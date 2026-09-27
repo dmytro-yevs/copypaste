@@ -10,6 +10,7 @@ type FallbackIcon = ComponentType<{
 }>;
 
 interface SourceAppIconProps {
+  itemId?: string | null;
   bundleId: string | null;
   Fallback?: FallbackIcon;
   fallbackText?: string;
@@ -19,6 +20,7 @@ interface SourceAppIconProps {
 }
 
 export function SourceAppIcon({
+  itemId = null,
   bundleId,
   Fallback,
   fallbackText,
@@ -26,7 +28,7 @@ export function SourceAppIcon({
   shape = "square",
   className,
 }: SourceAppIconProps) {
-  const icon = useSourceAppIcon(bundleId);
+  const icon = useSourceAppIcon(itemId, bundleId);
   return (
     <AppIcon
       pngBase64={icon.data?.png_base64}

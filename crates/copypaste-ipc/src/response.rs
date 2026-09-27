@@ -286,6 +286,7 @@ pub enum ResponseData {
     Page(ItemPage),
     Item(Item),
     ImagePreview(ImagePreview),
+    SourceAppIcon(ImagePreview),
     Count(u64),
     PairingInvite(PairingInviteData),
     PairingProgress(PairingProgressData),

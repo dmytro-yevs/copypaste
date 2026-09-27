@@ -27,7 +27,9 @@ use super::contract::{
     AndroidProbeResult, AndroidReadResult,
 };
 use super::intake::QueueWake;
-use super::model::{CaptureModel, CaptureSnapshot, CaptureSource, Clip, ReadOutcome};
+use super::model::{
+    CaptureModel, CaptureSnapshot, CaptureSource, CaptureSourceIcon, Clip, ReadOutcome,
+};
 use super::{CaptureControl, CaptureSetupInstructions};
 
 #[derive(Deserialize)]
@@ -295,6 +297,14 @@ impl CaptureControl for AndroidCapture {
             clip.at_ms = result.at_ms;
             clip.source_app_bundle_id = result.source_app_bundle_id;
             clip.source_app_name = result.source_app_name;
+            clip.source_app_icon = clip.source_app_bundle_id.as_deref().and_then(|package_id| {
+                self.source_app_icon(package_id)
+                    .map(|icon| CaptureSourceIcon {
+                        png_base64: icon.png_base64,
+                        width: icon.width,
+                        height: icon.height,
+                    })
+            });
             clip
         }))
     }
@@ -320,7 +330,22 @@ impl CaptureControl for AndroidCapture {
                 model.record_read(ReadOutcome::Succeeded, false, copypaste_core::now_ms());
             }
         });
-        Ok(result.clips)
+        Ok(result
+            .clips
+            .into_iter()
+            .map(|mut clip| {
+                clip.source_app_icon =
+                    clip.source_app_bundle_id.as_deref().and_then(|package_id| {
+                        self.source_app_icon(package_id)
+                            .map(|icon| CaptureSourceIcon {
+                                png_base64: icon.png_base64,
+                                width: icon.width,
+                                height: icon.height,
+                            })
+                    });
+                clip
+            })
+            .collect())
     }
 
     fn take_state_dirty(&self) -> bool {
