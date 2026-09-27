@@ -109,11 +109,11 @@ fi
 # 2. Build
 echo "==> Building the daemon and CLI for $TRIPLE ($BUILD_PROFILE)"
 rustup target add "$TRIPLE" >/dev/null 2>&1 || true
-PROFILE_ARGS=()
+BUILD_ARGS=(build --locked --target "$TRIPLE" -p copypaste-daemon -p copypaste-cli)
 if [[ "$BUILD_PROFILE" == "release" ]]; then
-    PROFILE_ARGS+=(--release)
+    BUILD_ARGS+=(--release)
 fi
-cargo build "${PROFILE_ARGS[@]}" --locked --target "$TRIPLE" -p copypaste-daemon -p copypaste-cli
+cargo "${BUILD_ARGS[@]}"
 
 echo "==> Building the frontend and the .app bundle ($BUILD_PROFILE)"
 (
