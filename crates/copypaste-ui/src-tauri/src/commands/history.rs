@@ -94,7 +94,7 @@ fn write_availability(
             }
             match platform {
                 ClipboardPlatform::Windows => Available,
-                ClipboardPlatform::MacOs
+                ClipboardPlatform::MacOs | ClipboardPlatform::Android
                     if matches!(
                         content_type,
                         content_type::IMAGE_PNG | content_type::IMAGE_TIFF
@@ -106,7 +106,9 @@ fn write_availability(
             }
         }
         ContentClass::File => match platform {
-            ClipboardPlatform::MacOs => Available,
+            ClipboardPlatform::MacOs | ClipboardPlatform::Android | ClipboardPlatform::Windows => {
+                Available
+            }
             _ => UnsupportedOnPlatform,
         },
         ContentClass::Other => UnsupportedContentType,
@@ -424,7 +426,7 @@ mod tests {
         for content_type in ["image/png", "image/tiff"] {
             assert_eq!(
                 write_availability(Android, content_type, Original),
-                UnsupportedOnPlatform
+                Available
             );
             assert_eq!(write_availability(MacOs, content_type, Original), Available);
             assert_eq!(
@@ -444,15 +446,9 @@ mod tests {
             write_availability(Android, "image/bmp", Original),
             UnsupportedOnPlatform
         );
-        assert_eq!(
-            write_availability(Android, "file", Original),
-            UnsupportedOnPlatform
-        );
+        assert_eq!(write_availability(Android, "file", Original), Available);
         assert_eq!(write_availability(MacOs, "file", Original), Available);
-        assert_eq!(
-            write_availability(Windows, "file", Original),
-            UnsupportedOnPlatform
-        );
+        assert_eq!(write_availability(Windows, "file", Original), Available);
         assert_eq!(
             write_availability(Other, "image/png", Original),
             UnsupportedOnPlatform
