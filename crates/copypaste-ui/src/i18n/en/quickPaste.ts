@@ -18,6 +18,7 @@ export const quickPaste = {
     body: "Looking for your recent copies.",
   },
   loadingMore: "Loading older clipboard items…",
+  loadMore: "Load older clipboard items",
   offline: {
     title: "The clipboard service isn't running",
     body: "Start it to see and copy recent items.",

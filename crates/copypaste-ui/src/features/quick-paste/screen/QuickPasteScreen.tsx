@@ -1,11 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
+import { useCallback, useMemo, useRef, useState, type UIEvent } from "react";
 import { toast } from "sonner";
 
 import { Screen, ScrollViewport } from "@/components/layout";
 import { ActionButton, EmptyState, FieldFeedback, SearchField } from "@/components/shared";
-import { Surface } from "@/components/ui";
+import { Button, Surface } from "@/components/ui";
 import { QuickPasteLoadingState } from "@/features/quick-paste/components/QuickPasteLoadingState";
 import { QuickPasteRow } from "@/features/quick-paste/components/QuickPasteRow";
 import { clipboardCopyPresentation } from "@/features/history/model/clipPresentation";
@@ -56,7 +56,7 @@ export function QuickPasteScreen() {
     isCacheGenerationCurrent,
   } = useQuickPasteLifecycle({ searchRef, clearLocalState });
 
-  const history = useHistory("", false, holding);
+  const history = useHistory(query, false, holding);
   const loadedHistory = historyOf(history.data);
   const { refetch } = history;
 
@@ -183,9 +183,6 @@ export function QuickPasteScreen() {
     (index: number) => virtualizer.scrollToIndex(index, { align: "auto" }),
     [virtualizer],
   );
-  useEffect(() => {
-    if (virtualRows.some((row) => row.index >= items.length)) loadMore();
-  }, [items.length, loadMore, virtualRows]);
   const { selectedId, onKeyDown, selectFromPointer, selectFromKeyboard, noteScroll } = useQuickPasteSelection({
     active: holding,
     items,
@@ -193,6 +190,7 @@ export function QuickPasteScreen() {
     scrollToItemIndex,
     hasMore: history.hasNextPage,
     onLoadMore: loadMore,
+    sessionKey: holding ? currentCacheGeneration() : -1,
     canCopy,
     copyPending,
     onCopy: copyAndDismiss,
@@ -310,7 +308,11 @@ export function QuickPasteScreen() {
                       className={styles.loadingMore}
                       style={{ transform: `translateY(${row.start}px)` }}
                     >
-                      {history.isFetchingNextPage ? t("quickPaste.loadingMore") : null}
+                      {history.isFetchingNextPage ? t("quickPaste.loadingMore") : (
+                        <Button type="button" variant="ghost" size="sm" onClick={loadMore}>
+                          {t("quickPaste.loadMore")}
+                        </Button>
+                      )}
                     </div>
                   );
                 }

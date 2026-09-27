@@ -15,6 +15,7 @@ interface QuickPasteSelectionOptions {
   scrollToItemIndex: (index: number) => void;
   hasMore: boolean;
   onLoadMore: () => void;
+  sessionKey: number;
   canCopy: (item: Item, plainText: boolean) => boolean;
   copyPending: boolean;
   onCopy: (item: Item, plainText?: boolean) => void;
@@ -32,6 +33,7 @@ export function useQuickPasteSelection({
   scrollToItemIndex,
   hasMore,
   onLoadMore,
+  sessionKey,
   canCopy,
   copyPending,
   onCopy,
@@ -42,7 +44,11 @@ export function useQuickPasteSelection({
   const lastKeyboardMove = useRef(0);
   const scrolling = useRef(false);
   const scrollIdleTimer = useRef<number | null>(null);
-  const pendingNextIndex = useRef<number | null>(null);
+  const pendingContinuation = useRef<{
+    afterId: string;
+    query: string;
+    sessionKey: number;
+  } | null>(null);
   const selectedIndex = Math.max(0, items.findIndex((item) => item.id === selectedId));
 
   useEffect(() => {
@@ -55,11 +61,22 @@ export function useQuickPasteSelection({
   }, [active, items, selectedId]);
 
   useEffect(() => {
-    const pending = pendingNextIndex.current;
-    if (pending === null || !items[pending]) return;
-    pendingNextIndex.current = null;
-    setSelectedId(items[pending].id);
-  }, [items]);
+    const pending = pendingContinuation.current;
+    if (pending === null) return;
+    if (pending.query !== query || pending.sessionKey !== sessionKey) {
+      pendingContinuation.current = null;
+      return;
+    }
+    const anchor = items.findIndex((item) => item.id === pending.afterId);
+    const next = anchor < 0 ? null : items[anchor + 1] ?? null;
+    if (next === null) return;
+    pendingContinuation.current = null;
+    setSelectedId(next.id);
+  }, [items, query, sessionKey]);
+
+  useEffect(() => {
+    pendingContinuation.current = null;
+  }, [active, query, sessionKey]);
 
   useEffect(() => {
     if (!keyboardNavigation.current) return;
@@ -94,7 +111,11 @@ export function useQuickPasteSelection({
         event.preventDefault();
         if (event.key === "ArrowDown" && current === items.length - 1 && hasMore) {
           keyboardNavigation.current = true;
-          pendingNextIndex.current = current + 1;
+          pendingContinuation.current = {
+            afterId: items[current]?.id ?? "",
+            query,
+            sessionKey,
+          };
           onLoadMore();
           return;
         }
@@ -127,7 +148,7 @@ export function useQuickPasteSelection({
         }
       }
     },
-    [canCopy, copyPending, hasMore, items, onCopy, onDismiss, onLoadMore, query, selectFromKeyboard, selectedId],
+    [canCopy, copyPending, hasMore, items, onCopy, onDismiss, onLoadMore, query, selectFromKeyboard, selectedId, sessionKey],
   );
 
   const selectFromPointer = useCallback((id: string) => {
