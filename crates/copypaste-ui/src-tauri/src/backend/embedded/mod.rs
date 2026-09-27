@@ -33,6 +33,17 @@ use messages::MSG_NO_PEER;
 pub use open::{Clipboard, EmbeddedBackend};
 
 impl EmbeddedBackend {
+    #[cfg(target_os = "android")]
+    fn reconcile_android_nsd(&self) {
+        let Some(node) = self.inner.node.get() else {
+            return;
+        };
+        crate::network_discovery::reconcile(
+            self.inner.state.device_name(),
+            node.pairing_ids(),
+            self.inner.settings().lan_visibility,
+        );
+    }
     async fn with_android_nsd(
         &self,
         devices: Vec<DiscoveredDevice>,
@@ -147,6 +158,8 @@ impl Backend for EmbeddedBackend {
             .await?;
         if let Some(node) = self.inner.node.get() {
             node.set_device_name(&stored);
+            #[cfg(target_os = "android")]
+            self.reconcile_android_nsd();
         }
         Ok(())
     }
