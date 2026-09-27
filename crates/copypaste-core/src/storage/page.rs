@@ -163,7 +163,9 @@ fn fetch_bounded(
         if out.len() == limit {
             return Ok(BoundedFetch::CountReached);
         }
-        let next_bytes = bytes.saturating_add(row.0.content_ciphertext.len());
+        let next_bytes = bytes
+            .saturating_add(row.0.content_ciphertext.len())
+            .saturating_add(row.0.payload_metadata.as_ref().map_or(0, String::len));
         if !out.is_empty() && next_bytes > budget {
             return Ok(BoundedFetch::BudgetReached);
         }
@@ -713,6 +715,19 @@ mod tests {
         store.insert(row).unwrap().id
     }
 
+    fn insert_with_metadata(
+        store: &Store,
+        label: &str,
+        created_at: i64,
+        ciphertext_bytes: usize,
+        metadata_bytes: usize,
+    ) -> String {
+        let mut row = item(label, created_at);
+        row.content_ciphertext = vec![0; ciphertext_bytes];
+        row.payload_metadata = Some("m".repeat(metadata_bytes));
+        store.insert(row).unwrap().id
+    }
+
     fn make_row_unreadable(store: &Store, id: &str) {
         store
             .conn()
@@ -954,6 +969,28 @@ mod tests {
                 .map(|row| &row.id)
                 .collect::<Vec<_>>(),
             vec![&over_older]
+        );
+    }
+
+    #[test]
+    fn bounded_paging_counts_metadata_bytes() {
+        let s = store();
+        let older = insert_with_metadata(&s, "older", T0, 1, 10);
+        let newer = insert_with_metadata(&s, "newer", T0 + 1, 1, 10);
+
+        let page = s.list_from_bounded(None, 1000, 21).unwrap();
+        assert_eq!(
+            page.items.iter().map(|item| &item.id).collect::<Vec<_>>(),
+            vec![&newer]
+        );
+        assert_eq!(
+            s.list_from_bounded(page.next.as_ref(), 1000, 21)
+                .unwrap()
+                .items
+                .iter()
+                .map(|item| &item.id)
+                .collect::<Vec<_>>(),
+            vec![&older]
         );
     }
 
