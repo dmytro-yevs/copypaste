@@ -1,7 +1,7 @@
 //! Where the device secret lives, per platform.
 //!
 //! Four backends — `macos.rs`, `android.rs`, `windows.rs`, `file.rs` — selected
-//! by the target alone, behind the load/create policy in this module.
+//! by platform and build mode, behind the load/create policy in this module.
 //!
 //! # The rule every backend obeys
 //!
@@ -64,7 +64,10 @@ pub(super) enum Lookup {
     Absent,
 }
 
-#[cfg(target_os = "macos")]
+// Debug macOS deliberately takes the durable development file backend. This
+// keeps developer launches and tests away from the login Keychain; release
+// macOS retains the Keychain and never has a plaintext fallback.
+#[cfg(all(target_os = "macos", not(debug_assertions)))]
 #[path = "macos.rs"]
 mod backend;
 
@@ -76,7 +79,10 @@ mod backend;
 #[path = "windows.rs"]
 mod backend;
 
-#[cfg(not(any(target_os = "macos", target_os = "android", target_os = "windows")))]
+#[cfg(any(
+    all(target_os = "macos", debug_assertions),
+    not(any(target_os = "macos", target_os = "android", target_os = "windows"))
+))]
 #[path = "file.rs"]
 mod backend;
 
@@ -117,7 +123,7 @@ pub(super) fn finish_load_or_create_secret(
 
 /// Read the device secret for the history in `data_dir`, minting one only if
 /// there is unambiguously none and nothing it could orphan.
-#[cfg(any(not(target_os = "macos"), test))]
+#[cfg(any(not(target_os = "macos"), debug_assertions, test))]
 pub(super) fn load_or_create_secret(data_dir: &Path) -> Result<DeviceSecret, CryptoError> {
     let lookup = lookup_secret(data_dir)?;
     finish_load_or_create_secret(data_dir, lookup)
@@ -151,11 +157,14 @@ mod tests {
     }
 
     /// Everything below drives a real backend, so it runs only where that
-    /// backend is a file in a temp directory. On macOS these would write to the
-    /// developer's login Keychain; on Android they cannot run at all; on
-    /// Windows `windows.rs` carries its own copies, which can also assert that
-    /// what landed on disk is sealed.
-    #[cfg(not(any(target_os = "macos", target_os = "android", target_os = "windows")))]
+    /// backend is a file in a temp directory. Debug macOS shares that backend;
+    /// release macOS uses the Keychain. Android cannot run these, and Windows
+    /// `windows.rs` carries its own copies, which can assert that what landed
+    /// on disk is sealed.
+    #[cfg(any(
+        all(target_os = "macos", debug_assertions),
+        not(any(target_os = "macos", target_os = "android", target_os = "windows"))
+    ))]
     mod mint_authorisation {
         use super::*;
 
