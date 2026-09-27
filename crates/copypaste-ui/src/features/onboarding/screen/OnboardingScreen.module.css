@@ -394,3 +394,7 @@
   .slide { animation: none; }
   .dot { transition: none; }
 }
+.copy h1:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
