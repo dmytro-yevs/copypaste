@@ -76,6 +76,64 @@ object ShizukuSettings {
         }
     }
 
+    fun clipboardAccessNotifications(completion: (Boolean?) -> Unit) {
+        mainHandler.post {
+            if (!hasPermission()) {
+                completion(null)
+                return@post
+            }
+            val args = serviceArgs()
+            lateinit var connection: ServiceConnection
+            lateinit var timeout: Runnable
+            val complete = AtomicBoolean(false)
+            fun finish(value: Boolean?) {
+                if (!complete.compareAndSet(false, true)) return
+                mainHandler.removeCallbacks(timeout)
+                try {
+                    Shizuku.unbindUserService(args, connection, true)
+                } catch (_: RuntimeException) {
+                } finally {
+                    try {
+                        Shizuku.unbindUserService(args, connection, false)
+                    } catch (_: RuntimeException) {
+                    }
+                }
+                completion(value)
+            }
+            timeout = Runnable { finish(null) }
+            connection = object : ServiceConnection {
+                override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+                    val service = binder?.let(IShizukuSettingsService.Stub::asInterface)
+                    val value = try {
+                        if (binder?.pingBinder() == true && service != null) {
+                            when (service.clipboardAccessNotifications()) {
+                                0 -> true
+                                1 -> false
+                                else -> null
+                            }
+                        } else null
+                    } catch (_: Exception) {
+                        null
+                    }
+                    finish(value)
+                }
+
+                override fun onServiceDisconnected(name: ComponentName?) = finish(null)
+                override fun onNullBinding(name: ComponentName?) = finish(null)
+                override fun onBindingDied(name: ComponentName?) = finish(null)
+            }
+            if (!mainHandler.postDelayed(timeout, SHIZUKU_SETTINGS_TIMEOUT_MILLIS)) {
+                finish(null)
+                return@post
+            }
+            try {
+                Shizuku.bindUserService(args, connection)
+            } catch (_: RuntimeException) {
+                finish(null)
+            }
+        }
+    }
+
     private fun bindUserService(
         completion: (Boolean) -> Unit,
         operation: (IShizukuSettingsService) -> Boolean,
