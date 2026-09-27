@@ -1,4 +1,10 @@
+.frame { display: flex; inline-size: 100%; block-size: 100%; gap: var(--s-2); background: transparent; }
+.frame[data-preview-side="left"] .root { order: 2; }
+.frame[data-preview-side="left"] > :last-child { order: 1; }
+
 .root {
+  inline-size: 403px;
+  flex: none;
   padding: var(--s-2);
   overflow: hidden;
   color: var(--text);
