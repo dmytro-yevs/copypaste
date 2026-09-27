@@ -35,15 +35,60 @@ if grep -E 'return[[:space:]]+START_STICKY([^_]|$)' crates/copypaste-ui/src-taur
     exit 1
 fi
 android_kotlin="crates/copypaste-ui/src-tauri/gen/android/app/src/main/java/com/copypaste/app"
-if rg -n --glob '*.kt' --glob '!ShizukuClipboard.kt' \
-    'ShizukuBinderWrapper|IClipboard\\$Stub' "$android_kotlin" >/dev/null; then
-    printf 'FAIL: the Shizuku clipboard binder escaped its source-attribution boundary\n' >&2
+if ! python3 - "$android_kotlin" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+try:
+    if not root.is_dir():
+        raise OSError
+    for source in root.rglob("*.kt"):
+        if source.name != "ShizukuClipboard.kt" and re.search(
+            r"ShizukuBinderWrapper|IClipboard(?:\\)?\$Stub",
+            source.read_text(encoding="utf-8"),
+        ):
+            print(
+                "FAIL: the Shizuku clipboard binder escaped its source-attribution boundary",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+except (OSError, UnicodeError):
+    print("FAIL: Android Kotlin source inspection failed", file=sys.stderr)
+    sys.exit(1)
+PY
+then
     exit 1
 fi
-if rg --pcre2 -n \
-    '"(?:getPrimaryClip(?!Source")|setPrimaryClip|clearPrimaryClip|hasPrimaryClip|hasClipboardText|addPrimaryClipChangedListener|removePrimaryClipChangedListener)"|OnPrimaryClipChangedListener' \
-    "$android_kotlin" >/dev/null; then
-    printf 'FAIL: Shizuku clipboard content transport reappeared in shipping Kotlin\n' >&2
+if ! python3 - "$android_kotlin" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+pattern = re.compile(
+    r'"(?:getPrimaryClip(?!Source")|setPrimaryClip|clearPrimaryClip|hasPrimaryClip|'
+    r'hasClipboardText|addPrimaryClipChangedListener|removePrimaryClipChangedListener)"'
+    r"|OnPrimaryClipChangedListener"
+)
+root = Path(sys.argv[1])
+try:
+    if not root.is_dir():
+        raise OSError
+    for source in root.rglob("*"):
+        if source.is_dir():
+            continue
+        if pattern.search(source.read_text(encoding="utf-8")):
+            print(
+                "FAIL: Shizuku clipboard content transport reappeared in shipping Kotlin",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+except (OSError, UnicodeError):
+    print("FAIL: Android Kotlin source inspection failed", file=sys.stderr)
+    sys.exit(1)
+PY
+then
     exit 1
 fi
 printf 'PASS: Android capture-ladder static contracts\n'
