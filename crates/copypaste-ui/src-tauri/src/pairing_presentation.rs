@@ -6,13 +6,8 @@ use copypaste_ipc::{PairingInviteData, PairingProgressData, PairingState};
 use tauri::{AppHandle, Manager as _};
 use zeroize::Zeroizing;
 
-#[cfg(any(
-    test,
-    target_os = "android",
-    target_os = "macos",
-    target_os = "windows"
-))]
 mod native_copy;
+pub use native_copy::PairingCopy;
 pub(crate) mod semantics;
 pub use semantics::{resolve_pairing_semantics, PairingSemantics};
 
@@ -52,7 +47,12 @@ pub fn native_refresh(app: AppHandle) -> NativeRefresh {
 ))]
 pub(crate) mod invite;
 
-#[cfg(any(test, target_os = "android"))]
+#[cfg(any(
+    test,
+    target_os = "android",
+    target_os = "macos",
+    target_os = "windows"
+))]
 pub(crate) mod pairing_link;
 
 #[cfg(target_os = "android")]
@@ -69,7 +69,7 @@ mod windows;
 #[cfg(target_os = "windows")]
 pub fn windows_ui(abort: NativeAbort, refresh: NativeRefresh) -> impl NativePairingUi {
     windows::WindowsPairingUi::new(
-        invite::encode_native_invite,
+        pairing_link::encode_pairing_link,
         invite::validate_native_invite_fields,
         abort,
         refresh,
@@ -107,13 +107,21 @@ pub enum PairingDecision {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NativePresentationOutcome {
     Presented,
+    Cancelled,
     Unavailable,
     Refresh,
 }
 
+pub enum NativeScanOutcome {
+    Scanned(ScannedPairing),
+    Cancelled,
+    Failed,
+    Unavailable,
+}
+
 pub trait NativePairingUi: Send + Sync + 'static {
     fn present_invite(&self, invite: &PairingInviteData) -> NativePresentationOutcome;
-    fn scan_invite(&self) -> Option<ScannedPairing>;
+    fn scan_invite(&self) -> NativeScanOutcome;
     fn present_progress(&self, progress: &PairingProgressData) -> PairingPresentationState;
     fn confirm(&self, progress: &PairingProgressData) -> Option<PairingDecision>;
     fn take_pending_join(&self) -> Option<ScannedPairing> {
@@ -132,7 +140,7 @@ impl Default for PairingPresenter {
         let native = Box::new(macos::MacOsPairingUi::new(Arc::new(|| {})));
         #[cfg(target_os = "windows")]
         let native = Box::new(windows::WindowsPairingUi::new(
-            invite::encode_native_invite,
+            pairing_link::encode_pairing_link,
             invite::validate_native_invite_fields,
             Arc::new(|| {}),
             Arc::new(|| {}),
@@ -160,10 +168,15 @@ impl PairingPresenter {
     pub fn state_for_progress(&self, state: PairingState) -> PairingPresentationState {
         if !self.available {
             PairingPresentationState::Unavailable
-        } else if state == PairingState::Idle {
-            PairingPresentationState::Available
-        } else {
+        } else if matches!(
+            state,
+            PairingState::WaitingForPeer
+                | PairingState::Handshaking
+                | PairingState::AwaitingConfirmation
+        ) {
             PairingPresentationState::Presented
+        } else {
+            PairingPresentationState::Available
         }
     }
 
@@ -171,7 +184,7 @@ impl PairingPresenter {
         self.native.present_invite(invite)
     }
 
-    pub fn scan_invite(&self) -> Option<ScannedPairing> {
+    pub fn scan_invite(&self) -> NativeScanOutcome {
         self.native.scan_invite()
     }
 
@@ -197,8 +210,8 @@ impl NativePairingUi for UnavailablePairingUi {
         NativePresentationOutcome::Unavailable
     }
 
-    fn scan_invite(&self) -> Option<ScannedPairing> {
-        None
+    fn scan_invite(&self) -> NativeScanOutcome {
+        NativeScanOutcome::Unavailable
     }
 
     fn present_progress(&self, _progress: &PairingProgressData) -> PairingPresentationState {
@@ -212,21 +225,47 @@ impl NativePairingUi for UnavailablePairingUi {
 
 #[cfg(test)]
 mod presenter_tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
 
     struct ConfiguredPairingUi;
+
+    struct RetryablePairingUi(AtomicUsize);
 
     impl NativePairingUi for ConfiguredPairingUi {
         fn present_invite(&self, _invite: &PairingInviteData) -> NativePresentationOutcome {
             NativePresentationOutcome::Unavailable
         }
 
-        fn scan_invite(&self) -> Option<ScannedPairing> {
-            None
+        fn scan_invite(&self) -> NativeScanOutcome {
+            NativeScanOutcome::Unavailable
         }
 
         fn present_progress(&self, _progress: &PairingProgressData) -> PairingPresentationState {
             PairingPresentationState::Unavailable
+        }
+
+        fn confirm(&self, _progress: &PairingProgressData) -> Option<PairingDecision> {
+            None
+        }
+    }
+
+    impl NativePairingUi for RetryablePairingUi {
+        fn present_invite(&self, _invite: &PairingInviteData) -> NativePresentationOutcome {
+            if self.0.fetch_add(1, Ordering::Relaxed) == 0 {
+                NativePresentationOutcome::Cancelled
+            } else {
+                NativePresentationOutcome::Presented
+            }
+        }
+
+        fn scan_invite(&self) -> NativeScanOutcome {
+            NativeScanOutcome::Cancelled
+        }
+
+        fn present_progress(&self, _progress: &PairingProgressData) -> PairingPresentationState {
+            PairingPresentationState::Available
         }
 
         fn confirm(&self, _progress: &PairingProgressData) -> Option<PairingDecision> {
@@ -245,6 +284,34 @@ mod presenter_tests {
         assert_eq!(
             presenter.state_for_progress(PairingState::WaitingForPeer),
             PairingPresentationState::Presented
+        );
+        assert_eq!(
+            presenter.state_for_progress(PairingState::Cancelled),
+            PairingPresentationState::Available
+        );
+    }
+
+    #[test]
+    fn cancelling_a_native_invite_keeps_the_next_invite_available() {
+        let presenter = PairingPresenter::new(RetryablePairingUi(AtomicUsize::new(0)));
+        let invite = PairingInviteData {
+            code: "code".into(),
+            pairing_id: "pairing-id".into(),
+            listen_addr: Some("192.0.2.1:47654".into()),
+            expires_in_secs: 120,
+        };
+
+        assert_eq!(
+            presenter.present_invite(&invite),
+            NativePresentationOutcome::Cancelled
+        );
+        assert_eq!(
+            presenter.state_for_progress(PairingState::Cancelled),
+            PairingPresentationState::Available
+        );
+        assert_eq!(
+            presenter.present_invite(&invite),
+            NativePresentationOutcome::Presented
         );
     }
 }
@@ -291,7 +358,10 @@ mod tests {
             presenter.present_progress(&progress()),
             PairingPresentationState::Unavailable
         );
-        assert!(presenter.scan_invite().is_none());
+        assert!(matches!(
+            presenter.scan_invite(),
+            NativeScanOutcome::Unavailable
+        ));
         assert!(presenter.confirm(&progress()).is_none());
     }
 }
@@ -339,7 +409,6 @@ mod native_pairing_source_contracts {
             "Security code: {spoken}",
             "for (index, digit) in sas.chars().enumerate()",
             "NativeAbort",
-            "let abort = self.abort.clone()",
             "(self.abort)()",
         ] {
             assert!(macos.contains(required), "missing macOS guard: {required}");
@@ -362,6 +431,29 @@ mod native_pairing_source_contracts {
         assert!(android_plugin.contains("GmsBarcodeScanning.getClient"));
         assert!(android_plugin.contains("Barcode.FORMAT_QR_CODE"));
         assert!(android_dialog.contains("WindowManager.LayoutParams.FLAG_SECURE"));
+    }
+
+    #[test]
+    fn qr_renderers_use_the_canonical_pairing_link_and_only_parse_legacy_json() {
+        let macos = production(include_str!("pairing_presentation/macos.rs"));
+        let presenter = production(include_str!("pairing_presentation.rs"));
+        let android = production(include_str!("pairing_presentation/android.rs"));
+        let deep_links =
+            include_str!("../gen/android/app/src/main/java/com/copypaste/app/PairingDeepLinks.kt");
+        let web_presentation =
+            include_str!("../../src/features/pairing/model/pairingPresentation.ts");
+
+        assert!(macos.contains("encode_pairing_link"));
+        assert!(!macos.contains("encode_native_invite"));
+        assert!(presenter.contains("windows::WindowsPairingUi::new("));
+        assert!(presenter.contains("pairing_link::encode_pairing_link"));
+        assert!(android.contains("encode_pairing_link"));
+        assert!(deep_links.contains("uri.toString()"));
+        assert!(!deep_links.contains("JSONObject"));
+        assert!(!deep_links.contains("appendQueryParameter"));
+        assert!(web_presentation.contains("semantics.copy.title"));
+        assert!(web_presentation.contains("semantics.copy.detail"));
+        assert!(!web_presentation.contains("devices.pairing.semantic"));
     }
 
     #[test]
@@ -401,12 +493,11 @@ mod native_pairing_source_contracts {
     }
 
     #[test]
-    fn windows_status_keeps_native_copy_import_unambiguous() {
+    fn windows_status_reads_the_semantics_owned_copy() {
         let status = production(include_str!("pairing_presentation/windows/status.rs"));
-        assert!(status.contains(
-            "use crate::pairing_presentation::native_copy::copy as native_pairing_copy;"
-        ));
         assert!(status.contains("pub(super) fn copy(progress: &PairingProgressData)"));
-        assert!(status.contains("let copy = native_pairing_copy("));
+        assert!(
+            status.contains("resolve_pairing_semantics(progress.state, progress.error_code).copy")
+        );
     }
 }

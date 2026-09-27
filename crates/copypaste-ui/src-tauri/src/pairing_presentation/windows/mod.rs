@@ -11,8 +11,8 @@ use zeroize::Zeroizing;
 
 use self::common::{Affinity, CloseHandle};
 use super::{
-    NativeAbort, NativePairingUi, NativePresentationOutcome, NativeRefresh, PairingDecision,
-    PairingPresentationState, ScannedPairing,
+    NativeAbort, NativePairingUi, NativePresentationOutcome, NativeRefresh, NativeScanOutcome,
+    PairingDecision, PairingPresentationState,
 };
 
 type PayloadEncoder = fn(&PairingInviteData) -> Option<Zeroizing<String>>;
@@ -111,9 +111,10 @@ impl NativePairingUi for WindowsPairingUi {
         state
     }
 
-    fn scan_invite(&self) -> Option<ScannedPairing> {
+    fn scan_invite(&self) -> NativeScanOutcome {
         self.close_active();
         entry::prompt(self.validate_fields, self.affinity)
+            .map_or(NativeScanOutcome::Cancelled, NativeScanOutcome::Scanned)
     }
 
     fn present_progress(&self, progress: &PairingProgressData) -> PairingPresentationState {

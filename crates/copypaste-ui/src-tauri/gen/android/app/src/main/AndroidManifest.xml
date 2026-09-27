@@ -9,7 +9,6 @@
         android:name="android.permission.NEARBY_WIFI_DEVICES"
         android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-    <uses-permission android:name="android.permission.CAMERA" />
 
     <!--
       The capture ladder (docs/rewrite/android-clipboard-access.md).

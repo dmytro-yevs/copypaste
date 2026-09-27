@@ -10,8 +10,8 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 use super::android_payload::AndroidProgressPayload;
 use super::pairing_link::{decode_pairing_payload, encode_pairing_link};
 use super::{
-    NativeAbort, NativePairingUi, NativePresentationOutcome, NativeRefresh, PairingDecision,
-    PairingPresentationState, PairingPresenter, ScannedPairing,
+    NativeAbort, NativePairingUi, NativePresentationOutcome, NativeRefresh, NativeScanOutcome,
+    PairingDecision, PairingPresentationState, PairingPresenter, ScannedPairing,
 };
 use crate::backend::{PairingBackend as _, SelectedBackend};
 
@@ -134,6 +134,15 @@ struct PresentationResult {
 #[derive(Deserialize, Zeroize, ZeroizeOnDrop)]
 struct ScanResult {
     payload: Option<String>,
+    outcome: ScanOutcome,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ScanOutcome {
+    Scanned,
+    Cancelled,
+    Failed,
 }
 
 #[derive(Deserialize)]
@@ -173,10 +182,20 @@ impl NativePairingUi for AndroidPairingUi {
         })
     }
 
-    fn scan_invite(&self) -> Option<ScannedPairing> {
-        let mut result: ScanResult = self.call("scanInvite", ())?;
-        let payload = Zeroizing::new(result.payload.take()?);
-        decode_pairing_payload(payload)
+    fn scan_invite(&self) -> NativeScanOutcome {
+        let Some(mut result) = self.call::<_, ScanResult>("scanInvite", ()) else {
+            return NativeScanOutcome::Unavailable;
+        };
+        match result.outcome {
+            ScanOutcome::Scanned => result
+                .payload
+                .take()
+                .map(Zeroizing::new)
+                .and_then(decode_pairing_payload)
+                .map_or(NativeScanOutcome::Failed, NativeScanOutcome::Scanned),
+            ScanOutcome::Cancelled => NativeScanOutcome::Cancelled,
+            ScanOutcome::Failed => NativeScanOutcome::Failed,
+        }
     }
 
     fn take_pending_join(&self) -> Option<ScannedPairing> {

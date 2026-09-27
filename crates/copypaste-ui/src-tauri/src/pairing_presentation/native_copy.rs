@@ -1,67 +1,68 @@
 use super::semantics::PairingMessageId;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct NativeCopy {
-    pub(super) title: &'static str,
-    pub(super) detail: &'static str,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+pub struct PairingCopy {
+    pub title: &'static str,
+    pub detail: &'static str,
 }
 
-pub(super) fn copy(message_id: PairingMessageId) -> NativeCopy {
+pub(crate) fn copy(message_id: PairingMessageId) -> PairingCopy {
     match message_id {
-        PairingMessageId::Ready => NativeCopy {
+        PairingMessageId::Ready => PairingCopy {
             title: "Pair a device",
             detail: "No device pairing is in progress.",
         },
-        PairingMessageId::WaitingForPeer => NativeCopy {
+        PairingMessageId::WaitingForPeer => PairingCopy {
             title: "Waiting for a device",
             detail: "Waiting for the other device to join.",
         },
-        PairingMessageId::SecuringConnection => NativeCopy {
+        PairingMessageId::SecuringConnection => PairingCopy {
             title: "Securing the connection",
             detail: "Keep both devices nearby while CopyPaste establishes a secure connection.",
         },
-        PairingMessageId::CompareCodes => NativeCopy {
+        PairingMessageId::CompareCodes => PairingCopy {
             title: "Compare security codes",
             detail: "Confirm the code in the native security prompt.",
         },
-        PairingMessageId::Paired => NativeCopy {
+        PairingMessageId::Paired => PairingCopy {
             title: "Paired",
             detail: "The device was paired successfully.",
         },
-        PairingMessageId::Rejected => NativeCopy {
+        PairingMessageId::Rejected => PairingCopy {
             title: "Pairing rejected",
             detail: "The security codes did not match, so no pairing was saved.",
         },
-        PairingMessageId::Cancelled => NativeCopy {
+        PairingMessageId::Cancelled => PairingCopy {
             title: "Pairing cancelled",
             detail: "No pairing was saved.",
         },
-        PairingMessageId::TimedOut => NativeCopy {
+        PairingMessageId::TimedOut => PairingCopy {
             title: "Pairing timed out",
             detail: "Check that both devices are on the same network and try again.",
         },
-        PairingMessageId::CodeMismatch => NativeCopy {
+        PairingMessageId::CodeMismatch => PairingCopy {
             title: "Pairing didn't match",
             detail: "The security codes did not match. No device was paired.",
         },
-        PairingMessageId::IncompatibleVersion => NativeCopy {
+        PairingMessageId::IncompatibleVersion => PairingCopy {
             title: "Pairing couldn't finish",
             detail: "The other device uses an incompatible version. No device was paired.",
         },
-        PairingMessageId::Unreachable => NativeCopy {
+        PairingMessageId::Unreachable => PairingCopy {
             title: "Pairing couldn't finish",
             detail:
                 "Could not reach the other device. Check that both devices are on the same network.",
         },
-        PairingMessageId::Busy => NativeCopy {
+        PairingMessageId::Busy => PairingCopy {
             title: "Pairing is busy",
             detail: "Another pairing is already in progress.",
         },
-        PairingMessageId::Limit => NativeCopy {
+        PairingMessageId::Limit => PairingCopy {
             title: "Pairing limit reached",
             detail: "Remove or revoke a paired device before trying again.",
         },
-        PairingMessageId::Failed => NativeCopy {
+        PairingMessageId::Failed => PairingCopy {
             title: "Pairing failed",
             detail: "Pairing failed. No device was paired.",
         },
@@ -92,7 +93,7 @@ mod tests {
         ];
 
         for (message_id, title, detail) in expected {
-            assert_eq!(copy(message_id), NativeCopy { title, detail });
+            assert_eq!(copy(message_id), PairingCopy { title, detail });
             let visible = format!("{title} {detail}").to_ascii_lowercase();
             for forbidden in ["/", "\\\\", "123456", "secret", "token"] {
                 assert!(!visible.contains(forbidden), "{visible}");

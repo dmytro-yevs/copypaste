@@ -312,7 +312,7 @@ describe("PairingLauncherDialog preview flows", () => {
         );
 
         expect(
-            screen.getByText("Establishing a private connection…"),
+            screen.getByText("Securing the connection"),
         ).toBeTruthy();
         expect(screen.queryByRole("textbox")).toBeNull();
         expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
@@ -401,7 +401,7 @@ describe("PairingLauncherDialog preview flows", () => {
             screen.getByRole("button", { name: /Show pairing code/ }),
         );
 
-        expect(screen.getByText("Device paired")).toBeTruthy();
-        expect(screen.getByText("Studio Mac is ready to sync.")).toBeTruthy();
+        expect(screen.getByText("Paired")).toBeTruthy();
+        expect(screen.getByText("The device was paired successfully.")).toBeTruthy();
     });
 });
