@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const ROUTE_CHUNK_PREFIXES = ["capture", "devices", "history", "settings"];
+export const ROUTE_CHUNK_PREFIXES = ["devices", "history", "settings"];
 
 function importedNames(manifest, keys, visited = new Set()) {
   const names = new Set();
