@@ -75,7 +75,7 @@ export const capture = {
     title: "Setup instructions",
     summary: "Shizuku, permissions and battery settings",
     body:
-      "Install Shizuku, start it using Wireless debugging, then return to CopyPaste to allow background capture. Keep Shizuku running.",
+      "Use Shizuku on this phone or run the provided adb commands from a computer to grant setup permissions. Shizuku is not needed after setup.",
     openShizuku: "Open Shizuku",
     openDeveloperOptions: "Developer options",
     requestBattery: "Battery settings",
