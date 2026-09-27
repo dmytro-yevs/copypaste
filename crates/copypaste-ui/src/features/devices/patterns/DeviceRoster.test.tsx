@@ -67,6 +67,13 @@ describe("DeviceRoster", () => {
           loading: false,
           failed: false,
           identity: UNKNOWN_DEVICE_IDENTITY,
+          status: {
+            icon: "checkCircle",
+            label: "Capture active",
+            tone: "ready",
+            busy: false,
+            a11y: {},
+          },
         }}
         peers={[laptopPeer]}
         peerHealth={{}}
@@ -92,7 +99,17 @@ describe("DeviceRoster", () => {
       discovered: [],
       peers: [laptopPeer],
       health: {},
-      own: { isPending: false, isError: false },
+      own: {
+        isPending: false,
+        isError: false,
+        status: {
+          icon: "checkCircle",
+          label: "Capture active",
+          tone: "ready",
+          busy: false,
+          a11y: {},
+        },
+      },
       syncAllPending: false,
     }));
 
