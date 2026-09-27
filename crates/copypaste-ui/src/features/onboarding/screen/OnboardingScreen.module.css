@@ -411,3 +411,22 @@
   outline: none;
   box-shadow: none;
 }
+
+/* One wizard surface at every viewport: only the step body may scroll. */
+.root,
+.stage { block-size: 100%; min-block-size: 0; overflow: hidden; }
+.stage { padding: var(--s-3); }
+.window { block-size: 100%; max-block-size: 100%; min-block-size: 0; }
+.slide { block-size: 100%; min-block-size: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
+.copy { display: flex; padding: var(--s-6) var(--s-7) var(--s-4); }
+.art { grid-row: 2; min-block-size: 0; margin-inline: 0; overflow: auto; border-inline-start: 0; border-block-start: var(--stroke-1) solid var(--divider); }
+.actions { grid-row: 3; padding: var(--s-3) var(--s-7) var(--s-5); }
+
+@media (--cp-toolbar) {
+  .stage { padding: 0; }
+  .window { overflow: hidden; }
+  .slide { padding: max(var(--s-5), env(safe-area-inset-top)) max(var(--s-5), env(safe-area-inset-right)) max(var(--s-5), env(safe-area-inset-bottom)) max(var(--s-5), env(safe-area-inset-left)); grid-template-rows: auto minmax(0, 1fr) auto; }
+  .copy { display: flex; padding: 0 0 var(--s-3); }
+  .art { grid-row: 2; margin-inline: 0; }
+  .actions { grid-row: 3; padding: var(--s-3) 0 0; }
+}
