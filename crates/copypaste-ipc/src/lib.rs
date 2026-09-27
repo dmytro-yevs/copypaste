@@ -135,6 +135,8 @@ pub enum Method {
     /// image bytes until a row actually becomes visible.
     ImagePreview {
         id: String,
+        #[serde(default)]
+        max_edge: Option<u32>,
     },
     /// Add an item directly, bypassing clipboard capture. Used by tests, by
     /// `copypaste add`, and by the fake clipboard source.
