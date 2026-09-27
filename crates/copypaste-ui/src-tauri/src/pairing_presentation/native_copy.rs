@@ -23,7 +23,7 @@ pub(crate) fn copy(message_id: PairingMessageId) -> PairingCopy {
         },
         PairingMessageId::CompareCodes => PairingCopy {
             title: "Compare security codes",
-            detail: "Confirm the code in the native security prompt.",
+            detail: "Compare the code on both devices before confirming.",
         },
         PairingMessageId::Paired => PairingCopy {
             title: "Paired",
@@ -79,7 +79,7 @@ mod tests {
             (PairingMessageId::Ready, "Pair a device", "No device pairing is in progress."),
             (PairingMessageId::WaitingForPeer, "Waiting for a device", "Waiting for the other device to join."),
             (PairingMessageId::SecuringConnection, "Securing the connection", "Keep both devices nearby while CopyPaste establishes a secure connection."),
-            (PairingMessageId::CompareCodes, "Compare security codes", "Confirm the code in the native security prompt."),
+            (PairingMessageId::CompareCodes, "Compare security codes", "Compare the code on both devices before confirming."),
             (PairingMessageId::Paired, "Paired", "The device was paired successfully."),
             (PairingMessageId::Rejected, "Pairing rejected", "The security codes did not match, so no pairing was saved."),
             (PairingMessageId::Cancelled, "Pairing cancelled", "No pairing was saved."),
