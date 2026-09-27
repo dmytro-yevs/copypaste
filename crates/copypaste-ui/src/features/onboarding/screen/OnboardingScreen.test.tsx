@@ -8,6 +8,7 @@ import { useUi } from "@/store/ui";
 import { OnboardingScreen } from "./OnboardingScreen";
 
 const platform = vi.hoisted(() => ({ android: false }));
+const serviceConfig = vi.hoisted(() => ({ mutate: vi.fn() }));
 
 vi.mock("@/lib/platform", () => ({
   currentPlatform: () => platform.android ? "android" : "macos",
@@ -51,11 +52,16 @@ vi.mock("@/hooks/useOpenAtLogin", () => ({
   useSetOpenAtLogin: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
 }));
 vi.mock("@/hooks/useServiceConfig", () => ({
-  useSetServiceConfig: () => ({ mutate: vi.fn(), isPending: false }),
+  useSetServiceConfig: () => ({ mutate: serviceConfig.mutate, isPending: false }),
 }));
 
 beforeEach(() => {
   platform.android = false;
+  serviceConfig.mutate.mockReset().mockImplementation((_patch: unknown, options?: {
+    onSuccess?: () => void;
+  }) => {
+    options?.onSuccess?.();
+  });
   usePrefs.setState({
     onboardingComplete: false,
     onboarding: { ...DEFAULT_ONBOARDING_PROGRESS },
@@ -117,4 +123,44 @@ it("resumes the persisted step and supports Android-specific capture controls", 
   expect(screen.getByText("Native capture setup")).toBeTruthy();
   expect(screen.getByText("Android capture choices")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Step 2 of 5" }).getAttribute("aria-current")).toBe("step");
+});
+
+it("applies cloud and later sync choices before allowing completion", () => {
+  usePrefs.setState({
+    onboarding: { ...DEFAULT_ONBOARDING_PROGRESS, step: "sync" },
+  });
+  render(
+    <TooltipProvider>
+      <OnboardingScreen />
+    </TooltipProvider>,
+  );
+
+  fireEvent.click(screen.getByRole("radio", { name: /Encrypted cloud sync/ }));
+  expect(serviceConfig.mutate).toHaveBeenLastCalledWith(
+    { sync_enabled: true, lan_visibility: false },
+    expect.any(Object),
+  );
+  expect(usePrefs.getState().onboarding.syncChoice).toBe("cloud");
+
+  fireEvent.click(screen.getByRole("radio", { name: /Set up sync later/ }));
+  expect(serviceConfig.mutate).toHaveBeenLastCalledWith(
+    { sync_enabled: false, lan_visibility: false },
+    expect.any(Object),
+  );
+  expect(usePrefs.getState().onboarding.syncChoice).toBe("later");
+});
+
+it("keeps sync completion disabled while a native choice is pending", () => {
+  serviceConfig.mutate.mockImplementation(() => {});
+  usePrefs.setState({
+    onboarding: { ...DEFAULT_ONBOARDING_PROGRESS, step: "sync" },
+  });
+  render(
+    <TooltipProvider>
+      <OnboardingScreen />
+    </TooltipProvider>,
+  );
+
+  fireEvent.click(screen.getByRole("radio", { name: /Nearby devices/ }));
+  expect(screen.getByRole("button", { name: "Finish setup" }).hasAttribute("disabled")).toBe(true);
 });

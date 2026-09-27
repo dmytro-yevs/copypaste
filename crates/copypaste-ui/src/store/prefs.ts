@@ -237,22 +237,64 @@ const durableStorage: StateStorage<unknown> = {
   },
 };
 
+function persistedPreferences(
+  prefs: Prefs,
+  onboarding: OnboardingProgress,
+): Prefs & { onboarding: OnboardingProgress } {
+  return {
+    ...Object.fromEntries(
+      Object.keys(DEFAULT_PREFS).map((key) => [
+        key,
+        prefs[key as keyof Prefs],
+      ]),
+    ),
+    onboarding,
+  } as Prefs & { onboarding: OnboardingProgress };
+}
+
+async function checkpointPreferences(
+  prefs: Prefs,
+  onboarding: OnboardingProgress,
+): Promise<boolean> {
+  const value = JSON.stringify({
+    state: persistedPreferences(prefs, onboarding),
+    version: PREFERENCES_VERSION,
+  });
+  browserStorage.setItem(STORAGE_KEY, value);
+  if (!hasNativeBridge()) return true;
+
+  try {
+    await nativePreferences.set(STORAGE_KEY, value);
+    await nativePreferences.save();
+    return true;
+  } catch {
+    console.warn("[copypaste] durable preferences could not be saved");
+    return false;
+  }
+}
+
 interface PrefsStore extends Prefs {
   onboarding: OnboardingProgress;
   set<K extends keyof Prefs>(key: K, value: Prefs[K]): void;
   setOnboarding: (patch: Partial<OnboardingProgress>) => void;
+  checkpointOnboarding: (patch: Partial<OnboardingProgress>) => Promise<boolean>;
   reset(): void;
 }
 
 export const usePrefs = create<PrefsStore>()(
   persist(
-    (setState) => ({
+    (setState, getState) => ({
       ...DEFAULT_PREFS,
       onboarding: { ...DEFAULT_ONBOARDING_PROGRESS },
       set: (key, value) => setState({ [key]: value } as Partial<Prefs>),
       setOnboarding: (patch) => setState((state) => ({
         onboarding: { ...state.onboarding, ...patch },
       })),
+      checkpointOnboarding: async (patch) => {
+        const onboarding = { ...getState().onboarding, ...patch };
+        setState({ onboarding });
+        return checkpointPreferences(getState(), onboarding);
+      },
       reset: () =>
         setState((state) => ({
           ...DEFAULT_PREFS,

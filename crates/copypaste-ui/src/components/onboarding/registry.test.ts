@@ -4,6 +4,6 @@ import { ONBOARDING_SLIDE_IDS } from "@/features/onboarding/screen/OnboardingScr
 
 describe("the onboarding slides", () => {
   it("keeps their navigation order stable", () => {
-    expect(ONBOARDING_SLIDE_IDS).toEqual(["welcome", "capture", "connections"]);
+    expect(ONBOARDING_SLIDE_IDS).toEqual(["welcome", "capture", "privacy", "sync", "complete"]);
   });
 });
