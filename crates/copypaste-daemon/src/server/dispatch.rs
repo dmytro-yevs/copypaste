@@ -253,7 +253,10 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
         Method::Copy { id: item_id } => items::copy(state, id, &item_id),
         Method::CopyPlainText { id: item_id } => items::copy_plain_text(state, id, &item_id),
         Method::Get { id: item_id } => items::get(state, id, &item_id),
-        Method::ImagePreview { id: item_id } => items::image_preview(state, id, &item_id),
+        Method::ImagePreview {
+            id: item_id,
+            max_edge,
+        } => items::image_preview(state, id, &item_id, max_edge),
         Method::Add { content } => items::add(state, id, &content),
         Method::Delete { id: item_id } => items::delete(state, id, &item_id),
         Method::DeleteAll { through } => items::delete_all(state, id, through),

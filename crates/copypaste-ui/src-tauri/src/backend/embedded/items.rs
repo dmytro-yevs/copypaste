@@ -260,10 +260,14 @@ pub(super) async fn get(backend: &EmbeddedBackend, id: &str) -> Result<Item> {
     backend.blocking(move |inner| inner.fetch(&id)).await
 }
 
-pub(super) async fn image_preview(backend: &EmbeddedBackend, id: &str) -> Result<ImagePreview> {
+pub(super) async fn image_preview(
+    backend: &EmbeddedBackend,
+    id: &str,
+    max_edge: Option<u32>,
+) -> Result<ImagePreview> {
     let id = id.to_string();
     backend
-        .blocking(move |inner| inner.image_preview(&id))
+        .blocking(move |inner| inner.image_preview(&id, max_edge))
         .await
 }
 

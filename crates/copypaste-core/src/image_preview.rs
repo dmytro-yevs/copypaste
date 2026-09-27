@@ -7,7 +7,8 @@ use thiserror::Error;
 
 /// A preview is deliberately much smaller than its source. It is displayed in
 /// a history row, never used to restore an image to the system clipboard.
-pub const MAX_THUMBNAIL_EDGE: u32 = 384;
+pub const DEFAULT_THUMBNAIL_EDGE: u32 = 384;
+pub const MAX_THUMBNAIL_EDGE: u32 = 2_048;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageThumbnail {
@@ -31,10 +32,14 @@ pub enum ImagePreviewError {
 pub fn thumbnail_png(
     source: &[u8],
     decoded_memory_mb: u32,
+    max_edge: Option<u32>,
 ) -> Result<ImageThumbnail, ImagePreviewError> {
+    let edge = max_edge
+        .unwrap_or(DEFAULT_THUMBNAIL_EDGE)
+        .clamp(1, MAX_THUMBNAIL_EDGE);
     let budget = u64::from(decoded_memory_mb).saturating_mul(1024 * 1024);
-    let thumbnail_bytes = u64::from(MAX_THUMBNAIL_EDGE)
-        .saturating_mul(u64::from(MAX_THUMBNAIL_EDGE))
+    let thumbnail_bytes = u64::from(edge)
+        .saturating_mul(u64::from(edge))
         .saturating_mul(4);
     let source_budget = budget
         .checked_sub(thumbnail_bytes)
@@ -53,10 +58,7 @@ pub fn thumbnail_png(
             ImagePreviewError::Decode
         }
     })?;
-    let thumbnail = image.thumbnail(
-        image.width().min(MAX_THUMBNAIL_EDGE),
-        image.height().min(MAX_THUMBNAIL_EDGE),
-    );
+    let thumbnail = image.thumbnail(image.width().min(edge), image.height().min(edge));
     let (width, height) = (thumbnail.width(), thumbnail.height());
     let mut png = Vec::new();
     thumbnail
@@ -82,7 +84,7 @@ mod tests {
 
     #[test]
     fn creates_a_png_thumbnail() {
-        let thumbnail = thumbnail_png(&png(1200, 600), 50).unwrap();
+        let thumbnail = thumbnail_png(&png(1200, 600), 50, None).unwrap();
         assert_eq!((thumbnail.width, thumbnail.height), (384, 192));
         assert_eq!(&thumbnail.png[..8], b"\x89PNG\r\n\x1a\n");
     }
@@ -90,7 +92,7 @@ mod tests {
     #[test]
     fn refuses_a_decode_over_the_budget() {
         assert!(matches!(
-            thumbnail_png(&png(1200, 1200), 1),
+            thumbnail_png(&png(1200, 1200), 1, None),
             Err(ImagePreviewError::TooLarge)
         ));
     }
@@ -98,8 +100,22 @@ mod tests {
     #[test]
     fn refuses_non_images() {
         assert!(matches!(
-            thumbnail_png(b"not an image", 50),
+            thumbnail_png(b"not an image", 50, None),
             Err(ImagePreviewError::Decode)
         ));
+    }
+
+    #[test]
+    fn high_dpi_edge_does_not_upscale_small_images() {
+        assert_eq!(
+            thumbnail_png(&png(1600, 800), 50, Some(1024))
+                .unwrap()
+                .width,
+            1024
+        );
+        assert_eq!(
+            thumbnail_png(&png(120, 60), 50, Some(1024)).unwrap().width,
+            120
+        );
     }
 }

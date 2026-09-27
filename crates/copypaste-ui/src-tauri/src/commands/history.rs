@@ -275,8 +275,9 @@ async fn joined_text(backend: &impl Backend, ids: &[String]) -> Result<(String, 
 pub async fn get_image_preview(
     backend: State<'_, SelectedBackend>,
     id: String,
+    max_edge: Option<u32>,
 ) -> Result<UiImagePreview> {
-    Ok(backend.image_preview(&id).await?.into())
+    Ok(backend.image_preview(&id, max_edge).await?.into())
 }
 
 /// Resolve the captured source application's icon without exposing an app path
