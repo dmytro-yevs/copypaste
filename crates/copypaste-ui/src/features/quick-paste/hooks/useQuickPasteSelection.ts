@@ -4,7 +4,6 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
-  type RefObject,
 } from "react";
 
 import type { Item } from "@/lib/ipc";
@@ -13,7 +12,9 @@ interface QuickPasteSelectionOptions {
   active: boolean;
   items: readonly Item[];
   query: string;
-  listRef: RefObject<HTMLDivElement | null>;
+  scrollToItemIndex: (index: number) => void;
+  hasMore: boolean;
+  onLoadMore: () => void;
   canCopy: (item: Item, plainText: boolean) => boolean;
   copyPending: boolean;
   onCopy: (item: Item, plainText?: boolean) => void;
@@ -28,7 +29,9 @@ export function useQuickPasteSelection({
   active,
   items,
   query,
-  listRef,
+  scrollToItemIndex,
+  hasMore,
+  onLoadMore,
   canCopy,
   copyPending,
   onCopy,
@@ -39,6 +42,7 @@ export function useQuickPasteSelection({
   const lastKeyboardMove = useRef(0);
   const scrolling = useRef(false);
   const scrollIdleTimer = useRef<number | null>(null);
+  const pendingNextIndex = useRef<number | null>(null);
   const selectedIndex = Math.max(0, items.findIndex((item) => item.id === selectedId));
 
   useEffect(() => {
@@ -51,11 +55,17 @@ export function useQuickPasteSelection({
   }, [active, items, selectedId]);
 
   useEffect(() => {
+    const pending = pendingNextIndex.current;
+    if (pending === null || !items[pending]) return;
+    pendingNextIndex.current = null;
+    setSelectedId(items[pending].id);
+  }, [items]);
+
+  useEffect(() => {
     if (!keyboardNavigation.current) return;
-    const row = listRef.current?.children[selectedIndex] as HTMLElement | undefined;
-    row?.scrollIntoView?.({ block: "nearest" });
+    scrollToItemIndex(selectedIndex);
     keyboardNavigation.current = false;
-  }, [listRef, selectedId, selectedIndex]);
+  }, [scrollToItemIndex, selectedId, selectedIndex]);
 
   useEffect(
     () => () => {
@@ -82,6 +92,12 @@ export function useQuickPasteSelection({
       const current = Math.max(0, items.findIndex((item) => item.id === selectedId));
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault();
+        if (event.key === "ArrowDown" && current === items.length - 1 && hasMore) {
+          keyboardNavigation.current = true;
+          pendingNextIndex.current = current + 1;
+          onLoadMore();
+          return;
+        }
         keyboardNavigation.current = true;
         lastKeyboardMove.current = Date.now();
         setSelectedId(
@@ -111,7 +127,7 @@ export function useQuickPasteSelection({
         }
       }
     },
-    [canCopy, copyPending, items, onCopy, onDismiss, query, selectFromKeyboard, selectedId],
+    [canCopy, copyPending, hasMore, items, onCopy, onDismiss, onLoadMore, query, selectFromKeyboard, selectedId],
   );
 
   const selectFromPointer = useCallback((id: string) => {

@@ -20,7 +20,6 @@ const toast = vi.hoisted(() => ({ error: vi.fn() }));
 
 vi.mock("sonner", () => ({ toast }));
 vi.mock("@/features/quick-paste/hooks/useQuickPasteLifecycle", () => ({
-  QUICK_PASTE_QUERY_KEY: ["quick-paste", "items"],
   useQuickPasteLifecycle: () => ({
     holding: true,
     dismiss: lifecycle.dismiss,
@@ -314,6 +313,78 @@ describe("quickPastePresentation", () => {
       ["text/plain", "original"],
       ["text/plain", "plain_text"],
     ]);
+  });
+
+  it("loads older cursor pages as the virtual list reaches its end", async () => {
+    const newer = item({ id: "newer", content: "newer item" });
+    const older = item({ id: "older", content: "older item" });
+    ipc.listItems.mockImplementation((_limit: number, cursor: string | null) =>
+      Promise.resolve(cursor === "older-cursor"
+        ? page([older])
+        : page([newer], 0, "older-cursor", 2)));
+    render(
+      <QueryClientProvider client={testClient()}>
+        <TooltipProvider><QuickPasteScreen /></TooltipProvider>
+      </QueryClientProvider>,
+    );
+
+    const list = await screen.findByRole("list");
+    Object.defineProperties(list, {
+      clientHeight: { configurable: true, value: 40 },
+      scrollHeight: { configurable: true, value: 80 },
+      scrollTop: { configurable: true, value: 40 },
+    });
+    fireEvent.scroll(list);
+
+    await waitFor(() => expect(ipc.listItems).toHaveBeenCalledWith(200, "older-cursor"));
+    expect(await screen.findByRole("button", { name: "Copy older item" })).toBeTruthy();
+  });
+
+  it("advances keyboard selection into an older page", async () => {
+    const newer = item({ id: "newer", content: "newer item" });
+    const older = item({ id: "older", content: "older item" });
+    ipc.listItems.mockImplementation((_limit: number, cursor: string | null) =>
+      Promise.resolve(cursor === "older-cursor"
+        ? page([older])
+        : page([newer], 0, "older-cursor", 2)));
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={testClient()}>
+        <TooltipProvider><QuickPasteScreen /></TooltipProvider>
+      </QueryClientProvider>,
+    );
+
+    await screen.findByRole("button", { name: "Copy newer item" });
+    await user.click(screen.getByRole("searchbox"));
+    await user.keyboard("{ArrowDown}");
+
+    await waitFor(() => expect(ipc.listItems).toHaveBeenCalledWith(200, "older-cursor"));
+    const olderCopy = await screen.findByRole("button", { name: "Copy older item" });
+    expect(olderCopy.closest('[role="listitem"]')?.getAttribute("data-state")).toBe("selected");
+  });
+
+  it("mounts only virtual rows and keeps keyboard selection through a refetch", async () => {
+    const shown = Array.from({ length: 40 }, (_, index) => item({
+      id: `row-${index}`,
+      content: `entry ${index}`,
+    }));
+    ipc.listItems.mockResolvedValue(page(shown));
+    const client = testClient();
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={client}>
+        <TooltipProvider><QuickPasteScreen /></TooltipProvider>
+      </QueryClientProvider>,
+    );
+
+    await screen.findByRole("button", { name: "Copy entry 0" });
+    expect(screen.getAllByRole("listitem").length).toBeLessThan(shown.length);
+    await user.click(screen.getByRole("searchbox"));
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Copy entry 1" }).closest('[role="listitem"]')?.getAttribute("data-state")).toBe("selected"));
+
+    await act(async () => { await client.refetchQueries({ queryKey: ["history"] }); });
+    expect(screen.getByRole("button", { name: "Copy entry 1" }).closest('[role="listitem"]')?.getAttribute("data-state")).toBe("selected");
   });
 
   it("accepts one copy across pointer, row Enter, root Enter and slot keys while writing", async () => {
