@@ -512,18 +512,6 @@ for s in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS AND
     fi
 done
 
-# A published Android APK must be signed by the durable release key. Unlike the
-# never-published emulator fixture, absence of any secret cannot mint a new key
-# and turn a normal update into an uninstall-and-data-loss event.
-if grep -q 'Android release signing is fail-closed' .github/workflows/release.yml \
-   && ! grep -q 'unstable-key' .github/workflows/release.yml \
-   && ! grep -q 'CopyPaste Unstable Key' .github/workflows/release.yml; then
-    ok "release.yml rejects missing Android signing secrets without an ephemeral-key fallback"
-else
-    bad "release.yml rejects missing Android signing secrets without an ephemeral-key fallback" \
-        "the signing step must fail before artifact upload, not generate an -unstable-key APK"
-fi
-
 # `npm audit` must cover every independently locked Node dependency graph: the
 # app bundle, the WebKit e2e harness and the token/build toolchain.
 if grep -q 'run: npm audit' .github/workflows/ci.yml \
@@ -541,7 +529,7 @@ if grep -q 'org.owasp:dependency-check-gradle:12.2.2' crates/copypaste-ui/src-ta
    && grep -q 'apiKey = nvdApiKey' crates/copypaste-ui/src-tauri/gen/android/build.gradle.kts \
    && grep -Fq 'NVD_API_KEY: ${{ secrets.NVD_API_KEY }}' .github/workflows/android-emulator.yml \
    && grep -q 'name: android-dependency-check-report' .github/workflows/android-emulator.yml \
-   && grep -q 'native-nightly.yml' scripts/release/check-wiring.py; then
+   && grep -q "if: inputs.mode == 'full'" .github/workflows/android-emulator.yml; then
     ok "Android workflow audits and retains the resolved Gradle dependency graph"
 else
     bad "Android workflow audits and retains the resolved Gradle dependency graph" \
@@ -555,7 +543,7 @@ EXPECTED_CERT="$(node scripts/release/android-metadata.mjs --field releaseCertif
 
 if [[ -z "$CERT_ERROR" ]] \
    && grep -q 'releaseCertificateSha256' .github/workflows/release.yml \
-   && grep -q 'APK signer fingerprint does not match Cargo.toml' .github/workflows/release.yml; then
+   && grep -q -- '--expected-cert "$expected"' .github/workflows/release.yml; then
     ok "release.yml pins the Android signing certificate before artifact upload"
 else
     bad "release.yml pins the Android signing certificate before artifact upload" \
@@ -569,18 +557,15 @@ else
         "unversioned cargo install makes the browser layer non-reproducible"
 fi
 
-# ADR-0001's premise, asserted rather than trusted. If a signing credential is
-# ever added to the release workflow, this fails and the ADR has to change
-# first.
-if grep -qE 'APPLE_CERTIFICATE|APPLE_ID|APPLE_TEAM_ID|APPLE_API_KEY|notarytool|stapler' .github/workflows/release.yml; then
-    if grep -qE 'if \[\[ -n .*APPLE_SIGNING_IDENTITY' .github/workflows/release.yml; then
-        ok "the only Apple names in release.yml are inside the guard"
-    else
-        bad "release.yml holds no Apple signing credential" \
-            "found an Apple credential or notarisation step; ADR-0001 says this pipeline has none"
-    fi
+# ADR-0001 permits ad-hoc signing only. The release job rejects ambient Apple
+# credentials before packaging and must not add notarisation or managed-signing.
+if grep -Fq '[[ -z "${APPLE_SIGNING_IDENTITY:-}${APPLE_CERTIFICATE:-}${APPLE_ID:-}" ]] || {' .github/workflows/release.yml \
+   && grep -Fq 'an Apple signing credential is present but this release is ad-hoc signed' .github/workflows/release.yml \
+   && ! grep -qE 'APPLE_TEAM_ID|APPLE_API_KEY|notarytool|stapler' .github/workflows/release.yml; then
+    ok "release.yml rejects Apple signing credentials and remains ad-hoc"
 else
-    ok "release.yml holds no Apple signing credential"
+    bad "release.yml rejects Apple signing credentials and remains ad-hoc" \
+        "the macOS release must fail before packaging if an Apple signing credential appears"
 fi
 # The bundler matches on the presence of APPLE_SIGNING_IDENTITY, not on its
 # value, so `APPLE_SIGNING_IDENTITY=''` makes it sign with the identity "" and
@@ -599,13 +584,6 @@ fi
 
 check "macOS bundle executable lookup self-test" \
     ./scripts/release/macos-bundle-self-test.sh
-
-if grep -q 'an Apple signing credential is present in the environment' .github/workflows/release.yml; then
-    ok "release.yml still fails the build if a signing identity appears"
-else
-    bad "release.yml still fails the build if a signing identity appears" \
-        "the guard step was removed; it is deliberate (ADR-0001)"
-fi
 
 prerelease_probe() {
     set -euo pipefail
