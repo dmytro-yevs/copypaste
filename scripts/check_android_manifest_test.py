@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 import os
 from pathlib import Path
+import shlex
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -145,7 +148,7 @@ class AndroidManifestCheckTest(unittest.TestCase):
 
 class AndroidCaptureGuardTest(unittest.TestCase):
     @staticmethod
-    def run_guard(overrides=None):
+    def run_guard(overrides=None, directories=None):
         files = {
             "MainActivity.kt": "window.setFlags(FLAG_SECURE, FLAG_SECURE)\n",
             "ScreenProtectionPlugin.kt": "window.clearFlags(FLAG_SECURE)\n",
@@ -159,19 +162,31 @@ class AndroidCaptureGuardTest(unittest.TestCase):
             kotlin = root / ANDROID_KOTLIN
             kotlin.mkdir(parents=True)
             for name, source in files.items():
-                (kotlin / name).write_text(source)
+                target = kotlin / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(source)
+            for name in directories or ():
+                (kotlin / name).mkdir(parents=True)
 
             bin_dir = root / "bin"
             bin_dir.mkdir()
+            for command in ("grep", "sh"):
+                executable = shutil.which(command)
+                if executable is None:
+                    raise RuntimeError(f"missing required fixture command: {command}")
+                (bin_dir / command).symlink_to(executable)
             python = bin_dir / "python3"
             python.write_text(
                 "#!/usr/bin/env sh\n"
                 "if [ \"$1\" = \"-m\" ] && [ \"$2\" = \"unittest\" ]; then exit 0; fi\n"
                 "if [ \"$1\" = \"scripts/check_android_manifest.py\" ]; then exit 0; fi\n"
-                "exit 64\n"
+                f"exec {shlex.quote(sys.executable)} \"$@\"\n"
             )
             python.chmod(0o755)
-            environment = os.environ | {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
+            self_path = str(bin_dir)
+            if shutil.which("rg", path=self_path) is not None:
+                raise AssertionError("fixture tool path unexpectedly includes rg")
+            environment = os.environ | {"PATH": self_path}
             return subprocess.run(
                 ["sh", str(CAPTURE_GUARD)],
                 cwd=root,
@@ -186,6 +201,18 @@ class AndroidCaptureGuardTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("PASS: Android capture-ladder static contracts", result.stdout)
+
+    def test_capture_guard_does_not_require_rg(self):
+        result = self.run_guard()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("PASS: Android capture-ladder static contracts", result.stdout)
+
+    def test_capture_guard_fails_closed_when_kotlin_source_cannot_be_read(self):
+        result = self.run_guard(directories=("Unreadable.kt",))
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("FAIL: Android Kotlin source inspection failed", result.stderr)
 
     def test_capture_guard_rejects_protected_regressions(self):
         regressions = {
@@ -209,8 +236,28 @@ class AndroidCaptureGuardTest(unittest.TestCase):
                 {"ClipboardRead.kt": "val binder = ShizukuBinderWrapper()\n"},
                 "Shizuku clipboard binder escaped its source-attribution boundary",
             ),
+            "nested Shizuku binder": (
+                {"nested/ClipboardRead.kt": "val binder = ShizukuBinderWrapper()\n"},
+                "Shizuku clipboard binder escaped its source-attribution boundary",
+            ),
+            "literal Shizuku binder stub": (
+                {"ClipboardRead.kt": "val binder = IClipboard$Stub\n"},
+                "Shizuku clipboard binder escaped its source-attribution boundary",
+            ),
+            "escaped Shizuku binder stub": (
+                {"ClipboardRead.kt": 'val binder = "IClipboard\\$Stub"\n'},
+                "Shizuku clipboard binder escaped its source-attribution boundary",
+            ),
             "Shizuku clipboard transport": (
                 {"ClipboardRead.kt": 'val read = "getPrimaryClip"\n'},
+                "Shizuku clipboard content transport reappeared",
+            ),
+            "Java Shizuku clipboard transport": (
+                {"ClipboardBridge.java": 'String read = "getPrimaryClip";\n'},
+                "Shizuku clipboard content transport reappeared",
+            ),
+            "nested Shizuku clipboard transport": (
+                {"nested/ClipboardRead.kt": 'val read = "getPrimaryClip"\n'},
                 "Shizuku clipboard content transport reappeared",
             ),
         }
