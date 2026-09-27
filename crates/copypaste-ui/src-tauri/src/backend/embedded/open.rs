@@ -49,6 +49,17 @@ impl Inner {
         }
     }
 
+    pub(super) fn publish_peers(&self) {
+        if self.events.receiver_count() > 0 {
+            let _ = self.events.send(EventData {
+                event: EventKind::Peers,
+                item_count: self.state.store.count().unwrap_or(0),
+                captured: false,
+                swept: 0,
+            });
+        }
+    }
+
     pub(super) fn note_version_written(&self, created_at: i64) {
         self.cloud.note_version_written(self, created_at);
     }
