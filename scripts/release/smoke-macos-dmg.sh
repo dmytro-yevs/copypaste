@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # smoke-macos-dmg.sh — install the DMG the way a user does, and watch it work.
 #
-#   Usage: scripts/release/smoke-macos-dmg.sh <version> [arch] [--force]
+#   Usage: COPYPASTE_SMOKE_PROFILE=critical scripts/release/smoke-macos-dmg.sh <version> [arch] [--force]
 #
 # The release pipeline had no install test at all: it produced a DMG and
 # published it, and every claim about whether the thing inside launches, reads a
@@ -26,8 +26,20 @@
 # and the summary is the deliverable.
 set -uo pipefail
 
+SMOKE_PROFILE="${COPYPASTE_SMOKE_PROFILE:-full}"
+case "$SMOKE_PROFILE" in
+    full|critical) ;;
+    *) echo "ERROR: COPYPASTE_SMOKE_PROFILE must be full or critical" >&2; exit 2 ;;
+esac
+
+list_response_contains_canary() { # <cli> <canary> <response-file> <stderr-file>
+    local cli="$1" canary="$2" response="$3" stderr="$4"
+    "$cli" --json list --limit 20 >"$response" 2>"$stderr" || return 2
+    grep -Fq -- "$canary" "$response"
+}
+
 self_test() {
-    local root tmp file pin mutated live script
+    local root tmp file pin mutated live script native_profile_export full_only_guard
     root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
     script="$root/scripts/release/smoke-macos-dmg.sh"
     python3 - "$root/scripts/release/write-native-evidence.py" "$script" <<'PY'
@@ -84,6 +96,67 @@ PY
     if python3 "$root/scripts/release/write-native-evidence.py" --capture-qualified-artifact "$file" >/dev/null 2>&1; then
         echo "self-test failed: symlink capture was accepted" >&2
         rm -rf "$tmp"
+        return 1
+    fi
+    if COPYPASTE_SMOKE_PROFILE=invalid "$script" --self-test >/dev/null 2>&1; then
+        echo "self-test failed: invalid smoke profile was accepted" >&2
+        rm -rf "$tmp"
+        return 1
+    fi
+    native_profile_export='COPYPASTE_SMOKE_PROFILE="$SMOKE_PROFILE"'
+    full_only_guard='if [[ "$SMOKE_PROFILE" == "full" ]]; then'
+    if ! grep -Fq "$native_profile_export" "$script" \
+        || ! grep -Fq "$full_only_guard" "$script"; then
+        echo "self-test failed: critical profile does not scope native evidence" >&2
+        rm -rf "$tmp"
+        return 1
+    fi
+    capture_poll_self_test() {
+        local fixture nonce legacy_status complete_status response_bytes
+        fixture="$(mktemp -d)"
+        nonce="capture-canary"
+        large_list_stub() {
+            python3 - "$nonce" <<'PY'
+import sys
+print(sys.argv[1], flush=True)
+for _ in range(512):
+    sys.stdout.write("x" * 65536)
+    sys.stdout.flush()
+PY
+        }
+        if large_list_stub 2>/dev/null | grep -Fq -- "$nonce"; then
+            echo "self-test failed: early grep did not expose the pipefail false failure" >&2
+            rm -rf "$fixture"
+            return 1
+        fi
+        legacy_status="${PIPESTATUS[0]}"
+        if list_response_contains_canary large_list_stub "$nonce" "$fixture/list.json" "$fixture/list.err"; then
+            complete_status=0
+            response_bytes="$(wc -c < "$fixture/list.json")"
+        else
+            complete_status=$?
+            response_bytes=0
+        fi
+        if [[ "$legacy_status" != 0 && "$complete_status" == 0 && "$response_bytes" -gt 1048576 ]]; then
+            :
+        else
+            echo "self-test failed: complete list response did not avoid early-pipe failure" >&2
+            rm -rf "$fixture"
+            return 1
+        fi
+        failed_list_stub() { printf '%s\n' "$nonce"; return 17; }
+        missing_list_stub() { printf '%s\n' '{"items":[]}'; }
+        if list_response_contains_canary failed_list_stub "$nonce" "$fixture/list.json" "$fixture/list.err" \
+            || list_response_contains_canary missing_list_stub "$nonce" "$fixture/list.json" "$fixture/list.err"; then
+            echo "self-test failed: a failed list command or missing canary passed" >&2
+            rm -rf "$fixture"
+            return 1
+        fi
+        rm -rf "$fixture"
+    }
+    if capture_poll_self_test; then
+        :
+    else
         return 1
     fi
     rm -rf "$tmp"
@@ -143,11 +216,24 @@ QUALIFIED_ARTIFACT_IDENTITY="$(python3 scripts/release/write-native-evidence.py 
 APP="/Applications/CopyPaste.app"
 MNT="$(mktemp -d)/CopyPaste"
 LOGS="$(mktemp -d)"
+EVIDENCE_DIR="artifacts/release-macos-native"
+DAEMON_LOG="$LOGS/daemon.log"
+LIST_RESPONSE="$LOGS/list-response.json"
+LIST_STDERR="$LOGS/list-response.err"
 APP_EXECUTABLE=""
 CLI=""
 PASS=0
 FAIL=0
 NOTES=()
+PBCOPY_EXIT="not-run"
+PBPASTE_EXIT="not-run"
+PBPASTE_CANARY="not-run"
+LIST_ATTEMPTS=0
+LIST_LAST_EXIT="not-run"
+STATUS_BEFORE_EXIT="not-run"
+STATUS_AFTER_EXIT="not-run"
+
+mkdir -p "$EVIDENCE_DIR"
 
 ok()   { PASS=$((PASS + 1)); printf '  ok      %s\n' "$1"; }
 bad()  { FAIL=$((FAIL + 1)); printf '  FAIL    %s\n' "$1"; [[ -n "${2:-}" ]] && printf '          %s\n' "$2"; }
@@ -160,6 +246,41 @@ note() {
     fi
 }
 group() { printf '\n== %s\n' "$1"; }
+
+printf 'Smoke profile: %s\n' "$SMOKE_PROFILE"
+
+capture_status() { # <before|after>
+    local phase="$1" output="$EVIDENCE_DIR/daemon-status-$1.json"
+    "$CLI" --json status >"$output" 2>"$LOGS/daemon-status-$phase.err"
+}
+
+write_capture_diagnostics() {
+    local response_bytes=0
+    if [[ -f "$LIST_RESPONSE" ]]; then
+        response_bytes="$(wc -c < "$LIST_RESPONSE")"
+    fi
+    {
+        printf 'pbcopy_exit=%s\n' "$PBCOPY_EXIT"
+        printf 'pbpaste_exit=%s\n' "$PBPASTE_EXIT"
+        printf 'pbpaste_canary=%s\n' "$PBPASTE_CANARY"
+        printf 'list_attempts=%s\n' "$LIST_ATTEMPTS"
+        printf 'list_last_exit=%s\n' "$LIST_LAST_EXIT"
+        printf 'list_response_bytes=%s\n' "$response_bytes"
+        printf 'status_before_exit=%s\n' "$STATUS_BEFORE_EXIT"
+        printf 'status_after_exit=%s\n' "$STATUS_AFTER_EXIT"
+    } > "$EVIDENCE_DIR/clipboard-capture-diagnostics.txt"
+}
+
+copy_bounded_runtime_daemon_log() {
+    local data_dir="${COPYPASTE_DATA_DIR:-$HOME/Library/Application Support/com.copypaste.CopyPaste}"
+    local runtime_logs="$data_dir/logs" latest=""
+    latest="$(find "$runtime_logs" -type f -name 'daemon.*.log' -print 2>/dev/null | sort | tail -n 1)"
+    if [[ -n "$latest" ]]; then
+        tail -n 40 "$latest" > "$EVIDENCE_DIR/daemon-runtime.log"
+    else
+        printf 'runtime daemon log unavailable\n' > "$EVIDENCE_DIR/daemon-runtime.log"
+    fi
+}
 
 # ADR-0001 ships ad-hoc. `codesign --verify --strict` rejects that on current
 # macOS runners even when the seal is intact, so ad-hoc is an accepted verify.
@@ -182,6 +303,7 @@ cleanup() {
     rm -rf "$APP"
     hdiutil detach "$MNT" -quiet >/dev/null 2>&1
     rm -rf "$(dirname "$MNT")"
+    rm -rf "$LOGS"
 }
 trap cleanup EXIT
 
@@ -299,15 +421,20 @@ group "The daemon inside the bundle (ENFORCED)"
 # failure here is the product rather than the runner. It is also the first time
 # the Keychain device-secret path runs in the configuration that ships.
 CLI="$APP/Contents/MacOS/copypaste"
-"$APP/Contents/MacOS/copypaste-daemon" --foreground >"$LOGS/daemon.log" 2>&1 &
+"$APP/Contents/MacOS/copypaste-daemon" --foreground >"$DAEMON_LOG" 2>&1 &
 DAEMON_PID=$!
 if wait_for_daemon "$CLI"; then
     ok "the bundled daemon answers on its socket"
 else
-    bad "the bundled daemon answers on its socket" "$(tail -20 "$LOGS/daemon.log")"
+    bad "the bundled daemon answers on its socket" "see bounded daemon diagnostics artifact"
 fi
 
-STATUS="$("$CLI" --json status 2>/dev/null | tr -d ' \n')"
+if capture_status before; then
+    STATUS_BEFORE_EXIT=0
+else
+    STATUS_BEFORE_EXIT=$?
+fi
+STATUS="$(tr -d ' \n' < "$EVIDENCE_DIR/daemon-status-before.json")"
 case "$STATUS" in
     *'"clipboard_backend":"nspasteboard"'*)
         ok "the live clipboard backend is NSPasteboard" ;;
@@ -321,25 +448,61 @@ esac
 # turn into a row. Nothing short of this exercises poll -> gate -> encrypt ->
 # store on a real pasteboard.
 NONCE="copypaste-smoke-$RANDOM$RANDOM"
-printf '%s' "$NONCE" | pbcopy
+if printf '%s' "$NONCE" | pbcopy; then
+    PBCOPY_EXIT=0
+else
+    PBCOPY_EXIT=$?
+fi
+PBPASTE_VALUE=""
+if PBPASTE_VALUE="$(pbpaste)"; then
+    PBPASTE_EXIT=0
+    if [[ "$PBPASTE_VALUE" == "$NONCE" ]]; then
+        PBPASTE_CANARY=yes
+    else
+        PBPASTE_CANARY=no
+    fi
+else
+    PBPASTE_EXIT=$?
+    PBPASTE_CANARY=no
+fi
+unset PBPASTE_VALUE
+if [[ "$PBCOPY_EXIT" != 0 ]]; then
+    bad "pbcopy accepted the capture canary" "pbcopy exit=$PBCOPY_EXIT"
+elif [[ "$PBPASTE_CANARY" != yes ]]; then
+    bad "pbpaste returns the capture canary" "pbpaste exit=$PBPASTE_EXIT"
+else
+    ok "the pasteboard round-trips the capture canary"
+fi
 CAPTURED="no"
 for _ in $(seq 1 20); do
-    if "$CLI" --json list --limit 20 2>/dev/null | grep -q "$NONCE"; then
+    LIST_ATTEMPTS=$((LIST_ATTEMPTS + 1))
+    if list_response_contains_canary "$CLI" "$NONCE" "$LIST_RESPONSE" "$LIST_STDERR"; then
+        LIST_LAST_EXIT=0
         CAPTURED="yes"
         break
+    else
+        LIST_LAST_EXIT=$?
     fi
     sleep 0.5
 done
+if capture_status after; then
+    STATUS_AFTER_EXIT=0
+else
+    STATUS_AFTER_EXIT=$?
+fi
+write_capture_diagnostics
 if [[ "$CAPTURED" == "yes" ]]; then
     ok "a copy made with pbcopy was captured into the history"
 else
     bad "a copy made with pbcopy was captured into the history" \
-        "the poll loop never saw it: $(tail -20 "$LOGS/daemon.log")"
+        "the poll loop never saw it; see bounded diagnostics artifacts"
 fi
 
 "$CLI" shutdown >/dev/null 2>&1
 wait "$DAEMON_PID" 2>/dev/null
+copy_bounded_runtime_daemon_log
 
+if [[ "$SMOKE_PROFILE" == "full" ]]; then
 group "The app itself (REPORTED — needs a window server)"
 # `open` rather than exec: it goes through LaunchServices, which is what a user
 # does and what Gatekeeper sees. The app is a menu-bar item with no dock icon,
@@ -403,10 +566,12 @@ else
     note "a re-signed daemon could not start" \
          "manifest 02 §3.8 predicts a Keychain ACL failure here: $(tail -10 "$LOGS/resigned.log")"
 fi
+fi
 
 # ---------------------------------------------------------------------------
 group "Native shell evidence (ENFORCED)"
 # ---------------------------------------------------------------------------
+export COPYPASTE_SMOKE_PROFILE="$SMOKE_PROFILE"
 if ./scripts/release/macos-native-evidence.sh artifacts/release-macos-native "$DMG" "$QUALIFIED_ARTIFACT_IDENTITY"; then
     ok "the installed app produced native accessibility, screenshot, and latency evidence"
 else
@@ -416,11 +581,15 @@ fi
 # COPYPASTE_EVIDENCE_AX / AXEnhancedUserInterface. Tray "Open Settings" is
 # visible; WebView labels (Settings, Sync, Sign in) are not. Keep running the
 # script for dumps/screenshots, but do not block the publish gate on it.
-if ./scripts/release/macos-cloud-evidence.sh artifacts/release-macos-cloud; then
-    ok "the installed app produced cloud account lifecycle evidence"
+if [[ "$SMOKE_PROFILE" == "full" ]]; then
+    if ./scripts/release/macos-cloud-evidence.sh artifacts/release-macos-cloud; then
+        ok "the installed app produced cloud account lifecycle evidence"
+    else
+        note "macOS cloud UI lifecycle evidence" \
+            "WKWebView AXWebArea stays empty on hosted runners; see testing-policy"
+    fi
 else
-    note "macOS cloud UI lifecycle evidence" \
-        "WKWebView AXWebArea stays empty on hosted runners; see testing-policy"
+    note "cloud account lifecycle evidence deferred to the full smoke profile"
 fi
 
 printf '\n%s\n' "-----------------------------------------------"

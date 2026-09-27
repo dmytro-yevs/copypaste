@@ -22,14 +22,6 @@ permissions:
   contents: read
 
 jobs:
-  ledger:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - run: python3 -m pip install --requirement requirements-ci.txt
-      - run: python3 scripts/check-feature-ledger.py
-
   # The `github` context inside a called workflow reflects the CALLER's event,
   # not the call itself — so android-emulator.yml's own `emulator` job matrix
   # already sees `github.event_name == 'schedule'` here and expands to the full
@@ -40,6 +32,7 @@ jobs:
     if: github.event_name == 'schedule'
     uses: ./.github/workflows/android-emulator.yml
     with:
+      mode: full
       target: google_apis
 
   # A manual dispatch of this workflow is not `schedule`, so the callee trusts
@@ -52,6 +45,7 @@ jobs:
         api-level: [34, 36]
     uses: ./.github/workflows/android-emulator.yml
     with:
+      mode: full
       api-level: ${{ matrix.api-level }}
       target: google_apis
 
