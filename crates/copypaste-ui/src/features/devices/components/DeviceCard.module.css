@@ -41,8 +41,8 @@
 .copy { display: flex; min-inline-size: 0; flex: 1; flex-direction: column; }
 .name { min-inline-size: 0; overflow: hidden; font-size: var(--fs-sm); font-weight: var(--fw-medium); text-overflow: ellipsis; white-space: nowrap; }
 .detailLine { display: block; min-inline-size: 0; margin-block-start: var(--s-1); color: var(--dim); font-size: var(--fs-xs); }
-.detailLayout { display: flex; min-inline-size: 0; align-items: center; gap: var(--s-1); }
-.meta { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detailLayout { display: flex; min-inline-size: 0; flex-wrap: wrap; align-items: center; gap: var(--s-1); }
+.meta { flex: 0 0 auto; max-inline-size: 100%; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .separator { flex: none; color: var(--dim); }
 .status { min-inline-size: 0; }
 .chevron { margin-inline-start: auto; flex: none; color: var(--dim); }
