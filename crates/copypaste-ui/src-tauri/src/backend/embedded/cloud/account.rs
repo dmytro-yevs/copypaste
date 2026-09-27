@@ -379,6 +379,16 @@ mod tests {
     use super::*;
     use crate::backend::embedded::cloud::{sensitive_guard, UploadCursor};
 
+    fn state(dir: &tempfile::TempDir) -> Arc<crate::backend::embedded::state::BackendState> {
+        Arc::new(
+            crate::backend::embedded::state::BackendState::open_with_keyring(
+                dir.path(),
+                crate::backend::embedded::tests::test_keyring(),
+            )
+            .unwrap(),
+        )
+    }
+
     fn configured() -> Arc<EmbeddedCloud> {
         let hosted = copypaste_cloud::CloudConfig::new("https://example.invalid", "anon").unwrap();
         Arc::new(EmbeddedCloud {
@@ -421,8 +431,7 @@ mod tests {
     #[test]
     fn concurrent_sign_out_fences_a_delayed_sign_in() {
         let dir = tempfile::TempDir::new().unwrap();
-        let state =
-            Arc::new(crate::backend::embedded::state::BackendState::open(dir.path()).unwrap());
+        let state = state(&dir);
         let cloud = configured();
         let attempt = cloud.begin_sign_in();
         let gate = Arc::new(Barrier::new(2));
@@ -464,8 +473,7 @@ mod tests {
     #[test]
     fn switching_accounts_clears_the_unreadable_upload_count() {
         let dir = tempfile::TempDir::new().unwrap();
-        let state =
-            Arc::new(crate::backend::embedded::state::BackendState::open(dir.path()).unwrap());
+        let state = state(&dir);
         let cloud = configured();
 
         let sign_in = |user: &str| {

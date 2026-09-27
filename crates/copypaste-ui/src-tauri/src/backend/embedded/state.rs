@@ -45,6 +45,16 @@ impl BackendState {
         // The same directory the database goes in, so the secret cannot end up
         // somewhere the history is not (security review F-11).
         let keyring = Keyring::load_or_create(data_dir).map_err(keyring_error)?;
+        Self::open_with_keyring(data_dir, keyring)
+    }
+
+    /// Open the normal persistent state pipeline with an already-selected key.
+    ///
+    /// Production resolves its key through [`Self::open`]. Test fixtures inject
+    /// a `Keyring::from_secret` so a temporary database cannot touch Keychain.
+    pub(super) fn open_with_keyring(data_dir: &Path, keyring: Keyring) -> Result<Self> {
+        std::fs::create_dir_all(data_dir)
+            .map_err(|e| BackendError::internal(&format!("could not prepare storage: {e}")))?;
 
         // The database filename comes from the shared crate.
         let db_path = data_dir.join(
@@ -161,6 +171,7 @@ mod tests {
     use super::super::tests::backend;
     use super::*;
     use crate::backend::Backend;
+    use copypaste_core::Keyring;
 
     fn index_row(store: &Store, id: &str, text: &str) {
         store
@@ -178,6 +189,25 @@ mod tests {
                 created_at: 1,
             })
             .unwrap();
+    }
+
+    #[test]
+    fn an_injected_key_reopens_its_store_and_wrong_keys_fail_closed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let first =
+            BackendState::open_with_keyring(dir.path(), Keyring::from_secret(&[0x31; 32])).unwrap();
+        let device_id = first.device_id.clone();
+        drop(first);
+
+        let reopened =
+            BackendState::open_with_keyring(dir.path(), Keyring::from_secret(&[0x31; 32])).unwrap();
+        assert_eq!(reopened.device_id, device_id);
+        drop(reopened);
+
+        assert!(
+            BackendState::open_with_keyring(dir.path(), Keyring::from_secret(&[0x32; 32]),)
+                .is_err()
+        );
     }
 
     /// The purge takes the high-confidence band and stops there.

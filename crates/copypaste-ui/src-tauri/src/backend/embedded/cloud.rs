@@ -454,6 +454,14 @@ fn to_wire(stats: copypaste_cloud::SyncStats) -> CloudSyncData {
 mod tests {
     use super::*;
 
+    fn state(dir: &tempfile::TempDir) -> super::super::state::BackendState {
+        super::super::state::BackendState::open_with_keyring(
+            dir.path(),
+            super::super::tests::test_keyring(),
+        )
+        .unwrap()
+    }
+
     #[cfg(not(feature = "cloud-evidence"))]
     #[test]
     fn production_configuration_rejects_plaintext_loopback() {
@@ -470,7 +478,7 @@ mod tests {
     #[test]
     fn a_stored_endpoint_overlays_the_hosted_bake() {
         let dir = tempfile::TempDir::new().unwrap();
-        let state = super::super::state::BackendState::open(dir.path()).unwrap();
+        let state = state(&dir);
         state
             .store
             .set_state_all(&[
@@ -525,7 +533,7 @@ mod tests {
     #[test]
     fn encrypted_store_restores_a_complete_session_and_key() {
         let dir = tempfile::TempDir::new().unwrap();
-        let state = super::super::state::BackendState::open(dir.path()).unwrap();
+        let state = state(&dir);
         let cloud = configured();
         let session = Session {
             access_token: "access".into(),
@@ -561,7 +569,7 @@ mod tests {
     #[test]
     fn incomplete_persisted_credentials_fail_closed_to_signed_out() {
         let dir = tempfile::TempDir::new().unwrap();
-        let state = super::super::state::BackendState::open(dir.path()).unwrap();
+        let state = state(&dir);
         state
             .store
             .set_state_all(&[
@@ -578,7 +586,7 @@ mod tests {
     #[test]
     fn local_sign_out_clears_every_credential() {
         let dir = tempfile::TempDir::new().unwrap();
-        let state = super::super::state::BackendState::open(dir.path()).unwrap();
+        let state = state(&dir);
         for key in SIGN_OUT_KEYS {
             state.store.set_state(key.as_str(), "secret").unwrap();
         }
@@ -592,7 +600,7 @@ mod tests {
     #[test]
     fn terminal_failure_signs_out_but_preserves_the_status_error() {
         let dir = tempfile::TempDir::new().unwrap();
-        let state = super::super::state::BackendState::open(dir.path()).unwrap();
+        let state = state(&dir);
         let cloud = configured();
         let driver = driver(&cloud, &state, "access");
         *cloud.account() = Some(Account {
@@ -629,7 +637,7 @@ mod tests {
     #[test]
     fn a_stale_round_cannot_overwrite_the_replacement_accounts_status() {
         let dir = tempfile::TempDir::new().unwrap();
-        let state = super::super::state::BackendState::open(dir.path()).unwrap();
+        let state = state(&dir);
         let cloud = configured();
         let stale = driver(&cloud, &state, "stale");
         let current = driver(&cloud, &state, "current");
@@ -659,7 +667,7 @@ mod tests {
     #[test]
     fn a_stale_failure_revision_cannot_invalidate_the_session() {
         let dir = tempfile::TempDir::new().unwrap();
-        let state = super::super::state::BackendState::open(dir.path()).unwrap();
+        let state = state(&dir);
         let cloud = configured();
         let driver = driver(&cloud, &state, "current");
         *cloud.account() = Some(Account {
@@ -695,7 +703,7 @@ mod tests {
     #[tokio::test]
     async fn signing_out_cancels_an_in_flight_round() {
         let dir = tempfile::TempDir::new().unwrap();
-        let state = super::super::state::BackendState::open(dir.path()).unwrap();
+        let state = state(&dir);
         let cloud = configured();
         let driver = driver(&cloud, &state, "access");
         let cancel = CancellationToken::new();
@@ -722,7 +730,7 @@ mod tests {
     #[test]
     fn disabling_sync_interrupts_a_round_without_signing_out() {
         let dir = tempfile::TempDir::new().unwrap();
-        let state = super::super::state::BackendState::open(dir.path()).unwrap();
+        let state = state(&dir);
         let cloud = configured();
         let driver = driver(&cloud, &state, "access");
         let previous = CancellationToken::new();
@@ -743,7 +751,7 @@ mod tests {
     #[test]
     fn shutdown_cancels_the_engine_and_current_round() {
         let dir = tempfile::TempDir::new().unwrap();
-        let state = super::super::state::BackendState::open(dir.path()).unwrap();
+        let state = state(&dir);
         let cloud = configured();
         let driver = driver(&cloud, &state, "access");
         let cancel = CancellationToken::new();
