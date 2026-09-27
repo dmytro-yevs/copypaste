@@ -68,6 +68,14 @@ def validation_steps(job):
     return [step for step in steps(job) if "check:native-parity" in str(step.get("run") or "")]
 
 
+def android_signing_steps(job):
+    return [
+        step for step in steps(job)
+        if "apksigner" in str(step.get("run") or "")
+        and " sign --ks " in str(step.get("run") or "")
+    ]
+
+
 def resolver_job(jobs):
     return next(
         (job for job in jobs.values()
@@ -131,12 +139,38 @@ def qualification_errors(release):
 
 def signing_errors(jobs):
     errors = []
-    android_jobs = [job for job in jobs.values() if "apksigner" in str(job)]
     windows_jobs = [job for job in jobs.values() if "build-windows.ps1" in str(job) or "windows-sign.ps1" in str(job)]
-    android_source = "\n".join(str(job) for job in android_jobs)
     windows_source = "\n".join(str(job) for job in windows_jobs)
-    if "ANDROID_KEYSTORE_BASE64" not in android_source or "apksigner" not in android_source:
-        errors.append("release must sign and verify the Android APK")
+    android_producers = uploaders(jobs, "android")
+    android_job = android_producers[0][1] if len(android_producers) == 1 else {}
+    signing_steps = android_signing_steps(android_job)
+    if len(signing_steps) != 1:
+        errors.append("release must sign the Android artifact exactly once")
+    else:
+        signing = signing_steps[0]
+        signing_env = signing.get("env") or {}
+        required_inputs = {
+            "KEYSTORE_BASE64": "${{ secrets.ANDROID_KEYSTORE_BASE64 }}",
+            "KEYSTORE_PASSWORD": "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}",
+            "KEY_ALIAS": "${{ secrets.ANDROID_KEY_ALIAS }}",
+            "KEY_PASSWORD": "${{ secrets.ANDROID_KEY_PASSWORD }}",
+        }
+        signing_source = str(signing.get("run") or "")
+        guards = tuple(f'${{{name}:?missing Android release key}}' for name in required_inputs)
+        guard_at = signing_source.find(guards[0])
+        signer_at = signing_source.find(" sign --ks ")
+        if (
+            any(signing_env.get(name) != value for name, value in required_inputs.items())
+            or any(guard not in signing_source for guard in guards)
+            or guard_at < 0
+            or signer_at < 0
+            or guard_at > signer_at
+            or "keytool" in signing_source
+            or "unstable" in signing_source.lower()
+            or "generate" in signing_source.lower() and "keystore" in signing_source.lower()
+            or "--expected-cert" not in signing_source
+        ):
+            errors.append("release must fail closed on all four durable Android signing inputs")
     if "WINDOWS_SIGNING_CERTIFICATE_BASE64" not in windows_source or "TAURI_SIGNING_PRIVATE_KEY" not in windows_source:
         errors.append("release must sign the Windows installer and updater")
     private = {"TAURI_SIGNING_PRIVATE_KEY", "TAURI_SIGNING_PRIVATE_KEY_PASSWORD"}
@@ -269,6 +303,8 @@ def self_test(release):
     rejects("missing Android predecessor binding fails", lambda value: next(step for step in steps(value["jobs"][android_name]) if "android-emulator-runner" in str(step.get("uses") or ""))["env"].pop("PREVIOUS_VERSION"), "current artifact and downloaded predecessor")
     rejects("missing Android predecessor download fails", lambda value: next(step for step in steps(value["jobs"][android_name]) if step.get("id") == "upgrade-fixture").update({"run": "true"}), "current artifact and downloaded predecessor")
     rejects("missing Windows signing input fails", lambda value: value["jobs"][windows_name]["steps"].__setitem__(slice(None), [step for step in steps(value["jobs"][windows_name]) if "TAURI_SIGNING_PRIVATE_KEY" not in str(step)]), "sign the Windows installer")
+    rejects("missing Android signing guard fails", lambda value: android_signing_steps(uploaders(value["jobs"], "android")[0][1])[0].update({"run": str(android_signing_steps(uploaders(value["jobs"], "android")[0][1])[0]["run"]).replace('${KEY_ALIAS:?missing Android release key}', '"$KEY_ALIAS"')}), "all four durable Android")
+    rejects("Android signing fallback fails", lambda value: android_signing_steps(uploaders(value["jobs"], "android")[0][1])[0].update({"run": str(android_signing_steps(uploaders(value["jobs"], "android")[0][1])[0]["run"]) + "\nkeytool -genkeypair"}), "all four durable Android")
 
     failures = 0
     for label, held in fixtures:
