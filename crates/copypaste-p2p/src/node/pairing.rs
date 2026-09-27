@@ -113,6 +113,7 @@ enum PairingState {
 pub(super) struct PairingManager {
     state: Mutex<PairingState>,
     now: Arc<dyn Fn() -> Instant + Send + Sync>,
+    changes: watch::Sender<()>,
 }
 
 impl PairingManager {
@@ -121,10 +122,20 @@ impl PairingManager {
     }
 
     fn with_clock(now: impl Fn() -> Instant + Send + Sync + 'static) -> Self {
+        let (changes, _) = watch::channel(());
         Self {
             state: Mutex::new(PairingState::Idle),
             now: Arc::new(now),
+            changes,
         }
+    }
+
+    pub(super) fn changes(&self) -> watch::Receiver<()> {
+        self.changes.subscribe()
+    }
+
+    fn changed(&self) {
+        self.changes.send_modify(|_| {});
     }
 
     fn now(&self) -> Instant {
@@ -157,6 +168,8 @@ impl PairingManager {
             expires_at: self.now() + PAIRING_INVITE_TTL,
             control,
         });
+        drop(state);
+        self.changed();
         Ok(PairingInvite {
             code,
             pairing_id,
@@ -199,6 +212,8 @@ impl PairingManager {
                     expires_at: None,
                     committing: false,
                 });
+                drop(state);
+                self.changed();
                 Ok((psk, receiver))
             }
             other => {
@@ -231,6 +246,8 @@ impl PairingManager {
             expires_at: None,
             committing: false,
         });
+        drop(state);
+        self.changed();
         Ok(receiver)
     }
 
@@ -242,6 +259,8 @@ impl PairingManager {
                 active.status.sas = Some(sas);
                 active.status.peer = Some(peer);
                 active.expires_at = Some(self.now() + PAIRING_CONFIRM_TIMEOUT);
+                drop(state);
+                self.changed();
             }
         }
     }
@@ -265,6 +284,8 @@ impl PairingManager {
             status.sas = None;
             status.expires_in_ms = None;
             *state = PairingState::Terminal(status);
+            drop(state);
+            self.changed();
         }
     }
 
@@ -334,6 +355,8 @@ impl PairingManager {
             ..status
         };
         *state = PairingState::Terminal(status.clone());
+        drop(state);
+        self.changed();
         status
     }
 
@@ -488,6 +511,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let responder = node(&dir, "responder");
         let initiator = node(&dir, "initiator");
+        let mut responder_changes = responder.subscribe_pairing_changes();
         let responder_source = Arc::new(TestSource::new("responder-id", Vec::new()));
         let initiator_source = Arc::new(TestSource::new("initiator-id", Vec::new()));
         let (addr, shutdown) =
@@ -501,6 +525,16 @@ mod tests {
             .unwrap();
         assert_eq!(joined.phase, PairingPhase::AwaitingConfirmation);
         let inbound = wait_for(&responder, PairingPhase::AwaitingConfirmation).await;
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                responder_changes.changed().await.unwrap();
+                if responder.pair_progress().phase == PairingPhase::AwaitingConfirmation {
+                    return;
+                }
+            }
+        })
+        .await
+        .expect("inbound pairing did not publish AwaitingConfirmation");
         assert_eq!(joined.sas, inbound.sas);
         assert!(joined
             .sas
