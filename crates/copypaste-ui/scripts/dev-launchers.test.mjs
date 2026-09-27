@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 
@@ -117,4 +118,30 @@ test("native launcher rebuilds an isolated ephemeral-key daemon", async () => {
   assert.match(record, /cargo .*copypaste-daemon\/dev-ephemeral-key/);
   assert.doesNotMatch(record, /cargo .*dev-fake-clipboard/);
   assert.match(record, /npm .*args=run tauri -- dev/);
+});
+
+test("bridge runtime writes executable JavaScript with escaped values", async () => {
+  const testFixture = await fixture();
+  try {
+    const url = 'http://127.0.0.1:9876/path?value="quoted"';
+    const token = 'fixture"token\\with-newline\n';
+    const result = spawnSync("sh", ["-c", '. "$ui_dir/scripts/web-bridge-runtime.sh"; write_bridge_runtime'], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        repo_dir: testFixture.root,
+        ui_dir: join(testFixture.root, "crates", "copypaste-ui"),
+        VITE_COPYPASTE_WEB_BRIDGE_URL: url,
+        VITE_COPYPASTE_WEB_BRIDGE_TOKEN: token,
+      },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const script = await readFile(join(testFixture.root, "crates", "copypaste-ui", "public", "copypaste-web-bridge.js"), "utf8");
+    const window = {};
+    runInNewContext(script, { window });
+    assert.equal(window.__COPYPASTE_WEB_BRIDGE__.url, url);
+    assert.equal(window.__COPYPASTE_WEB_BRIDGE__.token, token);
+  } finally {
+    await rm(testFixture.root, { recursive: true, force: true });
+  }
 });
