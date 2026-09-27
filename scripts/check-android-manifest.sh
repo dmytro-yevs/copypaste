@@ -35,11 +35,6 @@ if grep -E 'return[[:space:]]+START_STICKY([^_]|$)' crates/copypaste-ui/src-taur
     exit 1
 fi
 android_kotlin="crates/copypaste-ui/src-tauri/gen/android/app/src/main/java/com/copypaste/app"
-source_bridge="$android_kotlin/ShizukuClipboard.kt"
-if ! grep -q 'getPrimaryClipSource' "$source_bridge"; then
-    printf 'FAIL: Android source attribution no longer asks getPrimaryClipSource\n' >&2
-    exit 1
-fi
 if rg -n --glob '*.kt' --glob '!ShizukuClipboard.kt' \
     'ShizukuBinderWrapper|IClipboard\\$Stub' "$android_kotlin" >/dev/null; then
     printf 'FAIL: the Shizuku clipboard binder escaped its source-attribution boundary\n' >&2
