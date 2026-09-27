@@ -15,12 +15,11 @@
     public <init>();
 }
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# The initial-insets bridge is reached only from WebView JavaScript; R8 cannot
+# infer that reachability. Keep the explicitly annotated, side-effect-free API.
+-keep class com.copypaste.app.WebViewImeInsets$InsetBridge {
+    @android.webkit.JavascriptInterface <methods>;
+}
 
 # Uncomment this to preserve the line number information for
 # debugging stack traces.
