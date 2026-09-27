@@ -70,6 +70,39 @@ function Write-SignedConfig(
     $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $DestinationPath -Encoding utf8
 }
 
+function Write-BuildOnlyConfig([string]$SourcePath, [string]$DestinationPath) {
+    $config = Get-Content -Raw -LiteralPath $SourcePath | ConvertFrom-Json
+    # tauri-build copies these paths while compiling the UI. The release
+    # bundle owns that staging after the sidecars exist, so one Cargo graph can
+    # compile all three binaries without an ordering race.
+    $config.bundle.PSObject.Properties.Remove("externalBin")
+    $config.bundle.PSObject.Properties.Remove("resources")
+    $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $DestinationPath -Encoding utf8
+}
+
+function Get-TauriBuildArguments([string]$BuildConfig, [bool]$UsePrebuiltSidecars) {
+    $commandArguments = @("exec", "tauri", "build", "--", "--no-bundle", "--config", $BuildConfig, "--", "--package", "copypaste-ui")
+    if (-not $UsePrebuiltSidecars) {
+        $commandArguments += @("--package", "copypaste-cli", "--package", "copypaste-daemon")
+    }
+    return $commandArguments
+}
+
+function Merge-Config([hashtable]$Target, [hashtable]$Patch) {
+    foreach ($entry in $Patch.GetEnumerator()) {
+        if ($null -eq $entry.Value) {
+            $Target.Remove($entry.Key)
+        } elseif ($entry.Value -is [System.Collections.IDictionary]) {
+            if (-not $Target.ContainsKey($entry.Key) -or $Target[$entry.Key] -isnot [System.Collections.IDictionary]) {
+                $Target[$entry.Key] = @{}
+            }
+            Merge-Config $Target[$entry.Key] $entry.Value
+        } else {
+            $Target[$entry.Key] = $entry.Value
+        }
+    }
+}
+
 function Invoke-SelfTest {
     $root = Join-Path ([IO.Path]::GetTempPath()) "copypaste-windows-config-self-test-$PID"
     [IO.Directory]::CreateDirectory($root) | Out-Null
@@ -93,6 +126,63 @@ function Invoke-SelfTest {
         if ($config.plugins.updater.pubkey -ne "self-test-public-key" -or
             $config.plugins.updater.endpoints[0] -ne "https://updates.example.test/latest.json") {
             throw "generated updater configuration self-test failed"
+        }
+
+        $buildOnly = Join-Path $root "build-only.json"
+        Write-BuildOnlyConfig $destination $buildOnly
+        $buildConfig = Get-Content -Raw -LiteralPath $buildOnly | ConvertFrom-Json
+        if ($null -ne $buildConfig.bundle.PSObject.Properties["externalBin"] -or
+            $null -ne $buildConfig.bundle.PSObject.Properties["resources"]) {
+            throw "build-only configuration retained bundle staging inputs"
+        }
+        if ($buildConfig.plugins.updater.pubkey -ne "self-test-public-key" -or
+            $buildConfig.plugins.updater.endpoints[0] -ne "https://updates.example.test/latest.json") {
+            throw "build-only configuration lost signed updater settings"
+        }
+        $fullBuild = Get-TauriBuildArguments $buildOnly $false
+        $prebuiltBuild = Get-TauriBuildArguments $buildOnly $true
+        if ($fullBuild -notcontains "--no-bundle" -or
+            [string]::Join("`n", $fullBuild) -notmatch "--package`ncopypaste-ui`n--package`ncopypaste-cli`n--package`ncopypaste-daemon") {
+            throw "full Windows build plan does not compile the three release packages once"
+        }
+        if ($prebuiltBuild -notcontains "--no-bundle" -or
+            [string]::Join("`n", $prebuiltBuild) -match "copypaste-cli|copypaste-daemon") {
+            throw "prebuilt-sidecar Windows build plan recompiles a sidecar"
+        }
+
+        $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../.."))
+        $uiRoot = Join-Path $repoRoot "crates/copypaste-ui"
+        $unsignedCanonical = Join-Path $uiRoot "src-tauri/tauri.windows.release.conf.json"
+        if (-not (Test-Path -LiteralPath $unsignedCanonical -PathType Leaf)) {
+            throw "unsigned canonical Windows config is not resolved from the UI root"
+        }
+        $unsignedBuildOnly = Join-Path $root "unsigned-build-only.json"
+        Write-BuildOnlyConfig $unsignedCanonical $unsignedBuildOnly
+        $merged = @{}
+        foreach ($path in @(
+                (Join-Path $uiRoot "src-tauri/tauri.conf.json"),
+                (Join-Path $uiRoot "src-tauri/tauri.windows.conf.json"),
+                $unsignedBuildOnly
+            )) {
+            Merge-Config $merged (Get-Content -Raw -LiteralPath $path | ConvertFrom-Json -AsHashtable)
+        }
+        if ($merged["bundle"].ContainsKey("externalBin") -or $merged["bundle"].ContainsKey("resources")) {
+            throw "merged build-only configuration retained bundle staging inputs"
+        }
+        if ($merged["plugins"]["updater"]["pubkey"] -ne "") {
+            throw "merged unsigned build-only configuration changed updater settings"
+        }
+        $signedMerged = @{}
+        foreach ($path in @(
+                (Join-Path $uiRoot "src-tauri/tauri.conf.json"),
+                (Join-Path $uiRoot "src-tauri/tauri.windows.conf.json"),
+                $buildOnly
+            )) {
+            Merge-Config $signedMerged (Get-Content -Raw -LiteralPath $path | ConvertFrom-Json -AsHashtable)
+        }
+        if ($signedMerged["bundle"].ContainsKey("externalBin") -or $signedMerged["bundle"].ContainsKey("resources") -or
+            $signedMerged["plugins"]["updater"]["pubkey"] -ne "self-test-public-key") {
+            throw "merged signed build-only configuration lost its release contract"
         }
 
         $valid = Join-Path $root "valid"
@@ -164,6 +254,8 @@ if (-not $OutputDirectory) {
 
 $targetTriple = "$Architecture-pc-windows-msvc"
 $generatedConfig = Join-Path $tauriRoot "tauri.windows.signed.generated.json"
+$buildOnlyDirectory = Join-Path ([IO.Path]::GetTempPath()) "copypaste-windows-build-$PID"
+$buildOnlyConfig = Join-Path $buildOnlyDirectory "tauri.windows.build.json"
 $config = "src-tauri/tauri.windows.release.conf.json"
 $signaturePath = $null
 $releaseBaseUrl = $null
@@ -186,27 +278,27 @@ try {
         $config = "src-tauri/tauri.windows.signed.generated.json"
     }
 
+    [IO.Directory]::CreateDirectory($buildOnlyDirectory) | Out-Null
+    $canonicalConfig = Join-Path $uiRoot $config
+    Write-BuildOnlyConfig $canonicalConfig $buildOnlyConfig
+
     if ($PrebuiltSidecarsDirectory) {
         $sidecarSource = Resolve-PrebuiltSidecars $PrebuiltSidecarsDirectory $Architecture
+        $usePrebuiltSidecars = $true
     } else {
-        Push-Location $repoRoot
-        try {
-            Invoke-Checked cargo @("build", "--release", "--locked", "-p", "copypaste-cli", "-p", "copypaste-daemon")
-        } finally {
-            Pop-Location
-        }
         $sidecarSource = Join-Path $repoRoot "target/release"
+        $usePrebuiltSidecars = $false
     }
-
-    $binaryDirectory = Join-Path $tauriRoot "binaries"
-    [IO.Directory]::CreateDirectory($binaryDirectory) | Out-Null
-    Copy-Item -LiteralPath (Join-Path $sidecarSource "copypaste.exe") -Destination (Join-Path $binaryDirectory "copypaste-$targetTriple.exe") -Force
-    Copy-Item -LiteralPath (Join-Path $sidecarSource "copypaste-daemon.exe") -Destination (Join-Path $binaryDirectory "copypaste-daemon-$targetTriple.exe") -Force
 
     Push-Location $uiRoot
     try {
         Invoke-Checked npm.cmd @("ci")
-        Invoke-Checked npm.cmd @("exec", "tauri", "build", "--", "--bundles", "nsis", "--config", $config)
+        Invoke-Checked npm.cmd (Get-TauriBuildArguments $buildOnlyConfig $usePrebuiltSidecars)
+        $binaryDirectory = Join-Path $tauriRoot "binaries"
+        [IO.Directory]::CreateDirectory($binaryDirectory) | Out-Null
+        Copy-Item -LiteralPath (Join-Path $sidecarSource "copypaste.exe") -Destination (Join-Path $binaryDirectory "copypaste-$targetTriple.exe") -Force
+        Copy-Item -LiteralPath (Join-Path $sidecarSource "copypaste-daemon.exe") -Destination (Join-Path $binaryDirectory "copypaste-daemon-$targetTriple.exe") -Force
+        Invoke-Checked npm.cmd @("exec", "tauri", "bundle", "--", "--bundles", "nsis", "--config", $config)
     } finally {
         Pop-Location
     }
@@ -245,4 +337,5 @@ try {
     & (Join-Path $PSScriptRoot "package-windows.ps1") @packageArguments
 } finally {
     if (Test-Path -LiteralPath $generatedConfig) { [IO.File]::Delete($generatedConfig) }
+    if (Test-Path -LiteralPath $buildOnlyDirectory) { [IO.Directory]::Delete($buildOnlyDirectory, $true) }
 }
