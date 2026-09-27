@@ -6,7 +6,7 @@
 //! reached one by accident fails rather than passing on a default.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use copypaste_ipc::{
@@ -36,6 +36,8 @@ pub struct FakeBackend {
     /// `None` when `add` refuses, which is the default: a test that stored
     /// something by accident should fail rather than pass on a stub.
     added: Option<Mutex<Vec<String>>>,
+    source_app_icon: Option<ImagePreview>,
+    source_app_icon_calls: AtomicUsize,
 }
 
 impl FakeBackend {
@@ -45,6 +47,8 @@ impl FakeBackend {
             shutdown: AtomicBool::new(false),
             page: Mutex::new(Page::default()),
             added: None,
+            source_app_icon: None,
+            source_app_icon_calls: AtomicUsize::new(0),
         }
     }
 
@@ -74,6 +78,15 @@ impl FakeBackend {
     pub fn accepting_adds(mut self) -> Self {
         self.added = Some(Mutex::new(Vec::new()));
         self
+    }
+
+    pub fn with_source_app_icon(mut self, icon: ImagePreview) -> Self {
+        self.source_app_icon = Some(icon);
+        self
+    }
+
+    pub fn source_app_icon_calls(&self) -> usize {
+        self.source_app_icon_calls.load(Ordering::Relaxed)
     }
 
     /// What `add` was given, oldest first.
@@ -135,6 +148,11 @@ impl Backend for FakeBackend {
 
     async fn image_preview(&self, _id: &str, _max_edge: Option<u32>) -> Result<ImagePreview> {
         Err(refused())
+    }
+
+    async fn source_app_icon(&self, _id: &str) -> Result<Option<ImagePreview>> {
+        self.source_app_icon_calls.fetch_add(1, Ordering::Relaxed);
+        Ok(self.source_app_icon.clone())
     }
 
     async fn copy(&self, _id: &str) -> Result<Item> {
