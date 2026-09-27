@@ -31,6 +31,18 @@ MAIN="$PKG/$APP_NAMESPACE.MainActivity"
 INTAKE="$PKG/$APP_NAMESPACE.IntakeActivity"
 SETTLE_SECS="${SETTLE_SECS:-25}"
 PAINT_TIMEOUT="${PAINT_TIMEOUT:-90}"
+SMOKE_PROFILE="${COPYPASTE_SMOKE_PROFILE:-full}"
+
+valid_smoke_profile() { # <profile>
+    case "$1" in
+        full|critical) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+profile_runs_pairing_inventory() { # <profile>
+    [[ "$1" == full ]]
+}
 
 history_capture_holds() { # <accessibility artifact> <canary>
     enabled_node_exists_exact "$1" "Search clipboard history, default|Search clipboard history, active" \
@@ -225,6 +237,15 @@ release_history_receipt_self_test() {
         || bad "pending history artifacts are supplemental, not feature-state evidence"
 }
 
+release_smoke_profile_self_test() {
+    valid_smoke_profile full && valid_smoke_profile critical \
+        && ! valid_smoke_profile exhaustive \
+        && profile_runs_pairing_inventory full \
+        && ! profile_runs_pairing_inventory critical \
+        && ok "the critical release profile keeps only capture smoke" \
+        || bad "the critical release profile keeps only capture smoke"
+}
+
 release_onboarding_recovery_self_test() {
     if python3 - "${BASH_SOURCE[0]}" <<'PY'
 import pathlib
@@ -267,6 +288,11 @@ PY
     fi
 }
 
+if ! valid_smoke_profile "$SMOKE_PROFILE"; then
+    printf 'COPYPASTE_SMOKE_PROFILE must be full or critical, got %s\n' "$SMOKE_PROFILE" >&2
+    exit 2
+fi
+
 if [[ "${1:-}" == "--self-test" ]]; then
     self_test || exit $?
     android_navigation_self_test "$SELF_TEST_TMP"
@@ -276,6 +302,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
     release_onboarding_recovery_self_test
     release_foreign_recovery_self_test "$SELF_TEST_TMP"
     release_pairing_artifact_self_test "$SELF_TEST_TMP"
+    release_smoke_profile_self_test
     [[ $FAIL -eq 0 ]]
     exit $?
 fi
@@ -399,6 +426,7 @@ else
     bad "the native Android accessibility surface is observable and usable" "$native_ax"
 fi
 
+if profile_runs_pairing_inventory "$SMOKE_PROFILE"; then
 group "2a. Android pairing entry is a scanner"
 pairing_pid="$pid1"
 pairing_reached=0
@@ -471,6 +499,10 @@ if (( pairing_reached )); then
 else
     bad "the Android pairing scanner entry is reachable" \
         "uiautomator could not open Devices > Connect a device > Scan pairing code"
+fi
+else
+    note "Android pairing scanner inventory" \
+         "the critical profile retains launch, native accessibility, capture, history, restart, and artifact evidence; the full profile verifies pairing navigation"
 fi
 
 # The security half of the UI harness in e2e-android/: that harness attaches to
@@ -611,6 +643,43 @@ else
         "Library did not expose the release canary with its history search control"
 fi
 
+group "5. Captured history survives restart"
+sh_ am force-stop "$PKG" 2>/dev/null || true
+if wait_for 20 no_pid; then
+    ok "force-stop ended the capture process"
+else
+    bad "force-stop ended the capture process" "pid $(app_pid) is still running"
+fi
+adb logcat -c || true
+restart_out="$(sh_ am start -W -n "$MAIN")"
+if grep -q '^Status: ok' <<<"$restart_out" && ! grep -qi 'Error' <<<"$restart_out"; then
+    ok "the app restarts after capture"
+else
+    bad "the app restarts after capture" "$restart_out"
+fi
+wait_for 60 has_pid || true
+restart_pid="$(app_pid)"
+if [[ -n "$restart_pid" ]]; then
+    sleep "$SETTLE_SECS"
+    dump_logcat release-restart
+    restart_crashes="$(crash_report "$OUT/release-restart.log" "$restart_pid")"
+    restart_r8="$(r8_report "$OUT/release-restart.log" "$restart_pid")"
+    if [[ -z "$restart_crashes" && -z "$restart_r8" ]] \
+        && android_recover_onboarding "$OUT/history-restart-onboarding.xml" 30 \
+        && tap_until_state "Library" "$OUT/history-restart.xml" \
+        history_capture_current_holds none; then
+        capture_png "$OUT/history-restart.png" \
+            && ok "the captured text remains visible after restart" \
+            || bad "the captured history restart screenshot is complete"
+    else
+        bad "the captured text remains visible after restart" \
+            "restart did not expose the release canary in active history"
+    fi
+else
+    dump_logcat release-restart
+    bad "the app restarts after capture" "no $PKG process was running"
+fi
+
 note "that the captured text reached SQLCipher on this build" \
      "the database is inside a non-debuggable package's private directory and cannot be read from here; the debug leg asserts the storage half, this leg asserts that the doorways and the process survive R8"
 
@@ -647,7 +716,7 @@ PY
     elif [[ "$serial" != emulator-* || "$(sh_ getprop ro.kernel.qemu)" != "1" ]]; then
         bad "native evidence receipt was written" \
             "the Android release policy requires an emulator receipt; serial=$serial qemu=$(sh_ getprop ro.kernel.qemu)"
-    elif python3 scripts/release/write-native-evidence.py \
+    elif profile_runs_pairing_inventory "$SMOKE_PROFILE" && python3 scripts/release/write-native-evidence.py \
         --output "$OUT/native-evidence.json" \
         --platform android \
         --environment "$environment" \
@@ -667,7 +736,31 @@ PY
         --artifact diagnostic-log=release-final.log; then
         ok "native evidence receipt was written"
     else
-        bad "native evidence receipt was written"
+        if profile_runs_pairing_inventory "$SMOKE_PROFILE"; then
+            bad "native evidence receipt was written"
+        elif python3 scripts/release/write-native-evidence.py \
+            --output "$OUT/native-evidence.json" \
+            --platform android \
+            --environment "$environment" \
+            --os-version "API $sdk" \
+            --architecture "$abi" \
+            --commit "${GITHUB_SHA:-$(git rev-parse HEAD)}" \
+            --run-id "${GITHUB_RUN_ID:-local-$(git rev-parse --short HEAD)}" \
+            --elapsed-ms "$paint_elapsed_ms" \
+            --qualified-artifact "$APK" \
+            --qualified-artifact-identity "$qualified_artifact_identity" \
+            --artifact screenshot=release.png \
+            --artifact accessibility=release-ui.xml \
+            --artifact screenshot=history-ui.png \
+            --artifact accessibility=history-ui.xml \
+            --artifact screenshot=history-restart.png \
+            --artifact accessibility=history-restart.xml \
+            --artifact measurement=latency.json \
+            --artifact diagnostic-log=release-final.log; then
+            ok "native evidence receipt was written"
+        else
+            bad "native evidence receipt was written"
+        fi
     fi
 fi
 summary
