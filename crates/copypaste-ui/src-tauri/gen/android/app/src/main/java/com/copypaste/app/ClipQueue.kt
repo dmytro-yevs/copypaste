@@ -30,6 +30,7 @@ object ClipQueue {
     private var privateMode = false
     private var queueReady: (() -> Unit)? = null
     private var wakePending = false
+    private var stateDirty = false
 
     /**
      * Set by [CapturePlugin.load] and cleared when its activity is destroyed;
@@ -83,15 +84,25 @@ object ClipQueue {
         wakePending = false
     }
 
+    fun markCaptureStateDirty() {
+        val wake = synchronized(this) {
+            stateDirty = true
+            nextWakeLocked()
+        }
+        wake?.invoke()
+    }
+
     /** Everything captured since the last call, oldest first. */
     @Synchronized
-    fun drain(): Pair<List<CapturedClip>, Long> {
+    fun drain(): Triple<List<CapturedClip>, Long, Boolean> {
         val taken = queue.toList()
         val lost = dropped
+        val changed = stateDirty
         queue.clear()
         dropped = 0
         wakePending = false
-        return taken to lost
+        stateDirty = false
+        return Triple(taken, lost, changed)
     }
 
     fun subscribeQueueReady(channel: Channel?) {
@@ -106,7 +117,7 @@ object ClipQueue {
         val wake = synchronized(this) {
             queueReady = callback
             if (callback == null) return@synchronized null
-            if (queue.isNotEmpty() || dropped > 0) {
+            if (queue.isNotEmpty() || dropped > 0 || stateDirty) {
                 nextWakeLocked()
             } else {
                 null

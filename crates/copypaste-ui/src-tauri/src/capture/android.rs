@@ -9,7 +9,10 @@
 //!
 //! If you are about to add a branch here, add it to `model` instead.
 
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex,
+};
 
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
@@ -100,6 +103,7 @@ pub struct AndroidCapture {
     handle: PluginHandle<Wry>,
     model: Mutex<CaptureModel>,
     queue_ready: Channel<()>,
+    state_dirty: AtomicBool,
 }
 
 // the wire to Kotlin
@@ -144,6 +148,7 @@ impl AndroidCapture {
                 wake.notify();
                 Ok(())
             }),
+            state_dirty: AtomicBool::new(false),
         }
     }
 
@@ -260,6 +265,8 @@ impl CaptureControl for AndroidCapture {
         self.with(|model| {
             model.set_probe(result.probe);
             model.record_dropped(result.dropped);
+            self.state_dirty
+                .store(result.state_dirty, Ordering::Release);
             // Something arrived while we were not in front, which is the only
             // proof background capture works — and the only place the state can
             // legitimately become `Working`.
@@ -272,6 +279,10 @@ impl CaptureControl for AndroidCapture {
             }
         });
         Ok(result.clips)
+    }
+
+    fn take_state_dirty(&self) -> bool {
+        self.state_dirty.swap(false, Ordering::AcqRel)
     }
 
     fn set_private_mode(&self, enabled: bool) -> Result<()> {

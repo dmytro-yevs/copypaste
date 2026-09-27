@@ -432,8 +432,18 @@ async fn tick<R: Runtime>(app: &AppHandle<R>, buffer: &mut Buffer, private_mode:
             Vec::new()
         }
     };
+    let state_dirty = if private_mode {
+        false
+    } else {
+        let capture = app.state::<SelectedCapture>();
+        capture.take_state_dirty()
+    };
     push_captured(app, buffer, taken);
     drain_buffer(app, buffer).await;
+    if state_dirty {
+        let capture = app.state::<SelectedCapture>();
+        let _ = app.emit(TauriEventName::CaptureState.as_str(), capture.snapshot());
+    }
 }
 
 fn take_platform_batch(

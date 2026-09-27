@@ -62,6 +62,7 @@ pub(crate) struct AndroidReadResult {
 pub(crate) struct AndroidDrainResult {
     pub clips: Vec<Clip>,
     pub dropped: u64,
+    pub state_dirty: bool,
     pub probe: ShizukuProbe,
 }
 
@@ -171,6 +172,7 @@ mod tests {
             ]
         );
         assert_eq!(fixture.drain.dropped, 2);
+        assert!(!fixture.drain.state_dirty);
         let _ = fixture.empty;
         assert!(fixture.drain.probe.running);
         assert_eq!(

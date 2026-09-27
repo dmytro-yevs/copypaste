@@ -133,6 +133,7 @@
       }
     ],
     "dropped": 2,
+    "stateDirty": false,
     "probe": {
       "supported": true,
       "installed": true,

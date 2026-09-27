@@ -60,6 +60,12 @@ pub trait CaptureControl: Send + Sync + 'static {
     /// Take everything the platform has captured and not yet handed over.
     fn drain(&self) -> Result<Vec<Clip>>;
 
+    /// Whether the last drain carried a native capture-state change without a
+    /// clip. The intake owner emits the canonical Rust snapshot and clears it.
+    fn take_state_dirty(&self) -> bool {
+        false
+    }
+
     /// Stop or resume capture at the platform queue boundary. Enabling drops
     /// the ambiguous pending batch before any later drain can replay it.
     fn set_private_mode(&self, enabled: bool) -> Result<()>;
