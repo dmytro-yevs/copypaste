@@ -1,4 +1,4 @@
-use copypaste_ipc::PairingProgressData;
+use copypaste_ipc::{PairingProgressData, PairingState};
 
 use super::semantics::resolve_pairing_semantics;
 
@@ -20,6 +20,10 @@ pub(super) fn sas_digits(progress: &PairingProgressData) -> Option<&str> {
         .sas
         .as_deref()
         .filter(|sas| sas.len() == 6 && sas.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+pub(super) fn keeps_invite_visible(state: PairingState) -> bool {
+    state == PairingState::WaitingForPeer
 }
 
 #[cfg(test)]
@@ -73,6 +77,21 @@ mod tests {
         for invalid in ["12345", "1234567", "12 456", "１２３４５６"] {
             value.sas = Some(invalid.into());
             assert!(sas_digits(&value).is_none());
+        }
+    }
+
+    #[test]
+    fn invite_panel_closes_before_the_handshake_and_confirmation_surfaces() {
+        assert!(keeps_invite_visible(PairingState::WaitingForPeer));
+        for state in [
+            PairingState::Handshaking,
+            PairingState::AwaitingConfirmation,
+            PairingState::Confirmed,
+            PairingState::Failed,
+            PairingState::Cancelled,
+            PairingState::TimedOut,
+        ] {
+            assert!(!keeps_invite_visible(state), "{state:?}");
         }
     }
 }
