@@ -37,8 +37,8 @@ import { SettingsNavigation } from "@/features/settings/patterns/SettingsNavigat
 import { renderPreferenceSection } from "@/features/settings/patterns/settingsTabs";
 import {
   useObservedElementSize,
-  useViewportMetrics,
 } from "@/hooks/useViewportMetrics";
+import { useSizeClass } from "@/hooks/useSizeClass";
 import { useTranslation } from "@/i18n";
 import { EXPANDED_MIN_PX } from "@/lib/layoutBreakpoints";
 import { currentPlatform } from "@/lib/platform";
@@ -58,7 +58,7 @@ function clearSearchHighlight(target: HTMLElement | null) {
 
 export function SettingsScreen() {
   const { t } = useTranslation();
-  const viewportCompact = useViewportMetrics().sizeClass === "compact";
+  const viewportCompact = useSizeClass() === "compact";
   const { ref: screenRef, width: screenWidth } =
     useObservedElementSize<HTMLElement>();
   const compact = screenWidth > 0
