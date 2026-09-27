@@ -4,8 +4,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -21,17 +20,16 @@ use windows_sys::Win32::Security::{
 };
 
 const MAX_AGE: Duration = Duration::from_secs(10 * 60);
-const SWEEP_INTERVAL: Duration = Duration::from_secs(1);
 
 pub(super) struct StagingArea {
     root: PathBuf,
     entries: Arc<Mutex<Vec<Entry>>>,
-    stop: Arc<AtomicBool>,
-    worker: Option<JoinHandle<()>>,
+    wake: Arc<(Mutex<bool>, Condvar)>,
+    worker: Mutex<Option<JoinHandle<()>>>,
 }
 
 struct Entry {
-    _directory: tempfile::TempDir,
+    directory: PathBuf,
     expires: Instant,
 }
 
@@ -44,22 +42,11 @@ impl StagingArea {
         fs::create_dir_all(&root)?;
         protect_owner_only(&root)?;
         let entries = Arc::new(Mutex::new(Vec::<Entry>::new()));
-        let stop = Arc::new(AtomicBool::new(false));
-        let worker_entries = Arc::clone(&entries);
-        let worker_stop = Arc::clone(&stop);
-        let worker = std::thread::Builder::new()
-            .name("copypaste-file-sweeper".into())
-            .spawn(move || {
-                while !worker_stop.load(Ordering::Acquire) {
-                    std::thread::sleep(SWEEP_INTERVAL);
-                    prune(&worker_entries);
-                }
-            })?;
         Ok(Self {
             root,
             entries,
-            stop,
-            worker: Some(worker),
+            wake: Arc::new((Mutex::new(false), Condvar::new())),
+            worker: Mutex::new(None),
         })
     }
 
@@ -72,43 +59,112 @@ impl StagingArea {
         }
         let filename = metadata.filename.as_str();
         let mut entries = self.entries.lock().unwrap_or_else(|held| held.into_inner());
-        entries.retain(|entry| entry.expires > Instant::now());
+        prune_locked(&mut entries);
         let directory = tempfile::Builder::new()
             .prefix("file-")
             .tempdir_in(&self.root)?;
-        let path = directory.path().join(filename);
+        let directory = directory.keep();
+        let path = directory.join(filename);
+        entries.push(Entry {
+            directory,
+            expires: Instant::now() + MAX_AGE,
+        });
+        if let Err(error) = self.ensure_worker() {
+            let entry = entries.pop().expect("the staging entry was just inserted");
+            let _ = fs::remove_dir_all(entry.directory);
+            return Err(error);
+        }
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&path)?;
         file.write_all(bytes)?;
-        entries.push(Entry {
-            _directory: directory,
-            expires: Instant::now() + MAX_AGE,
-        });
+        self.wake.1.notify_one();
         Ok(path)
+    }
+
+    fn ensure_worker(&self) -> io::Result<()> {
+        let mut worker = self.worker.lock().unwrap_or_else(|held| held.into_inner());
+        if worker.as_ref().is_some_and(|worker| !worker.is_finished()) {
+            return Ok(());
+        }
+        if let Some(worker) = worker.take() {
+            let _ = worker.join();
+        }
+        let entries = Arc::clone(&self.entries);
+        let wake = Arc::clone(&self.wake);
+        *worker = Some(
+            std::thread::Builder::new()
+                .name("copypaste-file-sweeper".into())
+                .spawn(move || sweep(entries, wake))?,
+        );
+        Ok(())
     }
 }
 
 impl Drop for StagingArea {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Release);
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
-        self.entries
+        let (stop, wake) = &*self.wake;
+        *stop.lock().unwrap_or_else(|held| held.into_inner()) = true;
+        wake.notify_one();
+        if let Some(worker) = self
+            .worker
             .lock()
             .unwrap_or_else(|held| held.into_inner())
-            .clear();
-        let _ = fs::remove_dir_all(&self.root);
+            .take()
+        {
+            let _ = worker.join();
+        }
+        prune_locked(&mut self.entries.lock().unwrap_or_else(|held| held.into_inner()));
+        if let Err(error) = fs::remove_dir_all(&self.root) {
+            tracing::warn!(error_kind = ?error.kind(), "could not remove Windows paste-file staging");
+        }
     }
 }
 
-fn prune(entries: &Mutex<Vec<Entry>>) {
-    entries
-        .lock()
-        .unwrap_or_else(|held| held.into_inner())
-        .retain(|entry| entry.expires > Instant::now());
+fn sweep(entries: Arc<Mutex<Vec<Entry>>>, wake: Arc<(Mutex<bool>, Condvar)>) {
+    loop {
+        let deadline = {
+            let mut entries = entries.lock().unwrap_or_else(|held| held.into_inner());
+            prune_locked(&mut entries);
+            entries.iter().map(|entry| entry.expires).min()
+        };
+        let (stop, notify) = &*wake;
+        let stopped = stop.lock().unwrap_or_else(|held| held.into_inner());
+        if *stopped {
+            return;
+        }
+        let Some(deadline) = deadline else {
+            let (stopped, _) = notify
+                .wait_timeout(stopped, Duration::from_secs(1))
+                .unwrap_or_else(|held| held.into_inner());
+            if *stopped {
+                return;
+            }
+            continue;
+        };
+        let wait = deadline.saturating_duration_since(Instant::now());
+        let (stopped, _) = notify
+            .wait_timeout(stopped, wait)
+            .unwrap_or_else(|held| held.into_inner());
+        if *stopped {
+            return;
+        }
+    }
+}
+
+fn prune_locked(entries: &mut Vec<Entry>) {
+    let now = Instant::now();
+    let mut retained = Vec::new();
+    for mut entry in std::mem::take(entries) {
+        if entry.expires > now {
+            retained.push(entry);
+        } else if fs::remove_dir_all(&entry.directory).is_err() {
+            entry.expires = now + Duration::from_secs(60);
+            retained.push(entry);
+        }
+    }
+    *entries = retained;
 }
 
 fn protect_owner_only(path: &Path) -> io::Result<()> {
@@ -143,4 +199,41 @@ fn protect_owner_only(path: &Path) -> io::Result<()> {
         return Err(io::Error::last_os_error());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_expired_staging_directory_is_deleted() {
+        let parent = tempfile::tempdir().unwrap();
+        let directory = tempfile::tempdir_in(parent.path()).unwrap().keep();
+        std::fs::write(directory.join("fixture.bin"), b"synthetic").unwrap();
+        let mut entries = vec![Entry {
+            directory: directory.clone(),
+            expires: Instant::now() - Duration::from_secs(1),
+        }];
+
+        prune_locked(&mut entries);
+
+        assert!(entries.is_empty());
+        assert!(!directory.exists());
+    }
+
+    #[test]
+    fn a_failed_staging_deletion_stays_owned_for_retry() {
+        let parent = tempfile::tempdir().unwrap();
+        let file = parent.path().join("not-a-directory");
+        std::fs::write(&file, b"synthetic").unwrap();
+        let mut entries = vec![Entry {
+            directory: file,
+            expires: Instant::now() - Duration::from_secs(1),
+        }];
+
+        prune_locked(&mut entries);
+
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].expires > Instant::now());
+    }
 }
