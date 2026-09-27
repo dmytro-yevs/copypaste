@@ -72,7 +72,6 @@ crates/copypaste-ipc/src/payload/mod.rs
 crates/copypaste-ipc/src/redact.rs
 crates/copypaste-p2p/src/discovery/mod.rs
 crates/copypaste-p2p/src/discovery/record.rs
-crates/copypaste-p2p/src/discovery/service.rs
 crates/copypaste-p2p/src/lib.rs
 crates/copypaste-p2p/src/node/channel.rs
 crates/copypaste-p2p/src/node/mod.rs

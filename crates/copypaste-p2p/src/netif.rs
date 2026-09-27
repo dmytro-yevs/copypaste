@@ -6,7 +6,7 @@
 //! socket and read its local end" trick; the crate-backed enumeration works on
 //! all three shipped platforms (AGENTS.md rule 7).
 
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -112,6 +112,7 @@ impl LocalAddrs {
     /// Whether `ip` belongs to this host, re-enumerating at most every
     /// [`CACHE_TTL`].
     pub fn is_local(&self, ip: IpAddr, now_ms: i64) -> bool {
+        let ip = to_canonical(ip);
         let mut cached = match self.cached.lock() {
             Ok(guard) => guard,
             // A cache, not a decision: a poisoned lock must not propagate a
@@ -124,14 +125,41 @@ impl LocalAddrs {
         if !fresh {
             *cached = Some((now_ms, local_ips()));
         }
-        cached.as_ref().is_some_and(|(_, ips)| ips.contains(&ip))
+        cached.as_ref().is_some_and(|(_, ips)| {
+            ips.iter()
+                .copied()
+                .map(to_canonical)
+                .any(|local| local == ip)
+        })
     }
+}
+
+/// Whether a resolved address points at this host's listener.
+///
+/// A local address alone is not enough: separate CopyPaste instances on one
+/// host use different ports and must remain discoverable as peers. Conversely,
+/// every device uses the configured port, so the address must also be local.
+/// The cached address matcher normalises IPv4-mapped IPv6 before comparing.
+#[must_use]
+pub fn is_own_endpoint(
+    local_addrs: &LocalAddrs,
+    configured_port: u16,
+    addr: SocketAddr,
+    now_ms: i64,
+) -> bool {
+    addr.port() == configured_port && local_addrs.is_local(addr.ip(), now_ms)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::Ipv4Addr;
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    fn cached_addrs(ips: Vec<IpAddr>) -> LocalAddrs {
+        LocalAddrs {
+            cached: Mutex::new(Some((0, ips))),
+        }
+    }
 
     /// Every host has loopback, including this container.
     #[test]
@@ -196,5 +224,51 @@ mod tests {
             is_peer_reachable(&mapped_routable),
             "mapped routable reachable"
         );
+    }
+
+    #[test]
+    fn own_endpoint_matches_canonical_local_address_and_configured_port() {
+        let v4 = Ipv4Addr::new(192, 0, 2, 10);
+        let v6 = "2001:db8::10".parse::<Ipv6Addr>().unwrap();
+        let mapped_v4 = Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0xc000, 0x020a);
+        let local = cached_addrs(vec![IpAddr::V4(v4), IpAddr::V6(v6)]);
+        let port = 47_654;
+
+        assert!(is_own_endpoint(
+            &local,
+            port,
+            SocketAddr::new(IpAddr::V4(v4), port),
+            1
+        ));
+        assert!(is_own_endpoint(
+            &local,
+            port,
+            SocketAddr::new(IpAddr::V6(v6), port),
+            1
+        ));
+        assert!(is_own_endpoint(
+            &local,
+            port,
+            SocketAddr::new(IpAddr::V6(mapped_v4), port),
+            1
+        ));
+        assert!(!is_own_endpoint(
+            &local,
+            port,
+            SocketAddr::new(IpAddr::V4(v4), port + 1),
+            1
+        ));
+        assert!(!is_own_endpoint(
+            &local,
+            port,
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 11)), port),
+            1
+        ));
+        assert!(!is_own_endpoint(
+            &local,
+            port,
+            SocketAddr::new(IpAddr::V6("2001:db8::11".parse().unwrap()), port),
+            1
+        ));
     }
 }
