@@ -13,9 +13,7 @@ class ClipboardCaptureActivity : Activity() {
 
         handled = true
         val read = clipboardRead(this, CaptureSource.TILE)
-        read.text?.let { text ->
-            queueClip(text, CaptureSource.TILE, read.sourceAppBundleId, read.sourceAppName)
-        }
+        read.clip?.queue(this)
         finish()
     }
 }

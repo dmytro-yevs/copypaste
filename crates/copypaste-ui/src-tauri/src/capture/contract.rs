@@ -50,7 +50,7 @@ pub(crate) struct AndroidArmResult {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AndroidReadResult {
     pub outcome: ReadOutcome,
-    pub text: Option<String>,
+    pub clip: Option<Clip>,
     pub at_ms: i64,
     pub focused: bool,
     pub source_app_bundle_id: Option<String>,
@@ -148,13 +148,13 @@ mod tests {
                 ReadOutcome::Refused,
             ]
         );
-        assert!(fixture.reads[0].text.is_some());
+        assert!(fixture.reads[0].clip.is_some());
         assert_eq!(
             fixture.reads[0].source_app_bundle_id.as_deref(),
             Some("com.example.writer")
         );
         assert_eq!(fixture.reads[0].source_app_name.as_deref(), Some("Writer"));
-        assert!(fixture.reads[1..].iter().all(|read| read.text.is_none()));
+        assert!(fixture.reads[1..].iter().all(|read| read.clip.is_none()));
         assert!(fixture.reads.iter().all(|read| read.focused));
         assert_eq!(fixture.reads[0].at_ms, 1_700_000_000_001);
         assert_eq!(

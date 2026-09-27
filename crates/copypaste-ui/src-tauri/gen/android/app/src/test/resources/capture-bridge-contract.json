@@ -85,7 +85,13 @@
   "reads": [
     {
       "outcome": "succeeded",
-      "text": "captured",
+      "clip": {
+        "text": "captured",
+        "source": "in_app",
+        "atMs": 1700000000001,
+        "sourceAppBundleId": "com.example.writer",
+        "sourceAppName": "Writer"
+      },
       "atMs": 1700000000001,
       "focused": true,
       "sourceAppBundleId": "com.example.writer",
