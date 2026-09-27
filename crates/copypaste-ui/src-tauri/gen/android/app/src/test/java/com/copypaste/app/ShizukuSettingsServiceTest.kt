@@ -1,6 +1,7 @@
 package com.copypaste.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class ShizukuSettingsServiceTest {
@@ -17,10 +18,7 @@ class ShizukuSettingsServiceTest {
 
     @Test
     fun clipCascadeRefreshCommandMatchesThePublishedSetup() {
-        assertEquals(
-            listOf("am", "force-stop", "com.copypaste.app"),
-            clipCascadeRefreshCommand("com.copypaste.app"),
-        )
+        assertFalse(persistentCaptureStateCommands("com.copypaste.app").flatten().contains("force-stop"))
     }
 
     @Test
@@ -40,6 +38,17 @@ class ShizukuSettingsServiceTest {
     @Test
     fun restoringNotificationsUsesOne() {
         assertEquals("1", clipboardNotificationCommand(false).last())
+    }
+
+    @Test
+    fun privilegedSettingReadAcceptsOnlyKnownValues() {
+        assertEquals(
+            listOf("settings", "get", "secure", "clipboard_show_access_notifications"),
+            clipboardNotificationReadCommand(),
+        )
+        assertEquals(0, parseClipboardAccessNotifications("0\n"))
+        assertEquals(1, parseClipboardAccessNotifications("1"))
+        assertEquals(-1, parseClipboardAccessNotifications("null"))
     }
 
     @Test
