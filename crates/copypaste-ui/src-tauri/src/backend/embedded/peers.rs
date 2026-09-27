@@ -209,7 +209,7 @@ impl PeerNode {
     /// Recording the revocation is unconditional in the store, so this succeeds
     /// whether or not a peer was there: barring an id before the lost device
     /// ever reaches this one is the case that needs it.
-    pub(super) fn revoke(&self, pairing_id: &str) -> Result<()> {
+    pub(super) fn revoke(&self, inner: &Arc<Inner>, pairing_id: &str) -> Result<()> {
         self.node
             .peers()
             .revoke(pairing_id, copypaste_core::now_ms())
@@ -218,6 +218,7 @@ impl PeerNode {
                 BackendError::internal("that device could not be revoked")
             })?;
         self.node.republish();
+        let _ = inner;
         #[cfg(target_os = "android")]
         crate::network_discovery::reconcile(
             inner.state.device_name(),
@@ -321,12 +322,13 @@ impl PeerNode {
         self.node.republish();
     }
 
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
     pub(super) fn pairing_ids(&self) -> Vec<String> {
         self.node
             .peers()
             .list()
             .into_iter()
-            .map(|peer| peer.pairing_id)
+            .map(|peer| peer.pairing_id.clone())
             .collect()
     }
 

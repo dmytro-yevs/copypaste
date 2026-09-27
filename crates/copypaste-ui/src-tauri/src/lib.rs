@@ -56,6 +56,7 @@ mod installed_source_apps;
 pub mod model;
 #[cfg(target_os = "android")]
 pub mod network_discovery;
+mod network_discovery_lifecycle;
 mod pairing_presentation;
 pub mod service;
 pub mod shell;
