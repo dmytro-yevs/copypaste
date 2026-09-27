@@ -11,7 +11,7 @@ internal data class ClipboardRead(
 )
 
 internal fun clipboardRead(context: Context, source: CaptureSource): ClipboardRead {
-    val sourcePackage = ShizukuClipboard.sourcePackage(context)
+    val sourcePackage = ShizukuClipboard.sourcePackage()
     if (
         source == CaptureSource.BACKGROUND &&
         CaptureExclusions.decide(sourcePackage) != ExternalReadDecision.READ
