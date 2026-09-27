@@ -6,9 +6,11 @@ import styles from "./DeviceStatus.module.css";
 export function DeviceStatus({
   status,
   className,
+  wrap = false,
 }: {
   status: DeviceStatusPresentation;
   className?: string;
+  wrap?: boolean;
 }) {
   return (
     <span
@@ -17,7 +19,7 @@ export function DeviceStatus({
       aria-busy={status.busy || undefined}
       role={status.a11y.role}
       aria-live={status.a11y.live}
-      className={cn(styles.root, className)}
+      className={cn(styles.root, wrap && styles.wrap, className)}
     >
       <Icon
         name={status.icon}
