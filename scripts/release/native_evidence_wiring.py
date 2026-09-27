@@ -146,11 +146,19 @@ def signing_errors(jobs):
 
 
 def android_receipt_errors(job):
-    runner = next(
-        (step for step in steps(job) if "android-emulator-runner" in str(step.get("uses") or "")),
-        {},
+    runner_index, runner = next(
+        ((index, step) for index, step in enumerate(steps(job))
+         if "android-emulator-runner" in str(step.get("uses") or "")),
+        (-1, {}),
     )
     runner_inputs = runner.get("with") or {}
+    runner_env = runner.get("env") or {}
+    upgrade_steps = [step for step in steps(job) if step.get("id") == "upgrade-fixture"]
+    upgrade = upgrade_steps[0] if len(upgrade_steps) == 1 else {}
+    upgrade_source = str(upgrade.get("run") or "")
+    current_apk = str(runner_env.get("APK") or "")
+    previous_apk = runner_env.get("PREVIOUS_APK")
+    previous_version = runner_env.get("PREVIOUS_VERSION")
     source = str(job)
     if (
         runner_inputs.get("api-level") != "36"
@@ -160,8 +168,18 @@ def android_receipt_errors(job):
             and (job.get("env") or {}).get("COPYPASTE_SMOKE_PROFILE") != "critical"
         )
         or "android-release-emulator-legs.sh" not in source
+        or "android" not in downloads(job)
+        or runner_index < 0
+        or len(upgrade_steps) != 1
+        or steps(job).index(upgrade) >= runner_index
+        or "semver.lt(version, current)" not in upgrade_source
+        or 'gh release download "v${previous}"' not in upgrade_source
+        or 'echo "version=$previous" >> "$GITHUB_OUTPUT"' not in upgrade_source
+        or current_apk != "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk"
+        or previous_apk != "upgrade-dist/copypaste-previous-release.apk"
+        or previous_version != "${{ steps.upgrade-fixture.outputs.version }}"
     ):
-        return ["Android release receipt must come from the critical signed API 36 emulator smoke"]
+        return ["Android release receipt must bind the current artifact and downloaded predecessor"]
     return []
 
 
@@ -247,7 +265,9 @@ def self_test(release):
     rejects("skipped receipt validation fails", lambda value: validation_steps(value["jobs"][finalizer_name])[0].update({"if": False}), "must not be skipped")
     rejects("continuing receipt validation fails", lambda value: validation_steps(value["jobs"][finalizer_name])[0].update({"continue-on-error": True}), "must not be skipped")
     rejects("unbound receipt commit fails", lambda value: validation_steps(value["jobs"][finalizer_name])[0].update({"run": str(validation_steps(value["jobs"][finalizer_name])[0]["run"]).replace("--commit", "--unbound-commit")}), "all three run-bound receipts")
-    rejects("wrong Android evidence platform fails", lambda value: next(step for step in steps(value["jobs"][android_name]) if "android-emulator-runner" in str(step.get("uses") or ""))["with"].update({"api-level": "33"}), "signed API 36")
+    rejects("wrong Android evidence platform fails", lambda value: next(step for step in steps(value["jobs"][android_name]) if "android-emulator-runner" in str(step.get("uses") or ""))["with"].update({"api-level": "33"}), "current artifact and downloaded predecessor")
+    rejects("missing Android predecessor binding fails", lambda value: next(step for step in steps(value["jobs"][android_name]) if "android-emulator-runner" in str(step.get("uses") or ""))["env"].pop("PREVIOUS_VERSION"), "current artifact and downloaded predecessor")
+    rejects("missing Android predecessor download fails", lambda value: next(step for step in steps(value["jobs"][android_name]) if step.get("id") == "upgrade-fixture").update({"run": "true"}), "current artifact and downloaded predecessor")
     rejects("missing Windows signing input fails", lambda value: value["jobs"][windows_name]["steps"].__setitem__(slice(None), [step for step in steps(value["jobs"][windows_name]) if "TAURI_SIGNING_PRIVATE_KEY" not in str(step)]), "sign the Windows installer")
 
     failures = 0

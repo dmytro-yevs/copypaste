@@ -314,12 +314,12 @@ else
     bad "Tauri Android config resolves identity and version from release metadata"
 fi
 if grep -q 'android-artifact-check.sh' .github/workflows/android-emulator.yml \
+        && grep -q -- '--expected-cert "$expected"' .github/workflows/release.yml \
         && grep -q 'android-install-upgrade.sh' scripts/release/android-release-emulator-legs.sh \
-        && grep -q -- '--write-overlay "$previous_config"' .github/workflows/android-emulator.yml \
-        && grep -q -- '--config "$previous_config"' .github/workflows/android-emulator.yml \
-        && grep -q 'name: android-upgrade-fixture' .github/workflows/release.yml \
+        && grep -q 'id: upgrade-fixture' .github/workflows/release.yml \
+        && grep -q 'gh release download "v${previous}"' .github/workflows/release.yml \
         && grep -q 'PREVIOUS_APK: upgrade-dist/copypaste-previous-release.apk' .github/workflows/release.yml \
-        && grep -q -- '--expected-cert "$expected_cert"' .github/workflows/release.yml; then
+        && grep -q 'PREVIOUS_VERSION: ${{ steps.upgrade-fixture.outputs.version }}' .github/workflows/release.yml; then
     ok "CI checks assembled Android identity, signer, and upgrade"
 else
     bad "CI checks assembled Android identity, signer, and upgrade"
