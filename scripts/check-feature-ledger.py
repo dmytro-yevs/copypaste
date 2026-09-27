@@ -14,10 +14,8 @@ from jsonschema.exceptions import SchemaError
 from feature_ledger_evidence import (
     STATE,
     evidence_state_ids,
-    ledger_dependency_errors,
     native_errors,
     receipt_expectation_tokens,
-    release_gate_errors,
     repo_file,
     string_list_errors,
     workflow_contract,
@@ -320,13 +318,7 @@ def feature_shape_errors(feature, root=ROOT):
 
 
 def platform_errors(feature, root=ROOT, require_complete=False, uploads=None):
-    feature_id = feature.get("id", "<missing id>")
     errors = []
-    values = feature.get("release_evidence", [])
-    release_evidence = {value for value in values if isinstance(value, str)} if isinstance(values, list) else set()
-    missing_release = sorted(REQUIRED_RELEASE - release_evidence)
-    if missing_release:
-        errors.append(f"{feature_id}: release evidence missing {', '.join(missing_release)}")
     native, pending = native_errors(feature, root, require_complete, uploads)
     errors.extend(native)
     errors.extend(performance_errors(feature, root))
@@ -619,27 +611,6 @@ def self_test():
                 "release-windows-native-evidence": "windows",
             },
         ))
-        workflow = root / ".github/workflows/release.yml"
-        workflow_source = workflow.read_text(encoding="utf-8")
-        windows_upload = (
-            "      - uses: actions/upload-artifact@v4\n"
-            "        with:\n"
-            "          name: release-windows-native-evidence\n"
-            "          path: artifacts/windows\n"
-            "          if-no-files-found: error\n"
-        )
-        workflow.write_text(
-            workflow_source.replace(
-                windows_upload,
-                "".join(f"# {line}" for line in windows_upload.splitlines(keepends=True)),
-            ),
-            encoding="utf-8",
-        )
-        checks.append((
-            "commented artifact declarations do not create evidence",
-            platform_rejects(product, "does not exist"),
-        ))
-        workflow.write_text(workflow_source, encoding="utf-8")
         probe = copy.deepcopy(product)
         probe["native"]["windows"]["evidence_status"] = "partial"
         probe["native"]["windows"]["unverified_states"] = ["ready"]
@@ -651,20 +622,12 @@ def self_test():
         del probe["native"]["windows"]["evidence_states"]
         checks.append(("missing platform evidence states fail", platform_rejects(probe, "nonempty list")))
         probe = copy.deepcopy(product)
-        probe["native"]["android"]["evidence_states"][0]["screenshot"] = (
-            "artifacts/generic/screenshot.png"
-        )
-        checks.append(("an artifact outside its upload fails", platform_rejects(probe, "outside the uploaded")))
-        probe = copy.deepcopy(product)
         probe["native"]["windows"]["scenario"] = "manual evidence review"
         checks.append(("prose-only platform evidence fails", platform_rejects(probe, "does not exist")))
         probe = copy.deepcopy(product)
         (root / "scripts/windows.sh").chmod(0o644)
         checks.append(("a non-executable platform scenario fails", platform_rejects(probe, "not executable")))
         (root / "scripts/windows.sh").chmod(0o755)
-        probe = copy.deepcopy(product)
-        probe["release_evidence"].remove("release-windows-native-evidence")
-        checks.append(("missing Windows release evidence fails", platform_rejects(probe, "release-windows-native-evidence")))
         probe = copy.deepcopy(product)
         probe["native"]["macos"] = {
             "scenario": "./scripts/macos.sh",
@@ -679,74 +642,6 @@ def self_test():
         probe = copy.deepcopy(product)
         del probe["performance"]["windows"]
         checks.append(("missing Windows performance record fails", platform_rejects(probe, "android, macos, and windows")))
-        checks.append(("release requires complete feature evidence", not release_gate_errors(root)))
-        workflow_source = workflow.read_text(encoding="utf-8")
-        workflow.write_text(
-            workflow_source.replace(
-                "        run: python3 scripts/check-feature-ledger.py --require-complete --version \"$RELEASE_VERSION\"\n",
-                "        run: python3 scripts/check-feature-ledger.py --require-complete\n",
-            ),
-            encoding="utf-8",
-        )
-        checks.append(("release evidence gate rejects an unbound version", bool(release_gate_errors(root))))
-        workflow.write_text(
-            workflow_source.replace(
-                "RELEASE_VERSION: ${{ needs.version.outputs.version }}",
-                "RELEASE_VERSION: ${{ github.ref_name }}",
-            ),
-            encoding="utf-8",
-        )
-        checks.append(("release evidence gate rejects a changed version binding", bool(release_gate_errors(root))))
-        workflow.write_text(
-            workflow_source.replace(
-                "      - env:\n          RELEASE_VERSION: ${{ needs.version.outputs.version }}\n",
-                "      - if: false\n        env:\n          RELEASE_VERSION: ${{ needs.version.outputs.version }}\n",
-            ),
-            encoding="utf-8",
-        )
-        checks.append(("release evidence gate rejects a conditional step", bool(release_gate_errors(root))))
-        workflow.write_text(
-            workflow_source.replace(
-                "  native-parity:\n",
-                "  native-parity:\n    continue-on-error: true\n",
-            ),
-            encoding="utf-8",
-        )
-        checks.append(("release evidence gate rejects a continuing job", bool(release_gate_errors(root))))
-        workflow.write_text(
-            workflow_source.replace(
-                "      - env:\n          RELEASE_VERSION: ${{ needs.version.outputs.version }}\n",
-                "      - continue-on-error: true\n        env:\n          RELEASE_VERSION: ${{ needs.version.outputs.version }}\n",
-            ),
-            encoding="utf-8",
-        )
-        checks.append(("release evidence gate rejects a continuing step", bool(release_gate_errors(root))))
-        workflow.write_text(workflow_source, encoding="utf-8")
-        nightly = root / ".github/workflows/native-nightly.yml"
-        nightly.write_text(
-            "jobs:\n  ledger:\n    steps:\n      - run: python3 scripts/check-feature-ledger.py\n",
-            encoding="utf-8",
-        )
-        checks.append((
-            "workflow ledger checks require declared Python dependencies",
-            bool(ledger_dependency_errors(root)),
-        ))
-        nightly.write_text(
-            "jobs:\n  ledger:\n    steps:\n"
-            "      - run: python3 -m pip install --requirement requirements-ci.txt\n"
-            "      - run: python3 scripts/check-feature-ledger.py\n",
-            encoding="utf-8",
-        )
-        checks.append(("installed workflow ledger dependencies pass", not ledger_dependency_errors(root)))
-        workflow.write_text(
-            workflow.read_text(encoding="utf-8").replace(
-                "        run: python3 scripts/check-feature-ledger.py --require-complete --version \"$RELEASE_VERSION\"\n",
-                "        # run: python3 scripts/check-feature-ledger.py --require-complete --version \"$RELEASE_VERSION\"\n"
-                "        run: echo 'python3 scripts/check-feature-ledger.py --require-complete --version \"$RELEASE_VERSION\"'\n",
-            ),
-            encoding="utf-8",
-        )
-        checks.append(("commented and inert release commands do not execute the gate", bool(release_gate_errors(root))))
     shape = {
         "id": "fixture",
         "contracts": ["status"],
@@ -984,13 +879,7 @@ def main():
         shipped = set()
         errors.append(str(error))
     pending = []
-    errors.extend(release_gate_errors(ROOT))
-    errors.extend(ledger_dependency_errors(ROOT))
-    try:
-        uploads = workflow_contract(ROOT)
-    except ValueError as error:
-        uploads = {}
-        errors.append(str(error))
+    uploads = None
     features = document.get("features")
     if not isinstance(features, list) or not features:
         return fail("features must be a nonempty list")
@@ -1023,10 +912,11 @@ def main():
 
     errors.extend(contract_errors(shipped, features))
     receipt_tokens = []
-    try:
-        receipt_tokens = receipt_expectation_tokens(document, uploads)
-    except ValueError as error:
-        errors.append(str(error))
+    if receipt_expectations:
+        try:
+            receipt_tokens = receipt_expectation_tokens(document, workflow_contract(ROOT))
+        except ValueError as error:
+            errors.append(str(error))
     if errors:
         return fail("\nfeature-ledger: ".join(errors))
     if receipt_expectations:

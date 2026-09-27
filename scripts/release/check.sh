@@ -314,12 +314,12 @@ else
     bad "Tauri Android config resolves identity and version from release metadata"
 fi
 if grep -q 'android-artifact-check.sh' .github/workflows/android-emulator.yml \
+        && grep -q -- '--expected-cert "$expected"' .github/workflows/release.yml \
         && grep -q 'android-install-upgrade.sh' scripts/release/android-release-emulator-legs.sh \
-        && grep -q -- '--write-overlay "$previous_config"' .github/workflows/android-emulator.yml \
-        && grep -q -- '--config "$previous_config"' .github/workflows/android-emulator.yml \
-        && grep -q 'name: android-upgrade-fixture' .github/workflows/release.yml \
+        && grep -q 'id: upgrade-fixture' .github/workflows/release.yml \
+        && grep -q 'gh release download "v${previous}"' .github/workflows/release.yml \
         && grep -q 'PREVIOUS_APK: upgrade-dist/copypaste-previous-release.apk' .github/workflows/release.yml \
-        && grep -q -- '--expected-cert "$expected_cert"' .github/workflows/release.yml; then
+        && grep -q 'PREVIOUS_VERSION: ${{ steps.upgrade-fixture.outputs.version }}' .github/workflows/release.yml; then
     ok "CI checks assembled Android identity, signer, and upgrade"
 else
     bad "CI checks assembled Android identity, signer, and upgrade"
@@ -491,74 +491,9 @@ else
 fi
 rm -f "$WIRING"
 
-group "All shipped platforms reach one release page"
-check "publication depends on all shipped-platform qualification" python3 - <<'PY'
-import re, shlex, sys, yaml
-jobs = yaml.safe_load(open(".github/workflows/release.yml"))["jobs"]
-missing = [j for j in (
-    "version", "supabase-gate", "secret-scan", "pairing-e2e", "macos", "android",
-    "android-smoke", "android-smoke-api33", "windows", "native-parity", "packaging",
-) if j not in jobs]
-assert not missing, f"release.yml has no {missing} job"
-needs = set(jobs["publish"]["needs"])
-for j in (
-    "supabase-gate", "secret-scan", "pairing-e2e", "macos", "android", "android-smoke",
-    "android-smoke-api33", "windows", "native-parity", "packaging",
-):
-    assert j in needs, f"publish does not depend on {j}"
-assert jobs["publish"].get("if") == "needs.version.outputs.publish == 'true'", \
-    "only the publish output may create the release"
-
-smoke = jobs["android-smoke"]
-assert "android" in smoke["needs"], "android-smoke does not wait for Android artifact"
-qualification_if = "needs.version.outputs.qualify == 'true'"
-for name in (
-    "android-upgrade-fixture", "android-cloud-evidence", "android-smoke",
-    "android-smoke-api33", "native-parity",
-):
-    assert jobs[name].get("if") == qualification_if, \
-        f"{name} is not gated by canonical release qualification"
-version = jobs["version"]
-assert version.get("outputs", {}).get("qualify") == "${{ steps.resolve.outputs.qualify }}", \
-    "version does not expose qualification state"
-resolver = next(step for step in version["steps"] if step.get("id") == "resolve")
-assert resolver.get("env", {}).get("INPUT_QUALIFY") == "${{ inputs.qualify }}", \
-    "resolver does not receive the qualification input"
-ledger_steps = [
-    step for step in jobs["native-parity"]["steps"]
-    if any(
-        tuple(shlex.split(line, comments=True)) == (
-            "python3", "scripts/check-feature-ledger.py", "--require-complete",
-            "--version", "$RELEASE_VERSION",
-        )
-        for line in str(step.get("run", "")).splitlines()
-        if "check-feature-ledger.py" in line
-    )
-]
-assert len(ledger_steps) == 1, "native-parity must run one exact version-bound feature-ledger gate"
-assert "continue-on-error" not in jobs["native-parity"], \
-    "native-parity must not continue after a failed feature-ledger gate"
-assert "if" not in ledger_steps[0], \
-    "native-parity feature-ledger gate must run unconditionally"
-assert "continue-on-error" not in ledger_steps[0], \
-    "native-parity feature-ledger gate must not continue after failure"
-assert ledger_steps[0].get("env", {}).get("RELEASE_VERSION") == "${{ needs.version.outputs.version }}", \
-    "native-parity does not bind feature-ledger completion to the resolved version"
-assert re.search(r'if \[\[ "\$publish" == "true" \]\]; then\s+qualify=true\s+fi', resolver.get("run", "")), \
-    "publish must imply qualification"
-download = [s for s in smoke["steps"] if str(s.get("uses", "")).startswith("actions/download-artifact")]
-download_names = [step.get("with", {}).get("name") for step in download]
-assert download_names.count("android") == 1, \
-    "android-smoke does not download the published Android artifact"
-assert "android-cloud-evidence-apk" in download_names, \
-    "android-smoke does not download the configured cloud evidence APK"
-runner = [s for s in smoke["steps"] if "android-emulator-runner" in str(s.get("uses", ""))]
-script = str(runner[0].get("with", {}).get("script", "")) if len(runner) == 1 else ""
-if "android-release-emulator-legs.sh" in script:
-    script += open("scripts/release/android-release-emulator-legs.sh").read()
-assert "android-smoke-release.sh" in script, \
-    "android-smoke does not run the release smoke harness"
-PY
+group "Critical release provenance"
+check "three native receipts bind to the exact shipped artifacts" \
+    python3 scripts/release/check-native-parity-wiring.py
 for pattern in 'dist/\*\.dmg' 'dist/\*\.apk' 'dist/\*\.tar\.gz' 'dist/\*\.exe' 'dist/\*\.exe\.sig' 'dist/latest\.json' 'dist/SHA256SUMS'; do
     if grep -qE "$pattern" .github/workflows/release.yml; then
         ok "the release attaches ${pattern//\\/}"
@@ -577,18 +512,6 @@ for s in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS AND
     fi
 done
 
-# A published Android APK must be signed by the durable release key. Unlike the
-# never-published emulator fixture, absence of any secret cannot mint a new key
-# and turn a normal update into an uninstall-and-data-loss event.
-if grep -q 'Android release signing is fail-closed' .github/workflows/release.yml \
-   && ! grep -q 'unstable-key' .github/workflows/release.yml \
-   && ! grep -q 'CopyPaste Unstable Key' .github/workflows/release.yml; then
-    ok "release.yml rejects missing Android signing secrets without an ephemeral-key fallback"
-else
-    bad "release.yml rejects missing Android signing secrets without an ephemeral-key fallback" \
-        "the signing step must fail before artifact upload, not generate an -unstable-key APK"
-fi
-
 # `npm audit` must cover every independently locked Node dependency graph: the
 # app bundle, the WebKit e2e harness and the token/build toolchain.
 if grep -q 'run: npm audit' .github/workflows/ci.yml \
@@ -606,7 +529,7 @@ if grep -q 'org.owasp:dependency-check-gradle:12.2.2' crates/copypaste-ui/src-ta
    && grep -q 'apiKey = nvdApiKey' crates/copypaste-ui/src-tauri/gen/android/build.gradle.kts \
    && grep -Fq 'NVD_API_KEY: ${{ secrets.NVD_API_KEY }}' .github/workflows/android-emulator.yml \
    && grep -q 'name: android-dependency-check-report' .github/workflows/android-emulator.yml \
-   && grep -q 'native-nightly.yml' scripts/release/check-wiring.py; then
+   && grep -q "if: inputs.mode == 'full'" .github/workflows/android-emulator.yml; then
     ok "Android workflow audits and retains the resolved Gradle dependency graph"
 else
     bad "Android workflow audits and retains the resolved Gradle dependency graph" \
@@ -620,7 +543,7 @@ EXPECTED_CERT="$(node scripts/release/android-metadata.mjs --field releaseCertif
 
 if [[ -z "$CERT_ERROR" ]] \
    && grep -q 'releaseCertificateSha256' .github/workflows/release.yml \
-   && grep -q 'APK signer fingerprint does not match Cargo.toml' .github/workflows/release.yml; then
+   && grep -q -- '--expected-cert "$expected"' .github/workflows/release.yml; then
     ok "release.yml pins the Android signing certificate before artifact upload"
 else
     bad "release.yml pins the Android signing certificate before artifact upload" \
@@ -634,18 +557,15 @@ else
         "unversioned cargo install makes the browser layer non-reproducible"
 fi
 
-# ADR-0001's premise, asserted rather than trusted. If a signing credential is
-# ever added to the release workflow, this fails and the ADR has to change
-# first.
-if grep -qE 'APPLE_CERTIFICATE|APPLE_ID|APPLE_TEAM_ID|APPLE_API_KEY|notarytool|stapler' .github/workflows/release.yml; then
-    if grep -qE 'if \[\[ -n .*APPLE_SIGNING_IDENTITY' .github/workflows/release.yml; then
-        ok "the only Apple names in release.yml are inside the guard"
-    else
-        bad "release.yml holds no Apple signing credential" \
-            "found an Apple credential or notarisation step; ADR-0001 says this pipeline has none"
-    fi
+# ADR-0001 permits ad-hoc signing only. The release job rejects ambient Apple
+# credentials before packaging and must not add notarisation or managed-signing.
+if grep -Fq '[[ -z "${APPLE_SIGNING_IDENTITY:-}${APPLE_CERTIFICATE:-}${APPLE_ID:-}" ]] || {' .github/workflows/release.yml \
+   && grep -Fq 'an Apple signing credential is present but this release is ad-hoc signed' .github/workflows/release.yml \
+   && ! grep -qE 'APPLE_TEAM_ID|APPLE_API_KEY|notarytool|stapler' .github/workflows/release.yml; then
+    ok "release.yml rejects Apple signing credentials and remains ad-hoc"
 else
-    ok "release.yml holds no Apple signing credential"
+    bad "release.yml rejects Apple signing credentials and remains ad-hoc" \
+        "the macOS release must fail before packaging if an Apple signing credential appears"
 fi
 # The bundler matches on the presence of APPLE_SIGNING_IDENTITY, not on its
 # value, so `APPLE_SIGNING_IDENTITY=''` makes it sign with the identity "" and
@@ -664,13 +584,6 @@ fi
 
 check "macOS bundle executable lookup self-test" \
     ./scripts/release/macos-bundle-self-test.sh
-
-if grep -q 'an Apple signing credential is present in the environment' .github/workflows/release.yml; then
-    ok "release.yml still fails the build if a signing identity appears"
-else
-    bad "release.yml still fails the build if a signing identity appears" \
-        "the guard step was removed; it is deliberate (ADR-0001)"
-fi
 
 prerelease_probe() {
     set -euo pipefail

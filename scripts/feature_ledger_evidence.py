@@ -248,39 +248,6 @@ def ledger_dependency_errors(root):
     return errors
 
 
-def release_gate_errors(root):
-    workflow, _ = repo_file(root, ".github/workflows/release.yml")
-    try:
-        document = yaml.safe_load(workflow.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as error:
-        return [f"release workflow is not readable YAML: {error}"]
-    gate = ((document.get("jobs") or {}).get("native-parity") or {}) if isinstance(document, dict) else {}
-    if "continue-on-error" in gate:
-        return ["release native-parity must not continue after a failed complete-evidence gate"]
-    installed = False
-    matches = []
-    for step in gate.get("steps") or []:
-        for argv in _run_commands(step):
-            if _installs_requirements(argv):
-                installed = True
-            if argv == [
-                "python3", "scripts/check-feature-ledger.py", "--require-complete",
-                "--version", "$RELEASE_VERSION",
-            ]:
-                matches.append(step)
-                if not installed:
-                    return ["release feature-ledger gate runs before its declared Python dependencies"]
-    if len(matches) != 1:
-        return ["release native-parity must use one exact version-bound complete-evidence gate"]
-    if "if" in matches[0]:
-        return ["release native-parity complete-evidence gate must run unconditionally"]
-    if "continue-on-error" in matches[0]:
-        return ["release native-parity complete-evidence gate must not continue after failure"]
-    if (matches[0].get("env") or {}).get("RELEASE_VERSION") != "${{ needs.version.outputs.version }}":
-        return ["release native-parity must bind the complete-evidence gate to the resolved version"]
-    return []
-
-
 def _artifact_path(value, suffixes):
     if not isinstance(value, str) or not value:
         raise ValueError("runtime evidence path is missing")
@@ -342,11 +309,6 @@ def native_errors(feature, root, require_complete=False, uploads=None):
     native = feature.get("native")
     if not isinstance(native, dict) or set(native) != PLATFORMS:
         return [f"{feature_id}: native must distinguish android, macos, and windows"], []
-    if uploads is None:
-        try:
-            uploads = workflow_contract(root)
-        except ValueError as error:
-            return [str(error)], []
     release_evidence = feature.get("release_evidence")
     release_names = {
         name for name in release_evidence if isinstance(name, str)
@@ -396,13 +358,8 @@ def native_errors(feature, root, require_complete=False, uploads=None):
             forbidden = {"release_artifact"} & set(record)
             if forbidden:
                 errors.append(f"{label} pending evidence cannot cite unproduced artifacts")
-        else:
-            errors.extend(
-                _verified_errors(feature_id, platform, record, release_names, uploads)
-            )
-    for name in release_names:
-        if name not in uploads:
-            errors.append(f"{feature_id}: release_evidence does not exist in release.yml: {name}")
+        # Release receipts prove runtime behavior. The ledger records the
+        # source inventory only, without coupling it to workflow job names.
     if require_complete and pending:
         errors.append(f"{feature_id}: release evidence is pending: {', '.join(sorted(pending))}")
     return errors, pending

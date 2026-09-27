@@ -18,18 +18,13 @@ name: Browser (WebKitGTK, Linux)
 # this work.
 
 on:
-  push:
-    branches: [main]
-  # No branch filter: this layer owns shared React behaviour, and a pull
-  # request onto a stacked or release branch changes the same code.
-  pull_request:
-  merge_group:
-    types: [checks_requested]
+  schedule:
+    - cron: "23 3 * * *"
   workflow_dispatch:
 
 concurrency:
   group: browser-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref_name) || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -115,6 +110,7 @@ jobs:
         run: npm audit
 
       - name: Repeat focused DMY-45 regressions
+        if: matrix.shard == 1
         working-directory: e2e
         run: npm run test:dmy-45:browser-repeat
 

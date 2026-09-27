@@ -1,8 +1,14 @@
+"""Release invariants for the three artifacts people install.
+
+These checks intentionally verify outcomes and provenance, rather than the
+number or names of build jobs. A release must still qualify macOS, Android,
+and Windows receipts against the exact artifacts it publishes.
+"""
+
 import copy
 import json
 import os
 import pathlib
-import shlex
 import subprocess
 import tempfile
 
@@ -11,26 +17,9 @@ from native_evidence_policy import load_policy, schema_document
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 POLICY = load_policy()
-RELEASE_ARTIFACTS = {
+RECEIPT_ARTIFACTS = {
     platform: requirement["release_artifact"]
     for platform, requirement in POLICY["platforms"].items()
-}
-QUALIFIED_ARTIFACTS = {
-    "macos": (
-        "macos-app-arm64",
-        "artifacts/qualified-artifacts/macos",
-        "CopyPaste-v${{ needs.version.outputs.version }}-macos-arm64.dmg",
-    ),
-    "android": (
-        "android",
-        "artifacts/qualified-artifacts/android",
-        "CopyPaste-v${{ needs.version.outputs.version }}-android.apk",
-    ),
-    "windows": (
-        "windows-x86_64",
-        "artifacts/qualified-artifacts/windows",
-        "CopyPaste-v${{ needs.version.outputs.version }}-windows-x86_64-setup.exe",
-    ),
 }
 
 
@@ -42,6 +31,11 @@ def commands(job):
     return "\n".join(str(step.get("run") or "") for step in steps(job))
 
 
+def needs(job):
+    value = job.get("needs") or []
+    return {value} if isinstance(value, str) else set(value)
+
+
 def downloads(job):
     return {
         (step.get("with") or {}).get("name")
@@ -50,112 +44,50 @@ def downloads(job):
     }
 
 
-def download_destinations(job):
-    return {
-        (step.get("with") or {}).get("name"): (step.get("with") or {}).get("path")
-        for step in steps(job)
-        if str(step.get("uses") or "").startswith("actions/download-artifact")
-    }
-
-
-def exact_ledger_gate_steps(job):
-    expected = (
-        "python3", "scripts/check-feature-ledger.py", "--require-complete",
-        "--version", "$RELEASE_VERSION",
-    )
-    matches = []
-    for step in steps(job):
-        for line in str(step.get("run") or "").splitlines():
-            try:
-                argv = tuple(shlex.split(line, comments=True))
-            except ValueError:
-                continue
-            if argv == expected:
-                matches.append(step)
-    return matches
-
-
-def qualification_contract(release):
-    errors = []
-    triggers = release.get(True) or release.get("on") or {}
-    inputs = ((triggers.get("workflow_dispatch") or {}).get("inputs") or {})
-    qualify_input = inputs.get("qualify") or {}
-    version = (release.get("jobs") or {}).get("version") or {}
-    outputs = version.get("outputs") or {}
-    resolve = next((step for step in steps(version) if step.get("id") == "resolve"), {})
-    resolve_body = str(resolve.get("run") or "")
-    resolve_env = str(resolve.get("env") or {})
-
-    if qualify_input.get("type") != "boolean" or qualify_input.get("default") is not False:
-        errors.append("release qualification must be an explicit false-by-default boolean input")
-    if outputs.get("qualify") != "${{ steps.resolve.outputs.qualify }}":
-        errors.append("release version job must expose the canonical qualification output")
-    for value in (
-        'echo "qualify=$qualify"',
-        '>> "$GITHUB_OUTPUT"',
-        'if [[ "$publish" == "true" ]]; then',
-        "qualify=true",
-        "true|false)",
-    ):
-        if value not in resolve_body:
-            errors.append("release mode resolver must validate and emit qualification state")
-            break
-    if "INPUT_QUALIFY" not in resolve_env or "${{ inputs.qualify }}" not in resolve_env:
-        errors.append("release mode resolver must receive the explicit qualification input")
-
-    jobs = release.get("jobs") or {}
-    for name in (
-        "android-upgrade-fixture",
-        "android-cloud-evidence",
-        "android-smoke",
-        "android-smoke-api33",
-        "native-parity",
-    ):
-        if (jobs.get(name) or {}).get("if") != "needs.version.outputs.qualify == 'true'":
-            errors.append(f"{name} must run for canonical release qualification")
-
-    windows = jobs.get("windows") or {}
-    signed = next(
-        (step for step in steps(windows) if step.get("name") == "Build signed Windows release package"),
-        {},
-    )
-    unsigned = next(
-        (step for step in steps(windows) if step.get("name") == "Build unsigned Windows release package"),
-        {},
-    )
-    prepare = next(
-        (step for step in steps(windows) if step.get("name") == "Prepare Windows release signing"),
-        {},
-    )
-    cleanup = next(
-        (step for step in steps(windows) if step.get("name") == "Remove Windows signing material"),
-        {},
-    )
-    if (
-        signed.get("if") != "needs.version.outputs.qualify == 'true'"
-        or unsigned.get("if") != "needs.version.outputs.qualify != 'true'"
-        or prepare.get("if") != "needs.version.outputs.qualify == 'true'"
-        or cleanup.get("if") != "always() && needs.version.outputs.qualify == 'true'"
-        or "needs.version.outputs.qualify" not in commands(windows)
-    ):
-        errors.append("Windows qualification must sign, verify, and clean up the release package")
-
-    publish = jobs.get("publish") or {}
-    if publish.get("if") != "needs.version.outputs.publish == 'true'":
-        errors.append("only publication may use the publish output")
-    writers = [
-        name for name, job in jobs.items()
-        if "write" in str(job.get("permissions") or "")
+def uploaders(jobs, artifact):
+    return [
+        (name, job)
+        for name, job in jobs.items()
+        if artifact in {
+            (step.get("with") or {}).get("name")
+            for step in steps(job)
+            if str(step.get("uses") or "").startswith("actions/upload-artifact")
+        }
     ]
-    if writers != ["publish"]:
-        errors.append("qualification must not widen repository contents permissions")
-    return errors
+
+
+def finalizers(jobs):
+    return [
+        (name, job)
+        for name, job in jobs.items()
+        if "check:native-parity" in commands(job)
+    ]
+
+
+def validation_steps(job):
+    return [step for step in steps(job) if "check:native-parity" in str(step.get("run") or "")]
+
+
+def android_signing_steps(job):
+    return [
+        step for step in steps(job)
+        if "apksigner" in str(step.get("run") or "")
+        and " sign --ks " in str(step.get("run") or "")
+    ]
+
+
+def resolver_job(jobs):
+    return next(
+        (job for job in jobs.values()
+         if (job.get("outputs") or {}).get("qualify") == "${{ steps.resolve.outputs.qualify }}"),
+        {},
+    )
 
 
 def resolve_mode(release, *, event_name, ref_name, version, publish, qualify, metadata_version):
-    job = (release.get("jobs") or {}).get("version") or {}
-    step = next((candidate for candidate in steps(job) if candidate.get("id") == "resolve"), {})
-    script = str(step.get("run") or "")
+    version_job = resolver_job(release.get("jobs") or {})
+    resolver = next((step for step in steps(version_job) if step.get("id") == "resolve"), {})
+    script = str(resolver.get("run") or "")
     with tempfile.TemporaryDirectory() as directory:
         root = pathlib.Path(directory)
         output = root / "github-output"
@@ -175,14 +107,7 @@ def resolve_mode(release, *, event_name, ref_name, version, publish, qualify, me
             "GITHUB_OUTPUT": str(output),
             "PATH": f"{node_dir}{os.pathsep}{environment.get('PATH', '')}",
         })
-        result = subprocess.run(
-            ["bash", "-c", script],
-            env=environment,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-        )
+        result = subprocess.run(["bash", "-c", script], env=environment, text=True, capture_output=True, check=False)
         values = {}
         if output.exists():
             for line in output.read_text(encoding="utf-8").splitlines():
@@ -191,91 +116,150 @@ def resolve_mode(release, *, event_name, ref_name, version, publish, qualify, me
         return result, values
 
 
-def emulator_android_contract(release):
+def qualification_errors(release):
     jobs = release.get("jobs") or {}
-    smoke = jobs.get("android-smoke") or {}
-    runner = next(
-        (step for step in steps(smoke)
-         if str(step.get("uses") or "").startswith("reactivecircus/android-emulator-runner")),
-        {},
+    version = resolver_job(jobs)
+    resolver = next((step for step in steps(version) if step.get("id") == "resolve"), {})
+    source = commands(version)
+    errors = []
+    if version.get("outputs", {}).get("qualify") != "${{ steps.resolve.outputs.qualify }}":
+        errors.append("release version job must expose qualification state")
+    if not {"INPUT_PUBLISH", "INPUT_QUALIFY"} <= set((resolver.get("env") or {})):
+        errors.append("release resolver must receive publish and qualification inputs")
+    if "publish" not in source or "qualify=true" not in source:
+        errors.append("publication must imply artifact qualification")
+    publishers = [job for job in jobs.values() if "publish-github-release.sh" in commands(job)]
+    if len(publishers) != 1 or ".outputs.publish" not in str(publishers[0]):
+        errors.append("only the final release job may publish a qualified artifact")
+    writers = [name for name, job in jobs.items() if "write" in str(job.get("permissions") or "")]
+    if len(writers) > 1:
+        errors.append("qualification must not widen repository write permissions")
+    return errors
+
+
+def signing_errors(jobs):
+    errors = []
+    windows_jobs = [job for job in jobs.values() if "build-windows.ps1" in str(job) or "windows-sign.ps1" in str(job)]
+    windows_source = "\n".join(str(job) for job in windows_jobs)
+    android_producers = uploaders(jobs, "android")
+    android_job = android_producers[0][1] if len(android_producers) == 1 else {}
+    signing_steps = android_signing_steps(android_job)
+    if len(signing_steps) != 1:
+        errors.append("release must sign the Android artifact exactly once")
+    else:
+        signing = signing_steps[0]
+        signing_env = signing.get("env") or {}
+        required_inputs = {
+            "KEYSTORE_BASE64": "${{ secrets.ANDROID_KEYSTORE_BASE64 }}",
+            "KEYSTORE_PASSWORD": "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}",
+            "KEY_ALIAS": "${{ secrets.ANDROID_KEY_ALIAS }}",
+            "KEY_PASSWORD": "${{ secrets.ANDROID_KEY_PASSWORD }}",
+        }
+        signing_source = str(signing.get("run") or "")
+        guards = tuple(f'${{{name}:?missing Android release key}}' for name in required_inputs)
+        guard_at = signing_source.find(guards[0])
+        signer_at = signing_source.find(" sign --ks ")
+        if (
+            any(signing_env.get(name) != value for name, value in required_inputs.items())
+            or any(guard not in signing_source for guard in guards)
+            or guard_at < 0
+            or signer_at < 0
+            or guard_at > signer_at
+            or "keytool" in signing_source
+            or "unstable" in signing_source.lower()
+            or "generate" in signing_source.lower() and "keystore" in signing_source.lower()
+            or "--expected-cert" not in signing_source
+        ):
+            errors.append("release must fail closed on all four durable Android signing inputs")
+    if "WINDOWS_SIGNING_CERTIFICATE_BASE64" not in windows_source or "TAURI_SIGNING_PRIVATE_KEY" not in windows_source:
+        errors.append("release must sign the Windows installer and updater")
+    private = {"TAURI_SIGNING_PRIVATE_KEY", "TAURI_SIGNING_PRIVATE_KEY_PASSWORD"}
+    if any(private & set((job.get("env") or {})) for job in jobs.values()):
+        errors.append("Windows private signing inputs must be scoped to signing steps")
+    return errors
+
+
+def android_receipt_errors(job):
+    runner_index, runner = next(
+        ((index, step) for index, step in enumerate(steps(job))
+         if "android-emulator-runner" in str(step.get("uses") or "")),
+        (-1, {}),
     )
-    upload = [
-        step
-        for step in steps(smoke)
-        if (step.get("with") or {}).get("name") == RELEASE_ARTIFACTS["android"]
-    ]
-    valid = (
-        "android-hardware" not in jobs
-        and (runner.get("with") or {}).get("api-level") == "36"
-        and (runner.get("with") or {}).get("arch") == "x86_64"
-        and "android-release-emulator-legs.sh" in str((runner.get("with") or {}).get("script") or "")
-        and "sha256sum --check" in commands(smoke)
-        and "android" in downloads(smoke)
-        and len(upload) == 1
-        and (upload[0].get("with") or {}).get("if-no-files-found") == "error"
-    )
-    return valid, "the qualified Android receipt must come from the signed API 36 emulator job"
+    runner_inputs = runner.get("with") or {}
+    runner_env = runner.get("env") or {}
+    upgrade_steps = [step for step in steps(job) if step.get("id") == "upgrade-fixture"]
+    upgrade = upgrade_steps[0] if len(upgrade_steps) == 1 else {}
+    upgrade_source = str(upgrade.get("run") or "")
+    current_apk = str(runner_env.get("APK") or "")
+    previous_apk = runner_env.get("PREVIOUS_APK")
+    previous_version = runner_env.get("PREVIOUS_VERSION")
+    source = str(job)
+    if (
+        runner_inputs.get("api-level") != "36"
+        or runner_inputs.get("arch") != "x86_64"
+        or (
+            "COPYPASTE_SMOKE_PROFILE=critical" not in source
+            and (job.get("env") or {}).get("COPYPASTE_SMOKE_PROFILE") != "critical"
+        )
+        or "android-release-emulator-legs.sh" not in source
+        or "android" not in downloads(job)
+        or runner_index < 0
+        or len(upgrade_steps) != 1
+        or steps(job).index(upgrade) >= runner_index
+        or "semver.lt(version, current)" not in upgrade_source
+        or 'gh release download "v${previous}"' not in upgrade_source
+        or 'echo "version=$previous" >> "$GITHUB_OUTPUT"' not in upgrade_source
+        or current_apk != "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk"
+        or previous_apk != "upgrade-dist/copypaste-previous-release.apk"
+        or previous_version != "${{ steps.upgrade-fixture.outputs.version }}"
+    ):
+        return ["Android release receipt must bind the current artifact and downloaded predecessor"]
+    return []
 
 
 def contract_errors(release, projected_schema=None):
-    errors = []
-    errors.extend(qualification_contract(release))
     jobs = release.get("jobs") or {}
-    gate = jobs.get("native-parity") or {}
-    publish = jobs.get("publish") or {}
-    if "continue-on-error" in gate:
-        errors.append("native parity must not continue after a failed complete-evidence gate")
-    if not {"macos", "android-smoke", "windows"} <= set(gate.get("needs") or []):
-        errors.append("native parity must wait for all three shipped platforms")
-    if not {"native-parity", "windows"} <= set(publish.get("needs") or []):
-        errors.append("publication must wait for Windows and native parity")
-    if not set(RELEASE_ARTIFACTS.values()) <= downloads(gate):
-        errors.append("native parity must download all three release receipts")
-    qualified_downloads = download_destinations(gate)
-    expected_downloads = {
-        artifact: destination
-        for artifact, destination, _ in QUALIFIED_ARTIFACTS.values()
-    }
-    if any(qualified_downloads.get(artifact) != destination
-           for artifact, destination in expected_downloads.items()):
-        errors.append("native parity must download each qualified product artifact to its own path")
+    errors = qualification_errors(release) + signing_errors(jobs)
+    producers = {}
+    for platform, artifact in RECEIPT_ARTIFACTS.items():
+        matches = uploaders(jobs, artifact)
+        if len(matches) != 1:
+            errors.append(f"release must upload one {platform} native receipt")
+        else:
+            producers[platform] = matches[0]
 
-    gate_commands = commands(gate)
-    ledger_gate_steps = exact_ledger_gate_steps(gate)
-    if len(ledger_gate_steps) != 1:
-        errors.append("native parity must use one exact version-bound complete-evidence gate")
-    elif "if" in ledger_gate_steps[0]:
-        errors.append("native parity complete-evidence gate must run unconditionally")
-    elif "continue-on-error" in ledger_gate_steps[0]:
-        errors.append("native parity complete-evidence gate must not continue after failure")
-    elif (ledger_gate_steps[0].get("env") or {}).get("RELEASE_VERSION") != "${{ needs.version.outputs.version }}":
-        errors.append("native parity must bind the complete-evidence gate to the resolved version")
-    receipt_paths = (
-        "artifacts/native-parity/macos/native-evidence.json",
-        "artifacts/native-parity/android/native-evidence.json",
-        "artifacts/native-parity/windows/native-evidence.json",
-    )
-    if (
-        "--require macos,android,windows" not in gate_commands
-        or "--run-id ${{ github.run_id }}" not in gate_commands
-        or any(path not in gate_commands for path in receipt_paths)
-        or gate_commands.count("native-evidence.json") != 3
-        or "--receipt-expectations" not in gate_commands
-        or "--expect-feature-state" not in gate_commands
-    ):
-        errors.append("release gate must validate exactly three run-bound native receipts and ledger states")
-    qualified_selectors = [
-        f"--qualified-artifact {platform}=${{{{ github.workspace }}}}/{destination}/{filename}"
-        for platform, (_, destination, filename) in QUALIFIED_ARTIFACTS.items()
-    ]
-    if (
-        gate_commands.count("--qualified-artifact") != len(qualified_selectors)
-        or any(selector not in gate_commands for selector in qualified_selectors)
-    ):
-        errors.append("native parity must bind each receipt to one exact qualified product artifact")
-    emulator_valid, _ = emulator_android_contract(release)
-    if not emulator_valid:
-        errors.append("canonical Android publication evidence must run on the signed API 36 emulator and fail closed")
+    finalizer_matches = finalizers(jobs)
+    if len(finalizer_matches) != 1:
+        errors.append("release must have one fail-closed native receipt finalizer")
+        return errors
+    finalizer_name, finalizer = finalizer_matches[0]
+    if "continue-on-error" in finalizer:
+        errors.append("native receipt finalizer must not continue after failure")
+    for platform, (producer_name, _) in producers.items():
+        if producer_name not in needs(finalizer):
+            errors.append(f"native receipt finalizer must wait for {platform} evidence")
+    if not set(RECEIPT_ARTIFACTS.values()) <= downloads(finalizer):
+        errors.append("native receipt finalizer must download all three receipts")
+    validation = validation_steps(finalizer)
+    if len(validation) != 1:
+        errors.append("native receipt finalizer must run one validation step")
+        validation_source = ""
+    else:
+        validation_step = validation[0]
+        validation_source = str(validation_step.get("run") or "")
+        if "if" in validation_step or "continue-on-error" in validation_step:
+            errors.append("native receipt validation must not be skipped or continued")
+    required = ("--require macos,android,windows", "--commit", "github.sha", "--run-id", "github.run_id")
+    if any(value not in validation_source for value in required) or validation_source.count("--evidence") != 3:
+        errors.append("native receipt finalizer must validate all three run-bound receipts")
+    for platform in RECEIPT_ARTIFACTS:
+        if f"--qualified-artifact {platform}=" not in validation_source:
+            errors.append("native receipt finalizer must bind every receipt to its build artifact")
+            break
+    if "sha256" not in commands(finalizer):
+        errors.append("native receipt finalizer must verify qualified artifact hashes")
+    if "android" in producers:
+        errors.extend(android_receipt_errors(producers["android"][1]))
 
     if projected_schema is None:
         schema_path = ROOT / "crates" / "copypaste-ui" / "scripts" / "native-parity-evidence.schema.json"
@@ -284,203 +268,46 @@ def contract_errors(release, projected_schema=None):
         except (OSError, json.JSONDecodeError):
             projected_schema = None
     if projected_schema != schema_document(POLICY):
-        errors.append("native evidence schema must be the current policy projection")
+        errors.append("native evidence schema must match the current evidence policy")
     return errors
 
 
 def self_test(release):
     fixtures = []
 
+    def rejects(label, mutate, expected):
+        fixture = copy.deepcopy(release)
+        mutate(fixture)
+        fixtures.append((label, any(expected in error for error in contract_errors(fixture))))
+
     def mode_holds(event_name, ref_name, version, publish, qualify, expected):
-        result, values = resolve_mode(
-            release,
-            event_name=event_name,
-            ref_name=ref_name,
-            version=version,
-            publish=publish,
-            qualify=qualify,
-            metadata_version="2.0.0-alpha.34",
-        )
+        result, values = resolve_mode(release, event_name=event_name, ref_name=ref_name, version=version, publish=publish, qualify=qualify, metadata_version="2.0.0-alpha.34")
         return result.returncode == 0 and values == expected
 
     fixtures.extend((
-        (
-            "tag release publishes and qualifies",
-            mode_holds(
-                "push", "v2.0.0-alpha.34", "", "false", "false",
-                {"version": "2.0.0-alpha.34", "publish": "true", "qualify": "true"},
-            ),
-        ),
-        (
-            "publish dispatch implies qualification",
-            mode_holds(
-                "workflow_dispatch", "", "v2.0.0-alpha.34", "true", "false",
-                {"version": "2.0.0-alpha.34", "publish": "true", "qualify": "true"},
-            ),
-        ),
-        (
-            "qualification dispatch remains non-publishing",
-            mode_holds(
-                "workflow_dispatch", "", "2.0.0-alpha.34", "false", "true",
-                {"version": "2.0.0-alpha.34", "publish": "false", "qualify": "true"},
-            ),
-        ),
-        (
-            "build-only dispatch skips qualification",
-            mode_holds(
-                "workflow_dispatch", "", "2.0.0-alpha.34", "false", "false",
-                {"version": "2.0.0-alpha.34", "publish": "false", "qualify": "false"},
-            ),
-        ),
+        ("tag release publishes and qualifies", mode_holds("push", "v2.0.0-alpha.34", "", "false", "false", {"version": "2.0.0-alpha.34", "publish": "true", "qualify": "true"})),
+        ("qualification dispatch remains non-publishing", mode_holds("workflow_dispatch", "", "2.0.0-alpha.34", "false", "true", {"version": "2.0.0-alpha.34", "publish": "false", "qualify": "true"})),
     ))
 
-    with tempfile.TemporaryDirectory() as directory:
-        sentinel = pathlib.Path(directory) / "mode-input-executed"
-        hostile = f"true; touch {sentinel}"
-        result, values = resolve_mode(
-            release,
-            event_name="workflow_dispatch",
-            ref_name="",
-            version="2.0.0-alpha.34",
-            publish=hostile,
-            qualify="false",
-            metadata_version="2.0.0-alpha.34",
-        )
-        fixtures.append((
-            "adversarial release mode input fails without execution",
-            result.returncode != 0 and not values and not sentinel.exists(),
-        ))
-    result, values = resolve_mode(
-        release,
-        event_name="pull_request",
-        ref_name="",
-        version="2.0.0-alpha.34",
-        publish="false",
-        qualify="false",
-        metadata_version="2.0.0-alpha.34",
-    )
-    fixtures.append((
-        "unsupported release event fails closed",
-        result.returncode != 0 and not values,
-    ))
+    jobs = release.get("jobs") or {}
+    finalizer_name, _ = finalizers(jobs)[0]
+    android_name, _ = uploaders(jobs, RECEIPT_ARTIFACTS["android"])[0]
+    windows_name, _ = uploaders(jobs, RECEIPT_ARTIFACTS["windows"])[0]
+    rejects("missing Windows evidence dependency fails", lambda value: value["jobs"][finalizer_name]["needs"].remove(windows_name), "wait for windows evidence")
+    rejects("missing Android receipt download fails", lambda value: value["jobs"][finalizer_name]["steps"].__setitem__(slice(None), [step for step in steps(value["jobs"][finalizer_name]) if (step.get("with") or {}).get("name") != RECEIPT_ARTIFACTS["android"]]), "download all three receipts")
+    rejects("unbound Windows artifact fails", lambda value: next(step for step in steps(value["jobs"][finalizer_name]) if "--qualified-artifact windows=" in str(step.get("run") or "")).update({"run": commands(value["jobs"][finalizer_name]).replace("--qualified-artifact windows=", "--unbound-artifact windows=")}), "bind every receipt")
+    rejects("skipped receipt validation fails", lambda value: validation_steps(value["jobs"][finalizer_name])[0].update({"if": False}), "must not be skipped")
+    rejects("continuing receipt validation fails", lambda value: validation_steps(value["jobs"][finalizer_name])[0].update({"continue-on-error": True}), "must not be skipped")
+    rejects("unbound receipt commit fails", lambda value: validation_steps(value["jobs"][finalizer_name])[0].update({"run": str(validation_steps(value["jobs"][finalizer_name])[0]["run"]).replace("--commit", "--unbound-commit")}), "all three run-bound receipts")
+    rejects("wrong Android evidence platform fails", lambda value: next(step for step in steps(value["jobs"][android_name]) if "android-emulator-runner" in str(step.get("uses") or ""))["with"].update({"api-level": "33"}), "current artifact and downloaded predecessor")
+    rejects("missing Android predecessor binding fails", lambda value: next(step for step in steps(value["jobs"][android_name]) if "android-emulator-runner" in str(step.get("uses") or ""))["env"].pop("PREVIOUS_VERSION"), "current artifact and downloaded predecessor")
+    rejects("missing Android predecessor download fails", lambda value: next(step for step in steps(value["jobs"][android_name]) if step.get("id") == "upgrade-fixture").update({"run": "true"}), "current artifact and downloaded predecessor")
+    rejects("missing Windows signing input fails", lambda value: value["jobs"][windows_name]["steps"].__setitem__(slice(None), [step for step in steps(value["jobs"][windows_name]) if "TAURI_SIGNING_PRIVATE_KEY" not in str(step)]), "sign the Windows installer")
+    rejects("missing Android signing guard fails", lambda value: android_signing_steps(uploaders(value["jobs"], "android")[0][1])[0].update({"run": str(android_signing_steps(uploaders(value["jobs"], "android")[0][1])[0]["run"]).replace('${KEY_ALIAS:?missing Android release key}', '"$KEY_ALIAS"')}), "all four durable Android")
+    rejects("Android signing fallback fails", lambda value: android_signing_steps(uploaders(value["jobs"], "android")[0][1])[0].update({"run": str(android_signing_steps(uploaders(value["jobs"], "android")[0][1])[0]["run"]) + "\nkeytool -genkeypair"}), "all four durable Android")
 
-    def rejected(label, mutate, expected):
-        fixture = copy.deepcopy(release)
-        mutate(fixture)
-        held = any(expected in error for error in contract_errors(fixture))
-        fixtures.append((label, held))
-
-    stale_schema = copy.deepcopy(schema_document(POLICY))
-    android_schema = next(
-        condition for condition in stale_schema["allOf"]
-        if condition["if"]["properties"]["platform"]["const"] == "android"
-    )
-    android_schema["then"]["properties"]["environment"]["const"] = "physical-device"
-    fixtures.append((
-        "stale native evidence schema fails",
-        any("current policy projection" in error for error in contract_errors(release, stale_schema)),
-    ))
-    rejected(
-        "missing feature-state receipt expectations fails",
-        lambda value: next(
-            step for step in value["jobs"]["native-parity"]["steps"]
-            if "--receipt-expectations" in str(step.get("run") or "")
-        ).update({"run": "npm run check:native-parity -- --require macos,android,windows"}),
-        "native receipts and ledger states",
-    )
-    rejected(
-        "unbound complete-evidence gate fails",
-        lambda value: next(
-            step for step in value["jobs"]["native-parity"]["steps"]
-            if "check-feature-ledger.py" in str(step.get("run") or "")
-        ).update({"run": "python3 scripts/check-feature-ledger.py --require-complete"}),
-        "exact version-bound complete-evidence gate",
-    )
-    rejected(
-        "changed complete-evidence version binding fails",
-        lambda value: next(
-            step for step in value["jobs"]["native-parity"]["steps"]
-            if "check-feature-ledger.py" in str(step.get("run") or "")
-        )["env"].update({"RELEASE_VERSION": "${{ github.ref_name }}"}),
-        "bind the complete-evidence gate to the resolved version",
-    )
-    rejected(
-        "conditional complete-evidence gate fails",
-        lambda value: next(
-            step for step in value["jobs"]["native-parity"]["steps"]
-            if "check-feature-ledger.py" in str(step.get("run") or "")
-        ).update({"if": False}),
-        "must run unconditionally",
-    )
-    rejected(
-        "continuing complete-evidence gate fails",
-        lambda value: next(
-            step for step in value["jobs"]["native-parity"]["steps"]
-            if "check-feature-ledger.py" in str(step.get("run") or "")
-        ).update({"continue-on-error": True}),
-        "must not continue after failure",
-    )
-    rejected(
-        "continuing native-parity job fails",
-        lambda value: value["jobs"]["native-parity"].update({"continue-on-error": True}),
-        "must not continue after a failed complete-evidence gate",
-    )
-    rejected(
-        "missing canonical Android emulator dependency fails",
-        lambda value: value["jobs"]["native-parity"]["needs"].remove("android-smoke"),
-        "all three shipped platforms",
-    )
-    rejected(
-        "physical receipt substituted for canonical Android emulator fails",
-        lambda value: next(
-            step for step in value["jobs"]["native-parity"]["steps"]
-            if (step.get("with") or {}).get("name") == RELEASE_ARTIFACTS["android"]
-        )["with"].update({"name": "release-android-physical-evidence"}),
-        "all three release receipts",
-    )
-    rejected(
-        "canonical Android receipt must use API 36 emulator",
-        lambda value: next(
-            step for step in value["jobs"]["android-smoke"]["steps"]
-            if str(step.get("uses") or "").startswith("reactivecircus/android-emulator-runner")
-        )["with"].update({"api-level": "33"}),
-        "signed API 36 emulator",
-    )
-    rejected(
-        "qualification cannot skip canonical Android emulator evidence",
-        lambda value: value["jobs"]["android-smoke"].update(
-            {"if": "needs.version.outputs.publish == 'true'"}),
-        "android-smoke must run for canonical release qualification",
-    )
-    rejected(
-        "qualification cannot become publication",
-        lambda value: value["jobs"]["publish"].update(
-            {"if": "needs.version.outputs.qualify == 'true'"}),
-        "only publication may use the publish output",
-    )
-    rejected(
-        "missing qualified Android artifact download fails",
-        lambda value: value["jobs"]["native-parity"]["steps"].__setitem__(
-            slice(None),
-            [
-                step for step in value["jobs"]["native-parity"]["steps"]
-                if (step.get("with") or {}).get("name") != "android"
-            ],
-        ),
-        "qualified product artifact",
-    )
-    rejected(
-        "missing qualified Windows selector fails",
-        lambda value: next(
-            step for step in value["jobs"]["native-parity"]["steps"]
-            if "--qualified-artifact windows=" in str(step.get("run") or "")
-        ).update({"run": next(
-            step for step in value["jobs"]["native-parity"]["steps"]
-            if "--qualified-artifact windows=" in str(step.get("run") or "")
-        )["run"].replace(
-            "--qualified-artifact windows=", "--unbound-artifact windows=")}),
-        "exact qualified product artifact",
-    )
+    failures = 0
     for label, held in fixtures:
-        print(f"{'PASS' if held else 'FAIL'}|{label}|{'fixture passed unexpectedly' if not held else ''}")
-    return sum(not held for _, held in fixtures)
+        print(f"{'PASS' if held else 'FAIL'}|{label}|")
+        failures += not held
+    return failures

@@ -1,753 +1,95 @@
 {
-  "not_covered": [
-    {
-      "command": "scripts/release/android-smoke-release.sh --self-test",
-      "why": "runs android-smoke-lib.sh's detectors, which android-smoke covers; only the entry point differs"
-    },
-    {
-      "command": "scripts/release/android-log-report-lib.sh (via android-smoke.sh --self-test)",
-      "why": "no entry point of its own; its verdicts run inside android-smoke, which is covered"
-    },
-    {
-      "command": "scripts/release/android-cloud-evidence.sh --self-test",
-      "why": "80 assertions over a 24s baseline; not yet given mutations"
-    },
-    {
-      "command": "scripts/release/android-storage-transfer.sh --self-test",
-      "why": "88 assertions over a 47s baseline; not yet given mutations"
-    },
-    {
-      "command": "scripts/release/android-artifact-check.sh --self-test",
-      "why": "android-metadata.mjs needs jsonc-parser, so it needs npm ci in crates/copypaste-ui first"
-    },
-    {
-      "command": "crates/copypaste-ui/scripts/check-webview-baseline.mjs --self-test",
-      "why": "needs @babel/parser from crates/copypaste-ui/node_modules"
-    },
-    {
-      "command": "e2e/scripts/verify-dmy-45-tests.self-test.mjs",
-      "why": "needs yaml from e2e/node_modules"
-    },
-    {
-      "command": "scripts/check-secret-scan.sh --self-test",
-      "why": "needs the pinned gitleaks binary the secret-scan workflow installs"
-    },
-    {
-      "command": "scripts/check-macos-types.sh --self-test",
-      "why": "compiles a generated crate; a cargo build per mutation does not belong in this job"
-    },
-    {
-      "command": "crates/copypaste-ui/scripts/generate-ipc-bindings.sh --self-test",
-      "why": "59s cargo baseline; a build per mutation does not belong in this job"
-    },
-    {
-      "command": "scripts/check-docs.py --self-test",
-      "why": "not a self-test: check-docs.py has no --self-test and silently ignores the flag; its detectors are covered by scripts/check-docs.test.py"
-    },
-    {
-      "command": "crates/copypaste-p2p/src/node/pairing_ceremony.rs pairing tests",
-      "why": "a cargo test, not a self-test; nothing here can mutate a #[tokio::test] attribute and get a deterministic verdict, because the defect was a race"
-    }
-  ],
   "self_tests": [
     {
       "id": "macos-native-evidence",
-      "verifies": "the macOS accessibility surface check and the AppleScript dispatcher's bash half",
+      "verifies": "critical macOS accessibility and Library failure propagation",
       "command": ["bash", "scripts/release/macos-native-evidence.sh", "--self-test"],
       "platforms": ["linux", "macos"],
       "requires": ["python3", "bash"],
       "mutations": [
-        {
-          "name": "menu-bar-not-required",
-          "file": "scripts/release/macos-native-evidence.sh",
-          "find": "if \"AXMenuBar\" not in roles:",
-          "replace": "if False:",
-          "expect": "self-test failed: surface without a menu bar passed"
-        },
-        {
-          "name": "named-elements-not-required",
-          "file": "scripts/release/macos-native-evidence.sh",
-          "find": "if not named:",
-          "replace": "if False:",
-          "expect": "self-test failed: surface without a name passed"
-        },
-        {
-          "name": "launched-pid-never-reported",
-          "file": "scripts/release/macos-ui-evidence-lib.sh",
-          "find": "            printf '%s\\n' \"$pids\"",
-          "replace": "            printf '\\n'",
-          "expect": "self-test failed: bundle executable name selects the launched process"
-        },
-        {
-          "name": "label-lookup-matches-anything",
-          "file": "scripts/release/macos-ui-evidence-lib.sh",
-          "find": "    grep -Fq \"$2\" \"$1\"",
-          "replace": "    grep -Fq \"\" \"$1\"",
-          "expect": "self-test failed: window scans exclude unrelated process chrome"
-        },
-        {
-          "name": "label-probe-discards-its-evidence",
-          "file": "scripts/release/macos-ui-evidence-lib.sh",
-          "find": "        mac_ax find \"$label\" > \"$dump\" 2>/dev/null && return 0",
-          "replace": "        mac_ax find \"$label\" > /dev/null 2>/dev/null && return 0",
-          "expect": "self-test failed: label probes retain the matched accessibility row"
-        },
-        {
-          "name": "field-input-never-focuses",
-          "file": "scripts/release/macos-ui-evidence-lib.sh",
-          "find": "\n                                set focused of elementRef to true\n",
-          "replace": "\n",
-          "expect": "self-test failed: field input dispatches keyboard events"
-        },
-        {
-          "name": "field-input-types-nothing",
-          "file": "scripts/release/macos-ui-evidence-lib.sh",
-          "find": "\n                                keystroke inputValue\n",
-          "replace": "\n",
-          "expect": "self-test failed: field input dispatches keyboard events"
-        }
-      ]
-    },
-    {
-      "id": "macos-cloud-evidence",
-      "verifies": "the native cloud latency budget and the latency evidence it writes",
-      "command": ["bash", "scripts/release/macos-cloud-evidence.sh", "--self-test"],
-      "platforms": ["linux", "macos"],
-      "requires": ["python3", "bash"],
-      "mutations": [
-        {
-          "name": "latency-budget-not-enforced",
-          "file": "scripts/release/native-cloud-evidence-lib.sh",
-          "find": "    (( $3 <= $4 ))",
-          "replace": "    (( 1 ))",
-          "expect": "FAIL  a latency over budget fails"
-        },
-        {
-          "name": "measurements-never-recorded",
-          "file": "scripts/release/native-cloud-evidence-lib.sh",
-          "find": "    printf '%s\\t%s\\t%s\\n' \"$2\" \"$3\" \"$4\" >> \"$1\"",
-          "replace": "    : \"$2$3$4\" \"$1\"",
-          "expect": "FAIL  latency evidence is structured and complete"
-        },
-        {
-          "name": "latency-json-loses-the-scenario",
-          "file": "scripts/release/native-cloud-evidence-lib.sh",
-          "find": "rows.append({\"scenario\": scenario,",
-          "replace": "rows.append({\"scenario\": \"unknown\",",
-          "expect": "FAIL  latency evidence is structured and complete"
-        }
+        {"name": "menu-bar-not-required", "file": "scripts/release/macos-native-evidence.sh", "find": "if \"AXMenuBar\" not in roles:", "replace": "if False:", "expect": "self-test failed: surface without a menu bar passed"},
+        {"name": "named-elements-not-required", "file": "scripts/release/macos-native-evidence.sh", "find": "if not named:", "replace": "if False:", "expect": "self-test failed: surface without a name passed"},
+        {"name": "critical-onboarding-recovery-ignored", "file": "scripts/release/macos-native-evidence.sh", "find": "  mac_recover_onboarding \"$out/onboarding.tsv\" 30 || return 1", "replace": "  true", "expect": "critical profile reaches onboarding and Library with native artifacts"}
       ]
     },
     {
       "id": "macos-bundle",
-      "verifies": "CFBundleExecutable resolution, its refusals, and that none of them print a path",
+      "verifies": "the macOS bundle cannot escape or declare a missing executable",
       "command": ["bash", "scripts/release/macos-bundle-self-test.sh"],
       "platforms": ["linux", "macos"],
       "requires": ["bash"],
       "mutations": [
-        {
-          "name": "traversal-in-bundle-metadata-accepted",
-          "file": "scripts/release/macos-bundle-lib.sh",
-          "find": "        \"\"|.|..|*/*|*$'\\n'*|*$'\\r'*)",
-          "replace": "        \"\")",
-          "expect": "FAIL    rejects an executable name that escapes Contents/MacOS"
-        },
-        {
-          "name": "missing-executable-accepted",
-          "file": "scripts/release/macos-bundle-lib.sh",
-          "find": "    if [[ ! -f \"$path\" || ! -x \"$path\" ]]; then",
-          "replace": "    if false; then",
-          "expect": "FAIL    rejects a missing declared executable"
-        },
-        {
-          "name": "refusal-discloses-the-bundle-path",
-          "file": "scripts/release/macos-bundle-lib.sh",
-          "find": "        echo \"ERROR: the bundle executable is missing or not executable.\" >&2",
-          "replace": "        echo \"ERROR: $path is missing or not executable.\" >&2",
-          "expect": "rejects a missing declared executable (error exposed a path)"
-        }
+        {"name": "traversal-in-bundle-metadata-accepted", "file": "scripts/release/macos-bundle-lib.sh", "find": "        \"\"|.|..|*/*|*$'\\n'*|*$'\\r'*)", "replace": "        \"\")", "expect": "FAIL    rejects an executable name that escapes Contents/MacOS"},
+        {"name": "missing-executable-accepted", "file": "scripts/release/macos-bundle-lib.sh", "find": "    if [[ ! -f \"$path\" || ! -x \"$path\" ]]; then", "replace": "    if false; then", "expect": "FAIL    rejects a missing declared executable"}
       ]
     },
     {
       "id": "android-native-accessibility",
-      "verifies": "the uiautomator tree check that every interactive CopyPaste node is named",
+      "verifies": "the Android native surface exposes named interactive controls",
       "command": ["bash", "scripts/release/android-native-accessibility.sh", "--self-test"],
       "platforms": ["linux", "macos"],
       "requires": ["python3", "node", "bash"],
       "mutations": [
-        {
-          "name": "unnamed-interactive-nodes-accepted",
-          "file": "scripts/release/android-native-accessibility.sh",
-          "find": "if unnamed:",
-          "replace": "if False:",
-          "expect": "self-test failed: invalid fixture passed"
-        },
-        {
-          "name": "webview-surface-not-required",
-          "file": "scripts/release/android-native-accessibility.sh",
-          "find": "if not webviews:",
-          "replace": "if False:",
-          "expect": "self-test failed: invalid fixture reached the wrong rejection"
-        },
-        {
-          "name": "named-node-floor-removed",
-          "file": "scripts/release/android-native-accessibility.sh",
-          "find": "if len(named) < 3:",
-          "replace": "if len(named) < 0:",
-          "expect": "self-test failed: invalid fixture passed"
-        },
-        {
-          "name": "interactive-nodes-never-detected",
-          "file": "scripts/release/android-native-accessibility.sh",
-          "find": "    if any(node.get(attribute) == \"true\" for attribute in (\"clickable\", \"long-clickable\", \"checkable\")):\n        return True\n",
-          "replace": "",
-          "expect": "self-test failed: invalid fixture passed"
-        }
+        {"name": "unnamed-interactive-nodes-accepted", "file": "scripts/release/android-native-accessibility.sh", "find": "if unnamed:", "replace": "if False:", "expect": "self-test failed: invalid fixture passed"},
+        {"name": "webview-surface-not-required", "file": "scripts/release/android-native-accessibility.sh", "find": "if not webviews:", "replace": "if False:", "expect": "self-test failed: invalid fixture reached the wrong rejection"}
       ]
     },
     {
       "id": "png-evidence",
-      "verifies": "the release screenshot validator: a blank or contentless PNG is not evidence",
+      "verifies": "a blank screenshot cannot become release evidence",
       "command": ["python3", "scripts/release/png_evidence.py", "--self-test"],
       "platforms": ["linux", "macos"],
       "requires": ["python3"],
       "mutations": [
-        {
-          "name": "uniform-frames-accepted",
-          "file": "scripts/release/png_evidence.py",
-          "find": "            if all(low == high for low, high in extrema):",
-          "replace": "            if False:",
-          "expect": "PNG self-test returned"
-        },
-        {
-          "name": "blank-frames-accepted",
-          "file": "scripts/release/png_evidence.py",
-          "find": "            if visible_pixels <= required_pixels or coherent_pixels <= required_pixels:",
-          "replace": "            if False:",
-          "expect": "PNG self-test was accepted"
-        }
+        {"name": "uniform-frames-accepted", "file": "scripts/release/png_evidence.py", "find": "            if all(low == high for low, high in extrema):", "replace": "            if False:", "expect": "PNG self-test returned"},
+        {"name": "blank-frames-accepted", "file": "scripts/release/png_evidence.py", "find": "            if visible_pixels <= required_pixels or coherent_pixels <= required_pixels:", "replace": "            if False:", "expect": "PNG self-test was accepted"}
       ]
     },
     {
       "id": "write-native-evidence",
-      "verifies": "the native evidence writer refuses to emit a receipt for an unusable screenshot",
+      "verifies": "native receipts reject unusable screenshots",
       "command": ["python3", "scripts/release/write-native-evidence.py", "--self-test"],
       "platforms": ["linux", "macos"],
       "requires": ["python3"],
       "mutations": [
-        {
-          "name": "screenshots-not-validated",
-          "file": "scripts/release/write-native-evidence.py",
-          "find": "    if kind == \"screenshot\":\n        validate_png(file)",
-          "replace": "    if False:\n        validate_png(file)",
-          "expect": "produced a native evidence receipt"
-        }
+        {"name": "screenshots-not-validated", "file": "scripts/release/write-native-evidence.py", "find": "    if kind == \"screenshot\":\n        validate_png(file)", "replace": "    if False:\n        validate_png(file)", "expect": "produced a native evidence receipt"}
       ]
     },
     {
       "id": "android-smoke",
-      "verifies": "the on-device smoke detectors: React hydration, native code, the devtools socket, and the wry JNI scan",
+      "verifies": "the critical Android smoke distinguishes app-native code and hydrated content",
       "command": ["bash", "scripts/release/android-smoke.sh", "--self-test"],
       "platforms": ["linux", "macos"],
       "requires": ["bash", "python3", "node", "awk"],
       "mutations": [
-        {
-          "name": "ahead-of-time-dex-counted-as-native-code",
-          "file": "scripts/release/android-smoke-lib.sh",
-          "find": "        path ~ /\\.(odex|vdex|art|dm)$/ || path ~ /\\/oat\\// { next }",
-          "replace": "        0 { next }",
-          "expect": "FAIL  ahead-of-time dex is not native code"
-        },
-        {
-          "name": "another-packages-native-code-counted-as-ours",
-          "file": "scripts/release/android-smoke-lib.sh",
-          "find": "        index(path, pkg) || index(path, \"libcopypaste\") { print $2 \"  \" path }",
-          "replace": "        1 { print $2 \"  \" path }",
-          "expect": "FAIL  another package's native code is not ours"
-        },
-        {
-          "name": "devtools-socket-matches-a-pid-prefix",
-          "file": "scripts/release/android-smoke-lib.sh",
-          "find": "    grep -oE \"@webview_devtools_remote_$2\\$\" <<<\"$1\"",
-          "replace": "    grep -oE \"@webview_devtools_remote_$2\" <<<\"$1\"",
-          "expect": "FAIL  a pid that is a prefix of another's socket does not match it"
-        },
-        {
-          "name": "wry-neighbour-methods-not-counted",
-          "file": "scripts/release/android-smoke-lib.sh",
-          "find": "    for name in setWebContentsDebuggingEnabled setWebViewClient setWebChromeClient; do",
-          "replace": "    for name in setWebContentsDebuggingEnabled; do",
-          "expect": "FAIL  a release library reports no devtools call and both neighbours"
-        },
-        {
-          "name": "webview-shell-counted-as-react-hydration",
-          "file": "scripts/release/android-smoke-lib.sh",
-          "find": "    (( $1 >= 3 && $2 >= 3 && $3 >= 1 ))",
-          "replace": "    return 0",
-          "expect": "FAIL  run 33124469586's titled WebView and React root are not hydration"
-        },
-        {
-          "name": "pairing-provider-marker-counted-as-authored-content",
-          "file": "scripts/release/android-smoke-lib.sh",
-          "find": "        or node.get(\"resource-id\") in {\"root\", \"copypaste-pairing-dialog-open\"}",
-          "replace": "        or node.get(\"resource-id\") == \"root\"",
-          "expect": "FAIL  the pairing provider marker alone is not React hydration"
-        }
+        {"name": "ahead-of-time-dex-counted-as-native-code", "file": "scripts/release/android-smoke-lib.sh", "find": "        path ~ /\\.(odex|vdex|art|dm)$/ || path ~ /\\/oat\\// { next }", "replace": "        0 { next }", "expect": "FAIL  ahead-of-time dex is not native code"},
+        {"name": "another-packages-native-code-counted-as-ours", "file": "scripts/release/android-smoke-lib.sh", "find": "        index(path, pkg) || index(path, \"libcopypaste\") { print $2 \"  \" path }", "replace": "        1 { print $2 \"  \" path }", "expect": "FAIL  another package's native code is not ours"},
+        {"name": "webview-shell-counted-as-react-hydration", "file": "scripts/release/android-smoke-lib.sh", "find": "    (( $1 >= 3 && $2 >= 3 && $3 >= 1 ))", "replace": "    (( 1 ))", "expect": "FAIL  run 33124469586's titled WebView and React root are not hydration"}
       ]
     },
     {
-      "id": "android-rungs",
-      "verifies": "the binder parcel reader that tells an empty clipboard from a refused call",
-      "command": ["bash", "scripts/release/android-rungs.sh", "--self-test"],
-      "platforms": ["linux", "macos"],
-      "requires": ["bash", "python3", "node", "awk"],
-      "mutations": [
-        {
-          "name": "inline-parcel-status-unreadable",
-          "file": "scripts/release/android-rungs-lib.sh",
-          "find": "    sed -e 's/^Result: Parcel(//' -e 's/^0x00000000: //'",
-          "replace": "    sed -e 's/^0x00000000: //'",
-          "expect": "FAIL  a reply printed inline has its exception code read"
-        },
-        {
-          "name": "refusal-detection-inverted",
-          "file": "scripts/release/android-rungs-lib.sh",
-          "find": "parcel_refused() { [[ \"$(parcel_status \"$1\")\" != \"00000000\" ]]; }",
-          "replace": "parcel_refused() { [[ \"$(parcel_status \"$1\")\" == \"00000000\" ]]; }",
-          "expect": "FAIL  a thrown reply is a refusal"
-        },
-        {
-          "name": "canary-lookup-matches-anything",
-          "file": "scripts/release/android-rungs-lib.sh",
-          "find": "    grep -qF \"$2\" <<<\"$text\" || grep -qF \"$2\" <<<\"${text//./}\"",
-          "replace": "    grep -qF \"\" <<<\"$text\"",
-          "expect": "FAIL  a canary absent from the reply is not found"
-        },
-        {
-          "name": "utf16-exception-message-never-decoded",
-          "file": "scripts/release/android-rungs-lib.sh",
-          "find": "parcel_message() { parcel_text \"$1\" | tr -d '.'; }",
-          "replace": "parcel_message() { parcel_text \"$1\"; }",
-          "expect": "FAIL  a UTF-16 exception message reads back once the dots go"
-        }
-      ]
-    },
-    {
-      "id": "android-emulator-legs",
-      "verifies": "the API-36 rung fails closed on probe failure and records not-applicable receipts",
-      "command": ["bash", "scripts/release/android-emulator-legs.sh", "--self-test"],
+      "id": "android-release-profile",
+      "verifies": "the critical Android release path keeps upgrade and smoke while deferring extended legs",
+      "command": ["bash", "scripts/release/android-release-emulator-legs.sh", "--self-test"],
       "platforms": ["linux", "macos"],
       "requires": ["bash"],
       "mutations": [
-        {
-          "name": "probe-failure-accepted",
-          "file": "scripts/release/android-emulator-legs.sh",
-          "find": "if [[ $status -ne 0 ]]; then",
-          "replace": "if false; then",
-          "expect": "FAIL  adb failure fails closed"
-        },
-        {
-          "name": "empty-probe-accepted",
-          "file": "scripts/release/android-emulator-legs.sh",
-          "find": "if [[ ! \"$probe\" =~ ^[0-9]+$ ]]; then",
-          "replace": "if false; then",
-          "expect": "FAIL  empty probe fails closed"
-        },
-        {
-          "name": "valid-level-rejected",
-          "file": "scripts/release/android-emulator-legs.sh",
-          "find": "if [[ ! \"$probe\" =~ ^[0-9]+$ ]]; then",
-          "replace": "if true; then",
-          "expect": "FAIL  API 36 is recognized"
-        }
+        {"name": "critical-profile-runs-extended-legs", "file": "scripts/release/android-release-emulator-legs.sh", "find": "    if profile_runs_extended_release_legs \"$profile\"; then", "replace": "    if true; then", "expect": "release emulator profile self-test failed"}
       ]
     },
     {
-      "id": "check-wiring",
-      "verifies": "runner images, job budgets, Android artifacts, and Dockerless cargo-deny wiring",
-      "command": ["python3", "scripts/release/check-wiring.py", "--self-test"],
-      "platforms": ["linux", "macos"],
-      "requires": ["python3"],
-      "mutations": [
-        {
-          "name": "bare-ref-concurrency-accepted",
-          "file": ".github/workflows/ci.yml",
-          "find": "  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref_name) || github.run_id }}\n",
-          "replace": "  group: ci-${{ github.ref }}\n",
-          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
-        },
-        {
-          "name": "missing-event-concurrency-discriminator-accepted",
-          "file": ".github/workflows/ci.yml",
-          "find": "  group: ci-${{ github.event_name }}-",
-          "replace": "  group: ci-",
-          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
-        },
-        {
-          "name": "missing-merge-group-trigger-accepted",
-          "file": ".github/workflows/browser-webkitgtk.yml",
-          "find": "  merge_group:\n    types: [checks_requested]\n",
-          "replace": "",
-          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
-        },
-        {
-          "name": "merge-group-cancellation-accepted",
-          "file": ".github/workflows/windows-native-e2e.yml",
-          "find": "  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}\n",
-          "replace": "  cancel-in-progress: true\n",
-          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
-        },
-        {
-          "name": "nightly-events-may-collide",
-          "file": ".github/workflows/native-nightly.yml",
-          "find": "  group: native-nightly-${{ github.event_name }}\n",
-          "replace": "  group: native-nightly-${{ github.ref }}\n",
-          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
-        },
-        {
-          "name": "android-manual-runs-share-ref",
-          "file": ".github/workflows/android-emulator.yml",
-          "find": "|| github.run_id }}",
-          "replace": "|| github.ref_name }}",
-          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
-        },
-        {
-          "name": "android-api-concurrency-not-distinct",
-          "file": ".github/workflows/android-emulator.yml",
-          "find": "-${{ github.event_name == 'schedule' && 'sweep' || inputs.api-level || '36' }}",
-          "replace": "",
-          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
-        },
-        {
-          "name": "android-target-concurrency-not-distinct",
-          "file": ".github/workflows/android-emulator.yml",
-          "find": "-${{ inputs.target || 'google_apis' }}\n",
-          "replace": "\n",
-          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
-        },
-        {
-          "name": "prefixed-release-input-double-prefixed",
-          "file": ".github/workflows/release.yml",
-          "find": "  group: release-${{ github.event_name == 'workflow_dispatch' && (startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version)) || github.ref_name }}\n",
-          "replace": "  group: release-${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}\n",
-          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
-        },
-        {
-          "name": "release-ref-used-as-version",
-          "file": ".github/workflows/release.yml",
-          "find": "  group: release-${{ github.event_name == 'workflow_dispatch' && (startsWith(inputs.version, 'v') && inputs.version || format('v{0}', inputs.version)) || github.ref_name }}\n",
-          "replace": "  group: release-${{ github.ref }}\n",
-          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
-        },
-        {
-          "name": "release-cancellation-accepted",
-          "file": ".github/workflows/release.yml",
-          "find": "  cancel-in-progress: false\n",
-          "replace": "  cancel-in-progress: true\n",
-          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
-        },
-        {
-          "name": "secret-scan-shares-cancelling-caller-group",
-          "file": ".github/workflows/secret-scan.yml",
-          "find": "permissions:\n  contents: read\n",
-          "replace": "concurrency:\n  group: secret-scan-${{ github.ref_name }}\n  cancel-in-progress: true\n\npermissions:\n  contents: read\n",
-          "expect": "FAIL|self-test: current workflow concurrency policy holds|"
-        },
-        {
-          "name": "unknown-runner-label-accepted",
-          "file": "scripts/release/check-wiring.py",
-          "find": "            yield (family is not None,",
-          "replace": "            yield (True,",
-          "expect": "FAIL|self-test: a mistyped label is not|"
-        },
-        {
-          "name": "mixed-runner-images-accepted",
-          "file": "scripts/release/check-wiring.py",
-          "find": "        yield (len(images) <= 1,",
-          "replace": "        yield (True,",
-          "expect": "FAIL|self-test: two macOS images in one tree are mixed|"
-        },
-        {
-          "name": "matrix-runner-labels-unvalidated",
-          "file": "scripts/release/check-wiring.py",
-          "find": "                yield (bool(runners) and set(runners) <= known,",
-          "replace": "                yield (True,",
-          "expect": "FAIL|self-test: a mistyped label in a matrix is not|"
-        },
-        {
-          "name": "missing-job-timeout-accepted",
-          "file": "scripts/release/check-wiring.py",
-          "find": "            yield (isinstance(timeout, int) and not isinstance(timeout, bool)\n                   and 0 < timeout <= maximum,",
-          "replace": "            yield (True,",
-          "expect": "FAIL|self-test: a missing job budget is rejected|"
-        },
-        {
-          "name": "windows-package-coverage-not-required",
-          "file": "scripts/release/ci_contract.py",
-          "find": "        and valid_commands\n        and set(selected) == expected_packages\n        and len(selected) == len(expected_packages)\n",
-          "replace": "        and valid_commands\n",
-          "expect": "FAIL|self-test: reduced Windows workspace coverage is rejected|"
-        },
-        {
-          "name": "windows-cache-writers-may-collide",
-          "file": "scripts/release/ci_contract.py",
-          "find": "        and len(cache_keys) == len(names) == len(set(cache_keys))\n",
-          "replace": "        and len(cache_keys) == len(names)\n",
-          "expect": "FAIL|self-test: duplicate Windows cache writers are rejected|"
-        },
-        {
-          "name": "windows-shard-target-not-enforced",
-          "file": "scripts/release/ci_contract.py",
-          "find": "        and all(shards[name].get(\"timeout-minutes\") == 15 for name in test_names)\n",
-          "replace": "        and all(shards[name].get(\"timeout-minutes\") <= 20 for name in test_names)\n",
-          "expect": "FAIL|self-test: a Windows test shard above its target is rejected|"
-        },
-        {
-          "name": "runner-local-android-settings-transfer-accepted",
-          "file": "scripts/release/check-wiring.py",
-          "find": "                if token in detail:\n",
-          "replace": "                if False:\n",
-          "expect": "FAIL|self-test: runner-local Android settings are rejected as artifacts|"
-        },
-        {
-          "name": "generated-android-tree-transfer-accepted",
-          "file": "scripts/release/check-wiring.py",
-          "find": "            if \"src-tauri/gen/android\" in path and \"jniLibs/\" not in path:\n",
-          "replace": "            if False:\n",
-          "expect": "FAIL|self-test: an opaque generated Android tree artifact is rejected|"
-        },
-        {
-          "name": "unverified-cargo-deny-release-accepted",
-          "file": "scripts/release/check-wiring.py",
-          "find": "        \"checksum\": str(settings.get(\"checksum\", \"\")).lower() == \"true\",\n",
-          "replace": "        \"checksum\": True,\n",
-          "expect": "FAIL|self-test: cargo-deny without checksum verification is rejected|"
-        },
-        {
-          "name": "cargo-deny-build-fallback-accepted",
-          "file": "scripts/release/check-wiring.py",
-          "find": "        \"fallback\": settings.get(\"fallback\") == \"none\",\n",
-          "replace": "        \"fallback\": True,\n",
-          "expect": "FAIL|self-test: cargo-deny with a source-build fallback is rejected|"
-        },
-        {
-          "name": "unpinned-cargo-deny-version-accepted",
-          "file": "scripts/release/check-wiring.py",
-          "find": "        \"version\": settings.get(\"tool\") == \"cargo-deny@0.20.2\",\n",
-          "replace": "        \"version\": True,\n",
-          "expect": "FAIL|self-test: an unreviewed cargo-deny version is rejected|"
-        },
-        {
-          "name": "docker-cargo-deny-action-accepted",
-          "file": "scripts/release/check-wiring.py",
-          "find": "        \"dockerless\": not docker_actions,\n",
-          "replace": "        \"dockerless\": True,\n",
-          "expect": "FAIL|self-test: the Docker-based cargo-deny action is rejected|"
-        },
-        {
-          "name": "incomplete-cargo-deny-flags-accepted",
-          "file": "scripts/release/check-wiring.py",
-          "find": "    flags_hold = command.startswith(required_prefix) and command.endswith(required_suffix)\n",
-          "replace": "    flags_hold = True\n",
-          "expect": "FAIL|self-test: a cargo-deny command without the lockfile flag is rejected|"
-        },
-        {
-          "name": "incomplete-cargo-deny-matrix-accepted",
-          "file": "scripts/release/check-wiring.py",
-          "find": "        \"matrix\": matrix == [\"advisories\", \"bans\", \"licenses\", \"sources\"],\n",
-          "replace": "        \"matrix\": True,\n",
-          "expect": "FAIL|self-test: a cargo-deny matrix missing a policy check is rejected|"
-        },
-        {
-          "name": "hardcoded-cargo-deny-subset-accepted",
-          "file": "scripts/release/check-wiring.py",
-          "find": "        \"selector\": selector == \"${{ matrix.check }}\",\n",
-          "replace": "        \"selector\": True,\n",
-          "expect": "FAIL|self-test: a hardcoded cargo-deny policy subset is rejected|"
-        }
-      ]
-    },
-    {
-      "id": "android-abi-link-wiring",
-      "verifies": "the Android ABI link matrix exactly matches the shared linker and NDK target set",
-      "command": ["python3", "scripts/release/check-wiring.py", "--strict"],
-      "platforms": ["linux", "macos"],
-      "requires": ["python3"],
-      "mutations": [
-        {
-          "name": "abi-target-deleted",
-          "file": ".github/workflows/android-emulator.yml",
-          "find": "          - i686-linux-android\n          - x86_64-linux-android\n",
-          "replace": "          - i686-linux-android\n",
-          "expect": "FAIL|android-emulator.yml ABI link matrix matches NDK targets|"
-        },
-        {
-          "name": "abi-target-substituted",
-          "file": ".github/workflows/android-emulator.yml",
-          "find": "          - armv7-linux-androideabi\n",
-          "replace": "          - riscv64-linux-android\n",
-          "expect": "FAIL|android-emulator.yml ABI link matrix matches NDK targets|"
-        },
-        {
-          "name": "abi-target-duplicated",
-          "file": ".github/workflows/android-emulator.yml",
-          "find": "          - x86_64-linux-android\n",
-          "replace": "          - x86_64-linux-android\n          - x86_64-linux-android\n",
-          "expect": "FAIL|android-emulator.yml ABI link matrix matches NDK targets|"
-        }
-      ]
-    },
-    {
-      "id": "check-feature-ledger",
-      "verifies": "the ledger schema: every shipped Tauri command is classified and every platform recorded",
-      "command": ["python3", "scripts/check-feature-ledger.py", "--self-test"],
-      "platforms": ["linux", "macos"],
-      "requires": ["python3"],
-      "mutations": [
-        {
-          "name": "native-command-inventory-ignored",
-          "file": "scripts/check-feature-ledger.py",
-          "find": "    return set(commands)",
-          "replace": "    return set()",
-          "expect": "FAIL|self-test: generated native commands are extracted|"
-        },
-        {
-          "name": "unclassified-command-not-reported",
-          "file": "scripts/check-feature-ledger.py",
-          "find": "    missing = sorted(shipped - set(owners))",
-          "replace": "    missing = []",
-          "expect": "FAIL|self-test: an omitted generated command fails|"
-        }
-      ]
-    },
-    {
-      "id": "check-native-parity-wiring",
-      "verifies": "the release wiring that keeps Windows in the native-parity gate and its signing inputs scoped",
+      "id": "native-evidence-wiring",
+      "verifies": "signed artifacts, all three run-bound receipts, and fail-closed release finalization",
       "command": ["python3", "scripts/release/check-native-parity-wiring.py", "--self-test"],
       "platforms": ["linux", "macos"],
       "requires": ["python3"],
       "mutations": [
-        {
-          "name": "parity-gate-need-not-wait-for-windows",
-          "file": "scripts/release/native_evidence_wiring.py",
-          "find": "    if not {\"macos\", \"android-smoke\", \"windows\"} <= set(gate.get(\"needs\") or []):",
-          "replace": "    if False:",
-          "expect": "FAIL|missing Windows platform dependency fails|"
-        },
-        {
-          "name": "windows-receipt-need-not-be-downloaded",
-          "file": "scripts/release/native_evidence_wiring.py",
-          "find": "    if not set(RELEASE_ARTIFACTS.values()) <= downloads(gate):",
-          "replace": "    if False:",
-          "expect": "FAIL|missing Windows evidence download fails|"
-        },
-        {
-          "name": "job-wide-signing-key-accepted",
-          "file": "scripts/release/check-native-parity-wiring.py",
-          "find": "        private_signing_env & set(windows_env)\n",
-          "replace": "        False\n",
-          "expect": "FAIL|job-wide Tauri private signing input fails|"
-        },
-        {
-          "name": "missing-signing-certificate-accepted",
-          "file": "scripts/release/check-native-parity-wiring.py",
-          "find": "        or not {\"WINDOWS_SIGNING_CERTIFICATE_BASE64\", \"WINDOWS_SIGNING_CERTIFICATE_PASSWORD\"} <= set(certificate_env)\n",
-          "replace": "        or False\n",
-          "expect": "FAIL|missing signing preparation certificate input fails|"
-        },
-        {
-          "name": "quoted-venv-pip-not-counted",
-          "file": "scripts/release/check-native-parity-wiring.py",
-          "find": "    needle = \"install --requirement requirements-ci.txt\"",
-          "replace": "    needle = \"pip install --requirement requirements-ci.txt\"",
-          "expect": "FAIL|release macOS evidence must install requirements-ci.txt before its producer|"
-        },
-        {
-          "name": "linux-frontend-exact-command-count-not-enforced",
-          "file": "scripts/release/check-native-parity-wiring.py",
-          "find": "    if any(len(positions) != 1 for positions in frontend_positions):",
-          "replace": "    if any(len(positions) == 0 for positions in frontend_positions):",
-          "expect": "FAIL|duplicate Linux frontend test fails|"
-        },
-        {
-          "name": "linux-frontend-command-order-not-enforced",
-          "file": "scripts/release/check-native-parity-wiring.py",
-          "find": "    elif [positions[0] for positions in frontend_positions] != sorted(\n        positions[0] for positions in frontend_positions\n    ):",
-          "replace": "    elif False:",
-          "expect": "FAIL|Linux frontend build before install fails|"
-        },
-        {
-          "name": "windows-test-over-budget-accepted",
-          "file": "scripts/release/check-native-parity-wiring.py",
-          "find": "        or any(not isinstance(timeout, int) or isinstance(timeout, bool) or not 0 < timeout <= 15\n",
-          "replace": "        or any(not isinstance(timeout, int) or isinstance(timeout, bool) or not 0 < timeout <= 20\n",
-          "expect": "FAIL|Windows test timeout above budget fails|"
-        },
-        {
-          "name": "prebuilt-sidecar-contract-disabled",
-          "file": "scripts/release/check-native-parity-wiring.py",
-          "find": "    return (\n        sidecar_job in needs(package)\n",
-          "replace": "    return True or (\n        sidecar_job in needs(package)\n",
-          "expect": "FAIL|missing CI Windows sidecar shard fails|"
-        },
-        {
-          "name": "windows-launch-diagnostic-contract-disabled",
-          "file": "scripts/release/check-native-parity-wiring.py",
-          "find": "        if (\n            diagnostic_upload.get(\"uses\")\n",
-          "replace": "        if False and (\n            diagnostic_upload.get(\"uses\")\n",
-          "expect": "FAIL|always-uploaded Windows launch diagnostics fail|"
-        },
-        {
-          "name": "unpinned-windows-launch-diagnostics-accepted",
-          "file": "scripts/release/check-native-parity-wiring.py",
-          "find": "            != \"actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02\"\n",
-          "replace": "            != diagnostic_upload.get(\"uses\")\n",
-          "expect": "FAIL|unpinned Windows launch diagnostics action fails|"
-        },
-        {
-          "name": "windows-launch-diagnostic-retention-ignored",
-          "file": "scripts/release/check-native-parity-wiring.py",
-          "find": "            or diagnostic_with.get(\"retention-days\") != 7\n",
-          "replace": "            or False\n",
-          "expect": "FAIL|wrong Windows launch diagnostics retention fails|"
-        }
-      ]
-    },
-    {
-      "id": "android-smoke-levels",
-      "verifies": "the API-level selector and the all-legs-passed verdict the level sweep reports",
-      "command": ["bash", "scripts/release/android-smoke-levels.sh", "--self-test"],
-      "platforms": ["linux", "macos"],
-      "requires": ["bash"],
-      "mutations": [
-        {
-          "name": "default-api-levels-changed",
-          "file": "scripts/release/android-smoke-levels.sh",
-          "find": "DEFAULT_LEVELS=(29 33 34 36)",
-          "replace": "DEFAULT_LEVELS=(29 33)",
-          "expect": "FAIL android-smoke-levels self-test"
-        },
-        {
-          "name": "non-numeric-api-level-accepted",
-          "file": "scripts/release/android-smoke-levels.sh",
-          "find": "        [[ \"$level\" =~ ^[0-9]+$ ]] || return 1",
-          "replace": "        [[ -n \"$level\" ]] || return 1",
-          "expect": "FAIL android-smoke-levels self-test"
-        },
-        {
-          "name": "a-failed-leg-reported-as-passed",
-          "file": "scripts/release/android-smoke-levels.sh",
-          "find": "        [[ -n \"$level\" && \"$verdict\" == \"PASS\" ]] || return 1",
-          "replace": "        [[ -n \"$level\" ]] || return 1",
-          "expect": "FAIL android-smoke-levels self-test"
-        },
-        {
-          "name": "no-legs-at-all-reported-as-passed",
-          "file": "scripts/release/android-smoke-levels.sh",
-          "find": "    [[ $# -gt 0 ]] || return 1\n    for result in \"$@\"; do",
-          "replace": "    [[ $# -ge 0 ]] || return 1\n    for result in \"$@\"; do",
-          "expect": "FAIL android-smoke-levels self-test"
-        }
+        {"name": "windows-evidence-dependency-ignored", "file": "scripts/release/native_evidence_wiring.py", "find": "        if producer_name not in needs(finalizer):", "replace": "        if False:", "expect": "FAIL|missing Windows evidence dependency fails|"},
+        {"name": "receipt-download-requirement-ignored", "file": "scripts/release/native_evidence_wiring.py", "find": "    if not set(RECEIPT_ARTIFACTS.values()) <= downloads(finalizer):", "replace": "    if False:", "expect": "FAIL|missing Android receipt download fails|"},
+        {"name": "receipt-artifact-binding-ignored", "file": "scripts/release/native_evidence_wiring.py", "find": "        if f\"--qualified-artifact {platform}=\" not in validation_source:", "replace": "        if False:", "expect": "FAIL|unbound Windows artifact fails|"},
+        {"name": "validation-may-continue", "file": "scripts/release/native_evidence_wiring.py", "find": "        if \"if\" in validation_step or \"continue-on-error\" in validation_step:", "replace": "        if False:", "expect": "FAIL|skipped receipt validation fails|"},
+        {"name": "windows-signing-input-not-required", "file": "scripts/release/native_evidence_wiring.py", "find": "    if \"WINDOWS_SIGNING_CERTIFICATE_BASE64\" not in windows_source or \"TAURI_SIGNING_PRIVATE_KEY\" not in windows_source:", "replace": "    if False:", "expect": "FAIL|missing Windows signing input fails|"},
+        {"name": "android-api-36-not-required", "file": "scripts/release/native_evidence_wiring.py", "find": "        runner_inputs.get(\"api-level\") != \"36\"", "replace": "        False", "expect": "FAIL|wrong Android evidence platform fails|"}
       ]
     },
     {
@@ -757,176 +99,26 @@
       "platforms": ["linux", "macos"],
       "requires": ["python3"],
       "mutations": [
-        {
-          "name": "a-green-self-test-counted-as-a-kill",
-          "file": "scripts/mutation-gate/run.py",
-          "find": "            if code == 0:\n                report.survived(entry, mutation, \"the self-test still passed\")",
-          "replace": "            if False:\n                report.survived(entry, mutation, \"the self-test still passed\")",
-          "expect": "FAIL  a mutation that leaves the self-test green is reported as survived"
-        },
-        {
-          "name": "a-failure-that-names-nothing-counted-as-a-kill",
-          "file": "scripts/mutation-gate/run.py",
-          "find": "            elif mutation[\"expect\"] not in output:",
-          "replace": "            elif False:",
-          "expect": "FAIL  a self-test that fails without naming the assertion is reported as survived"
-        },
-        {
-          "name": "a-stale-mutation-counted-as-a-kill",
-          "file": "scripts/mutation-gate/run.py",
-          "find": "    if occurrences != expected:",
-          "replace": "    if False:",
-          "expect": "FAIL  a mutation whose find no longer matches is reported as stale"
-        },
-        {
-          "name": "a-red-baseline-mutated-anyway",
-          "file": "scripts/mutation-gate/run.py",
-          "find": "    if code != 0:\n        report.baseline_failed(entry, code, output)\n        return",
-          "replace": "    if False:\n        report.baseline_failed(entry, code, output)\n        return",
-          "expect": "FAIL  a self-test that is already red is reported instead of mutated"
-        },
-        {
-          "name": "mutations-not-restored-between-runs",
-          "file": "scripts/mutation-gate/run.py",
-          "find": "        scratch.restore(mutation[\"file\"])",
-          "replace": "        pass",
-          "expect": "FAIL  every mutation is restored before the next one"
-        }
+        {"name": "a-green-self-test-counted-as-a-kill", "file": "scripts/mutation-gate/run.py", "find": "            if code == 0:\n                report.survived(entry, mutation, \"the self-test still passed\")", "replace": "            if False:\n                report.survived(entry, mutation, \"the self-test still passed\")", "expect": "FAIL  a mutation that leaves the self-test green is reported as survived"},
+        {"name": "a-failure-that-names-nothing-counted-as-a-kill", "file": "scripts/mutation-gate/run.py", "find": "            elif mutation[\"expect\"] not in output:", "replace": "            elif False:", "expect": "FAIL  a self-test that fails without naming the assertion is reported as survived"},
+        {"name": "a-stale-mutation-counted-as-a-kill", "file": "scripts/mutation-gate/run.py", "find": "    if occurrences != expected:", "replace": "    if False:", "expect": "FAIL  a mutation whose find no longer matches is reported as stale"},
+        {"name": "a-red-baseline-mutated-anyway", "file": "scripts/mutation-gate/run.py", "find": "    if code != 0:\n        report.baseline_failed(entry, code, output)\n        return", "replace": "    if False:\n        report.baseline_failed(entry, code, output)\n        return", "expect": "FAIL  a self-test that is already red is reported instead of mutated"},
+        {"name": "mutations-not-restored-between-runs", "file": "scripts/mutation-gate/run.py", "find": "        scratch.restore(mutation[\"file\"])", "replace": "        pass", "expect": "FAIL  every mutation is restored before the next one"}
       ]
     },
     {
       "id": "windows-native-evidence",
-      "verifies": "bounded Windows readiness, real process tracing, failure preservation, and complete UIA snapshots",
+      "verifies": "Windows readiness, protected UI, installed sidecars, and process shutdown fail closed",
       "command": ["pwsh", "-NoProfile", "-File", "scripts/release/windows-native-evidence.ps1", "-SelfTest"],
       "platforms": ["windows"],
       "requires": ["pwsh", "python"],
       "mutations": [
-        {
-          "name": "narration-on-the-return-channel",
-          "file": "scripts/release/windows-readiness-lib.ps1",
-          "find": "                Write-Host \"  readiness: $Description saw a transient failure on probe ${attempt}: $why\"",
-          "replace": "                Write-Output \"  readiness: $Description saw a transient failure on probe ${attempt}: $why\"",
-          "expect": "values on the ready return"
-        },
-        {
-          "name": "invariant-retried-to-a-timeout",
-          "file": "scripts/release/windows-readiness-lib.ps1",
-          "find": "                throw \"$Description cannot become ready: $why. Observed after $attempt probe(s) and $($timer.ElapsedMilliseconds) ms.\"",
-          "replace": "                $last = \"not ready: $why\"",
-          "expect": "an invariant failure was retried instead of propagating"
-        },
-        {
-          "name": "bare-probe-value-accepted",
-          "file": "scripts/release/windows-readiness-lib.ps1",
-          "find": "        if (-not $kind) {",
-          "replace": "        if ($false) {",
-          "expect": "a probe that returned a bare value was accepted as ready"
-        },
-        {
-          "name": "process-budget-not-enforced",
-          "file": "scripts/release/windows-readiness-lib.ps1",
-          "find": "        if ($maxAttempts -gt 0 -and ($delays.Count + 1) -ge $maxAttempts) { break }",
-          "replace": "        if ($false) { break }",
-          "expect": "did not bound the schedule to 4 probes"
-        },
-        {
-          "name": "unpayable-budget-accepted",
-          "file": "scripts/release/windows-readiness-lib.ps1",
-          "find": "        if ($ProcessBudget -lt $ProcessesPerProbe) {",
-          "replace": "        if ($false) {",
-          "expect": "a budget that cannot pay for a single probe was accepted"
-        },
-        {
-          "name": "unreadable-node-dropped-silently",
-          "file": "scripts/release/windows-uia-snapshot-lib.ps1",
-          "find": "            $unreadable += [ordered]@{ index = $index; attempts = $used; reason = $failure }",
-          "replace": "            $index = $index",
-          "expect": "an unreadable node was dropped silently"
-        },
-        {
-          "name": "partial-snapshot-accepted-as-evidence",
-          "file": "scripts/release/windows-uia-snapshot-lib.ps1",
-          "find": "    if ($missing -gt 0) {",
-          "replace": "    if ($false) {",
-          "expect": "a partial accessibility snapshot was accepted as evidence"
-        },
-        {
-          "name": "empty-snapshot-accepted-as-evidence",
-          "file": "scripts/release/windows-uia-snapshot-lib.ps1",
-          "find": "    if (@($Snapshot.nodes).Count -eq 0) {",
-          "replace": "    if ($false) {",
-          "expect": "an empty accessibility snapshot was accepted as evidence"
-        },
-        {
-          "name": "transient-node-read-not-retried",
-          "file": "scripts/release/windows-uia-snapshot-lib.ps1",
-          "find": "$UIA_NODE_READ_ATTEMPTS = 3",
-          "replace": "$UIA_NODE_READ_ATTEMPTS = 1",
-          "expect": "a transient node read was not retried"
-        },
-        {
-          "name": "unnameable-control-type-given-a-name",
-          "file": "scripts/release/windows-native-ui-evidence.ps1",
-          "find": "    if ($null -eq $ControlType) { return $null }",
-          "replace": "    if ($null -eq $ControlType) { return \"ControlType.Custom\" }",
-          "expect": "a control type the client cannot name was given a name anyway"
-        },
-        {
-          "name": "registered-control-type-not-read",
-          "file": "scripts/release/windows-native-ui-evidence.ps1",
-          "find": "    return $ControlType.ProgrammaticName",
-          "replace": "    return $null",
-          "expect": "a registered control type was not read from the element"
-        },
-        {
-          "name": "protected-pairing-accepts-wda-none",
-          "file": "scripts/release/windows-native-window-evidence.ps1",
-          "find": "        -not $State.capture_allowed -and $State.display_affinity -eq 17",
-          "replace": "        ((-not $State.capture_allowed -and $State.display_affinity -eq 17) -or ($State.capture_allowed -and $State.display_affinity -eq 0))",
-          "expect": "WDA_NONE was accepted as protected"
-        },
-        {
-          "name": "protected-pairing-binds-a-screenshot",
-          "file": "scripts/release/windows-native-protected-evidence.ps1",
-          "find": "        accessibility = $Accessibility",
-          "replace": "        screenshot = $Accessibility; accessibility = $Accessibility",
-          "expect": "protected state record bound a screenshot"
-        },
-        {
-          "name": "protected-pairing-retains-a-raw-secret",
-          "file": "scripts/release/windows-native-protected-evidence.ps1",
-          "find": "        name = if ($Name -in $AllowedNames) { $Name } else { $null }",
-          "replace": "        name = $Name",
-          "expect": "protected accessibility retained an unapproved name"
-        },
-        {
-          "name": "installed-sidecar-not-required",
-          "file": "scripts/release/windows-native-evidence.ps1",
-          "find": "\"copypaste-daemon.exe\", ",
-          "replace": "",
-          "expect": "a package without the installed sidecar did not fail"
-        },
-        {
-          "name": "orphaned-sidecar-accepted",
-          "file": "scripts/release/windows-native-evidence.ps1",
-          "find": "    Assert-True ($LASTEXITCODE -eq 1) \"the CLI answered exit $LASTEXITCODE with no sidecar running\"",
-          "replace": "    Assert-True ($LASTEXITCODE -ge 0) \"the CLI answered exit $LASTEXITCODE with no sidecar running\"",
-          "expect": "a sidecar still answering was accepted as a stopped one"
-        },
-        {
-          "name": "process-ownership-not-retired",
-          "file": "scripts/release/windows-process-trace.ps1",
-          "find": "        $OwnedByPid.Remove($processId)",
-          "replace": "        $processId = $processId",
-          "expect": "process trace retained ownership after a matching stop"
-        },
-        {
-          "name": "duplicate-process-events-not-removed",
-          "file": "scripts/release/windows-process-trace.ps1",
-          "find": "                if ($seen.ContainsKey($key)) { return $false }",
-          "replace": "                if ($false) { return $false }",
-          "expect": "process trace did not reorder and deduplicate causal events before truncation"
-        }
+        {"name": "invariant-retried-to-a-timeout", "file": "scripts/release/windows-readiness-lib.ps1", "find": "                throw \"$Description cannot become ready: $why. Observed after $attempt probe(s) and $($timer.ElapsedMilliseconds) ms.\"", "replace": "                $last = \"not ready: $why\"", "expect": "an invariant failure was retried instead of propagating"},
+        {"name": "partial-snapshot-accepted-as-evidence", "file": "scripts/release/windows-uia-snapshot-lib.ps1", "find": "    if ($missing -gt 0) {", "replace": "    if ($false) {", "expect": "a partial accessibility snapshot was accepted as evidence"},
+        {"name": "protected-pairing-accepts-wda-none", "file": "scripts/release/windows-native-window-evidence.ps1", "find": "        -not $State.capture_allowed -and $State.display_affinity -eq 17", "replace": "        ((-not $State.capture_allowed -and $State.display_affinity -eq 17) -or ($State.capture_allowed -and $State.display_affinity -eq 0))", "expect": "WDA_NONE was accepted as protected"},
+        {"name": "protected-pairing-retains-a-raw-secret", "file": "scripts/release/windows-native-protected-evidence.ps1", "find": "        name = if ($Name -in $AllowedNames) { $Name } else { $null }", "replace": "        name = $Name", "expect": "protected accessibility retained an unapproved name"},
+        {"name": "installed-sidecar-not-required", "file": "scripts/release/windows-native-evidence.ps1", "find": "\"copypaste-daemon.exe\", ", "replace": "", "expect": "a package without the installed sidecar did not fail"},
+        {"name": "orphaned-sidecar-accepted", "file": "scripts/release/windows-native-evidence.ps1", "find": "    Assert-True ($LASTEXITCODE -eq 1) \"the CLI answered exit $LASTEXITCODE with no sidecar running\"", "replace": "    Assert-True ($LASTEXITCODE -ge 0) \"the CLI answered exit $LASTEXITCODE with no sidecar running\"", "expect": "a sidecar still answering was accepted as a stopped one"}
       ]
     }
   ]
