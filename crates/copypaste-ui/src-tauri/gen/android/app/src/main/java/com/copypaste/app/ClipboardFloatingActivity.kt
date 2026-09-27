@@ -39,14 +39,7 @@ class ClipboardFloatingActivity : Activity() {
             floatingView.viewTreeObserver.removeOnGlobalLayoutListener(layoutListener)
             try {
                 val read = clipboardRead(this, CaptureSource.BACKGROUND)
-                read.text?.let { text ->
-                    queueClip(
-                        text,
-                        CaptureSource.BACKGROUND,
-                        read.sourceAppBundleId,
-                        read.sourceAppName,
-                    )
-                }
+                read.clip?.queue(this)
             } finally {
                 finishCapture()
             }

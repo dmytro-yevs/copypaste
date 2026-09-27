@@ -108,7 +108,16 @@ class CaptureBridgeContractTest {
             listOf(
                 ReadResult(
                     ReadOutcome.SUCCEEDED,
-                    "captured",
+                    CapturedClip(
+                        text = "captured",
+                        bytesBase64 = null,
+                        contentType = null,
+                        filename = null,
+                        source = CaptureSource.IN_APP,
+                        atMs = 1_700_000_000_001,
+                        sourceAppBundleId = "com.example.writer",
+                        sourceAppName = "Writer",
+                    ),
                     1_700_000_000_001,
                     true,
                     "com.example.writer",
@@ -121,6 +130,9 @@ class CaptureBridgeContractTest {
                 CaptureSource.entries.mapIndexed { index, source ->
                     CapturedClip(
                         text = source.name.lowercase(),
+                        bytesBase64 = null,
+                        contentType = null,
+                        filename = null,
                         source = source,
                         atMs = 1_700_000_000_100 + index,
                         sourceAppBundleId = if (source == CaptureSource.BACKGROUND) {

@@ -159,6 +159,20 @@ pub trait Backend: PairingBackend + Send + Sync + 'static {
             .map(|item| Some(CaptureWrite { item, saved: true }))
     }
 
+    /// Store one binary capture. Only Android's embedded backend has a native
+    /// byte source; other backends refuse instead of reinterpreting it as text.
+    async fn add_captured_binary(
+        &self,
+        _bytes: &[u8],
+        _content_type: &str,
+        _filename: Option<&str>,
+        _source: CaptureSource,
+        _app_bundle_id: Option<&str>,
+        _app_name: Option<&str>,
+    ) -> Result<Option<CaptureWrite>> {
+        Err(BackendError::Unsupported("Binary capture is unavailable."))
+    }
+
     /// Fetch one item by id, including a sensitive one's plaintext.
     ///
     /// The only route back to a secret, and it exists for the explicit reveal

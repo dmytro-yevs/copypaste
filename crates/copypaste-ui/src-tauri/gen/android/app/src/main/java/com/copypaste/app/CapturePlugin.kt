@@ -368,7 +368,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             ReadResult.serializer(),
             ReadResult(
                 read.outcome,
-                read.text,
+                read.clip,
                 System.currentTimeMillis(),
                 focused = true,
                 sourceAppBundleId = read.sourceAppBundleId,

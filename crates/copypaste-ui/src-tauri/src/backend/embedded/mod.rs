@@ -98,6 +98,27 @@ impl Backend for EmbeddedBackend {
         items::add_captured(self, content, source, app_bundle_id, app_name).await
     }
 
+    async fn add_captured_binary(
+        &self,
+        bytes: &[u8],
+        content_type: &str,
+        filename: Option<&str>,
+        source: crate::capture::model::CaptureSource,
+        app_bundle_id: Option<&str>,
+        app_name: Option<&str>,
+    ) -> Result<Option<CaptureWrite>> {
+        items::add_captured_binary(
+            self,
+            bytes,
+            content_type,
+            filename,
+            source,
+            app_bundle_id,
+            app_name,
+        )
+        .await
+    }
+
     async fn get(&self, id: &str) -> Result<Item> {
         items::get(self, id).await
     }

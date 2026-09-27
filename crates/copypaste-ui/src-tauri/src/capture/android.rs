@@ -263,12 +263,12 @@ impl CaptureControl for AndroidCapture {
         // Recorded, but `focused` is true for this path by construction, so it
         // cannot promote the state to `Working`. See `model::record_read`.
         self.with(|model| model.record_read(result.outcome, result.focused, result.at_ms));
-        Ok(result.text.map(|text| Clip {
-            text,
-            source,
-            at_ms: result.at_ms,
-            source_app_bundle_id: result.source_app_bundle_id,
-            source_app_name: result.source_app_name,
+        Ok(result.clip.map(|mut clip| {
+            clip.source = source;
+            clip.at_ms = result.at_ms;
+            clip.source_app_bundle_id = result.source_app_bundle_id;
+            clip.source_app_name = result.source_app_name;
+            clip
         }))
     }
 

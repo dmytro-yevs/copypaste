@@ -62,6 +62,31 @@ class ClipQueueTest {
         assertEquals(0L, dropped)
     }
 
+    @Test
+    fun binaryBytesAreQueuedWithoutTextReclassification() {
+        ClipQueue.offerBinary("iVBORw==", "image/png", null, CaptureSource.TILE)
+
+        val clip = ClipQueue.drain().first.single()
+
+        assertEquals(null, clip.text)
+        assertEquals("iVBORw==", clip.bytesBase64)
+        assertEquals("image/png", clip.contentType)
+    }
+
+    @Test
+    fun oversizedBinaryTransportIsReportedAsDropped() {
+        ClipQueue.offerBinary(
+            "A".repeat(((ClipQueue.MAX_BINARY_BYTES + 2) / 3) * 4 + 1),
+            "image/png",
+            null,
+            CaptureSource.BACKGROUND,
+        )
+
+        val (clips, dropped) = ClipQueue.drain()
+        assertTrue(clips.isEmpty())
+        assertEquals(1L, dropped)
+    }
+
     /**
      * `intake::Buffer::discard_all` counts the clips Rust throws away for the
      * same reason, and this queue used to zero its tally instead. That erased

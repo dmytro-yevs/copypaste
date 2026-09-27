@@ -169,6 +169,92 @@ pub(super) async fn add_captured(
         .await
 }
 
+pub(super) async fn add_captured_binary(
+    backend: &EmbeddedBackend,
+    bytes: &[u8],
+    content_type: &str,
+    filename: Option<&str>,
+    source: CaptureSource,
+    app_bundle_id: Option<&str>,
+    app_name: Option<&str>,
+) -> Result<Option<CaptureWrite>> {
+    let bytes = bytes.to_vec();
+    let content_type = content_type.to_string();
+    let filename = filename.map(str::to_owned);
+    let app_bundle_id = app_bundle_id.map(str::to_owned);
+    let app_name = app_name.map(str::to_owned);
+    backend
+        .blocking(move |inner| {
+            let settings = inner.settings();
+            if settings.private_mode {
+                return Ok(None);
+            }
+            if source.requires_external_attribution()
+                && !settings.excluded_app_bundle_ids.is_empty()
+            {
+                let allowed = app_bundle_id.as_ref().is_some_and(|id| {
+                    !settings
+                        .excluded_app_bundle_ids
+                        .iter()
+                        .any(|excluded| excluded.eq_ignore_ascii_case(id))
+                });
+                if !allowed {
+                    return Ok(None);
+                }
+            }
+            let sensitive_floor = app_bundle_id
+                .as_deref()
+                .is_some_and(copypaste_core::sensitive::is_password_manager_app);
+            // Images keep their concrete MIME so the shared image class and
+            // bounded preview decoder handle every image/*. Other local files
+            // use the established `file` storage type; their validated MIME
+            // belongs in metadata, not in the open wire vocabulary.
+            let storage_content_type = if content_type.starts_with("image/") {
+                content_type.as_str()
+            } else {
+                copypaste_ipc::content_type::FILE
+            };
+            let metadata = (!content_type.starts_with("image/"))
+                .then(|| {
+                    filename.and_then(|name| {
+                        copypaste_core::FileMetadata::new(name, content_type.clone())
+                    })
+                })
+                .flatten();
+            match copypaste_core::ingest_binary_into_with_capture_source(
+                &inner.state.store,
+                &inner.state.keyring,
+                &bytes,
+                storage_content_type,
+                copypaste_core::now_ms(),
+                sensitive_floor,
+                app_bundle_id.as_deref(),
+                app_name.as_deref(),
+                metadata.as_ref(),
+                &settings,
+            ) {
+                Ok(ingested) => {
+                    let (item, saved) = match ingested {
+                        Ingested::Stored(item) => (item, true),
+                        Ingested::Duplicate(item) => (item, false),
+                    };
+                    let item = inner.to_wire(item)?;
+                    inner.note_version_written(item.created_at);
+                    inner.note_local_version(item.created_at);
+                    inner.publish_items(true, 0);
+                    Ok(Some(CaptureWrite { item, saved }))
+                }
+                Err(IngestError::Empty) => Err(BackendError::Invalid(MSG_EMPTY)),
+                Err(IngestError::TooLarge) => Err(BackendError::Invalid(MSG_TOO_LARGE)),
+                Err(error) => {
+                    tracing::warn!(?error, "a captured binary item could not be stored");
+                    Err(BackendError::internal(MSG_NOT_STORED))
+                }
+            }
+        })
+        .await
+}
+
 pub(super) async fn get(backend: &EmbeddedBackend, id: &str) -> Result<Item> {
     let id = id.to_string();
     backend.blocking(move |inner| inner.fetch(&id)).await
@@ -324,6 +410,42 @@ mod tests {
                 payload_metadata: None,
             })
             .expect("a pre-limit row is still a valid stored row");
+    }
+
+    #[tokio::test]
+    async fn captured_binary_uses_the_shared_binary_ingest_with_basename_metadata() {
+        let (backend, _clipboard, _dir) = backend();
+        let captured = backend
+            .add_captured_binary(
+                b"%PDF-1.7\n",
+                "application/pdf",
+                Some("report.pdf"),
+                CaptureSource::Share,
+                Some("com.example.files"),
+                Some("Files"),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            captured.item.content_type,
+            copypaste_ipc::content_type::FILE
+        );
+        assert_eq!(captured.item.content, "[file]");
+        let row = backend
+            .inner
+            .state
+            .store
+            .get(&captured.item.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            row.payload_metadata
+                .as_deref()
+                .and_then(copypaste_core::FileMetadata::from_json),
+            copypaste_core::FileMetadata::new("report.pdf", "application/pdf"),
+        );
     }
 
     #[tokio::test]

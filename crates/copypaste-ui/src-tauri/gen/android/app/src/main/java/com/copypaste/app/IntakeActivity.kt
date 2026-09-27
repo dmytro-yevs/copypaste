@@ -15,24 +15,11 @@ import android.os.Bundle
 class IntakeActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val text = fromIntent(intent)
-        if (text != null) {
-            queueClip(text, sourceOf(intent))
+        when (intent?.action) {
+            Intent.ACTION_PROCESS_TEXT -> intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)
+                ?.toString()?.takeIf(String::isNotBlank)?.let { queueClip(it, CaptureSource.PROCESS_TEXT) }
+            Intent.ACTION_SEND -> sharedClip(this, intent)?.queue(this)
         }
         finish()
     }
-
-    private fun fromIntent(intent: Intent?): String? = when (intent?.action) {
-        Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
-        Intent.ACTION_PROCESS_TEXT ->
-            intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString()
-        else -> null
-    }
-
-    private fun sourceOf(intent: Intent?): CaptureSource =
-        if (intent?.action == Intent.ACTION_PROCESS_TEXT) {
-            CaptureSource.PROCESS_TEXT
-        } else {
-            CaptureSource.SHARE
-        }
 }
