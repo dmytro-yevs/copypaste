@@ -20,6 +20,12 @@ const ipc = vi.hoisted(() => ({
 const lifecycle = vi.hoisted(() => ({ dismiss: vi.fn(), generation: 0 }));
 const toast = vi.hoisted(() => ({ error: vi.fn() }));
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 vi.mock("sonner", () => ({ toast }));
 vi.mock("@/features/quick-paste/hooks/useQuickPasteLifecycle", () => ({
   useQuickPasteLifecycle: () => ({
@@ -122,7 +128,7 @@ describe("quickPastePresentation", () => {
       </QueryClientProvider>,
     );
 
-    const preview = await screen.findByLabelText("Clipboard preview");
+    const preview = await screen.findByRole("complementary", { name: "Clipboard preview pane" });
     expect(within(preview).getByText("first preview")).toBeTruthy();
     expect(ipc.setQuickPastePreview).toHaveBeenCalledWith(true);
     await user.click(screen.getByRole("searchbox"));
@@ -144,7 +150,7 @@ describe("quickPastePresentation", () => {
     );
 
     await screen.findByRole("listitem");
-    expect(screen.queryByLabelText("Clipboard preview")).toBeNull();
+    expect(screen.queryByRole("complementary", { name: "Clipboard preview pane" })).toBeNull();
     expect(ipc.setQuickPastePreview).not.toHaveBeenCalledWith(true);
   });
 
@@ -159,7 +165,36 @@ describe("quickPastePresentation", () => {
     await screen.findByRole("listitem");
     await waitFor(() => expect(ipc.setQuickPastePreview).toHaveBeenCalledWith(true));
     expect(container.querySelector('[data-preview-side="hidden"] > [aria-label="Quick Paste"]')).not.toBeNull();
-    expect(screen.queryByLabelText("Clipboard preview")).toBeNull();
+    expect(screen.queryByRole("complementary", { name: "Clipboard preview pane" })).toBeNull();
+  });
+
+  it("ignores an outdated open response after selection closes and reopens preview space", async () => {
+    const first = deferred<{ side: "right"; width: number }>();
+    let opens = 0;
+    ipc.setQuickPastePreview.mockImplementation((open: boolean) => {
+      if (!open) return Promise.resolve({ side: "hidden", width: 0 });
+      opens += 1;
+      return opens === 1 ? first.promise : Promise.resolve({ side: "right", width: 320 });
+    });
+    const initial = item({ id: "initial", content: "initial preview" });
+    const sensitive = item({ id: "sensitive", content: null, is_sensitive: true });
+    const replacement = item({ id: "replacement", content: "replacement preview" });
+    ipc.listItems.mockResolvedValue(page([initial, sensitive, replacement]));
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={testClient()}>
+        <TooltipProvider><QuickPasteScreen /></TooltipProvider>
+      </QueryClientProvider>,
+    );
+
+    await screen.findAllByRole("listitem");
+    await user.click(screen.getByRole("searchbox"));
+    await user.keyboard("{ArrowDown}{ArrowDown}");
+    const preview = await screen.findByRole("complementary", { name: "Clipboard preview pane" });
+    expect(within(preview).getByText("replacement preview")).toBeTruthy();
+
+    await act(async () => { first.resolve({ side: "right", width: 320 }); });
+    expect(within(preview).getByText("replacement preview")).toBeTruthy();
   });
 
   it.each([

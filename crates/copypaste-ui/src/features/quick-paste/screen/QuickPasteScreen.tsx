@@ -49,6 +49,7 @@ export function QuickPasteScreen() {
   const [copyPending, setCopyPending] = useState(false);
   const [previewLayout, setPreviewLayout] = useState<QuickPastePreviewLayout | null>(null);
   const previewOpen = useRef(false);
+  const previewRequestEpoch = useRef(0);
   const clearLocalState = useCallback(() => {
     setQuery("");
     setPinPendingId(null);
@@ -218,6 +219,7 @@ export function QuickPasteScreen() {
   const selectedBody = useItemBody(selectedItem);
   const previewWanted = holding && selectedItem !== null && !selectedItem.is_sensitive;
   const releasePreview = useCallback(() => {
+    previewRequestEpoch.current += 1;
     if (!previewOpen.current) return;
     previewOpen.current = false;
     setPreviewLayout(null);
@@ -230,10 +232,12 @@ export function QuickPasteScreen() {
       return;
     }
     if (previewOpen.current) return;
+    const requestEpoch = ++previewRequestEpoch.current;
     previewOpen.current = true;
     void setQuickPastePreview(true)
       .then((layout) => {
-        if (!previewOpen.current || layout.side === "hidden" || layout.width <= 0) {
+        if (requestEpoch !== previewRequestEpoch.current) return;
+        if (layout.side === "hidden" || layout.width <= 0) {
           previewOpen.current = false;
           setPreviewLayout(null);
           return;

@@ -1,5 +1,6 @@
-import { ClipBodyPreview, PreviewSurface } from "@/components/shared";
+import { PreviewSurface } from "@/components/shared";
 import { ClipImageLoader } from "@/features/clip-content";
+import { InspectorPreview } from "@/features/history/components/InspectorPreview";
 import { resolveClipBodyPresentation } from "@/lib/clipPresentation";
 import { kindOf } from "@/lib/format";
 import type { Item, QuickPastePreviewLayout } from "@/lib/ipc";
@@ -30,7 +31,7 @@ export function QuickPastePreview({
     <aside
       className={styles.pane}
       data-side={layout.side}
-      aria-label={t("quickPaste.preview.label")}
+      aria-label={t("quickPaste.preview.paneLabel")}
       style={{ inlineSize: `${layout.width}px` }}
     >
       <PreviewSurface elevation="raised" border="subtle" radius="lg" padding="compact" scroll className={styles.surface}>
@@ -39,11 +40,12 @@ export function QuickPastePreview({
         ) : loading ? (
           <p role="status">{t("quickPaste.row.fullLoading")}</p>
         ) : body.state === "content" ? (
-          <ClipBodyPreview
+          <InspectorPreview
             kind={kind}
+            ariaLabel={t("quickPaste.preview.label")}
             content={body.content}
-            previewLines={3}
             imagePreview={kind === "image" ? <ClipImageLoader id={item.id} size="fill" /> : undefined}
+            mode="reader"
           />
         ) : null}
       </PreviewSurface>

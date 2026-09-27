@@ -23,6 +23,17 @@ describe("QuickPastePreview", () => {
     expect(screen.getByRole("img", { name: "preview image" })).toBeTruthy();
   });
 
+  it("uses the scrollable reader mode for the complete selected body", () => {
+    const full = "first line\nsecond line\nthird line\nfourth line";
+    render(
+      <QuickPastePreview item={item({ content: "first line", truncated: true })} fullContent={full} fullContentFailed={false} layout={layout} />,
+    );
+
+    const reader = screen.getByRole("region", { name: "Clipboard preview" });
+    expect(reader.getAttribute("data-mode")).toBe("reader");
+    expect(reader.textContent).toContain("fourth line");
+  });
+
   it("never renders sensitive plaintext and keeps findings redacted", () => {
     const raw = "raw secret fragment";
     const { rerender } = render(
