@@ -30,13 +30,15 @@
     place-items: center;
     border: var(--stroke-1) solid var(--border);
     border-radius: var(--r-ctl);
-    color: var(--text);
+    color: var(--dim);
     background: var(--card);
     box-shadow: var(--sh1);
-    font-size: var(--fs-xs);
+    font-size: calc(var(--fs-xs) - var(--stroke-1));
     font-weight: var(--fw-semibold);
     font-variant-numeric: tabular-nums;
     line-height: 1;
+    white-space: nowrap;
+    user-select: none;
 }
 .toolbar {
     container: library-toolbar / inline-size;
