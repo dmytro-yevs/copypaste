@@ -29,6 +29,7 @@
 .root:is(
   [data-state="loading"],
   [data-state="ready"],
+  [data-state="checking"],
   [data-state="up_to_date"],
   [data-state="unsupported"],
   [data-state="unconfigured"]
@@ -45,6 +46,7 @@
 .root:is(
   [data-state="loading"],
   [data-state="ready"],
+  [data-state="checking"],
   [data-state="up_to_date"],
   [data-state="unsupported"],
   [data-state="unconfigured"]:not([data-platform="macos"])
@@ -69,6 +71,7 @@
 .root:is(
   [data-state="loading"],
   [data-state="ready"],
+  [data-state="checking"],
   [data-state="up_to_date"],
   [data-state="unsupported"],
   [data-state="unconfigured"]
@@ -219,6 +222,7 @@
   .root:is(
     [data-state="loading"],
     [data-state="ready"],
+    [data-state="checking"],
     [data-state="up_to_date"],
     [data-state="unsupported"],
     [data-state="unconfigured"]
@@ -230,6 +234,7 @@
   .root:is(
     [data-state="loading"],
     [data-state="ready"],
+    [data-state="checking"],
     [data-state="up_to_date"],
     [data-state="unsupported"],
     [data-state="unconfigured"]
