@@ -38,9 +38,6 @@ zeroize.workspace = true
 # `SIOCGIFCONF` walk or a "connect a UDP socket and read its local end" trick;
 # works on every shipped platform (AGENTS.md rule 7).
 if-addrs = "0.15"
-# Device name. Reading /etc/hostname works on Linux only, and `uname -n` is a
-# subprocess; this is the portable `gethostname(3)` binding.
-gethostname = "1"
 base64.workspace = true
 url.workspace = true
 tempfile.workspace = true

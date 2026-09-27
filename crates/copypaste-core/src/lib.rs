@@ -11,6 +11,7 @@
 pub mod binary;
 pub mod clipboard_payload;
 pub mod crypto;
+pub mod device_name;
 pub mod image_preview;
 pub mod ingest;
 pub mod p2p_contract;
