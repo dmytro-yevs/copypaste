@@ -132,6 +132,23 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: crates/copypaste-ui/package-lock.json
+      - name: Create throwaway keychain
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/copypaste-ci.keychain-db"
+          password="$(openssl rand -base64 24)"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          existing="$(security list-keychains -d user | sed -e 's/^ *"//' -e 's/"$//')"
+          # shellcheck disable=SC2086
+          security list-keychains -d user -s "$keychain" $existing
+          security default-keychain -d user -s "$keychain"
+          security add-generic-password -s copypaste-ci-probe -a probe -w "hunter2" "$keychain"
+          found="$(security find-generic-password -s copypaste-ci-probe -a probe -w "$keychain")"
+          [[ "$found" == "hunter2" ]] || { echo "::error::non-interactive keychain round trip failed"; exit 1; }
+          security delete-generic-password -s copypaste-ci-probe -a probe "$keychain" >/dev/null
+          echo "COPYPASTE_KEYCHAIN_TEST=1" >> "$GITHUB_ENV"
       - name: Build native app bundle
         env:
           COPYPASTE_MACOS_BUILD_PROFILE: debug
@@ -166,23 +183,6 @@ jobs:
           path: artifacts/ci-macos-native
           if-no-files-found: error
           retention-days: 7
-      - name: Create throwaway keychain
-        run: |
-          set -euo pipefail
-          keychain="$RUNNER_TEMP/copypaste-ci.keychain-db"
-          password="$(openssl rand -base64 24)"
-          security create-keychain -p "$password" "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p "$password" "$keychain"
-          existing="$(security list-keychains -d user | sed -e 's/^ *"//' -e 's/"$//')"
-          # shellcheck disable=SC2086
-          security list-keychains -d user -s "$keychain" $existing
-          security default-keychain -d user -s "$keychain"
-          security add-generic-password -s copypaste-ci-probe -a probe -w "hunter2" "$keychain"
-          found="$(security find-generic-password -s copypaste-ci-probe -a probe -w "$keychain")"
-          [[ "$found" == "hunter2" ]] || { echo "::error::non-interactive keychain round trip failed"; exit 1; }
-          security delete-generic-password -s copypaste-ci-probe -a probe "$keychain" >/dev/null
-          echo "COPYPASTE_KEYCHAIN_TEST=1" >> "$GITHUB_ENV"
       - name: NSPasteboard smoke
         run: |
           set -euo pipefail
