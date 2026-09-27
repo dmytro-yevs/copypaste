@@ -365,7 +365,7 @@ impl<R: tauri::Runtime> backend::embedded::Clipboard for AppClipboard<R> {
             } => self
                 .app
                 .state::<capture::android::AndroidCapture>()
-                .write_binary_clipboard(bytes, content_type, "copypaste-image.png")
+                .write_binary_clipboard(bytes, content_type, image_filename(content_type))
                 .map_err(|_| copypaste_core::ClipboardWriteError::Failed),
             copypaste_core::ClipboardPayload::File { bytes, metadata } => {
                 let Some(metadata) = metadata else {
@@ -380,6 +380,16 @@ impl<R: tauri::Runtime> backend::embedded::Clipboard for AppClipboard<R> {
                 Err(copypaste_core::ClipboardWriteError::UnsupportedContent)
             }
         }
+    }
+}
+
+#[cfg(target_os = "android")]
+fn image_filename(content_type: &str) -> &'static str {
+    match content_type {
+        "image/png" => "copypaste-image.png",
+        "image/jpeg" => "copypaste-image.jpeg",
+        "image/tiff" => "copypaste-image.tiff",
+        _ => "copypaste-image.bin",
     }
 }
 
