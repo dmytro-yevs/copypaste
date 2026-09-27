@@ -31,9 +31,6 @@ function focusSyncEnabledControl(): boolean {
 
 export function DeviceSyncSettings() {
   const { t } = useTranslation();
-  const deviceDescriptionId = useId();
-  const peersDescriptionId = useId();
-  const syncDescriptionId = useId();
   const syncNoteId = useId();
   const peers = usePeers();
   const sync = useSyncNow();
@@ -73,21 +70,16 @@ export function DeviceSyncSettings() {
 
   return (
     <>
-      <Section title="This device">
+      <Section title="Devices">
         <SettingsRow
           title={t("devices.own.rename.label")}
-          descriptionId={deviceDescriptionId}
-          description={t("devices.own.rename.description")}
         >
-          <DeviceNameField showCurrentName descriptionId={deviceDescriptionId} />
+          <DeviceNameField showCurrentName />
         </SettingsRow>
-      </Section>
 
-      <Section title="Nearby devices">
         <SettingsRow
           title={t("settings.sync.paired.title")}
-          descriptionId={peersDescriptionId}
-          description={t("settings.sync.paired.description")}
+          help={t("settings.sync.paired.description")}
         >
           <div className={styles.pairedActions}>
             <Badge variant={peers.isError ? "warn" : "secondary"}>
@@ -106,19 +98,16 @@ export function DeviceSyncSettings() {
             <Button
               variant="secondary"
               size="sm"
-              aria-describedby={peersDescriptionId}
               onClick={() => setView("devices")}
             >
               <Icon name="devices" aria-hidden="true" />
-              {t("settings.sync.paired.manage")}
+              {t("settings.sync.paired.open")}
             </Button>
           </div>
         </SettingsRow>
 
-        <SettingsRow
+        {count !== undefined && count > 0 ? <SettingsRow
           title={t("settings.sync.now.title")}
-          descriptionId={syncDescriptionId}
-          description={t("settings.sync.now.description")}
           note={syncNote ? <span id={syncNoteId}>{syncNote}</span> : undefined}
         >
           <div className={styles.pairedActions}>
@@ -127,7 +116,7 @@ export function DeviceSyncSettings() {
               size="sm"
               disabled={sync.isPending || readiness !== "ready"}
               aria-busy={sync.isPending || undefined}
-              aria-describedby={syncNote ? `${syncDescriptionId} ${syncNoteId}` : syncDescriptionId}
+              aria-describedby={syncNote ? syncNoteId : undefined}
               onClick={() => {
                 if (readiness !== "ready" || sync.isPending) return;
                 sync.mutate(undefined, {
@@ -168,7 +157,7 @@ export function DeviceSyncSettings() {
               </Button>
             )}
           </div>
-        </SettingsRow>
+        </SettingsRow> : null}
       </Section>
     </>
   );

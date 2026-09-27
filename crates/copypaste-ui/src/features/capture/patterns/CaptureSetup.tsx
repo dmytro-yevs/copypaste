@@ -147,7 +147,7 @@ function AlwaysOn() {
   return (
     <SettingsRow
       title={t("capture.setup.always.title")}
-      description={t("capture.setup.always.body")}
+      help={t("capture.setup.always.body")}
     >
       <Button
         variant="secondary"
