@@ -17,6 +17,11 @@
   gap: var(--s-2);
   /* grid gap */
 }
+.fullWidth {
+  inline-size: 100%;
+  max-inline-size: none;
+  margin-inline: 0;
+}
 .marker {
   display: grid;
   inline-size: var(--s-7);

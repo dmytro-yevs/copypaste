@@ -35,6 +35,7 @@ export function DiscoveryStage({
             <div className={styles.stage} data-state={state}>
                 <EmptyState
                     compact
+                    fullWidth
                     busy={presentation.busy}
                     tone={presentation.tone}
                     icon={presentation.icon ?? undefined}
