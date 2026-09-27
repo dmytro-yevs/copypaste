@@ -7,6 +7,7 @@ import { Button, Icon } from "@/components/ui";
 import { useTranslation } from "@/i18n";
 import { invalidateHistoryQueries, STATUS_KEY } from "@/hooks/historyRefresh";
 import { toFriendly } from "@/lib/errors";
+import { POLL_BACKOFF_MS } from "@/lib/scheduling";
 import {
     type ServiceState,
     restartService,
@@ -15,6 +16,7 @@ import {
 } from "@/lib/ipc";
 
 export const SERVICE_STATE_KEY = ["service-state"] as const;
+const MAX_UNHEALTHY_REPROBES = 3;
 
 interface ServiceOfflineStateProps {
     onOpenDiagnostics: () => void;
@@ -35,6 +37,7 @@ export function ServiceOfflineState({
     >(null);
     const operationRunning = useRef(false);
     const matchingRefreshAttempted = useRef(false);
+    const unhealthyReprobes = useRef(0);
     const [matchingRefreshSettled, setMatchingRefreshSettled] = useState(false);
 
     const invalidateConsumers = useCallback(
@@ -96,11 +99,31 @@ export function ServiceOfflineState({
                 const result = await service.refetch();
                 if (result.error) throw result.error;
             }),
-        [runExclusive, service],
+    [runExclusive, service.refetch],
     );
 
     const state = service.data;
     const matchesApp = state?.state === "running" && state.matches_app;
+
+    useEffect(() => {
+        if (state?.state !== "unhealthy") {
+            unhealthyReprobes.current = 0;
+            return;
+        }
+        let cancelled = false;
+        let timer: number | undefined;
+        const probe = async () => {
+            unhealthyReprobes.current += 1;
+            await retryState();
+            if (cancelled || unhealthyReprobes.current >= MAX_UNHEALTHY_REPROBES) return;
+            timer = window.setTimeout(probe, POLL_BACKOFF_MS);
+        };
+        timer = window.setTimeout(probe, POLL_BACKOFF_MS);
+        return () => {
+            cancelled = true;
+            if (timer !== undefined) window.clearTimeout(timer);
+        };
+    }, [retryState, state?.state]);
 
     useEffect(() => {
         if (!matchesApp) {
@@ -108,10 +131,11 @@ export function ServiceOfflineState({
             setMatchingRefreshSettled(false);
             return;
         }
+        if (operation !== null) return;
         if (matchingRefreshAttempted.current) return;
         matchingRefreshAttempted.current = true;
         void refreshConsumers();
-    }, [matchesApp, refreshConsumers]);
+    }, [matchesApp, operation, refreshConsumers]);
 
     const busy = operation !== null || service.isFetching;
 
@@ -129,9 +153,8 @@ export function ServiceOfflineState({
                 tone="attention"
                 busy
                 title={t("shell.service.checking.title")}
-                body={t("shell.service.checking.body")}
+                details={t("shell.service.checking.body")}
                 secondary={diagnostics}
-                secondaryPlacement="attached"
             />
         );
     }
@@ -143,7 +166,7 @@ export function ServiceOfflineState({
                 tone="danger"
                 busy={busy}
                 title={t("shell.service.unhealthy.title")}
-                body={toFriendly(service.error)}
+                details={toFriendly(service.error)}
                 action={{
                     label: t("common.tryAgain"),
                     icon: "refresh",
@@ -151,7 +174,6 @@ export function ServiceOfflineState({
                     onClick: () => void retryState(),
                 }}
                 secondary={diagnostics}
-                secondaryPlacement="attached"
             />
         );
     }
@@ -163,7 +185,7 @@ export function ServiceOfflineState({
                 tone="danger"
                 busy={busy}
                 title={t("shell.service.unhealthy.title")}
-                body={t("shell.service.unhealthy.body")}
+                details={t("shell.service.unhealthy.body")}
                 action={{
                     label: t("common.tryAgain"),
                     icon: "refresh",
@@ -171,7 +193,6 @@ export function ServiceOfflineState({
                     onClick: () => void retryState(),
                 }}
                 secondary={diagnostics}
-                secondaryPlacement="attached"
             />
         );
     }
@@ -183,7 +204,7 @@ export function ServiceOfflineState({
                 tone="danger"
                 busy={busy}
                 title={t("shell.service.unhealthy.title")}
-                body={t("shell.service.unhealthy.body")}
+                details={t("shell.service.unhealthy.body")}
                 action={{
                     label: t("common.tryAgain"),
                     icon: "refresh",
@@ -191,7 +212,6 @@ export function ServiceOfflineState({
                     onClick: () => void retryState(),
                 }}
                 secondary={diagnostics}
-                secondaryPlacement="attached"
             />
         );
     }
@@ -207,7 +227,7 @@ export function ServiceOfflineState({
                 tone="attention"
                 busy={refreshing}
                 title={t("shell.service.running.title")}
-                body={t(
+                details={t(
                     refreshing
                         ? "shell.service.running.refreshing"
                         : "shell.service.running.retry",
@@ -223,7 +243,6 @@ export function ServiceOfflineState({
                           }
                 }
                 secondary={diagnostics}
-                secondaryPlacement="attached"
             />
         );
     }
@@ -235,7 +254,7 @@ export function ServiceOfflineState({
                 tone="attention"
                 busy={busy}
                 title={t("shell.service.outOfDate.title")}
-                body={t("shell.service.outOfDate.body")}
+                details={t("shell.service.outOfDate.body")}
                 action={{
                     label: t(
                         busy
@@ -247,7 +266,6 @@ export function ServiceOfflineState({
                     onClick: () => void recover(restartService),
                 }}
                 secondary={diagnostics}
-                secondaryPlacement="attached"
             />
         );
     }
@@ -258,9 +276,8 @@ export function ServiceOfflineState({
                 icon="alert"
                 tone="attention"
                 title={t("shell.service.notInstalled.title")}
-                body={t("shell.service.notInstalled.body")}
+                details={t("shell.service.notInstalled.body")}
                 secondary={diagnostics}
-                secondaryPlacement="attached"
             />
         );
     }
@@ -271,7 +288,7 @@ export function ServiceOfflineState({
             tone="attention"
             busy={busy}
             title={t("shell.service.stopped.title")}
-            body={t("shell.service.stopped.body")}
+            details={t("shell.service.stopped.body")}
             action={{
                 label: t(
                     busy
@@ -283,7 +300,6 @@ export function ServiceOfflineState({
                 onClick: () => void recover(startService),
             }}
             secondary={diagnostics}
-            secondaryPlacement="attached"
         />
     );
 }
