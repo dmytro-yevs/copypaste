@@ -52,6 +52,8 @@ use attribution::{Attribution, FrontmostApp};
 /// this way the module does not depend on which binding revision exports
 /// which constant.
 const UTI_TEXT: &str = "public.utf8-plain-text";
+const UTI_RTF: &str = "public.rtf";
+const UTI_HTML: &str = "public.html";
 const UTI_PNG: &str = "public.png";
 const UTI_TIFF: &str = "public.tiff";
 const UTI_FILE_URL: &str = "public.file-url";
@@ -76,18 +78,27 @@ const UTI_MARKERS: [&str; 3] = [
 struct Utis {
     text: Retained<NSString>,
     text_probe: Retained<NSArray<NSString>>,
+    rtf: Retained<NSString>,
+    rtf_probe: Retained<NSArray<NSString>>,
+    html: Retained<NSString>,
+    html_probe: Retained<NSArray<NSString>>,
     png: Retained<NSString>,
     png_probe: Retained<NSArray<NSString>>,
     tiff: Retained<NSString>,
     tiff_probe: Retained<NSArray<NSString>>,
+    file_url: Retained<NSString>,
+    file_url_probe: Retained<NSArray<NSString>>,
     markers: Retained<NSArray<NSString>>,
 }
 
 impl Utis {
     fn new() -> Self {
         let text = NSString::from_str(UTI_TEXT);
+        let rtf = NSString::from_str(UTI_RTF);
+        let html = NSString::from_str(UTI_HTML);
         let png = NSString::from_str(UTI_PNG);
         let tiff = NSString::from_str(UTI_TIFF);
+        let file_url = NSString::from_str(UTI_FILE_URL);
         let markers: Vec<Retained<NSString>> =
             UTI_MARKERS.iter().map(|s| NSString::from_str(s)).collect();
         // `from_vec`, not `from_slice`: the latter needs `T: IsRetainable`, and
@@ -95,12 +106,18 @@ impl Utis {
         // is not. Taking owned `Retained`s is the supported path for it.
         Self {
             text_probe: NSArray::from_vec(vec![text.clone()]),
+            rtf_probe: NSArray::from_vec(vec![rtf.clone()]),
+            html_probe: NSArray::from_vec(vec![html.clone()]),
             png_probe: NSArray::from_vec(vec![png.clone()]),
             tiff_probe: NSArray::from_vec(vec![tiff.clone()]),
+            file_url_probe: NSArray::from_vec(vec![file_url.clone()]),
             markers: NSArray::from_vec(markers),
             text,
+            rtf,
+            html,
             png,
             tiff,
+            file_url,
         }
     }
 }
@@ -217,16 +234,30 @@ impl ClipboardSource for MacOsClipboard {
                 if pb.availableTypeFromArray(&utis.text_probe).is_some() {
                     pb.dataForType(&utis.text)
                         .map(|data| (data, copypaste_ipc::content_type::TEXT))
+                } else if pb.availableTypeFromArray(&utis.rtf_probe).is_some() {
+                    pb.dataForType(&utis.rtf)
+                        .map(|data| (data, copypaste_ipc::content_type::RICH_TEXT))
+                } else if pb.availableTypeFromArray(&utis.html_probe).is_some() {
+                    pb.dataForType(&utis.html)
+                        .map(|data| (data, copypaste_ipc::content_type::HTML))
                 } else if pb.availableTypeFromArray(&utis.png_probe).is_some() {
                     pb.dataForType(&utis.png)
                         .map(|data| (data, copypaste_ipc::content_type::IMAGE_PNG))
                 } else if pb.availableTypeFromArray(&utis.tiff_probe).is_some() {
                     pb.dataForType(&utis.tiff)
                         .map(|data| (data, copypaste_ipc::content_type::IMAGE_TIFF))
+                } else if pb.availableTypeFromArray(&utis.file_url_probe).is_some() {
+                    pb.dataForType(&utis.file_url)
+                        .map(|data| (data, copypaste_ipc::content_type::FILE))
                 } else {
                     None
                 }
             })?;
+            if content_type == copypaste_ipc::content_type::FILE
+                && unsafe { pb.pasteboardItems() }.is_none_or(|items| items.len() != 1)
+            {
+                return None;
+            }
 
             // I-18 (CopyPaste-1f5c): `length` is a field read, `to_vec` on a
             // multi-GiB item is a multi-GiB allocation. Check first.
@@ -244,11 +275,11 @@ impl ClipboardSource for MacOsClipboard {
             }
 
             let bytes = unsafe { data.bytes() }.to_vec();
-            if content_type == copypaste_ipc::content_type::TEXT {
-                // public.utf8-plain-text is UTF-8 by definition; malformed input
-                // is a third-party app's bug. §3.6's precedent is lossy
-                // conversion rather than dropping the user's copy, and I-37
-                // forbids panicking on a malformed payload.
+            if copypaste_ipc::content_type::is_text(content_type) {
+                // Clipboard text representations can contain malformed UTF-8.
+                // §3.6's precedent is lossy conversion rather than dropping
+                // the user's copy, and I-37 forbids panicking on a malformed
+                // payload.
                 let content = String::from_utf8_lossy(&bytes).into_owned();
                 if content.is_empty() {
                     return None;
@@ -258,6 +289,22 @@ impl ClipboardSource for MacOsClipboard {
                     binary_content: None,
                     file_path: None,
                     file_metadata: None,
+                    content_type: content_type.to_string(),
+                    app_bundle_id,
+                    app_name,
+                });
+            }
+            if content_type == copypaste_ipc::content_type::FILE {
+                let url = url::Url::parse(&String::from_utf8_lossy(&bytes)).ok()?;
+                let path = url.to_file_path().ok()?;
+                let filename = path.file_name()?.to_string_lossy();
+                let metadata =
+                    copypaste_core::FileMetadata::new(filename, "application/octet-stream")?;
+                return Some(Capture {
+                    content: String::new(),
+                    binary_content: None,
+                    file_path: Some(path),
+                    file_metadata: Some(metadata),
                     content_type: content_type.to_string(),
                     app_bundle_id,
                     app_name,
@@ -411,7 +458,9 @@ impl ClipboardSource for MacOsClipboard {
 mod tests {
     use std::sync::{Mutex, MutexGuard};
 
-    use objc2_foundation::NSData;
+    use objc2::{rc::Retained, runtime::ProtocolObject};
+    use objc2_app_kit::NSPasteboardWriting;
+    use objc2_foundation::{NSData, NSURL};
 
     use super::*;
 
@@ -459,6 +508,25 @@ mod tests {
     fn write_text(text: &str) {
         write_types(&[(UTI_TEXT, text.as_bytes())]);
         assert!(offers(UTI_TEXT), "the pasteboard refused a test write");
+    }
+
+    fn write_file_urls(paths: &[&std::path::Path]) {
+        autoreleasepool(|_| unsafe {
+            let objects: Vec<Retained<ProtocolObject<dyn NSPasteboardWriting>>> = paths
+                .iter()
+                .map(|path| {
+                    let path = NSString::from_str(path.to_str().unwrap());
+                    ProtocolObject::from_retained(NSURL::fileURLWithPath(&path))
+                })
+                .collect();
+            let objects = NSArray::from_vec(objects);
+            let pb = NSPasteboard::generalPasteboard();
+            let _ = pb.clearContents();
+            assert!(
+                pb.writeObjects(&objects),
+                "the file URLs were not put on the pasteboard"
+            );
+        });
     }
 
     fn clear() {
@@ -569,15 +637,91 @@ mod tests {
 
     #[test]
     #[ignore = "drives the real NSPasteboard"]
-    fn text_wins_when_an_image_is_also_offered() {
+    fn text_wins_when_rich_text_and_an_image_are_also_offered() {
         let _lock = serialised();
         let (_data_dir, mut clipboard) = test_clipboard();
 
-        write_types(&[(UTI_TEXT, b"plain fallback"), (UTI_PNG, b"ignored")]);
-        assert!(offers(UTI_TEXT) && offers(UTI_PNG));
+        write_types(&[
+            (UTI_TEXT, b"plain fallback"),
+            (UTI_RTF, b"{\\rtf1 ignored}"),
+            (UTI_HTML, b"<p>ignored</p>"),
+            (UTI_PNG, b"ignored"),
+        ]);
+        assert!(offers(UTI_TEXT) && offers(UTI_RTF) && offers(UTI_HTML) && offers(UTI_PNG));
         let capture = clipboard.poll().expect("plain text must win when offered");
         assert_eq!(capture.content, "plain fallback");
         assert_eq!(capture.content_type, copypaste_ipc::content_type::TEXT);
+    }
+
+    #[test]
+    #[ignore = "drives the real NSPasteboard"]
+    fn rich_text_and_html_prefer_a_plain_text_representation_when_cocoa_offers_one() {
+        let _lock = serialised();
+        let (_data_dir, mut clipboard) = test_clipboard();
+
+        for (uti, content, content_type) in [
+            (
+                UTI_RTF,
+                b"{\\rtf1 synthetic rich text}".as_slice(),
+                copypaste_ipc::content_type::RICH_TEXT,
+            ),
+            (
+                UTI_HTML,
+                b"<p>synthetic html</p>".as_slice(),
+                copypaste_ipc::content_type::HTML,
+            ),
+        ] {
+            write_types(&[(uti, content)]);
+            assert!(offers(uti), "{uti} was not put on the pasteboard");
+            let expected_type = if offers(UTI_TEXT) {
+                copypaste_ipc::content_type::TEXT
+            } else {
+                content_type
+            };
+            let capture = clipboard.poll().expect("rich fallback must be captured");
+            assert!(!capture.content.is_empty(), "{uti} produced empty content");
+            assert_eq!(capture.content_type, expected_type);
+            assert!(capture.binary_content.is_none());
+        }
+    }
+
+    #[test]
+    #[ignore = "drives the real NSPasteboard"]
+    fn one_local_file_url_is_captured_without_reading_its_bytes() {
+        let _lock = serialised();
+        let (_data_dir, mut clipboard) = test_clipboard();
+        let fixture_dir = tempfile::tempdir().unwrap();
+        let path = fixture_dir.path().join("fixture.bin");
+        std::fs::write(&path, b"synthetic file fixture").unwrap();
+        let url = url::Url::from_file_path(&path).unwrap();
+
+        write_types(&[(UTI_FILE_URL, url.as_str().as_bytes())]);
+        assert!(
+            offers(UTI_FILE_URL),
+            "the file URL was not put on the pasteboard"
+        );
+        let capture = clipboard.poll().expect("a local file URL must be captured");
+        assert_eq!(capture.content_type, copypaste_ipc::content_type::FILE);
+        assert_eq!(capture.file_path.as_deref(), Some(path.as_path()));
+        assert_eq!(
+            capture.file_metadata,
+            copypaste_core::FileMetadata::new("fixture.bin", "application/octet-stream")
+        );
+        assert!(capture.binary_content.is_none());
+
+        write_types(&[(UTI_FILE_URL, b"https://example.invalid/fixture.bin")]);
+        assert!(
+            clipboard.poll().is_none(),
+            "a non-local URL must not produce a file capture"
+        );
+
+        let second = fixture_dir.path().join("second.bin");
+        std::fs::write(&second, b"second fixture").unwrap();
+        write_file_urls(&[path.as_path(), second.as_path()]);
+        assert!(
+            clipboard.poll().is_none(),
+            "a multi-file change must not silently capture its first path"
+        );
     }
 
     /// T-8, T-9 and the Fix-4 / "DUP-ON-COPY" pair, asserted as behaviour
