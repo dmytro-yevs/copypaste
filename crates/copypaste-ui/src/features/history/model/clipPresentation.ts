@@ -52,6 +52,12 @@ export function clipCopyAction(kind: Kind): ClipCopyActionPresentation {
     : { icon: "copy", label: t("history.detail.copy") };
 }
 
+export function clipPotentialRevealAction(revealed: boolean): { icon: "eye" | "eyeOff"; label: string } {
+  return revealed
+    ? { icon: "eyeOff", label: t("history.row.hideOriginal") }
+    : { icon: "eye", label: t("history.row.showOriginal") };
+}
+
 export function historyKindFilterLabel(kind: "all" | Kind): string {
   return kind === "all" ? t("history.kind.all") : t(`history.kind.${kind}`);
 }

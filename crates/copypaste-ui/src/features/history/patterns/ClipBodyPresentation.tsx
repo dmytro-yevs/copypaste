@@ -30,17 +30,6 @@ export function ClipBodyNotices({ reason, canRetry, onRetry, potentialFinding }:
     </>;
 }
 
-export function ClipPotentialRevealButton({ revealed, disabled, onClick }: {
-    revealed: boolean;
-    disabled: boolean;
-    onClick: () => void;
-}) {
-    const { t } = useTranslation();
-    return <Button variant="secondary" icon={revealed ? "eyeOff" : "eye"} disabled={disabled} aria-pressed={revealed} onClick={onClick}>
-        {t(revealed ? "history.row.hideOriginal" : "history.row.showOriginal")}
-    </Button>;
-}
-
 export function ClipBodyView({ mode, item, kind, body, copyPending, revealPending, onReveal }: {
     mode: "inspector" | "reader";
     item: Item;
@@ -58,8 +47,8 @@ export function ClipBodyView({ mode, item, kind, body, copyPending, revealPendin
             type="button"
             variant="ghost"
             disabled={copyPending}
+            pending={revealPending}
             aria-label={t("history.row.sensitiveReveal")}
-            aria-busy={revealPending || undefined}
             className={reader ? readerStyles.masked : inspectorStyles.protected}
             onClick={() => !revealPending && onReveal(item)}
         >
@@ -69,10 +58,9 @@ export function ClipBodyView({ mode, item, kind, body, copyPending, revealPendin
                     <span className={readerStyles.redactionShort} />
                     <span className={readerStyles.redactionMedium} />
                 </span>
-                {revealPending && <Icon name="spinner" className={readerStyles.spinner} />}
             </> : <>
                 <span aria-hidden="true" className={inspectorStyles.protectedLines}><i /><i /><i /></span>
-                <Icon name="eye" size="sm" />
+                {!revealPending && <Icon name="eye" size="sm" />}
                 <strong>{t("history.row.sensitivePlaceholder")}</strong>
             </>}
         </Button>;

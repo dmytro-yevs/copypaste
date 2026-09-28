@@ -5,9 +5,9 @@ import {
     Dialog,
 } from "@/components/ui";
 import { StateView } from "@/components/shared/StateView";
-import { ClipBodyNotices, ClipBodyView, ClipPotentialRevealButton } from "@/features/history/patterns/ClipBodyPresentation";
+import { ClipBodyNotices, ClipBodyView } from "@/features/history/patterns/ClipBodyPresentation";
 import { originName, wontSync, type OriginDevice } from "@/lib/itemOrigin";
-import { clipboardCopyPresentation, clipCopyAction } from "@/features/history/model/clipPresentation";
+import { clipboardCopyPresentation, clipCopyAction, clipPotentialRevealAction } from "@/features/history/model/clipPresentation";
 import { useClipboardWriteAvailability } from "@/hooks/useClipboardWriteAvailability";
 import { LibraryInspectorPanel } from "@/features/history/patterns/LibraryInspectorPanel";
 import { useViewportMetrics } from "@/hooks/useViewportMetrics";
@@ -112,6 +112,7 @@ export function ClipDetailDialog({
           })
         : null;
     const copyAction = clipCopyAction(kind);
+    const potentialRevealAction = clipPotentialRevealAction(potentialRevealed);
 
     const meta = item
         ? [absoluteTime(item.created_at), clipTypeMetadata(kind).label]
@@ -179,14 +180,16 @@ export function ClipDetailDialog({
                 },
             }}
             footer={expanded ? <>
-                {potentialFinding !== null && <ClipPotentialRevealButton
-                    revealed={potentialRevealed}
+                {potentialFinding !== null && <Button
+                    variant="secondary"
+                    icon={potentialRevealAction.icon}
                     disabled={copying}
+                    aria-pressed={potentialRevealed}
                     onClick={() => setShownFinding(potentialRevealed ? null : {
                         id: item!.id,
                         finding: potentialFinding,
                     })}
-                />}
+                >{potentialRevealAction.label}</Button>}
                 {revealed && <Button variant="secondary" icon="eyeOff" disabled={copying} onClick={onHide}>
                     {t("history.detail.hide")}
                 </Button>}

@@ -11,8 +11,8 @@ import {
     TruncatedValue,
 } from "@/components/shared";
 import { Button, Icon, iconComponent } from "@/components/ui";
-import { ClipBodyNotices, ClipBodyView, ClipPotentialRevealButton } from "@/features/history/patterns/ClipBodyPresentation";
-import { clipboardCopyPresentation, clipCopyAction } from "@/features/history/model/clipPresentation";
+import { ClipBodyNotices, ClipBodyView } from "@/features/history/patterns/ClipBodyPresentation";
+import { clipboardCopyPresentation, clipCopyAction, clipPotentialRevealAction } from "@/features/history/model/clipPresentation";
 import { useClipboardWriteAvailability } from "@/hooks/useClipboardWriteAvailability";
 import { originName, type OriginDevice } from "@/lib/itemOrigin";
 import { SourceAppIcon } from "@/features/source-apps";
@@ -170,6 +170,7 @@ export function LibraryInspectorPanel({
     const content = body.state === "content" ? body.content : "";
     const type = clipTypeMetadata(kind, content || item.content || "");
     const copyAction = clipCopyAction(kind);
+    const potentialRevealAction = clipPotentialRevealAction(potentialRevealed);
     const SourceIcon = iconComponent(source.icon);
     const device = origin ? originName(origin) : t("common.unknown");
     const created = absoluteTime(item.created_at);
@@ -256,9 +257,11 @@ export function LibraryInspectorPanel({
                         onClick={() => onDelete(item)}
                     />
                     {potentialFinding !== null ? (
-                        <ClipPotentialRevealButton
-                            revealed={potentialRevealed}
+                        <Button
+                            variant="secondary"
+                            icon={potentialRevealAction.icon}
                             disabled={copyPending}
+                            aria-pressed={potentialRevealed}
                             onClick={() =>
                                 setShownFinding(
                                     potentialRevealed
@@ -266,7 +269,7 @@ export function LibraryInspectorPanel({
                                         : { id: item.id, finding: potentialFinding },
                                 )
                             }
-                        />
+                        >{potentialRevealAction.label}</Button>
                     ) : null}
                     {revealed ? (
                         <Button variant="secondary" disabled={copyPending} onClick={onHide}>

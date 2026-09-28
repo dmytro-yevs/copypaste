@@ -22,6 +22,29 @@ const unsupported = item({
 describe("QuickPasteRow", () => {
   beforeEach(() => { clipboardAvailability.value = "available"; });
 
+  it("anchors copy and unavailable select tooltips to their actionable buttons", async () => {
+    const user = userEvent.setup();
+    const target = item({ content: "copy target" });
+    const props = {
+      item: target, active: true, shortcut: null, pinPending: false,
+      origin: null, fullContent: null, fullContentFailed: false,
+      onSelect: () => {}, onSelectFromKeyboard: () => {},
+      onCopy: () => {}, onTogglePin: () => {},
+    };
+    const { rerender } = render(<TooltipProvider><QuickPasteRow {...props} /></TooltipProvider>);
+    const copy = screen.getByRole("button", { name: "Copy copy target" });
+    await user.hover(copy);
+    expect(await screen.findByRole("tooltip", { name: "Copy copy target" })).toBeTruthy();
+    expect(copy.getAttribute("aria-describedby")).not.toBeNull();
+
+    clipboardAvailability.value = "unsupported_on_platform";
+    rerender(<TooltipProvider><QuickPasteRow {...props} /></TooltipProvider>);
+    const select = screen.getByRole("button", { name: "Select copy target" });
+    await user.hover(select);
+    expect(await screen.findByRole("tooltip", { name: "Select copy target" })).toBeTruthy();
+    expect(select.getAttribute("aria-describedby")).not.toBeNull();
+  });
+
   it("selects an unavailable row by touch or keyboard without invoking copy", async () => {
     clipboardAvailability.value = "unsupported_on_platform";
     const onSelect = vi.fn();

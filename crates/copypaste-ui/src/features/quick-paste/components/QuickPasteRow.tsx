@@ -92,6 +92,8 @@ export function QuickPasteRow({
           ? rowLabel
           : item.content ?? "";
   const compactContent = cardContent.replace(/\s+/gu, " ").trim();
+  const copyHitLabel = `${t("quickPaste.row.copyPrefix")} ${image ? t("quickPaste.row.image") : rowLabel}`;
+  const selectHitLabel = `${t("quickPaste.row.selectPrefix")} ${image ? t("quickPaste.row.image") : rowLabel}`;
 
   const copyButton = (
     <Button
@@ -117,7 +119,8 @@ export function QuickPasteRow({
       onClick={(event) => {
         if (!copyPending && copyAvailability.canCopy && event.detail === 0) onCopy(false);
       }}
-      aria-label={`${t("quickPaste.row.copyPrefix")} ${image ? t("quickPaste.row.image") : rowLabel}`}
+      aria-label={copyHitLabel}
+      tooltip={copyAvailability.canCopy ? copyHitLabel : undefined}
       className={styles.hit}
     />
   );
@@ -145,7 +148,8 @@ export function QuickPasteRow({
       onClick={(event) => {
         if (event.detail === 0) onSelectFromKeyboard();
       }}
-      aria-label={`${t("quickPaste.row.selectPrefix")} ${image ? t("quickPaste.row.image") : rowLabel}`}
+      aria-label={selectHitLabel}
+      tooltip={!copyAvailability.canCopy ? selectHitLabel : undefined}
       className={`${styles.hit} ${styles.selectHit}`}
     />
   );
