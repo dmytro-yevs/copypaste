@@ -49,6 +49,8 @@ macro_rules! command_registry {
                 ServiceState => ("service_state", crate::commands::service::service_state, "undefined", "ServiceState"),
                 StartService => ("start_service", crate::commands::service::start_service, "undefined", "ServiceState"),
                 RestartService => ("restart_service", crate::commands::service::restart_service, "undefined", "ServiceState"),
+                QuitFailureRead => ("quit_failure_read", crate::commands::service::quit_failure_read, "undefined", "QuitFailureView | null"),
+                QuitFailureAck => ("quit_failure_ack", crate::commands::service::quit_failure_ack, "{ id: number }", "boolean"),
                 HideWindow => ("hide_window", crate::commands::service::hide_window, "undefined", "void"),
                 SetQuickPastePreview => ("set_quick_paste_preview", crate::commands::service::set_quick_paste_preview, "{ open: boolean }", "QuickPastePreviewLayout"),
                 ShowMainWindow => ("show_main_window", crate::commands::service::show_main_window, "undefined", "void"),
@@ -87,6 +89,12 @@ macro_rules! command_registry {
                 PairConfirm => ("pair_confirm", crate::commands::pairing::pair_confirm, "undefined", "PairingCeremony"),
                 PairReject => ("pair_reject", crate::commands::pairing::pair_reject, "undefined", "PairingCeremony"),
                 PairCancel => ("pair_cancel", crate::commands::pairing::pair_cancel, "undefined", "PairingCeremony"),
+                PairSecureState => ("pair_secure_state", crate::commands::pairing::pair_secure_state, "undefined", "SecurePairingView"),
+                PairSecureRevealInvite => ("pair_secure_reveal_invite", crate::commands::pairing::pair_secure_reveal_invite, "{ generation: number }", "SecureInviteView"),
+                PairSecureRevealSas => ("pair_secure_reveal_sas", crate::commands::pairing::pair_secure_reveal_sas, "{ generation: number }", "SecureSasView"),
+                PairSecureJoin => ("pair_secure_join", crate::commands::pairing::pair_secure_join, "{ generation: number; code: string; addr: string }", "PairingCeremony"),
+                PairSecureDecide => ("pair_secure_decide", crate::commands::pairing::pair_secure_decide, "{ generation: number; accept: boolean }", "PairingCeremony"),
+                PairSecureClose => ("pair_secure_close", crate::commands::pairing::pair_secure_close, "undefined", "void"),
                 CopyText => ("copy_text", crate::commands::clipboard::copy_text, "{ text: string }", "void"),
             }
             preview_only {
@@ -95,6 +103,25 @@ macro_rules! command_registry {
             }
         }
     };
+}
+
+/// The protected surfaces do not inherit the ordinary application's command
+/// vocabulary. Own commands are not restricted by Tauri capability JSON.
+pub(crate) fn window_command_allowed(label: &str, command: &str) -> bool {
+    const PAIRING: &[&str] = &[
+        "pair_secure_state",
+        "pair_secure_reveal_invite",
+        "pair_secure_reveal_sas",
+        "pair_secure_join",
+        "pair_secure_decide",
+        "pair_secure_close",
+    ];
+    const QUIT: &[&str] = &["quit_failure_read", "quit_failure_ack"];
+    match label {
+        "pairing" => PAIRING.contains(&command),
+        "quit-failure" => QUIT.contains(&command),
+        _ => !PAIRING.contains(&command) && !QUIT.contains(&command),
+    }
 }
 
 macro_rules! define_contract {
@@ -178,5 +205,34 @@ mod tests {
             UiCommandName::NATIVE.len() + UiCommandName::PREVIEW_ONLY.len()
         );
         assert_eq!(UiCommandName::parse("future_command"), None);
+    }
+
+    #[test]
+    fn protected_windows_have_only_their_explicit_commands() {
+        for name in UiCommandName::NATIVE {
+            let command = name.as_str();
+            let pairing = command.starts_with("pair_secure_");
+            let quit = command.starts_with("quit_failure_");
+            assert_eq!(
+                window_command_allowed("pairing", command),
+                pairing,
+                "{command}"
+            );
+            assert_eq!(
+                window_command_allowed("quit-failure", command),
+                quit,
+                "{command}"
+            );
+            assert_eq!(
+                window_command_allowed("main", command),
+                !pairing && !quit,
+                "{command}"
+            );
+            assert_eq!(
+                window_command_allowed("quick-paste", command),
+                !pairing && !quit,
+                "{command}"
+            );
+        }
     }
 }

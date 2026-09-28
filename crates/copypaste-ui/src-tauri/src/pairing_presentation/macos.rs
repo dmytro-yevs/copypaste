@@ -1,725 +1,586 @@
-//! AppKit owns every pairing credential and decision on macOS.
+//! Protected, first-party pairing WebView on macOS.
 //!
-//! macOS has no reusable system QR-scanner sheet. Manual join therefore uses
-//! AppKit's protected text input; QR creation uses the maintained `qrcode`
-//! encoder, and no credential is copied or sent through the WebView.
+//! Only this window may read an explicitly revealed invite or bound SAS. The
+//! ordinary application and Quick Paste windows receive `PairingCeremony` only.
 
-#![allow(unsafe_code)]
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
-use std::cell::RefCell;
-use std::io::Cursor;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::time::Duration;
-
-use block2::RcBlock;
-use dispatch2::{DispatchQueue, DispatchQueueGlobalPriority, DispatchTime, GlobalQueueIdentifier};
-use image::{DynamicImage, ImageFormat, Luma};
-use objc2::runtime::AnyObject;
-use objc2::{declare_class, msg_send_id, mutability, sel, ClassType, DeclaredClass};
-use objc2_app_kit::{
-    NSAccessibility, NSAlert, NSAlertFirstButtonReturn, NSApplication, NSBackingStoreType,
-    NSButton, NSColor, NSImage, NSImageView, NSModalResponseCancel, NSSecureTextField, NSTextField,
-    NSView, NSWindow, NSWindowSharingType, NSWindowStyleMask,
-};
-use objc2_foundation::{
-    MainThreadMarker, NSData, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
-};
-use qrcode::QrCode;
+use copypaste_ipc::{PairingInviteData, PairingProgressData, PairingState};
+use tauri::{AppHandle, Manager as _, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use zeroize::Zeroizing;
 
 use super::invite::validate_native_invite_fields;
-use super::macos_model::{keeps_invite_visible, progress_copy, sas_digits};
+use super::macos_model::sas_digits;
 use super::pairing_link::encode_pairing_link;
 use super::{
     NativeAbort, NativePairingUi, NativePresentationOutcome, NativeScanOutcome, PairingDecision,
     PairingPresentationState,
 };
-use copypaste_ipc::{PairingInviteData, PairingProgressData, PairingState};
+use crate::backend::{BackendError, PairingBackend as _, Result};
+use crate::commands::pairing::{
+    PairingCeremony, SecureInviteView, SecurePairingView, SecureSasView,
+};
+use crate::SelectedBackend;
+
+pub(crate) const WINDOW_LABEL: &str = "pairing";
+const ROUTE: &str = "index.html?surface=pairing";
+const WRONG_WINDOW: &str = "Protected pairing is unavailable in this window.";
+const EXPIRED: &str = "This pairing session expired. Start again.";
+
+#[derive(Clone, Default)]
+pub(crate) struct SecurePairingSession {
+    inner: Arc<Mutex<Session>>,
+    operation: Arc<tokio::sync::Mutex<()>>,
+}
+
+#[derive(Default)]
+struct Session {
+    generation: u64,
+    phase: Phase,
+    ceremony_id: Option<String>,
+    invite: Option<Invite>,
+    revealed_sas: Option<BoundSas>,
+}
+
+struct BoundSas {
+    value: Zeroizing<String>,
+    expires_at: Instant,
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum Phase {
+    #[default]
+    Idle,
+    Join,
+    Invite,
+    Progress,
+    Confirm,
+    Terminal,
+}
+
+struct Invite {
+    code: Zeroizing<String>,
+    address: Zeroizing<String>,
+    link: Zeroizing<String>,
+    expires_at: Instant,
+}
+
+impl SecurePairingSession {
+    fn reset(&self, phase: Phase) {
+        if let Ok(mut session) = self.inner.lock() {
+            session.generation = session.generation.wrapping_add(1);
+            session.phase = phase;
+            session.ceremony_id = None;
+            session.invite = None;
+            session.revealed_sas = None;
+        }
+    }
+
+    fn begin_invite(&self, invite: &PairingInviteData) -> bool {
+        let Some(address) = invite.listen_addr.as_ref() else {
+            return false;
+        };
+        let Some(link) = encode_pairing_link(invite) else {
+            return false;
+        };
+        let Some(expires_at) =
+            Instant::now().checked_add(Duration::from_secs(invite.expires_in_secs))
+        else {
+            return false;
+        };
+        if expires_at <= Instant::now() {
+            return false;
+        }
+        let Ok(mut session) = self.inner.lock() else {
+            return false;
+        };
+        session.generation = session.generation.wrapping_add(1);
+        session.phase = Phase::Invite;
+        session.ceremony_id = Some(invite.pairing_id.clone());
+        session.invite = Some(Invite {
+            code: Zeroizing::new(invite.code.clone()),
+            address: Zeroizing::new(address.clone()),
+            link,
+            expires_at,
+        });
+        session.revealed_sas = None;
+        true
+    }
+
+    fn progress(&self, progress: &PairingProgressData) {
+        let _ = self.progress_if_generation(progress, None);
+    }
+
+    fn progress_if_generation(
+        &self,
+        progress: &PairingProgressData,
+        expected: Option<u64>,
+    ) -> bool {
+        let Ok(mut session) = self.inner.lock() else {
+            return false;
+        };
+        if expected.is_some_and(|generation| session.generation != generation) {
+            return false;
+        }
+        if session.phase == Phase::Idle {
+            return true;
+        }
+        if session.ceremony_id.is_some() && session.ceremony_id != progress.pairing_id {
+            session.generation = session.generation.wrapping_add(1);
+            session.invite = None;
+            session.revealed_sas = None;
+        }
+        if progress.pairing_id.is_some() {
+            session.ceremony_id = progress.pairing_id.clone();
+        }
+        session.phase = match progress.state {
+            PairingState::WaitingForPeer if session.invite.is_some() => Phase::Invite,
+            PairingState::Handshaking | PairingState::WaitingForPeer => Phase::Progress,
+            PairingState::AwaitingConfirmation => Phase::Confirm,
+            PairingState::Idle if session.phase == Phase::Join => Phase::Join,
+            _ => Phase::Terminal,
+        };
+        if session.phase != Phase::Invite {
+            session.invite = None;
+        }
+        if session.phase != Phase::Confirm {
+            session.revealed_sas = None;
+        }
+        true
+    }
+
+    pub(crate) fn clear(&self) -> (bool, u64, Option<String>) {
+        let Ok(mut session) = self.inner.lock() else {
+            return (false, 0, None);
+        };
+        let active = matches!(
+            session.phase,
+            Phase::Join | Phase::Invite | Phase::Progress | Phase::Confirm
+        );
+        let ceremony_id = session.ceremony_id.take();
+        session.generation = session.generation.wrapping_add(1);
+        session.phase = Phase::Idle;
+        session.invite = None;
+        session.revealed_sas = None;
+        (active, session.generation, ceremony_id)
+    }
+
+    fn generation(&self) -> u64 {
+        self.inner.lock().map_or(0, |session| session.generation)
+    }
+
+    fn is_generation(&self, generation: u64) -> bool {
+        self.inner
+            .lock()
+            .is_ok_and(|session| session.generation == generation)
+    }
+
+    pub(crate) async fn lock_operation(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.operation.lock().await
+    }
+
+    fn phase(&self) -> &'static str {
+        self.inner
+            .lock()
+            .map_or("idle", |session| match session.phase {
+                Phase::Idle => "idle",
+                Phase::Join => "join",
+                Phase::Invite => "invite",
+                Phase::Progress => "progress",
+                Phase::Confirm => "confirm",
+                Phase::Terminal => "terminal",
+            })
+    }
+
+    fn reveal_invite(
+        &self,
+        progress: &PairingProgressData,
+        generation: u64,
+    ) -> Result<SecureInviteView> {
+        let session = self
+            .inner
+            .lock()
+            .map_err(|_| BackendError::Invalid(EXPIRED))?;
+        let invite = session
+            .invite
+            .as_ref()
+            .ok_or(BackendError::Invalid(EXPIRED))?;
+        if session.generation != generation
+            || session.phase != Phase::Invite
+            || progress.state != PairingState::WaitingForPeer
+            || session.ceremony_id != progress.pairing_id
+            || invite.expires_at <= Instant::now()
+        {
+            return Err(BackendError::Invalid(EXPIRED));
+        }
+        let qr_svg = qrcode::QrCode::new(invite.link.as_bytes())
+            .map_err(|_| BackendError::Invalid(EXPIRED))?
+            .render::<qrcode::render::svg::Color>()
+            .min_dimensions(256, 256)
+            .build();
+        let expires_in_ms = invite
+            .expires_at
+            .saturating_duration_since(Instant::now())
+            .as_millis() as u64;
+        Ok(SecureInviteView {
+            generation,
+            ceremony_id: session
+                .ceremony_id
+                .clone()
+                .ok_or(BackendError::Invalid(EXPIRED))?,
+            code: invite.code.to_string(),
+            address: invite.address.to_string(),
+            qr_svg,
+            expires_in_ms,
+        })
+    }
+
+    fn reveal_sas(&self, progress: &PairingProgressData, generation: u64) -> Result<SecureSasView> {
+        let mut session = self
+            .inner
+            .lock()
+            .map_err(|_| BackendError::Invalid(EXPIRED))?;
+        let remaining = progress
+            .expires_in_ms
+            .filter(|ms| *ms > 0)
+            .ok_or(BackendError::Invalid(EXPIRED))?;
+        if session.generation != generation
+            || session.phase != Phase::Confirm
+            || progress.state != PairingState::AwaitingConfirmation
+            || session.ceremony_id != progress.pairing_id
+        {
+            return Err(BackendError::Invalid(EXPIRED));
+        }
+        let sas = sas_digits(progress)
+            .ok_or(BackendError::Invalid(EXPIRED))?
+            .to_owned();
+        session.revealed_sas = Some(BoundSas {
+            value: Zeroizing::new(sas.clone()),
+            expires_at: Instant::now() + Duration::from_millis(remaining),
+        });
+        Ok(SecureSasView {
+            generation,
+            ceremony_id: session
+                .ceremony_id
+                .clone()
+                .ok_or(BackendError::Invalid(EXPIRED))?,
+            sas,
+            expires_in_ms: remaining,
+        })
+    }
+
+    fn take_decision(&self, progress: &PairingProgressData, generation: u64) -> Result<()> {
+        let mut session = self
+            .inner
+            .lock()
+            .map_err(|_| BackendError::Invalid(EXPIRED))?;
+        if session.generation != generation
+            || session.phase != Phase::Confirm
+            || session.revealed_sas.as_ref().is_none_or(|bound| {
+                bound.expires_at <= Instant::now()
+                    || progress.sas.as_deref() != Some(bound.value.as_str())
+            })
+            || progress.state != PairingState::AwaitingConfirmation
+            || progress.expires_in_ms.is_none_or(|ms| ms == 0)
+            || session.ceremony_id != progress.pairing_id
+        {
+            return Err(BackendError::Invalid(EXPIRED));
+        }
+        session.revealed_sas = None;
+        Ok(())
+    }
+}
 
 pub(crate) struct MacOsPairingUi {
-    abort: NativeAbort,
-}
-
-struct ActiveInvite {
-    sheet: objc2::rc::Retained<NSWindow>,
-    code: objc2::rc::Retained<NSTextField>,
-    address: objc2::rc::Retained<NSTextField>,
-    dismissed: Arc<AtomicBool>,
-    watchdog: ModalDeadline,
-}
-
-#[derive(Clone, Copy)]
-enum SheetAction {
-    Accept,
-    Reject,
-    Cancel,
-}
-
-struct PairingSheetIvars {
-    action: Arc<dyn Fn(SheetAction) + Send + Sync>,
-}
-
-declare_class!(
-    struct PairingSheetView;
-
-    unsafe impl ClassType for PairingSheetView {
-        type Super = NSView;
-        type Mutability = mutability::MainThreadOnly;
-        const NAME: &'static str = "CopyPastePairingSheetView";
-    }
-
-    impl DeclaredClass for PairingSheetView {
-        type Ivars = PairingSheetIvars;
-    }
-
-    unsafe impl NSObjectProtocol for PairingSheetView {}
-
-    unsafe impl PairingSheetView {
-        #[method(acceptPairing:)]
-        fn accept_pairing(&self, _sender: &AnyObject) {
-            (self.ivars().action)(SheetAction::Accept);
-        }
-
-        #[method(rejectPairing:)]
-        fn reject_pairing(&self, _sender: &AnyObject) {
-            (self.ivars().action)(SheetAction::Reject);
-        }
-
-        #[method(cancelPairing:)]
-        fn cancel_pairing(&self, _sender: &AnyObject) {
-            (self.ivars().action)(SheetAction::Cancel);
-        }
-    }
-);
-
-impl PairingSheetView {
-    unsafe fn new(
-        mtm: MainThreadMarker,
-        frame: NSRect,
-        action: Arc<dyn Fn(SheetAction) + Send + Sync>,
-    ) -> objc2::rc::Retained<Self> {
-        let view = mtm.alloc::<Self>().set_ivars(PairingSheetIvars { action });
-        unsafe { msg_send_id![super(view), initWithFrame: frame] }
-    }
-}
-
-thread_local! {
-    static ACTIVE_INVITE: RefCell<Option<ActiveInvite>> = const { RefCell::new(None) };
+    app: AppHandle,
+    session: SecurePairingSession,
+    _abort: NativeAbort,
 }
 
 impl MacOsPairingUi {
-    pub(crate) fn new(abort: NativeAbort) -> Self {
-        Self { abort }
+    pub(crate) fn new(app: AppHandle, session: SecurePairingSession, abort: NativeAbort) -> Self {
+        Self {
+            app,
+            session,
+            _abort: abort,
+        }
+    }
+
+    fn open(&self) -> bool {
+        let window = match self.app.get_webview_window(WINDOW_LABEL) {
+            Some(window) => window,
+            None => match WebviewWindowBuilder::new(
+                &self.app,
+                WINDOW_LABEL,
+                WebviewUrl::App(ROUTE.into()),
+            )
+            .title("Connect a device")
+            .inner_size(560.0, 520.0)
+            .resizable(false)
+            .visible(false)
+            .content_protected(true)
+            .on_navigation(|url| {
+                url.path() == "/index.html" && url.query() == Some("surface=pairing")
+            })
+            .build()
+            {
+                Ok(window) => window,
+                Err(_) => return false,
+            },
+        };
+        if window.set_content_protected(true).is_err()
+            || window.show().is_err()
+            || window.set_focus().is_err()
+        {
+            let _ = window.destroy();
+            return false;
+        }
+        true
     }
 }
 
 impl NativePairingUi for MacOsPairingUi {
     fn present_invite(&self, invite: &PairingInviteData) -> NativePresentationOutcome {
-        let Some(listen_addr) = invite.listen_addr.as_deref() else {
-            show_message(
-                "Pair a new device",
-                "This Mac does not have a reachable pairing address yet. Check the network and try again.",
-            );
+        if !self.session.begin_invite(invite) || !self.open() {
+            self.session.clear();
             return NativePresentationOutcome::Unavailable;
-        };
-        let Some(payload) = encode_pairing_link(invite) else {
-            show_message(
-                "Pair a new device",
-                "This Mac does not have a reachable pairing address yet. Check the network and try again.",
-            );
-            return NativePresentationOutcome::Unavailable;
-        };
-        let Some(png) = render_qr_png(payload.as_bytes()) else {
-            show_message(
-                "Pair a new device",
-                "The pairing code could not be rendered. Try generating a new invite.",
-            );
-            return NativePresentationOutcome::Unavailable;
-        };
-        drop(payload);
-        let expires = invite.expires_in_secs;
-        let code = Zeroizing::new(invite.code.clone());
-        let address = Zeroizing::new(listen_addr.to_owned());
-        let abort = self.abort.clone();
-
-        on_main(move |mtm| unsafe {
-            let application = NSApplication::sharedApplication(mtm);
-            let Some(parent) = application.mainWindow() else {
-                return NativePresentationOutcome::Unavailable;
-            };
-
-            close_active_invite(None);
-            let dismissed = Arc::new(AtomicBool::new(false));
-            let expiry_token = Arc::clone(&dismissed);
-            let Some(watchdog) = ModalDeadline::arm(Duration::from_secs(expires), move || {
-                close_active_invite(Some(&expiry_token));
-            }) else {
-                return NativePresentationOutcome::Refresh;
-            };
-            let cancel_token = Arc::clone(&dismissed);
-            let cancel_abort = abort.clone();
-            let action: Arc<dyn Fn(SheetAction) + Send + Sync> = Arc::new(move |action| {
-                if matches!(action, SheetAction::Cancel) && close_active_invite(Some(&cancel_token))
-                {
-                    (cancel_abort)();
-                }
-            });
-            let Some((invite_view, code_value, address_value)) =
-                invite_view(mtm, &png, &code, &address, action)
-            else {
-                watchdog.finish();
-                return NativePresentationOutcome::Unavailable;
-            };
-            let shown = product_sheet(mtm, &invite_view, "CopyPaste");
-            let callback_code = code_value.clone();
-            let callback_address = address_value.clone();
-            let callback_watchdog = watchdog.clone();
-            let callback_token = Arc::clone(&dismissed);
-            let callback_abort = abort.clone();
-            let callback = RcBlock::new(move |_response| {
-                callback_code.setStringValue(&NSString::from_str(""));
-                callback_address.setStringValue(&NSString::from_str(""));
-                let expired = callback_watchdog.finish();
-                if let Some(invite) = take_active_invite(Some(&callback_token)) {
-                    invite.code.setStringValue(&NSString::from_str(""));
-                    invite.address.setStringValue(&NSString::from_str(""));
-                    invite.watchdog.finish();
-                    if !invite.dismissed.load(Ordering::Acquire) && !expired {
-                        (callback_abort)();
-                    }
-                }
-            });
-            ACTIVE_INVITE.with(|active| {
-                *active.borrow_mut() = Some(ActiveInvite {
-                    sheet: shown.clone(),
-                    code: code_value,
-                    address: address_value,
-                    dismissed,
-                    watchdog,
-                });
-            });
-            parent.beginSheet_completionHandler(&shown, Some(&callback));
-            NativePresentationOutcome::Presented
-        })
+        }
+        NativePresentationOutcome::Presented
     }
 
     fn scan_invite(&self) -> NativeScanOutcome {
-        on_main(|mtm| unsafe {
-            loop {
-                let prompt = alert(
-                    mtm,
-                    "Join another device",
-                    "Enter the pairing code and address shown by CopyPaste on the other device. Both stay in this native dialog.",
-                    &["Join", "Cancel"],
-                );
-                let (form, code, address) = join_form(mtm);
-                prompt.setAccessoryView(Some(&form));
-                let response = prompt.runModal();
-                if response != NSAlertFirstButtonReturn {
-                    code.setStringValue(&NSString::from_str(""));
-                    address.setStringValue(&NSString::from_str(""));
-                    return NativeScanOutcome::Cancelled;
-                }
-
-                let code_value = Zeroizing::new(code.stringValue().to_string());
-                let address_value = Zeroizing::new(address.stringValue().to_string());
-                code.setStringValue(&NSString::from_str(""));
-                address.setStringValue(&NSString::from_str(""));
-                if let Some(scanned) = validate_native_invite_fields(code_value, address_value) {
-                    return NativeScanOutcome::Scanned(scanned);
-                }
-
-                let invalid = alert(
-                    mtm,
-                    "That code or address is not valid",
-                    "Check both values shown by CopyPaste on the other device and try again.",
-                    &["Try Again", "Cancel"],
-                );
-                if invalid.runModal() != NSAlertFirstButtonReturn {
-                    return NativeScanOutcome::Cancelled;
-                }
-            }
-        })
+        self.session.reset(Phase::Join);
+        if self.open() {
+            NativeScanOutcome::Cancelled
+        } else {
+            self.session.clear();
+            NativeScanOutcome::Unavailable
+        }
     }
 
     fn present_progress(&self, progress: &PairingProgressData) -> PairingPresentationState {
-        if keeps_invite_visible(progress.state) {
-            return PairingPresentationState::Presented;
-        }
-        on_main(|_| close_active_invite(None));
-        // SAS comparison remains owned by confirm(), which the shared flow
-        // invokes exactly once after the ceremony reaches this state.
-        if progress.state == PairingState::AwaitingConfirmation {
-            return PairingPresentationState::Presented;
-        }
-        PairingPresentationState::Available
+        self.session.progress(progress);
+        PairingPresentationState::Presented
     }
 
-    fn confirm(&self, progress: &PairingProgressData) -> Option<PairingDecision> {
-        if progress.state != PairingState::AwaitingConfirmation {
-            return None;
-        }
-        let sas = sas_digits(progress)?.to_owned();
-        let remaining = Duration::from_millis(progress.expires_in_ms?);
-        let Some(watchdog) = ModalDeadline::arm(remaining, || unsafe {
-            NSApplication::sharedApplication(
-                MainThreadMarker::new().expect("deadline runs on the main thread"),
-            )
-            .abortModal();
-        }) else {
-            return Some(PairingDecision::Refresh);
-        };
-        let copy = progress_copy(progress);
-
-        Some(on_main(move |mtm| unsafe {
-            let decision = Arc::new(std::sync::atomic::AtomicU8::new(0));
-            let action_decision = Arc::clone(&decision);
-            let action: Arc<dyn Fn(SheetAction) + Send + Sync> = Arc::new(move |action| {
-                let value = match action {
-                    SheetAction::Accept => 1,
-                    SheetAction::Reject => 2,
-                    SheetAction::Cancel => 3,
-                };
-                action_decision.store(value, Ordering::Release);
-                NSApplication::sharedApplication(
-                    MainThreadMarker::new().expect("pairing action runs on the main thread"),
-                )
-                .stopModal();
-            });
-            let code = sas_view(mtm, &sas, copy.message, action);
-            let sheet = product_sheet(mtm, &code, copy.title);
-            NSApplication::sharedApplication(mtm).runModalForWindow(&sheet);
-            sheet.orderOut(None);
-            if watchdog.finish() {
-                return PairingDecision::Refresh;
-            }
-            match decision.load(Ordering::Acquire) {
-                1 => PairingDecision::Accept,
-                2 => PairingDecision::Reject,
-                _ => PairingDecision::Cancel,
-            }
-        }))
+    fn confirm(&self, _progress: &PairingProgressData) -> Option<PairingDecision> {
+        // The protected WebView submits a separately checked, bound decision.
+        Some(PairingDecision::Refresh)
     }
 }
 
-#[derive(Clone)]
-struct ModalDeadline {
-    armed: Arc<AtomicBool>,
-    gate: ExpiryGate,
-}
-
-#[derive(Clone)]
-struct ExpiryGate {
-    cancelled: Arc<AtomicBool>,
-    expired: Arc<AtomicBool>,
-}
-
-impl ExpiryGate {
-    fn new() -> Self {
-        Self {
-            cancelled: Arc::new(AtomicBool::new(false)),
-            expired: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    fn cancel(&self) -> bool {
-        self.cancelled.store(true, Ordering::Release);
-        self.expired.load(Ordering::Acquire)
-    }
-
-    fn claim_on_main(&self) -> bool {
-        if self.cancelled.load(Ordering::Acquire) {
-            return false;
-        }
-        self.expired.store(true, Ordering::Release);
-        true
+fn require_window(window: &WebviewWindow) -> Result<()> {
+    if window.label() == WINDOW_LABEL {
+        Ok(())
+    } else {
+        Err(BackendError::Invalid(WRONG_WINDOW))
     }
 }
 
-impl ModalDeadline {
-    fn arm(delay: Duration, on_expire: impl FnOnce() + Send + 'static) -> Option<Self> {
-        if delay.is_zero() {
-            return None;
-        }
-        let armed = Arc::new(AtomicBool::new(true));
-        let gate = ExpiryGate::new();
-        let timer_armed = Arc::clone(&armed);
-        let timer_gate = gate.clone();
-        let when = DispatchTime::try_from(delay).ok()?;
-        DispatchQueue::global_queue(GlobalQueueIdentifier::Priority(
-            DispatchQueueGlobalPriority::Default,
-        ))
-        .after(when, move || {
-            if !timer_armed.swap(false, Ordering::AcqRel) {
-                return;
-            }
-            DispatchQueue::main().exec_async(move || {
-                if timer_gate.claim_on_main() {
-                    on_expire();
-                }
-            });
-        })
-        .ok()?;
-        Some(Self { armed, gate })
+pub(crate) async fn state(window: WebviewWindow, app: AppHandle) -> Result<SecurePairingView> {
+    require_window(&window)?;
+    let session = app.state::<SecurePairingSession>();
+    let _operation = session.lock_operation().await;
+    let generation = session.generation();
+    let backend = app.state::<SelectedBackend>();
+    let progress = backend.pair_progress().await?;
+    if !session.progress_if_generation(&progress, Some(generation)) {
+        return Err(BackendError::Invalid(EXPIRED));
     }
-
-    fn finish(&self) -> bool {
-        self.armed.store(false, Ordering::Release);
-        self.gate.cancel()
-    }
-}
-
-fn take_active_invite(expected: Option<&Arc<AtomicBool>>) -> Option<ActiveInvite> {
-    ACTIVE_INVITE.with(|active| {
-        let matches = active.borrow().as_ref().is_some_and(|invite| {
-            expected.is_none_or(|expected| Arc::ptr_eq(expected, &invite.dismissed))
-        });
-        matches.then(|| active.borrow_mut().take()).flatten()
+    let presenter = app.state::<super::PairingPresenter>();
+    Ok(SecurePairingView {
+        generation: session.generation(),
+        phase: session.phase().to_owned(),
+        ceremony: PairingCeremony::from_progress(
+            progress.clone(),
+            presenter.state_for_progress(progress.state),
+        ),
     })
 }
 
-fn close_active_invite(expected: Option<&Arc<AtomicBool>>) -> bool {
-    let invite = take_active_invite(expected);
-    if let Some(invite) = invite {
-        invite.dismissed.store(true, Ordering::Release);
-        unsafe {
-            invite.code.setStringValue(&NSString::from_str(""));
-            invite.address.setStringValue(&NSString::from_str(""));
+pub(crate) async fn reveal_invite(
+    window: WebviewWindow,
+    app: AppHandle,
+    generation: u64,
+) -> Result<SecureInviteView> {
+    require_window(&window)?;
+    let session = app.state::<SecurePairingSession>();
+    let _operation = session.lock_operation().await;
+    let backend = app.state::<SelectedBackend>();
+    let progress = backend.pair_progress().await?;
+    session.reveal_invite(&progress, generation)
+}
+
+pub(crate) async fn reveal_sas(
+    window: WebviewWindow,
+    app: AppHandle,
+    generation: u64,
+) -> Result<SecureSasView> {
+    require_window(&window)?;
+    let session = app.state::<SecurePairingSession>();
+    let _operation = session.lock_operation().await;
+    let backend = app.state::<SelectedBackend>();
+    let progress = backend.pair_progress().await?;
+    session.reveal_sas(&progress, generation)
+}
+
+pub(crate) async fn join(
+    window: WebviewWindow,
+    app: AppHandle,
+    generation: u64,
+    code: String,
+    addr: String,
+) -> Result<PairingCeremony> {
+    require_window(&window)?;
+    let session = app.state::<SecurePairingSession>();
+    let _operation = session.lock_operation().await;
+    if !session.is_generation(generation) || session.phase() != "join" {
+        return Err(BackendError::Invalid(EXPIRED));
+    }
+    let scanned = validate_native_invite_fields(Zeroizing::new(code), Zeroizing::new(addr))
+        .ok_or(BackendError::Invalid("Check the pairing code and address."))?;
+    let backend = app.state::<SelectedBackend>();
+    let progress = backend
+        .pair_join(scanned.code.as_str(), scanned.addr.as_str())
+        .await?;
+    if !session.progress_if_generation(&progress, Some(generation)) {
+        // A close while join was pending must not strand the new backend
+        // ceremony. A later replacement session has a different generation.
+        if session.is_generation(generation.wrapping_add(1)) {
+            if let Ok(current) = backend.pair_progress().await {
+                if current.pairing_id == progress.pairing_id
+                    && matches!(
+                        current.state,
+                        PairingState::WaitingForPeer
+                            | PairingState::Handshaking
+                            | PairingState::AwaitingConfirmation
+                    )
+                {
+                    let _ = backend.pair_cancel().await;
+                }
+            }
         }
-        invite.watchdog.finish();
-        let sheet = invite.sheet;
-        if let Some(parent) = unsafe { sheet.sheetParent() } {
-            unsafe { parent.endSheet_returnCode(&sheet, NSModalResponseCancel) };
-        }
-        true
-    } else {
-        false
+        return Err(BackendError::Invalid(EXPIRED));
+    }
+    let presenter = app.state::<super::PairingPresenter>();
+    crate::commands::pairing::reconcile_progress(&*backend, &presenter, progress, false).await
+}
+
+pub(crate) async fn decide(
+    window: WebviewWindow,
+    app: AppHandle,
+    generation: u64,
+    accept: bool,
+) -> Result<PairingCeremony> {
+    require_window(&window)?;
+    let backend = app.state::<SelectedBackend>();
+    let session = app.state::<SecurePairingSession>();
+    let _operation = session.lock_operation().await;
+    let progress = backend.pair_progress().await?;
+    session.take_decision(&progress, generation)?;
+    let next = backend.pair_confirm(accept).await?;
+    if !session.is_generation(generation) {
+        return Err(BackendError::Invalid(EXPIRED));
+    }
+    let presenter = app.state::<super::PairingPresenter>();
+    crate::commands::pairing::reconcile_progress(&*backend, &presenter, next, false).await
+}
+
+pub(crate) fn window_closed(app: &AppHandle) {
+    let (active, closed_generation, ceremony_id) = app.state::<SecurePairingSession>().clear();
+    if active {
+        let backend = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let session = backend.state::<SecurePairingSession>();
+            let _operation = session.lock_operation().await;
+            let pairing = backend.state::<SelectedBackend>();
+            let Ok(progress) = pairing.pair_progress().await else {
+                return;
+            };
+            if session.is_generation(closed_generation)
+                && matches!(
+                    progress.state,
+                    PairingState::WaitingForPeer
+                        | PairingState::Handshaking
+                        | PairingState::AwaitingConfirmation
+                )
+                && (ceremony_id.is_none() || progress.pairing_id == ceremony_id)
+            {
+                let _ = pairing.pair_cancel().await;
+            }
+        });
     }
 }
 
-fn render_qr_png(payload: &[u8]) -> Option<Zeroizing<Vec<u8>>> {
-    let code = QrCode::new(payload).ok()?;
-    let image = code
-        .render::<Luma<u8>>()
-        .min_dimensions(256, 256)
-        .quiet_zone(true)
-        .dark_color(Luma([0]))
-        .light_color(Luma([255]))
-        .build();
-    let mut png = Zeroizing::new(Vec::new());
-    DynamicImage::ImageLuma8(image)
-        .write_to(&mut Cursor::new(&mut *png), ImageFormat::Png)
-        .ok()?;
-    Some(png)
-}
-
-fn show_message(title: &str, message: &str) {
-    let title = title.to_owned();
-    let message = message.to_owned();
-    on_main(move |mtm| unsafe {
-        alert(mtm, &title, &message, &["Close"]).runModal();
-    });
-}
-
-unsafe fn alert(
-    mtm: MainThreadMarker,
-    title: &str,
-    message: &str,
-    buttons: &[&str],
-) -> objc2::rc::Retained<NSAlert> {
-    let alert = NSAlert::new(mtm);
-    alert
-        .window()
-        .setSharingType(NSWindowSharingType::NSWindowSharingNone);
-    alert.setMessageText(&NSString::from_str(title));
-    alert.setInformativeText(&NSString::from_str(message));
-    for button in buttons {
-        alert.addButtonWithTitle(&NSString::from_str(button));
+pub(crate) fn destroy_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(WINDOW_LABEL) {
+        let _ = window.destroy();
     }
-    alert
-}
-
-unsafe fn qr_view(mtm: MainThreadMarker, png: &[u8]) -> Option<objc2::rc::Retained<NSImageView>> {
-    let data = NSData::with_bytes(png);
-    let image = NSImage::initWithData(NSImage::alloc(), &data)?;
-    image.setSize(NSSize::new(256.0, 256.0));
-    let view = NSImageView::imageViewWithImage(&image, mtm);
-    view.setFrame(rect(0.0, 0.0, 256.0, 256.0));
-    view.setAccessibilityLabel(Some(&NSString::from_str(
-        "Pairing QR code. Scan with CopyPaste on the other device.",
-    )));
-    view.setAccessibilityProtectedContent(true);
-    Some(view)
-}
-
-unsafe fn invite_view(
-    mtm: MainThreadMarker,
-    png: &[u8],
-    code: &str,
-    address: &str,
-    action: Arc<dyn Fn(SheetAction) + Send + Sync>,
-) -> Option<(
-    objc2::rc::Retained<PairingSheetView>,
-    objc2::rc::Retained<NSTextField>,
-    objc2::rc::Retained<NSTextField>,
-)> {
-    let container = PairingSheetView::new(mtm, rect(0.0, 0.0, 560.0, 452.0), action);
-    let title = static_field(mtm, "CopyPaste", 410.0, 560.0);
-    title.setFrame(rect(28.0, 410.0, 504.0, 24.0));
-    title.setTextColor(Some(&NSColor::labelColor()));
-    let detail = static_field(
-        mtm,
-        "Scan this code with CopyPaste on the other device.",
-        382.0,
-        560.0,
-    );
-    detail.setFrame(rect(28.0, 382.0, 504.0, 20.0));
-    detail.setTextColor(Some(&NSColor::secondaryLabelColor()));
-    let qr = qr_view(mtm, png)?;
-    qr.setFrame(rect(152.0, 108.0, 256.0, 256.0));
-    container.addSubview(&qr);
-
-    let code_label = static_field(mtm, "Pairing code", 76.0, 100.0);
-    let code_value = protected_display_field(mtm, code, 76.0, 450.0);
-    code_value.setFrame(rect(122.0, 76.0, 410.0, 22.0));
-    code_value.setAccessibilityLabel(Some(&NSString::from_str("Pairing code")));
-    let address_label = static_field(mtm, "Pairing address", 44.0, 100.0);
-    let address_value = protected_display_field(mtm, address, 44.0, 450.0);
-    address_value.setFrame(rect(122.0, 44.0, 410.0, 22.0));
-    address_value.setAccessibilityLabel(Some(&NSString::from_str("Pairing address")));
-    let cancel = NSButton::buttonWithTitle_target_action(
-        &NSString::from_str("Cancel Pairing"),
-        Some(&*container),
-        Some(sel!(cancelPairing:)),
-        mtm,
-    );
-    cancel.setFrame(rect(412.0, 10.0, 120.0, 26.0));
-    cancel.setKeyEquivalent(&NSString::from_str("\u{1b}"));
-    cancel.setAccessibilityLabel(Some(&NSString::from_str("Cancel pairing")));
-
-    for view in [
-        &title,
-        &detail,
-        &code_label,
-        &code_value,
-        &address_label,
-        &address_value,
-    ] {
-        container.addSubview(view);
-    }
-    container.addSubview(&cancel);
-    Some((container, code_value, address_value))
-}
-
-unsafe fn product_sheet(
-    mtm: MainThreadMarker,
-    content: &NSView,
-    title: &str,
-) -> objc2::rc::Retained<NSWindow> {
-    let sheet = NSWindow::initWithContentRect_styleMask_backing_defer(
-        mtm.alloc::<NSWindow>(),
-        content.frame(),
-        NSWindowStyleMask::Titled.union(NSWindowStyleMask::DocModalWindow),
-        NSBackingStoreType::NSBackingStoreBuffered,
-        false,
-    );
-    sheet.setTitle(&NSString::from_str(title));
-    sheet.setSharingType(NSWindowSharingType::NSWindowSharingNone);
-    sheet.setReleasedWhenClosed(false);
-    sheet.setContentView(Some(content));
-    sheet
-}
-
-unsafe fn static_field(
-    mtm: MainThreadMarker,
-    value: &str,
-    y: f64,
-    width: f64,
-) -> objc2::rc::Retained<NSTextField> {
-    let field = NSTextField::labelWithString(&NSString::from_str(value), mtm);
-    field.setFrame(rect(0.0, y, width, 22.0));
-    field.setSelectable(false);
-    field.setEditable(false);
-    field
-}
-
-unsafe fn protected_display_field(
-    mtm: MainThreadMarker,
-    value: &str,
-    y: f64,
-    width: f64,
-) -> objc2::rc::Retained<NSTextField> {
-    let field = static_field(mtm, value, y, width);
-    field.setAccessibilityProtectedContent(true);
-    field
-}
-
-unsafe fn join_form(
-    mtm: MainThreadMarker,
-) -> (
-    objc2::rc::Retained<NSView>,
-    objc2::rc::Retained<NSSecureTextField>,
-    objc2::rc::Retained<NSSecureTextField>,
-) {
-    let form = NSView::initWithFrame(mtm.alloc::<NSView>(), rect(0.0, 0.0, 420.0, 104.0));
-    let code_label = NSTextField::labelWithString(&NSString::from_str("Pairing code"), mtm);
-    code_label.setFrame(rect(0.0, 80.0, 420.0, 20.0));
-    let code = NSSecureTextField::initWithFrame(
-        mtm.alloc::<NSSecureTextField>(),
-        rect(0.0, 54.0, 420.0, 24.0),
-    );
-    code.setPlaceholderString(Some(&NSString::from_str("Pairing code")));
-    code.setAccessibilityLabel(Some(&NSString::from_str("Pairing code")));
-    code.setAccessibilityProtectedContent(true);
-    let address_label = NSTextField::labelWithString(&NSString::from_str("Pairing address"), mtm);
-    address_label.setFrame(rect(0.0, 28.0, 420.0, 20.0));
-    let address = NSSecureTextField::initWithFrame(
-        mtm.alloc::<NSSecureTextField>(),
-        rect(0.0, 2.0, 420.0, 24.0),
-    );
-    address.setPlaceholderString(Some(&NSString::from_str("Pairing address")));
-    address.setAccessibilityLabel(Some(&NSString::from_str("Pairing address")));
-    address.setAccessibilityProtectedContent(true);
-
-    form.addSubview(&code_label);
-    form.addSubview(&code);
-    form.addSubview(&address_label);
-    form.addSubview(&address);
-    (form, code, address)
-}
-
-unsafe fn sas_view(
-    mtm: MainThreadMarker,
-    sas: &str,
-    detail_text: &str,
-    action: Arc<dyn Fn(SheetAction) + Send + Sync>,
-) -> objc2::rc::Retained<PairingSheetView> {
-    let spoken = sas
-        .chars()
-        .map(|digit| digit.to_string())
-        .collect::<Vec<_>>()
-        .join(" ");
-    let container = PairingSheetView::new(mtm, rect(0.0, 0.0, 420.0, 224.0), action);
-    let title = static_field(mtm, "Compare security codes", 180.0, 420.0);
-    title.setFrame(rect(28.0, 180.0, 364.0, 24.0));
-    let detail = static_field(mtm, detail_text, 152.0, 420.0);
-    detail.setFrame(rect(28.0, 152.0, 364.0, 20.0));
-    detail.setTextColor(Some(&NSColor::secondaryLabelColor()));
-    for (index, digit) in sas.chars().enumerate() {
-        let field = NSTextField::labelWithString(&NSString::from_str(&digit.to_string()), mtm);
-        field.setSelectable(false);
-        field.setEditable(false);
-        field.setFrame(rect(78.0 + (index as f64) * 44.0, 98.0, 40.0, 44.0));
-        container.addSubview(&field);
-    }
-    let accept = NSButton::buttonWithTitle_target_action(
-        &NSString::from_str("Codes Match"),
-        Some(&*container),
-        Some(sel!(acceptPairing:)),
-        mtm,
-    );
-    accept.setFrame(rect(276.0, 18.0, 116.0, 26.0));
-    accept.setKeyEquivalent(&NSString::from_str("\r"));
-    let reject = NSButton::buttonWithTitle_target_action(
-        &NSString::from_str("Doesn't Match"),
-        Some(&*container),
-        Some(sel!(rejectPairing:)),
-        mtm,
-    );
-    reject.setFrame(rect(148.0, 18.0, 116.0, 26.0));
-    let cancel = NSButton::buttonWithTitle_target_action(
-        &NSString::from_str("Cancel"),
-        Some(&*container),
-        Some(sel!(cancelPairing:)),
-        mtm,
-    );
-    cancel.setFrame(rect(28.0, 18.0, 108.0, 26.0));
-    cancel.setKeyEquivalent(&NSString::from_str("\u{1b}"));
-    for view in [&title, &detail] {
-        container.addSubview(view);
-    }
-    for view in [&accept, &reject, &cancel] {
-        container.addSubview(view);
-    }
-    container.setAccessibilityLabel(Some(&NSString::from_str(&format!(
-        "Security code: {spoken}"
-    ))));
-    container
-}
-
-fn rect(x: f64, y: f64, width: f64, height: f64) -> NSRect {
-    NSRect::new(NSPoint::new(x, y), NSSize::new(width, height))
-}
-
-fn on_main<T: Send>(work: impl Send + FnOnce(MainThreadMarker) -> T) -> T {
-    if let Some(mtm) = MainThreadMarker::new() {
-        return work(mtm);
-    }
-
-    let output = Mutex::new(None);
-    DispatchQueue::main().exec_sync(|| {
-        let mtm = MainThreadMarker::new().expect("dispatch main queue runs on the main thread");
-        *output.lock().expect("main-thread result lock poisoned") = Some(work(mtm));
-    });
-    output
-        .into_inner()
-        .expect("main-thread result lock poisoned")
-        .expect("main-thread closure returned a result")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use copypaste_ipc::{PairingRole, PairingState};
 
-    #[test]
-    fn elapsed_deadline_never_opens_a_secret_surface() {
-        assert!(ModalDeadline::arm(Duration::ZERO, || {}).is_none());
-    }
-
-    #[test]
-    fn cancelled_queued_expiry_cannot_abort_a_replacement_invite() {
-        let queued_expiry = ExpiryGate::new();
-        let old_invite = Arc::new(AtomicBool::new(false));
-        let replacement_invite = Arc::new(AtomicBool::new(false));
-
-        queued_expiry.cancel();
-        assert!(!queued_expiry.claim_on_main());
-        assert!(!Arc::ptr_eq(&old_invite, &replacement_invite));
-    }
-
-    #[test]
-    fn invite_expiry_hides_the_matching_sheet_without_cancelling_the_ceremony() {
-        let source = include_str!("macos.rs");
-        let invite = source
-            .split_once("fn present_invite")
-            .and_then(|(_, source)| source.split_once("fn scan_invite").map(|(body, _)| body))
-            .expect("invite implementation");
-        let expiry = invite
-            .split_once("let expiry_token")
-            .and_then(|(_, source)| source.split_once("let cancel_token").map(|(body, _)| body))
-            .expect("expiry handler");
-
-        assert!(expiry.contains("close_active_invite(Some(&expiry_token))"));
-        assert!(!expiry.contains("abort"));
-    }
-
-    #[test]
-    fn invite_opens_one_nonblocking_product_sheet_without_reveal_barriers() {
-        let source = include_str!("macos.rs");
-        let invite = source
-            .split_once("fn present_invite")
-            .and_then(|(_, source)| source.split_once("fn scan_invite").map(|(body, _)| body))
-            .expect("invite implementation");
-
-        assert!(invite.contains("product_sheet"));
-        assert!(invite.contains("beginSheet_completionHandler"));
-        for barrier in ["Reveal QR", "\"Continue\"", ".runModal()"] {
-            assert!(
-                !invite.contains(barrier),
-                "unexpected invite barrier: {barrier}"
-            );
+    fn progress(state: PairingState, id: &str) -> PairingProgressData {
+        PairingProgressData {
+            pairing_id: Some(id.into()),
+            role: Some(PairingRole::Initiator),
+            state,
+            expires_in_ms: Some(60_000),
+            sas: Some("123456".into()),
+            peer_device_id: None,
+            peer_name: None,
+            peer_addr: None,
+            known_device: None,
+            error_code: None,
         }
+    }
+
+    #[test]
+    fn invite_reveal_requires_current_generation_ceremony_and_deadline() {
+        let session = SecurePairingSession::default();
+        let invite = PairingInviteData {
+            code: "0123-4567-89AB-CDEF".into(),
+            pairing_id: "one".into(),
+            listen_addr: Some("192.0.2.1:47654".into()),
+            expires_in_secs: 120,
+        };
+        assert!(session.begin_invite(&invite));
+        let generation = session.generation();
+        let waiting = progress(PairingState::WaitingForPeer, "one");
+        assert!(session.reveal_invite(&waiting, generation).is_ok());
+        assert!(session
+            .reveal_invite(&waiting, generation.wrapping_add(1))
+            .is_err());
+        assert!(session
+            .reveal_invite(&progress(PairingState::WaitingForPeer, "other"), generation)
+            .is_err());
+        session.clear();
+        assert!(session.reveal_invite(&waiting, generation).is_err());
+    }
+
+    #[test]
+    fn decision_requires_the_exact_sas_revealed_for_this_generation() {
+        let session = SecurePairingSession::default();
+        session.reset(Phase::Join);
+        let awaiting = progress(PairingState::AwaitingConfirmation, "one");
+        session.progress(&awaiting);
+        let generation = session.generation();
+        assert!(session.take_decision(&awaiting, generation).is_err());
+        let revealed = session
+            .reveal_sas(&awaiting, generation)
+            .expect("bound SAS");
+        assert_eq!(revealed.sas, "123456");
+        let mut changed = awaiting.clone();
+        changed.sas = Some("654321".into());
+        assert!(session.take_decision(&changed, generation).is_err());
+        assert!(session.take_decision(&awaiting, generation).is_ok());
+        assert!(session.take_decision(&awaiting, generation).is_err());
+        session.reset(Phase::Join);
+        session.progress(&progress(PairingState::AwaitingConfirmation, "two"));
+        assert!(session.take_decision(&awaiting, generation).is_err());
     }
 }

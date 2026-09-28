@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "protected-surfaces",
+  "description": "The pairing and quit-failure windows invoke only CopyPaste's label-checked Rust commands. They receive no core window, event, store, clipboard, dialog, file-system, updater or opener grants.",
+  "windows": ["pairing", "quit-failure"],
+  "permissions": []
+}
