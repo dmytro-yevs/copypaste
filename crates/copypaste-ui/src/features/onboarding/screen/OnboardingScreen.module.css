@@ -94,7 +94,7 @@
   /* grid gap */
 }
 
-.art {
+.content {
   position: relative;
   display: grid;
   min-inline-size: 0;
@@ -105,12 +105,12 @@
   background: var(--elevated);
 }
 
-.art[data-interactive] {
+.content[data-interactive] {
   padding-block: var(--s-4);
   overflow-y: auto;
 }
 
-.art[data-interactive] > div {
+.content[data-interactive] > div {
   inline-size: min(100%, calc(var(--s-9) * 12));
   padding-inline: var(--s-4);
 }
@@ -283,7 +283,7 @@
   }
 
   .slide {
-    --onboarding-art-size: clamp(calc(var(--s-9) * 3.5), 30vh, calc(var(--s-9) * 6.25));
+    --onboarding-content-size: clamp(calc(var(--s-9) * 3.5), 30vh, calc(var(--s-9) * 6.25));
 
     display: grid;
     inline-size: 100%;
@@ -296,7 +296,7 @@
       max(var(--s-5), env(safe-area-inset-bottom))
       var(--mobile-inline-start);
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto auto auto minmax(var(--onboarding-art-size), 1fr) auto;
+    grid-template-rows: auto auto auto auto minmax(var(--onboarding-content-size), 1fr) auto;
   }
 
   .copy {
@@ -347,7 +347,7 @@
     min-block-size: var(--s-9);
   }
 
-  .art {
+  .content {
     grid-row: 5;
     inline-size: auto;
     min-inline-size: 0;
@@ -359,7 +359,7 @@
     background: var(--panel);
   }
 
-  .art[data-interactive] {
+  .content[data-interactive] {
     padding-block: var(--s-4);
     align-items: start;
     justify-items: center;
@@ -419,7 +419,7 @@
 .window { block-size: 100%; max-block-size: 100%; min-block-size: 0; }
 .slide { block-size: 100%; min-block-size: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
 .copy { display: flex; padding: var(--s-6) var(--s-7) var(--s-4); }
-.art { grid-row: 2; min-block-size: 0; margin-inline: 0; overflow: auto; border-inline-start: 0; border-block-start: var(--stroke-1) solid var(--divider); }
+.content { grid-row: 2; min-block-size: 0; margin-inline: 0; overflow: auto; border-inline-start: 0; border-block-start: var(--stroke-1) solid var(--divider); }
 .actions { grid-row: 3; padding: var(--s-3) var(--s-7) var(--s-5); }
 
 @media (--cp-toolbar) {
@@ -427,6 +427,6 @@
   .window { overflow: hidden; }
   .slide { padding: max(var(--s-5), env(safe-area-inset-top)) max(var(--s-5), env(safe-area-inset-right)) max(var(--s-5), env(safe-area-inset-bottom)) max(var(--s-5), env(safe-area-inset-left)); grid-template-rows: auto minmax(0, 1fr) auto; }
   .copy { display: flex; padding: 0 0 var(--s-3); }
-  .art { grid-row: 2; margin-inline: 0; }
+  .content { grid-row: 2; margin-inline: 0; }
   .actions { grid-row: 3; padding: var(--s-3) 0 0; }
 }

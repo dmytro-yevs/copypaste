@@ -14,7 +14,6 @@ import { cloudConnectionPresentation } from "./cloud";
 import {
     peerPresentationState,
     peerPresenceLabel,
-    peerRowStatus,
 } from "./status";
 import { STALE_AFTER_MS } from "./peerState";
 
@@ -357,7 +356,6 @@ describe("device status descriptors", () => {
             expect(peerStatus(expected.peer, expected.health, false).label).toBe(
                 expected.label,
             );
-            expect(peerRowStatus(state).label).toBeTruthy();
         }
     });
 
@@ -378,7 +376,6 @@ describe("device status descriptors", () => {
         const sourceRoot = resolve(import.meta.dirname, "..");
         for (const file of [
             "components/DeviceStatus.tsx",
-            "components/PeerRow.tsx",
             "components/CloudConnectionCard.tsx",
             "patterns/DiscoveryStage.tsx",
         ]) {
