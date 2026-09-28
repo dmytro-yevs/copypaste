@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "@/components/ui";
-import { ActionButton, FieldFeedback } from "@/components/shared";
+import { FieldFeedback } from "@/components/shared";
 import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
 import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
 import {
@@ -152,15 +152,15 @@ export function ShortcutTab({ supportsStartup }: { supportsStartup: boolean }) {
     </FieldFeedback>
   ) : undefined;
   const resetButton = (
-    <ActionButton
+    <Button
       variant="ghost"
       size="icon"
       icon="reset"
+      label={t("settings.shortcut.reset")}
+      tooltip={t("settings.shortcut.reset")}
       disabled={resetDisabled}
-      aria-label={t("settings.shortcut.reset")}
       aria-describedby={feedback ? feedbackId : undefined}
       aria-busy={save.isPending || undefined}
-      title={t("settings.shortcut.reset")}
       onClick={() => {
         setSaved(null);
         save.mutate(fallback);

@@ -1,16 +1,8 @@
-import { Icon } from "@/components/ui/icon";
 import { useId, useState } from "react";
 
-import { FieldFeedback } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 import {
   AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  Button,
   Checkbox,
   Label,
 } from "@/components/ui";
@@ -37,7 +29,7 @@ export function TransferSettings() {
           kind: "action", definition: settingDefinition("storage", "settings.transfer.export.title"),
           note: exportHistory.isError ? (
             <span id={exportFeedbackId}>
-              <FieldFeedback state="error">History wasn’t exported.</FieldFeedback>
+              <StateView mode="error" placement="control" title="History wasn’t exported." />
             </span>
           ) : undefined,
           label: exportHistory.isPending ? "Exporting…" : t("settings.transfer.export.action"),
@@ -50,7 +42,7 @@ export function TransferSettings() {
         }, {
           kind: "action", definition: settingDefinition("storage", "settings.transfer.import.title"),
           note: importHistory.prepare.isError || importHistory.apply.isError ? (
-            <span id={importFeedbackId}><FieldFeedback state="error">History wasn’t imported.</FieldFeedback></span>
+            <span id={importFeedbackId}><StateView mode="error" placement="control" title="History wasn’t imported." /></span>
           ) : undefined,
           label: importHistory.isPending ? "Importing…" : t("settings.transfer.import.action"),
           icon: "upload", disabled: importHistory.isPending, busy: importHistory.isPending,
@@ -64,12 +56,11 @@ export function TransferSettings() {
           if (!open && exportHistory.isPending) return;
           setExportOpen(open);
         }}
+        title={t("settings.transfer.export.dialogTitle")}
+        description={t("settings.transfer.export.dialogBody")}
+        cancel={{ label: t("common.cancel"), disabled: exportHistory.isPending }}
+        action={{ label: exportHistory.isPending ? "Exporting…" : t("settings.transfer.export.confirm"), pending: exportHistory.isPending, onClick: () => exportHistory.mutate(includeSensitive, { onSuccess: () => setExportOpen(false) }) }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("settings.transfer.export.dialogTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>{t("settings.transfer.export.dialogBody")}</AlertDialogDescription>
-          </AlertDialogHeader>
           <div className={styles.exportOptions}>
             <div className={styles.checkboxRow}>
               <Checkbox
@@ -83,21 +74,6 @@ export function TransferSettings() {
             </div>
             <p className={styles.hint}>{t("settings.transfer.export.includeSensitiveHint")}</p>
           </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={exportHistory.isPending}>
-              <Icon name="close" aria-hidden="true" />
-              {t("common.cancel")}
-            </AlertDialogCancel>
-            <Button
-              disabled={exportHistory.isPending}
-              aria-busy={exportHistory.isPending || undefined}
-              onClick={() => exportHistory.mutate(includeSensitive, { onSuccess: () => setExportOpen(false) })}
-            >
-              <Icon name="download" aria-hidden="true" />
-              {exportHistory.isPending ? "Exporting…" : t("settings.transfer.export.confirm")}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
       </AlertDialog>
 
       <AlertDialog
@@ -107,37 +83,14 @@ export function TransferSettings() {
           importHistory.cancel.mutate(pendingImport.token);
           setPendingImport(null);
         }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {t("settings.transfer.import.dialogTitle", { count: pendingImport?.item_count ?? 0 })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("settings.transfer.import.dialogBody", { count: pendingImport?.item_count ?? 0 })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={importHistory.apply.isPending}>
-              <Icon name="close" aria-hidden="true" />
-              {t("common.cancel")}
-            </AlertDialogCancel>
-            <Button
-              disabled={importHistory.apply.isPending}
-              aria-busy={importHistory.apply.isPending || undefined}
-              onClick={() => {
-                if (pendingImport === null) return;
-                importHistory.apply.mutate(pendingImport.token, {
-                  onSuccess: () => setPendingImport(null),
-                });
-              }}
-            >
-              <Icon name="upload" aria-hidden="true" />
-              {importHistory.apply.isPending ? "Importing…" : t("settings.transfer.import.confirm")}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        title={t("settings.transfer.import.dialogTitle", { count: pendingImport?.item_count ?? 0 })}
+        description={t("settings.transfer.import.dialogBody", { count: pendingImport?.item_count ?? 0 })}
+        cancel={{ label: t("common.cancel"), disabled: importHistory.apply.isPending }}
+        action={{ label: importHistory.apply.isPending ? "Importing…" : t("settings.transfer.import.confirm"), pending: importHistory.apply.isPending, onClick: () => {
+          if (pendingImport === null) return;
+          importHistory.apply.mutate(pendingImport.token, { onSuccess: () => setPendingImport(null) });
+        } }}
+      />
     </>
   );
 }
