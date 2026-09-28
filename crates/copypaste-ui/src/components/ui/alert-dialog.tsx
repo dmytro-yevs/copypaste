@@ -38,7 +38,7 @@ export type AlertDialogCancelDescriptor = {
 };
 
 export type AlertDialogProps = Omit<ComponentProps<typeof AlertDialogPrimitive.Root>, "children"> & {
-  title?: ReactNode;
+  title: ReactNode;
   description?: ReactNode;
   children?: ReactNode;
   footer?: ReactNode;
@@ -65,27 +65,24 @@ function AlertDialog({ title, description, children, footer, trigger, contentPro
   return (
     <AlertDialogPrimitive.Root data-slot="alert-dialog" {...rootProps}>
       {trigger ? <AlertDialogPrimitive.Trigger asChild>{trigger}</AlertDialogPrimitive.Trigger> : null}
-      {title === undefined ? children : (
-        <AlertDialogContent {...contentProps}>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{title}</AlertDialogTitle>
-            {description ? <AlertDialogDescription>{description}</AlertDialogDescription> : null}
-          </AlertDialogHeader>
-          {children}
-          {footer || cancel || action ? (
-            <AlertDialogFooter>
-              {footer}
-              {cancel ? <AlertDialogCancel disabled={cancel.disabled || action?.pending} onClick={cancel.onClick}>{cancel.label}</AlertDialogCancel> : null}
-              {action?.autoClose && actionButton ? <AlertDialogPrimitive.Action asChild>{actionButton}</AlertDialogPrimitive.Action> : actionButton}
-            </AlertDialogFooter>
-          ) : null}
-        </AlertDialogContent>
-      )}
+      <AlertDialogContent {...contentProps}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          {description ? <AlertDialogDescription>{description}</AlertDialogDescription> : null}
+        </AlertDialogHeader>
+        {children}
+        {footer || cancel || action ? (
+          <AlertDialogFooter>
+            {footer}
+            {cancel ? <AlertDialogCancel disabled={cancel.disabled || action?.pending} onClick={cancel.onClick}>{cancel.label}</AlertDialogCancel> : null}
+            {action?.autoClose && actionButton ? <AlertDialogPrimitive.Action asChild>{actionButton}</AlertDialogPrimitive.Action> : actionButton}
+          </AlertDialogFooter>
+        ) : null}
+      </AlertDialogContent>
     </AlertDialogPrimitive.Root>
   );
 }
 
-const AlertDialogTrigger = AlertDialogPrimitive.Trigger;
 const AlertDialogPortal = AlertDialogPrimitive.Portal;
 
 function AlertDialogOverlay({
@@ -164,24 +161,6 @@ function AlertDialogDescription({
   );
 }
 
-function AlertDialogAction({
-  className,
-  variant = "primary",
-  size = "md",
-  tone = "neutral",
-  ...props
-}: ComponentProps<typeof AlertDialogPrimitive.Action> & {
-  variant?: "primary" | "secondary" | "ghost" | "danger";
-  size?: "sm" | "md" | "lg";
-  tone?: "neutral" | "danger";
-}) {
-  return (
-    <Button asChild variant={variant} size={size} tone={tone} className={className}>
-      <AlertDialogPrimitive.Action {...props} />
-    </Button>
-  );
-}
-
 function AlertDialogCancel({
   className,
   size = "md",
@@ -196,16 +175,4 @@ function AlertDialogCancel({
   );
 }
 
-export {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogOverlay,
-  AlertDialogPortal,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-};
+export { AlertDialog };

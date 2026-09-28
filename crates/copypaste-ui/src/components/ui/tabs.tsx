@@ -35,30 +35,25 @@ export type TabsItem = {
   content?: ReactNode;
 };
 
-export type TabsProps = ComponentProps<typeof TabsPrimitive.Root> & {
-  items?: readonly TabsItem[];
+export type TabsProps = Omit<ComponentProps<typeof TabsPrimitive.Root>, "children"> & {
+  items: readonly TabsItem[];
   variant?: "bare" | "floating";
   equalWidth?: boolean;
   listProps?: Omit<ComponentProps<typeof TabsPrimitive.List>, "children">;
   contentClassName?: string;
 };
 
-function Tabs({ className, items, variant, equalWidth, listProps, contentClassName, children, ...props }: TabsProps) {
+function Tabs({ className, items, variant, equalWidth, listProps, contentClassName, ...props }: TabsProps) {
   return (
     <TabsPrimitive.Root
       data-slot="tabs"
       className={cn(styles.root, className)}
       {...props}
     >
-      {items ? (
-        <>
-          <TabsList variant={variant} equalWidth={equalWidth} {...listProps}>
-            {items.map((item) => <TabsTrigger key={item.value} value={item.value} disabled={item.disabled} className={item.className}>{item.label}</TabsTrigger>)}
-          </TabsList>
-          {items.map((item) => item.content === undefined ? null : <TabsContent key={item.value} value={item.value} className={contentClassName}>{item.content}</TabsContent>)}
-        </>
-      ) : null}
-      {children}
+      <TabsList variant={variant} equalWidth={equalWidth} {...listProps}>
+        {items.map((item) => <TabsTrigger key={item.value} value={item.value} disabled={item.disabled} className={item.className}>{item.label}</TabsTrigger>)}
+      </TabsList>
+      {items.map((item) => item.content === undefined ? null : <TabsContent key={item.value} value={item.value} className={contentClassName}>{item.content}</TabsContent>)}
     </TabsPrimitive.Root>
   );
 }
@@ -127,4 +122,4 @@ function TabsContent({
   );
 }
 
-export { Tabs, TabsList, TabsTrigger, TabsContent };
+export { Tabs };
