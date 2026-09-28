@@ -27,6 +27,9 @@ export function settingsGroups(
       const definition = settingDefinition(owner, title);
       const binding = byId.get(definition.id);
       if (!binding) return [];
+      if (definition.kind !== "dynamic" && definition.kind !== binding.kind) {
+        throw new Error(`Settings field ${definition.id} expects ${definition.kind}, received ${binding.kind}`);
+      }
       used.add(definition.id);
       return [{ ...binding, definition } as SettingsField];
     });
