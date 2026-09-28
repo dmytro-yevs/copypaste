@@ -11,7 +11,7 @@ import {
     Dialog,
     Icon,
 } from "@/components/ui";
-import { FieldFeedback } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 import type { PairingController } from "@/features/pairing/hooks/usePairing";
 import { PairingProgressCard } from "@/features/pairing/patterns/PairingProgressCard";
 import {
@@ -211,9 +211,13 @@ export function PairingLauncherDialog({
 
                 {preview && flow !== "choices" ? (
                     <div className={styles.flow}>
-                        <FieldFeedback state="warning">
-                            {t("devices.pairing.previewUnavailable")}
-                        </FieldFeedback>
+                        <StateView
+                            mode="warning"
+                            placement="inline"
+                            description={t("devices.pairing.previewUnavailable")}
+                            role="status"
+                            aria-live="polite"
+                        />
                         <PairingProgressCard
                             pairing={pairing}
                             compact

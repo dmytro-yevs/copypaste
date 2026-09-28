@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { FieldFeedback } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 import {
   Button,
   Dialog,
@@ -207,9 +207,12 @@ export function DeviceNameField({
               }}
             />
             {rename.isError ? (
-              <FieldFeedback id={errorId} state="error">
-                Name wasn’t changed. Try again.
-              </FieldFeedback>
+              <StateView
+                id={errorId}
+                mode="error"
+                placement="inline"
+                description="Name wasn’t changed. Try again."
+              />
             ) : null}
           </div>
           <VisuallyHidden role="status" aria-live="polite">
