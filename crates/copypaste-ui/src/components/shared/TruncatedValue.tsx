@@ -1,7 +1,6 @@
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 
-import { ActionButton } from "@/components/shared/ActionButton";
 import { Button, Tooltip } from "@/components/ui";
 import { useObservedElementSize, usePointerKind } from "@/hooks/useViewportMetrics";
 import styles from "./TruncatedValue.module.css";
@@ -65,9 +64,9 @@ export function TruncatedValue({
         >
           <p className={styles.full}>{value}</p>
           {copyable && onCopy ? (
-            <ActionButton icon="copy" onClick={() => onCopy(value)}>
+            <Button variant="secondary" icon="copy" onClick={() => onCopy(value)}>
               Copy
-            </ActionButton>
+            </Button>
           ) : null}
           <PopoverPrimitive.Arrow className={styles.arrow} />
         </PopoverPrimitive.Content>

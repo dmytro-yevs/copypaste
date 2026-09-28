@@ -1,7 +1,7 @@
 import type { InputHTMLAttributes, RefObject } from "react";
 
-import { IconButton } from "./IconButton";
 import {
+  Button,
   ControlAdornment,
   ControlSurface,
   Icon,
@@ -70,8 +70,8 @@ export function SearchField({
         className={styles.input}
       />
       {hasValue && clearable ? (
-        <IconButton
-          size={size === "compact" ? "compact" : "regular"}
+        <Button
+          size={size === "compact" ? "compactIcon" : "icon"}
           variant="ghost"
           edge="control"
           label={clearLabel}
@@ -85,8 +85,8 @@ export function SearchField({
         <ShortcutBadge size={adornmentSize} aria-label={shortcut}>{shortcutLabel}</ShortcutBadge>
       ) : null}
       {mode === "overlay" && !hasValue ? (
-        <IconButton
-          size={size === "compact" ? "compact" : "regular"}
+        <Button
+          size={size === "compact" ? "compactIcon" : "icon"}
           variant="ghost"
           edge="control"
           label={closeLabel}

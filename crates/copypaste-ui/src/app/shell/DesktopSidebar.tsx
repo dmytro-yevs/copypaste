@@ -1,4 +1,4 @@
-import { BrandLockup } from "@/components/shared";
+import { BrandMark } from "@/components/shared/BrandMark";
 import { NavigationItem } from "@/app/shell/NavigationItem";
 import { navigationRoutes } from "@/app/routes/routeMetadata";
 import { useTranslation } from "@/i18n";
@@ -18,7 +18,13 @@ export function DesktopSidebar({ navigationReady = true }: { navigationReady?: b
       aria-label={t("nav.primary")}
     >
       <div data-tauri-drag-region className={styles.brand}>
-        <BrandLockup />
+        <div className={styles.brandLockup}>
+          <BrandMark size="sidebar" />
+          <span className={styles.brandCopy}>
+            <strong>CopyPaste</strong>
+            <small>Memory Stream</small>
+          </span>
+        </div>
       </div>
       <nav className={styles.navigation}>
         {ITEMS.map((item) => (

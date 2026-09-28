@@ -2,7 +2,6 @@ export { ActionButton } from "./ActionButton";
 export type { ActionButtonProps } from "./ActionButton";
 export { AppIcon } from "./AppIcon";
 export { BrandMark } from "./BrandMark";
-export { BrandLockup } from "./BrandLockup";
 export { ClipBodyPreview } from "./ClipBodyPreview";
 export { ClipImage, type ClipImageProps } from "./ClipImage";
 export { ClipTypeGlyph } from "./ClipTypeGlyph";

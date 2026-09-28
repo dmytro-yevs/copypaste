@@ -14,11 +14,6 @@ import { Icon } from "@/components/ui/icon";
 import {
   Button,
   Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
 } from "@/components/ui";
 import { useCaptureMutation, useToastExplanation } from "@/hooks/useCapture";
 import { useTranslation } from "@/i18n";
@@ -40,19 +35,13 @@ export function ToastConsentDialog({
   const shown = explanation.data;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t("capture.toast.dialog.title")}</DialogTitle>
-          <DialogDescription>
-            {shown ??
+    <Dialog open={open} onOpenChange={onOpenChange}
+      title={t("capture.toast.dialog.title")}
+      description={shown ??
               (explanation.isPending
                 ? t("capture.toast.dialog.loading")
                 : t("capture.toast.dialog.unavailable"))}
-          </DialogDescription>
-        </DialogHeader>
-
-        <DialogFooter>
+      footer={<>
           <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
             <Icon name="close" size="md" />
             {t("common.cancel")}
@@ -72,8 +61,7 @@ export function ToastConsentDialog({
               {t("capture.toast.dialog.confirm")}
             </Button>
           )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </>}
+    />
   );
 }

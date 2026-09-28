@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import { ErrorBoundary } from "react-error-boundary";
 
 import { Container, Screen } from "@/components/layout";
-import { IllustratedErrorState, ScreenHeader } from "@/components/shared";
+import { ScreenHeader } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 import { Button, Icon } from "@/components/ui";
 import { useTranslation } from "@/i18n";
 import { useUi } from "@/store/ui";
@@ -28,10 +29,12 @@ export function Boundary({ label, layout = "inline", onReset, children }: Bounda
       onReset={onReset}
       fallbackRender={({ resetErrorBoundary }) => {
         const message = (
-          <IllustratedErrorState
+          <StateView
+            mode="error"
+            placement="panel"
             className={styles.recovery}
             title={t("shell.boundary.title", { region: label })}
-            body={t("shell.boundary.body")}
+            description={t("shell.boundary.body")}
             actions={
               <>
                 <Button type="button" onClick={resetErrorBoundary}>
