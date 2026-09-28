@@ -157,17 +157,25 @@ describe("fail-closed product surfaces", () => {
       '[data-settings-search-target="row:App updates"]',
     );
     await updater.waitForDisplayed({ timeout: 15_000 });
-    expect(await updater.getAttribute("data-state")).toBe("unconfigured");
+    const status = await updater.$('[role="status"][aria-label="Not configured"]');
+    await status.waitForDisplayed({ timeout: 15_000 });
+    expect(await status.getAttribute("data-mode")).toBe("warning");
+    expect(await status.getAttribute("aria-live")).toBe("polite");
     expect(await updater.getText()).toContain(
       "Updates aren't configured in this build.",
     );
-    const description = await updater.$("p");
-    expect(await description.getProperty("textContent")).toBe(
+    expect(await updater.getText()).toContain("Not configured");
+    const buttons = await updater.$$("button");
+    expect(buttons).toHaveLength(1);
+    expect(await buttons[0]!.getAttribute("aria-label")).toBe("More about App updates");
+    expect(await updater.$$("progress")).toHaveLength(0);
+    await buttons[0]!.click();
+    const description = await app.browser.$('[role="dialog"]');
+    await description.waitForDisplayed({ timeout: 15_000 });
+    expect(await description.getText()).toBe(
       "Checks the signed CopyPaste release feed for Windows.",
     );
-    expect(await updater.getText()).toContain("Not configured");
-    expect(await updater.$$("button")).toHaveLength(0);
-    expect(await updater.$$("progress")).toHaveLength(0);
+    await app.browser.keys(["Escape"]);
   });
 
   test("keeps cloud controls absent when no deployment is configured", async () => {
