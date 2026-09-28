@@ -1,5 +1,0 @@
-.root { display: inline-flex; max-inline-size: 100%; flex: none; vertical-align: baseline; }
-.root[data-width="xs"] { inline-size: calc(var(--s-9) + var(--s-4)); }
-.root[data-width="sm"] { inline-size: calc(var(--s-9) * 2); }
-.root[data-width="md"] { inline-size: calc(var(--s-9) * 3); }
-.root[data-width="fill"] { inline-size: 100%; }
