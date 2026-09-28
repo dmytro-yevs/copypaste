@@ -40,8 +40,6 @@ export { Icon, iconComponent } from "./icon";
 export type { IconName, IconSize } from "./icon";
 export { Input } from "./input";
 export { Label } from "./label";
-export { MultiSelect } from "./multi-select";
-export type { MultiSelectItem } from "./multi-select";
 export { Select } from "./select";
 export type { SelectItem } from "./select";
 export { ShortcutBadge } from "./shortcut-badge";

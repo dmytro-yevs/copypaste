@@ -105,7 +105,7 @@ function Button({
     const content = (
         <>
             {adornment}
-            {buttonContent(children)}
+            {buttonContent(children ?? (iconOnly ? undefined : label))}
         </>
     );
     const buttonClass = cn(buttonVariants({ variant, size, tone, state: loading ? "loading" : state, className }), edge === "control" && styles.controlEdge);
@@ -164,7 +164,7 @@ function Button({
                 </Slottable>
             </Slot>
         );
-        return tooltipContent ? <Tooltip content={tooltipContent}>{element}</Tooltip> : element;
+        return tooltipContent ? <Tooltip content={tooltipContent}>{disabledState ? <span className={styles.disabledTrigger}>{element}</span> : element}</Tooltip> : element;
     }
 
     const element = (

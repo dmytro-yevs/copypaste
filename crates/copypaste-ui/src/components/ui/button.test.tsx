@@ -81,6 +81,19 @@ describe("Button asChild", () => {
 });
 
 describe("Button shared action behavior", () => {
+    it("renders a supplied label for a regular action and only names an icon action", () => {
+        render(<TooltipProvider><Button icon="copy" label="Copy item" /><Button icon="close" size="icon" label="Close" /></TooltipProvider>);
+        expect(screen.getByRole("button", { name: "Copy item" }).textContent).toBe("Copy item");
+        expect(screen.getByRole("button", { name: "Close" }).textContent).toBe("");
+    });
+
+    it("retains a tooltip hover target around a disabled slotted icon button", () => {
+        render(<TooltipProvider><Button asChild size="icon" label="Close" disabled><button>×</button></Button></TooltipProvider>);
+        const button = screen.getByRole("button", { name: "Close" });
+        expect(button).toHaveProperty("disabled", true);
+        expect(button.parentElement?.tagName).toBe("SPAN");
+    });
+
     it("names an icon action and disables it while pending with the shared loading visual", () => {
         render(<TooltipProvider><Button icon="copy" label="Copy item" size="icon" pending /></TooltipProvider>);
 
