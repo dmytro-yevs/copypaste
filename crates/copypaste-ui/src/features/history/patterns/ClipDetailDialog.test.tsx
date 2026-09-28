@@ -16,6 +16,34 @@ vi.mock("@/features/clip-content/hooks/useImagePreview", () => ({
 }));
 
 describe("ClipDetailDialog notices", () => {
+  it("keeps a pending sensitive body masked with the shared loading indicator", () => {
+    render(
+      <TooltipProvider>
+        <ClipDetailDialog
+          item={item({ content: "private body", is_sensitive: true })}
+          origin={null}
+          initialExpanded
+          fullContent="private body"
+          fullContentFailed={false}
+          revealedContent={null}
+          revealPending
+          onReveal={vi.fn()}
+          onHide={vi.fn()}
+          onCopy={vi.fn()}
+          onTogglePin={vi.fn()}
+          onDelete={vi.fn()}
+          onClose={vi.fn()}
+          onReturnFocus={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    const reveal = screen.getByRole("button", { name: "Sensitive content hidden — activate to reveal" });
+    expect(reveal.hasAttribute("disabled")).toBe(true);
+    expect(reveal.querySelectorAll('[data-mode="loading"][data-placement="control"]')).toHaveLength(1);
+    expect(screen.queryByText("private body")).toBeNull();
+  });
+
   it("keeps a potential original redacted until shown in the reader", async () => {
     const user = userEvent.setup();
     render(
