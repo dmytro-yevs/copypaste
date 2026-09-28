@@ -1,9 +1,11 @@
-import { useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode, type Ref } from "react";
+import { useId, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode, type Ref } from "react";
 
 import { Screen } from "@/components/layout";
 import { BrandMark } from "@/components/shared/BrandMark";
-import { Button, Icon, type IconName } from "@/components/ui";
-import { CaptureSetupState } from "@/features/capture";
+import { SettingsRow } from "@/components/shared/SettingsRow";
+import { StateView } from "@/components/shared/StateView";
+import { Button, Icon, Switch, type IconName } from "@/components/ui";
+import { CaptureSetupController } from "@/features/capture";
 import { PairingLauncherDialog } from "@/features/devices/patterns/PairingLauncherDialog";
 import { AndroidCaptureSetup } from "@/features/onboarding/patterns/AndroidCaptureSetup";
 import { usePairing } from "@/features/pairing";
@@ -11,8 +13,7 @@ import { ClipboardNotificationSection } from "@/features/settings/patterns/servi
 import { PrivacyServiceSections } from "@/features/settings/patterns/service/PrivacyServiceSections";
 import { ServiceSettingsProvider } from "@/features/settings/patterns/service/ServiceSettingsController";
 import { CloudSyncSettings } from "@/features/settings/patterns/CloudSyncSettings";
-import { PrivacyDisplaySettings } from "@/features/settings/patterns/ListTab";
-import { SwitchRow } from "@/features/settings/components/SwitchRow";
+import { ListTab } from "@/features/settings/patterns/ListTab";
 import { settingsCapabilities } from "@/features/settings/model/settingsNavigation";
 import { useOpenAtLogin, useSetOpenAtLogin } from "@/hooks/useOpenAtLogin";
 import { useSetServiceConfig } from "@/hooks/useServiceConfig";
@@ -90,7 +91,7 @@ export function OnboardingScreen(props: Omit<ComponentProps<typeof Screen>, "chi
               title={t("onboarding.welcome.title")}
               body={t("onboarding.welcome.body")}
               headingRef={headingRef}
-              content={<WelcomePanel />}
+              content={<BrandMark size="app" animated />}
               pagination={pagination}
               lockup
               primary={{ label: t("onboarding.welcome.action"), onClick: () => go("capture") }}
@@ -102,7 +103,7 @@ export function OnboardingScreen(props: Omit<ComponentProps<typeof Screen>, "chi
               title={t("onboarding.capture.title")}
               body={t(android ? "onboarding.capture.androidBody" : "onboarding.capture.body")}
               headingRef={headingRef}
-              content={android ? <AndroidCaptureOnboarding /> : <CaptureSetupState />}
+              content={android ? <AndroidCaptureOnboarding /> : <CaptureSetupController />}
               contentInteractive
               pagination={pagination}
               primary={{
@@ -157,7 +158,7 @@ export function OnboardingScreen(props: Omit<ComponentProps<typeof Screen>, "chi
               title={t("onboarding.complete.title")}
               body={t("onboarding.complete.body")}
               headingRef={headingRef}
-              content={<CompletionPanel />}
+              content={<BrandMark size="app" animated />}
               pagination={pagination}
               primary={{ label: t("onboarding.complete.action"), onClick: () => finish() }}
               secondary={{ label: t("onboarding.complete.secondary"), onClick: () => go("sync") }}
@@ -219,14 +220,10 @@ function OnboardingSlide({
   );
 }
 
-function WelcomePanel() {
-  return <BrandMark size="app" animated />;
-}
-
 function AndroidCaptureOnboarding() {
   return (
     <>
-      <CaptureSetupState />
+      <CaptureSetupController />
       <AndroidCaptureSetup />
     </>
   );
@@ -237,7 +234,7 @@ function PrivacyAndBasics() {
 
   return (
     <div className={styles.privacyFlow}>
-      <PrivacyDisplaySettings ready supportsScreenshots={capabilities.screenshots} />
+      <ListTab ready supportsScreenshots={capabilities.screenshots} scope="privacy" />
       <ServiceSettingsProvider requiresPrivateMode>
         <PrivacyServiceSections />
         {!isAndroidPlatform() ? (
@@ -251,22 +248,34 @@ function PrivacyAndBasics() {
 
 function StartupOption() {
   const { t } = useTranslation();
+  const noteId = useId();
   const startup = useOpenAtLogin();
   const saveStartup = useSetOpenAtLogin();
   const unavailable = startup.isError || saveStartup.isError;
 
   return (
-    <SwitchRow
-      id="onboarding-open-at-login"
+    <SettingsRow
       title={t("onboarding.startup.title")}
-      checked={startup.data ?? false}
-      disabled={startup.isPending || unavailable || saveStartup.isPending}
-      busy={startup.isPending || saveStartup.isPending}
-      note={startup.isPending
-        ? t("onboarding.startup.checking")
-        : unavailable ? t("onboarding.startup.unavailable") : undefined}
-      onChange={(open) => saveStartup.mutate(open)}
-    />
+      note={startup.isPending || unavailable ? (
+        <StateView
+          id={noteId}
+          mode={startup.isPending ? "loading" : "error"}
+          placement="control"
+          title={t(startup.isPending ? "onboarding.startup.checking" : "onboarding.startup.unavailable")}
+          role="none"
+        />
+      ) : undefined}
+    >
+      <Switch
+        id="onboarding-open-at-login"
+        aria-label={t("onboarding.startup.title")}
+        aria-describedby={startup.isPending || unavailable ? noteId : undefined}
+        aria-busy={startup.isPending || saveStartup.isPending || undefined}
+        checked={startup.data ?? false}
+        disabled={startup.isPending || unavailable || saveStartup.isPending}
+        onCheckedChange={(open) => saveStartup.mutate(open)}
+      />
+    </SettingsRow>
   );
 }
 
@@ -332,8 +341,8 @@ function SyncSetup({
         </Button>
       ) : null}
       {cloudSelected ? <CloudSyncSettings /> : null}
-      {choice !== null ? <p className={styles.savedChoice}>{t("onboarding.sync.selectionSaved")}</p> : null}
-      {saveFailed ? <p className={styles.savedChoice} role="alert">{t("onboarding.sync.saveFailed")}</p> : null}
+      {choice !== null ? <StateView mode="success" placement="inline" role="none" title={t("onboarding.sync.selectionSaved")} /> : null}
+      {saveFailed ? <StateView mode="error" placement="inline" role="alert" title={t("onboarding.sync.saveFailed")} /> : null}
       <PairingLauncherDialog
         open={pairingOpen}
         available={pairing.protectedPresentationAvailable || pairing.webPreview}
@@ -346,8 +355,4 @@ function SyncSetup({
       />
     </div>
   );
-}
-
-function CompletionPanel() {
-  return <BrandMark size="app" animated />;
 }
