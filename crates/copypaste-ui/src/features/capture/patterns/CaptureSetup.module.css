@@ -66,18 +66,6 @@
   gap: var(--s-4);
 }
 
-.spinner {
-  animation: capture-setup-spin var(--dur) linear infinite;
-}
-
-@keyframes capture-setup-spin {
-  to { transform: rotate(1turn); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .spinner { animation: none; }
-}
-
 .heading {
   font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
