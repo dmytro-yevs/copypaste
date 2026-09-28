@@ -12,8 +12,10 @@ const sonnerMock = vi.hoisted(() => ({
     id: string | number;
     element: unknown;
     options: Record<string, unknown>;
+    record: Record<string, unknown>;
   }>,
   dismiss: vi.fn(),
+  getToasts: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -23,16 +25,20 @@ vi.mock("sonner", () => ({
       options: Record<string, unknown> = {},
     ) => {
       const id = options.id ?? `generated-${sonnerMock.entries.length}`;
-      sonnerMock.entries.push({ id: id as string | number, element: renderToast(id as string | number), options });
+      const element = renderToast(id as string | number);
+      const record = { ...options, id, jsx: element };
+      sonnerMock.entries.push({ id: id as string | number, element, options, record });
       return id;
     },
     dismiss: sonnerMock.dismiss,
+    getToasts: sonnerMock.getToasts,
   },
 }));
 
 beforeEach(() => {
   sonnerMock.entries.length = 0;
   sonnerMock.dismiss.mockReset();
+  sonnerMock.getToasts.mockImplementation(() => sonnerMock.entries.map((entry) => entry.record));
 });
 
 function latestToast() {
@@ -147,5 +153,29 @@ describe("toast StateView adapter", () => {
 
     toast.dismiss("explicit-toast");
     expect(sonnerMock.dismiss).toHaveBeenLastCalledWith("explicit-toast");
+  });
+
+  it("calls onDismiss once from close with the current Sonner toast, not on programmatic dismiss", () => {
+    const onDismiss = vi.fn();
+    toast.error("Could not save", { id: "user-close", onDismiss });
+    const current = latestToast().record;
+
+    renderLatestToast();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(sonnerMock.dismiss).toHaveBeenCalledTimes(1);
+    expect(sonnerMock.dismiss).toHaveBeenCalledWith("user-close");
+    expect(onDismiss).toHaveBeenCalledOnce();
+    expect(onDismiss).toHaveBeenCalledWith(current);
+    cleanup();
+
+    const programmaticOnDismiss = vi.fn();
+    toast.info("Background update", {
+      id: "programmatic-dismiss",
+      onDismiss: programmaticOnDismiss,
+    });
+    toast.dismiss("programmatic-dismiss");
+    expect(programmaticOnDismiss).not.toHaveBeenCalled();
   });
 });

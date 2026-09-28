@@ -1,5 +1,11 @@
 import { createElement, type ComponentType, type ReactNode } from "react";
-import { toast as sonnerToast, type Action, type ExternalToast, type ToastT } from "sonner";
+import {
+  toast as sonnerToast,
+  type Action,
+  type ExternalToast,
+  type ToastT,
+  type ToastToDismiss,
+} from "sonner";
 
 import { StateView, type StateMode } from "@/components/shared/StateView";
 import { Button } from "@/components/ui/button";
@@ -19,6 +25,10 @@ function asRenderable(node: ToastMessage | undefined): ReactNode {
 
 function isAction(action: ToastAction): action is Action {
   return typeof action === "object" && action !== null && "label" in action;
+}
+
+function isToastRecord(toast: ToastT | ToastToDismiss): toast is ToastT {
+  return !("dismiss" in toast);
 }
 
 function renderAction(
@@ -71,6 +81,16 @@ function notifyAs(mode: ToastMode, message: ToastMessage, options: NotifyOptions
 
   return sonnerToast.custom(
     (id) => {
+      let closedByUser = false;
+      const close = () => {
+        if (closedByUser) return;
+        closedByUser = true;
+        const current = sonnerToast.getToasts().find(
+          (candidate): candidate is ToastT => candidate.id === id && isToastRecord(candidate),
+        );
+        sonnerToast.dismiss(id);
+        current?.onDismiss?.call(current, current);
+      };
       const actions = (
         <>
           {renderAction(cancel, id, "cancel", dismissible, options)}
@@ -81,7 +101,7 @@ function notifyAs(mode: ToastMode, message: ToastMessage, options: NotifyOptions
               icon="close"
               aria-label={t("common.close")}
               disabled={!dismissible}
-              onClick={() => sonnerToast.dismiss(id)}
+              onClick={close}
             />
           )}
         </>
