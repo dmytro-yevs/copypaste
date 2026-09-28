@@ -2,10 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "@/components/ui";
-import { ActionButton, FieldFeedback, SettingsRow } from "@/components/shared";
-import { Section } from "@/features/settings/components/Section";
-import { SettingsGroupSurface } from "@/features/settings/components/SettingsGroupSurface";
-import { SwitchRow } from "@/features/settings/components/SwitchRow";
+import { ActionButton, FieldFeedback } from "@/components/shared";
+import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
+import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
 import {
   DEFAULT_SHORTCUT,
   acceleratorGlyphs,
@@ -171,12 +170,11 @@ export function ShortcutTab({ supportsStartup }: { supportsStartup: boolean }) {
 
   return (
     <div className={styles.root}>
-      <SettingsGroupSurface>
-        <SettingsRow
-          title={t("settings.shortcut.title")}
-          help={t("settings.shortcut.description")}
-          note={feedback ? <span id={feedbackId}>{feedback}</span> : undefined}
-        >
+      <SettingsSchemaRenderer groups={[{ id: "shortcut", fields: [{
+        kind: "custom",
+        definition: settingDefinition("shortcuts", "settings.shortcut.title"),
+        note: feedback ? <span id={feedbackId}>{feedback}</span> : undefined,
+        content: (
           <div className={styles.controlRow}>
             <Button
               ref={buttonRef}
@@ -214,8 +212,8 @@ export function ShortcutTab({ supportsStartup }: { supportsStartup: boolean }) {
 
             {resetButton}
           </div>
-        </SettingsRow>
-      </SettingsGroupSurface>
+        ),
+      }] }]} />
 
       {supportsStartup ? <StartupSection /> : null}
     </div>
@@ -239,15 +237,14 @@ function StartupSection() {
     save.isSuccess && save.variables === true && save.data === false;
 
   return (
-    <Section title={t("settings.startup.title")}>
-      <SwitchRow
-        title={t("settings.startup.openAtLogin.title")}
-        help={t("settings.startup.openAtLogin.description")}
-        id="open-at-login"
-        checked={enabled}
-        disabled={openAtLogin.isPending || unknown || save.isPending}
-        busy={openAtLogin.isPending || save.isPending}
-        note={
+    <SettingsSchemaRenderer groups={[{ id: "startup", title: t("settings.startup.title"), fields: [{
+        kind: "boolean",
+        definition: settingDefinition("shortcuts", "settings.startup.openAtLogin.title"),
+        controlId: "open-at-login",
+        value: enabled,
+        disabled: openAtLogin.isPending || unknown || save.isPending,
+        busy: openAtLogin.isPending || save.isPending,
+        note:
           openAtLogin.isPending ? (
             <FieldFeedback state="pending">Checking startup setting…</FieldFeedback>
           ) : unknown ? (
@@ -262,10 +259,8 @@ function StartupSection() {
             <FieldFeedback state="error">
               {t("settings.startup.failed")}
             </FieldFeedback>
-          ) : undefined
-        }
-        onChange={(next) => save.mutate(next)}
-      />
-    </Section>
+          ) : undefined,
+        onChange: (next: boolean) => save.mutate(next),
+      }] }]} />
   );
 }

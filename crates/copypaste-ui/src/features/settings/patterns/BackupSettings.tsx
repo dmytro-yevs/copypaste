@@ -1,7 +1,7 @@
 import { Icon } from "@/components/ui/icon";
 import { useId, useState } from "react";
 
-import { FieldFeedback, SettingsRow } from "@/components/shared";
+import { FieldFeedback } from "@/components/shared";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -12,7 +12,8 @@ import {
   AlertDialogTitle,
   Button,
 } from "@/components/ui";
-import { Section } from "@/features/settings/components/Section";
+import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
+import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
 import { useBackupDatabase, useRestoreDatabase } from "@/hooks/useServiceConfig";
 import { useTranslation } from "@/i18n";
 import styles from "./StorageTab.module.css";
@@ -27,52 +28,26 @@ export function BackupSettings() {
 
   return (
     <>
-      <Section title={t("settings.transfer.recoverySection")}>
-        <SettingsRow
-          title={t("settings.transfer.backup.title")}
-          help={t("settings.transfer.backup.description")}
-          note={backup.isError ? (
+      <SettingsSchemaRenderer groups={[{ id: "recovery", title: t("settings.transfer.recoverySection"), fields: [{
+          kind: "action", definition: settingDefinition("storage", "settings.transfer.backup.title"),
+          note: backup.isError ? (
             <span id={backupFeedbackId}>
               <FieldFeedback state="error">History wasn’t backed up.</FieldFeedback>
             </span>
-          ) : undefined}
-        >
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={backup.isPending}
-            aria-busy={backup.isPending || undefined}
-            aria-describedby={backup.isError ? backupFeedbackId : undefined}
-            onClick={() => backup.mutate()}
-          >
-            <Icon name="file" aria-hidden="true" />
-            {backup.isPending ? "Backing up…" : t("settings.transfer.backup.action")}
-          </Button>
-        </SettingsRow>
+          ) : undefined,
+          label: backup.isPending ? "Backing up…" : t("settings.transfer.backup.action"),
+          icon: "file", disabled: backup.isPending, busy: backup.isPending,
+          onAction: () => backup.mutate(),
+        }, {
+          kind: "action", definition: settingDefinition("storage", "settings.transfer.restore.title"),
+          note: restore.isError ? (
+            <span id={restoreFeedbackId}><FieldFeedback state="error">History wasn’t restored.</FieldFeedback></span>
+          ) : undefined,
+          label: restore.isPending ? "Restoring…" : t("settings.transfer.restore.action"),
+          icon: "reset", tone: "danger", disabled: restore.isPending, busy: restore.isPending,
+          onAction: () => setRestoreOpen(true),
+        }] }]} />
 
-        <SettingsRow
-          title={t("settings.transfer.restore.title")}
-          help={t("settings.transfer.restore.description")}
-          note={restore.isError ? (
-            <span id={restoreFeedbackId}>
-              <FieldFeedback state="error">History wasn’t restored.</FieldFeedback>
-            </span>
-          ) : undefined}
-        >
-          <Button
-            variant="secondary"
-            size="sm"
-            tone="danger"
-            disabled={restore.isPending}
-            aria-busy={restore.isPending || undefined}
-            aria-describedby={restore.isError ? restoreFeedbackId : undefined}
-            onClick={() => setRestoreOpen(true)}
-          >
-            <Icon name="reset" aria-hidden="true" />
-            {restore.isPending ? "Restoring…" : t("settings.transfer.restore.action")}
-          </Button>
-        </SettingsRow>
-      </Section>
 
       <AlertDialog
         open={restoreOpen}
