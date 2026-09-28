@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import type { IconName } from "@/components/ui/icon";
+import type { StateMode } from "@/components/shared/StateView";
 import type { SettingsCapabilities } from "./settingsNavigation";
 import type { PreferenceSection } from "./preferenceSections";
 
@@ -41,7 +42,8 @@ export type SettingsField =
   | (FieldBase & { readonly kind: "multi-choice"; readonly value: readonly string[]; readonly options: readonly { value: string; label: string }[]; readonly onChange: (value: readonly string[]) => void })
   | (FieldBase & { readonly kind: "text"; readonly value: string; readonly onChange: (value: string) => void; readonly placeholder?: string })
   | (FieldBase & { readonly kind: "number"; readonly value: number; readonly min: number; readonly max: number; readonly step?: number; readonly displayValue?: string; readonly onChange: (value: number) => void })
-  | (FieldBase & { readonly kind: "readonly" | "status"; readonly value: ReactNode })
+  | (FieldBase & { readonly kind: "readonly"; readonly value: ReactNode })
+  | (FieldBase & { readonly kind: "status"; readonly value?: ReactNode; readonly mode?: StateMode; readonly description?: ReactNode; readonly actions?: ReactNode })
   | (FieldBase & { readonly kind: "action"; readonly label: string; readonly onAction?: () => void; readonly href?: string; readonly tone?: "danger"; readonly variant?: "secondary" | "ghost"; readonly icon?: IconName; readonly extraActions?: ReactNode })
   | (FieldBase & { readonly kind: "custom"; readonly content: ReactNode; readonly rowless?: boolean });
 
