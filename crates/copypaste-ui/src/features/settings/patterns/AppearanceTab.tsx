@@ -1,174 +1,48 @@
-import { SettingsRow } from "@/components/shared";
-import { Button, Switch } from "@/components/ui";
-import { SettingsGroupSurface } from "@/features/settings/components/SettingsGroupSurface";
+import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
+import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
 import { useTranslation } from "@/i18n";
 import { changeAppearanceFrom } from "@/lib/themeTransition";
-import {
-  type ColorTheme,
-  type ThemePref,
-  usePrefs,
-} from "@/store/prefs";
+import { type ColorTheme, type ThemePref, usePrefs } from "@/store/prefs";
 import styles from "./AppearanceTab.module.css";
 
 const MODE_OPTIONS = [
   { value: "system", label: "settings.appearance.theme.system" },
   { value: "light", label: "settings.appearance.theme.light" },
   { value: "dark", label: "settings.appearance.theme.dark" },
-] as const satisfies ReadonlyArray<{
-  value: ThemePref;
-  label: string;
-}>;
-
+] as const satisfies ReadonlyArray<{ value: ThemePref; label: string }>;
 const PRODUCT_THEMES = [
-  {
-    value: "midnight",
-    label: "settings.appearance.colorTheme.midnight",
-    description: "settings.appearance.colorTheme.midnightDescription",
-  },
-  {
-    value: "aurora",
-    label: "settings.appearance.colorTheme.aurora",
-    description: "settings.appearance.colorTheme.auroraDescription",
-  },
-  {
-    value: "ember",
-    label: "settings.appearance.colorTheme.ember",
-    description: "settings.appearance.colorTheme.emberDescription",
-  },
-  {
-    value: "graphite",
-    label: "settings.appearance.colorTheme.graphite",
-    description: "settings.appearance.colorTheme.graphiteDescription",
-  },
-] as const satisfies ReadonlyArray<{
-  value: ColorTheme;
-  label: string;
-  description: string;
-}>;
+  { value: "midnight", label: "settings.appearance.colorTheme.midnight", description: "settings.appearance.colorTheme.midnightDescription" },
+  { value: "aurora", label: "settings.appearance.colorTheme.aurora", description: "settings.appearance.colorTheme.auroraDescription" },
+  { value: "ember", label: "settings.appearance.colorTheme.ember", description: "settings.appearance.colorTheme.emberDescription" },
+  { value: "graphite", label: "settings.appearance.colorTheme.graphite", description: "settings.appearance.colorTheme.graphiteDescription" },
+] as const satisfies ReadonlyArray<{ value: ColorTheme; label: string; description: string }>;
 
-export function AppearanceTab({
-  ready,
-  supportsTranslucency,
-}: {
-  ready: boolean;
-  supportsTranslucency: boolean;
-}) {
+export function AppearanceTab({ ready, supportsTranslucency }: { ready: boolean; supportsTranslucency: boolean }) {
   const { t } = useTranslation();
   const theme = usePrefs((state) => state.theme);
   const colorTheme = usePrefs((state) => state.colorTheme);
   const translucency = usePrefs((state) => state.translucency);
   const set = usePrefs((state) => state.set);
-  if (!ready) {
-    return null;
-  }
-
-  return (
-    <div className={styles.root}>
-      <SettingsGroupSurface>
-        <SettingsRow
-          title={t("settings.appearance.theme.title")}
-        >
-          <div
-            role="group"
-            aria-label={t("settings.appearance.theme.title")}
-            className={styles.modeControl}
-          >
-            {MODE_OPTIONS.map((option) => (
-              <Button
-                key={option.value}
-                type="button"
-                variant={theme === option.value ? "secondary" : "ghost"}
-                size="sm"
-                aria-label={t(option.label)}
-                aria-pressed={theme === option.value}
-                onClick={(event) => {
-                  void changeAppearanceFrom(
-                    event.currentTarget,
-                    () => {
-                      const current = usePrefs.getState();
-                      return {
-                        theme: option.value,
-                        colorTheme: current.colorTheme,
-                        translucency: current.translucency,
-                      };
-                    },
-                    () => set("theme", option.value),
-                  );
-                }}
-              >
-                <span className={styles.modeLabel}>{t(option.label)}</span>
-              </Button>
-            ))}
-          </div>
-        </SettingsRow>
-      </SettingsGroupSurface>
-
-      <div className={styles.themeTitle}>
-        {t("settings.appearance.colorTheme.title")}
-      </div>
-      <div className={styles.themeGrid}>
-        {PRODUCT_THEMES.map((option) => (
-          <Button
-            key={option.value}
-            type="button"
-            variant="ghost"
-            size="md"
-            aria-pressed={option.value === colorTheme}
-            className={styles.themeCard}
-            data-product-theme={option.value}
-            onClick={(event) => {
-              void changeAppearanceFrom(
-                event.currentTarget,
-                () => {
-                  const current = usePrefs.getState();
-                  return {
-                    theme: current.theme,
-                    colorTheme: option.value,
-                    translucency: current.translucency,
-                  };
-                },
-                () => set("colorTheme", option.value),
-              );
-            }}
-          >
-            <span className={styles.themePreview} aria-hidden="true">
-              <span className={styles.themeRail}>
-                <span className={styles.themeSwatches}>
-                  <i />
-                  <i />
-                  <i />
-                </span>
-              </span>
-              <span className={styles.themeCanvas}>
-                <span className={styles.themeSwatches}>
-                  <i />
-                  <i />
-                  <i />
-                </span>
-              </span>
-            </span>
-            <span className={styles.themeCopy}>
-              <strong>{t(option.label)}</strong>
-              <small>{t(option.description)}</small>
-            </span>
-          </Button>
-        ))}
-      </div>
-
-      {supportsTranslucency ? (
-        <SettingsGroupSurface>
-          <SettingsRow
-            title={t("settings.appearance.translucency.title")}
-            help={t("settings.appearance.translucency.description")}
-          >
-            <Switch
-              aria-label={t("settings.appearance.translucency.title")}
-              checked={translucency}
-              onCheckedChange={(checked) => set("translucency", checked)}
-            />
-          </SettingsRow>
-        </SettingsGroupSurface>
-      ) : null}
-    </div>
-  );
+  if (!ready) return null;
+  return <div className={styles.root}><SettingsSchemaRenderer groups={[
+    { id: "mode", fields: [{
+      kind: "choice", definition: settingDefinition("appearance", "settings.appearance.theme.title"),
+      value: theme, presentation: "segmented", controlClassName: styles.modeControl,
+      options: MODE_OPTIONS.map((option) => ({ value: option.value, label: t(option.label) })),
+      renderOption: (option) => <span className={styles.modeLabel}>{option.label}</span>,
+      onChange: (value, source) => { if (source) void changeAppearanceFrom(source, () => { const current = usePrefs.getState(); return { theme: value as ThemePref, colorTheme: current.colorTheme, translucency: current.translucency }; }, () => set("theme", value as ThemePref)); },
+    }] },
+    { id: "color-theme", surface: false, fields: [{
+      kind: "choice", definition: settingDefinition("appearance", "settings.appearance.colorTheme.title"),
+      value: colorTheme, presentation: "cards", controlClassName: styles.themeGrid,
+      optionClassName: styles.themeCard, titleClassName: styles.themeTitle,
+      options: PRODUCT_THEMES.map((option) => ({ value: option.value, label: t(option.label), description: t(option.description) })),
+      renderOption: (option) => <><span className={styles.themePreview} aria-hidden="true"><span className={styles.themeRail}><span className={styles.themeSwatches}><i /><i /><i /></span></span><span className={styles.themeCanvas}><span className={styles.themeSwatches}><i /><i /><i /></span></span></span><span className={styles.themeCopy}><strong>{option.label}</strong><small>{option.description}</small></span></>,
+      onChange: (value, source) => { if (source) void changeAppearanceFrom(source, () => { const current = usePrefs.getState(); return { theme: current.theme, colorTheme: value as ColorTheme, translucency: current.translucency }; }, () => set("colorTheme", value as ColorTheme)); },
+    }] },
+    { id: "translucency", fields: [{
+      kind: "boolean", definition: settingDefinition("appearance", "settings.appearance.translucency.title"),
+      value: translucency, visible: supportsTranslucency, onChange: (value: boolean) => set("translucency", value),
+    }] },
+  ]} /></div>;
 }

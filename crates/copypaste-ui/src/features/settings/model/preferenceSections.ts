@@ -23,63 +23,9 @@ export interface PreferenceSectionDefinition {
   readonly capability?: Exclude<keyof SettingsCapabilities, "platform">;
 }
 
-export const PREFERENCE_SECTIONS: readonly PreferenceSectionDefinition[] = [
-  {
-    value: "appearance",
-    label: "Appearance",
-    description: "Light, dark, color theme and translucency",
-    icon: "palette",
-  },
-  {
-    value: "clipboard",
-    label: "Clipboard behavior",
-    description: "Capture, duplicate and paste rules",
-    icon: "capture",
-  },
-  {
-    value: "privacy",
-    label: "Privacy & retention",
-    description: "Private mode, sensitive content and retention",
-    icon: "service",
-  },
-  {
-    value: "shortcuts",
-    label: "Shortcuts",
-    description: "Quick Paste shortcut and startup",
-    icon: "keyboard",
-    capability: "shortcut",
-  },
-  {
-    value: "device-sync",
-    label: "Device sync",
-    description: "This device, nearby devices and network access",
-    icon: "devices",
-  },
-  {
-    value: "cloud-sync",
-    label: "Cloud sync",
-    description: "Account, encryption and cloud status",
-    icon: "cloud",
-  },
-  {
-    value: "storage",
-    label: "Storage & history",
-    description: "Stored items, cleanup, transfer and recovery",
-    icon: "storage",
-  },
-  {
-    value: "diagnostics",
-    label: "Diagnostics",
-    description: "Service state and support report",
-    icon: "diagnostics",
-  },
-  {
-    value: "about",
-    label: "About",
-    description: "Versions, links and product information",
-    icon: "help",
-  },
-];
+import { SETTINGS_SECTIONS } from "./settingsSchemaCatalog";
+
+export const PREFERENCE_SECTIONS: readonly PreferenceSectionDefinition[] = SETTINGS_SECTIONS;
 
 export function visiblePreferenceSections(
   capabilities: SettingsCapabilities,
