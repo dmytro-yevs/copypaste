@@ -24,6 +24,8 @@ describe("Boundary recovery", () => {
             screen.getByRole("button", { name: "Open diagnostics" }),
         ).toBeTruthy();
         expect(container.querySelector('svg[aria-hidden="true"]')).toBeNull();
-        expect(screen.getByRole("button", { name: "Error details" })).toBeTruthy();
+        expect(screen.getByRole("alert").textContent).toContain(
+            "This view is temporarily unavailable, while other CopyPaste screens remain available.",
+        );
     });
 });
