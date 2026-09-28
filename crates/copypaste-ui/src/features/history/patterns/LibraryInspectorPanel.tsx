@@ -11,6 +11,7 @@ import {
     TruncatedValue,
 } from "@/components/shared";
 import { Button, Icon, iconComponent } from "@/components/ui";
+import { StateView } from "@/components/shared/StateView";
 import { ClipBodyNotices, ClipBodyView } from "@/features/history/patterns/ClipBodyPresentation";
 import { clipboardCopyPresentation, clipCopyAction, clipPotentialRevealAction } from "@/features/history/model/clipPresentation";
 import { useClipboardWriteAvailability } from "@/hooks/useClipboardWriteAvailability";
@@ -145,10 +146,14 @@ export function LibraryInspectorPanel({
                     />
                 }
             >
-                <div className={styles.empty}>
-                    <strong>{t("history.inspector.emptyTitle")}</strong>
-                    <p>{t("history.inspector.emptyBody")}</p>
-                </div>
+                <StateView
+                    mode="empty"
+                    placement="panel"
+                    role="none"
+                    className={styles.empty}
+                    title={t("history.inspector.emptyTitle")}
+                    description={t("history.inspector.emptyBody")}
+                />
             </InspectorShell>
         );
     }
