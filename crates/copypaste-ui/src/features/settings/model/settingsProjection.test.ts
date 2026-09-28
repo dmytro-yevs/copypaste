@@ -34,4 +34,10 @@ describe("settings schema projection", () => {
     expect(SETTINGS_SEARCH_ITEMS.some((item) => item.title === "capture.setup.enable.title")).toBe(false);
     expect(SETTINGS_SEARCH_ITEMS.filter((item) => item.title === "settings.service.exclusions.title")).toHaveLength(1);
   });
+
+  it("rejects a control kind that violates the catalog", () => {
+    expect(() => settingsGroups("clipboard", [
+      { kind: "readonly", definition: settingDefinition("clipboard", "settings.service.sound.title"), value: "off" },
+    ], identity)).toThrow(/expects boolean/);
+  });
 });
