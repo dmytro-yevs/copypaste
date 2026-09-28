@@ -3,7 +3,7 @@
 .frame[data-preview-side="left"] > :last-child { order: 1; }
 
 .root {
-  inline-size: 403px;
+  inline-size: var(--quick-paste-pane-width);
   flex: none;
   padding: var(--s-2);
   overflow: hidden;

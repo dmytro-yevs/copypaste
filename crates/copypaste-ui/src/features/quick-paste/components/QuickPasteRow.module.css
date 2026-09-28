@@ -23,7 +23,7 @@
   z-index: 2;
   display: inline-flex;
   flex: none;
-  margin-block-start: 2.5px;
+  margin-block-start: var(--quick-paste-icon-offset);
   pointer-events: none;
 }
 

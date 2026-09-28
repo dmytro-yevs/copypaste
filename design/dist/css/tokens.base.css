@@ -65,6 +65,8 @@
   --scale-pulse-end: 1.18;
   --ease: cubic-bezier(0, 0, 0.2, 1);
   --ease-linear: cubic-bezier(0, 0, 1, 1);
+  --quick-paste-pane-width: 403px;
+  --quick-paste-icon-offset: 2.5px;
   --icon-sm: 14px;
   --icon-md: 16px;
   --icon-lg: 20px;
