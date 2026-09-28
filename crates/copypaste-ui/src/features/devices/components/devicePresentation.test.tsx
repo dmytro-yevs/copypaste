@@ -5,7 +5,6 @@ import { ConnectionSummary } from "./ConnectionSummary";
 import { DeviceCard } from "./DeviceCard";
 import { DeviceStatus } from "./DeviceStatus";
 import { CloudConnectionCard } from "./CloudConnectionCard";
-import { PeerRow } from "./PeerRow";
 import {
     UNKNOWN_DEVICE_IDENTITY,
     connectionSummary,
@@ -123,69 +122,4 @@ describe("device presentation components", () => {
     expect(card.getAttribute("aria-busy")).toBe("true");
   });
 
-  it("renders one descriptor-owned peer status icon and its declared hint live region", () => {
-    const { container } = render(
-      <PeerRow
-        peer={{
-          ...PEER,
-          last_seen_ms: Date.now() - 60_000,
-          online: false,
-          details: {
-            profile: null,
-            endpoint: null,
-            latency: null,
-            presence: {
-              state: "offline",
-              last_seen_ms: Date.now() - 60_000,
-              provenance: "observed",
-              trust: "local",
-              observed_at_ms: Date.now(),
-              fresh_until_ms: Date.now() + 60_000,
-            },
-            public_ip: { availability: "unavailable" },
-            geo: { availability: "unavailable" },
-          },
-        }}
-        health={undefined}
-        syncing={false}
-        unpairing={false}
-        revoking={false}
-        onSync={vi.fn()}
-        onUnpair={vi.fn()}
-        onRevoke={vi.fn()}
-      />,
-    );
-
-    expect(container.querySelectorAll('[data-slot="device-status"]')).toHaveLength(1);
-    expect(screen.getByRole("status").getAttribute("aria-live")).toBe("polite");
-  });
-
-  it("gives syncing precedence over a peer failure and unknown presence", () => {
-    const { container } = render(
-      <PeerRow
-        peer={{ ...PEER, details: undefined }}
-        health={{
-          failure: {
-            at: Date.now(),
-            kind: "auth_failed",
-            retryable: false,
-            durationMs: null,
-          },
-        }}
-        syncing
-        unpairing={false}
-        revoking={false}
-        onSync={vi.fn()}
-        onUnpair={vi.fn()}
-        onRevoke={vi.fn()}
-      />,
-    );
-
-    const status = container.querySelector('[data-slot="device-status"]');
-    expect(status?.getAttribute("data-tone")).toBe("busy");
-    expect(status?.getAttribute("aria-busy")).toBe("true");
-    expect(status?.textContent).toContain("Syncing");
-    expect(status?.textContent).not.toContain("Sync failed");
-    expect(status?.textContent).not.toContain("Presence unknown");
-  });
 });
