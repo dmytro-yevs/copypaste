@@ -30,14 +30,19 @@ export function disclosureRevealKey(
 
 /** Every settings row is listed here so search does not depend on hidden tabs
  * being mounted. Translation keys keep the index correct when copy changes. */
-import { SETTINGS_FIELD_DEFINITIONS, SETTINGS_GROUP_DEFINITIONS } from "./settingsSchemaCatalog";
+import { SETTINGS_FIELD_DEFINITIONS, SETTINGS_GROUP_DEFINITIONS, SETTINGS_SECTIONS } from "./settingsSchemaCatalog";
 
-export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = SETTINGS_FIELD_DEFINITIONS.map((field) => ({
+const searchDefinitions = [
+  ...SETTINGS_SECTIONS.flatMap((section) => section.fields),
+  ...SETTINGS_FIELD_DEFINITIONS.filter((field) => field.kind === "group"),
+];
+
+export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = searchDefinitions.map((field) => ({
   tab: field.section,
   section: SETTINGS_GROUP_DEFINITIONS.find((group) =>
     group.section === (field.section === "runtime-events" ? "diagnostics" : field.section) &&
     group.fields.includes(field.title),
-  )?.title ?? field.group,
+  )?.title,
   title: field.title,
   description: field.description,
   keywords: field.keywords,

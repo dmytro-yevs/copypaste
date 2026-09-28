@@ -31,7 +31,7 @@ export function SettingsCompactNavigation({
 
   if (active && definition) {
     return (
-      <section className={styles.detail} aria-label={definition.label}>
+      <section className={styles.detail} aria-label={definition.label} data-settings-search-target={`section:${definition.label}`}>
         <ScreenHeader
           leading={<Button
             size="compactIcon"

@@ -4,28 +4,3 @@
   flex-direction: column;
   gap: var(--s-4);
 }
-
-.sliderControl {
-  display: flex;
-  inline-size: min(calc(var(--s-9) * 7.5), 50cqi);
-  min-inline-size: 0;
-  max-inline-size: 100%;
-  align-items: center;
-  gap: var(--s-3);
-}
-
-.sliderValue {
-  inline-size: auto;
-  max-inline-size: 50%;
-  min-inline-size: 0;
-  flex: 0 0 auto;
-  overflow: hidden;
-  color: var(--dim);
-  font-size: var(--fs-sm);
-  font-variant-numeric: tabular-nums;
-  text-align: end;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.limitSlider { min-inline-size: 0; flex: 1 1 0; }
