@@ -14,8 +14,8 @@ const css = readFileSync(
 describe("QuickPasteRow compact presentation", () => {
   it("uses a flat row with a fixed one-line quick-paste density", () => {
     expect(component).toMatch(/elevation="flat"\s+border="none"\s+radius="sm"/);
-    expect(component).toContain("previewLines={QUICK_PASTE_PREVIEW_LINES}");
-    expect(component).toContain('surface="quickPaste"');
+    expect(component).toContain("previewLines: QUICK_PASTE_PREVIEW_LINES");
+    expect(component).toContain('surface: "quickPaste"');
   });
 
   it("keeps desktop shortcuts and a keyboard-reachable quiet pin control", () => {

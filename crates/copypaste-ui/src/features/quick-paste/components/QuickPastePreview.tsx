@@ -1,4 +1,5 @@
 import { PreviewSurface } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 import { ClipImageLoader } from "@/features/clip-content";
 import { InspectorPreview } from "@/features/history/components/InspectorPreview";
 import { resolveClipBodyPresentation } from "@/lib/clipPresentation";
@@ -36,9 +37,9 @@ export function QuickPastePreview({
     >
       <PreviewSurface elevation="raised" border="subtle" radius="lg" padding="compact" scroll className={styles.surface}>
         {body.state === "unavailable" ? (
-          <p role="status">{t("quickPaste.row.fullUnavailable")}</p>
+          <StateView mode="error" placement="panel" role="status" title={t("quickPaste.row.fullUnavailable")} />
         ) : loading ? (
-          <p role="status">{t("quickPaste.row.fullLoading")}</p>
+          <StateView mode="loading" placement="panel" title={t("quickPaste.row.fullLoading")} />
         ) : body.state === "content" ? (
           <InspectorPreview
             kind={kind}

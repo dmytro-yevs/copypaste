@@ -4,9 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from 
 import { toast } from "sonner";
 
 import { Screen, ScrollViewport } from "@/components/layout";
-import { ActionButton, EmptyState, FieldFeedback, SearchField } from "@/components/shared";
+import { SearchField } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 import { Button, Surface } from "@/components/ui";
-import { QuickPasteLoadingState } from "@/features/quick-paste/components/QuickPasteLoadingState";
 import { QuickPastePreview } from "@/features/quick-paste/components/QuickPastePreview";
 import { QuickPasteRow } from "@/features/quick-paste/components/QuickPasteRow";
 import { clipboardCopyPresentation } from "@/features/history/model/clipPresentation";
@@ -286,54 +286,46 @@ export function QuickPasteScreen() {
           className={cn(styles.list, history.isPending && styles.loadingList)}
         >
           {history.isPending ? (
-            <QuickPasteLoadingState
+            <StateView mode="loading" placement="panel"
               title={t("quickPaste.loading.title")}
             />
           ) : historyError === "offline" ? (
-            <EmptyState
-              compact
+            <StateView
+              mode="offline"
+              placement="panel"
               icon="plug"
-              tone="attention"
               title={t("quickPaste.offline.title")}
-              body={t("quickPaste.offline.body")}
-              action={{
-                label: t("quickPaste.offline.action"),
-                icon: "play",
-                onClick: () => void restart(),
-              }}
+              description={t("quickPaste.offline.body")}
+              actions={<Button variant="secondary" icon="play" onClick={() => void restart()}>{t("quickPaste.offline.action")}</Button>}
             />
           ) : historyError === "not_ready" ? (
-            <EmptyState
-              busy
-              compact
+            <StateView
+              mode="loading"
+              placement="panel"
               icon="plug"
-              tone="info"
               title={t("quickPaste.starting.title")}
-              body={t("quickPaste.starting.body")}
+              description={t("quickPaste.starting.body")}
             />
           ) : history.error ? (
-            <EmptyState
-              compact
+            <StateView
+              mode="error"
+              placement="panel"
               icon="alert"
-              tone="danger"
               title={t("quickPaste.failed.title")}
-              body={t("quickPaste.failed.body")}
-              action={{
-                label: t("common.tryAgain"),
-                icon: "refresh",
-                onClick: () => void refetch(),
-              }}
+              description={t("quickPaste.failed.body")}
+              actions={<Button variant="secondary" icon="refresh" onClick={() => void refetch()}>{t("common.tryAgain")}</Button>}
             />
           ) : items.length === 0 ? (
-            <EmptyState
-              compact
+            <StateView
+              mode="empty"
+              placement="panel"
               icon={searching ? "searchX" : "library"}
               title={
                 searching
                   ? t("quickPaste.noResults.title", { query })
                   : t("quickPaste.empty.title")
               }
-              body={t(searching ? "quickPaste.noResults.body" : "quickPaste.empty.body")}
+              description={t(searching ? "quickPaste.noResults.body" : "quickPaste.empty.body")}
             />
           ) : (
             <div className={styles.virtualCanvas} style={{ height: virtualizer.getTotalSize() }}>
@@ -349,7 +341,7 @@ export function QuickPasteScreen() {
                       className={styles.loadingMore}
                       style={{ transform: `translateY(${row.start}px)` }}
                     >
-                      {history.isFetchingNextPage ? t("quickPaste.loadingMore") : (
+                      {history.isFetchingNextPage ? <StateView mode="loading" placement="control" role="none" title={t("quickPaste.loadingMore")} /> : (
                         <Button type="button" variant="ghost" size="sm" onClick={loadMore}>
                           {t("quickPaste.loadMore")}
                         </Button>
@@ -406,13 +398,13 @@ export function QuickPasteScreen() {
                     : t("quickPaste.count.all", { count: items.length })}
             </p>
             {copyPending ? (
-              <FieldFeedback state="pending">{t("quickPaste.copying")}</FieldFeedback>
+              <StateView mode="loading" placement="control" data-state="pending" title={t("quickPaste.copying")} />
             ) : null}
-            <ActionButton
+            <Button
               size="compactIcon"
               variant="ghost"
               icon="settings"
-              aria-label={t("quickPaste.settings")}
+              label={t("quickPaste.settings")}
               title={t("quickPaste.settings")}
               className={styles.settingsAction}
               onClick={() =>

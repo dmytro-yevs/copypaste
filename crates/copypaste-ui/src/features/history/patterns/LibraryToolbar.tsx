@@ -1,8 +1,9 @@
 import { useMemo, type RefObject } from "react";
 
 import { Container } from "@/components/layout";
-import { ActionButton, InlineNotice, SearchField } from "@/components/shared";
-import { MultiSelect, Select, VisuallyHidden } from "@/components/ui";
+import { ScreenHeader, SearchField } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
+import { Button, Select, VisuallyHidden } from "@/components/ui";
 import { useLibraryToolbarSearch } from "@/features/history/hooks/useLibraryToolbarSearch";
 import {
     historyCompactCount,
@@ -16,7 +17,6 @@ import { historyKindFilterLabel } from "@/features/history/model/clipPresentatio
 import type { OriginDevice } from "@/lib/itemOrigin";
 import { ActiveControlBadge } from "@/features/history/patterns/ActiveControlBadge";
 import { BulkActionBar } from "@/features/history/patterns/BulkActionBar";
-import { LibraryToolbarHeader } from "@/features/history/patterns/LibraryToolbarHeader";
 import { useTranslation } from "@/i18n";
 import { acceleratorLabel } from "@/lib/accelerator";
 import {
@@ -129,7 +129,9 @@ export function LibraryToolbar({
 
     return (
         <>
-            <LibraryToolbarHeader />
+            <Container width="library" gutter="screen" className={styles.header}>
+                <ScreenHeader title={t("history.header.title")} />
+            </Container>
 
             <Container
                 width="library"
@@ -200,19 +202,20 @@ export function LibraryToolbar({
                                     }
                                     className={styles.searchTriggerFrame}
                                 >
-                                    <ActionButton
+                                    <Button
                                         id={searchTriggerId}
                                         className={styles.searchTrigger}
                                         size="compactIcon"
                                         icon="search"
-                                        aria-label={searchLabel}
+                                        label={searchLabel}
                                         aria-controls={searchOverlayId}
                                         aria-expanded={searchExpanded}
                                         onClick={() => openSearch()}
                                     />
                                 </ActiveControlBadge>
                                 <ActiveControlBadge active={kindActive}>
-                                    <MultiSelect
+                                    <Select
+                                        mode="multiple"
                                         size="compact"
                                         aria-label={kindLabelText}
                                         values={view.kinds}
@@ -230,7 +233,8 @@ export function LibraryToolbar({
                                 </ActiveControlBadge>
                                 {origins.length > 1 ? (
                                     <ActiveControlBadge active={deviceActive}>
-                                        <MultiSelect
+                                        <Select
+                                            mode="multiple"
                                             size="compact"
                                             aria-label={deviceLabel}
                                             values={view.devices}
@@ -265,9 +269,9 @@ export function LibraryToolbar({
                                 <div className={styles.endSlot}>
                                     {origins.length > 1 ? (
                                         <ActiveControlBadge active={groupActive}>
-                                            <ActionButton
+                                            <Button
                                                 size="compactIcon"
-                                                aria-label={groupLabel}
+                                                label={groupLabel}
                                                 aria-pressed={
                                                     view.groupByDevice
                                                 }
@@ -351,12 +355,12 @@ export function LibraryToolbar({
 
             {displayLimit !== null ? (
                 <div className={styles.limitNotice}>
-                    <InlineNotice live>
-                        {t("history.search.displayLimitHint", {
+                    <StateView mode="info" placement="inline" role="status" aria-live="polite" title={
+                        t("history.search.displayLimitHint", {
                             limit: displayLimit,
                             count: visible,
                         })}
-                    </InlineNotice>
+                    />
                 </div>
             ) : null}
         </>

@@ -3,20 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import {
     Button,
     Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    Icon,
-    VisuallyHidden,
 } from "@/components/ui";
-import {
-    InlineNotice,
-    PreviewSurface,
-} from "@/components/shared";
-import { ClipImageLoader } from "@/features/clip-content";
-import { InspectorPreview } from "@/features/history/components/InspectorPreview";
+import { StateView } from "@/components/shared/StateView";
+import { ClipBodyNotices, ClipBodyView, ClipPotentialRevealButton } from "@/features/history/patterns/ClipBodyPresentation";
 import { originName, wontSync, type OriginDevice } from "@/lib/itemOrigin";
 import { clipboardCopyPresentation, clipCopyAction } from "@/features/history/model/clipPresentation";
 import { useClipboardWriteAvailability } from "@/hooks/useClipboardWriteAvailability";
@@ -122,7 +111,6 @@ export function ClipDetailDialog({
               showPotentialSensitiveOriginal: potentialRevealed,
           })
         : null;
-    const content = body?.state === "content" ? body.content : "";
     const copyAction = clipCopyAction(kind);
 
     const meta = item
@@ -160,269 +148,107 @@ export function ClipDetailDialog({
     };
 
     return (
-        <Dialog open={item !== null} onOpenChange={(open) => !open && close()}>
-            <DialogContent
-                ref={contentRef}
-                presentation={sheet ? "sheet" : "modal"}
-                showCloseButton={expanded}
-                aria-busy={copying || undefined}
-                className={cn(
-                    styles.dialog,
-                    expanded ? styles.expanded : styles.normal,
-                )}
-                onCloseAutoFocus={(event) => {
+        <Dialog
+            open={item !== null}
+            onOpenChange={(open) => !open && close()}
+            title={t("history.detail.title")}
+            description={expanded ? meta.join(" · ") : undefined}
+            headerHidden={!expanded}
+            showCloseButton={expanded}
+            contentProps={{
+                ref: contentRef,
+                presentation: sheet ? "sheet" : "modal",
+                "aria-busy": copying || undefined,
+                className: cn(styles.dialog, expanded ? styles.expanded : styles.normal),
+                onCloseAutoFocus: (event) => {
                     event.preventDefault();
                     onReturnFocus();
-                }}
-                onEscapeKeyDown={(event) => {
+                },
+                onEscapeKeyDown: (event) => {
                     if (copyingRef.current) event.preventDefault();
-                }}
-                onPointerDownOutside={(event) => {
+                },
+                onPointerDownOutside: (event) => {
                     if (!copyingRef.current) return;
                     event.preventDefault();
                     requestAnimationFrame(() => {
                         if (copyingRef.current) contentRef.current?.focus();
                     });
-                }}
-                onInteractOutside={(event) => {
+                },
+                onInteractOutside: (event) => {
                     if (copyingRef.current) event.preventDefault();
-                }}
-            >
-                {!expanded && item ? (
-                    <>
-                        <VisuallyHidden asChild>
-                            <DialogTitle>
-                                {t("history.detail.title")}
-                            </DialogTitle>
-                        </VisuallyHidden>
-                        <LibraryInspectorPanel
-                            item={item}
-                            origin={origin}
-                            revealedContent={revealedContent}
-                            fullContent={fullContent}
-                            fullContentFailed={fullContentFailed === true}
-                            revealPending={revealPending}
-                            copyPending={copying}
-                            onReveal={onReveal}
-                            onHide={onHide}
-                            onCopy={(target) => startCopy(target, false)}
-                            onTogglePin={onTogglePin}
-                            onDelete={(target) => {
-                                onDelete(target);
-                                close();
-                            }}
-                            onOpenReader={() => setExpanded(true)}
-                            onClose={close}
-                        />
-                    </>
-                ) : (
-                    <>
-                        <DialogHeader>
-                            <DialogTitle>
-                                {t("history.detail.title")}
-                            </DialogTitle>
-                            <DialogDescription>
-                                {meta.join(" · ")}
-                            </DialogDescription>
-                        </DialogHeader>
-
-                        {item && wontSync(item) && (
-                            <InlineNotice tone="warning" icon="cloudOff">
-                                {t("history.row.wontSync")}
-                            </InlineNotice>
-                        )}
-
-                        {copyAvailability.reason !== null && (
-                            <InlineNotice
-                                role="status"
-                                tone={copyAvailability.canRetry ? "warning" : "neutral"}
-                                icon="info"
-                                action={copyAvailability.canRetry ? (
-                                    <Button variant="secondary" size="sm" onClick={() => void availability.refetch()}>
-                                        {t("history.copyAvailability.retry")}
-                                    </Button>
-                                ) : undefined}
-                            >
-                                {copyAvailability.reason}
-                            </InlineNotice>
-                        )}
-
-                        {potentialFinding !== null && (
-                            <InlineNotice
-                                role="status"
-                                tone="warning"
-                                icon="sensitive"
-                            >
-                                {t("history.row.potentialSensitiveWarning")}
-                            </InlineNotice>
-                        )}
-
-                        {body?.state === "masked" ? (
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                disabled={copying}
-                                aria-label={t("history.row.sensitiveReveal")}
-                                aria-busy={revealPending || undefined}
-                                className={styles.masked}
-                                onClick={() =>
-                                    item && !revealPending && onReveal(item)
-                                }
-                            >
-                                <span
-                                    aria-hidden="true"
-                                    className={styles.redactions}
-                                >
-                                    <span className={styles.redactionLong} />
-                                    <span className={styles.redactionShort} />
-                                    <span className={styles.redactionMedium} />
-                                </span>
-                                {revealPending && (
-                                    <Icon
-                                        name="spinner"
-                                        className={styles.spinner}
-                                    />
-                                )}
-                            </Button>
-                        ) : body?.state === "unavailable" ? (
-                            <PreviewSurface
-                                role="status"
-                                className={styles.unavailable}
-                                elevation="flat"
-                                border="subtle"
-                                radius="md"
-                                padding="roomy"
-                            >
-                                {t("history.detail.fullBodyUnavailable")}
-                            </PreviewSurface>
-                        ) : body?.state === "content" && body.source === "preview" ? (
-                            <PreviewSurface
-                                role="status"
-                                className={styles.unavailable}
-                                elevation="flat"
-                                border="subtle"
-                                radius="md"
-                                padding="roomy"
-                            >
-                                {t("history.empty.loading.title")}
-                            </PreviewSurface>
-                        ) : (
-                            <PreviewSurface
-                                className={styles.contentRegion}
-                                elevation="flat"
-                                border={
-                                    kind === "code" || kind === "json"
-                                        ? "none"
-                                        : "strong"
-                                }
-                                radius="md"
-                                padding="compact"
-                            >
-                                <InspectorPreview
-                                    mode="reader"
-                                    kind={kind}
-                                    ariaLabel={t(
-                                        kind === "image"
-                                            ? "history.detail.image"
-                                            : "history.detail.contents",
-                                    )}
-                                    content={
-                                        content === ""
-                                            ? t("history.detail.empty")
-                                            : content
-                                    }
-                                    imagePreview={
-                                        kind === "image" && item ? (
-                                            <ClipImageLoader
-                                                id={item.id}
-                                                size="detail"
-                                                loadingLabel={t(
-                                                    "history.detail.imageLoading",
-                                                )}
-                                                failureLabel={t(
-                                                    "history.detail.imageUnavailable",
-                                                )}
-                                                title={t("history.detail.image")}
-                                            />
-                                        ) : undefined
-                                    }
-                                />
-                            </PreviewSurface>
-                        )}
-
-                        <DialogFooter>
-                            {potentialFinding !== null && (
-                                <Button
-                                    variant="secondary"
-                                    disabled={copying}
-                                    aria-pressed={potentialRevealed}
-                                    onClick={() =>
-                                        setShownFinding(
-                                            potentialRevealed
-                                                ? null
-                                                : { id: item!.id, finding: potentialFinding },
-                                        )
-                                    }
-                                >
-                                    {potentialRevealed ? (
-                                        <Icon name="eyeOff" />
-                                    ) : (
-                                        <Icon name="eye" />
-                                    )}
-                                    {t(
-                                        potentialRevealed
-                                            ? "history.row.hideOriginal"
-                                            : "history.row.showOriginal",
-                                    )}
-                                </Button>
-                            )}
-                            {revealed && (
-                                <Button variant="secondary" disabled={copying} onClick={onHide}>
-                                    <Icon name="eyeOff" />
-                                    {t("history.detail.hide")}
-                                </Button>
-                            )}
-                            {item ? (
-                                <Button
-                                    variant="secondary"
-                                    disabled={copying}
-                                    aria-pressed={item.pinned}
-                                    onClick={() => onTogglePin(item)}
-                                >
-                                    <Icon name={item.pinned ? "unpin" : "pin"} />
-                                    {t(
-                                        item.pinned
-                                            ? "history.row.unpin"
-                                            : "history.row.pin",
-                                    )}
-                                </Button>
-                            ) : null}
-                            {item ? (
-                                <Button
-                                    variant="secondary"
-                                    disabled={copying}
-                                    onClick={() => {
-                                        onDelete(item);
-                                        close();
-                                    }}
-                                >
-                                    <Icon name="trash" />
-                                    {t("history.row.delete")}
-                                </Button>
-                            ) : null}
-                            <Button
-                                disabled={copying || !copyAvailability.canCopy}
-                                onClick={() => {
-                                    if (item) startCopy(item, true);
-                                }}
-                            >
-                                <Icon name={copyAction.icon} />
-                                {copyAction.label}
-                            </Button>
-                        </DialogFooter>
-                    </>
-                )}
-            </DialogContent>
+                },
+            }}
+            footer={expanded ? <>
+                {potentialFinding !== null && <ClipPotentialRevealButton
+                    revealed={potentialRevealed}
+                    disabled={copying}
+                    onClick={() => setShownFinding(potentialRevealed ? null : {
+                        id: item!.id,
+                        finding: potentialFinding,
+                    })}
+                />}
+                {revealed && <Button variant="secondary" icon="eyeOff" disabled={copying} onClick={onHide}>
+                    {t("history.detail.hide")}
+                </Button>}
+                {item && <Button
+                    variant="secondary"
+                    icon={item.pinned ? "unpin" : "pin"}
+                    disabled={copying}
+                    aria-pressed={item.pinned}
+                    onClick={() => onTogglePin(item)}
+                >{t(item.pinned ? "history.row.unpin" : "history.row.pin")}</Button>}
+                {item && <Button
+                    variant="secondary"
+                    icon="trash"
+                    disabled={copying}
+                    onClick={() => { onDelete(item); close(); }}
+                >{t("history.row.delete")}</Button>}
+                <Button
+                    icon={copyAction.icon}
+                    disabled={copying || !copyAvailability.canCopy}
+                    onClick={() => { if (item) startCopy(item, true); }}
+                >{copyAction.label}</Button>
+            </> : undefined}
+        >
+            {!expanded && item ? <LibraryInspectorPanel
+                item={item}
+                origin={origin}
+                revealedContent={revealedContent}
+                fullContent={fullContent}
+                fullContentFailed={fullContentFailed === true}
+                revealPending={revealPending}
+                copyPending={copying}
+                onReveal={onReveal}
+                onHide={onHide}
+                onCopy={(target) => startCopy(target, false)}
+                onTogglePin={onTogglePin}
+                onDelete={(target) => { onDelete(target); close(); }}
+                onOpenReader={() => setExpanded(true)}
+                onClose={close}
+            /> : <>
+                {item && wontSync(item) && <StateView
+                    mode="warning"
+                    placement="inline"
+                    role="none"
+                    icon="cloudOff"
+                    title={t("history.row.wontSync")}
+                />}
+                <ClipBodyNotices
+                    reason={copyAvailability.reason}
+                    canRetry={copyAvailability.canRetry}
+                    onRetry={() => void availability.refetch()}
+                    potentialFinding={potentialFinding !== null}
+                />
+                {item && body && <ClipBodyView
+                    mode="reader"
+                    item={item}
+                    kind={kind}
+                    body={body}
+                    copyPending={copying}
+                    revealPending={revealPending}
+                    onReveal={onReveal}
+                />}
+            </>}
         </Dialog>
     );
 }
