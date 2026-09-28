@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PAIRING_SEMANTICS_BY_STATE, type PairingCeremony } from "@/lib/ipc";
-import { DEVICE_PRESENCE_OPTIONS } from "@/devtools/PreviewScenarioControls";
 import { previewObservedPresence } from "@/service/previewDeviceDto";
 import { previewHistoryPage } from "@/service/previewHistory";
 import { createPreviewInterceptor } from "@/service/previewIpc";
@@ -10,6 +9,8 @@ import {
   type PreviewDevice,
   type PreviewPairingPhase,
 } from "@/service/previewScenario";
+
+const DEVICE_PRESENCE_OPTIONS = ["online", "offline", "unknown"] as const;
 
 const PHONE: PreviewDevice = {
   id: "phone-1",
