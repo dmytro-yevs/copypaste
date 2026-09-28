@@ -9,6 +9,10 @@ import { Slot, Slottable } from "@radix-ui/react-slot";
 import { type VariantProps, cva } from "class-variance-authority";
 
 import { cn } from "@/lib/cn";
+import { StateView } from "@/components/shared/StateView";
+import { ControlAdornment } from "./control-adornment";
+import { Icon, type IconName } from "./icon";
+import { Tooltip } from "./tooltip";
 import styles from "./button.module.css";
 
 const buttonVariants = cva(styles.button, {
@@ -56,6 +60,16 @@ function buttonContent(children: ReactNode): ReactNode {
     });
 }
 
+export type ButtonProps = ComponentProps<"button"> &
+    VariantProps<typeof buttonVariants> & {
+        asChild?: boolean;
+        icon?: IconName;
+        label?: string;
+        tooltip?: ReactNode;
+        pending?: boolean;
+        edge?: "none" | "control";
+    };
+
 function Button({
     className,
     variant,
@@ -65,22 +79,42 @@ function Button({
     asChild = false,
     children,
     disabled,
+    icon,
+    label,
+    tooltip,
+    pending = false,
+    edge = "none",
     ...props
-}: ComponentProps<"button"> &
-    VariantProps<typeof buttonVariants> & { asChild?: boolean }) {
-    const loading = state === "loading";
+}: ButtonProps) {
+    const loading = pending || state === "loading";
     const disabledState = disabled || loading;
+    const iconOnly = size === "icon" || size === "compactIcon";
+    const adornmentSize = size === "compact" || size === "compactIcon" ? "compact" : "regular";
+    const accessibleLabel = label ?? props["aria-label"] ?? props.title;
+    const adornment = loading ? <StateView mode="loading" placement="control" /> : icon ? (
+        <ControlAdornment size={adornmentSize}>
+            <Icon name={icon} size={adornmentSize === "compact" ? "sm" : "md"} />
+        </ControlAdornment>
+    ) : null;
+    const content = (
+        <>
+            {adornment}
+            {buttonContent(children)}
+        </>
+    );
+    const buttonClass = cn(buttonVariants({ variant, size, tone, state: loading ? "loading" : state, className }), edge === "control" && styles.controlEdge);
+    const tooltipContent = tooltip ?? (iconOnly ? accessibleLabel : undefined);
 
     if (asChild) {
-        return (
+        const element = (
             <Slot
                 data-slot="button"
-                data-state={state ?? "normal"}
+                data-state={loading ? "loading" : state ?? "normal"}
                 aria-busy={loading || undefined}
                 aria-disabled={disabledState || undefined}
-                className={cn(
-                    buttonVariants({ variant, size, tone, state, className }),
-                )}
+                aria-label={accessibleLabel}
+                data-action-size={iconOnly ? "icon" : "label"}
+                className={buttonClass}
                 {...props}
             >
                 <Slottable child={children}>
@@ -89,30 +123,34 @@ function Button({
                             data-slot="button-content"
                             className={styles.content}
                         >
+                            {adornment}
                             {buttonContent(slottable)}
                         </span>
                     )}
                 </Slottable>
             </Slot>
         );
+        return tooltipContent ? <Tooltip content={tooltipContent}>{element}</Tooltip> : element;
     }
 
-    return (
+    const element = (
         <button
             data-slot="button"
-            data-state={state ?? "normal"}
+            data-state={loading ? "loading" : state ?? "normal"}
+            data-action-size={iconOnly ? "icon" : "label"}
             aria-busy={loading || undefined}
+            aria-label={accessibleLabel}
             disabled={disabledState}
-            className={cn(
-                buttonVariants({ variant, size, tone, state, className }),
-            )}
+            type="button"
+            className={buttonClass}
             {...props}
         >
             <span data-slot="button-content" className={styles.content}>
-                {buttonContent(children)}
+                {content}
             </span>
         </button>
     );
+    return tooltipContent ? <Tooltip content={tooltipContent}>{disabledState ? <span className={styles.disabledTrigger}>{element}</span> : element}</Tooltip> : element;
 }
 
 export { Button, buttonVariants };

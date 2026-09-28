@@ -164,6 +164,13 @@
   cursor: progress;
 }
 
+.controlEdge {
+  margin-inline-end: calc(var(--s-3) * -1);
+  border-radius: var(--r-input);
+}
+
+.disabledTrigger { display: inline-flex; }
+
 @media (prefers-reduced-motion: reduce) {
   .button {
     transition: none;
