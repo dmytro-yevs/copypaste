@@ -22,13 +22,11 @@
 
 :global([data-sonner-toaster][data-sonner-theme] [data-sonner-toast].copypaste-toast[data-styled="false"]) {
   box-sizing: border-box;
-  display: flex;
+  display: block;
   inline-size: fit-content;
   min-inline-size: min(calc(var(--s-8) * 7), 100%);
   max-inline-size: min(calc(var(--s-9) * 10), 100%);
-  align-items: center;
   padding: var(--s-2) var(--s-3);
-  gap: 0;
   border: var(--stroke-1) solid var(--normal-border);
   border-radius: var(--border-radius);
   color: var(--normal-text);

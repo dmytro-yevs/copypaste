@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeNative } from "@/lib/nativeInvoke";
 
 import { StateView } from "@/components/shared/StateView";
 import { Button, Dialog, Input } from "@/components/ui";
 import type {
-  PairingCeremony,
   SecureInviteView,
   SecurePairingView,
   SecureSasView,
@@ -31,7 +30,7 @@ export default function ProtectedPairingSurface() {
   const refresh = useCallback(async () => {
     const issued = ++refreshIssued.current;
     try {
-      const next = await invoke<SecurePairingView>("pair_secure_state");
+      const next = await invokeNative("pair_secure_state");
       if (issued !== refreshIssued.current) return;
       if (generation.current !== next.generation) {
         generation.current = next.generation;
@@ -104,7 +103,7 @@ export default function ProtectedPairingSurface() {
     setRevealed(null);
     setCode("");
     setAddr("");
-    void invoke("pair_secure_close").catch(() => {
+    void invokeNative("pair_secure_close").catch(() => {
       setError("The pairing window could not close. Try again.");
     });
   };
@@ -113,7 +112,7 @@ export default function ProtectedPairingSurface() {
     if (expected === null) return;
     const epoch = revealEpoch.current;
     const requestedAt = Date.now();
-    const value = await invoke<SecureInviteView>("pair_secure_reveal_invite", { generation: expected });
+    const value = await invokeNative("pair_secure_reveal_invite", { generation: expected });
     if (epoch !== revealEpoch.current || value.generation !== generation.current || value.ceremony_id !== view?.ceremony.ceremony_id) return;
     const expiresAt = requestedAt + value.expires_in_ms;
     if (Date.now() >= expiresAt) return;
@@ -124,22 +123,26 @@ export default function ProtectedPairingSurface() {
     if (expected === null) return;
     const epoch = revealEpoch.current;
     const requestedAt = Date.now();
-    const value = await invoke<SecureSasView>("pair_secure_reveal_sas", { generation: expected });
+    const value = await invokeNative("pair_secure_reveal_sas", { generation: expected });
     if (epoch !== revealEpoch.current || value.generation !== generation.current || value.ceremony_id !== view?.ceremony.ceremony_id) return;
     const expiresAt = requestedAt + value.expires_in_ms;
     if (Date.now() >= expiresAt) return;
     setRevealed({ kind: "sas", value, expiresAt });
   });
   const join = () => run(async () => {
+    const expected = generation.current;
+    if (expected === null) return;
     const enteredCode = code;
     const enteredAddr = addr;
     setCode("");
     setAddr("");
-    await invoke<PairingCeremony>("pair_secure_join", { generation: generation.current, code: enteredCode, addr: enteredAddr });
+    await invokeNative("pair_secure_join", { generation: expected, code: enteredCode, addr: enteredAddr });
   });
   const decide = (accept: boolean) => run(async () => {
+    const expected = generation.current;
+    if (expected === null) return;
     setRevealed(null);
-    await invoke<PairingCeremony>("pair_secure_decide", { generation: generation.current, accept });
+    await invokeNative("pair_secure_decide", { generation: expected, accept });
   });
 
   const phase = view?.phase ?? "loading";
