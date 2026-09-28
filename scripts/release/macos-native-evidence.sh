@@ -49,11 +49,32 @@ print(f"VoiceOver accessibility surface: {len(rows)} elements, {len(named)} name
 PY
 }
 
+check_no_protected_pairing_window() { # <temporary AX observation>
+  python3 - "$1" <<'PY'
+import csv
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+with path.open(encoding="utf-8", newline="") as source:
+    protected = any(
+        len(row) > 1 and row[0] == "AXWindow" and row[1] == "Connect a device"
+        for row in csv.reader(source, delimiter="\t")
+    )
+if protected:
+    path.unlink(missing_ok=True)
+    raise SystemExit("protected pairing window is open; refusing screenshot or AX artifact")
+PY
+}
+
 capture_route_state() { # <state> <navigation label> <heading>
   local navigation="$2" heading="$3" state_dir="$out/ui-$1"
   mkdir -p "$state_dir"
   mac_press_unique_exact_description_role "$navigation" "AXButton" >/dev/null || return 1
   mac_wait_safe_role_label "$heading" "AXHeading" "$state_dir/heading.tsv" 30 || return 1
+  mac_ax surface > "$state_dir/pre-capture-ax.tsv"
+  check_no_protected_pairing_window "$state_dir/pre-capture-ax.tsv" || return 1
+  rm "$state_dir/pre-capture-ax.tsv"
   mac_capture_state "$state_dir"
 }
 
@@ -119,6 +140,16 @@ if [[ "${1:-}" == "--self-test" ]]; then
   printf 'AXWindow\tCopyPaste\n' > "$fixture_dir/no-menu.tsv"
   printf 'AXMenuBar\t\n' > "$fixture_dir/unnamed.tsv"
   check_accessibility_surface "$fixture_dir/good.tsv" >/dev/null
+  check_no_protected_pairing_window "$fixture_dir/good.tsv"
+  printf 'AXWindow\tConnect a device\n' > "$fixture_dir/protected.tsv"
+  if check_no_protected_pairing_window "$fixture_dir/protected.tsv" >/dev/null 2>&1; then
+    echo "self-test failed: protected pairing window was captured" >&2
+    exit 1
+  fi
+  if [[ -e "$fixture_dir/protected.tsv" ]]; then
+    echo "self-test failed: protected pairing AX data was retained" >&2
+    exit 1
+  fi
   if check_accessibility_surface "$fixture_dir/no-menu.tsv" >/dev/null 2>&1; then
     echo "self-test failed: surface without a menu bar passed" >&2
     exit 1
@@ -838,6 +869,7 @@ mac_prepare_webview_ax
 scenario="$(python3 scripts/release/native_evidence_policy.py value --platform macos --field scenario)"
 budget_ms="$(python3 scripts/release/native_evidence_policy.py value --platform macos --field budget_ms)"
 mac_ax surface > "$out/ax.log" 2> "$out/ax.err"
+check_no_protected_pairing_window "$out/ax.log"
 check_accessibility_surface "$out/ax.log"
 screencapture -x "$out/screenshot.png"
 python3 - "$out/latency.json" "$scenario" "$((ready_ms - start_ms))" "$budget_ms" "$daemon_activation_observation" <<'PY'

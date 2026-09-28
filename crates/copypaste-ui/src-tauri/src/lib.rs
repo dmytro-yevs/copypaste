@@ -128,7 +128,32 @@ pub fn run() {
         .plugin(shell::permissions::android::plugin());
 
     builder
-        .on_window_event(shell::window::on_event)
+        .on_window_event(|window, event| {
+            #[cfg(target_os = "macos")]
+            if window.label() == pairing_presentation::macos::WINDOW_LABEL {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    pairing_presentation::macos::window_closed(window.app_handle());
+                    if let Some(secure) = window
+                        .app_handle()
+                        .get_webview_window(pairing_presentation::macos::WINDOW_LABEL)
+                    {
+                        let _ = secure.destroy();
+                    }
+                }
+                return;
+            }
+            if window.label() == "quit-failure" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    // Only the explicit button in this window acknowledges the failure.
+                    api.prevent_close();
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+                return;
+            }
+            shell::window::on_event(window, event);
+        })
         .setup(|app| {
             let runtime_log_dir = runtime_log_dir(app.handle())?;
             app.manage(copypaste_runtime_log::init(
@@ -158,6 +183,8 @@ pub fn run() {
             }
             #[cfg(target_os = "macos")]
             {
+                let session = pairing_presentation::macos::SecurePairingSession::default();
+                app.manage(session.clone());
                 let handle = app.handle().clone();
                 let abort = std::sync::Arc::new(move || {
                     let handle = handle.clone();
@@ -168,12 +195,13 @@ pub fn run() {
                     });
                 });
                 app.manage(pairing_presentation::PairingPresenter::new(
-                    pairing_presentation::macos_ui(abort),
+                    pairing_presentation::macos_ui(app.handle().clone(), session, abort),
                 ));
             }
             #[cfg(not(any(target_os = "android", target_os = "windows", target_os = "macos")))]
             app.manage(pairing_presentation::PairingPresenter::default());
             app.manage(Supervisor::default());
+            app.manage(service::quit::QuitFailureStore::default());
             app.manage(shell::shortcut::ShortcutSettings::load(app.handle())?);
 
             #[cfg(not(target_os = "android"))]
@@ -223,7 +251,20 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(command_contract::ui_invoke_handler!())
+        .invoke_handler(|invoke: tauri::ipc::Invoke<tauri::Wry>| {
+            if !command_contract::window_command_allowed(
+                invoke.message.webview_ref().label(),
+                invoke.message.command(),
+            ) {
+                invoke
+                    .resolver
+                    .reject("This command is unavailable in this window.");
+                return true;
+            }
+            let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool =
+                command_contract::ui_invoke_handler!();
+            handler(invoke)
+        })
         .build(tauri::generate_context!())
         .expect("could not start CopyPaste")
         .run(|app, event| {
@@ -248,7 +289,11 @@ pub fn run() {
                                 service::quit::show_failure(app, presentation);
                             });
                         }
-                        service::quit::ExitRequest::AlreadyDraining => api.prevent_exit(),
+                        service::quit::ExitRequest::AlreadyDraining => {
+                            api.prevent_exit();
+                            #[cfg(not(target_os = "android"))]
+                            service::quit::ensure_failure_window(app);
+                        }
                         service::quit::ExitRequest::Drain => {
                             api.prevent_exit();
                             let handle = app.clone();
@@ -407,11 +452,22 @@ mod tests {
     #[test]
     fn app_assembly_registers_the_window_lifecycle_policy() {
         let compact_source = production_source().split_whitespace().collect::<String>();
-        let registration = [".on_window_", "event(shell::window::on_", "event)"].concat();
-
         assert!(
-            compact_source.contains(&registration),
-            "the app builder must register shell::window::on_event"
+            compact_source.contains(".on_window_event(|window,event|"),
+            "the app builder must register a window event dispatcher"
+        );
+        assert!(
+            compact_source.contains("shell::window::on_event(window,event)"),
+            "ordinary windows must keep the shell lifecycle policy"
+        );
+        assert!(
+            compact_source
+                .contains("pairing_presentation::macos::window_closed(window.app_handle())"),
+            "closing the protected pairing window must cancel its ceremony"
+        );
+        assert!(
+            compact_source.contains("window.label()==\"quit-failure\""),
+            "quit failure close must retain its explicit acknowledgement gate"
         );
     }
 
