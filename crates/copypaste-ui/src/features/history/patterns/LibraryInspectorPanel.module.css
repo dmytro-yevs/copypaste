@@ -149,13 +149,3 @@
     color: var(--dim);
     text-align: center;
 }
-.empty strong {
-    color: var(--text);
-    font-size: var(--fs-sm);
-    font-weight: var(--fw-medium);
-}
-.empty p {
-    max-inline-size: var(--content-max-width);
-    margin-block-start: var(--s-1);
-    font-size: var(--fs-xs);
-}
