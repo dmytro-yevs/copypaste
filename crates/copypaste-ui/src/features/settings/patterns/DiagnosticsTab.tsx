@@ -40,9 +40,9 @@ function DiagnosticsOverview() {
   }
   const counters = data.status?.counters;
   const fields: SettingsField[] = [
-    { kind: "status", definition: settingDefinition("diagnostics", "settings.diagnostics.running.history.title"), value: <StateView mode={data.history_read.state === "readable" ? "success" : "error"} placement="control" title={data.history_read.state === "readable" ? t("settings.diagnostics.running.history.readable") : t("settings.diagnostics.running.history.failed", { code: data.history_read.code })} /> },
+    { kind: "status", definition: settingDefinition("diagnostics", "settings.diagnostics.running.history.title"), mode: data.history_read.state === "readable" ? "success" : "error", value: data.history_read.state === "readable" ? t("settings.diagnostics.running.history.readable") : t("settings.diagnostics.running.history.failed", { code: data.history_read.code }) },
     { kind: "readonly", definition: settingDefinition("diagnostics", "settings.diagnostics.running.started.title"), value: <span className={styles.metric}>{counters === undefined ? t("settings.diagnostics.running.started.unknown") : shortAge(Date.now() - counters.uptime_secs * 1000)}</span> },
-    ...(data.status === null ? [{ kind: "status" as const, definition: settingDefinition("diagnostics", "settings.diagnostics.dropped.tooLarge.title"), value: <StateView mode="offline" placement="control" title={t("errors.offline")} /> }] : ([
+    ...(data.status === null ? [{ kind: "status" as const, definition: settingDefinition("diagnostics", "settings.diagnostics.dropped.tooLarge.title"), mode: "offline" as const, value: t("errors.offline") }] : ([
       ["tooLarge", counters?.rejected_too_large], ["missed", counters?.lost_intermediates], ["swept", counters?.sensitive_swept], ["purged", counters?.index_purged],
     ] as const).map(([name, count]) => ({ kind: "readonly" as const, definition: settingDefinition("diagnostics", `settings.diagnostics.dropped.${name}.title`), value: <span className={(count ?? 0) > 0 ? styles.warningCount : styles.count}>{(count ?? 0).toLocaleString()}</span> }))),
   ];

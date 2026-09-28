@@ -1,5 +1,4 @@
 import { useEffect, useId, useState } from "react";
-import { Button } from "@/components/ui";
 import { StateView } from "@/components/shared/StateView";
 import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
 import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
@@ -15,7 +14,6 @@ import styles from "./CloudSyncSettings.module.css";
 
 export function CloudSyncSettings({ revealAdvancedKey }: { revealAdvancedKey?: string }) {
   const { t } = useTranslation();
-  const connectionDescriptionId = useId();
   const accountDescriptionId = useId();
   const [setupRevealKey, setSetupRevealKey] = useState<number>();
   const controller = useCloudAccountController();
@@ -32,14 +30,14 @@ export function CloudSyncSettings({ revealAdvancedKey }: { revealAdvancedKey?: s
     : controller.signOutError ? t("settings.sync.cloud.signOutError")
     : status?.last_error ? t("settings.sync.cloud.lastError")
     : status?.unreadable_uploads ? t("settings.sync.cloud.unreadableUploads", { count: status.unreadable_uploads }) : null;
-  const statusControl = presentation.state === "checking" ? <StateView mode="loading" placement="control" />
-    : presentation.state === "unavailable" ? <Button variant="secondary" size="sm" aria-describedby={connectionDescriptionId} onClick={() => void cloud.refetch()}>{t("settings.sync.cloud.retry")}</Button>
-    : presentation.badge ? <StateView mode={presentation.badge.variant === "ok" ? "success" : presentation.badge.variant === "warn" ? "warning" : "info"} placement="control" title={t(presentation.badge.label)} /> : null;
   // The alert owner stays mounted while cloud status changes, so screen readers
   // receive subsequent sync and sign-out errors through the same live region.
-  const connectionNote = <><span id={connectionDescriptionId}>{presentation.state === "unavailable" ? <StateView mode="offline" placement="inline" title={t(presentation.description)} /> : t(presentation.description)}</span><span className={styles.connectionNote} role="alert" aria-live="assertive" aria-atomic="true">{connectionMessage ? <StateView mode="error" placement="control" role="presentation" title={connectionMessage} /> : null}</span></>;
+  const connectionNote = <><span>{presentation.state === "unavailable" ? <StateView mode="offline" placement="inline" title={t(presentation.description)} /> : t(presentation.description)}</span><span className={styles.connectionNote} role="alert" aria-live="assertive" aria-atomic="true">{connectionMessage ? <StateView mode="error" placement="control" role="presentation" title={connectionMessage} /> : null}</span></>;
+  const connectionField: SettingsField = presentation.state === "unavailable"
+    ? { kind: "action", definition: settingDefinition("cloud-sync", "settings.sync.cloud.connectionTitle"), label: t("settings.sync.cloud.retry"), onAction: () => { void cloud.refetch(); }, note: connectionNote }
+    : { kind: "status", definition: settingDefinition("cloud-sync", "settings.sync.cloud.connectionTitle"), mode: presentation.state === "checking" ? "loading" : presentation.badge?.variant === "ok" ? "success" : presentation.badge?.variant === "warn" ? "warning" : "info", value: presentation.badge ? t(presentation.badge.label) : t(presentation.description), note: connectionNote };
   const fields: SettingsField[] = [
-    { kind: "status", definition: settingDefinition("cloud-sync", "settings.sync.cloud.connectionTitle"), value: statusControl, note: connectionNote, help: undefined },
+    connectionField,
     { kind: "action", definition: settingDefinition("cloud-sync", "settings.sync.cloud.setupTitle"), visible: !cloud.isLoading && !cloud.isError && !configured, label: t("settings.sync.cloud.setupAction"), note: t("settings.sync.cloud.setupDescription"), onAction: () => setSetupRevealKey((key) => (key ?? 0) + 1) },
     { kind: "custom", definition: settingDefinition("cloud-sync", "settings.sync.cloud.accountTitle"), rowless: true, visible: !cloud.isLoading && !cloud.isError && configured,
       content: <section className={styles.setupSection} aria-labelledby="cloud-account-title"><div className={styles.sectionHeader}><div><h4 id="cloud-account-title">{t("settings.sync.cloud.accountTitle")}</h4><p id={accountDescriptionId}>{t(connected ? "settings.sync.cloud.accountConnectedDescription" : "settings.sync.cloud.accountSignedOutDescription")}</p></div></div>{connected ? <CloudConnectedControls controller={controller} descriptionId={accountDescriptionId} /> : <CloudAccountForm controller={controller} />}</section>,
