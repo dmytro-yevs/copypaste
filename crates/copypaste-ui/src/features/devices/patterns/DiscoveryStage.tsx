@@ -55,7 +55,7 @@ export function DiscoveryStage({
                 placement="panel"
                 title={results.label}
                 description={refreshing ? t("devices.discovered.refreshing") : results.detail}
-                icon={refreshing ? "spinner" : "devices"}
+                icon={refreshing ? undefined : "devices"}
                 role="status"
                 aria-live="polite"
                 aria-atomic="true"
