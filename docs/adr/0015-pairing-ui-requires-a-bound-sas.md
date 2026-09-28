@@ -1,43 +1,15 @@
 # 0015 — Pairing UI requires a bound SAS ceremony
 
-**Status:** Accepted — 2026-08-01; re-entry conditions met — 2026-08-09
+**Status:** Accepted — 2026-08-01; protected macOS WebView revision — 2026-09-28
 
-The current native-safe command family creates a memory-only invite, joins the
-authenticated handshake, exposes its bound SAS through native presentation,
-records both peers' decisions before persistence, and supports idempotent
-cancel. A locally generated six-digit code remains prohibited, as does copying
-pairing credentials to the system clipboard.
+Pairing still creates a memory-only invite, joins an authenticated handshake, compares the common SAS derived from that handshake, records both peers' decisions before persistence, and supports idempotent cancellation. A locally generated six-digit display code remains prohibited. Pairing credentials never have a system-clipboard path.
 
-The Devices screen continues to list, sync, unpair and revoke established
-devices. Pairing may return only with a protocol/API that supplies all of:
+The ordinary app and Quick Paste WebViews receive only `PairingCeremony`: role, state, sanitized semantics and errors, presentation availability, and confirmed device metadata. They do not receive an invite, QR, code, address, SAS, peer address or key material. Android and Windows retain their protected native presenters. macOS uses a dedicated first-party `pairing` WebView whose window is created hidden with capture protection enabled; protection is checked again before showing it and never follows the Allow screenshots preference. The secure window has no plugin permissions. Its Rust commands require the injected window label, the current session generation and ceremony identity; the ordinary app and Quick Paste windows cannot call them successfully.
 
-- a common SAS derived from the authenticated handshake;
-- a peer-visible confirm/reject state, before persistence;
-- an idempotent abort for every close/cancel path;
-- a QR rendered only after explicit reveal; desktop may also render the code
-  and listen address as non-selectable text in the same protected native
-  surface, with no clipboard copy path.
+The protected window loads local bundled content under the app CSP. The user must explicitly select **Reveal code** or **Show security code**. Only then can its narrow read command return a short-lived invite or the six-digit SAS from the current authenticated backend progress. The invite is rejected after its Rust monotonic deadline. SAS reveal and accept/reject require the backend's current `awaiting_confirmation` state, a positive remaining lifetime, the same ceremony and generation, and the exact SAS previously revealed in that window. A decision is sent through the backend pairing protocol; the UI cannot mint a local SAS or persist a device itself. The protected window also owns secure manual join entry. Its secret nodes and references are removed on phase change, hide, cancel, expiration and teardown; Rust-held invite and SAS copies use zeroizing buffers. Closing the window cancels an active ceremony. Expiry and cancellation are enforced again in Rust even if the WebView timer is late.
 
-The native-safe pairing commands now meet those conditions. The WebView sees
-only typed ceremony states, presentation availability, sanitized errors, and
-confirmed device metadata. Invite data, QR payloads, desktop code/address
-entry, SAS values, ceremony peer addresses and key material remain in the
-native presentation layer.
+This revision intentionally permits QR, invite fields and SAS in the dedicated WebView DOM and its accessibility tree **only after explicit reveal**. Their appearance in that one protected window is part of the user-visible ceremony. No screenshots or accessibility dumps of its revealed state may be collected as evidence. Unlike the previous AppKit-only presenter, removing DOM nodes cannot guarantee erasure of copies held by the JavaScript engine; this is the accepted residual risk of sharing the application UI. The window has no clipboard or external navigation action and is destroyed on close. Release evidence checks the window's label, capture protection and sanitized ordinary surfaces without recording secrets.
 
-## Consequences
+A pairing change is acceptable only if macOS, Android and Windows still provide a common bound SAS, peer-visible confirm/reject before persistence, idempotent abort for every close/cancel path, explicit invite reveal and finite expiry. Windows keeps `WDA_EXCLUDEFROMCAPTURE` for its native pairing windows and must not be screenshotted. Android retains `FLAG_SECURE` for its native pairing activity. System file pickers and permission surfaces are separate OS integrations and remain.
 
-Product controls call only the native-safe command family. Native presentation
-owns QR generation/scanning and SAS comparison; the WebView owns progress,
-cancellation, retry, and the confirmed-device refresh.
-
-On Windows, every pairing window keeps `WDA_EXCLUDEFROMCAPTURE` (`0x11`)
-regardless of the shell's Allow screenshots preference. Windows documents this
-affinity as excluding a top-level window from capture; `WDA_NONE` imposes no
-restriction. Release evidence therefore never screenshots pairing. It records
-only a complete, allowlisted UI Automation tree, requires the code and address
-edits to report `IsPassword=true`, and never reads `ValuePattern`.
-
-Primary sources:
-
-- [SetWindowDisplayAffinity](https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-setwindowdisplayaffinity)
-- [AutomationElement.IsPassword](https://learn.microsoft.com/dotnet/api/system.windows.automation.automationelement.automationelementinformation.ispassword)
+Dependency disposition after this change: `qrcode` still renders macOS protected-window QR and Windows native QR; `objc2`/AppKit still serve shell, active-window and accessibility integrations; `dispatch2` remains in macOS accessibility evidence support. `tauri-plugin-dialog` remains for Rust-owned file pickers and Android quit-failure presentation. `swift-rs` remains transitive through `tauri-utils`/Tauri build tooling (`cargo tree -p copypaste-ui -i swift-rs --locked`); deleting AppKit pairing dialogs does not remove it. These dependencies are retained for current owners rather than removed by name.

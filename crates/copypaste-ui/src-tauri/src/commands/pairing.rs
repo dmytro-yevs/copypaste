@@ -1,6 +1,6 @@
 use copypaste_ipc::{PairingProgressData, PairingRole, PairingState};
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Manager as _, State, WebviewWindow};
 
 use crate::backend::{PairingBackend, Result};
 use crate::pairing_presentation::{
@@ -60,6 +60,39 @@ pub struct PairedDevice {
     online: bool,
 }
 
+/// Secrets are returned only to the dedicated, capture-protected pairing
+/// window. The ordinary PairingCeremony DTO remains secret-free.
+#[derive(Clone, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
+pub struct SecureInviteView {
+    pub(crate) generation: u64,
+    pub(crate) ceremony_id: String,
+    pub(crate) code: String,
+    pub(crate) address: String,
+    pub(crate) qr_svg: String,
+    pub(crate) expires_in_ms: u64,
+}
+
+#[derive(Clone, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
+pub struct SecureSasView {
+    pub(crate) generation: u64,
+    pub(crate) ceremony_id: String,
+    pub(crate) sas: String,
+    pub(crate) expires_in_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
+pub struct SecurePairingView {
+    pub(crate) generation: u64,
+    pub(crate) phase: String,
+    pub(crate) ceremony: PairingCeremony,
+}
+
 impl PairingCeremony {
     pub(crate) fn from_progress(
         progress: PairingProgressData,
@@ -103,9 +136,16 @@ impl PairingCeremony {
 
 #[tauri::command]
 pub async fn pair_create_invite(
+    app: AppHandle,
     backend: State<'_, SelectedBackend>,
     presenter: State<'_, PairingPresenter>,
 ) -> Result<PairingCeremony> {
+    #[cfg(target_os = "macos")]
+    let session = app.state::<crate::pairing_presentation::macos::SecurePairingSession>();
+    #[cfg(target_os = "macos")]
+    let _operation = session.lock_operation().await;
+    #[cfg(not(target_os = "macos"))]
+    let _ = &app;
     let invite = backend.pair_create_invite().await?;
     match presenter.present_invite(&invite) {
         NativePresentationOutcome::Unavailable => backend.pair_cancel().await.map(|progress| {
@@ -128,9 +168,16 @@ pub async fn pair_create_invite(
 
 #[tauri::command]
 pub async fn pair_scan_invite(
+    app: AppHandle,
     backend: State<'_, SelectedBackend>,
     presenter: State<'_, PairingPresenter>,
 ) -> Result<PairingCeremony> {
+    #[cfg(target_os = "macos")]
+    let session = app.state::<crate::pairing_presentation::macos::SecurePairingSession>();
+    #[cfg(target_os = "macos")]
+    let _operation = session.lock_operation().await;
+    #[cfg(not(target_os = "macos"))]
+    let _ = &app;
     let scanned = match presenter.scan_invite() {
         NativeScanOutcome::Scanned(scanned) => scanned,
         NativeScanOutcome::Cancelled | NativeScanOutcome::Failed => {
@@ -147,9 +194,16 @@ pub async fn pair_scan_invite(
 
 #[tauri::command]
 pub async fn pair_progress(
+    app: AppHandle,
     backend: State<'_, SelectedBackend>,
     presenter: State<'_, PairingPresenter>,
 ) -> Result<PairingCeremony> {
+    #[cfg(target_os = "macos")]
+    let session = app.state::<crate::pairing_presentation::macos::SecurePairingSession>();
+    #[cfg(target_os = "macos")]
+    let _operation = session.lock_operation().await;
+    #[cfg(not(target_os = "macos"))]
+    let _ = &app;
     let progress = backend.pair_progress().await?;
     if progress.state == PairingState::Idle {
         if let Some(scanned) = presenter.take_pending_join() {
@@ -164,38 +218,182 @@ pub async fn pair_progress(
 
 #[tauri::command]
 pub async fn pair_present(
+    app: AppHandle,
     backend: State<'_, SelectedBackend>,
     presenter: State<'_, PairingPresenter>,
 ) -> Result<PairingCeremony> {
+    #[cfg(target_os = "macos")]
+    let session = app.state::<crate::pairing_presentation::macos::SecurePairingSession>();
+    #[cfg(target_os = "macos")]
+    let _operation = session.lock_operation().await;
+    #[cfg(not(target_os = "macos"))]
+    let _ = &app;
     let progress = backend.pair_progress().await?;
     reconcile_progress(&*backend, &presenter, progress, false).await
 }
 
 #[tauri::command]
 pub async fn pair_confirm(
+    app: AppHandle,
     backend: State<'_, SelectedBackend>,
     presenter: State<'_, PairingPresenter>,
 ) -> Result<PairingCeremony> {
+    #[cfg(target_os = "macos")]
+    let session = app.state::<crate::pairing_presentation::macos::SecurePairingSession>();
+    #[cfg(target_os = "macos")]
+    let _operation = session.lock_operation().await;
+    #[cfg(not(target_os = "macos"))]
+    let _ = &app;
     let progress = backend.pair_progress().await?;
     reconcile_progress(&*backend, &presenter, progress, true).await
 }
 
 #[tauri::command]
 pub async fn pair_reject(
+    app: AppHandle,
     backend: State<'_, SelectedBackend>,
     presenter: State<'_, PairingPresenter>,
 ) -> Result<PairingCeremony> {
+    #[cfg(target_os = "macos")]
+    let session = app.state::<crate::pairing_presentation::macos::SecurePairingSession>();
+    #[cfg(target_os = "macos")]
+    let _operation = session.lock_operation().await;
+    #[cfg(not(target_os = "macos"))]
+    let _ = &app;
     let progress = backend.pair_confirm(false).await?;
     reconcile_progress(&*backend, &presenter, progress, false).await
 }
 
 #[tauri::command]
 pub async fn pair_cancel(
+    app: AppHandle,
     backend: State<'_, SelectedBackend>,
     presenter: State<'_, PairingPresenter>,
 ) -> Result<PairingCeremony> {
+    #[cfg(target_os = "macos")]
+    let session = app.state::<crate::pairing_presentation::macos::SecurePairingSession>();
+    #[cfg(target_os = "macos")]
+    let _operation = session.lock_operation().await;
+    #[cfg(not(target_os = "macos"))]
+    let _ = &app;
     let progress = backend.pair_cancel().await?;
     reconcile_progress(&*backend, &presenter, progress, false).await
+}
+
+#[tauri::command]
+pub async fn pair_secure_state(window: WebviewWindow, app: AppHandle) -> Result<SecurePairingView> {
+    #[cfg(target_os = "macos")]
+    {
+        return crate::pairing_presentation::macos::state(window, app).await;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (window, app);
+        Err(crate::backend::BackendError::Invalid(
+            "Protected pairing is unavailable.",
+        ))
+    }
+}
+
+#[tauri::command]
+pub async fn pair_secure_reveal_invite(
+    window: WebviewWindow,
+    app: AppHandle,
+    generation: u64,
+) -> Result<SecureInviteView> {
+    #[cfg(target_os = "macos")]
+    {
+        return crate::pairing_presentation::macos::reveal_invite(window, app, generation).await;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (window, app, generation);
+        Err(crate::backend::BackendError::Invalid(
+            "Protected pairing is unavailable.",
+        ))
+    }
+}
+
+#[tauri::command]
+pub async fn pair_secure_reveal_sas(
+    window: WebviewWindow,
+    app: AppHandle,
+    generation: u64,
+) -> Result<SecureSasView> {
+    #[cfg(target_os = "macos")]
+    {
+        return crate::pairing_presentation::macos::reveal_sas(window, app, generation).await;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (window, app, generation);
+        Err(crate::backend::BackendError::Invalid(
+            "Protected pairing is unavailable.",
+        ))
+    }
+}
+
+#[tauri::command]
+pub async fn pair_secure_join(
+    window: WebviewWindow,
+    app: AppHandle,
+    generation: u64,
+    code: String,
+    addr: String,
+) -> Result<PairingCeremony> {
+    #[cfg(target_os = "macos")]
+    {
+        return crate::pairing_presentation::macos::join(window, app, generation, code, addr).await;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (window, app, generation, code, addr);
+        Err(crate::backend::BackendError::Invalid(
+            "Protected pairing is unavailable.",
+        ))
+    }
+}
+
+#[tauri::command]
+pub async fn pair_secure_decide(
+    window: WebviewWindow,
+    app: AppHandle,
+    generation: u64,
+    accept: bool,
+) -> Result<PairingCeremony> {
+    #[cfg(target_os = "macos")]
+    {
+        return crate::pairing_presentation::macos::decide(window, app, generation, accept).await;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (window, app, generation, accept);
+        Err(crate::backend::BackendError::Invalid(
+            "Protected pairing is unavailable.",
+        ))
+    }
+}
+
+#[tauri::command]
+pub async fn pair_secure_close(window: WebviewWindow, app: AppHandle) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        if window.label() != crate::pairing_presentation::macos::WINDOW_LABEL {
+            return Err(crate::backend::BackendError::Invalid(
+                "Protected pairing is unavailable in this window.",
+            ));
+        }
+        crate::pairing_presentation::macos::window_closed(&app);
+        crate::pairing_presentation::macos::destroy_window(&app);
+        return Ok(());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (window, app);
+        Err(crate::backend::BackendError::Invalid(
+            "Protected pairing is unavailable.",
+        ))
+    }
 }
 
 #[cfg(test)]
