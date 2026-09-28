@@ -8,11 +8,7 @@ import {
     type ReactNode,
 } from "react";
 
-import {
-    ClipBodyPreview,
-    SourceMeta,
-    SourceMetaBadge,
-} from "@/components/shared";
+import { ClipItemPresentation } from "@/components/shared/ClipItemPresentation";
 import { Button, iconComponent, SelectionControl, Surface } from "@/components/ui";
 import { rowLabel } from "@/features/history/model/clipPresentation";
 import { originName, wontSync, type OriginDevice } from "@/lib/itemOrigin";
@@ -207,60 +203,44 @@ function ClipCardImpl({
                 />
             </span>
             <div className={styles.content}>
-                <div className={styles.body}>
-                    <ClipBodyPreview
-                        kind={kind}
-                        masked={masked}
-                        content={body}
-                        previewLines={previewLines}
-                        imagePreview={imagePreview}
-                    />
-                </div>
-                <SourceMeta
-                    source={source}
-                    createdAt={item.created_at}
-                    sourceIcon={
-                        <SourceAppIcon
+                <ClipItemPresentation
+                    bodyClassName={styles.body}
+                    preview={{
+                        kind,
+                        masked,
+                        content: body,
+                        previewLines,
+                        imagePreview,
+                    }}
+                    metadata={{
+                        source,
+                        createdAt: item.created_at,
+                        sourceIcon: <SourceAppIcon
                             itemId={item.id}
                             bundleId={item.source_app_bundle_id}
                             Fallback={iconComponent(source.icon)}
                             fallbackText={source.label.slice(0, 2)}
                             size="xs"
-                        />
-                    }
-                    origin={origin}
-                    kind={kind}
-                    content={body}
-                    extras={
-                        <>
-                            {item.pinned && (
-                                <SourceMetaBadge
-                                    icon="pin"
-                                    label={tr("history.row.pinnedBadge")}
-                                />
-                            )}
-                            {potentialFinding !== null && (
-                                <SourceMetaBadge
-                                    icon="sensitive"
-                                    tone="warning"
-                                    label={tr(
-                                        "history.row.potentialSensitiveBadge",
-                                    )}
-                                    title={tr(
-                                        "history.row.potentialSensitiveWarning",
-                                    )}
-                                />
-                            )}
-                            {stranded && (
-                                <SourceMetaBadge
-                                    icon="cloudOff"
-                                    tone="warning"
-                                    label={tr("history.row.wontSyncBadge")}
-                                    title={tr("history.row.wontSync")}
-                                />
-                            )}
-                        </>
-                    }
+                        />,
+                        origin,
+                        kind,
+                        content: body,
+                        badges: [
+                            ...(item.pinned ? [{ icon: "pin" as const, label: tr("history.row.pinnedBadge") }] : []),
+                            ...(potentialFinding !== null ? [{
+                                icon: "sensitive" as const,
+                                tone: "warning" as const,
+                                label: tr("history.row.potentialSensitiveBadge"),
+                                title: tr("history.row.potentialSensitiveWarning"),
+                            }] : []),
+                            ...(stranded ? [{
+                                icon: "cloudOff" as const,
+                                tone: "warning" as const,
+                                label: tr("history.row.wontSyncBadge"),
+                                title: tr("history.row.wontSync"),
+                            }] : []),
+                        ],
+                    }}
                 />
             </div>
         </Surface>

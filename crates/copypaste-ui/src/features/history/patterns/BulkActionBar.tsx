@@ -1,5 +1,4 @@
-import { ActionButton } from "@/components/shared";
-import { Checkbox } from "@/components/ui";
+import { Button, Checkbox } from "@/components/ui";
 import { useTranslation } from "@/i18n";
 import styles from "./BulkActionBar.module.css";
 
@@ -50,35 +49,35 @@ export function BulkActionBar({
             <div className={styles.actions}>
                 <div className={styles.actionsLayout}>
                     {!allSelected && count < total ? (
-                        <ActionButton
+                        <Button
                             size="compactIcon"
                             icon="selectAll"
-                            aria-label={t("history.bulk.selectAll")}
+                            label={t("history.bulk.selectAll")}
                             disabled={busy}
                             onClick={onSelectAll}
                         />
                     ) : null}
-                    <ActionButton
+                    <Button
                         size="compactIcon"
                         icon={allPinned ? "unpin" : "pin"}
-                        aria-label={t(
+                        label={t(
                             allPinned ? "history.bulk.unpin" : "history.bulk.pin",
                         )}
                         disabled={busy}
                         onClick={onTogglePin}
                     />
-                    <ActionButton
+                    <Button
                         size="compactIcon"
                         tone="danger"
                         icon="trash"
-                        aria-label={t("history.bulk.delete")}
+                        label={t("history.bulk.delete")}
                         disabled={busy}
                         onClick={onDelete}
                     />
-                    <ActionButton
+                    <Button
                         size="compactIcon"
                         icon="close"
-                        aria-label={t("history.bulk.done")}
+                        label={t("history.bulk.done")}
                         disabled={busy}
                         onClick={onClose}
                     />

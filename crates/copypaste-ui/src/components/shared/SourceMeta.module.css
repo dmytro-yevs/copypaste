@@ -2,3 +2,10 @@
 .layout { display: flex; min-inline-size: 0; align-items: center; gap: var(--s-1); }.compact, .regular { margin-block-start: var(--s-2); }
 .app { display: inline-flex; min-inline-size: 0; flex: 0 1 auto; align-items: center; gap: var(--s-1); color: var(--text); font-weight: var(--fw-semibold); }.app > .sourceIcon { display: inline-flex; inline-size: var(--fs-xs); block-size: var(--fs-xs); flex: none; overflow: hidden; }.app > .sourceIcon > * { inline-size: 100%; block-size: 100%; }
 .unit { display: inline-flex; min-inline-size: 0; max-inline-size: 100%; flex: none; align-items: center; gap: var(--s-1); }.appLabel { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.separator, .age { flex: none; }.separator { color: var(--faint); }.root .device { min-inline-size: 0; overflow: hidden; font-size: var(--fs-xs); }.root .device > :first-child { font-size: var(--fs-xs); }.unit[data-device-kind] { flex: 1 1 auto; overflow: hidden; }
+.badge { display: inline-flex; min-inline-size: 0; max-inline-size: 100%; align-items: center; gap: var(--s-1); }
+.badgeLabel { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.accent { color: var(--accent-2); }
+.warning { color: var(--warn-strong); }
+.badgeIcon { font-size: var(--fs-xs); }
+.glyph { display: inline-flex; inline-size: var(--fs-xs); block-size: var(--fs-xs); flex: none; align-items: center; justify-content: center; color: var(--c-text); background: transparent; }
+.glyph[data-kind="secret"] { color: var(--c-secret); }.glyph[data-kind="image"] { color: var(--c-image); }.glyph[data-kind="file"] { color: var(--c-file); }.glyph[data-kind="url"] { color: var(--c-url); }.glyph[data-kind="mail"] { color: var(--c-mail); }.glyph[data-kind="path"] { color: var(--c-path); }.glyph[data-kind="json"] { color: var(--c-json); }.glyph[data-kind="code"] { color: var(--c-code); }.glyph[data-kind="color"] { color: var(--c-color); }.glyph[data-kind="num"] { color: var(--c-num); }.glyph[data-kind="unknown"] { color: var(--c-unknown); }

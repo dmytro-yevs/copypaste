@@ -230,7 +230,7 @@ describe("ClipDetailDialog notices", () => {
     );
     const syncNotice = screen
       .getAllByText("Too large to sync — this item stays on this device")
-      .map((element) => element.closest<HTMLElement>('[data-slot="surface"]'))
+      .map((element) => element.closest<HTMLElement>('[data-mode="warning"]'))
       .find((element) => element !== null);
     expect(syncNotice).toBeTruthy();
     expect(

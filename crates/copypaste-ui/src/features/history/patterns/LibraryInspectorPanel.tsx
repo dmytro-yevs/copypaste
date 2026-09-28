@@ -1,20 +1,17 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import {
-    ActionButton,
     DeviceMeta,
     InspectorShell,
     MetadataLabel,
     MetadataList,
     MetadataRow,
     MetadataValue,
-    InlineNotice,
     PreviewSurface,
     TruncatedValue,
 } from "@/components/shared";
-import { ClipImageLoader } from "@/features/clip-content";
 import { Button, Icon, iconComponent } from "@/components/ui";
-import { InspectorPreview } from "@/features/history/components/InspectorPreview";
+import { ClipBodyNotices, ClipBodyView, ClipPotentialRevealButton } from "@/features/history/patterns/ClipBodyPresentation";
 import { clipboardCopyPresentation, clipCopyAction } from "@/features/history/model/clipPresentation";
 import { useClipboardWriteAvailability } from "@/hooks/useClipboardWriteAvailability";
 import { originName, type OriginDevice } from "@/lib/itemOrigin";
@@ -139,7 +136,7 @@ export function LibraryInspectorPanel({
                 aria-label={t("history.inspector.label")}
                 title={t("history.inspector.label")}
                 headerActions={
-                    <ActionButton
+                    <Button variant="secondary"
                         size="compactIcon"
                         icon="close"
                         disabled={copyPending}
@@ -183,7 +180,7 @@ export function LibraryInspectorPanel({
             aria-label={t("history.inspector.label")}
             title={t("history.inspector.label")}
             headerActions={
-                <ActionButton
+                <Button variant="secondary"
                     size="compactIcon"
                     icon="close"
                     disabled={copyPending}
@@ -194,7 +191,7 @@ export function LibraryInspectorPanel({
             }
             actions={
                 <>
-                    <ActionButton
+                    <Button variant="secondary"
                         size="compactIcon"
                         icon="expand"
                         disabled={copyPending}
@@ -205,7 +202,7 @@ export function LibraryInspectorPanel({
                             onOpenReader(item, event.currentTarget);
                         }}
                     />
-                    <ActionButton
+                    <Button
                         ref={copyButtonRef}
                         size="compactIcon"
                         variant="primary"
@@ -232,7 +229,7 @@ export function LibraryInspectorPanel({
                             onCopy(item);
                         }}
                     />
-                    <ActionButton
+                    <Button variant="secondary"
                         size="compactIcon"
                         icon={item.pinned ? "unpin" : "pin"}
                         disabled={copyPending}
@@ -249,7 +246,7 @@ export function LibraryInspectorPanel({
                         )}
                         onClick={() => onTogglePin(item)}
                     />
-                    <ActionButton
+                    <Button variant="secondary"
                         size="compactIcon"
                         tone="danger"
                         disabled={copyPending}
@@ -259,10 +256,9 @@ export function LibraryInspectorPanel({
                         onClick={() => onDelete(item)}
                     />
                     {potentialFinding !== null ? (
-                        <Button
-                            variant="secondary"
+                        <ClipPotentialRevealButton
+                            revealed={potentialRevealed}
                             disabled={copyPending}
-                            aria-pressed={potentialRevealed}
                             onClick={() =>
                                 setShownFinding(
                                     potentialRevealed
@@ -270,14 +266,7 @@ export function LibraryInspectorPanel({
                                         : { id: item.id, finding: potentialFinding },
                                 )
                             }
-                        >
-                            <Icon name={potentialRevealed ? "eyeOff" : "eye"} />
-                            {t(
-                                potentialRevealed
-                                    ? "history.row.hideOriginal"
-                                    : "history.row.showOriginal",
-                            )}
-                        </Button>
+                        />
                     ) : null}
                     {revealed ? (
                         <Button variant="secondary" disabled={copyPending} onClick={onHide}>
@@ -372,25 +361,12 @@ export function LibraryInspectorPanel({
                 </MetadataList>
             }
         >
-            {copyAvailability.reason !== null ? (
-                <InlineNotice
-                    role="status"
-                    tone={copyAvailability.canRetry ? "warning" : "neutral"}
-                    icon="info"
-                    action={copyAvailability.canRetry ? (
-                        <Button variant="secondary" size="sm" onClick={() => void availability.refetch()}>
-                            {t("history.copyAvailability.retry")}
-                        </Button>
-                    ) : undefined}
-                >
-                    {copyAvailability.reason}
-                </InlineNotice>
-            ) : null}
-            {potentialFinding !== null ? (
-                <InlineNotice role="status" tone="warning" icon="sensitive">
-                    {t("history.row.potentialSensitiveWarning")}
-                </InlineNotice>
-            ) : null}
+            <ClipBodyNotices
+                reason={copyAvailability.reason}
+                canRetry={copyAvailability.canRetry}
+                onRetry={() => void availability.refetch()}
+                potentialFinding={potentialFinding !== null}
+            />
             <PreviewSurface
                 className={styles.preview}
                 elevation="flat"
@@ -426,68 +402,15 @@ export function LibraryInspectorPanel({
                     </div>
                     <div className={styles.previewBody}>
                         <div className={styles.previewContent}>
-                            {body.state === "masked" ? (
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    disabled={copyPending}
-                                    className={styles.protected}
-                                    aria-label={t(
-                                        "history.row.sensitiveReveal",
-                                    )}
-                                    aria-busy={revealPending || undefined}
-                                    onClick={() =>
-                                        !revealPending && onReveal(item)
-                                    }
-                                >
-                                    <span
-                                        aria-hidden="true"
-                                        className={styles.protectedLines}
-                                    >
-                                        <i />
-                                        <i />
-                                        <i />
-                                    </span>
-                                    <Icon name="eye" size="sm" />
-                                    <strong>
-                                        {t(
-                                            "history.row.sensitivePlaceholder",
-                                        )}
-                                    </strong>
-                                </Button>
-                            ) : body.state === "unavailable" ? (
-                                <div role="status" className={styles.unavailable}>
-                                    {t("history.detail.fullBodyUnavailable")}
-                                </div>
-                            ) : body.source === "preview" ? (
-                                <div role="status" className={styles.unavailable}>
-                                    {t("history.empty.loading.title")}
-                                </div>
-                            ) : (
-                                <InspectorPreview
-                                    kind={kind}
-                                    ariaLabel={t("history.detail.contents")}
-                                    content={
-                                        content === ""
-                                            ? t("history.detail.empty")
-                                            : content
-                                    }
-                                    imagePreview={
-                                        kind === "image" ? (
-                                            <ClipImageLoader
-                                                id={item.id}
-                                                size="fill"
-                                                loadingLabel={t(
-                                                    "history.detail.imageLoading",
-                                                )}
-                                                failureLabel={t(
-                                                    "history.detail.imageUnavailable",
-                                                )}
-                                            />
-                                        ) : undefined
-                                    }
-                                />
-                            )}
+                            <ClipBodyView
+                                mode="inspector"
+                                item={item}
+                                kind={kind}
+                                body={body}
+                                copyPending={copyPending}
+                                revealPending={revealPending}
+                                onReveal={onReveal}
+                            />
                         </div>
                     </div>
                 </div>

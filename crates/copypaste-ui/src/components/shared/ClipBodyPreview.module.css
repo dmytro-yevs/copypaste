@@ -12,3 +12,8 @@
 .secret i { display: block; block-size: var(--s-2); border-radius: var(--r-pill); background: var(--border-strong); }
 .secret i:nth-child(2) { inline-size: 76%; }
 .secret i:last-child { inline-size: 58%; }
+.thumbnail { display: flex; inline-size: 100%; block-size: clamp(calc(var(--s-8) * 4 + var(--s-2)), 50cqi, calc(var(--s-9) * 5)); overflow: hidden; align-items: center; justify-content: flex-start; background: transparent; }
+.thumbnail :global(img) { object-fit: contain; object-position: left center; }
+.color { display: flex; min-inline-size: 0; align-items: center; gap: var(--s-3); }
+.swatch { inline-size: var(--s-8); block-size: var(--s-8); flex: none; border: var(--stroke-1) solid var(--swatch-border); border-radius: var(--r-ctl); box-shadow: inset 0 var(--stroke-1) var(--swatch-highlight); }
+.color strong { min-inline-size: 0; overflow: hidden; color: var(--text); font-family: var(--f-mono); font-size: var(--fs-xs); text-overflow: ellipsis; white-space: nowrap; }
