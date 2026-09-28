@@ -16,3 +16,6 @@
 .disclosureCopy strong { font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
 .disclosureCopy span { color: var(--dim); font-size: var(--fs-xs); }
 .disclosureContent { border-block-start: var(--stroke-1) solid var(--divider); }
+.numberControl { display: flex; inline-size: min(calc(var(--s-9) * 7.5), 50cqi); min-inline-size: 0; max-inline-size: 100%; align-items: center; gap: var(--s-3); }
+.numberValue { max-inline-size: 50%; min-inline-size: 0; flex: 0 0 auto; overflow: hidden; color: var(--dim); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; text-align: end; text-overflow: ellipsis; white-space: nowrap; }
+.numberSlider { min-inline-size: 0; flex: 1 1 0; }

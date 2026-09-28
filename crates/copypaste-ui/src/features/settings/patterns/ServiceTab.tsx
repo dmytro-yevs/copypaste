@@ -7,6 +7,7 @@ import { useUi } from "@/store/ui";
 import { settingsCapabilities } from "@/features/settings/model/settingsNavigation";
 import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
 import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
+import { settingsGroups } from "@/features/settings/model/settingsProjection";
 import { AdvancedServiceSection } from "./service/AdvancedServiceSection";
 import {
   ClipboardCaptureSection,
@@ -46,15 +47,14 @@ function CaptureSetupEntry() {
   const openOnboardingAt = useUi((state) => state.openOnboardingAt);
   const snapshot = capture.data;
 
-  if (snapshot === undefined) return null;
-  const presentation = capturePresentationOf(snapshot.health);
-  const description = snapshot.detail
+  const presentation = snapshot === undefined ? undefined : capturePresentationOf(snapshot.health);
+  const description = snapshot === undefined ? t("capture.loading.body") : snapshot.detail
     ? `${snapshot.headline} ${snapshot.detail}`
     : snapshot.headline;
 
-  return <SettingsSchemaRenderer groups={[{ id: "capture-status", fields: [{
+  return <SettingsSchemaRenderer groups={settingsGroups("clipboard", [{
     kind: "action", definition: settingDefinition("clipboard", "capture.title"),
-    help: description, note: presentation.tone === "danger" ? snapshot.headline : undefined,
+    help: description, note: presentation?.tone === "danger" ? snapshot?.headline : undefined,
     label: t("capture.status.open"), onAction: () => openOnboardingAt("capture"),
-  }] }]} />;
+  }], (key) => t(key as never))} />;
 }

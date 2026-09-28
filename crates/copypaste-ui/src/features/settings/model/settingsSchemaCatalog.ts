@@ -14,25 +14,25 @@ const SEARCHABLE_FIELDS: readonly Omit<SettingsFieldDefinition, "id">[] = [
   { kind: "boolean", section: "privacy", title: "settings.list.allowScreenshots.title", description: "settings.list.allowScreenshots.description", keywords: ["screen recording", "privacy"], capability: "screenshots" },
 
   { kind: "custom", section: "shortcuts", title: "settings.shortcut.title", description: "settings.shortcut.description", keywords: ["hotkey", "keyboard", "quick paste"] },
-  { kind: "boolean", section: "shortcuts", group: "settings.startup.title", title: "settings.startup.openAtLogin.title", description: "settings.startup.openAtLogin.description", keywords: ["autostart", "login", "sign in", "boot", "launch", "start with windows", "login items"], capability: "startup" },
+  { kind: "boolean", section: "shortcuts", title: "settings.startup.openAtLogin.title", description: "settings.startup.openAtLogin.description", keywords: ["autostart", "login", "sign in", "boot", "launch", "start with windows", "login items"], capability: "startup" },
 
   { kind: "action", section: "clipboard", title: "capture.title", description: "capture.loading.body", keywords: ["background", "clipboard", "recording", "paused", "android", "shizuku", "permission", "other apps", "notice", "always on"] },
   { kind: "boolean", section: "privacy", title: "settings.service.privateMode.title", description: "settings.service.privateMode.description" },
-  { kind: "choice", section: "clipboard", group: "settings.service.advanced.title", title: "settings.service.poll.title", description: "settings.service.poll.description", keywords: ["polling", "interval", "frequency"], disclosure: "clipboard-advanced" },
-  { kind: "choice", section: "clipboard", group: "settings.service.groups.capture.title", title: "settings.service.dedup.title", description: "settings.service.dedup.description" },
-  { kind: "choice", section: "clipboard", group: "settings.service.advanced.title", title: "settings.service.maxText.title", description: "settings.service.maxText.description", disclosure: "clipboard-advanced" },
-  { kind: "choice", section: "clipboard", group: "settings.service.advanced.title", title: "settings.service.maxImage.title", description: "settings.service.maxImage.description", disclosure: "clipboard-advanced" },
-  { kind: "choice", section: "clipboard", group: "settings.service.advanced.title", title: "settings.service.maxFile.title", description: "settings.service.maxFile.description", disclosure: "clipboard-advanced" },
-  { kind: "choice", section: "clipboard", group: "settings.service.advanced.title", title: "settings.service.maxDecodedImage.title", description: "settings.service.maxDecodedImage.description", disclosure: "clipboard-advanced" },
-  { kind: "custom", section: "clipboard", group: "settings.service.groups.capture.title", title: "settings.service.exclusions.title", description: "settings.service.exclusions.description", keywords: ["app", "application", "exclude", "source", "bundle", "package", "privacy", "program", "exe", "android"] },
-  { kind: "choice", section: "privacy", group: "settings.service.groups.keeping.title", title: "settings.service.historyLimit.title", description: "settings.service.historyLimit.description" },
-  { kind: "choice", section: "privacy", group: "settings.service.groups.keeping.title", title: "settings.service.storageQuota.title", description: "settings.service.storageQuota.description" },
-  { kind: "choice", section: "privacy", group: "settings.service.groups.keeping.title", title: "settings.service.retention.title", description: "settings.service.retention.description" },
-  { kind: "choice", section: "privacy", group: "settings.service.groups.keeping.title", title: "settings.service.sensitive.title", description: "settings.service.sensitive.description", keywords: ["password", "key", "token", "delete"] },
-  { kind: "boolean", section: "clipboard", group: "settings.service.groups.telling.title", title: "settings.service.notify.title", description: "settings.service.notify.description", keywords: ["notification"], capability: "copyNotifications" },
-  { kind: "boolean", section: "clipboard", group: "settings.service.groups.telling.title", title: "settings.service.sound.title", description: "settings.service.sound.description" },
-  { kind: "boolean", section: "device-sync", group: "settings.service.groups.network.title", title: "settings.service.syncEnabled.title", description: "settings.service.syncEnabled.description", keywords: ["pair", "devices"] },
-  { kind: "boolean", section: "device-sync", group: "settings.service.groups.network.title", title: "settings.service.lan.title", description: "settings.service.lan.description", keywords: ["network", "discover"] },
+  { kind: "choice", section: "clipboard", title: "settings.service.poll.title", description: "settings.service.poll.description", keywords: ["polling", "interval", "frequency"], disclosure: "clipboard-advanced" },
+  { kind: "choice", section: "clipboard", title: "settings.service.dedup.title", description: "settings.service.dedup.description" },
+  { kind: "choice", section: "clipboard", title: "settings.service.maxText.title", description: "settings.service.maxText.description", disclosure: "clipboard-advanced" },
+  { kind: "choice", section: "clipboard", title: "settings.service.maxImage.title", description: "settings.service.maxImage.description", disclosure: "clipboard-advanced" },
+  { kind: "choice", section: "clipboard", title: "settings.service.maxFile.title", description: "settings.service.maxFile.description", disclosure: "clipboard-advanced" },
+  { kind: "choice", section: "clipboard", title: "settings.service.maxDecodedImage.title", description: "settings.service.maxDecodedImage.description", disclosure: "clipboard-advanced" },
+  { kind: "custom", section: "clipboard", title: "settings.service.exclusions.title", description: "settings.service.exclusions.description", keywords: ["app", "application", "exclude", "source", "bundle", "package", "privacy", "program", "exe", "android"] },
+  { kind: "choice", section: "privacy", title: "settings.service.historyLimit.title", description: "settings.service.historyLimit.description" },
+  { kind: "choice", section: "privacy", title: "settings.service.storageQuota.title", description: "settings.service.storageQuota.description" },
+  { kind: "choice", section: "privacy", title: "settings.service.retention.title", description: "settings.service.retention.description" },
+  { kind: "choice", section: "privacy", title: "settings.service.sensitive.title", description: "settings.service.sensitive.description", keywords: ["password", "key", "token", "delete"] },
+  { kind: "boolean", section: "clipboard", title: "settings.service.notify.title", description: "settings.service.notify.description", keywords: ["notification"], capability: "copyNotifications" },
+  { kind: "boolean", section: "clipboard", title: "settings.service.sound.title", description: "settings.service.sound.description" },
+  { kind: "boolean", section: "device-sync", title: "settings.service.syncEnabled.title", description: "settings.service.syncEnabled.description", keywords: ["pair", "devices"] },
+  { kind: "boolean", section: "device-sync", title: "settings.service.lan.title", description: "settings.service.lan.description", keywords: ["network", "discover"] },
 
 
   { kind: "custom", section: "device-sync", title: "devices.own.rename.label", description: "devices.own.rename.description", keywords: ["device name", "rename", "this device"] },
@@ -41,38 +41,38 @@ const SEARCHABLE_FIELDS: readonly Omit<SettingsFieldDefinition, "id">[] = [
   { kind: "status", section: "cloud-sync", title: "settings.sync.cloud.connectionTitle", description: "settings.sync.cloud.description", keywords: ["cloud sync", "account", "internet"] },
   { kind: "action", section: "cloud-sync", title: "settings.sync.cloud.setupTitle", description: "settings.sync.cloud.setupDescription" },
   { kind: "custom", section: "cloud-sync", title: "settings.sync.cloud.accountTitle" },
-  { kind: "custom", section: "cloud-sync", title: "settings.sync.cloud.endpoint.advancedTitle", description: "settings.sync.cloud.endpoint.advancedDescription", keywords: ["self-hosted", "server", "advanced"], disclosure: "cloud-server" },
-  { kind: "action", section: "cloud-sync", group: "settings.sync.cloud.endpoint.advancedTitle", title: "settings.sync.cloud.endpoint.title", description: "settings.sync.cloud.endpoint.description", keywords: ["server", "change", "restore"], disclosure: "cloud-server" },
-  { kind: "custom", section: "cloud-sync", group: "settings.sync.cloud.endpoint.advancedTitle", title: "settings.sync.cloud.endpoint.url", keywords: ["host", "address", "server"], disclosure: "cloud-server" },
-  { kind: "custom", section: "cloud-sync", group: "settings.sync.cloud.endpoint.advancedTitle", title: "settings.sync.cloud.endpoint.publishableKey", keywords: ["anon key", "server credential"], disclosure: "cloud-server" },
+  { kind: "group", section: "cloud-sync", title: "settings.sync.cloud.endpoint.advancedTitle", description: "settings.sync.cloud.endpoint.advancedDescription", keywords: ["self-hosted", "server", "advanced"], disclosure: "cloud-server" },
+  { kind: "action", section: "cloud-sync", title: "settings.sync.cloud.endpoint.title", description: "settings.sync.cloud.endpoint.description", keywords: ["server", "change", "restore"], disclosure: "cloud-server" },
+  { kind: "custom", section: "cloud-sync", title: "settings.sync.cloud.endpoint.url", keywords: ["host", "address", "server"], disclosure: "cloud-server" },
+  { kind: "custom", section: "cloud-sync", title: "settings.sync.cloud.endpoint.publishableKey", keywords: ["anon key", "server credential"], disclosure: "cloud-server" },
 
   { kind: "readonly", section: "storage", title: "settings.storage.stored.title" },
   { kind: "action", section: "storage", title: "settings.transfer.export.title", description: "settings.transfer.export.description" },
   { kind: "action", section: "storage", title: "settings.transfer.import.title", description: "settings.transfer.import.description" },
-  { kind: "action", section: "storage", group: "settings.transfer.recoverySection", title: "settings.transfer.backup.title", description: "settings.transfer.backup.description" },
-  { kind: "action", section: "storage", group: "settings.transfer.recoverySection", title: "settings.transfer.restore.title", description: "settings.transfer.restore.description" },
+  { kind: "action", section: "storage", title: "settings.transfer.backup.title", description: "settings.transfer.backup.description" },
+  { kind: "action", section: "storage", title: "settings.transfer.restore.title", description: "settings.transfer.restore.description" },
   { kind: "action", section: "storage", title: "settings.storage.clear.title", description: "settings.storage.clear.description" },
 
-  { kind: "readonly", section: "diagnostics", group: "settings.diagnostics.running.title", title: "settings.diagnostics.running.history.title", description: "settings.diagnostics.running.history.description" },
-  { kind: "readonly", section: "diagnostics", group: "settings.diagnostics.running.title", title: "settings.diagnostics.running.started.title", description: "settings.diagnostics.running.started.description" },
-  { kind: "readonly", section: "diagnostics", group: "settings.diagnostics.dropped.title", title: "settings.diagnostics.dropped.tooLarge.title", description: "settings.diagnostics.dropped.tooLarge.description" },
-  { kind: "readonly", section: "diagnostics", group: "settings.diagnostics.dropped.title", title: "settings.diagnostics.dropped.missed.title", description: "settings.diagnostics.dropped.missed.description" },
-  { kind: "readonly", section: "diagnostics", group: "settings.diagnostics.dropped.title", title: "settings.diagnostics.dropped.swept.title", description: "settings.diagnostics.dropped.swept.description" },
-  { kind: "readonly", section: "diagnostics", group: "settings.diagnostics.dropped.title", title: "settings.diagnostics.dropped.purged.title", description: "settings.diagnostics.dropped.purged.description" },
+  { kind: "status", section: "diagnostics", title: "settings.diagnostics.running.history.title", description: "settings.diagnostics.running.history.description" },
+  { kind: "readonly", section: "diagnostics", title: "settings.diagnostics.running.started.title", description: "settings.diagnostics.running.started.description" },
+  { kind: "dynamic", section: "diagnostics", title: "settings.diagnostics.dropped.tooLarge.title", description: "settings.diagnostics.dropped.tooLarge.description" },
+  { kind: "readonly", section: "diagnostics", title: "settings.diagnostics.dropped.missed.title", description: "settings.diagnostics.dropped.missed.description" },
+  { kind: "readonly", section: "diagnostics", title: "settings.diagnostics.dropped.swept.title", description: "settings.diagnostics.dropped.swept.description" },
+  { kind: "readonly", section: "diagnostics", title: "settings.diagnostics.dropped.purged.title", description: "settings.diagnostics.dropped.purged.description" },
   { kind: "action", section: "diagnostics", title: "settings.diagnostics.report.title", keywords: ["copy", "export", "logs", "support"] },
 
-  { kind: "custom", section: "runtime-events", title: "runtimeLog.title", keywords: ["logs", "events", "service", "activity"] },
+  { kind: "dynamic", section: "runtime-events", title: "runtimeLog.title", keywords: ["logs", "events", "service", "activity"] },
 
   { kind: "readonly", section: "about", title: "settings.about.app.title", description: "settings.about.app.description" },
-  { kind: "action", section: "about", title: "settings.about.updates.title", description: "settings.about.updates.description", keywords: ["update", "upgrade", "version"] },
-  { kind: "readonly", section: "about", title: "settings.about.service.title" },
-  { kind: "readonly", section: "about", title: "settings.about.capture.title", description: "settings.about.capture.description" },
+  { kind: "dynamic", section: "about", title: "settings.about.updates.title", description: "settings.about.updates.description", keywords: ["update", "upgrade", "version"] },
+  { kind: "status", section: "about", title: "settings.about.service.title" },
+  { kind: "status", section: "about", title: "settings.about.capture.title", description: "settings.about.capture.description" },
   { kind: "readonly", section: "about", title: "settings.about.backend.title", description: "settings.about.backend.description" },
   { kind: "readonly", section: "about", title: "settings.about.protocol.title", description: "settings.about.protocol.description" },
   { kind: "readonly", section: "about", title: "settings.about.items.title", description: "settings.about.items.description" },
-  { kind: "custom", section: "about", title: "settings.about.links.title" },
-  { kind: "action", section: "about", group: "settings.about.links.title", title: "settings.about.links.repository" },
-  { kind: "action", section: "about", group: "settings.about.links.title", title: "settings.about.links.releases" },
+  { kind: "group", section: "about", title: "settings.about.links.title" },
+  { kind: "action", section: "about", title: "settings.about.links.repository" },
+  { kind: "action", section: "about", title: "settings.about.links.releases" },
   { kind: "action", section: "about", title: "onboarding.settings.title", description: "onboarding.settings.description", keywords: ["setup", "onboarding", "welcome", "first run"] },
   { kind: "action", section: "about", title: "settings.about.reset.title", description: "settings.about.reset.description", keywords: ["defaults", "restore"] },
 ];
@@ -146,10 +146,6 @@ const SECTION_DEFINITIONS: readonly PreferenceSectionDefinition[] = [
 ];
 
 
-export const SETTINGS_SECTIONS = SECTION_DEFINITIONS.map((section) => ({
-  ...section,
-  fields: SETTINGS_FIELD_DEFINITIONS.filter((field) => field.section === section.value || (section.value === "diagnostics" && field.section === "runtime-events")),
-}));
 
 export interface SettingsGroupDefinition {
   readonly section: PreferenceSectionDefinition["value"];
@@ -196,3 +192,15 @@ export const SETTINGS_GROUP_DEFINITIONS: readonly SettingsGroupDefinition[] = [
   { section: "about", id: "welcome", fields: ["onboarding.settings.title"] },
   { section: "about", id: "reset", fields: ["settings.about.reset.title"] },
 ];
+
+export const SETTINGS_SECTIONS = SECTION_DEFINITIONS.map((section) => {
+  const groups = SETTINGS_GROUP_DEFINITIONS.filter((group) => group.section === section.value);
+  return {
+    ...section,
+    groups,
+    fields: groups.flatMap((group) => group.fields.map((title) => settingDefinition(
+      section.value === "diagnostics" && title === "runtimeLog.title" ? "runtime-events" : section.value,
+      title,
+    ))),
+  };
+});

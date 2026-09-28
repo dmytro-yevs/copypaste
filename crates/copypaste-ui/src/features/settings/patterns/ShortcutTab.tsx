@@ -2,9 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
 
 import { Button } from "@/components/ui";
-import { FieldFeedback } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
 import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
+import { settingsGroups } from "@/features/settings/model/settingsProjection";
 import {
   DEFAULT_SHORTCUT,
   acceleratorGlyphs,
@@ -129,27 +130,19 @@ export function ShortcutTab({ supportsStartup }: { supportsStartup: boolean }) {
     ? t("settings.shortcut.capturingName")
     : t("settings.shortcut.current", { accelerator: bound });
   const feedback = shortcutLoading ? (
-    <FieldFeedback state="pending">Checking shortcut…</FieldFeedback>
+    <StateView mode="loading" placement="control" title="Checking shortcut…" />
   ) : current.error !== null && !isUnavailable(current.error) ? (
-    <FieldFeedback state="error">
-      {toFriendly(current.error)}
-    </FieldFeedback>
+    <StateView mode="error" placement="control" title={toFriendly(current.error)} />
   ) : save.isPending ? (
-    <FieldFeedback state="pending">Saving shortcut…</FieldFeedback>
+    <StateView mode="loading" placement="control" title="Saving shortcut…" />
   ) : refusal ? (
-    <FieldFeedback state="error">{refusal}</FieldFeedback>
+    <StateView mode="error" placement="control" title={refusal} />
   ) : save.error !== null && !isUnavailable(save.error) ? (
-    <FieldFeedback state="error">
-      {`${toFriendly(save.error)} ${t("settings.shortcut.saveFailed")}`}
-    </FieldFeedback>
+    <StateView mode="error" placement="control" title={`${toFriendly(save.error)} ${t("settings.shortcut.saveFailed")}`} />
   ) : saved !== null ? (
-    <FieldFeedback state="success">
-      {t(saved === "reset" ? "settings.shortcut.resetSaved" : "settings.shortcut.saved")}
-    </FieldFeedback>
+    <StateView mode="success" placement="control" title={t(saved === "reset" ? "settings.shortcut.resetSaved" : "settings.shortcut.saved")} />
   ) : unavailable ? (
-    <FieldFeedback state="neutral">
-      {t("settings.shortcut.unavailable", { accelerator: fallback })}
-    </FieldFeedback>
+    <StateView mode="info" placement="control" title={t("settings.shortcut.unavailable", { accelerator: fallback })} />
   ) : undefined;
   const resetButton = (
     <Button
@@ -170,7 +163,7 @@ export function ShortcutTab({ supportsStartup }: { supportsStartup: boolean }) {
 
   return (
     <div className={styles.root}>
-      <SettingsSchemaRenderer groups={[{ id: "shortcut", fields: [{
+      <SettingsSchemaRenderer groups={settingsGroups("shortcuts", [{
         kind: "custom",
         definition: settingDefinition("shortcuts", "settings.shortcut.title"),
         note: feedback ? <span id={feedbackId}>{feedback}</span> : undefined,
@@ -213,7 +206,7 @@ export function ShortcutTab({ supportsStartup }: { supportsStartup: boolean }) {
             {resetButton}
           </div>
         ),
-      }] }]} />
+      }], (key) => t(key as never))} />
 
       {supportsStartup ? <StartupSection /> : null}
     </div>
@@ -237,7 +230,7 @@ function StartupSection() {
     save.isSuccess && save.variables === true && save.data === false;
 
   return (
-    <SettingsSchemaRenderer groups={[{ id: "startup", title: t("settings.startup.title"), fields: [{
+    <SettingsSchemaRenderer groups={settingsGroups("shortcuts", [{
         kind: "boolean",
         definition: settingDefinition("shortcuts", "settings.startup.openAtLogin.title"),
         controlId: "open-at-login",
@@ -246,21 +239,15 @@ function StartupSection() {
         busy: openAtLogin.isPending || save.isPending,
         note:
           openAtLogin.isPending ? (
-            <FieldFeedback state="pending">Checking startup setting…</FieldFeedback>
+            <StateView mode="loading" placement="control" title="Checking startup setting…" />
           ) : unknown ? (
-            <FieldFeedback state="error">
-              {t("settings.startup.unknown")}
-            </FieldFeedback>
+            <StateView mode="error" placement="control" title={t("settings.startup.unknown")} />
           ) : blocked ? (
-            <FieldFeedback state="warning">
-              {t("settings.startup.blocked")}
-            </FieldFeedback>
+            <StateView mode="warning" placement="control" title={t("settings.startup.blocked")} />
           ) : save.isError ? (
-            <FieldFeedback state="error">
-              {t("settings.startup.failed")}
-            </FieldFeedback>
+            <StateView mode="error" placement="control" title={t("settings.startup.failed")} />
           ) : undefined,
         onChange: (next: boolean) => save.mutate(next),
-      }] }]} />
+      }], (key) => t(key as never))} />
   );
 }
