@@ -63,9 +63,6 @@ export function CaptureSetupController() {
   );
 }
 
-/** Alias for settings and onboarding until their imports migrate. */
-export const CaptureSetupState = CaptureSetupController;
-
 export function CaptureSetup({ snapshot }: { snapshot: CaptureSnapshot }) {
   const { t } = useTranslation();
   const managed = snapshot.rung !== "desktop";

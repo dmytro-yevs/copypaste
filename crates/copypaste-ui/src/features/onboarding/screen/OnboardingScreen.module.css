@@ -151,12 +151,6 @@
   line-height: var(--lh-normal);
 }
 
-.savedChoice {
-  margin: var(--s-3) 0 0;
-  color: var(--dim);
-  font-size: var(--fs-xs);
-}
-
 .dotsPosition {
   position: absolute;
   z-index: 5;
