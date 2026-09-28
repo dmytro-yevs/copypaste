@@ -1,7 +1,6 @@
 import { useState, type ReactNode } from "react";
 
-import { FieldFeedback } from "@/components/shared/FieldFeedback";
-import { InlineNotice } from "@/components/shared/InlineNotice";
+import { StateView } from "@/components/shared/StateView";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { Button } from "@/components/ui";
 import {
@@ -65,12 +64,12 @@ export function AndroidCaptureSetup() {
   const permissionFeedback = (id: OnboardingPermissionId, action: PermissionAction) => {
     if (actionState?.id !== id || actionState.action !== action) return null;
     if (request.isPending || openSettings.isPending) {
-      return <FieldFeedback state="pending">{t("onboarding.capture.permission.actionPending")}</FieldFeedback>;
+      return <StateView mode="loading" placement="control" title={t("onboarding.capture.permission.actionPending")} />;
     }
     return "error" in actionState ? (
-      <FieldFeedback state="error">
-        {t("onboarding.capture.permission.actionFailed", { error: toFriendly(actionState.error) })}
-      </FieldFeedback>
+      <StateView mode="error" placement="control"
+        title={t("onboarding.capture.permission.actionFailed", { error: toFriendly(actionState.error) })}
+      />
     ) : null;
   };
 
@@ -80,18 +79,17 @@ export function AndroidCaptureSetup() {
       aria-label={t("onboarding.capture.androidSetupLabel")}
     >
       {permissionReadFailed ? (
-        <InlineNotice
+        <StateView
+          mode="warning"
+          placement="inline"
           role="alert"
-          tone="warning"
-          icon="alert"
-          action={
+          actions={
             <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={() => void permissions.refetch()}>
               {t("onboarding.capture.permission.retryCheck")}
             </Button>
           }
-        >
-          {t("onboarding.capture.permission.checkFailedDetail")}
-        </InlineNotice>
+          title={t("onboarding.capture.permission.checkFailedDetail")}
+        />
       ) : null}
       <SetupAction
         icon="library"

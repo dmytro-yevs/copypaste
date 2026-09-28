@@ -54,4 +54,16 @@ describe("CaptureStatus", () => {
     render(<CaptureStatus />);
     expect(screen.queryByRole("status")).toBeNull();
   });
+
+  it("keeps desktop capture warnings visible without an unsupported setup action", () => {
+    mocks.snapshot = captureSnapshot({
+      rung: "desktop",
+      health: { state: "granted_not_working", reason: "read_refused" },
+      headline: "Clipboard access was refused.",
+      detail: "Copy once, then try again.",
+    });
+    render(<CaptureStatus />);
+    expect(screen.getByRole("alert").getAttribute("aria-label")).toContain("Copy once, then try again.");
+    expect(screen.queryByRole("button", { name: "Set up" })).toBeNull();
+  });
 });
