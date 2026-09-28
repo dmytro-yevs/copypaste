@@ -39,18 +39,23 @@ export function StateView({
 }: StateViewProps) {
   const resolvedRole = role ?? (mode === "error" ? "alert" : "status");
   const resolvedIcon = mode === "loading" ? "spinner" : icon ?? defaultIcon[mode];
+  const inline = placement === "control" || placement === "inline";
+  const Copy = inline ? "span" : "div";
+  const Title = inline ? "span" : "div";
+  const Description = inline ? "span" : "div";
+  const Actions = inline ? "span" : "div";
   const content = (
     <>
       <span className={styles.marker} aria-hidden="true">
         <Icon name={resolvedIcon} size={placement === "control" ? "xs" : "sm"} />
       </span>
       {(title != null || description != null) && (
-        <span className={styles.copy}>
-          {title != null && <span className={styles.title}>{title}</span>}
-          {description != null && <span className={styles.description}>{description}</span>}
-        </span>
+        <Copy className={styles.copy}>
+          {title != null && <Title className={styles.title}>{title}</Title>}
+          {description != null && <Description className={styles.description}>{description}</Description>}
+        </Copy>
       )}
-      {actions != null && <span className={styles.actions}>{actions}</span>}
+      {actions != null && <Actions className={styles.actions}>{actions}</Actions>}
     </>
   );
   const shared = {
@@ -59,11 +64,11 @@ export function StateView({
     "data-mode": mode,
     "data-placement": placement,
     role: resolvedRole,
-    "aria-live": attributes["aria-live"] ?? (resolvedRole === "alert" ? "assertive" : resolvedRole === "status" ? "polite" : undefined),
+    "aria-live": attributes["aria-live"] ?? (resolvedRole === "status" ? "polite" : undefined),
     "aria-busy": attributes["aria-busy"] ?? (mode === "loading" || undefined),
   };
 
-  return placement === "control" || placement === "inline"
+  return inline
     ? <span {...shared}>{content}</span>
     : <section {...shared}>{content}</section>;
 }

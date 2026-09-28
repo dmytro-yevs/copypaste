@@ -2,7 +2,6 @@ import { Icon } from "@/components/ui/icon";
 import { Button } from "@/components/ui";
 import {
   useCopyReport,
-  useDiagnostics,
   useExportSupportBundle,
 } from "@/hooks/useDiagnostics";
 import { useTranslation } from "@/i18n";
@@ -52,11 +51,4 @@ export function SupportReportActions({
       </Button>
     </div>
   );
-}
-
-/** Loaded only on a recovery screen, so normal history browsing does not add a
- * second diagnostics poll solely for an action that is not visible. */
-export function RecoveryReportActions() {
-  const diagnostics = useDiagnostics();
-  return <SupportReportActions report={diagnostics.data?.report} compact />;
 }
