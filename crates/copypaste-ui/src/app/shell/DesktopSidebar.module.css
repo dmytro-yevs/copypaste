@@ -12,6 +12,11 @@
   background: transparent;
 }
 .brand { display: grid; padding: 0 var(--s-2) var(--s-5); place-items: center; }
+.brandLockup { display: flex; min-inline-size: 0; align-items: center; gap: calc(var(--s-2) + var(--stroke-2)); }
+.brandCopy { display: flex; min-inline-size: 0; flex-direction: column; gap: calc(var(--s-1) / 2); }
+.brandCopy strong, .brandCopy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brandCopy strong { color: var(--text); font-size: var(--fs-sm); font-weight: var(--fw-semibold); line-height: var(--lh-tight); }
+.brandCopy small { color: var(--dim); font-size: calc(var(--fs-xs) - var(--stroke-2)); line-height: var(--lh-tight); }
 .navigation { display: grid; gap: calc(var(--s-1) + var(--stroke-1)); }
 
 @media (--cp-lg) and (max-width: $cpToolbar) {

@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { Boundary } from "@/app/shell/Boundary";
 import { useTranslation } from "@/i18n";
 import { useUi } from "@/store/ui";
-import { RouteLoadingState } from "./RouteLoadingState";
+import { StateView } from "@/components/shared/StateView";
 import { screenRegistry } from "./screenRegistry";
 
 export function ScreenRouter({ pushLive }: { pushLive: boolean }) {
@@ -15,9 +15,11 @@ export function ScreenRouter({ pushLive }: { pushLive: boolean }) {
     <Boundary key={view} label={label} layout="screen" onReset={screen.reset}>
       <Suspense
         fallback={
-          <RouteLoadingState
+          <StateView
+            mode="loading"
+            placement="screen"
             title={label}
-            label={t("shell.loading", { region: label })}
+            aria-label={t("shell.loading", { region: label })}
           />
         }
       >
