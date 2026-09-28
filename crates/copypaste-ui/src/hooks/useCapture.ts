@@ -8,7 +8,7 @@
  */
 import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 import { invalidateHistoryHead, STATUS_KEY } from "@/hooks/historyRefresh";
 import { t } from "@/i18n";
