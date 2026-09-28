@@ -1,8 +1,11 @@
 import {
     Children,
     Fragment,
+    cloneElement,
     isValidElement,
     type ComponentProps,
+    type KeyboardEvent,
+    type MouseEvent,
     type ReactNode,
 } from "react";
 import { Slot, Slottable } from "@radix-ui/react-slot";
@@ -84,6 +87,9 @@ function Button({
     tooltip,
     pending = false,
     edge = "none",
+    onClickCapture,
+    onKeyDownCapture,
+    tabIndex,
     ...props
 }: ButtonProps) {
     const loading = pending || state === "loading";
@@ -106,6 +112,32 @@ function Button({
     const tooltipContent = tooltip ?? (iconOnly ? accessibleLabel : undefined);
 
     if (asChild) {
+        const intrinsicButton = isValidElement(children) && children.type === "button";
+        // Slot composes a child's capture handler before its own. Guard the
+        // slotted child itself so disabled actions cannot run in that handler.
+        const safeChild = isValidElement<{
+            onClickCapture?: (event: MouseEvent<HTMLElement>) => void;
+            onKeyDownCapture?: (event: KeyboardEvent<HTMLElement>) => void;
+        }>(children) ? cloneElement(children, {
+            onClickCapture: (event) => {
+                if (disabledState) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return;
+                }
+                children.props.onClickCapture?.(event);
+                onClickCapture?.(event as MouseEvent<HTMLButtonElement>);
+            },
+            onKeyDownCapture: (event) => {
+                if (disabledState && (event.key === "Enter" || event.key === " ")) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return;
+                }
+                children.props.onKeyDownCapture?.(event);
+                onKeyDownCapture?.(event as KeyboardEvent<HTMLButtonElement>);
+            },
+        }) : children;
         const element = (
             <Slot
                 data-slot="button"
@@ -113,11 +145,13 @@ function Button({
                 aria-busy={loading || undefined}
                 aria-disabled={disabledState || undefined}
                 aria-label={accessibleLabel}
+                tabIndex={disabledState ? -1 : tabIndex}
+                {...(intrinsicButton && disabledState ? { disabled: true } : {})}
                 data-action-size={iconOnly ? "icon" : "label"}
                 className={buttonClass}
                 {...props}
             >
-                <Slottable child={children}>
+                <Slottable child={safeChild}>
                     {(slottable) => (
                         <span
                             data-slot="button-content"
@@ -141,6 +175,9 @@ function Button({
             aria-busy={loading || undefined}
             aria-label={accessibleLabel}
             disabled={disabledState}
+            tabIndex={tabIndex}
+            onClickCapture={onClickCapture}
+            onKeyDownCapture={onKeyDownCapture}
             type="button"
             className={buttonClass}
             {...props}

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import { Button } from "./button";
 import { TooltipProvider } from "./tooltip";
@@ -35,6 +35,48 @@ describe("Button asChild", () => {
         expect(compactIcon).toContain(compactSize);
         expect(compactIcon?.match(/max\(var\(--ctl-h-sm\), var\(--tap-min\)\)/g)).toHaveLength(4);
         expect(styles).not.toMatch(/@media \(pointer: coarse\)/);
+    });
+
+    it("blocks a pending slotted button before its child handler can run", () => {
+        const onClick = vi.fn();
+        const onClickCapture = vi.fn();
+        render(<Button asChild pending><button type="button" onClick={onClick} onClickCapture={onClickCapture}>Save</button></Button>);
+
+        const button = screen.getByRole("button", { name: "Save" });
+        expect(button.getAttribute("aria-disabled")).toBe("true");
+        fireEvent.click(button);
+        expect(onClick).not.toHaveBeenCalled();
+        expect(onClickCapture).not.toHaveBeenCalled();
+    });
+
+    it("blocks a disabled slotted link and its keyboard activation", () => {
+        const onClick = vi.fn();
+        const onKeyDown = vi.fn();
+        const onClickCapture = vi.fn();
+        const onKeyDownCapture = vi.fn();
+        render(<Button asChild disabled><a href="/releases" onClick={onClick} onClickCapture={onClickCapture} onKeyDown={onKeyDown} onKeyDownCapture={onKeyDownCapture}>Releases</a></Button>);
+
+        const link = screen.getByRole("link", { name: "Releases" });
+        expect(link.getAttribute("aria-disabled")).toBe("true");
+        expect(link.getAttribute("tabindex")).toBe("-1");
+        fireEvent.click(link);
+        fireEvent.keyDown(link, { key: "Enter" });
+        expect(onClick).not.toHaveBeenCalled();
+        expect(onClickCapture).not.toHaveBeenCalled();
+        expect(onKeyDown).not.toHaveBeenCalled();
+        expect(onKeyDownCapture).not.toHaveBeenCalled();
+    });
+
+    it("retains child and Button capture handlers when enabled", () => {
+        const childCapture = vi.fn();
+        const buttonCapture = vi.fn();
+        const onClick = vi.fn();
+        render(<Button asChild onClickCapture={buttonCapture}><a href="/releases" onClickCapture={childCapture} onClick={(event) => { event.preventDefault(); onClick(); }}>Releases</a></Button>);
+
+        fireEvent.click(screen.getByRole("link", { name: "Releases" }));
+        expect(childCapture).toHaveBeenCalledOnce();
+        expect(buttonCapture).toHaveBeenCalledOnce();
+        expect(onClick).toHaveBeenCalledOnce();
     });
 });
 
