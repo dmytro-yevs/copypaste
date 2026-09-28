@@ -2,6 +2,14 @@
   "size": {
     "$description": "Control, icon and stroke sizes, aligned to shadcn's control heights (h-8 / h-9 / h-10) and its size-4 icon default. Three tokens carry a `coarsePointer` extension and are re-emitted under @media (pointer: coarse); the rest are the same on both platforms. Library components own switch, checkbox and selection-bar geometry; an unread token is a value that drifts.",
     "$type": "dimension",
+    "quick-paste-pane-width": {
+      "$value": "403px",
+      "$description": "Quick Paste list pane width, bound to the native QUICK_PASTE_WIDTH allocation."
+    },
+    "quick-paste-icon-offset": {
+      "$value": "2.5px",
+      "$description": "Vertical optical alignment of the source icon within a Quick Paste row."
+    },
     "icon-sm": {
       "$value": "14px",
       "$description": "Inline glyph inside dense text."
