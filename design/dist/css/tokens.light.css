@@ -17,8 +17,6 @@
   --border: oklch(0.92 0.004 286.32);
   --border-strong: oklch(0.552 0.016 285.938);
   --divider: oklch(0.94 0.004 286.32);
-  --skeleton: oklch(0.141 0.005 285.823 / 8%);
-  --skeleton-shine: oklch(1 0 0 / 72%);
   --text: oklch(0.141 0.005 285.823);
   --dim: oklch(0.442 0.017 285.786);
   --faint: oklch(0.5 0.016 285.938);
@@ -66,9 +64,6 @@
   --status-warn-border: rgba(225, 113, 0, 0.2);
   --status-error-border: rgba(231, 0, 11, 0.2);
   --button-danger-hover-bg: rgba(231, 0, 11, 0.12);
-  --skeleton-element-bg: rgba(9, 9, 11, 0.13);
-  --artwork-error-bg: rgba(231, 0, 11, 0.18);
-  --artwork-info-bg: rgba(21, 93, 252, 0.18);
   --swatch-highlight: rgba(9, 9, 11, 0.16);
   --redaction-line-bg: rgba(199, 0, 54, 0.25);
   --protected-line-bg: rgba(199, 0, 54, 0.24);
@@ -99,9 +94,6 @@
   --danger-control-border: rgb(240, 163, 156);
   --update-bg: rgba(248, 248, 255, 0.37);
   --update-available-bg: rgba(184, 182, 246, 0.2);
-  --skeleton-card-bg: rgba(255, 255, 255, 0.35);
-  --artwork-orbit-border: rgba(107, 82, 223, 0.2);
-  --artwork-glow-bg: rgba(107, 82, 223, 0.18);
   --quick-row-hover-bg: rgba(232, 232, 253, 0.44);
   --quick-row-selected-border: rgb(134, 124, 228);
   --swatch-border: rgb(183, 183, 186);

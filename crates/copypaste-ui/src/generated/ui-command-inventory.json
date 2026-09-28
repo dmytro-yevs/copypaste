@@ -45,6 +45,8 @@
     "service_state",
     "start_service",
     "restart_service",
+    "quit_failure_read",
+    "quit_failure_ack",
     "hide_window",
     "set_quick_paste_preview",
     "show_main_window",
@@ -83,6 +85,12 @@
     "pair_confirm",
     "pair_reject",
     "pair_cancel",
+    "pair_secure_state",
+    "pair_secure_reveal_invite",
+    "pair_secure_reveal_sas",
+    "pair_secure_join",
+    "pair_secure_decide",
+    "pair_secure_close",
     "copy_text"
   ],
   "preview_only_commands": [

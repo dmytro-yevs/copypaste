@@ -47,15 +47,15 @@ Every element of one interaction type composes the same foundation.
 
 | Foundation | Controlled modifiers | Composed by |
 |---|---|---|
-| `Button` | `variant=primary|secondary|ghost|danger`, `size=compact|compactIcon|sm|md|lg|icon`, `tone=neutral|danger`, `state=normal|loading` | `ActionButton`, dialog actions, navigation, all feature actions |
+| `Button` | `variant=primary|secondary|ghost|danger`, `size=compact|compactIcon|sm|md|lg|icon`, `tone=neutral|danger`, `pending`, icon/label/tooltip and control edge | dialog actions, navigation, all feature actions |
 | `ControlSurface` | `size=compact|md|library`, `width=content|fill`, `state=normal|invalid|disabled` | `Input`, `Select`, `SearchField` |
 | `ControlAdornment` | `size=compact|regular`, `tone=inherit|muted` | icons and end slots inside controls |
 | `ShortcutBadge` | `size=compact|regular` | keyboard hints inside controls and menus |
 | `SelectionControl` | `hitSize=compact|comfortable`; fixed 16px visual control inside the target | card-local and bulk selection |
 | `Surface` | `elevation=flat|raised|overlay`, `border=none|subtle|strong`, `radius=sm|md|lg`, `tone=neutral|accent|warning|danger` | cards, `PreviewSurface`, notices and Quick Paste rows |
 | `Icon` | finite name, size and weight | shared actions and feature metadata |
-| `DropdownMenu` | Radix-owned menu focus, keyboard navigation and checked state | reusable menus and `MultiSelect` |
-| `Tooltip` | Radix-owned trigger/content behavior; one provider in `AppProviders` | every shared icon-only `ActionButton` |
+| `DropdownMenu` | Radix-owned menu focus, keyboard navigation and checked state | reusable menus and multiple `Select` |
+| `Tooltip` | Radix-owned trigger/content behavior; one provider in `AppProviders` | icon-only `Button` and explicit hit areas |
 
 `Button` is the only raw button foundation. `ControlSurface` owns shared
 input/search/select chrome. Compact controls render at 32px for a fine pointer
@@ -73,22 +73,22 @@ accepting arbitrary external geometry. State is expressed with native/ARIA or
 
 | Component or family | Primitive/layout base | Controlled contract | Main consumers |
 |---|---|---|---|
-| `ActionButton` | `Button` + `Icon`; delegates icon-only actions to `IconButton` | button variant/size/tone/state, icon name or glyph, control edge | Library, Devices, Settings, Capture, Diagnostics, Quick Paste |
-| `IconButton` | square `Button` + `Icon` + `Tooltip` | compact/regular size, finite icon source, accessible label, control edge | all icon-only actions |
-| `SearchField` | `ControlSurface` + embedded `Input` + `IconButton` + `ShortcutBadge` | value, shortcut-or-clear state, disabled | Library and Quick Paste |
+| `Button` | native button or Radix Slot + icon/tooltip | variant, size, tone, pending, icon, label, tooltip and control edge | all actions |
+| `Dialog`, `AlertDialog` | internal Radix focus/portal primitives | title, description, controlled open, body/footer or action descriptors, async close policy | all feature dialogs |
+| `Select` | internal Radix controls and virtual catalog | single/multiple modes, caller-owned option metadata, selected values and catalog states | filters, settings, source exclusions |
+| `SearchField` | `ControlSurface` + embedded `Input` + `Button` + `ShortcutBadge` | value, shortcut-or-clear state, disabled | Library and Quick Paste |
 | `MetadataList` | semantic `dl` grid | regular/compact density, wrapping or truncating values | inspectors and detail panes |
-| `StatusCard` | `Surface` | finite status, title/detail/icon/action slots, compact density | navigation and connection summaries |
+| `StateView` | one icon/loading animation and content/action renderer | finite mode, control/inline/panel/screen placement, role/live semantics | all loading, empty, offline, error and status messages |
 | `InspectorShell` | `PaneHeader` + `ScrollViewport` | title/header actions/body/actions/metadata slots | resizable inspectors and detail panes |
 | `PreviewSurface` | `Surface` | padding and scroll plus surface modifiers | Library Inspector and detail views |
-| `EmptyState`, `StateNotice`, `InlineNotice` | `Surface` + flow layouts | tone, busy/live state, finite actions | route failures, loading/empty/offline states |
 | `NavigationItem` | `Button` + `Icon` + `Tooltip` | `layout=sidebar|dock`, active/disabled | desktop sidebar and mobile dock |
 | `ClipCard` | `Surface` + `Button` + card-local `SelectionControl` | selection state, content kind, preview lines | measured History virtual rows |
 | Clip body/media family | `Stack`, `Surface`, `Icon`, media element | normalized kind, intrinsic size/fit, masked/loading/error | ClipCard, Inspector, Quick Paste |
 | Source metadata family | `Inline`, `AppIcon`, `Icon` | density, wrap, semantic badges | ClipCard and Inspector |
 | History list family | `ScrollViewport` + measured ClipCards | grouping, selection, estimates replaced by measurements | LibraryScreen |
 | Library toolbar/Inspector | container/flow layouts + shared controls/surfaces | search/filter/selection and item state | LibraryScreen |
-| `CaptureSetup` | `Surface`, settings rows/notices, capture components | normalized snapshot or connected state | CaptureScreen and Android Settings |
-| Settings tabs/index/search | `Tabs`, `PaneHeader`, `ScrollViewport`, model ids | expanded tabs versus compact ladder | SettingsScreen |
+| `CaptureSetup` | settings controls and StateView | normalized capture snapshot; query/retry belongs to CaptureSetupController | capture setup and onboarding |
+| Settings schema | canonical section/group/field definitions + live controller bindings + one renderer | navigation, search targets, visibility, disclosures and standard controls | all nine sections |
 | `ApplicationShell` | `AppFrame` + navigation family | compact/expanded width and platform surface | app routes |
 
 ## Layout contracts
@@ -243,3 +243,11 @@ modifiers, and keep the import arrow pointed toward lower layers. Confirm every
 new text surface has a deliberate wrapping/truncation rule, every surface has
 token padding, every fill region has min/max constraints, and every responsive
 change lives in the component, pattern or screen that owns the composition.
+
+## State and protected presentation boundaries
+
+StateView owns the only loading graphic. Feature resolvers and hooks retain priority, recovery, invalidation, sensitive-content and async lifecycle rules. Sonner schedules notifications; `lib/notify` renders their contents through StateView and Button. Startup failure has a dependency-free DOM fallback so missing React or styles cannot hide the error.
+
+Settings section controllers bind current values, callbacks, availability and specialized interactions to the canonical field/group catalog. Search and navigation use that catalog. Specialized shortcut recording, account/pairing operations and runtime logs remain bounded slots; standard rows and disclosures belong to the schema renderer.
+
+macOS pairing uses a separate protected first-party window with an explicit command allowlist and short-lived reveal. Ordinary windows never receive pairing secrets. Quit failure uses a separate durable read/ack surface with a minimal startup fallback. ADR-0015 documents the revised security boundary and outstanding native validation requirements.

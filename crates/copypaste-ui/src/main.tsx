@@ -7,7 +7,7 @@ import "@ungap/replace-children";
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeNative } from "@/lib/nativeInvoke";
 
 import {
   applyFlexGapSupportState,
@@ -46,8 +46,8 @@ function renderQuitFallback(): void {
   button.addEventListener("click", async () => {
     button.disabled = true;
     try {
-      const pending = await invoke<{ id: number } | null>("quit_failure_read");
-      if (pending === null || !await invoke<boolean>("quit_failure_ack", { id: pending.id })) {
+      const pending = await invokeNative("quit_failure_read");
+      if (pending === null || !await invokeNative("quit_failure_ack", { id: pending.id })) {
         button.disabled = false;
       }
     } catch {

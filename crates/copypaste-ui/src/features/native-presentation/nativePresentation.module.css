@@ -1,5 +1,5 @@
 .dialog {
-  width: min(100% - 2rem, 34rem);
+  width: min(calc(100% - var(--s-7)), calc(var(--s-9) * 11 + var(--s-4)));
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
@@ -9,12 +9,12 @@
 .form,
 .secret {
   display: grid;
-  gap: 1rem;
+  gap: var(--s-4);
 }
 
 .form label {
   display: grid;
-  gap: 0.35rem;
+  gap: var(--s-1);
 }
 
 .form input {
@@ -30,17 +30,17 @@
 }
 
 .qr {
-  width: 16rem;
-  height: 16rem;
+  width: calc(var(--s-7) * 8);
+  height: calc(var(--s-7) * 8);
   max-width: 100%;
   image-rendering: pixelated;
   -webkit-user-drag: none;
 }
 
 .sas {
-  font-size: 2rem;
-  font-weight: 700;
-  letter-spacing: 0.2em;
+  font-size: calc(var(--fs-base) * 2);
+  font-weight: var(--fw-bold);
+  letter-spacing: calc(var(--ls-wider) * 4);
   font-variant-numeric: tabular-nums;
 }
 
@@ -48,5 +48,5 @@
   display: flex;
   justify-content: end;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: var(--s-2);
 }

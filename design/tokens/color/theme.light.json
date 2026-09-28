@@ -38,14 +38,6 @@
       "$value": "oklch(0.94 0.004 286.32)",
       "$description": "One step lighter than --border so a region separator never reads as a control edge."
     },
-    "skeleton": {
-      "$value": "oklch(0.141 0.005 285.823 / 8%)",
-      "$description": "Pending-content geometry. It is visible enough to preserve structure without reading as disabled content."
-    },
-    "skeleton-shine": {
-      "$value": "oklch(1 0 0 / 72%)",
-      "$description": "Moving highlight used only while content is pending. Reduced motion removes the animation and leaves --skeleton static."
-    },
     "text": {
       "$value": "oklch(0.141 0.005 285.823)",
       "$description": "zinc-950. shadcn `foreground`."

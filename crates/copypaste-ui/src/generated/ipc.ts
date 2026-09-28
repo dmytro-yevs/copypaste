@@ -148,11 +148,19 @@ export type PairedDevice = { name: string, last_seen_ms: number, online: boolean
 
 export type PairingCeremony = { ceremony_id: string | null, role: PairingRole | null, state: PairingState, semantics: PairingSemantics, presentation: PairingPresentationState, known_device: PairedDevice | null, error: UiError | null, };
 
+export type SecureInviteView = { generation: number, ceremony_id: string, code: string, address: string, qr_svg: string, expires_in_ms: number, };
+
+export type SecureSasView = { generation: number, ceremony_id: string, sas: string, expires_in_ms: number, };
+
+export type SecurePairingView = { generation: number, phase: string, ceremony: PairingCeremony, };
+
 export type PeerInfo = { pairing_id: string, name: string, last_addr: string | null, last_seen_ms: number, online: boolean, details?: DeviceDetails, };
 
 export type PrivateModeData = { private_mode: boolean, private_mode_epoch: number, };
 
 export type ServiceState = { "state": "running", version: string, matches_app: boolean, ours: boolean, } | { "state": "unhealthy" } | { "state": "stopped" } | { "state": "not_installed" };
+
+export type QuitFailureView = { id: number, message: string, };
 
 export type HistoryRead = { "state": "readable" } | { "state": "failed", code: string, };
 

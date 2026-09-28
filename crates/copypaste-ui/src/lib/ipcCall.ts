@@ -1,12 +1,12 @@
 /**
- * The only place `invoke` is called.
+ * Application command boundary; native transport lives in nativeInvoke.
  *
  * A command the bridge does not route and an operation a build cannot perform
  * (`Unsupported` — no backend reorders pinned items) both classify as
  * `unavailable`: "this build cannot" and "the service is down" are different
  * things to be told, and only one is worth retrying.
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invokeNative } from "./nativeInvoke";
 
 import {
   UI_BOUNDARY_ERROR_CODES,
@@ -273,7 +273,7 @@ export async function call<C extends UiCommandName>(
     // Tauri exposes no AbortSignal contract. Only this caller-facing promise
     // stops; the native command is allowed to finish and is safely ignored.
     return await bounded(
-      () => invoke<CommandResult<C>>(command, serializedArgs),
+      () => invokeNative(command, args),
       options,
       false,
     );

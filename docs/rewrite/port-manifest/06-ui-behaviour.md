@@ -336,12 +336,12 @@ pause dismissal on interaction and expose a dismiss control.
 The directed dependency and component ownership rules in
 `docs/ui-architecture.md` are binding. In particular:
 
-- `Button`/`ActionButton`/`IconButton` own all action chrome and state;
+- `Button` owns all action chrome, accessible labels, tooltips and pending state;
 - `ControlSurface` owns input, select and search chrome;
 - `Surface` owns card and preview chrome;
 - `PreviewSurface` owns History preview padding, scroll and focus;
 - `MetadataList` owns semantic `dl/dt/dd` metadata;
-- `StatusCard` owns status chrome, role, busy state and action layout;
+- `StateView` owns state presentation, loading, role, busy state and actions;
 - feature models own exhaustive domain presentation and remain React-free;
 - feature screens own responsive geometry, not leaf-component styling.
 

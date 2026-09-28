@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeNative } from "@/lib/nativeInvoke";
 
 import { StateView } from "@/components/shared/StateView";
 import { Button, Dialog } from "@/components/ui";
@@ -15,7 +15,7 @@ export default function QuitFailureSurface() {
     let mounted = true;
     const read = async () => {
       try {
-        const next = await invoke<QuitFailureView | null>("quit_failure_read");
+        const next = await invokeNative("quit_failure_read");
         if (mounted) setFailure(next);
       } catch {
         if (mounted) setReadError(true);
@@ -30,7 +30,7 @@ export default function QuitFailureSurface() {
     if (pending || failure === null) return;
     setPending(true);
     try {
-      const acknowledged = await invoke<boolean>("quit_failure_ack", { id: failure.id });
+      const acknowledged = await invokeNative("quit_failure_ack", { id: failure.id });
       if (!acknowledged) setReadError(true);
     } catch {
       setReadError(true);

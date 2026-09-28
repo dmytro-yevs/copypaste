@@ -38,14 +38,6 @@
       "$value": "oklch(1 0 0 / 6%)",
       "$description": "Hairline between regions. Lighter than --border so a separator never reads as a control edge."
     },
-    "skeleton": {
-      "$value": "oklch(1 0 0 / 8%)",
-      "$description": "Pending-content geometry. It is visible enough to preserve structure without reading as disabled content."
-    },
-    "skeleton-shine": {
-      "$value": "oklch(1 0 0 / 14%)",
-      "$description": "Moving highlight used only while content is pending. Reduced motion removes the animation and leaves --skeleton static."
-    },
     "text": {
       "$value": "oklch(0.985 0 0)",
       "$description": "shadcn `foreground`."
