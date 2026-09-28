@@ -41,6 +41,22 @@ struct Session {
     ceremony_id: Option<String>,
     invite: Option<Invite>,
     revealed_sas: Option<BoundSas>,
+    decision_in_flight: bool,
+}
+
+struct DecisionPermit {
+    session: SecurePairingSession,
+    generation: u64,
+}
+
+impl Drop for DecisionPermit {
+    fn drop(&mut self) {
+        if let Ok(mut session) = self.session.inner.lock() {
+            if session.generation == self.generation {
+                session.decision_in_flight = false;
+            }
+        }
+    }
 }
 
 struct BoundSas {
@@ -74,6 +90,7 @@ impl SecurePairingSession {
             session.ceremony_id = None;
             session.invite = None;
             session.revealed_sas = None;
+            session.decision_in_flight = false;
         }
     }
 
@@ -105,6 +122,7 @@ impl SecurePairingSession {
             expires_at,
         });
         session.revealed_sas = None;
+        session.decision_in_flight = false;
         true
     }
 
@@ -150,10 +168,13 @@ impl SecurePairingSession {
         true
     }
 
-    pub(crate) fn clear(&self) -> (bool, u64, Option<String>) {
+    pub(crate) fn clear(&self) -> Option<(bool, u64, Option<String>)> {
         let Ok(mut session) = self.inner.lock() else {
-            return (false, 0, None);
+            return None;
         };
+        if session.decision_in_flight {
+            return None;
+        }
         let active = matches!(
             session.phase,
             Phase::Join | Phase::Invite | Phase::Progress | Phase::Confirm
@@ -163,7 +184,7 @@ impl SecurePairingSession {
         session.phase = Phase::Idle;
         session.invite = None;
         session.revealed_sas = None;
-        (active, session.generation, ceremony_id)
+        Some((active, session.generation, ceremony_id))
     }
 
     fn generation(&self) -> u64 {
@@ -270,13 +291,18 @@ impl SecurePairingSession {
         })
     }
 
-    fn take_decision(&self, progress: &PairingProgressData, generation: u64) -> Result<()> {
+    fn take_decision(
+        &self,
+        progress: &PairingProgressData,
+        generation: u64,
+    ) -> Result<DecisionPermit> {
         let mut session = self
             .inner
             .lock()
             .map_err(|_| BackendError::Invalid(EXPIRED))?;
         if session.generation != generation
             || session.phase != Phase::Confirm
+            || session.decision_in_flight
             || session.revealed_sas.as_ref().is_none_or(|bound| {
                 bound.expires_at <= Instant::now()
                     || progress.sas.as_deref() != Some(bound.value.as_str())
@@ -288,7 +314,11 @@ impl SecurePairingSession {
             return Err(BackendError::Invalid(EXPIRED));
         }
         session.revealed_sas = None;
-        Ok(())
+        session.decision_in_flight = true;
+        Ok(DecisionPermit {
+            session: self.clone(),
+            generation,
+        })
     }
 }
 
@@ -478,7 +508,7 @@ pub(crate) async fn decide(
     let session = app.state::<SecurePairingSession>();
     let _operation = session.lock_operation().await;
     let progress = backend.pair_progress().await?;
-    session.take_decision(&progress, generation)?;
+    let _decision = session.take_decision(&progress, generation)?;
     let next = backend.pair_confirm(accept).await?;
     if !session.is_generation(generation) {
         return Err(BackendError::Invalid(EXPIRED));
@@ -487,8 +517,12 @@ pub(crate) async fn decide(
     crate::commands::pairing::reconcile_progress(&*backend, &presenter, next, false).await
 }
 
-pub(crate) fn window_closed(app: &AppHandle) {
-    let (active, closed_generation, ceremony_id) = app.state::<SecurePairingSession>().clear();
+pub(crate) fn window_closed(app: &AppHandle) -> bool {
+    let Some((active, closed_generation, ceremony_id)) =
+        app.state::<SecurePairingSession>().clear()
+    else {
+        return false;
+    };
     if active {
         let backend = app.clone();
         tauri::async_runtime::spawn(async move {
@@ -511,6 +545,7 @@ pub(crate) fn window_closed(app: &AppHandle) {
             }
         });
     }
+    true
 }
 
 pub(crate) fn destroy_window(app: &AppHandle) {
@@ -582,5 +617,46 @@ mod tests {
         session.reset(Phase::Join);
         session.progress(&progress(PairingState::AwaitingConfirmation, "two"));
         assert!(session.take_decision(&awaiting, generation).is_err());
+    }
+
+    #[test]
+    fn close_waits_for_a_submitted_decision_and_unblocks_after_result() {
+        let session = SecurePairingSession::default();
+        session.reset(Phase::Join);
+        let awaiting = progress(PairingState::AwaitingConfirmation, "one");
+        session.progress(&awaiting);
+        let generation = session.generation();
+        session
+            .reveal_sas(&awaiting, generation)
+            .expect("bound SAS");
+        let permit = session
+            .take_decision(&awaiting, generation)
+            .expect("submitted");
+        assert!(
+            session.clear().is_none(),
+            "OS/custom close must wait for the backend"
+        );
+        assert!(session.is_generation(generation));
+
+        session.progress(&progress(PairingState::Confirmed, "one"));
+        drop(permit);
+        assert!(session.clear().is_some(), "terminal result may close");
+
+        session.reset(Phase::Join);
+        let awaiting = progress(PairingState::AwaitingConfirmation, "two");
+        session.progress(&awaiting);
+        let generation = session.generation();
+        session
+            .reveal_sas(&awaiting, generation)
+            .expect("bound SAS");
+        let permit = session
+            .take_decision(&awaiting, generation)
+            .expect("submitted");
+        assert!(session.clear().is_none());
+        drop(permit);
+        assert!(
+            session.clear().is_some(),
+            "backend error also releases close"
+        );
     }
 }

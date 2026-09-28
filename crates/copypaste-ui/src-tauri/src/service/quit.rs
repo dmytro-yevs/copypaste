@@ -209,10 +209,13 @@ pub(crate) fn ensure_failure_window<R: Runtime>(app: &AppHandle<R>) {
             .ok(),
         };
         if let Some(window) = window {
-            if window.set_content_protected(true).is_ok() {
-                let _ = window.show();
-                let _ = window.set_focus();
+            // This window contains only fixed, non-sensitive copy. A capture
+            // protection failure must not strand the quit acknowledgment.
+            if let Err(error) = window.set_content_protected(true) {
+                tracing::warn!(%error, "quit recovery capture protection unavailable");
             }
+            let _ = window.show();
+            let _ = window.set_focus();
         }
     }
 }

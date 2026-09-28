@@ -1,5 +1,8 @@
 .dialog {
   width: min(100% - 2rem, 34rem);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .stack,
@@ -14,6 +17,12 @@
   gap: 0.35rem;
 }
 
+.form input {
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: none;
+}
+
 .secret {
   justify-items: center;
   text-align: center;
@@ -25,6 +34,7 @@
   height: 16rem;
   max-width: 100%;
   image-rendering: pixelated;
+  -webkit-user-drag: none;
 }
 
 .sas {
