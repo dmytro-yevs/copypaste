@@ -1,6 +1,6 @@
 import { useId, type FormEvent } from "react";
 
-import { FieldFeedback, InlineNotice } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 import { Button, Input, Label } from "@/components/ui";
 import type { CloudAccountController } from "@/features/settings/hooks/useCloudAccountController";
 import { useTranslation } from "@/i18n";
@@ -38,9 +38,7 @@ export function CloudEndpointForm({
     >
       {replacing ? (
         <div id={warningId}>
-          <InlineNotice tone="warning" icon="alert">
-            {t("settings.sync.cloud.endpoint.changeWarning")}
-          </InlineNotice>
+          <StateView mode="warning" placement="inline" title={t("settings.sync.cloud.endpoint.changeWarning")} />
         </div>
       ) : null}
       <div
@@ -86,13 +84,9 @@ export function CloudEndpointForm({
       </p>
       <div id={feedbackId} className={styles.feedback}>
         {controller.endpointPending ? (
-          <FieldFeedback state="pending">
-            {t("settings.sync.cloud.endpoint.saving")}
-          </FieldFeedback>
+          <StateView mode="loading" placement="control" title={t("settings.sync.cloud.endpoint.saving")} />
         ) : controller.endpointError ? (
-          <FieldFeedback state="error">
-            {t("settings.sync.cloud.endpoint.error")}
-          </FieldFeedback>
+          <StateView mode="error" placement="control" title={t("settings.sync.cloud.endpoint.error")} />
         ) : controller.endpointDirty ? (
           <span className={styles.dirty}>{t("settings.sync.cloud.endpoint.unsaved")}</span>
         ) : null}
@@ -133,7 +127,7 @@ export function CloudEndpointForm({
         <Button
           type="submit"
           size="sm"
-          state={controller.endpointPending ? "loading" : "normal"}
+          pending={controller.endpointPending}
           disabled={controller.busy || !controller.endpointComplete}
         >
           {t(controller.endpointPending

@@ -15,8 +15,9 @@ export function SettingsSchemaRenderer({ groups }: { readonly groups: readonly S
 
 function SettingsSchemaGroup({ group }: { readonly group: SettingsGroupSchema }) {
   const disclosureRef = useRef<HTMLDetailsElement>(null);
-  useEffect(() => { if (group.revealKey !== undefined && disclosureRef.current) disclosureRef.current.open = true; }, [group.revealKey]);
-  const content = group.fields.filter((field) => field.visible !== false).map((field) => (
+  const visibleFields = group.fields.filter((field) => field.visible !== false);
+  useEffect(() => { if (group.revealKey !== undefined && disclosureRef.current) disclosureRef.current.open = true; }, [group.revealKey, visibleFields.length]);
+  const content = visibleFields.map((field) => (
     <SettingsSchemaField key={field.definition.id} field={field} />
   ));
   if (content.length === 0) return null;
@@ -45,7 +46,7 @@ export function SettingsSchemaField({ field }: { readonly field: SettingsField }
     case "choice": control = field.presentation === "segmented" || field.presentation === "cards" ? <div role="group" aria-label={title} className={field.controlClassName}>{field.options.map((option) => <Button key={option.value} type="button" variant={field.presentation === "cards" ? "ghost" : field.value === option.value ? "secondary" : "ghost"} size={field.presentation === "cards" ? "md" : "sm"} className={field.optionClassName} data-product-theme={field.presentation === "cards" ? option.value : undefined} aria-label={option.label} aria-describedby={describedBy} aria-pressed={field.value === option.value} disabled={field.disabled} onClick={(event) => field.onChange(option.value, event.currentTarget)}>{field.renderOption?.(option) ?? option.label}</Button>)}</div> : <Select size="sm" aria-label={title} aria-describedby={describedBy} value={field.value} disabled={field.disabled} aria-busy={field.busy || undefined} aria-invalid={invalid || undefined} aria-errormessage={invalid ? errorId : undefined} leadingIcon={field.leadingIcon} items={field.options} onValueChange={(value) => field.onChange(value)} />; break;
     case "multi-choice": control = <Select mode="multiple" aria-label={title} aria-describedby={describedBy} values={field.value} items={field.options} disabled={field.disabled} allLabel={title} onValuesChange={field.onChange} />; break;
     case "text": control = <Input size="sm" aria-label={title} aria-describedby={describedBy} value={field.value} disabled={field.disabled} placeholder={field.placeholder} onChange={(event) => field.onChange(event.currentTarget.value)} />; break;
-    case "number": control = <><output>{field.displayValue ?? field.value.toLocaleString()}</output><Slider aria-label={title} aria-describedby={describedBy} value={[field.value]} min={field.min} max={field.max} step={field.step ?? 1} disabled={field.disabled} onValueChange={([value]) => { if (value !== undefined) field.onChange(value); }} /></>; break;
+    case "number": control = <div className={styles.numberControl}><output className={styles.numberValue}>{field.displayValue ?? field.value.toLocaleString()}</output><Slider className={styles.numberSlider} aria-label={title} aria-describedby={describedBy} value={[field.value]} min={field.min} max={field.max} step={field.step ?? 1} disabled={field.disabled} onValueChange={([value]) => { if (value !== undefined) field.onChange(value); }} /></div>; break;
     case "readonly": case "status": control = field.value; break;
     case "action": control = <>{field.href ? <Button asChild size="sm" variant={field.variant ?? "secondary"} tone={field.tone}><a href={field.href} target="_blank" rel="noreferrer" aria-describedby={describedBy}>{field.icon ? <Icon name={field.icon} aria-hidden="true" /> : null}{field.label}</a></Button> : <Button type="button" size="sm" variant={field.variant ?? "secondary"} tone={field.tone} disabled={field.disabled} aria-describedby={describedBy} aria-busy={field.busy || undefined} onClick={field.onAction}>{field.icon ? <Icon name={field.icon} aria-hidden="true" /> : null}{field.label}</Button>}{field.extraActions}</>; break;
     case "custom": control = field.content; break;
