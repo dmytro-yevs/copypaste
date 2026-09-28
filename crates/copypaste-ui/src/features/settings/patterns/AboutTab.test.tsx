@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { t } from "@/i18n";
 import { SETTINGS_SEARCH_ITEMS } from "@/features/settings/model/settingsSearchIndex";
+import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
 import { captureSnapshot } from "@/test/harness";
 import { useUi } from "@/store/ui";
 import { AboutTab } from "./AboutTab";
@@ -16,7 +17,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/features/settings/components/useUpdateSetting", () => ({
   useUpdateSetting: () => ({
-    field: { kind: "readonly", definition: { id: "about:updates", section: "about", title: "settings.about.updates.title", kind: "readonly" }, value: "Up to date" },
+    field: { kind: "readonly", definition: settingDefinition("about", "settings.about.updates.title"), value: "Up to date" },
     dialog: null,
   }),
 }));

@@ -6,6 +6,8 @@ import {
 } from "@/components/ui";
 import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
 import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
+import { settingsGroups } from "@/features/settings/model/settingsProjection";
+import type { SettingsField } from "@/features/settings/model/settingsFieldSchema";
 import { useBackupDatabase, useRestoreDatabase } from "@/hooks/useServiceConfig";
 import { useTranslation } from "@/i18n";
 import styles from "./StorageTab.module.css";
@@ -17,28 +19,27 @@ export function BackupSettings() {
   const [restoreOpen, setRestoreOpen] = useState(false);
   const backupFeedbackId = useId();
   const restoreFeedbackId = useId();
+  const fields: SettingsField[] = [{
+    kind: "action", definition: settingDefinition("storage", "settings.transfer.backup.title"),
+    note: backup.isPending ? <StateView mode="loading" placement="inline" title="Backing up…" /> : backup.isError ? (
+      <span id={backupFeedbackId}><StateView mode="error" placement="control" title="History wasn’t backed up." /></span>
+    ) : undefined,
+    label: backup.isPending ? "Backing up…" : t("settings.transfer.backup.action"),
+    icon: "file", disabled: backup.isPending, busy: backup.isPending,
+    onAction: () => backup.mutate(),
+  }, {
+    kind: "action", definition: settingDefinition("storage", "settings.transfer.restore.title"),
+    note: restore.isPending ? <StateView mode="loading" placement="inline" title="Restoring…" /> : restore.isError ? (
+      <span id={restoreFeedbackId}><StateView mode="error" placement="control" title="History wasn’t restored." /></span>
+    ) : undefined,
+    label: restore.isPending ? "Restoring…" : t("settings.transfer.restore.action"),
+    icon: "reset", tone: "danger", disabled: restore.isPending, busy: restore.isPending,
+    onAction: () => setRestoreOpen(true),
+  }];
 
   return (
     <>
-      <SettingsSchemaRenderer groups={[{ id: "recovery", title: t("settings.transfer.recoverySection"), fields: [{
-          kind: "action", definition: settingDefinition("storage", "settings.transfer.backup.title"),
-          note: backup.isError ? (
-            <span id={backupFeedbackId}>
-              <StateView mode="error" placement="control" title="History wasn’t backed up." />
-            </span>
-          ) : undefined,
-          label: backup.isPending ? "Backing up…" : t("settings.transfer.backup.action"),
-          icon: "file", disabled: backup.isPending, busy: backup.isPending,
-          onAction: () => backup.mutate(),
-        }, {
-          kind: "action", definition: settingDefinition("storage", "settings.transfer.restore.title"),
-          note: restore.isError ? (
-            <span id={restoreFeedbackId}><StateView mode="error" placement="control" title="History wasn’t restored." /></span>
-          ) : undefined,
-          label: restore.isPending ? "Restoring…" : t("settings.transfer.restore.action"),
-          icon: "reset", tone: "danger", disabled: restore.isPending, busy: restore.isPending,
-          onAction: () => setRestoreOpen(true),
-        }] }]} />
+      <SettingsSchemaRenderer groups={settingsGroups("storage", fields, (key) => t(key as never))} />
 
 
       <AlertDialog

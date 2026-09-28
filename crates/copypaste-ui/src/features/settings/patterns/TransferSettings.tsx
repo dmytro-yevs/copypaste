@@ -8,6 +8,8 @@ import {
 } from "@/components/ui";
 import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
 import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
+import { settingsGroups } from "@/features/settings/model/settingsProjection";
+import type { SettingsField } from "@/features/settings/model/settingsFieldSchema";
 import { useExportHistory, useImportHistory } from "@/hooks/useServiceConfig";
 import { useTranslation } from "@/i18n";
 import type { ImportPreview } from "@/lib/ipc";
@@ -22,32 +24,27 @@ export function TransferSettings() {
   const [pendingImport, setPendingImport] = useState<ImportPreview | null>(null);
   const exportFeedbackId = useId();
   const importFeedbackId = useId();
+  const fields: SettingsField[] = [{
+    kind: "action", definition: settingDefinition("storage", "settings.transfer.export.title"),
+    note: exportHistory.isPending ? <StateView mode="loading" placement="inline" title="Exporting…" /> : exportHistory.isError ? (
+      <span id={exportFeedbackId}><StateView mode="error" placement="control" title="History wasn’t exported." /></span>
+    ) : undefined,
+    label: exportHistory.isPending ? "Exporting…" : t("settings.transfer.export.action"),
+    icon: "download", disabled: exportHistory.isPending, busy: exportHistory.isPending,
+    onAction: () => { setIncludeSensitive(false); setExportOpen(true); },
+  }, {
+    kind: "action", definition: settingDefinition("storage", "settings.transfer.import.title"),
+    note: importHistory.isPending ? <StateView mode="loading" placement="inline" title="Importing…" /> : importHistory.prepare.isError || importHistory.apply.isError ? (
+      <span id={importFeedbackId}><StateView mode="error" placement="control" title="History wasn’t imported." /></span>
+    ) : undefined,
+    label: importHistory.isPending ? "Importing…" : t("settings.transfer.import.action"),
+    icon: "upload", disabled: importHistory.isPending, busy: importHistory.isPending,
+    onAction: () => importHistory.prepare.mutate(undefined, { onSuccess: (preview) => setPendingImport(preview) }),
+  }];
 
   return (
     <>
-      <SettingsSchemaRenderer groups={[{ id: "transfer", title: t("settings.transfer.transferSection"), fields: [{
-          kind: "action", definition: settingDefinition("storage", "settings.transfer.export.title"),
-          note: exportHistory.isError ? (
-            <span id={exportFeedbackId}>
-              <StateView mode="error" placement="control" title="History wasn’t exported." />
-            </span>
-          ) : undefined,
-          label: exportHistory.isPending ? "Exporting…" : t("settings.transfer.export.action"),
-          icon: "download", disabled: exportHistory.isPending, busy: exportHistory.isPending,
-          onAction: () => {
-              // Sensitive-item consent is intentionally one export only.
-              setIncludeSensitive(false);
-              setExportOpen(true);
-            },
-        }, {
-          kind: "action", definition: settingDefinition("storage", "settings.transfer.import.title"),
-          note: importHistory.prepare.isError || importHistory.apply.isError ? (
-            <span id={importFeedbackId}><StateView mode="error" placement="control" title="History wasn’t imported." /></span>
-          ) : undefined,
-          label: importHistory.isPending ? "Importing…" : t("settings.transfer.import.action"),
-          icon: "upload", disabled: importHistory.isPending, busy: importHistory.isPending,
-          onAction: () => importHistory.prepare.mutate(undefined, { onSuccess: (preview) => setPendingImport(preview) }),
-        }] }]} />
+      <SettingsSchemaRenderer groups={settingsGroups("storage", fields, (key) => t(key as never))} />
 
 
       <AlertDialog
