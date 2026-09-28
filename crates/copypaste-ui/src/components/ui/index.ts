@@ -1,13 +1,4 @@
-export {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-} from "./alert-dialog";
+export { AlertDialog } from "./alert-dialog";
 export { Badge, badgeVariants } from "./badge";
 export { Button, buttonVariants } from "./button";
 export { Checkbox, SelectionControl } from "./checkbox";
@@ -18,15 +9,7 @@ export {
     controlSurfaceVariants,
 } from "./control-surface";
 export type { ControlSurfaceVariants } from "./control-surface";
-export {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    DialogTrigger,
-} from "./dialog";
+export { Dialog } from "./dialog";
 export {
     DropdownMenu,
     DropdownMenuCheckboxItem,
@@ -49,13 +32,6 @@ export type { StepperItem } from "./stepper";
 export { Surface, surfaceVariants } from "./surface";
 export type { SurfaceVariants } from "./surface";
 export { Switch } from "./switch";
-export { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs";
-export {
-    Tooltip,
-    TooltipContent,
-    TooltipPortal,
-    TooltipProvider,
-    TooltipRoot,
-    TooltipTrigger,
-} from "./tooltip";
+export { Tabs } from "./tabs";
+export { Tooltip, TooltipProvider } from "./tooltip";
 export { VisuallyHidden } from "./visually-hidden";
