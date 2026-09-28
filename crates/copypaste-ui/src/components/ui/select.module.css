@@ -167,3 +167,42 @@
         animation: none;
     }
 }
+
+.optionContainer,
+.optionCopy {
+    display: flex;
+    min-inline-size: 0;
+    flex: 1;
+    flex-direction: column;
+}
+
+.itemDescription {
+    overflow: hidden;
+    color: var(--dim);
+    font-family: var(--f-mono);
+    font-size: var(--fs-xs);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.multiContent { min-inline-size: var(--radix-dropdown-menu-trigger-width); }
+.catalog { display: flex; min-inline-size: 0; flex-direction: column; gap: var(--s-2); }
+.catalogToolbar { display: flex; min-inline-size: 0; align-items: center; gap: var(--s-2); }
+.catalogToolbar > input { min-inline-size: 0; flex: 1; }
+.visuallyHidden { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.catalogList { position: relative; min-block-size: calc(var(--s-9) * 3); max-block-size: calc(var(--s-9) * 7); overflow-y: auto; border: var(--stroke-1) solid var(--divider); border-radius: var(--r-ctl); background: var(--panel); }
+.catalogState { display: flex; min-block-size: calc(var(--s-9) * 3); padding: var(--s-3); flex-direction: column; align-items: center; justify-content: center; gap: var(--s-2); color: var(--dim); font-size: var(--fs-sm); text-align: center; }
+.catalogState strong { color: var(--text); font-weight: var(--fw-medium); }
+.catalogState small { font-size: var(--fs-xs); }
+.virtualList { position: relative; inline-size: 100%; }
+.catalogRow { position: absolute; inset-block-start: 0; inset-inline-start: 0; inline-size: 100%; min-block-size: calc(var(--s-9) + var(--s-1)); border-block-end: var(--stroke-1) solid var(--divider); }
+.catalogOption { display: flex; inline-size: 100%; min-block-size: calc(var(--s-9) + var(--s-1)); padding-inline: var(--s-2); align-items: center; border: 0; color: var(--text); background: transparent; text-align: left; font: inherit; cursor: pointer; }
+.catalogOption > * + * { margin-inline-start: var(--s-2); }
+.catalogOption:hover, .catalogOption:focus-visible { background: var(--selected); }
+.catalogOption:disabled { cursor: default; opacity: 0.7; }
+.optionAction { flex: none; color: var(--accent-2); }
+.selectedList { display: flex; flex-direction: column; margin-block-start: var(--s-1); border: var(--stroke-1) solid var(--divider); border-radius: var(--r-ctl); }
+.selectedItem { display: flex; min-block-size: var(--ctl-h-lg); padding-inline: var(--s-2); align-items: center; gap: var(--s-2); }
+.selectedItem:not(:last-child) { border-block-end: var(--stroke-1) solid var(--divider); }
+.removeButton { display: flex; inline-size: var(--ctl-h-sm); block-size: var(--ctl-h-sm); flex: none; align-items: center; justify-content: center; border: 0; border-radius: var(--r-ctl); color: var(--text); background: transparent; cursor: pointer; }
+.removeButton:hover, .removeButton:focus-visible { background: var(--selected); }
