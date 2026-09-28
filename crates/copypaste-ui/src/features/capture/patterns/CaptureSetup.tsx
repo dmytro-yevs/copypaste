@@ -17,7 +17,6 @@ import {
 import {
   useCaptureMutation,
   useCaptureNow,
-  useCaptureState,
 } from "@/hooks/useCapture";
 import { useTranslation } from "@/i18n";
 import { longAge } from "@/lib/format";
@@ -33,6 +32,7 @@ import {
 } from "@/lib/ipc";
 import { usePrefs } from "@/store/prefs";
 import styles from "./CaptureSetup.module.css";
+import { useCaptureSetupResolution } from "./useCaptureSetupResolution";
 
 const PRIMARY_LABEL = {
   arm: "capture.setup.action.arm",
@@ -40,17 +40,15 @@ const PRIMARY_LABEL = {
   recheck: "capture.setup.action.checkAgain",
 } as const satisfies Record<Exclude<CapturePrimary, "none">, string>;
 
-export function CaptureSetupState() {
+export function CaptureSetupController() {
   const { t } = useTranslation();
-  const capture = useCaptureState();
+  const resolved = useCaptureSetupResolution();
 
-  if (capture.data !== undefined) {
-    return <CaptureSetup snapshot={capture.data} />;
-  }
+  if (resolved.kind === "ready") return <CaptureSetup snapshot={resolved.snapshot} />;
 
   return (
     <div className={styles.emptyState}>
-      {capture.isPending ? (
+      {resolved.kind === "loading" ? (
         <StateView mode="loading" placement="panel" title={t("capture.loading.title")} description={t("capture.loading.body")} />
       ) : (
         <StateView
@@ -58,12 +56,15 @@ export function CaptureSetupState() {
           placement="panel"
           title={t("capture.unknown.title")}
           description={t("capture.unknown.body")}
-          actions={<Button onClick={() => void capture.refetch()}><Icon name="refresh" size="sm" />{t("common.tryAgain")}</Button>}
+          actions={<Button onClick={resolved.retry}><Icon name="refresh" size="sm" />{t("common.tryAgain")}</Button>}
         />
       )}
     </div>
   );
 }
+
+/** Alias for settings and onboarding until their imports migrate. */
+export const CaptureSetupState = CaptureSetupController;
 
 export function CaptureSetup({ snapshot }: { snapshot: CaptureSnapshot }) {
   const { t } = useTranslation();

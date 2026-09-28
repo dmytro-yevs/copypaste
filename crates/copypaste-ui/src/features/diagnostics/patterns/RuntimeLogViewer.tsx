@@ -183,12 +183,14 @@ export function RuntimeLogViewer() {
                 )}
                 <Button
                     size="compactIcon"
+                    variant="secondary"
                     onClick={logs.refetch}
                     aria-label={t("runtimeLog.refresh")}
                     title={t("runtimeLog.refresh")}
                 ><Icon name="refresh" size="sm" /></Button>
                 <Button
                     size="compactIcon"
+                    variant="secondary"
                     onClick={() => setFollow((value) => !value)}
                     aria-pressed={follow}
                     aria-label={t(
@@ -198,6 +200,7 @@ export function RuntimeLogViewer() {
                 ><Icon name={follow ? "pause" : "play"} size="sm" /></Button>
                 <Button
                     size="compactIcon"
+                    variant="secondary"
                     onClick={copyLoaded}
                     disabled={events.length === 0}
                     aria-label={t("runtimeLog.copyLoaded")}
@@ -327,7 +330,7 @@ export function RuntimeLogViewer() {
                                     }
                                 >
                                     {logs.isFetchingNextPage && (
-                                        <StateView mode="loading" placement="control" aria-label={t("runtimeLog.loadingOlder")} />
+                                        <StateView mode="loading" placement="control" role="none" aria-hidden="true" />
                                     )}
                                 </div>
                             )}
