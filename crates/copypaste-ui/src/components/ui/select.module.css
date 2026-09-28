@@ -200,6 +200,7 @@
 .catalogOption [data-slot="button-content"] { align-items: center; justify-content: flex-start; }
 .catalogOption:hover, .catalogOption:focus-visible { background: var(--selected); }
 .catalogOption:disabled { cursor: default; }
+.catalogOption[aria-disabled="true"] { cursor: default; }
 .optionAction { flex: none; color: var(--accent-2); }
 .selectedList { display: flex; flex-direction: column; margin-block-start: var(--s-1); border: var(--stroke-1) solid var(--divider); border-radius: var(--r-ctl); }
 .selectedItem { display: flex; min-block-size: var(--ctl-h-lg); padding-inline: var(--s-2); align-items: center; gap: var(--s-2); }
