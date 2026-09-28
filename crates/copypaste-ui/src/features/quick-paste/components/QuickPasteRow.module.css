@@ -57,6 +57,8 @@
 }
 
 .body > :first-child { min-inline-size: 0; flex: 1; }
+.sensitiveBadge { display: inline-flex; min-inline-size: 0; max-inline-size: 100%; align-items: center; gap: var(--s-1); color: var(--warn-strong); font-size: var(--fs-xs); }
+.sensitiveBadge > :last-child { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .root[data-kind="file"] .body :global(small) { display: none; }
 

@@ -1,11 +1,7 @@
 import { useLayoutEffect, useRef } from "react";
 
-import {
-  ActionButton,
-  ClipBodyPreview,
-  SourceMeta,
-  SourceMetaBadge,
-} from "@/components/shared";
+import { ClipItemPresentation } from "@/components/shared/ClipItemPresentation";
+import { StateView } from "@/components/shared/StateView";
 import { ClipImageLoader } from "@/features/clip-content";
 import {
   Button,
@@ -13,7 +9,6 @@ import {
   iconComponent,
   ShortcutBadge,
   Surface,
-  VisuallyHidden,
 } from "@/components/ui";
 import type { OriginDevice } from "@/lib/itemOrigin";
 import { resolveClipBodyPresentation } from "@/lib/clipPresentation";
@@ -185,27 +180,41 @@ export function QuickPasteRow({
         )}
       </span>
       <div className={styles.content}>
-        <div className={styles.body}>
-          <ClipBodyPreview
-            kind={kind}
-            masked={body.state === "masked"}
-            content={compactContent}
-            previewLines={QUICK_PASTE_PREVIEW_LINES}
-            imagePreview={image ? <ClipImageLoader id={item.id} size="fill" /> : undefined}
-            surface="quickPaste"
-          />
-          {hasPotentialFinding ? (
-            <SourceMetaBadge
-              icon="sensitive"
-              tone="warning"
-              label={t("quickPaste.row.potentialSensitive")}
-            />
+        <ClipItemPresentation
+          bodyClassName={styles.body}
+          preview={{
+            kind,
+            masked: body.state === "masked",
+            content: compactContent,
+            previewLines: QUICK_PASTE_PREVIEW_LINES,
+            imagePreview: image ? <ClipImageLoader id={item.id} size="fill" /> : undefined,
+            surface: "quickPaste",
+          }}
+          metadata={{
+            source,
+            createdAt: item.created_at,
+            origin,
+            kind,
+            content: cardContent,
+            density: "compact",
+            devicePresentation: "label",
+          }}
+          hideMetadata
+          bodyAccessory={hasPotentialFinding ? (
+            <span className={styles.sensitiveBadge} data-tone="warning" title={t("quickPaste.row.potentialSensitive")}>
+              <span aria-hidden="true">•</span>
+              <Icon name="sensitive" size="xs" weight="bold" />
+              <span>{t("quickPaste.row.potentialSensitive")}</span>
+            </span>
           ) : null}
-        </div>
-        {active && copyAvailability.reason !== null ? (
-          <div className={styles.availability} role="status">
-            <span>{copyAvailability.reason}</span>
-            {copyAvailability.canRetry ? (
+          afterBody={active && copyAvailability.reason !== null ? (
+          <StateView
+            mode={copyAvailability.canRetry ? "warning" : "info"}
+            placement="inline"
+            role="status"
+            className={styles.availability}
+            title={copyAvailability.reason}
+            actions={copyAvailability.canRetry ? (
               <Button
                 type="button"
                 variant="ghost"
@@ -216,27 +225,17 @@ export function QuickPasteRow({
               >
                 {t("history.copyAvailability.retry")}
               </Button>
-            ) : null}
-          </div>
-        ) : null}
-        <VisuallyHidden asChild>
-          <SourceMeta
-            source={source}
-            createdAt={item.created_at}
-            origin={origin}
-            kind={kind}
-            content={cardContent}
-            density="compact"
-            devicePresentation="label"
+            ) : undefined}
           />
-        </VisuallyHidden>
+          ) : null}
+        />
       </div>
       {shortcut !== null && copyAvailability.canCopy ? (
         <ShortcutBadge aria-hidden="true" className={styles.shortcut}>
           {shortcut}
         </ShortcutBadge>
       ) : null}
-      <ActionButton
+      <Button
         variant="ghost"
         size="compactIcon"
         icon={item.pinned ? "unpin" : "pin"}
