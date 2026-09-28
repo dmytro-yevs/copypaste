@@ -7,6 +7,7 @@ import "@ungap/replace-children";
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { invoke } from "@tauri-apps/api/core";
 
 import {
   applyFlexGapSupportState,
@@ -27,11 +28,34 @@ if (!container) throw new Error("missing #root");
 // above no longer narrows the type away from null.
 const root: HTMLElement = container;
 
-const isQuickPaste =
-  import.meta.env.VITE_ANDROID_BUILD !== "1" &&
-  new URLSearchParams(window.location.search).get("surface") === "quick-paste";
+const requestedSurface = new URLSearchParams(window.location.search).get("surface");
+const desktopSurface = import.meta.env.VITE_ANDROID_BUILD !== "1" ? requestedSurface : null;
+const isQuickPaste = desktopSurface === "quick-paste";
+const protectedSurface = desktopSurface === "pairing" || desktopSurface === "quit-failure";
 
-document.documentElement.dataset.surface = isQuickPaste ? "quick-paste" : "main";
+document.documentElement.dataset.surface = protectedSurface ? desktopSurface : isQuickPaste ? "quick-paste" : "main";
+
+function renderQuitFallback(): void {
+  // This independent entry keeps the explicit acknowledgement available even
+  // if the recovery React chunk or its first render fails.
+  const message = document.createElement("p");
+  message.textContent = "CopyPaste could not safely stop the background service.";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "OK";
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      const pending = await invoke<{ id: number } | null>("quit_failure_read");
+      if (pending === null || !await invoke<boolean>("quit_failure_ack", { id: pending.id })) {
+        button.disabled = false;
+      }
+    } catch {
+      button.disabled = false;
+    }
+  });
+  root.replaceChildren(message, button);
+}
 
 /**
  * The screens are imported here rather than above so that nothing they reach
@@ -47,6 +71,21 @@ document.documentElement.dataset.surface = isQuickPaste ? "quick-paste" : "main"
 async function boot(): Promise<void> {
   if (import.meta.env.LEGACY) {
     await atStartup("polyfills", () => import("@/legacyPolyfills"));
+  }
+
+  if (protectedSurface) {
+    const { TooltipProvider } = await atStartup("screens", () => import("@/components/ui/tooltip"));
+    const { default: Surface } = desktopSurface === "pairing"
+      ? await atStartup("screens", () => import("@/features/native-presentation/ProtectedPairingSurface"))
+      : await atStartup("screens", () => import("@/features/native-presentation/QuitFailureSurface"));
+    await atStartup("render", () =>
+      createRoot(root, {
+        onUncaughtError: () => desktopSurface === "quit-failure"
+          ? renderQuitFallback()
+          : reportStartupFailure(root, { startupStage: "render" }),
+      }).render(<StrictMode><TooltipProvider><Surface /></TooltipProvider></StrictMode>),
+    );
+    return;
   }
 
   const { initializePlatform } = await atStartup("platform", () =>
@@ -81,5 +120,9 @@ async function boot(): Promise<void> {
 // leaves `#root` empty and a blank window is not a diagnosis. `startupFailure`
 // is statically imported so this path never fetches anything.
 void boot().catch((failure: unknown) => {
+  if (desktopSurface === "quit-failure") {
+    renderQuitFallback();
+    return;
+  }
   reportStartupFailure(root, failure);
 });

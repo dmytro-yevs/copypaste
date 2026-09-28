@@ -63,7 +63,7 @@ pub(crate) mod pairing_link;
 pub(crate) mod android;
 
 #[cfg(target_os = "macos")]
-mod macos;
+pub(crate) mod macos;
 #[cfg(any(test, target_os = "macos"))]
 mod macos_model;
 
@@ -81,8 +81,12 @@ pub fn windows_ui(abort: NativeAbort, refresh: NativeRefresh) -> impl NativePair
 }
 
 #[cfg(target_os = "macos")]
-pub fn macos_ui(abort: NativeAbort) -> impl NativePairingUi {
-    macos::MacOsPairingUi::new(abort)
+pub fn macos_ui(
+    app: tauri::AppHandle,
+    session: macos::SecurePairingSession,
+    abort: NativeAbort,
+) -> impl NativePairingUi {
+    macos::MacOsPairingUi::new(app, session, abort)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -339,7 +343,7 @@ pub struct PairingPresenter {
 impl Default for PairingPresenter {
     fn default() -> Self {
         #[cfg(target_os = "macos")]
-        let native = Box::new(macos::MacOsPairingUi::new(Arc::new(|| {})));
+        let native = Box::new(UnavailablePairingUi);
         #[cfg(target_os = "windows")]
         let native = Box::new(windows::WindowsPairingUi::new(
             pairing_link::encode_pairing_link,
@@ -352,7 +356,7 @@ impl Default for PairingPresenter {
 
         Self {
             native,
-            available: cfg!(any(target_os = "macos", target_os = "windows")),
+            available: cfg!(target_os = "windows"),
             coordinator: Mutex::new(CeremonyCoordinator::default()),
         }
     }
@@ -466,10 +470,10 @@ impl PairingPresenter {
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(not(target_os = "windows"))]
 struct UnavailablePairingUi;
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(not(target_os = "windows"))]
 impl NativePairingUi for UnavailablePairingUi {
     fn present_invite(&self, _invite: &PairingInviteData) -> NativePresentationOutcome {
         NativePresentationOutcome::Unavailable
@@ -865,9 +869,8 @@ mod native_pairing_source_contracts {
     }
 
     #[test]
-    fn native_pairing_keeps_credentials_off_the_webview_with_platform_entry_parity() {
+    fn pairing_secrets_are_scoped_to_the_protected_window_with_platform_entry_parity() {
         let sources = [
-            production(include_str!("pairing_presentation/macos.rs")),
             production(include_str!("pairing_presentation/windows/mod.rs")),
             production(include_str!("pairing_presentation/windows/invite.rs")),
             production(include_str!("pairing_presentation/windows/entry.rs")),
@@ -889,19 +892,19 @@ mod native_pairing_source_contracts {
         assert!(joined.contains("Zeroizing"));
 
         let macos = production(include_str!("pairing_presentation/macos.rs"));
-        assert!(macos.matches("NSSecureTextField").count() >= 2);
-        assert!(macos.contains("Pairing code"));
-        assert!(macos.contains("Pairing address"));
-        assert!(macos.contains("setSelectable(false)"));
         for required in [
-            "setAccessibilityProtectedContent(true)",
-            "NSWindowSharingType::NSWindowSharingNone",
-            "Security code: {spoken}",
-            "for (index, digit) in sas.chars().enumerate()",
-            "NativeAbort",
-            "if matches!(action, SheetAction::Cancel)",
-            "close_active_invite(Some(&cancel_token))",
-            "(cancel_abort)()",
+            "const WINDOW_LABEL: &str = \"pairing\"",
+            "WebviewUrl::App(ROUTE.into())",
+            ".visible(false)",
+            ".content_protected(true)",
+            "window.set_content_protected(true)",
+            "window.label() == WINDOW_LABEL",
+            "session.generation != generation",
+            "invite.expires_at <= Instant::now()",
+            "session.revealed_sas",
+            "progress.sas.as_deref()",
+            "Zeroizing",
+            "window_closed",
         ] {
             assert!(macos.contains(required), "missing macOS guard: {required}");
         }
@@ -965,37 +968,14 @@ mod native_pairing_source_contracts {
     #[test]
     fn native_deadlines_clear_secrets_and_leave_timeout_to_backend_progress() {
         let macos = production(include_str!("pairing_presentation/macos.rs"));
-        assert!(macos.contains("ModalDeadline::arm"));
-        assert!(macos.contains("abortModal"));
+        assert!(macos.contains("expires_at: Instant"));
+        assert!(macos.contains("progress.expires_in_ms"));
+        assert!(macos.contains("session.invite = None"));
+        assert!(macos.contains("session.revealed_sas = None"));
         assert!(macos.contains("PairingDecision::Refresh"));
-        let invite = macos
-            .split_once("fn present_invite")
-            .and_then(|(_, source)| source.split_once("fn scan_invite").map(|(body, _)| body))
-            .expect("macOS invite implementation");
-        let expiry = invite
-            .split_once("let expiry_token")
-            .and_then(|(_, source)| source.split_once("let cancel_token").map(|(body, _)| body))
-            .expect("macOS invite expiry handler");
-        assert!(expiry.contains("close_active_invite(Some(&expiry_token))"));
-        assert!(!expiry.contains("abort"));
-        let cancel = invite
-            .split_once("let cancel_token")
-            .and_then(|(_, source)| {
-                source
-                    .split_once("let Some((invite_view")
-                    .map(|(body, _)| body)
-            })
-            .expect("macOS invite cancellation handler");
-        assert!(cancel.contains("close_active_invite(Some(&cancel_token))"));
-        assert!(cancel.contains("(cancel_abort)()"));
-        let progress = macos
-            .split("fn present_progress")
-            .nth(1)
-            .and_then(|body| body.split("fn confirm").next())
-            .expect("macOS progress implementation");
-        assert!(progress.contains("AwaitingConfirmation"));
-        assert!(progress.contains("close_active_invite(None)"));
-        assert!(!progress.contains("abort"));
+        assert!(macos.contains("PairingState::AwaitingConfirmation"));
+        assert!(macos.contains("session.is_generation(closed_generation)"));
+        assert!(macos.contains("pairing.pair_cancel().await"));
 
         let windows_invite = production(include_str!("pairing_presentation/windows/invite.rs"));
         assert!(windows_invite.contains("SetWindowText(\"\")"));

@@ -1,8 +1,11 @@
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use super::{child::ChildExitCode, Supervisor};
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager as _, Runtime, WebviewWindow};
+#[cfg(not(target_os = "android"))]
+use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 pub(super) const MSG_QUIT_FAILED: &str = "CopyPaste could not safely stop the background service.";
 
@@ -102,13 +105,133 @@ impl Drop for ShutdownPermit {
     }
 }
 
-pub(crate) fn show_failure<R: Runtime>(app: &AppHandle<R>, mut presentation: FailurePresentation) {
-    use tauri_plugin_dialog::DialogExt as _;
+const QUIT_WINDOW: &str = "quit-failure";
 
-    app.dialog()
-        .message(MSG_QUIT_FAILED)
-        .title("CopyPaste")
-        .show(move |_| presentation.ack());
+#[derive(Default)]
+pub struct QuitFailureStore {
+    next_id: std::sync::atomic::AtomicU64,
+    pending: Mutex<Option<PendingFailure>>,
+}
+
+struct PendingFailure {
+    id: u64,
+    presentation: FailurePresentation,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
+pub struct QuitFailureView {
+    id: u64,
+    message: String,
+}
+
+impl QuitFailureStore {
+    fn publish(&self, mut presentation: FailurePresentation) {
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
+        if let Ok(mut pending) = self.pending.lock() {
+            // A second failure cannot replace an unacknowledged first one.
+            if pending.is_none() {
+                *pending = Some(PendingFailure { id, presentation });
+            } else {
+                presentation.disarm_duplicate();
+            }
+        }
+    }
+
+    fn read(&self) -> Option<QuitFailureView> {
+        self.pending
+            .lock()
+            .ok()?
+            .as_ref()
+            .map(|failure| QuitFailureView {
+                id: failure.id,
+                message: MSG_QUIT_FAILED.to_owned(),
+            })
+    }
+
+    fn acknowledge(&self, id: u64) -> bool {
+        let Ok(mut pending) = self.pending.lock() else {
+            return false;
+        };
+        if pending.as_ref().is_none_or(|failure| failure.id != id) {
+            return false;
+        }
+        let Some(mut failure) = pending.take() else {
+            return false;
+        };
+        failure.presentation.ack();
+        true
+    }
+}
+
+pub(crate) fn show_failure<R: Runtime>(app: &AppHandle<R>, presentation: FailurePresentation) {
+    app.state::<QuitFailureStore>().publish(presentation);
+    #[cfg(not(target_os = "android"))]
+    ensure_failure_window(app);
+    #[cfg(target_os = "android")]
+    {
+        use tauri_plugin_dialog::DialogExt as _;
+        let handle = app.clone();
+        app.dialog()
+            .message(MSG_QUIT_FAILED)
+            .title("CopyPaste")
+            .show(move |_| {
+                if let Some(failure) = handle.state::<QuitFailureStore>().read() {
+                    handle.state::<QuitFailureStore>().acknowledge(failure.id);
+                }
+            });
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+pub(crate) fn ensure_failure_window<R: Runtime>(app: &AppHandle<R>) {
+    if app.state::<QuitFailureStore>().read().is_none() {
+        return;
+    }
+    {
+        let window = match app.get_webview_window(QUIT_WINDOW) {
+            Some(window) => Some(window),
+            None => WebviewWindowBuilder::new(
+                app,
+                QUIT_WINDOW,
+                WebviewUrl::App("index.html?surface=quit-failure".into()),
+            )
+            .title("CopyPaste")
+            .inner_size(440.0, 260.0)
+            .resizable(false)
+            .visible(false)
+            .content_protected(true)
+            .on_navigation(|url| {
+                url.path() == "/index.html" && url.query() == Some("surface=quit-failure")
+            })
+            .build()
+            .ok(),
+        };
+        if let Some(window) = window {
+            if window.set_content_protected(true).is_ok() {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }
+    }
+}
+
+pub(crate) fn read_for_window(
+    window: &WebviewWindow,
+    store: &QuitFailureStore,
+) -> Option<QuitFailureView> {
+    (window.label() == QUIT_WINDOW)
+        .then(|| store.read())
+        .flatten()
+}
+
+pub(crate) fn ack_for_window(window: &WebviewWindow, store: &QuitFailureStore, id: u64) -> bool {
+    if window.label() != QUIT_WINDOW || !store.acknowledge(id) {
+        return false;
+    }
+    let _ = window.destroy();
+    true
 }
 
 pub(crate) fn finish_failure(supervisor: &Supervisor, show: impl FnOnce(FailurePresentation)) {
@@ -133,6 +256,12 @@ impl FailurePresentation {
     pub(crate) fn ack(&mut self) {
         self.terminal_failure.store(false, Ordering::SeqCst);
         self.gate.failed();
+        self.acknowledged = true;
+    }
+
+    fn disarm_duplicate(&mut self) {
+        // A previously published presentation still owns this same gate.
+        // Dropping a duplicate must not reset it before the first is read.
         self.acknowledged = true;
     }
 }
@@ -235,5 +364,23 @@ mod tests {
         assert_eq!(gate.request(true), ExitRequest::Drain);
         gate.failed();
         assert_eq!(gate.request(true), ExitRequest::Drain);
+    }
+
+    #[test]
+    fn duplicate_failure_does_not_release_first_ack_gate() {
+        let gate = QuitGate::default();
+        let terminal = Arc::new(AtomicBool::new(true));
+        assert_eq!(gate.request(true), ExitRequest::Drain);
+        let store = QuitFailureStore::default();
+        store.publish(FailurePresentation::new(terminal.clone(), gate.clone()));
+        let first = store.read().expect("first failure").id;
+        store.publish(FailurePresentation::new(terminal.clone(), gate.clone()));
+        assert_eq!(store.read().expect("still first").id, first);
+        assert_eq!(gate.request(true), ExitRequest::AlreadyDraining);
+        assert!(!store.acknowledge(first.wrapping_add(1)));
+        assert_eq!(gate.request(true), ExitRequest::AlreadyDraining);
+        assert!(store.acknowledge(first));
+        assert!(!terminal.load(Ordering::SeqCst));
+        assert_eq!(gate.request(false), ExitRequest::Allow);
     }
 }
