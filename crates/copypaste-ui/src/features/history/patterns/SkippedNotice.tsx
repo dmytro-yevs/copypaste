@@ -10,7 +10,7 @@
  * (AGENTS.md rule 4), and a row that will not decrypt today may be a keychain
  * problem that is fixable tomorrow.
  */
-import { InlineNotice } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 import { useTranslation } from "@/i18n";
 
 interface SkippedNoticeProps {
@@ -22,8 +22,6 @@ export function SkippedNotice({ count }: SkippedNoticeProps) {
     if (count <= 0) return null;
 
     return (
-        <InlineNotice live icon="fileWarning">
-            {t("history.skipped", { count })}
-        </InlineNotice>
+        <StateView mode="info" placement="inline" role="status" aria-live="polite" icon="fileWarning" title={t("history.skipped", { count })} />
     );
 }
