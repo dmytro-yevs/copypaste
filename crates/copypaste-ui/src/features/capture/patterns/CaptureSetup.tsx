@@ -4,13 +4,10 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Icon } from "@/components/ui/icon";
 
 import {
-  EmptyState,
-  FieldFeedback,
-  InlineNotice,
   SettingsRow,
-  StatusCard,
 } from "@/components/shared";
 import { Button } from "@/components/ui";
+import { StateView, type StateMode } from "@/components/shared/StateView";
 import { SettingsGroupSurface } from "@/features/settings/components/SettingsGroupSurface";
 import {
   type CapturePrimary,
@@ -54,21 +51,14 @@ export function CaptureSetupState() {
   return (
     <div className={styles.emptyState}>
       {capture.isPending ? (
-        <EmptyState
-          busy
-          title={t("capture.loading.title")}
-          body={t("capture.loading.body")}
-        />
+        <StateView mode="loading" placement="panel" title={t("capture.loading.title")} description={t("capture.loading.body")} />
       ) : (
-        <EmptyState
-          icon="alert"
+        <StateView
+          mode="error"
+          placement="panel"
           title={t("capture.unknown.title")}
-          body={t("capture.unknown.body")}
-          action={{
-            label: t("common.tryAgain"),
-            icon: "refresh",
-            onClick: () => void capture.refetch(),
-          }}
+          description={t("capture.unknown.body")}
+          actions={<Button onClick={() => void capture.refetch()}><Icon name="refresh" size="sm" />{t("common.tryAgain")}</Button>}
         />
       )}
     </div>
@@ -113,29 +103,28 @@ function CaptureStateCard({
         )
       }
     >
-      <Icon name="refresh" size="md"
-        aria-hidden="true"
-        className={run.isPending ? styles.spinner : undefined}
-      />
+      <Icon name="refresh" size="md" aria-hidden="true" />
       {t(PRIMARY_LABEL[primary])}
     </Button>
   );
 
+  const mode: StateMode = presentation.tone === "positive" ? "success"
+    : presentation.tone === "danger" ? "error"
+    : presentation.tone === "attention" ? "warning" : "info";
+  const lastSaved = snapshot.lastCaptureAt === null ? undefined : t("capture.setup.lastSaved", {
+    age: longAge(snapshot.lastCaptureAt),
+  });
+
   return (
-    <StatusCard
-      status={presentation.tone}
-      density="compact"
+    <StateView
+      mode={run.isPending ? "loading" : mode}
+      placement="panel"
       title={snapshot.headline}
-      detail={snapshot.detail}
-      meta={snapshot.lastCaptureAt === null
-        ? undefined
-        : t("capture.setup.lastSaved", {
-            age: longAge(snapshot.lastCaptureAt),
-          })}
-      action={action}
+      description={<>{snapshot.detail}{lastSaved ? <small>{lastSaved}</small> : null}</>}
+      actions={action}
       role={presentation.role}
-      live={presentation.urgency}
-      busy={run.isPending}
+      aria-live={presentation.urgency}
+      aria-busy={run.isPending || undefined}
     />
   );
 }
@@ -289,7 +278,7 @@ function AndroidCaptureRecovery({ snapshot }: { snapshot: CaptureSnapshot }) {
       ) : progress.captureSetupMethod === "adb" ? (
         <p>{t("onboarding.capture.setup.adbDetail")}</p>
       ) : null}
-      {instructions.isError ? <FieldFeedback state="error">{t("onboarding.capture.setup.unavailable")}</FieldFeedback> : null}
+      {instructions.isError ? <StateView mode="error" placement="control" title={t("onboarding.capture.setup.unavailable")} /> : null}
       {progress.captureSetupMethod === "adb" && commands?.length ? (
         <div className={styles.commands}>
           <h4>{t("onboarding.capture.setup.commands")}</h4>
@@ -303,8 +292,8 @@ function AndroidCaptureRecovery({ snapshot }: { snapshot: CaptureSnapshot }) {
           ))}
         </div>
       ) : null}
-      {instructions.data?.requiresRestart ? <FieldFeedback state="neutral">{t("onboarding.capture.setup.restart")}</FieldFeedback> : null}
-      {feedback ? <FieldFeedback state={feedback.state}>{feedback.message}</FieldFeedback> : null}
+      {instructions.data?.requiresRestart ? <StateView mode="info" placement="control" title={t("onboarding.capture.setup.restart")} role="none" /> : null}
+      {feedback ? <StateView mode={feedback.state} placement="control" title={feedback.message} /> : null}
       <div className={styles.recoveryActions}>
         <Button
           type="button"
@@ -342,8 +331,6 @@ function formatCommand(argv: readonly string[]): string {
 function Dropped({ count }: { count: number }) {
   const { t } = useTranslation();
   return (
-    <InlineNotice role="alert" tone="warning" icon="alert">
-      {t("capture.setup.dropped", { count })}
-    </InlineNotice>
+    <StateView mode="warning" placement="inline" role="alert" title={t("capture.setup.dropped", { count })} />
   );
 }

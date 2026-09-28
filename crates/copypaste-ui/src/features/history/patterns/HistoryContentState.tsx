@@ -5,16 +5,14 @@
  * banner and the status chip say the service went away, and the rows stay
  * readable.
  */
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps } from "react";
 
-import { IllustratedErrorState, InlineNotice } from "@/components/shared";
-import { Button, Icon, type IconName } from "@/components/ui";
-import { HistoryLoadingState } from "@/features/history/patterns/HistoryLoadingState";
+import { StateView } from "@/components/shared/StateView";
+import { Button, Icon } from "@/components/ui";
 import { HistoryList } from "@/features/history/patterns/HistoryList";
 import { ServiceOfflineState } from "@/features/history/patterns/ServiceOfflineState";
 import { useTranslation } from "@/i18n";
 import { type ErrorKind, friendlyError } from "@/lib/errors";
-import styles from "./HistoryContentState.module.css";
 
 interface HistoryContentStateProps {
     loading: boolean;
@@ -28,31 +26,6 @@ interface HistoryContentStateProps {
     onRetry: () => void;
     onOpenDiagnostics: () => void;
     list: ComponentProps<typeof HistoryList>;
-}
-
-function InlineLibraryState({
-    icon,
-    title,
-    body,
-    actions,
-}: {
-    icon: IconName;
-    title: string;
-    body: string;
-    actions?: ReactNode;
-}) {
-    return (
-        <section className={styles.inlineState} role="status">
-            <span className={styles.inlineIcon} aria-hidden="true">
-                <Icon name={icon} size="sm" />
-            </span>
-            <span className={styles.inlineCopy}>
-                <strong>{title}</strong>
-                <span>{body}</span>
-            </span>
-            {actions ? <span className={styles.inlineActions}>{actions}</span> : null}
-        </section>
-    );
 }
 
 export function HistoryContentState({
@@ -84,9 +57,7 @@ export function HistoryContentState({
 
     if (loading) {
         return (
-            <HistoryLoadingState
-                title={t("history.empty.loading.title")}
-            />
+            <StateView mode="loading" placement="panel" title={t("history.empty.loading.title")} />
         );
     }
 
@@ -94,19 +65,12 @@ export function HistoryContentState({
         return (
             <>
                 {errorKind === "offline" ? (
-                    <InlineNotice
-                        role="status"
-                        tone="warning"
-                        icon="plug"
-                        action={
-                            <span className={styles.inlineActions}>
-                                {retryAction}
-                                {diagnosticsAction}
-                            </span>
-                        }
-                    >
-                        {t("shell.service.stopped.title")}
-                    </InlineNotice>
+                    <StateView
+                        mode="offline"
+                        placement="inline"
+                        title={t("shell.service.stopped.title")}
+                        actions={<>{retryAction}{diagnosticsAction}</>}
+                    />
                 ) : null}
                 <HistoryList {...list} />
             </>
@@ -116,17 +80,17 @@ export function HistoryContentState({
     switch (errorKind) {
         case "key_unusable":
             return (
-                <IllustratedErrorState
+                <StateView mode="error" placement="screen"
                     title={t("history.empty.keyUnusable.title")}
-                    body={friendlyError("key_unusable")}
+                    description={friendlyError("key_unusable")}
                     actions={diagnosticsAction}
                 />
             );
         case "key_locked":
             return (
-                <IllustratedErrorState
+                <StateView mode="error" placement="screen"
                     title={t("history.empty.keyLocked.title")}
-                    body={friendlyError("key_locked")}
+                    description={friendlyError("key_locked")}
                     actions={<>{retryAction}{diagnosticsAction}</>}
                 />
             );
@@ -136,17 +100,15 @@ export function HistoryContentState({
             );
         case "not_ready":
             return (
-                <HistoryLoadingState
-                    title={t("history.empty.starting.title")}
-                />
+                <StateView mode="loading" placement="panel" title={t("history.empty.starting.title")} />
             );
         case null:
             break;
         default:
             return (
-                <IllustratedErrorState
+                <StateView mode="error" placement="screen"
                     title={t("history.empty.failed.title")}
-                    body={friendlyError(errorKind)}
+                    description={friendlyError(errorKind)}
                     actions={<>{retryAction}{diagnosticsAction}</>}
                 />
             );
@@ -154,24 +116,24 @@ export function HistoryContentState({
 
     if (privateMode) {
         return (
-            <InlineLibraryState
+            <StateView mode="empty" placement="inline"
                 icon="lock"
                 title={t("history.empty.private.title")}
-                body={t("history.empty.private.body")}
+                description={t("history.empty.private.body")}
             />
         );
     }
 
     if (filtered) {
         return (
-            <InlineLibraryState
+            <StateView mode="empty" placement="inline"
                 icon="search"
                 title={
                     searching
                         ? t("history.empty.noResults", { query })
                         : t("history.empty.noMatch")
                 }
-                body={t("history.empty.filteredBody")}
+                description={t("history.empty.filteredBody")}
                 actions={
                     hasMore
                         ? <Button variant="secondary" size="sm" onClick={onLoadMore}>
@@ -185,10 +147,10 @@ export function HistoryContentState({
     }
 
     return (
-        <InlineLibraryState
+        <StateView mode="empty" placement="inline"
             icon="library"
             title={t("history.empty.none.title")}
-            body={t("history.empty.none.body")}
+            description={t("history.empty.none.body")}
         />
     );
 }

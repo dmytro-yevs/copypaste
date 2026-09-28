@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { EmptyState } from "@/components/shared";
+import { StateView, type StateMode } from "@/components/shared/StateView";
 import { Button, Icon } from "@/components/ui";
 import { useTranslation } from "@/i18n";
 import { invalidateHistoryQueries, STATUS_KEY } from "@/hooks/historyRefresh";
@@ -145,161 +145,68 @@ export function ServiceOfflineState({
             {t("shell.service.diagnostics")}
         </Button>
     );
+    const retryAction = (
+        <Button size="sm" disabled={busy} onClick={() => void retryState()}>
+            <Icon name="refresh" size="sm" />
+            {t("common.tryAgain")}
+        </Button>
+    );
+    const view = (mode: StateMode, title: string, description: string, action?: ReactNode) => (
+        <StateView
+            mode={busy ? "loading" : mode}
+            placement="screen"
+            title={title}
+            description={description}
+            actions={<>{action}{diagnostics}</>}
+            aria-busy={busy || undefined}
+        />
+    );
 
     if (service.isPending) {
-        return (
-            <EmptyState
-                icon="plug"
-                tone="attention"
-                busy
-                title={t("shell.service.checking.title")}
-                details={t("shell.service.checking.body")}
-                secondary={diagnostics}
-            />
-        );
+        return view("loading", t("shell.service.checking.title"), t("shell.service.checking.body"));
     }
 
     if (service.isError) {
-        return (
-            <EmptyState
-                icon="alert"
-                tone="danger"
-                busy={busy}
-                title={t("shell.service.unhealthy.title")}
-                details={toFriendly(service.error)}
-                action={{
-                    label: t("common.tryAgain"),
-                    icon: "refresh",
-                    disabled: busy,
-                    onClick: () => void retryState(),
-                }}
-                secondary={diagnostics}
-            />
-        );
+        return view("error", t("shell.service.unhealthy.title"), toFriendly(service.error), retryAction);
     }
 
-    if (state === undefined) {
-        return (
-            <EmptyState
-                icon="alert"
-                tone="danger"
-                busy={busy}
-                title={t("shell.service.unhealthy.title")}
-                details={t("shell.service.unhealthy.body")}
-                action={{
-                    label: t("common.tryAgain"),
-                    icon: "refresh",
-                    disabled: busy,
-                    onClick: () => void retryState(),
-                }}
-                secondary={diagnostics}
-            />
-        );
-    }
-
-    if (state.state === "unhealthy") {
-        return (
-            <EmptyState
-                icon="alert"
-                tone="danger"
-                busy={busy}
-                title={t("shell.service.unhealthy.title")}
-                details={t("shell.service.unhealthy.body")}
-                action={{
-                    label: t("common.tryAgain"),
-                    icon: "refresh",
-                    disabled: busy,
-                    onClick: () => void retryState(),
-                }}
-                secondary={diagnostics}
-            />
-        );
+    if (state === undefined || state.state === "unhealthy") {
+        return view("error", t("shell.service.unhealthy.title"), t("shell.service.unhealthy.body"), retryAction);
     }
 
     if (matchesApp) {
-        const refreshing =
-            operation === "recover" ||
-            operation === "refresh" ||
-            !matchingRefreshSettled;
-        return (
-            <EmptyState
-                icon="plug"
-                tone="attention"
-                busy={refreshing}
-                title={t("shell.service.running.title")}
-                details={t(
-                    refreshing
-                        ? "shell.service.running.refreshing"
-                        : "shell.service.running.retry",
-                )}
-                action={
-                    refreshing
-                        ? undefined
-                        : {
-                              label: t("common.tryAgain"),
-                              icon: "refresh",
-                              disabled: busy,
-                              onClick: () => void refreshConsumers(),
-                          }
-                }
-                secondary={diagnostics}
-            />
+        const refreshing = operation === "recover" || operation === "refresh" || !matchingRefreshSettled;
+        const action = refreshing ? undefined : (
+            <Button size="sm" disabled={busy} onClick={() => void refreshConsumers()}>
+                <Icon name="refresh" size="sm" />
+                {t("common.tryAgain")}
+            </Button>
+        );
+        return view(
+            refreshing ? "loading" : "offline",
+            t("shell.service.running.title"),
+            t(refreshing ? "shell.service.running.refreshing" : "shell.service.running.retry"),
+            action,
         );
     }
 
     if (state.state === "running") {
-        return (
-            <EmptyState
-                icon="alert"
-                tone="attention"
-                busy={busy}
-                title={t("shell.service.outOfDate.title")}
-                details={t("shell.service.outOfDate.body")}
-                action={{
-                    label: t(
-                        busy
-                            ? "shell.service.outOfDate.restarting"
-                            : "shell.service.outOfDate.restart",
-                    ),
-                    icon: "play",
-                    disabled: busy,
-                    onClick: () => void recover(restartService),
-                }}
-                secondary={diagnostics}
-            />
-        );
+        return view("warning", t("shell.service.outOfDate.title"), t("shell.service.outOfDate.body"), (
+            <Button size="sm" disabled={busy} onClick={() => void recover(restartService)}>
+                <Icon name="play" size="sm" />
+                {t(busy ? "shell.service.outOfDate.restarting" : "shell.service.outOfDate.restart")}
+            </Button>
+        ));
     }
 
     if (state.state === "not_installed") {
-        return (
-            <EmptyState
-                icon="alert"
-                tone="attention"
-                title={t("shell.service.notInstalled.title")}
-                details={t("shell.service.notInstalled.body")}
-                secondary={diagnostics}
-            />
-        );
+        return view("warning", t("shell.service.notInstalled.title"), t("shell.service.notInstalled.body"));
     }
 
-    return (
-        <EmptyState
-            icon="plug"
-            tone="attention"
-            busy={busy}
-            title={t("shell.service.stopped.title")}
-            details={t("shell.service.stopped.body")}
-            action={{
-                label: t(
-                    busy
-                        ? "shell.service.stopped.starting"
-                        : "shell.service.stopped.start",
-                ),
-                icon: "play",
-                disabled: busy,
-                onClick: () => void recover(startService),
-            }}
-            secondary={diagnostics}
-        />
-    );
+    return view("offline", t("shell.service.stopped.title"), t("shell.service.stopped.body"), (
+        <Button size="sm" disabled={busy} onClick={() => void recover(startService)}>
+            <Icon name="play" size="sm" />
+            {t(busy ? "shell.service.stopped.starting" : "shell.service.stopped.start")}
+        </Button>
+    ));
 }

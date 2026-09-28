@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { item } from "@/test/harness";
+import { friendlyError } from "@/lib/errors";
 import { HistoryContentState } from "./HistoryContentState";
 import { HistoryList } from "./HistoryList";
 
@@ -27,7 +28,7 @@ const cachedList = {
 } as unknown as ComponentProps<typeof HistoryList>;
 
 describe("HistoryContentState errors", () => {
-    it("keeps recovery compact and preserves retry and diagnostics actions", async () => {
+    it("preserves retry and diagnostics actions with the error explanation", async () => {
         const user = userEvent.setup();
         const retry = vi.fn();
         const diagnostics = vi.fn();
@@ -50,7 +51,7 @@ describe("HistoryContentState errors", () => {
         expect(screen.getByRole("alert").textContent).toContain(
             "Failed to load history",
         );
-        expect(screen.getByRole("button", { name: "Error details" })).toBeTruthy();
+        expect(screen.getByRole("alert").textContent).toContain(friendlyError("timeout"));
 
         await user.click(screen.getByRole("button", { name: "Try again" }));
         await user.click(

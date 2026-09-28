@@ -1,6 +1,6 @@
-import { Icon } from "@/components/ui";
 import type { RefCallback } from "react";
 
+import { StateView } from "./StateView";
 import { usePngObjectUrl } from "./usePngObjectUrl";
 import styles from "./ClipImage.module.css";
 
@@ -38,12 +38,16 @@ export function ClipImage({
     return (
       <span
         ref={measureRef}
-        aria-label={state === "loading" ? loadingLabel : failureLabel}
-        role={loadingLabel || failureLabel ? "status" : undefined}
         title={title}
         className={`${styles.fallback} ${styles[size]}`}
       >
-        {state === "loading" ? <Icon name="spinner" size="sm" className={styles.spinner} /> : <Icon name="imageBroken" size="sm" />}
+        <StateView
+          mode={state === "loading" ? "loading" : "error"}
+          placement="control"
+          icon="imageBroken"
+          aria-label={state === "loading" ? loadingLabel : failureLabel}
+          role={loadingLabel || failureLabel ? "status" : "none"}
+        />
       </span>
     );
   }

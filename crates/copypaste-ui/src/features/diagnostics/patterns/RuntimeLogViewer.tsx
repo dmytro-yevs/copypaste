@@ -3,13 +3,10 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { toast } from "sonner";
 
 import {
-    ActionButton,
-    IllustratedErrorState,
-    InlineNotice,
     SearchField,
-    SkeletonText,
 } from "@/components/shared";
 import { Button, Icon, Select, VisuallyHidden, type SelectItem } from "@/components/ui";
+import { StateView } from "@/components/shared/StateView";
 import { useRuntimeLog } from "@/features/diagnostics/hooks/useRuntimeLog";
 import { t } from "@/i18n";
 import { copyText } from "@/lib/ipc";
@@ -184,81 +181,51 @@ export function RuntimeLogViewer() {
                         />
                     </>
                 )}
-                <ActionButton
+                <Button
                     size="compactIcon"
-                    icon="refresh"
                     onClick={logs.refetch}
                     aria-label={t("runtimeLog.refresh")}
                     title={t("runtimeLog.refresh")}
-                />
-                <ActionButton
+                ><Icon name="refresh" size="sm" /></Button>
+                <Button
                     size="compactIcon"
-                    icon={follow ? "pause" : "play"}
                     onClick={() => setFollow((value) => !value)}
                     aria-pressed={follow}
                     aria-label={t(
                         follow ? "runtimeLog.pause" : "runtimeLog.resume",
                     )}
                     title={t(follow ? "runtimeLog.pause" : "runtimeLog.resume")}
-                />
-                <ActionButton
+                ><Icon name={follow ? "pause" : "play"} size="sm" /></Button>
+                <Button
                     size="compactIcon"
-                    icon="copy"
                     onClick={copyLoaded}
                     disabled={events.length === 0}
                     aria-label={t("runtimeLog.copyLoaded")}
                     title={t("runtimeLog.copyLoaded")}
-                />
+                ><Icon name="copy" size="sm" /></Button>
             </div>
 
             {logs.overrun && (
-                <InlineNotice role="alert" tone="warning" icon="alert">
-                    {t("runtimeLog.overrun")}
-                </InlineNotice>
+                <StateView mode="warning" placement="inline" role="alert" title={t("runtimeLog.overrun")} />
             )}
 
             {logs.followFailed && (
-                <InlineNotice role="alert" tone="danger" icon="alert">
-                    {t("runtimeLog.followFailed")}
-                </InlineNotice>
+                <StateView mode="error" placement="inline" role="alert" title={t("runtimeLog.followFailed")} />
             )}
 
             {logs.isPending ? (
-                <div
-                    className={styles.logSkeleton}
-                    role="status"
-                    aria-label={`${t("runtimeLog.title")}…`}
-                    aria-busy="true"
-                >
-                    {Array.from({ length: 24 }, (_, index) => (
-                        <article
-                            className={`${styles.row} ${styles.skeletonRow}`}
-                            key={index}
-                            aria-hidden="true"
-                        >
-                            <time className={styles.time}>
-                                <SkeletonText width="fill" />
-                            </time>
-                            <div className={styles.rowContent}>
-                                <div className={styles.metadata}>
-                                    <SkeletonText width="xs" />
-                                    <SkeletonText width="xs" />
-                                    <SkeletonText width="sm" />
-                                </div>
-                                <p className={styles.message}>
-                                    <SkeletonText
-                                        width={index % 3 === 0 ? "fill" : "md"}
-                                    />
-                                </p>
-                            </div>
-                        </article>
-                    ))}
-                </div>
+                <StateView
+                    mode="loading"
+                    placement="panel"
+                    title={`${t("runtimeLog.title")}…`}
+                    className={styles.placeholder}
+                />
             ) : logs.isError ? (
-                <IllustratedErrorState
-                    compact
+                <StateView
+                    mode="error"
+                    placement="panel"
                     title={t("runtimeLog.loadFailed.title")}
-                    body={t("runtimeLog.loadFailed.body")}
+                    description={t("runtimeLog.loadFailed.body")}
                     actions={
                         <Button size="sm" onClick={logs.refetch}>
                             <Icon name="refresh" size="sm" />
@@ -267,14 +234,13 @@ export function RuntimeLogViewer() {
                     }
                 />
             ) : events.length === 0 ? (
-                <div
-                    className={styles.emptyState}
+                <StateView
+                    mode="empty"
+                    placement="panel"
+                    title={t("runtimeLog.noMatch")}
+                    className={styles.placeholder}
                     data-runtime-log-empty
-                    role="status"
-                >
-                    <Icon name="searchX" size="lg" className={styles.emptyIcon} />
-                    <p className={styles.emptyCopy}>{t("runtimeLog.noMatch")}</p>
-                </div>
+                />
             ) : (
                 <>
                     <div
@@ -361,7 +327,7 @@ export function RuntimeLogViewer() {
                                     }
                                 >
                                     {logs.isFetchingNextPage && (
-                                        <SkeletonText width="sm" />
+                                        <StateView mode="loading" placement="control" aria-label={t("runtimeLog.loadingOlder")} />
                                     )}
                                 </div>
                             )}
