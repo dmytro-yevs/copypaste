@@ -78,3 +78,20 @@ pub fn show_main_window(app: tauri::AppHandle, window: WebviewWindow) {
     crate::shell::window::hide_window_for_main(&window);
     crate::shell::window::show_main_settings(&app);
 }
+
+#[tauri::command]
+pub fn quit_failure_read(
+    window: WebviewWindow,
+    store: State<'_, crate::service::quit::QuitFailureStore>,
+) -> Option<crate::service::quit::QuitFailureView> {
+    crate::service::quit::read_for_window(&window, &store)
+}
+
+#[tauri::command]
+pub fn quit_failure_ack(
+    window: WebviewWindow,
+    store: State<'_, crate::service::quit::QuitFailureStore>,
+    id: u64,
+) -> bool {
+    crate::service::quit::ack_for_window(&window, &store, id)
+}

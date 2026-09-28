@@ -1,12 +1,17 @@
-use copypaste_ipc::{PairingProgressData, PairingState};
+use copypaste_ipc::PairingProgressData;
+#[cfg(test)]
+use copypaste_ipc::PairingState;
 
+#[cfg(test)]
 use super::semantics::resolve_pairing_semantics;
 
+#[cfg(test)]
 pub(super) struct ProgressCopy {
     pub title: &'static str,
     pub message: &'static str,
 }
 
+#[cfg(test)]
 pub(super) fn progress_copy(progress: &PairingProgressData) -> ProgressCopy {
     let copy = resolve_pairing_semantics(progress.state, progress.error_code).copy;
     ProgressCopy {
@@ -22,6 +27,7 @@ pub(super) fn sas_digits(progress: &PairingProgressData) -> Option<&str> {
         .filter(|sas| sas.len() == 6 && sas.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
+#[cfg(test)]
 pub(super) fn keeps_invite_visible(state: PairingState) -> bool {
     state == PairingState::WaitingForPeer
 }

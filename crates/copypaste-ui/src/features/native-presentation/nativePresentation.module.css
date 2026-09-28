@@ -1,0 +1,42 @@
+.dialog {
+  width: min(100% - 2rem, 34rem);
+}
+
+.stack,
+.form,
+.secret {
+  display: grid;
+  gap: 1rem;
+}
+
+.form label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.secret {
+  justify-items: center;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.qr {
+  width: 16rem;
+  height: 16rem;
+  max-width: 100%;
+  image-rendering: pixelated;
+}
+
+.sas {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  font-variant-numeric: tabular-nums;
+}
+
+.actions {
+  display: flex;
+  justify-content: end;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
