@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { FieldFeedback } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 import type { ConfigPatch } from "@/lib/ipc";
 import { useServiceSettings } from "./ServiceSettingsController";
 
@@ -15,11 +15,9 @@ export function ServiceFieldNote({
   return (
     <>
       {controller.fieldPending(field) ? (
-        <FieldFeedback state="pending">Saving…</FieldFeedback>
+        <StateView mode="loading" placement="control" title="Saving…" />
       ) : controller.fieldFailed(field) ? (
-        <FieldFeedback state="error">
-          This change wasn’t saved.
-        </FieldFeedback>
+        <StateView mode="error" placement="control" title="This change wasn’t saved." />
       ) : null}
       {children}
     </>
