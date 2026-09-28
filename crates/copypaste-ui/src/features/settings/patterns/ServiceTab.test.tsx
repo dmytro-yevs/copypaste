@@ -4,11 +4,7 @@ import { screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui";
 import type { ConfigApplied, ConfigData, ConfigPatch } from "@/lib/ipc";
 import { withUser } from "@/test/harness";
-import {
-  AdvancedServiceSettings,
-  ClipboardServiceSettings,
-  PrivacyServiceSettings,
-} from "./ServiceTab";
+import { ServiceSettings } from "./ServiceTab";
 
 const ipc = vi.hoisted(() => ({
   getConfig: vi.fn(),
@@ -85,7 +81,7 @@ beforeEach(() => {
 describe("service setting ownership", () => {
   it("keeps core capture choices visible while advanced limits remain available", async () => {
     const { user } = withUser(
-      <TooltipProvider><ClipboardServiceSettings /></TooltipProvider>,
+      <TooltipProvider><ServiceSettings scope="clipboard" /></TooltipProvider>,
     );
     await screen.findByRole("combobox", { name: /Treat a repeat as the same item for/ });
     expect(screen.getByText("Exclude apps from capture")).toBeTruthy();
@@ -101,7 +97,7 @@ describe("service setting ownership", () => {
   it("opens advanced capture controls for a search destination", async () => {
     const { user, rerender } = withUser(
       <TooltipProvider>
-        <ClipboardServiceSettings revealAdvancedKey="first result" />
+        <ServiceSettings scope="clipboard" revealAdvancedKey="first result" />
       </TooltipProvider>,
     );
     await screen.findByRole("combobox", { name: /Check the clipboard every/ });
@@ -111,7 +107,7 @@ describe("service setting ownership", () => {
     expect(summary.closest("details")?.open).toBe(false);
     rerender(
       <TooltipProvider>
-        <ClipboardServiceSettings revealAdvancedKey="second result" />
+        <ServiceSettings scope="clipboard" revealAdvancedKey="second result" />
       </TooltipProvider>,
     );
     await waitFor(() => expect(summary.closest("details")?.open).toBe(true));
@@ -123,7 +119,7 @@ describe("service setting ownership", () => {
     withUser(
       <TooltipProvider>
         <p>Device sync remains available.</p>
-        <AdvancedServiceSettings />
+        <ServiceSettings scope="device-sync" />
       </TooltipProvider>,
     );
 
@@ -141,7 +137,7 @@ describe("service setting ownership", () => {
   it("saves one advanced field and offers the service-requested restart", async () => {
     const { user } = withUser(
       <TooltipProvider>
-        <AdvancedServiceSettings />
+        <ServiceSettings scope="device-sync" />
       </TooltipProvider>,
     );
     const visibility = await screen.findByRole("switch", {
@@ -168,7 +164,7 @@ describe("service setting ownership", () => {
   it("keeps private mode on its dedicated service mutation", async () => {
     const { user } = withUser(
       <TooltipProvider>
-        <PrivacyServiceSettings />
+        <ServiceSettings scope="privacy" />
       </TooltipProvider>,
     );
     await user.click(

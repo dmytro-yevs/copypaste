@@ -8,18 +8,10 @@ import {
 } from "@/store/prefs";
 import styles from "./ListTab.module.css";
 
-interface ListTabProps {
+export interface ListTabProps {
   ready: boolean;
   supportsScreenshots: boolean;
   scope?: "all" | "clipboard" | "privacy";
-}
-
-export function ClipboardListSettings(props: Omit<ListTabProps, "scope">) {
-  return <ListTab {...props} scope="clipboard" />;
-}
-
-export function PrivacyDisplaySettings(props: Omit<ListTabProps, "scope">) {
-  return <ListTab {...props} scope="privacy" />;
 }
 
 export function ListTab({ ready, supportsScreenshots, scope = "all" }: ListTabProps) {

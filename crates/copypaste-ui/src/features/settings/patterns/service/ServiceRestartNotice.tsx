@@ -1,4 +1,4 @@
-import { InlineNotice } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 import { Button, Icon } from "@/components/ui";
 import { useTranslation } from "@/i18n";
 import { useServiceSettings } from "./ServiceSettingsController";
@@ -9,11 +9,12 @@ export function ServiceRestartNotice() {
   if (!controller.restartRequired) return null;
 
   return (
-    <InlineNotice
+    <StateView
       role="status"
-      tone="warning"
+      mode="warning"
+      placement="inline"
       icon="refresh"
-      action={
+      actions={
         <Button
           variant="secondary"
           size="sm"
@@ -29,8 +30,7 @@ export function ServiceRestartNotice() {
           )}
         </Button>
       }
-    >
-      {t("settings.service.liveness.pending")}
-    </InlineNotice>
+      title={t("settings.service.liveness.pending")}
+    />
   );
 }

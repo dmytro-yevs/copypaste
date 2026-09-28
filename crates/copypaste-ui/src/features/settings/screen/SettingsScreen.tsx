@@ -13,7 +13,8 @@ import {
   ScrollViewport,
 } from "@/components/layout";
 import { ScreenHeader } from "@/components/shared";
-import { Tabs, TabsContent, VisuallyHidden } from "@/components/ui";
+import { Tabs, VisuallyHidden } from "@/components/ui";
+import { SettingsTabIcon } from "@/features/settings/components/SettingsTabIcon";
 import {
   resolveSettingsSearch,
   SettingsSearchField,
@@ -33,7 +34,6 @@ import {
   type SettingsSearchTab,
 } from "@/features/settings/model/settingsSearchIndex";
 import { settingsCapabilities } from "@/features/settings/model/settingsNavigation";
-import { SettingsNavigation } from "@/features/settings/patterns/SettingsNavigation";
 import { renderPreferenceSection } from "@/features/settings/patterns/settingsTabs";
 import {
   useObservedElementSize,
@@ -152,9 +152,6 @@ export function SettingsScreen() {
       onBackFromEvents: compact ? undefined : closeEvents,
     }),
     [capabilities, closeEvents, compact, diagnosticsView, disclosureReveal, openEvents, prefsReady],
-  );
-  const activeDefinition = sections.find(
-    (section) => section.value === desktopSection,
   );
   const searchPlatform = platform === "android"
     ? "android"
@@ -331,17 +328,20 @@ export function SettingsScreen() {
               title="Settings"
               actions={search}
             />
-            <Tabs value={desktopSection} onValueChange={(value) => openSection(value as PreferenceSection)}>
-              <div className={styles.desktopBody}>
-                <SettingsNavigation sections={sections} />
-                <TabsContent value={desktopSection} className={styles.content}>
-                  <h2 className={styles.panelTitle}>{activeDefinition?.label}</h2>
-                  <div className={styles.sectionStack}>
-                    {renderPreferenceSection(desktopSection, controller)}
-                  </div>
-                </TabsContent>
-              </div>
-            </Tabs>
+            <Tabs
+              value={desktopSection}
+              onValueChange={(value) => openSection(value as PreferenceSection)}
+              variant="bare"
+              className={styles.desktopBody}
+              listProps={{ "aria-label": "Settings sections", className: styles.settingsNav }}
+              contentClassName={styles.content}
+              items={sections.map((section) => ({
+                value: section.value,
+                label: <><SettingsTabIcon name={section.icon} /><span className={styles.settingsNavLabel}>{section.label}</span></>,
+                className: styles.settingsNavItem,
+                content: <><h2 className={styles.panelTitle}>{section.label}</h2><div className={styles.sectionStack}>{renderPreferenceSection(section.value, controller)}</div></>,
+              }))}
+            />
           </Container>
         </ScrollViewport>
       )}

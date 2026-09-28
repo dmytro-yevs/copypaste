@@ -1,15 +1,7 @@
-import { Icon } from "@/components/ui/icon";
 import { useState } from "react";
 
 import {
   AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  Button,
 } from "@/components/ui";
 import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
 import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
@@ -51,34 +43,16 @@ export function StorageHistorySettings() {
           if (!open && clearStarting) return;
           setClearOpen(open);
         }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("history.clear.title")}</AlertDialogTitle>
-            <AlertDialogDescription>{t("history.clear.body")}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={clearStarting}>
-              <Icon name="close" aria-hidden="true" />
-              {t("common.cancel")}
-            </AlertDialogCancel>
-            <Button
-              tone="danger"
-              disabled={clearStarting}
-              aria-busy={clearStarting || undefined}
-              onClick={async () => {
-                setClearStarting(true);
-                await removeAll();
-                setClearStarting(false);
-                setClearOpen(false);
-              }}
-            >
-              <Icon name="trash" aria-hidden="true" />
-              {t("history.clear.action")}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        title={t("history.clear.title")}
+        description={t("history.clear.body")}
+        cancel={{ label: t("common.cancel"), disabled: clearStarting }}
+        action={{ label: t("history.clear.action"), tone: "danger", pending: clearStarting, onClick: async () => {
+          setClearStarting(true);
+          await removeAll();
+          setClearStarting(false);
+          setClearOpen(false);
+        } }}
+      />
     </>
   );
 }

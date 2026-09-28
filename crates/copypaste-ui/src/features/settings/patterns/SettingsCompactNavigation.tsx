@@ -1,7 +1,7 @@
 import { Icon } from "@/components/ui/icon";
 import type { ReactNode } from "react";
 
-import { ActionButton, ScreenHeader } from "@/components/shared";
+import { ScreenHeader } from "@/components/shared";
 import { Button } from "@/components/ui";
 import { SettingsTabIcon } from "@/features/settings/components/SettingsTabIcon";
 import {
@@ -33,11 +33,12 @@ export function SettingsCompactNavigation({
     return (
       <section className={styles.detail} aria-label={definition.label}>
         <ScreenHeader
-          leading={<ActionButton
+          leading={<Button
             size="compactIcon"
             variant="ghost"
             icon="back"
-            aria-label={backLabel}
+            label={backLabel}
+            tooltip={backLabel}
             onClick={onBack}
           />}
           title={definition.label}

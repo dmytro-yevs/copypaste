@@ -1,6 +1,6 @@
 /** Diagnostic reports contain counts only; Rust redacts free text before it arrives. */
 import { useState } from "react";
-import { Badge, Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui";
+import { Badge, Button, Dialog } from "@/components/ui";
 import { StateView } from "@/components/shared/StateView";
 import { SupportReportActions } from "@/features/diagnostics";
 import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
@@ -62,6 +62,6 @@ function ReportSection({ report }: { report: Diagnostics["report"] }) {
     <SettingsSchemaRenderer groups={[{ id: "support", title: "Support", fields: [{
       kind: "action", definition: settingDefinition("diagnostics", "settings.diagnostics.report.title"), label: "Open", onAction: () => setOpen(true),
     }] }]} />
-    <Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>{t("settings.diagnostics.report.title")}</DialogTitle><DialogDescription>{t("settings.diagnostics.report.description")}</DialogDescription></DialogHeader><pre className={styles.report}>{empty ? t("settings.diagnostics.report.empty") : report}</pre><p className={styles.safety}>{t("settings.diagnostics.report.safety")}</p><SupportReportActions report={empty ? undefined : report} compact /></DialogContent></Dialog>
+    <Dialog open={open} onOpenChange={setOpen} title={t("settings.diagnostics.report.title")} description={t("settings.diagnostics.report.description")}><pre className={styles.report}>{empty ? t("settings.diagnostics.report.empty") : report}</pre><p className={styles.safety}>{t("settings.diagnostics.report.safety")}</p><SupportReportActions report={empty ? undefined : report} compact /></Dialog>
   </>;
 }

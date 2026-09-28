@@ -16,7 +16,7 @@ const SEARCHABLE_FIELDS: readonly Omit<SettingsFieldDefinition, "id">[] = [
   { kind: "custom", section: "shortcuts", title: "settings.shortcut.title", description: "settings.shortcut.description", keywords: ["hotkey", "keyboard", "quick paste"] },
   { kind: "boolean", section: "shortcuts", group: "settings.startup.title", title: "settings.startup.openAtLogin.title", description: "settings.startup.openAtLogin.description", keywords: ["autostart", "login", "sign in", "boot", "launch", "start with windows", "login items"], capability: "startup" },
 
-  { kind: "custom", section: "clipboard", title: "capture.title", description: "capture.loading.body", keywords: ["background", "clipboard", "recording", "paused"] },
+  { kind: "action", section: "clipboard", title: "capture.title", description: "capture.loading.body", keywords: ["background", "clipboard", "recording", "paused", "android", "shizuku", "permission", "other apps", "notice", "always on"] },
   { kind: "boolean", section: "privacy", title: "settings.service.privateMode.title", description: "settings.service.privateMode.description" },
   { kind: "choice", section: "clipboard", group: "settings.service.advanced.title", title: "settings.service.poll.title", description: "settings.service.poll.description", keywords: ["polling", "interval", "frequency"], disclosure: "clipboard-advanced" },
   { kind: "choice", section: "clipboard", group: "settings.service.groups.capture.title", title: "settings.service.dedup.title", description: "settings.service.dedup.description" },
@@ -24,7 +24,7 @@ const SEARCHABLE_FIELDS: readonly Omit<SettingsFieldDefinition, "id">[] = [
   { kind: "choice", section: "clipboard", group: "settings.service.advanced.title", title: "settings.service.maxImage.title", description: "settings.service.maxImage.description", disclosure: "clipboard-advanced" },
   { kind: "choice", section: "clipboard", group: "settings.service.advanced.title", title: "settings.service.maxFile.title", description: "settings.service.maxFile.description", disclosure: "clipboard-advanced" },
   { kind: "choice", section: "clipboard", group: "settings.service.advanced.title", title: "settings.service.maxDecodedImage.title", description: "settings.service.maxDecodedImage.description", disclosure: "clipboard-advanced" },
-  { kind: "custom", section: "clipboard", group: "settings.service.groups.capture.title", title: "settings.service.exclusions.title", description: "settings.service.exclusions.description", keywords: ["app", "application", "exclude", "source", "bundle", "package", "privacy", "program", "exe"] },
+  { kind: "custom", section: "clipboard", group: "settings.service.groups.capture.title", title: "settings.service.exclusions.title", description: "settings.service.exclusions.description", keywords: ["app", "application", "exclude", "source", "bundle", "package", "privacy", "program", "exe", "android"] },
   { kind: "choice", section: "privacy", group: "settings.service.groups.keeping.title", title: "settings.service.historyLimit.title", description: "settings.service.historyLimit.description" },
   { kind: "choice", section: "privacy", group: "settings.service.groups.keeping.title", title: "settings.service.storageQuota.title", description: "settings.service.storageQuota.description" },
   { kind: "choice", section: "privacy", group: "settings.service.groups.keeping.title", title: "settings.service.retention.title", description: "settings.service.retention.description" },
@@ -34,18 +34,15 @@ const SEARCHABLE_FIELDS: readonly Omit<SettingsFieldDefinition, "id">[] = [
   { kind: "boolean", section: "device-sync", group: "settings.service.groups.network.title", title: "settings.service.syncEnabled.title", description: "settings.service.syncEnabled.description", keywords: ["pair", "devices"] },
   { kind: "boolean", section: "device-sync", group: "settings.service.groups.network.title", title: "settings.service.lan.title", description: "settings.service.lan.description", keywords: ["network", "discover"] },
 
-  { kind: "custom", section: "clipboard", title: "capture.setup.enable.title", description: "capture.setup.enable.body", keywords: ["android", "shizuku", "permission", "clipboard"], platforms: ["android"] },
-  { kind: "custom", section: "clipboard", title: "settings.service.exclusions.title", description: "settings.service.exclusions.androidLimitation", keywords: ["app", "application", "exclude", "source", "package", "privacy"], platforms: ["android"] },
-  { kind: "custom", section: "clipboard", group: "capture.setup.always.title", title: "capture.setup.always.action", description: "capture.setup.always.body", platforms: ["android"] },
-  { kind: "custom", section: "clipboard", group: "capture.setup.ladder.title", title: "capture.setup.ladder.armed", keywords: ["other apps", "shizuku", "permission"], platforms: ["android"] },
-  { kind: "custom", section: "clipboard", title: "capture.toast.row.title", description: "capture.toast.row.body", keywords: ["android", "notice"], platforms: ["android"] },
 
   { kind: "custom", section: "device-sync", title: "devices.own.rename.label", description: "devices.own.rename.description", keywords: ["device name", "rename", "this device"] },
   { kind: "custom", section: "device-sync", title: "settings.sync.paired.title", description: "settings.sync.paired.description", keywords: ["pair", "devices", "encrypted"] },
   { kind: "action", section: "device-sync", title: "settings.sync.now.title", description: "settings.sync.now.description" },
-  { kind: "custom", section: "cloud-sync", title: "settings.sync.cloud.connectionTitle", description: "settings.sync.cloud.description", keywords: ["cloud sync", "account", "internet"] },
+  { kind: "status", section: "cloud-sync", title: "settings.sync.cloud.connectionTitle", description: "settings.sync.cloud.description", keywords: ["cloud sync", "account", "internet"] },
+  { kind: "action", section: "cloud-sync", title: "settings.sync.cloud.setupTitle", description: "settings.sync.cloud.setupDescription" },
+  { kind: "custom", section: "cloud-sync", title: "settings.sync.cloud.accountTitle" },
   { kind: "custom", section: "cloud-sync", title: "settings.sync.cloud.endpoint.advancedTitle", description: "settings.sync.cloud.endpoint.advancedDescription", keywords: ["self-hosted", "server", "advanced"], disclosure: "cloud-server" },
-  { kind: "custom", section: "cloud-sync", group: "settings.sync.cloud.endpoint.advancedTitle", title: "settings.sync.cloud.endpoint.title", description: "settings.sync.cloud.endpoint.description", keywords: ["server", "change", "restore"], disclosure: "cloud-server" },
+  { kind: "action", section: "cloud-sync", group: "settings.sync.cloud.endpoint.advancedTitle", title: "settings.sync.cloud.endpoint.title", description: "settings.sync.cloud.endpoint.description", keywords: ["server", "change", "restore"], disclosure: "cloud-server" },
   { kind: "custom", section: "cloud-sync", group: "settings.sync.cloud.endpoint.advancedTitle", title: "settings.sync.cloud.endpoint.url", keywords: ["host", "address", "server"], disclosure: "cloud-server" },
   { kind: "custom", section: "cloud-sync", group: "settings.sync.cloud.endpoint.advancedTitle", title: "settings.sync.cloud.endpoint.publishableKey", keywords: ["anon key", "server credential"], disclosure: "cloud-server" },
 
@@ -153,3 +150,49 @@ export const SETTINGS_SECTIONS = SECTION_DEFINITIONS.map((section) => ({
   ...section,
   fields: SETTINGS_FIELD_DEFINITIONS.filter((field) => field.section === section.value || (section.value === "diagnostics" && field.section === "runtime-events")),
 }));
+
+export interface SettingsGroupDefinition {
+  readonly section: PreferenceSectionDefinition["value"];
+  readonly id: string;
+  readonly title?: string;
+  readonly description?: string;
+  readonly disclosure?: SettingsFieldDefinition["disclosure"];
+  readonly surface?: boolean;
+  readonly fields: readonly string[];
+}
+
+/** Field order and group ownership are defined once here. Controllers bind
+ * live values, callbacks and rare workflow slots without recreating layouts. */
+export const SETTINGS_GROUP_DEFINITIONS: readonly SettingsGroupDefinition[] = [
+  { section: "appearance", id: "mode", fields: ["settings.appearance.theme.title"] },
+  { section: "appearance", id: "color-theme", surface: false, fields: ["settings.appearance.colorTheme.title"] },
+  { section: "appearance", id: "translucency", fields: ["settings.appearance.translucency.title"] },
+  { section: "clipboard", id: "capture-status", fields: ["capture.title"] },
+  { section: "clipboard", id: "capture", title: "settings.service.groups.capture.title", description: "settings.service.groups.capture.description", fields: ["settings.service.dedup.title", "settings.service.exclusions.title"] },
+  { section: "clipboard", id: "clipboard-advanced", title: "settings.service.advanced.title", description: "settings.service.advanced.description", disclosure: "clipboard-advanced", fields: ["settings.service.poll.title", "settings.service.maxText.title", "settings.service.maxImage.title", "settings.service.maxFile.title", "settings.service.maxDecodedImage.title"] },
+  { section: "clipboard", id: "notifications", title: "settings.service.groups.telling.title", fields: ["settings.service.notify.title", "settings.service.sound.title"] },
+  { section: "clipboard", id: "history-list", title: "History list", fields: ["settings.list.groupByDevice.title", "settings.list.historyDisplayLimit.title"] },
+  { section: "privacy", id: "private-mode", title: "Private mode", fields: ["settings.service.privateMode.title"] },
+  { section: "privacy", id: "retention", title: "settings.service.groups.keeping.title", fields: ["settings.service.historyLimit.title", "settings.service.storageQuota.title", "settings.service.retention.title", "settings.service.sensitive.title"] },
+  { section: "privacy", id: "reveal-protection", title: "Reveal protection", fields: ["settings.list.warnBeforeReveal.title", "settings.list.allowScreenshots.title"] },
+  { section: "shortcuts", id: "shortcut", fields: ["settings.shortcut.title"] },
+  { section: "shortcuts", id: "startup", title: "settings.startup.title", fields: ["settings.startup.openAtLogin.title"] },
+  { section: "device-sync", id: "devices", title: "Devices", fields: ["devices.own.rename.label", "settings.sync.paired.title", "settings.sync.now.title"] },
+  { section: "device-sync", id: "network", title: "settings.service.groups.network.title", fields: ["settings.service.syncEnabled.title", "settings.service.lan.title"] },
+  { section: "cloud-sync", id: "cloud-connection", title: "settings.sync.cloud.sectionTitle", description: "settings.sync.cloud.sectionDescription", fields: ["settings.sync.cloud.connectionTitle", "settings.sync.cloud.setupTitle", "settings.sync.cloud.accountTitle"] },
+  { section: "cloud-sync", id: "cloud-server", title: "settings.sync.cloud.endpoint.advancedTitle", description: "settings.sync.cloud.endpoint.advancedDescription", disclosure: "cloud-server", fields: ["settings.sync.cloud.endpoint.title", "settings.sync.cloud.endpoint.url", "settings.sync.cloud.endpoint.publishableKey"] },
+  { section: "storage", id: "history", title: "settings.storage.historySection", fields: ["settings.storage.stored.title"] },
+  { section: "storage", id: "transfer", title: "settings.transfer.transferSection", fields: ["settings.transfer.export.title", "settings.transfer.import.title"] },
+  { section: "storage", id: "recovery", title: "settings.transfer.recoverySection", fields: ["settings.transfer.backup.title", "settings.transfer.restore.title"] },
+  { section: "storage", id: "danger", title: "settings.storage.dangerSection", fields: ["settings.storage.clear.title"] },
+  { section: "diagnostics", id: "running", title: "settings.diagnostics.running.title", fields: ["settings.diagnostics.running.history.title", "settings.diagnostics.running.started.title"] },
+  { section: "diagnostics", id: "dropped", title: "settings.diagnostics.dropped.title", description: "settings.diagnostics.dropped.description", fields: ["settings.diagnostics.dropped.tooLarge.title", "settings.diagnostics.dropped.missed.title", "settings.diagnostics.dropped.swept.title", "settings.diagnostics.dropped.purged.title"] },
+  { section: "diagnostics", id: "support", title: "Support", fields: ["settings.diagnostics.report.title"] },
+  { section: "diagnostics", id: "runtime-events", title: "runtimeLog.title", description: "runtimeLog.description", fields: ["runtimeLog.title"] },
+  { section: "about", id: "identity", surface: false, fields: ["settings.about.app.title"] },
+  { section: "about", id: "updates", fields: ["settings.about.updates.title"] },
+  { section: "about", id: "runtime", title: "settings.about.runtime.title", fields: ["settings.about.service.title", "settings.about.capture.title", "settings.about.backend.title", "settings.about.protocol.title", "settings.about.items.title"] },
+  { section: "about", id: "links", title: "settings.about.links.title", fields: ["settings.about.links.repository", "settings.about.links.releases"] },
+  { section: "about", id: "welcome", fields: ["onboarding.settings.title"] },
+  { section: "about", id: "reset", fields: ["settings.about.reset.title"] },
+];

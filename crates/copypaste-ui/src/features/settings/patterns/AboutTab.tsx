@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { BrandMark, SkeletonText } from "@/components/shared";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Badge } from "@/components/ui";
+import { BrandMark } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
+import { AlertDialog, Badge } from "@/components/ui";
 import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
 import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
-import { UpdateRow } from "@/features/settings/components/UpdateRow";
+import { useUpdateSetting } from "@/features/settings/components/useUpdateSetting";
 import { capturePresentationOf } from "@/features/capture/model";
 import { useCaptureState } from "@/hooks/useCapture";
 import { statusService, useStatus } from "@/hooks/useStatus";
@@ -23,6 +24,7 @@ export function AboutTab() {
   const status = useStatus(statusService);
   const capture = useCaptureState();
   const resetPrefs = usePrefs((state) => state.reset);
+  const update = useUpdateSetting();
   const openOnboarding = useUi((state) => state.openOnboarding);
   const [version, setVersion] = useState(__COPYPASTE_APP_VERSION__);
   const [resetOpen, setResetOpen] = useState(false);
@@ -38,14 +40,14 @@ export function AboutTab() {
 
   return <div className={styles.root}><div className={styles.layout}>
     <div className={styles.identity} data-settings-search-target={`row:${t("settings.about.app.title")}`}><BrandMark size="app" animated /><div className={styles.identityCopy}><strong>CopyPaste</strong><span>{t("settings.about.app.version", { version })}</span></div><span className={styles.tagline}>{t("settings.about.app.tagline")}</span></div>
-    <UpdateRow />
+    <SettingsSchemaRenderer groups={[{ id: "updates", fields: [update.field] }]} />
     <SettingsSchemaRenderer groups={[{
       id: "runtime", title: t("settings.about.runtime.title"), fields: [
-        { kind: "status", definition: settingDefinition("about", "settings.about.service.title"), value: status.error ? <span className={styles.error}>{friendlyError(classifyError(status.error))}</span> : status.data ? t("settings.about.service.version", { version: status.data.version }) : <SkeletonText width="sm" /> },
+        { kind: "status", definition: settingDefinition("about", "settings.about.service.title"), value: status.error ? <StateView mode="error" placement="control" title={friendlyError(classifyError(status.error))} /> : status.data ? t("settings.about.service.version", { version: status.data.version }) : <StateView mode="loading" placement="control" title="Checking…" /> },
         { kind: "status", definition: settingDefinition("about", "settings.about.capture.title"), value: capture.isError || (desktopCapture && status.isError) ? <Badge variant="warn">{t("settings.about.capture.unavailable")}</Badge> : snapshot && (!desktopCapture || status.data) ? <Badge variant={captureVariant} className={styles.valueBadge}>{captureLabel}{!desktopCapture && snapshot.health.state !== "working" ? ` ${t("settings.about.capture.manualAvailable")}` : ""}</Badge> : <Badge variant="secondary" role="status" aria-label={t("settings.about.capture.loading")}>{t("settings.about.capture.loading")}</Badge> },
-        { kind: "readonly", definition: settingDefinition("about", "settings.about.backend.title"), value: status.data ? <Badge variant={backendIsReal ? "secondary" : "warn"} className={styles.valueBadge}>{status.data.clipboard_backend}</Badge> : <SkeletonText width="sm" /> },
-        { kind: "readonly", definition: settingDefinition("about", "settings.about.protocol.title"), value: status.data ? <Badge variant={mismatch ? "error" : "secondary"} className={styles.valueBadge}>{t("settings.about.protocol.value", { version: status.data.protocol_version })}{mismatch ? ` ${t("settings.about.protocol.mismatch", { version: CURRENT_PROTOCOL_VERSION })}` : ""}</Badge> : <SkeletonText width="xs" /> },
-        { kind: "readonly", definition: settingDefinition("about", "settings.about.items.title"), value: status.data ? <span className={styles.numeric}>{status.data.item_count.toLocaleString()}</span> : <SkeletonText width="xs" /> },
+        { kind: "readonly", definition: settingDefinition("about", "settings.about.backend.title"), value: status.data ? <Badge variant={backendIsReal ? "secondary" : "warn"} className={styles.valueBadge}>{status.data.clipboard_backend}</Badge> : <StateView mode="loading" placement="control" title="Checking…" /> },
+        { kind: "readonly", definition: settingDefinition("about", "settings.about.protocol.title"), value: status.data ? <Badge variant={mismatch ? "error" : "secondary"} className={styles.valueBadge}>{t("settings.about.protocol.value", { version: status.data.protocol_version })}{mismatch ? ` ${t("settings.about.protocol.mismatch", { version: CURRENT_PROTOCOL_VERSION })}` : ""}</Badge> : <StateView mode="loading" placement="control" title="Checking…" /> },
+        { kind: "readonly", definition: settingDefinition("about", "settings.about.items.title"), value: status.data ? <span className={styles.numeric}>{status.data.item_count.toLocaleString()}</span> : <StateView mode="loading" placement="control" title="Checking…" /> },
       ],
     }, {
       id: "links", title: t("settings.about.links.title"), fields: [
@@ -57,6 +59,7 @@ export function AboutTab() {
     }, {
       id: "reset", fields: [{ kind: "action", definition: settingDefinition("about", "settings.about.reset.title"), label: t("settings.about.reset.action"), tone: "danger", onAction: () => setResetOpen(true) }],
     }]} />
-    <AlertDialog open={resetOpen} onOpenChange={setResetOpen}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>{t("settings.about.reset.confirmTitle")}</AlertDialogTitle><AlertDialogDescription>{t("settings.about.reset.confirmDescription")}</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel><AlertDialogAction variant="danger" tone="danger" onClick={() => { resetPrefs(); setResetOpen(false); }}>{t("settings.about.reset.action")}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+    {update.dialog}
+    <AlertDialog open={resetOpen} onOpenChange={setResetOpen} title={t("settings.about.reset.confirmTitle")} description={t("settings.about.reset.confirmDescription")} cancel={{ label: t("common.cancel") }} action={{ label: t("settings.about.reset.action"), variant: "danger", tone: "danger", onClick: () => { resetPrefs(); setResetOpen(false); } }} />
   </div></div>;
 }

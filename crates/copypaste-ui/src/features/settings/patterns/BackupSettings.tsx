@@ -1,16 +1,8 @@
-import { Icon } from "@/components/ui/icon";
 import { useId, useState } from "react";
 
-import { FieldFeedback } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 import {
   AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  Button,
 } from "@/components/ui";
 import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
 import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
@@ -32,7 +24,7 @@ export function BackupSettings() {
           kind: "action", definition: settingDefinition("storage", "settings.transfer.backup.title"),
           note: backup.isError ? (
             <span id={backupFeedbackId}>
-              <FieldFeedback state="error">History wasn’t backed up.</FieldFeedback>
+              <StateView mode="error" placement="control" title="History wasn’t backed up." />
             </span>
           ) : undefined,
           label: backup.isPending ? "Backing up…" : t("settings.transfer.backup.action"),
@@ -41,7 +33,7 @@ export function BackupSettings() {
         }, {
           kind: "action", definition: settingDefinition("storage", "settings.transfer.restore.title"),
           note: restore.isError ? (
-            <span id={restoreFeedbackId}><FieldFeedback state="error">History wasn’t restored.</FieldFeedback></span>
+            <span id={restoreFeedbackId}><StateView mode="error" placement="control" title="History wasn’t restored." /></span>
           ) : undefined,
           label: restore.isPending ? "Restoring…" : t("settings.transfer.restore.action"),
           icon: "reset", tone: "danger", disabled: restore.isPending, busy: restore.isPending,
@@ -55,30 +47,11 @@ export function BackupSettings() {
           if (!open && restore.isPending) return;
           setRestoreOpen(open);
         }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("settings.transfer.restore.dialogTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>{t("settings.transfer.restore.dialogBody")}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <p className={styles.hint}>{t("settings.transfer.restore.dialogSafety")}</p>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={restore.isPending}>
-              <Icon name="close" aria-hidden="true" />
-              {t("common.cancel")}
-            </AlertDialogCancel>
-            <Button
-              tone="danger"
-              disabled={restore.isPending}
-              aria-busy={restore.isPending || undefined}
-              onClick={() => restore.mutate(undefined, { onSuccess: () => setRestoreOpen(false) })}
-            >
-              <Icon name="reset" aria-hidden="true" />
-              {restore.isPending ? "Restoring…" : t("settings.transfer.restore.confirm")}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        title={t("settings.transfer.restore.dialogTitle")}
+        description={t("settings.transfer.restore.dialogBody")}
+        cancel={{ label: t("common.cancel"), disabled: restore.isPending }}
+        action={{ label: restore.isPending ? "Restoring…" : t("settings.transfer.restore.confirm"), tone: "danger", pending: restore.isPending, onClick: () => restore.mutate(undefined, { onSuccess: () => setRestoreOpen(false) }) }}
+      ><p className={styles.hint}>{t("settings.transfer.restore.dialogSafety")}</p></AlertDialog>
     </>
   );
 }

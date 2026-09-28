@@ -1,7 +1,7 @@
 import type { ComponentProps, ReactNode, RefObject } from "react";
 
 
-import { ActionButton } from "@/components/shared";
+import { Button } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import styles from "./ExpandableSearch.module.css";
 
@@ -36,13 +36,13 @@ function ExpandableSearch({
       {expanded ? (
         children
       ) : (
-        <ActionButton
+        <Button
           ref={triggerRef}
           type="button"
           size="compactIcon"
           icon="search"
-          aria-label={label}
-          title={label}
+          label={label}
+          tooltip={label}
           onClick={() => onExpandedChange(true)}
         />
       )}

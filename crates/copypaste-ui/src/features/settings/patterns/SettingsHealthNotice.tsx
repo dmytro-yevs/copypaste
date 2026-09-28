@@ -1,4 +1,4 @@
-import { InlineNotice } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 import type { SettingsHealth, StatusData } from "@/generated/ipc";
 import { useStatus } from "@/hooks/useStatus";
 import { useTranslation } from "@/i18n";
@@ -41,10 +41,7 @@ export function SettingsHealthNotice() {
     ? 0
     : unreadable_fields.length - affected.length;
 
-  return (
-    <InlineNotice live icon="alert" tone="warning">
-      <strong>{t("settings.service.degraded.title")}</strong>{" "}
-      {[
+  return <StateView mode="warning" placement="inline" title={t("settings.service.degraded.title")} description={[
         affected.length > 0
           ? t("settings.service.degraded.privacy", {
               fields: affected.map((label) => t(label)).join(", "),
@@ -54,9 +51,5 @@ export function SettingsHealthNotice() {
           ? t("settings.service.degraded.others", { count: others })
           : undefined,
         t("settings.service.degraded.remedy"),
-      ]
-        .filter(Boolean)
-        .join(" ")}
-    </InlineNotice>
-  );
+      ].filter(Boolean).join(" ")} />;
 }
