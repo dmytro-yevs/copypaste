@@ -22,7 +22,7 @@ import styles from "./dialog.module.css";
  * bugs in both.
  */
 export type DialogProps = Omit<ComponentProps<typeof DialogPrimitive.Root>, "children"> & {
-    title?: ReactNode;
+    title: ReactNode;
     description?: ReactNode;
     children?: ReactNode;
     footer?: ReactNode;
@@ -43,20 +43,16 @@ function Dialog({ title, description, children, footer, trigger, contentProps, s
     return (
         <DialogPrimitive.Root data-slot="dialog" {...rootProps}>
             {trigger ? <DialogPrimitive.Trigger asChild>{trigger}</DialogPrimitive.Trigger> : null}
-            {title === undefined ? children : (
-                <DialogContent {...contentProps} showCloseButton={showCloseButton ?? contentProps?.showCloseButton} closeLabel={closeLabel ?? contentProps?.closeLabel}>
-                    {headerHidden ? <VisuallyHidden asChild>{header}</VisuallyHidden> : header}
-                    {children}
-                    {footer ? <DialogFooter>{footer}</DialogFooter> : null}
-                </DialogContent>
-            )}
+            <DialogContent {...contentProps} showCloseButton={showCloseButton ?? contentProps?.showCloseButton} closeLabel={closeLabel ?? contentProps?.closeLabel}>
+                {headerHidden ? <VisuallyHidden asChild>{header}</VisuallyHidden> : header}
+                {children}
+                {footer ? <DialogFooter>{footer}</DialogFooter> : null}
+            </DialogContent>
         </DialogPrimitive.Root>
     );
 }
 
-const DialogTrigger = DialogPrimitive.Trigger;
 const DialogPortal = DialogPrimitive.Portal;
-const DialogClose = DialogPrimitive.Close;
 
 function DialogOverlay({
     className,
@@ -203,15 +199,4 @@ function DialogDescription({
     );
 }
 
-export {
-    Dialog,
-    DialogClose,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogOverlay,
-    DialogPortal,
-    DialogTitle,
-    DialogTrigger,
-};
+export { Dialog };
