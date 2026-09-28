@@ -6,7 +6,12 @@ import { HistoryDialogs } from "@/features/history/patterns/HistoryDialogs";
 import { RevealNotice } from "@/features/history/patterns/RevealNotice";
 import { SkippedNotice } from "@/features/history/patterns/SkippedNotice";
 import { ClipDetailDialog } from "@/features/history/patterns/ClipDetailDialog";
-import { HistoryContentState } from "@/features/history/patterns/HistoryContentState";
+import { HistoryList } from "@/features/history/patterns/HistoryList";
+import { ServiceOfflineState } from "@/features/history/patterns/ServiceOfflineState";
+import { resolveHistoryContent } from "@/features/history/model/resolveHistoryContent";
+import { StateView } from "@/components/shared/StateView";
+import { Button, Icon } from "@/components/ui";
+import { friendlyError } from "@/lib/errors";
 import { LibraryInspectorPanel } from "@/features/history/patterns/LibraryInspectorPanel";
 import { LibraryToolbar } from "@/features/history/patterns/LibraryToolbar";
 import { originOf } from "@/lib/itemOrigin";
@@ -202,6 +207,112 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
         });
     }, [activeId]);
 
+    const historyKind = resolveHistoryContent({
+        loading: history.loading,
+        hasItems: items.length > 0,
+        errorKind: history.errorKind,
+        privateMode: status.data?.privateMode === true,
+        filtered: history.filtered,
+    });
+    const openDiagnostics = () => {
+        setSettingsTab("diagnostics");
+        setView("settings");
+    };
+    const diagnosticsAction = (
+        <Button variant="ghost" size="sm" onClick={openDiagnostics}>
+            <Icon name="stethoscope" size="sm" />
+            {t("shell.service.diagnostics")}
+        </Button>
+    );
+    const retryAction = (
+        <Button size="sm" onClick={history.retry}>
+            <Icon name="refresh" size="sm" />
+            {t("common.tryAgain")}
+        </Button>
+    );
+    const renderHistoryContent = () => {
+        if (historyKind === "list") {
+            return <>
+                {history.errorKind === "offline" ? (
+                    <StateView mode="offline" placement="inline"
+                        title={t("shell.service.stopped.title")}
+                        actions={<>{retryAction}{diagnosticsAction}</>}
+                    />
+                ) : null}
+                <HistoryList
+                    items={items}
+                    activeId={activeId}
+                    onActiveIdChange={changeActiveId}
+                    revealedId={reveal.revealedId}
+                    revealedContent={reveal.revealedContent}
+                    revealPendingId={reveal.pendingId}
+                    previewLines={previewLines}
+                    groupedByDevice={history.groupedByDevice}
+                    selection={selection}
+                    hasMore={history.hasMore}
+                    loadingMore={history.loadingMore}
+                    onReorderPinned={reorderPinned}
+                    onDelete={history.remove}
+                    onOpen={openDetail}
+                    onLoadMore={history.loadMore}
+                    listRef={listRef}
+                />
+            </>;
+        }
+        if (historyKind === "loading") {
+            return <StateView mode="loading" placement="panel" title={t("history.empty.loading.title")} />;
+        }
+        if (historyKind === "key_unusable") {
+            return <StateView mode="error" placement="screen"
+                title={t("history.empty.keyUnusable.title")}
+                description={friendlyError("key_unusable")}
+                actions={diagnosticsAction}
+            />;
+        }
+        if (historyKind === "key_locked") {
+            return <StateView mode="error" placement="screen"
+                title={t("history.empty.keyLocked.title")}
+                description={friendlyError("key_locked")}
+                actions={<>{retryAction}{diagnosticsAction}</>}
+            />;
+        }
+        if (historyKind === "offline") return <ServiceOfflineState onOpenDiagnostics={openDiagnostics} />;
+        if (historyKind === "not_ready") {
+            return <StateView mode="loading" placement="panel" title={t("history.empty.starting.title")} />;
+        }
+        if (historyKind === "error") {
+            return <StateView mode="error" placement="screen"
+                title={t("history.empty.failed.title")}
+                description={friendlyError(history.errorKind ?? "unknown")}
+                actions={<>{retryAction}{diagnosticsAction}</>}
+            />;
+        }
+        if (historyKind === "private") {
+            return <StateView mode="empty" placement="inline" icon="lock"
+                title={t("history.empty.private.title")}
+                description={t("history.empty.private.body")}
+            />;
+        }
+        if (historyKind === "filtered") {
+            return <StateView mode="empty" placement="inline" icon="search"
+                title={history.searching
+                    ? t("history.empty.noResults", { query: history.query })
+                    : t("history.empty.noMatch")}
+                description={t("history.empty.filteredBody")}
+                actions={history.hasMore ? (
+                    <Button variant="secondary" size="sm" onClick={history.loadMore}>
+                        <Icon name="caretDown" size="sm" />
+                        {t("history.empty.loadMore")}
+                    </Button>
+                ) : undefined}
+            />;
+        }
+        return <StateView mode="empty" placement="inline" icon="library"
+            title={t("history.empty.none.title")}
+            description={t("history.empty.none.body")}
+        />;
+    };
+
     const primary = (
         <Screen className={styles.main}>
             <LibraryToolbar
@@ -254,39 +365,7 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
                     className={styles.stream}
                     aria-label={t("history.stream.label")}
                 >
-                    <HistoryContentState
-                        loading={history.loading}
-                        errorKind={history.errorKind}
-                        searching={history.searching}
-                        filtered={history.filtered}
-                        privateMode={status.data?.privateMode === true}
-                        query={history.query}
-                        hasMore={history.hasMore}
-                        onLoadMore={history.loadMore}
-                        onRetry={history.retry}
-                        onOpenDiagnostics={() => {
-                            setSettingsTab("diagnostics");
-                            setView("settings");
-                        }}
-                        list={{
-                            items,
-                            activeId,
-                            onActiveIdChange: changeActiveId,
-                            revealedId: reveal.revealedId,
-                            revealedContent: reveal.revealedContent,
-                            revealPendingId: reveal.pendingId,
-                            previewLines,
-                            groupedByDevice: history.groupedByDevice,
-                            selection,
-                            hasMore: history.hasMore,
-                            loadingMore: history.loadingMore,
-                            onReorderPinned: reorderPinned,
-                            onDelete: history.remove,
-                            onOpen: openDetail,
-                            onLoadMore: history.loadMore,
-                            listRef,
-                        }}
-                    />
+                    {renderHistoryContent()}
                 </section>
             </Container>
 

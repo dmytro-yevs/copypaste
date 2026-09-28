@@ -2,9 +2,10 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { captureSnapshot, withClient } from "@/test/harness";
-import { CaptureSetup } from "./CaptureSetup";
+import { CaptureSetup, CaptureSetupController } from "./CaptureSetup";
 
 const ipc = vi.hoisted(() => ({
+  state: vi.fn(),
   instructions: vi.fn(),
   copy: vi.fn(),
   openShizuku: vi.fn(),
@@ -26,6 +27,7 @@ const prefs = vi.hoisted(() => ({
 
 vi.mock("@/lib/ipc", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/ipc")>()),
+  captureState: () => ipc.state(),
   captureSetupInstructions: () => ipc.instructions(),
   copyText: (text: string) => ipc.copy(text),
   captureOpenShizuku: () => ipc.openShizuku(),
@@ -44,6 +46,7 @@ vi.mock("@/store/prefs", () => ({
 }));
 
 beforeEach(() => {
+  ipc.state.mockResolvedValue(captureSnapshot());
   ipc.instructions.mockResolvedValue({
     packageName: "com.copypaste.app",
     shizukuCommands: [["pm", "grant", "com.copypaste.app", "android.permission.READ_LOGS"]],
@@ -70,6 +73,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  ipc.state.mockReset();
   ipc.instructions.mockReset();
   ipc.copy.mockReset();
   ipc.openShizuku.mockReset();
@@ -80,6 +84,14 @@ afterEach(() => {
 });
 
 describe("CaptureSetup", () => {
+  it("retries an initial capture-state failure and shows the recovered setup", async () => {
+    ipc.state.mockRejectedValueOnce(new Error("unavailable"));
+    withClient(<CaptureSetupController />);
+    expect(await screen.findByText("CopyPaste can't tell what it is capturing")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Capturing from every app.")).toBeTruthy();
+    expect(ipc.state).toHaveBeenCalledTimes(2);
+  });
   it("keeps normal capture compact and does not rerun its setup", () => {
     const { container } = withClient(<CaptureSetup snapshot={captureSnapshot()} />);
     expect(container.querySelector("details")).toBeNull();
