@@ -246,7 +246,10 @@ function CatalogSelect({ items, values, onValuesChange, catalog, disabled, id, c
                         if (!item) return null;
                         const checked = selected.has(item.value);
                         return <div key={row.key} ref={virtualizer.measureElement} data-index={row.index} role="listitem" className={styles.catalogRow} style={{ transform: `translateY(${row.start}px)` }}>
-                            <Button type="button" variant="ghost" size="sm" className={styles.catalogOption} aria-pressed={checked} disabled={disabled || (checked && catalog.disableSelectedOptions)} onClick={() => choose(item.value)}><OptionContent item={item} /><Icon name={checked ? "check" : "plus"} size="sm" className={styles.optionAction} aria-hidden="true" /></Button>
+                            <Button type="button" variant="ghost" size="sm" className={styles.catalogOption} aria-pressed={checked} aria-disabled={(checked && catalog.disableSelectedOptions) || undefined} disabled={disabled} onClick={() => {
+                                if (checked && catalog.disableSelectedOptions) return;
+                                choose(item.value);
+                            }}><OptionContent item={item} /><Icon name={checked ? "check" : "plus"} size="sm" className={styles.optionAction} aria-hidden="true" /></Button>
                         </div>;
                     })}
                 </div>}

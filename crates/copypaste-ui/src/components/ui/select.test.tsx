@@ -69,7 +69,7 @@ describe("Select", () => {
         const user = userEvent.setup();
         render(<CatalogProbe items={[{ value: "app.one", label: "One" }, { value: "app.two", label: "Two" }, { value: "app.three", label: "Three" }]} initial={["app.two"]} />);
         const one = await screen.findByRole("button", { name: "One" });
-        expect(screen.getByRole("button", { name: "Two" }).hasAttribute("disabled")).toBe(true);
+        expect(screen.getByRole("button", { name: "Two" }).getAttribute("aria-disabled")).toBe("true");
         one.focus();
         await user.keyboard("{ArrowDown}");
         await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Three" })));
@@ -77,6 +77,42 @@ describe("Select", () => {
         expect(document.activeElement).toBe(screen.getByRole("button", { name: "Three" }));
         await user.keyboard("{ArrowUp}");
         await waitFor(() => expect(document.activeElement).toBe(one));
+    });
+
+    it("keeps focus on a newly selected row without adding it twice", async () => {
+        const user = userEvent.setup();
+        const changes = vi.fn();
+        function Probe() {
+            const [values, setValues] = useState<string[]>([]);
+            return <TooltipProvider><Select mode="multiple" display="catalog" items={[{ value: "app.one", label: "One" }, { value: "app.two", label: "Two" }]} values={values} onValuesChange={(next) => {
+                changes(next);
+                setValues(next);
+            }} catalog={catalog} /></TooltipProvider>;
+        }
+        render(<Probe />);
+        const one = await screen.findByRole("button", { name: "One" });
+        one.focus();
+        await user.keyboard("{Enter}");
+        expect(changes).toHaveBeenCalledWith(["app.one"]);
+        expect(changes).toHaveBeenCalledOnce();
+        expect(document.activeElement).toBe(one);
+        expect(one.getAttribute("aria-disabled")).toBe("true");
+
+        await user.keyboard("{Enter}");
+        expect(changes).toHaveBeenCalledOnce();
+        await user.keyboard("{ArrowDown}");
+        await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Two" })));
+    });
+
+    it("lets Tab leave a catalog whose only row is selected", async () => {
+        const user = userEvent.setup();
+        render(<CatalogProbe items={[{ value: "app.one", label: "One" }]} initial={["app.one"]} />);
+        const one = await screen.findByRole("button", { name: "One" });
+        one.focus();
+        await user.keyboard("{ArrowDown}");
+        expect(document.activeElement).toBe(one);
+        await user.tab();
+        expect(document.activeElement).toBe(screen.getByRole("button", { name: "Remove app.one" }));
     });
 
     it("forwards catalog accessibility and single value attributes", () => {
