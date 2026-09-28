@@ -12,7 +12,7 @@ const ipc = vi.hoisted(() => ({
 }));
 const toastError = vi.hoisted(() => vi.fn());
 
-vi.mock("sonner", () => ({ toast: { error: toastError } }));
+vi.mock("@/lib/notify", () => ({ toast: { error: toastError } }));
 vi.mock("@/lib/ipc", async (importOriginal) => ({
     ...(await importOriginal<typeof import("@/lib/ipc")>()),
     serviceState: () => ipc.serviceState(),
