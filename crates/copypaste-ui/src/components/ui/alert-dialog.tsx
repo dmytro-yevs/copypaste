@@ -1,4 +1,4 @@
-import type { ComponentProps } from "react";
+import type { ComponentProps, MouseEvent, ReactElement, ReactNode } from "react";
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 
 import { cn } from "@/lib/cn";
@@ -20,8 +20,69 @@ import {
  * must not be able to dismiss a prompt whose other button erases history
  * (AGENTS.md rule 4: data loss is the worst outcome).
  */
-function AlertDialog(props: ComponentProps<typeof AlertDialogPrimitive.Root>) {
-  return <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />;
+export type AlertDialogActionDescriptor = {
+  label: ReactNode;
+  onClick?: (event: MouseEvent<HTMLButtonElement>) => void;
+  disabled?: boolean;
+  pending?: boolean;
+  variant?: "primary" | "secondary" | "ghost" | "danger";
+  tone?: "neutral" | "danger";
+  /** Opt in only when the action can safely close before any async work. */
+  autoClose?: boolean;
+};
+
+export type AlertDialogCancelDescriptor = {
+  label: ReactNode;
+  disabled?: boolean;
+  onClick?: (event: MouseEvent<HTMLButtonElement>) => void;
+};
+
+export type AlertDialogProps = Omit<ComponentProps<typeof AlertDialogPrimitive.Root>, "children"> & {
+  title?: ReactNode;
+  description?: ReactNode;
+  children?: ReactNode;
+  footer?: ReactNode;
+  trigger?: ReactElement;
+  contentProps?: Omit<ComponentProps<typeof AlertDialogContent>, "children">;
+  cancel?: AlertDialogCancelDescriptor;
+  action?: AlertDialogActionDescriptor;
+};
+
+function AlertDialog({ title, description, children, footer, trigger, contentProps, cancel, action, ...rootProps }: AlertDialogProps) {
+  const actionButton = action ? (
+    <Button
+      type="button"
+      variant={action.variant ?? "primary"}
+      tone={action.tone ?? "neutral"}
+      disabled={action.disabled}
+      pending={action.pending}
+      onClick={action.onClick}
+    >
+      {action.label}
+    </Button>
+  ) : null;
+
+  return (
+    <AlertDialogPrimitive.Root data-slot="alert-dialog" {...rootProps}>
+      {trigger ? <AlertDialogPrimitive.Trigger asChild>{trigger}</AlertDialogPrimitive.Trigger> : null}
+      {title === undefined ? children : (
+        <AlertDialogContent {...contentProps}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{title}</AlertDialogTitle>
+            {description ? <AlertDialogDescription>{description}</AlertDialogDescription> : null}
+          </AlertDialogHeader>
+          {children}
+          {footer || cancel || action ? (
+            <AlertDialogFooter>
+              {footer}
+              {cancel ? <AlertDialogCancel disabled={cancel.disabled || action?.pending} onClick={cancel.onClick}>{cancel.label}</AlertDialogCancel> : null}
+              {action?.autoClose && actionButton ? <AlertDialogPrimitive.Action asChild>{actionButton}</AlertDialogPrimitive.Action> : actionButton}
+            </AlertDialogFooter>
+          ) : null}
+        </AlertDialogContent>
+      )}
+    </AlertDialogPrimitive.Root>
+  );
 }
 
 const AlertDialogTrigger = AlertDialogPrimitive.Trigger;

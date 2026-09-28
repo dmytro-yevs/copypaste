@@ -4,6 +4,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { Button } from "./button";
+import { TooltipProvider } from "./tooltip";
 
 const styles = readFileSync(resolve(process.cwd(), "src/components/ui/button.module.css"), "utf8");
 
@@ -34,5 +35,24 @@ describe("Button asChild", () => {
         expect(compactIcon).toContain(compactSize);
         expect(compactIcon?.match(/max\(var\(--ctl-h-sm\), var\(--tap-min\)\)/g)).toHaveLength(4);
         expect(styles).not.toMatch(/@media \(pointer: coarse\)/);
+    });
+});
+
+describe("Button shared action behavior", () => {
+    it("names an icon action and disables it while pending with the shared loading visual", () => {
+        render(<TooltipProvider><Button icon="copy" label="Copy item" size="icon" pending /></TooltipProvider>);
+
+        const button = screen.getByRole("button", { name: "Copy item" });
+        expect(button).toHaveProperty("disabled", true);
+        expect(button.getAttribute("aria-busy")).toBe("true");
+        expect(button.querySelector('[data-mode="loading"][data-placement="control"]')).not.toBeNull();
+    });
+
+    it("keeps a disabled icon action named inside its tooltip trigger", () => {
+        render(<TooltipProvider><Button icon="copy" label="Copy item" size="compactIcon" disabled /></TooltipProvider>);
+
+        const button = screen.getByRole("button", { name: "Copy item" });
+        expect(button).toHaveProperty("disabled", true);
+        expect(button.parentElement?.tagName).toBe("SPAN");
     });
 });

@@ -1,4 +1,4 @@
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
 import { cva } from "class-variance-authority";
 
@@ -27,13 +27,39 @@ const tabsListVariants = cva(undefined, {
   },
 });
 
-function Tabs({ className, ...props }: ComponentProps<typeof TabsPrimitive.Root>) {
+export type TabsItem = {
+  value: string;
+  label: ReactNode;
+  disabled?: boolean;
+  className?: string;
+  content?: ReactNode;
+};
+
+export type TabsProps = ComponentProps<typeof TabsPrimitive.Root> & {
+  items?: readonly TabsItem[];
+  variant?: "bare" | "floating";
+  equalWidth?: boolean;
+  listProps?: Omit<ComponentProps<typeof TabsPrimitive.List>, "children">;
+  contentClassName?: string;
+};
+
+function Tabs({ className, items, variant, equalWidth, listProps, contentClassName, children, ...props }: TabsProps) {
   return (
     <TabsPrimitive.Root
       data-slot="tabs"
       className={cn(styles.root, className)}
       {...props}
-    />
+    >
+      {items ? (
+        <>
+          <TabsList variant={variant} equalWidth={equalWidth} {...listProps}>
+            {items.map((item) => <TabsTrigger key={item.value} value={item.value} disabled={item.disabled} className={item.className}>{item.label}</TabsTrigger>)}
+          </TabsList>
+          {items.map((item) => item.content === undefined ? null : <TabsContent key={item.value} value={item.value} className={contentClassName}>{item.content}</TabsContent>)}
+        </>
+      ) : null}
+      {children}
+    </TabsPrimitive.Root>
   );
 }
 
