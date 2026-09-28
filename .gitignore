@@ -92,6 +92,7 @@ rust_out
 
 # graphify graph artifact (per-machine, regenerated)
 graphify-out/
+/.graphifyignore
 
 # Playwright visual-gate run outputs
 crates/copypaste-ui/playwright-report/
