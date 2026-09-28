@@ -52,10 +52,10 @@ export function DiscoveryPairingFooter({
                         size="md"
                         variant="primary"
                         disabled={disabled}
+                        icon="shieldCheck"
                         aria-label={`Connect to ${deviceName} with protected pairing`}
                         onClick={onConnect}
                     >
-                        <Icon name="shieldCheck" aria-hidden="true" />
                         Connect
                     </Button>
                 ) : state === "pending" ? (
@@ -64,7 +64,7 @@ export function DiscoveryPairingFooter({
                         size="md"
                         variant="secondary"
                         disabled={cancelling}
-                        state={cancelling ? "loading" : "normal"}
+                        pending={cancelling}
                         onClick={() => pairing.run("cancel")}
                     >
                         {cancelling ? "Cancelling…" : "Cancel"}
@@ -75,9 +75,9 @@ export function DiscoveryPairingFooter({
                         size="md"
                         variant="primary"
                         disabled={disabled}
+                        icon="refresh"
                         onClick={onConnect}
                     >
-                        <Icon name="refresh" aria-hidden="true" />
                         Try again
                     </Button>
                 ) : null}

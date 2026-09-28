@@ -19,9 +19,6 @@
   gap: var(--s-2);
 }
 
-.spinner {
-  animation: device-name-spin var(--dur) linear infinite;
-}
 
 .inlineTitle { display: flex; min-inline-size: 0; align-items: center; gap: var(--s-2); }
 .inlineTitle h2 { min-inline-size: 0; overflow: hidden; font-size: var(--fs-lg); font-weight: var(--fw-medium); text-overflow: ellipsis; white-space: nowrap; }
@@ -45,14 +42,6 @@
   font-size: var(--fs-lg);
 }
 .inlineEditor { display: grid; min-inline-size: 0; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--s-2); }
-
-@keyframes device-name-spin {
-  to { transform: rotate(1turn); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .spinner { animation: none; }
-}
 
 @media (--cp-xs) {
   .inlineEditor { grid-template-columns: repeat(2, minmax(0, 1fr)); }
