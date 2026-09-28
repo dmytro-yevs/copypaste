@@ -211,7 +211,7 @@ function OnboardingSlide({
         <h1 ref={headingRef} tabIndex={-1}>{title}</h1>
         <p>{body}</p>
       </div>
-      <div className={styles.art} data-interactive={contentInteractive || undefined}>
+      <div className={styles.content} data-interactive={contentInteractive || undefined}>
         {content}
       </div>
       <footer className={styles.actions}>{pagination}<Button size="md" disabled={primary.disabled} onClick={primary.onClick}>{primary.label}</Button><Button size="md" variant="secondary" onClick={secondary.onClick}>{secondary.label}</Button></footer>
