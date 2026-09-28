@@ -9,7 +9,7 @@
  * than patches, and the screen never shows the value that was refused.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 import { t } from "@/i18n";
 import { toFriendly } from "@/lib/errors";

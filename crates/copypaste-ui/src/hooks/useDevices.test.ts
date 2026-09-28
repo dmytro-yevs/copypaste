@@ -19,7 +19,7 @@ vi.mock("@/lib/ipc", async (importOriginal) => ({
   syncNow: (pairingId?: string) => ipc.syncNow(pairingId),
 }));
 
-vi.mock("sonner", () => ({
+vi.mock("@/lib/notify", () => ({
   toast: Object.assign(notifications.info, {
     success: notifications.success,
     warning: notifications.warning,
