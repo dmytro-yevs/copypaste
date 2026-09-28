@@ -10,7 +10,7 @@ interface AstNode {
 }
 
 const SOURCE_ROOT = resolve(process.cwd(), "src");
-const IPC_CALL = resolve(SOURCE_ROOT, "lib/ipcCall.ts");
+const NATIVE_TRANSPORT = resolve(SOURCE_ROOT, "lib/nativeInvoke.ts");
 
 function productionModules(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -55,11 +55,24 @@ function rawInvokeImports(path: string): string[] {
 }
 
 describe("IPC boundary", () => {
-  it("keeps raw Tauri invoke inside ipcCall", () => {
+  it("keeps raw Tauri invoke inside the native transport", () => {
     const violations = productionModules(SOURCE_ROOT)
-      .filter((path) => path !== IPC_CALL)
+      .filter((path) => path !== NATIVE_TRANSPORT)
       .flatMap(rawInvokeImports);
 
+    expect(violations).toEqual([]);
+  });
+
+  it("limits direct native transport to the IPC boundary and protected entry points", () => {
+    const allowed = new Set([
+      "lib/ipcCall.ts", "main.tsx",
+      "features/native-presentation/ProtectedPairingSurface.tsx",
+      "features/native-presentation/QuitFailureSurface.tsx",
+    ].map((path) => resolve(SOURCE_ROOT, path)));
+    const violations = productionModules(SOURCE_ROOT).filter((path) =>
+      path !== NATIVE_TRANSPORT && !allowed.has(path) &&
+      /from ["'][^"']*nativeInvoke["']/.test(readFileSync(path, "utf8")),
+    );
     expect(violations).toEqual([]);
   });
 });

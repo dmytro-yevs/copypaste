@@ -104,10 +104,9 @@ tauri-plugin-autostart = "2"
 # AppKit supplies the frontmost-process hand-off after Quick Paste copies an
 # item. Tauri deliberately keeps this platform detail out of its cross-platform
 # window API.
-objc2-app-kit = { workspace = true, features = ["NSAccessibilityProtocols", "NSAlert", "NSBitmapImageRep", "NSButton", "NSControl", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSImageView", "NSResponder", "NSRunningApplication", "NSSecureTextField", "NSTextField", "NSView", "NSWindow", "NSWorkspace", "NSColor", "NSColorSpace", "block2", "libc"] }
+objc2-app-kit = { workspace = true, features = ["NSEvent", "NSResponder", "block2", "libc"] }
 objc2.workspace = true
-# The maintained objc2 sibling marshals modal AppKit work onto the main queue;
-# it is already present through Tauri and avoids raw dispatch FFI.
+# The accessibility evidence bridge marshals work onto the main queue.
 dispatch2 = "0.3.1"
 objc2-foundation = { workspace = true, features = ["NSDictionary", "NSThread"] }
 # The exclusion picker walks only the platform's standard application roots
@@ -124,10 +123,8 @@ objc2-user-notifications = { version = "0.2.2", features = [
     "block2",
 ] }
 block2 = "=0.5.1"
-# Maintained encoder/rendering crates own the QR matrix and PNG; pairing code
-# must not grow another handwritten QR implementation.
-qrcode = { version = "0.14.1", default-features = false, features = ["image", "svg"] }
-image.workspace = true
+# The protected pairing surface receives the maintained encoder's SVG.
+qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
 # Tauri's tray hook exposes tray-icon's objc2 0.6 AppKit objects. Keep this
 # narrow alias beside the older capture bindings until they can move together.
 objc2-menu = { package = "objc2", version = "0.6.4" }
