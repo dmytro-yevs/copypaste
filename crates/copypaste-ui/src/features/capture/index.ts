@@ -4,5 +4,4 @@ export { SourceExclusions } from "./patterns/SourceExclusions";
 export {
   CaptureSetup,
   CaptureSetupController,
-  CaptureSetupState,
 } from "./patterns/CaptureSetup";

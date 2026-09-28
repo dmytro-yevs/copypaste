@@ -9,13 +9,21 @@ import { OnboardingScreen } from "./OnboardingScreen";
 
 const platform = vi.hoisted(() => ({ android: false }));
 const serviceConfig = vi.hoisted(() => ({ mutate: vi.fn() }));
+const startup = vi.hoisted(() => ({
+  data: false,
+  isPending: false,
+  isError: false,
+  savePending: false,
+  saveError: false,
+  mutate: vi.fn(),
+}));
 
 vi.mock("@/lib/platform", () => ({
   currentPlatform: () => platform.android ? "android" : "macos",
   isAndroidPlatform: () => platform.android,
 }));
 vi.mock("@/features/capture", () => ({
-  CaptureSetupState: () => <p>Native capture setup</p>,
+  CaptureSetupController: () => <p>Native capture setup</p>,
 }));
 vi.mock("@/features/onboarding/patterns/AndroidCaptureSetup", () => ({
   AndroidCaptureSetup: () => <p>Android capture choices</p>,
@@ -45,11 +53,11 @@ vi.mock("@/features/settings/patterns/CloudSyncSettings", () => ({
   CloudSyncSettings: () => <p>Cloud setup</p>,
 }));
 vi.mock("@/features/settings/patterns/ListTab", () => ({
-  PrivacyDisplaySettings: () => <p>Reveal and screenshots</p>,
+  ListTab: () => <p>Reveal and screenshots</p>,
 }));
 vi.mock("@/hooks/useOpenAtLogin", () => ({
-  useOpenAtLogin: () => ({ data: false, isPending: false, isError: false }),
-  useSetOpenAtLogin: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
+  useOpenAtLogin: () => ({ data: startup.data, isPending: startup.isPending, isError: startup.isError }),
+  useSetOpenAtLogin: () => ({ mutate: startup.mutate, isPending: startup.savePending, isError: startup.saveError }),
 }));
 vi.mock("@/hooks/useServiceConfig", () => ({
   useSetServiceConfig: () => ({ mutate: serviceConfig.mutate, isPending: false }),
@@ -57,6 +65,12 @@ vi.mock("@/hooks/useServiceConfig", () => ({
 
 beforeEach(() => {
   platform.android = false;
+  startup.data = false;
+  startup.isPending = false;
+  startup.isError = false;
+  startup.savePending = false;
+  startup.saveError = false;
+  startup.mutate.mockReset();
   serviceConfig.mutate.mockReset().mockImplementation((_patch: unknown, options?: {
     onSuccess?: () => void;
   }) => {
@@ -163,4 +177,21 @@ it("keeps sync completion disabled while a native choice is pending", () => {
 
   fireEvent.click(screen.getByRole("radio", { name: /Nearby devices/ }));
   expect(screen.getByRole("button", { name: "Finish setup" }).hasAttribute("disabled")).toBe(true);
+});
+
+it("keeps startup accessible and blocks changes while checking", () => {
+  usePrefs.setState({ onboarding: { ...DEFAULT_ONBOARDING_PROGRESS, step: "privacy" } });
+  const view = render(<TooltipProvider><OnboardingScreen /></TooltipProvider>);
+  const control = screen.getByRole("switch", { name: "Open at login" });
+  fireEvent.click(control);
+  expect(startup.mutate).toHaveBeenCalledWith(true);
+
+  startup.isPending = true;
+  view.rerender(<TooltipProvider><OnboardingScreen /></TooltipProvider>);
+  const checking = screen.getByRole("switch", { name: "Open at login" });
+  expect(checking.hasAttribute("disabled")).toBe(true);
+  expect(checking.getAttribute("aria-busy")).toBe("true");
+  const noteId = checking.getAttribute("aria-describedby");
+  expect(noteId).toBeTruthy();
+  expect(document.getElementById(noteId!)?.textContent).toContain("Checking startup setting");
 });
