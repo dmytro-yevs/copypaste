@@ -83,7 +83,7 @@ describe("update setting static states", () => {
     await user.click(screen.getByRole("button", { name: "More about App updates" }));
     expect(await screen.findByText("Install the native app to check and install updates here.")).toBeTruthy();
     expect(screen.getByText("Unavailable")).toBeTruthy();
-    expect(screen.getByRole("status").getAttribute("aria-live")).toBe("polite");
+    expect(screen.getByRole("status", { name: "Unavailable" }).getAttribute("aria-live")).toBe("polite");
     expect(screen.queryByRole("button", { name: "Check for updates" })).toBeNull();
     expect(screen.queryByRole("progressbar")).toBeNull();
     expect(updater.checkForUpdate).not.toHaveBeenCalled();
@@ -97,7 +97,7 @@ describe("update setting static states", () => {
     await user.click(screen.getByRole("button", { name: "More about App updates" }));
     expect(await screen.findByText("Checks the signed CopyPaste release feed for Windows.")).toBeTruthy();
     expect(screen.getByText("Not configured")).toBeTruthy();
-    expect(screen.getByRole("status").getAttribute("aria-live")).toBe("polite");
+    expect(screen.getByRole("status", { name: "Not configured" }).getAttribute("aria-live")).toBe("polite");
     expect(screen.queryByRole("button", { name: "Check for updates" })).toBeNull();
     expect(screen.queryByRole("progressbar")).toBeNull();
     expect(updater.checkForUpdate).not.toHaveBeenCalled();
@@ -201,7 +201,7 @@ describe("update setting actions", () => {
     act(() => onProgress({ state: "downloading", downloaded: 25, total: 100 }));
     const progress = screen.getByRole("progressbar", { name: "Downloading CopyPaste 2.0.0 update" });
     expect(progress.getAttribute("value")).toBe("25");
-    expect(screen.getByRole("status").textContent).toBe("Downloading the update… 25%");
+    expect(screen.getByText("Downloading the update… 25%").closest('[role="status"]')?.getAttribute("aria-live")).toBe("polite");
 
     act(() => onProgress({ state: "verifying" }));
     expect(screen.getByText("Download complete. Verifying the update…")).toBeTruthy();

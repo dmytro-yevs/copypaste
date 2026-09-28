@@ -21,7 +21,7 @@ export function BackupSettings() {
   const restoreFeedbackId = useId();
   const fields: SettingsField[] = [{
     kind: "action", definition: settingDefinition("storage", "settings.transfer.backup.title"),
-    note: backup.isPending ? <StateView mode="loading" placement="inline" title="Backing up…" /> : backup.isError ? (
+    note: backup.isError ? (
       <span id={backupFeedbackId}><StateView mode="error" placement="control" title="History wasn’t backed up." /></span>
     ) : undefined,
     label: backup.isPending ? "Backing up…" : t("settings.transfer.backup.action"),
@@ -29,7 +29,7 @@ export function BackupSettings() {
     onAction: () => backup.mutate(),
   }, {
     kind: "action", definition: settingDefinition("storage", "settings.transfer.restore.title"),
-    note: restore.isPending ? <StateView mode="loading" placement="inline" title="Restoring…" /> : restore.isError ? (
+    note: restore.isError ? (
       <span id={restoreFeedbackId}><StateView mode="error" placement="control" title="History wasn’t restored." /></span>
     ) : undefined,
     label: restore.isPending ? "Restoring…" : t("settings.transfer.restore.action"),

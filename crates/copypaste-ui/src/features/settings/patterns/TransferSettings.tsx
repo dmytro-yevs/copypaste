@@ -26,7 +26,7 @@ export function TransferSettings() {
   const importFeedbackId = useId();
   const fields: SettingsField[] = [{
     kind: "action", definition: settingDefinition("storage", "settings.transfer.export.title"),
-    note: exportHistory.isPending ? <StateView mode="loading" placement="inline" title="Exporting…" /> : exportHistory.isError ? (
+    note: exportHistory.isError ? (
       <span id={exportFeedbackId}><StateView mode="error" placement="control" title="History wasn’t exported." /></span>
     ) : undefined,
     label: exportHistory.isPending ? "Exporting…" : t("settings.transfer.export.action"),
@@ -34,7 +34,7 @@ export function TransferSettings() {
     onAction: () => { setIncludeSensitive(false); setExportOpen(true); },
   }, {
     kind: "action", definition: settingDefinition("storage", "settings.transfer.import.title"),
-    note: importHistory.isPending ? <StateView mode="loading" placement="inline" title="Importing…" /> : importHistory.prepare.isError || importHistory.apply.isError ? (
+    note: importHistory.prepare.isError || importHistory.apply.isError ? (
       <span id={importFeedbackId}><StateView mode="error" placement="control" title="History wasn’t imported." /></span>
     ) : undefined,
     label: importHistory.isPending ? "Importing…" : t("settings.transfer.import.action"),

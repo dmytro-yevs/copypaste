@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 
 import { StateView } from "@/components/shared/StateView";
-import { AlertDialog, Badge } from "@/components/ui";
+import { AlertDialog } from "@/components/ui";
 import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
 import type { SettingsField } from "@/features/settings/model/settingsFieldSchema";
 import { useTranslation } from "@/i18n";
@@ -123,9 +123,10 @@ export function useUpdateSetting(): { field: SettingsField; dialog: ReactNode } 
   const busy = state.state === "loading" || state.state === "checking" ||
     state.state === "preparing" || state.state === "downloading" ||
     state.state === "verifying" || state.state === "installing";
+  const liveMessage = <span role={state.state === "error" ? "alert" : "status"} aria-live={state.state === "error" ? "assertive" : "polite"}>{message}</span>;
   const note = state.state === "checking"
-    ? <StateView mode="loading" placement="inline" title={message} />
-    : <span role={state.state === "error" ? "alert" : "status"} aria-live={state.state === "error" ? "assertive" : "polite"}>{message}</span>;
+    ? liveMessage
+    : <StateView mode={state.state === "error" ? "error" : state.state === "up_to_date" ? "success" : state.state === "unconfigured" ? "warning" : "info"} placement="inline" title={message} />;
   const base = { definition, help: description, note };
   let field: SettingsField;
 
@@ -139,7 +140,7 @@ export function useUpdateSetting(): { field: SettingsField; dialog: ReactNode } 
     field = { ...base, kind: "action", label: t("settings.about.updates.install"), onAction: () => setConfirmingVersion(availableVersion) };
   } else if (state.state === "downloading") {
     field = {
-      ...base, kind: "status", busy: true,
+      ...base, kind: "status", mode: "loading", busy: true, note: liveMessage,
       value: <progress aria-label={t("settings.about.updates.downloadProgress", { version: state.version })} max={100} value={percent} className={styles.progress} />,
     };
   } else if (permissionVersion !== undefined) {
@@ -147,15 +148,15 @@ export function useUpdateSetting(): { field: SettingsField; dialog: ReactNode } 
   } else if (state.state === "error" && state.retryable) {
     field = { ...base, kind: "action", label: t("common.tryAgain"), onAction: () => { void (state.version ? install(state.version) : check()); } };
   } else if (state.state === "error") {
-    field = { ...base, kind: "status", value: <Badge variant="error">{t("settings.about.updates.attentionLabel")}</Badge> };
+    field = { ...base, kind: "status", mode: "error", value: t("settings.about.updates.attentionLabel"), note: liveMessage };
   } else if (state.state === "unsupported") {
-    field = { ...base, kind: "status", value: <Badge variant="secondary">{t("settings.about.updates.unavailableLabel")}</Badge> };
+    field = { ...base, kind: "status", mode: "info", value: t("settings.about.updates.unavailableLabel"), note: liveMessage };
   } else if (state.state === "unconfigured") {
     field = platform === "macos"
       ? { ...base, kind: "action", label: t("settings.about.updates.viewReleases"), href: PRODUCT_RELEASES_URL }
-      : { ...base, kind: "status", value: <Badge variant="warn">{t("settings.about.updates.unconfiguredLabel")}</Badge> };
+      : { ...base, kind: "status", mode: "warning", value: t("settings.about.updates.unconfiguredLabel"), note: liveMessage };
   } else {
-    field = { definition, help: description, kind: "status", busy, value: <StateView mode="loading" placement="inline" title={message} /> };
+    field = { definition, help: description, kind: "status", mode: "loading", busy, value: message };
   }
 
   const confirmationDescription = platform === "macos"

@@ -3,7 +3,6 @@ import { useState } from "react";
 import {
   AlertDialog,
 } from "@/components/ui";
-import { StateView } from "@/components/shared/StateView";
 import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
 import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
 import { settingsGroups } from "@/features/settings/model/settingsProjection";
@@ -22,14 +21,14 @@ export function StorageHistorySettings() {
   const [clearStarting, setClearStarting] = useState(false);
   const clearing = clearStarting || pendingAll;
   const fields: SettingsField[] = [
-    { kind: "readonly", definition: settingDefinition("storage", "settings.storage.stored.title"), value: status.isPending
-      ? <StateView mode="loading" placement="control" title="Checking…" />
+    status.isPending
+      ? { kind: "status", definition: settingDefinition("storage", "settings.storage.stored.title"), mode: "loading", value: "Checking…" }
       : status.isError || status.data === undefined
-        ? <StateView mode="error" placement="control" title="Unavailable" />
-        : <span className={styles.metric}>{status.data.toLocaleString()}</span> },
+        ? { kind: "status", definition: settingDefinition("storage", "settings.storage.stored.title"), mode: "error", value: "Unavailable" }
+        : { kind: "readonly", definition: settingDefinition("storage", "settings.storage.stored.title"), value: <span className={styles.metric}>{status.data.toLocaleString()}</span> },
     { kind: "action", definition: settingDefinition("storage", "settings.storage.clear.title"),
       label: t("settings.storage.clear.action"), tone: "danger", icon: "trash", disabled: clearing,
-      busy: clearing, note: clearing ? <StateView mode="loading" placement="inline" title="Clearing…" /> : undefined,
+      busy: clearing,
       onAction: () => setClearOpen(true) },
   ];
 
