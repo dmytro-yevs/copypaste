@@ -99,6 +99,7 @@ export default function ProtectedPairingSurface() {
   };
 
   const close = () => {
+    if (busy) return;
     revealEpoch.current += 1;
     setRevealed(null);
     setCode("");
@@ -152,10 +153,14 @@ export default function ProtectedPairingSurface() {
       open
       onOpenChange={(open) => { if (!open) close(); }}
       title={title}
-      description="Only this protected window displays pairing details."
+      description="Show pairing details only when the other device is ready."
       showCloseButton={false}
       contentProps={{
         className: styles.dialog,
+        onCopy: (event) => event.preventDefault(),
+        onCut: (event) => event.preventDefault(),
+        onDragStart: (event) => event.preventDefault(),
+        onContextMenu: (event) => event.preventDefault(),
         onEscapeKeyDown: (event) => { event.preventDefault(); close(); },
         onPointerDownOutside: (event) => event.preventDefault(),
       }}
@@ -179,7 +184,7 @@ export default function ProtectedPairingSurface() {
             <StateView mode="info" title="Ready to show a pairing code" description="Reveal it only when the other device is ready to scan or enter it." actions={<Button type="button" disabled={busy} onClick={() => void revealInvite()}>Reveal code</Button>} />
           ) : (
             <div className={styles.secret}>
-              <img className={styles.qr} src={`data:image/svg+xml,${encodeURIComponent(visible.value.qr_svg)}`} alt="Pairing QR code" />
+              <img className={styles.qr} draggable={false} src={`data:image/svg+xml,${encodeURIComponent(visible.value.qr_svg)}`} alt="Pairing QR code" />
               <p>Code: <strong>{visible.value.code}</strong></p>
               <p>Address: <strong>{visible.value.address}</strong></p>
             </div>
@@ -190,7 +195,7 @@ export default function ProtectedPairingSurface() {
       {phase === "confirm" && (
         <div className={styles.stack}>
           {!visible || visible.kind !== "sas" ? (
-            <StateView mode="warning" title="Compare security codes" description="Show the bound code and check it on both devices before confirming." actions={<Button type="button" disabled={busy} onClick={() => void revealSas()}>Show security code</Button>} />
+            <StateView mode="warning" title="Compare security codes" description="Show the security code and compare it on both devices before confirming." actions={<Button type="button" disabled={busy} onClick={() => void revealSas()}>Show security code</Button>} />
           ) : (
             <div className={styles.secret}>
               <p>Security code</p>

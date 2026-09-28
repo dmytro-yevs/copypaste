@@ -133,12 +133,16 @@ pub fn run() {
             if window.label() == pairing_presentation::macos::WINDOW_LABEL {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
-                    pairing_presentation::macos::window_closed(window.app_handle());
-                    if let Some(secure) = window
-                        .app_handle()
-                        .get_webview_window(pairing_presentation::macos::WINDOW_LABEL)
-                    {
-                        let _ = secure.destroy();
+                    if pairing_presentation::macos::window_closed(window.app_handle()) {
+                        if let Some(secure) = window
+                            .app_handle()
+                            .get_webview_window(pairing_presentation::macos::WINDOW_LABEL)
+                        {
+                            let _ = secure.destroy();
+                        }
+                    } else {
+                        let _ = window.show();
+                        let _ = window.set_focus();
                     }
                 }
                 return;

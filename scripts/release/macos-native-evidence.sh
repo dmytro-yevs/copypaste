@@ -49,36 +49,54 @@ print(f"VoiceOver accessibility surface: {len(rows)} elements, {len(named)} name
 PY
 }
 
-check_no_protected_pairing_window() { # <temporary AX observation>
-  python3 - "$1" <<'PY'
-import csv
-from pathlib import Path
-import sys
+mac_window_titles() { # metadata only; never reads AX descendants or window content
+  osascript - "$app_pid" <<'APPLESCRIPT'
+on run argv
+  set targetPid to (item 1 of argv) as integer
+  tell application "System Events"
+    set appProcess to first application process whose unix id is targetPid
+    set titles to name of every window of appProcess
+  end tell
+  set AppleScript's text item delimiters to linefeed
+  return titles as text
+end run
+APPLESCRIPT
+}
 
-path = Path(sys.argv[1])
-with path.open(encoding="utf-8", newline="") as source:
-    protected = any(
-        len(row) > 1 and row[0] == "AXWindow" and row[1] == "Connect a device"
-        for row in csv.reader(source, delimiter="\t")
-    )
-if protected:
-    path.unlink(missing_ok=True)
-    raise SystemExit("protected pairing window is open; refusing screenshot or AX artifact")
-PY
+safe_window_preflight() {
+  local titles
+  titles="$(mac_window_titles)" || {
+    echo "window-title metadata unavailable; refusing AX or screenshot capture" >&2
+    return 1
+  }
+  # The evidence scenario owns one visible main app window. Any second or
+  # unexpected title could be a revealed protected pairing or quit surface.
+  if [[ "$titles" != "CopyPaste" ]]; then
+    echo "unexpected CopyPaste window metadata; refusing AX or screenshot capture" >&2
+    return 1
+  fi
 }
 
 capture_route_state() { # <state> <navigation label> <heading>
   local navigation="$2" heading="$3" state_dir="$out/ui-$1"
   mkdir -p "$state_dir"
+  safe_window_preflight || return 1
   mac_press_unique_exact_description_role "$navigation" "AXButton" >/dev/null || return 1
   mac_wait_safe_role_label "$heading" "AXHeading" "$state_dir/heading.tsv" 30 || return 1
-  mac_ax surface > "$state_dir/pre-capture-ax.tsv"
-  check_no_protected_pairing_window "$state_dir/pre-capture-ax.tsv" || return 1
-  rm "$state_dir/pre-capture-ax.tsv"
+  safe_window_preflight || return 1
   mac_capture_state "$state_dir"
 }
 
+capture_initial_surface() {
+  safe_window_preflight || return 1
+  mac_ax surface > "$out/ax.log" 2> "$out/ax.err" || return 1
+  check_accessibility_surface "$out/ax.log" || return 1
+  safe_window_preflight || return 1
+  screencapture -x "$out/screenshot.png"
+}
+
 capture_required_routes() {
+  safe_window_preflight || return 1
   mac_recover_onboarding "$out/onboarding.tsv" 30 || return 1
   capture_route_state history "Library" "Library" || return 1
   if should_capture_route_evidence; then
@@ -140,14 +158,26 @@ if [[ "${1:-}" == "--self-test" ]]; then
   printf 'AXWindow\tCopyPaste\n' > "$fixture_dir/no-menu.tsv"
   printf 'AXMenuBar\t\n' > "$fixture_dir/unnamed.tsv"
   check_accessibility_surface "$fixture_dir/good.tsv" >/dev/null
-  check_no_protected_pairing_window "$fixture_dir/good.tsv"
-  printf 'AXWindow\tConnect a device\n' > "$fixture_dir/protected.tsv"
-  if check_no_protected_pairing_window "$fixture_dir/protected.tsv" >/dev/null 2>&1; then
-    echo "self-test failed: protected pairing window was captured" >&2
+  if ! (
+    mac_window_titles() { printf 'CopyPaste\n'; }
+    safe_window_preflight
+  ); then
+    echo "self-test failed: single main window was rejected" >&2
     exit 1
   fi
-  if [[ -e "$fixture_dir/protected.tsv" ]]; then
-    echo "self-test failed: protected pairing AX data was retained" >&2
+  if (
+    out="$fixture_dir/blocked-capture"
+    mkdir -p "$out"
+    mac_window_titles() { printf 'CopyPaste\nConnect a device\n'; }
+    mac_ax() { : > "$fixture_dir/unsafe-ax-called"; }
+    mac_capture_state() { : > "$fixture_dir/unsafe-capture-called"; }
+    capture_initial_surface || capture_route_state devices Devices Devices
+  ) >/dev/null 2>&1; then
+    echo "self-test failed: protected pairing window passed preflight" >&2
+    exit 1
+  fi
+  if [[ -e "$fixture_dir/unsafe-ax-called" || -e "$fixture_dir/unsafe-capture-called" ]]; then
+    echo "self-test failed: protected pairing reached AX or screenshot capture" >&2
     exit 1
   fi
   if check_accessibility_surface "$fixture_dir/no-menu.tsv" >/dev/null 2>&1; then
@@ -740,10 +770,11 @@ prod = text.split(marker, 1)[1]
 names = [
     "seed_native_preferences",
     "mac_launch_evidence_app",
+    "safe_window_preflight",
     "mac_ax ready",
     "mac_verify_daemon_activation_policy",
     "mac_prepare_webview_ax",
-    "mac_ax surface",
+    "capture_initial_surface",
     "capture_required_routes",
 ]
 idxs = [prod.index(name) for name in names]
@@ -768,6 +799,7 @@ PY
     printf 'AXHeading\t%s\n' "$1" > "$3"
   }
   mac_capture_state() { mkdir -p "$1"; printf 'AXHeading\n' > "$1/ax.txt"; printf 'png' > "$1/screenshot.png"; }
+  mac_window_titles() { printf 'CopyPaste\n'; }
   mac_recover_onboarding() {
     [[ "$1" == "$out/onboarding.tsv" ]] || return 1
     onboarding_recoveries=$((onboarding_recoveries + 1))
@@ -808,7 +840,7 @@ PY
     SMOKE_PROFILE="$saved_profile"
   }
   route_profile_self_test
-  unset -f mac_press_unique_exact_description_role mac_wait_safe_role_label mac_capture_state mac_recover_onboarding mac_capture_state_self_test
+  unset -f mac_press_unique_exact_description_role mac_wait_safe_role_label mac_capture_state mac_recover_onboarding mac_window_titles mac_capture_state_self_test
   [[ "$FAIL" -eq 0 ]] || exit 1
   echo "macOS native accessibility self-test passed"
   exit 0
@@ -850,7 +882,7 @@ mac_set_app_pid "$app_pid"
 surface_ready="no"
 surface_started="$SECONDS"
 while (( SECONDS - surface_started < 30 )); do
-  if mac_ax ready > /dev/null 2> "$out/ax.err"; then
+  if safe_window_preflight 2> /dev/null && mac_ax ready > /dev/null 2> "$out/ax.err"; then
     surface_ready="yes"
     break
   fi
@@ -868,10 +900,7 @@ daemon_activation_observation="$(mac_verify_daemon_activation_policy "$daemon_ex
 mac_prepare_webview_ax
 scenario="$(python3 scripts/release/native_evidence_policy.py value --platform macos --field scenario)"
 budget_ms="$(python3 scripts/release/native_evidence_policy.py value --platform macos --field budget_ms)"
-mac_ax surface > "$out/ax.log" 2> "$out/ax.err"
-check_no_protected_pairing_window "$out/ax.log"
-check_accessibility_surface "$out/ax.log"
-screencapture -x "$out/screenshot.png"
+capture_initial_surface
 python3 - "$out/latency.json" "$scenario" "$((ready_ms - start_ms))" "$budget_ms" "$daemon_activation_observation" <<'PY'
 import json, pathlib, sys
 try:

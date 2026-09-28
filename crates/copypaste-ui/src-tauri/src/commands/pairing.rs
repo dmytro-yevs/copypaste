@@ -383,7 +383,11 @@ pub async fn pair_secure_close(window: WebviewWindow, app: AppHandle) -> Result<
                 "Protected pairing is unavailable in this window.",
             ));
         }
-        crate::pairing_presentation::macos::window_closed(&app);
+        if !crate::pairing_presentation::macos::window_closed(&app) {
+            return Err(crate::backend::BackendError::Invalid(
+                "Wait for the pairing decision to finish.",
+            ));
+        }
         crate::pairing_presentation::macos::destroy_window(&app);
         return Ok(());
     }
