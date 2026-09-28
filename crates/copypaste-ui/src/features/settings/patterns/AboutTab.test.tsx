@@ -14,10 +14,11 @@ const mocks = vi.hoisted(() => ({
   captureError: false,
 }));
 
-vi.mock("@/features/settings/components/UpdateRow", () => ({
-  UpdateRow: () => (
-    <div data-settings-search-target="row:App updates" />
-  ),
+vi.mock("@/features/settings/components/useUpdateSetting", () => ({
+  useUpdateSetting: () => ({
+    field: { kind: "readonly", definition: { id: "about:updates", section: "about", title: "settings.about.updates.title", kind: "readonly" }, value: "Up to date" },
+    dialog: null,
+  }),
 }));
 
 vi.mock("@/hooks/useStatus", () => ({

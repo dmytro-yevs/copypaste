@@ -1,5 +1,3 @@
-import { SettingsRow } from "@/components/shared";
-import { Button } from "@/components/ui";
 import { capturePresentationOf } from "@/features/capture/model";
 import { useCaptureState } from "@/hooks/useCapture";
 import { useTranslation } from "@/i18n";
@@ -7,6 +5,8 @@ import { SettingsHealthNotice } from "@/features/settings/patterns/SettingsHealt
 import { currentPlatform } from "@/lib/platform";
 import { useUi } from "@/store/ui";
 import { settingsCapabilities } from "@/features/settings/model/settingsNavigation";
+import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
+import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
 import { AdvancedServiceSection } from "./service/AdvancedServiceSection";
 import {
   ClipboardCaptureSection,
@@ -17,12 +17,12 @@ import { ServiceRestartNotice } from "./service/ServiceRestartNotice";
 import { ServiceSettingsProvider } from "./service/ServiceSettingsController";
 import styles from "./ServiceTab.module.css";
 
-type ServiceScope = "all" | "clipboard" | "privacy" | "advanced";
+export type ServiceScope = "all" | "clipboard" | "privacy" | "device-sync";
 
-function ScopedServiceSettings({ scope, revealAdvancedKey }: { scope: ServiceScope; revealAdvancedKey?: string }) {
+export function ServiceSettings({ scope, revealAdvancedKey }: { scope: ServiceScope; revealAdvancedKey?: string }) {
   const showClipboard = scope === "all" || scope === "clipboard";
   const showPrivacy = scope === "all" || scope === "privacy";
-  const showAdvanced = scope === "all" || scope === "advanced";
+  const showAdvanced = scope === "all" || scope === "device-sync";
   const supportsCopyNotifications = settingsCapabilities(currentPlatform()).copyNotifications;
 
   return (
@@ -52,36 +52,9 @@ function CaptureSetupEntry() {
     ? `${snapshot.headline} ${snapshot.detail}`
     : snapshot.headline;
 
-  return (
-    <SettingsRow
-      title={t("capture.title")}
-      help={description}
-      note={presentation.tone === "danger" ? snapshot.headline : undefined}
-    >
-      <Button
-        type="button"
-        variant="secondary"
-        size="sm"
-        onClick={() => openOnboardingAt("capture")}
-      >
-        {t("capture.status.open")}
-      </Button>
-    </SettingsRow>
-  );
-}
-
-export function ClipboardServiceSettings({ revealAdvancedKey }: { revealAdvancedKey?: string }) {
-  return <ScopedServiceSettings scope="clipboard" revealAdvancedKey={revealAdvancedKey} />;
-}
-
-export function PrivacyServiceSettings() {
-  return <ScopedServiceSettings scope="privacy" />;
-}
-
-export function AdvancedServiceSettings() {
-  return <ScopedServiceSettings scope="advanced" />;
-}
-
-export function ServiceTab() {
-  return <ScopedServiceSettings scope="all" />;
+  return <SettingsSchemaRenderer groups={[{ id: "capture-status", fields: [{
+    kind: "action", definition: settingDefinition("clipboard", "capture.title"),
+    help: description, note: presentation.tone === "danger" ? snapshot.headline : undefined,
+    label: t("capture.status.open"), onAction: () => openOnboardingAt("capture"),
+  }] }]} />;
 }

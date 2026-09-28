@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Badge, Button } from "@/components/ui";
-import { FieldFeedback } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 import { DeviceNameField } from "@/features/devices";
 import { connectionSummary, syncReadinessIsLoading, syncReadinessMessage, syncReadinessOf, syncReadinessRecovery } from "@/features/devices/model";
 import { noteSync, type PeerHealthMap } from "@/features/devices/model/peerState";
@@ -35,10 +35,10 @@ export function DeviceSyncSettings() {
   const recovery = syncReadinessRecovery(readiness);
   const summary = connectionSummary({ serviceOffline: service.isError, serviceStarting: service.isPending, syncing: sync.isPending, peersLoaded: !peers.isPending, peersFailed: peers.isError, peers: peers.data ?? [], health });
   const partialFailure = sync.data?.some((result) => result.error !== null) ?? false;
-  const syncNote = readiness !== "ready" ? <FieldFeedback state={syncReadinessIsLoading(readiness) ? "pending" : readiness === "disabled" || readiness === "no-peers" ? "neutral" : "warning"}>{syncReadinessMessage(readiness)}</FieldFeedback>
-    : sync.isError ? <FieldFeedback state="error">{t("settings.sync.now.failed")}</FieldFeedback>
-    : summary ? <FieldFeedback state={summary.status === "attention" ? "warning" : "pending"}>{summary.title}{summary.supportingLine ? ` ${summary.supportingLine}` : ""}</FieldFeedback>
-    : partialFailure ? <FieldFeedback state="warning">{t("settings.sync.now.partial")}</FieldFeedback> : undefined;
+  const syncNote = readiness !== "ready" ? <StateView mode={syncReadinessIsLoading(readiness) ? "loading" : readiness === "disabled" || readiness === "no-peers" ? "info" : "warning"} placement="control" title={syncReadinessMessage(readiness)} />
+    : sync.isError ? <StateView mode="error" placement="control" title={t("settings.sync.now.failed")} />
+    : summary ? <StateView mode={summary.status === "attention" ? "warning" : "loading"} placement="control" title={summary.title} description={summary.supportingLine} />
+    : partialFailure ? <StateView mode="warning" placement="control" title={t("settings.sync.now.partial")} /> : undefined;
   const peerLabel = peers.isError ? count === undefined ? t("settings.sync.paired.unavailable") : t("devices.syncReadiness.lastKnownCount", { n: count })
     : peers.isPending ? t("settings.sync.paired.checking")
     : count === undefined ? t("settings.sync.paired.unavailable")

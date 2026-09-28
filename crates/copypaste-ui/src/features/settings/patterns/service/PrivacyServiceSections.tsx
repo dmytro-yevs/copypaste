@@ -1,4 +1,4 @@
-import { FieldFeedback } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
 import { HISTORY_LIMIT, RETENTION_DAYS, SENSITIVE_TTL_SECS, STORAGE_QUOTA_BYTES, valuesWith, type Choice } from "@/features/settings/model/serviceChoices";
 import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
@@ -25,7 +25,7 @@ export function PrivacyServiceSections() {
   return <SettingsSchemaRenderer groups={[
     { id: "private-mode", title: "Private mode", fields: [{
       kind: "boolean", definition: settingDefinition("privacy", "settings.service.privateMode.title"), value: controller.privateModeEnabled ?? false, controlId: "private-mode", disabled: controller.privateModePending, busy: controller.privateModePending,
-      note: controller.privateModePending ? <FieldFeedback state="pending">Saving…</FieldFeedback> : controller.privateModeFailed ? <FieldFeedback state="error">Private mode wasn’t changed.</FieldFeedback> : undefined,
+      note: controller.privateModePending ? <StateView mode="loading" placement="control" title="Saving…" /> : controller.privateModeFailed ? <StateView mode="error" placement="control" title="Private mode wasn’t changed." /> : undefined,
       onChange: controller.setPrivateMode,
     }] },
     { id: "retention", title: t("settings.service.groups.keeping.title"), fields: [
