@@ -1,11 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
-import { useDeferredValue, useId, useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 
 import { FieldFeedback } from "@/components/shared";
-import { Button, Input, Surface } from "@/components/ui";
+import { Button, Input, Select, Surface, iconComponent } from "@/components/ui";
+import type { SelectItem } from "@/components/ui/select";
+import { SourceAppIcon } from "@/features/source-apps";
 import { useHistory } from "@/hooks/useHistory";
 import { useTranslation } from "@/i18n";
 import { canonicalExclusion, findExclusion } from "@/lib/exclusions";
+import { clipSourceMetadata } from "@/lib/clipSourcePresentation";
 import { isAndroidPlatform, isWindowsPlatform } from "@/lib/platform";
 import { listInstalledSourceApps, type Item } from "@/lib/ipc";
 import {
@@ -13,8 +16,6 @@ import {
     SOURCE_APP_CATALOG_STALE_MS,
 } from "@/lib/scheduling";
 import styles from "./SourceExclusions.module.css";
-import { InstalledAppPicker } from "./InstalledAppPicker";
-import { SelectedExclusions } from "./SelectedExclusions";
 import { SourceExclusionsHeader } from "./SourceExclusionsHeader";
 
 interface SourceExclusionsProps {
@@ -90,8 +91,6 @@ function ExclusionsEditor({
 }: ExclusionsEditorProps) {
     const { t } = useTranslation();
     const history = useHistory("");
-    const [catalogQuery, setCatalogQuery] = useState("");
-    const deferredCatalogQuery = useDeferredValue(catalogQuery);
     const [manualId, setManualId] = useState("");
     const [validation, setValidation] = useState<string | null>(null);
     const [normalizedNotice, setNormalizedNotice] = useState<string | null>(
@@ -120,25 +119,42 @@ function ExclusionsEditor({
         return first;
     }, [history.data?.items]);
 
-    const selectedIds = useMemo(() => new Set(ids), [ids]);
     const normalized = manualId.trim();
-    const deferredNormalized = deferredCatalogQuery.trim();
-    const visibleInstalledApps = useMemo(() => {
-        const needle = deferredNormalized.toLocaleLowerCase();
-        return (installedApps.data ?? []).filter(
-            (app) =>
-                !needle ||
-                app.label.toLocaleLowerCase().includes(needle) ||
-                app.package_id.toLocaleLowerCase().includes(needle),
-        );
-    }, [deferredNormalized, installedApps.data]);
     const installedById = useMemo(
         () =>
             new Map(
-                (installedApps.data ?? []).map((app) => [app.package_id, app]),
+                (installedApps.data ?? []).map((app) => [
+                    canonicalExclusion(app.package_id, windows) ?? app.package_id,
+                    app,
+                ]),
             ),
-        [installedApps.data],
+        [installedApps.data, windows],
     );
+    const installedOptions = useMemo<SelectItem[]>(
+        () => (installedApps.data ?? []).map((app) => ({
+            value: canonicalExclusion(app.package_id, windows) ?? app.package_id,
+            label: app.label,
+            description: app.package_id,
+            visual: <SourceAppIcon bundleId={app.package_id} Fallback={iconComponent("app")} />,
+        })),
+        [installedApps.data, windows],
+    );
+    const selectedOptions = ids.map((id): SelectItem => {
+        const app = installedById.get(id);
+        const item = firstByApp.get(id);
+        const source = item ? clipSourceMetadata(item) : null;
+        return {
+            value: id,
+            label: app?.label ?? source?.label ?? id,
+            description: app?.label || source?.label ? id : undefined,
+            visual: <SourceAppIcon
+                itemId={item?.id ?? null}
+                bundleId={id}
+                Fallback={source ? iconComponent(source.icon) : iconComponent("search")}
+                size="xs"
+            />,
+        };
+    });
 
     /** Windows: Chrome.exe, chrome, and a pasted path are one program. */
     const add = (id: string) => {
@@ -177,19 +193,35 @@ function ExclusionsEditor({
 
     return (
         <>
-            <InstalledAppPicker
-                apps={visibleInstalledApps}
-                selectedIds={selectedIds}
-                query={catalogQuery}
+            <Select
+                mode="multiple"
+                display="catalog"
+                aria-label={t("settings.service.exclusions.installedList")}
+                items={installedOptions}
+                values={ids}
                 disabled={disabled}
-                loading={installedApps.isLoading}
-                refreshing={
-                    installedApps.isFetching && !installedApps.isLoading
-                }
-                failed={installedApps.isError}
-                onQueryChange={setCatalogQuery}
-                onRetry={() => void installedApps.refetch()}
-                onAdd={add}
+                onValuesChange={(next) => {
+                    const added = next.find((id) => !ids.includes(id));
+                    if (added !== undefined) add(added);
+                    else onChange(next);
+                }}
+                catalog={{
+                    searchLabel: t("settings.service.exclusions.searchInstalled"),
+                    listLabel: t("settings.service.exclusions.installedList"),
+                    emptyLabel: t("settings.service.exclusions.noInstalledMatches"),
+                    loadingLabel: t("settings.service.exclusions.loadingApps"),
+                    errorLabel: t("settings.service.exclusions.appsUnavailable"),
+                    errorDescription: t("settings.service.exclusions.appsUnavailableBody"),
+                    retryLabel: t("settings.service.exclusions.retryApps"),
+                    refreshLabel: t("settings.service.exclusions.refreshApps"),
+                    removeLabel: (id) => t("settings.service.exclusions.remove", { id }),
+                    onRetry: () => void installedApps.refetch(),
+                    loading: installedApps.isLoading,
+                    refreshing: installedApps.isFetching && !installedApps.isLoading,
+                    failed: installedApps.isError,
+                    selectedItems: selectedOptions,
+                    disableSelectedOptions: true,
+                }}
             />
 
             <div className={styles.manualEntry}>
@@ -266,13 +298,6 @@ function ExclusionsEditor({
                 )}
             </div>
 
-            <SelectedExclusions
-                ids={ids}
-                installedById={installedById}
-                firstByApp={firstByApp}
-                disabled={disabled}
-                onChange={onChange}
-            />
         </>
     );
 }
