@@ -67,9 +67,12 @@ export function reportStartupFailure(root: Element, failure: unknown): void {
   notice.setAttribute("role", "alert");
   notice.setAttribute("tabindex", "-1");
   notice.setAttribute("data-startup-failure", stage ?? "unknown");
+  notice.setAttribute("data-mode", "error");
+  notice.setAttribute("data-placement", "screen");
   notice.style.cssText =
-    "margin:0;padding:1.25rem;font-family:system-ui,sans-serif;font-size:1rem;" +
-    "line-height:1.5;color:#111111;background:#ffffff";
+    "margin:1.25rem auto;max-width:32rem;padding:1.25rem;font-family:system-ui,sans-serif;font-size:1rem;" +
+    "line-height:1.5;color:var(--text,#111111);background:var(--panel,#ffffff);" +
+    "border:1px solid var(--border,#dddddd);border-radius:var(--r-card,12px)";
 
   root.textContent = "";
   root.appendChild(notice);
