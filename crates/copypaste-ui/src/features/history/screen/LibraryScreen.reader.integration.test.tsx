@@ -107,6 +107,21 @@ describe("LibraryScreen reader reachability", () => {
         expect(document.activeElement).toBe(openReader);
     });
 
+    it("shows an empty library and exposes recovery after a failed fetch", async () => {
+        viewport.width = 1200;
+        ipc.listItems.mockResolvedValueOnce(page([]));
+        const empty = renderScreen([]);
+        expect(await screen.findByText("Nothing copied yet")).toBeTruthy();
+        empty.unmount();
+
+        ipc.listItems.mockRejectedValue({ code: "timeout", retryable: true });
+        renderScreen([]);
+        const failure = await screen.findByText("Failed to load history");
+        expect(failure.closest('[role="alert"]')).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Open diagnostics" })).toBeTruthy();
+    });
+
     it("keeps the source device in inspector and reader for a single-device history", async () => {
         viewport.width = 1200;
         const localItem = item({
