@@ -7,7 +7,7 @@
 import { type RefObject, useMemo } from "react";
 
 import { ScrollViewport } from "@/components/layout";
-import { Button, Icon, VisuallyHidden } from "@/components/ui";
+import { Button, VisuallyHidden } from "@/components/ui";
 import { useTranslation } from "@/i18n";
 import type { Item } from "@/lib/ipc";
 import { useHistoryKeyboardNavigation } from "@/features/history/hooks/useHistoryKeyboardNavigation";
@@ -143,10 +143,10 @@ export function HistoryList({
                             <Button
                                 variant="secondary"
                                 size="sm"
-                                disabled={loadingMore}
+                                icon="caretDown"
+                                pending={loadingMore}
                                 onClick={onLoadMore}
                             >
-                                <Icon name="caretDown" size="sm" />
                                 {t(
                                     loadingMore
                                         ? "history.list.loadingMore"

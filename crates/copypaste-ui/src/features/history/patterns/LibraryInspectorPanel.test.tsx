@@ -54,6 +54,19 @@ function inspector(
 }
 
 describe("LibraryInspectorPanel", () => {
+  it("keeps a pending sensitive preview masked with the shared loading indicator", () => {
+    render(inspector({
+      item: item({ content: "private body", is_sensitive: true }),
+      fullContent: "private body",
+      revealPending: true,
+    }));
+
+    const reveal = screen.getByRole("button", { name: "Sensitive content hidden — activate to reveal" });
+    expect(reveal.hasAttribute("disabled")).toBe(true);
+    expect(reveal.querySelectorAll('[data-mode="loading"][data-placement="control"]')).toHaveLength(1);
+    expect(screen.queryByText("private body")).toBeNull();
+  });
+
   it("opens the reader and reveals a potential original only after a gesture", async () => {
     const user = userEvent.setup();
     const target = item({
