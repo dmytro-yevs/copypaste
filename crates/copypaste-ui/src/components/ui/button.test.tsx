@@ -81,6 +81,10 @@ describe("Button asChild", () => {
 });
 
 describe("Button shared action behavior", () => {
+    it("keeps a visible action name when title contains supplementary help", () => {
+        render(<Button title="Open capture setup">Set up</Button>);
+        expect(screen.getByRole("button", { name: "Set up" }).title).toBe("Open capture setup");
+    });
     it("renders a supplied label for a regular action and only names an icon action", () => {
         render(<TooltipProvider><Button icon="copy" label="Copy item" /><Button icon="close" size="icon" label="Close" /></TooltipProvider>);
         expect(screen.getByRole("button", { name: "Copy item" }).textContent).toBe("Copy item");
