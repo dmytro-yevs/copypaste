@@ -32,7 +32,9 @@ describe("QuickPasteRow compact presentation", () => {
 
   it("aligns the source icon with the first content line", () => {
     expect(css).toMatch(/\.root \{[\s\S]*?align-items: flex-start;/);
-    expect(css).toMatch(/\.sourceIcon \{[\s\S]*?margin-block-start: 2\.5px;/);
+    expect(css).toMatch(/\.sourceIcon \{[\s\S]*?margin-block-start: var\(--quick-paste-icon-offset\);/);
+    const sizes = JSON.parse(readFileSync(resolve(process.cwd(), "../../design/tokens/size.json"), "utf8")).size;
+    expect(sizes["quick-paste-icon-offset"].$value).toBe("2.5px");
   });
 
   it("reserves the action column for every clip kind, including images", () => {
