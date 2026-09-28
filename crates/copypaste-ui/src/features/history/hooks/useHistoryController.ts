@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDebounceValue } from "usehooks-ts";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 import { type OriginDevice, originsOf } from "@/lib/itemOrigin";
 import { useDeferredDelete } from "@/hooks/useDeferredDelete";

@@ -13,7 +13,7 @@ const copyItem = vi.hoisted(() => vi.fn());
 const getClipboardWriteAvailability = vi.hoisted(() => vi.fn());
 const toast = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn() }));
 
-vi.mock("sonner", () => ({ toast }));
+vi.mock("@/lib/notify", () => ({ toast }));
 
 vi.mock("@/hooks/historyRefresh", () => ({
   invalidateHistoryQueries,

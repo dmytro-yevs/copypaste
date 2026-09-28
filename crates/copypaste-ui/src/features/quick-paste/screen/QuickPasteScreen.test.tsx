@@ -26,7 +26,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-vi.mock("sonner", () => ({ toast }));
+vi.mock("@/lib/notify", () => ({ toast }));
 vi.mock("@/features/quick-paste/hooks/useQuickPasteLifecycle", () => ({
   useQuickPasteLifecycle: () => ({
     holding: true,

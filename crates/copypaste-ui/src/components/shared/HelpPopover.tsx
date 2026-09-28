@@ -8,7 +8,7 @@ export function HelpPopover({ content, label }: { content: ReactNode; label: str
   return (
     <PopoverPrimitive.Root>
       <PopoverPrimitive.Trigger asChild>
-        <Button variant="ghost" size="compactIcon" className={styles.trigger} label={label} icon="info" />
+        <Button variant="ghost" size="compactIcon" tooltip={false} className={styles.trigger} label={label} icon="info" />
       </PopoverPrimitive.Trigger>
       <PopoverPrimitive.Portal>
         <PopoverPrimitive.Content sideOffset={8} collisionPadding={8} className={styles.content}>

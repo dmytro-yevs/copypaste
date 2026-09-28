@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { Icon } from "@/components/ui/icon";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 import { Button } from "@/components/ui";
 import { useTranslation } from "@/i18n";

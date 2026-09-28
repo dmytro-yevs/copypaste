@@ -25,7 +25,7 @@ const toast = vi.hoisted(() => ({
     warning: vi.fn(),
 }));
 
-vi.mock("sonner", () => ({ toast }));
+vi.mock("@/lib/notify", () => ({ toast }));
 vi.mock("@/lib/ipc", async (load) => ({
     ...(await load<typeof import("@/lib/ipc")>()),
     captureState: ipc.captureState,

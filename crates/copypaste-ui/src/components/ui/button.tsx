@@ -96,7 +96,7 @@ function Button({
     const disabledState = disabled || loading;
     const iconOnly = size === "icon" || size === "compactIcon";
     const adornmentSize = size === "compact" || size === "compactIcon" ? "compact" : "regular";
-    const accessibleLabel = label ?? props["aria-label"] ?? props.title;
+    const accessibleLabel = label ?? props["aria-label"] ?? (iconOnly ? props.title : undefined);
     const adornment = loading ? <StateView mode="loading" placement="control" /> : icon ? (
         <ControlAdornment size={adornmentSize}>
             <Icon name={icon} size={adornmentSize === "compact" ? "sm" : "md"} />

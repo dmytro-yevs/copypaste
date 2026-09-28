@@ -11,7 +11,7 @@ import { items, testClient } from "@/test/harness";
 
 const setPinned = vi.hoisted(() => vi.fn());
 
-vi.mock("sonner", () => ({
+vi.mock("@/lib/notify", () => ({
   toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
 }));
 
