@@ -41,7 +41,7 @@ export function SettingsHealthNotice() {
     ? 0
     : unreadable_fields.length - affected.length;
 
-  return <StateView mode="warning" placement="inline" title={t("settings.service.degraded.title")} description={[
+  return <StateView mode="warning" placement="inline" role="none" aria-live="polite" title={t("settings.service.degraded.title")} description={[
         affected.length > 0
           ? t("settings.service.degraded.privacy", {
               fields: affected.map((label) => t(label)).join(", "),

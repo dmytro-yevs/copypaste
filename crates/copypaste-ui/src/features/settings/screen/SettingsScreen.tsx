@@ -236,7 +236,8 @@ export function SettingsScreen() {
             element.dataset.settingsSearchTarget === `row:${result.title}`,
           ) ?? (allowSection ? candidates.find((element) =>
             element.dataset.settingsSearchTarget === `section:${result.title}` ||
-            element.dataset.settingsSearchTarget === `section:${result.sectionLabel}`,
+            element.dataset.settingsSearchTarget === `section:${result.sectionLabel}` ||
+            element.dataset.settingsSearchTarget === `section:${result.tabLabel}`,
           ) : undefined);
           if (!target) return false;
           cancel();
@@ -339,7 +340,7 @@ export function SettingsScreen() {
                 value: section.value,
                 label: <><SettingsTabIcon name={section.icon} /><span className={styles.settingsNavLabel}>{section.label}</span></>,
                 className: styles.settingsNavItem,
-                content: <><h2 className={styles.panelTitle}>{section.label}</h2><div className={styles.sectionStack}>{renderPreferenceSection(section.value, controller)}</div></>,
+                content: <><h2 className={styles.panelTitle} data-settings-search-target={`section:${section.label}`}>{section.label}</h2><div className={styles.sectionStack}>{renderPreferenceSection(section.value, controller)}</div></>,
               }))}
             />
           </Container>

@@ -12,7 +12,6 @@ export type SettingsDisclosureId = "clipboard-advanced" | "cloud-server";
 export interface SettingsFieldDefinition {
   readonly id: string;
   readonly section: PreferenceSection | "runtime-events";
-  readonly group?: string;
   readonly title: string;
   readonly description?: string;
   readonly keywords?: readonly string[];
@@ -24,7 +23,7 @@ export interface SettingsFieldDefinition {
 
 export type SettingsFieldKind =
   | "boolean" | "choice" | "multi-choice" | "text" | "number"
-  | "readonly" | "status" | "action" | "custom";
+  | "readonly" | "status" | "action" | "custom" | "dynamic" | "group";
 
 interface FieldBase {
   readonly definition: SettingsFieldDefinition;

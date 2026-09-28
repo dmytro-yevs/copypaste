@@ -28,7 +28,7 @@ describe("SettingsHealthNotice", () => {
     const title = screen.getByText("Some saved settings couldn't be read.");
     const notice = title.closest("[aria-live=polite]");
     expect(notice).not.toBeNull();
-    expect(notice?.getAttribute("role")).toBeNull();
+    expect(notice?.getAttribute("role")).toBe("none");
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByText(/CopyPaste chose the safer setting/)).toBeTruthy();
   });

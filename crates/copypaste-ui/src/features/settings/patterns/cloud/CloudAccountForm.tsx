@@ -1,7 +1,7 @@
 import { useId, type FormEvent } from "react";
 
 import { Icon } from "@/components/ui/icon";
-import { FieldFeedback } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 import { Button, Input, Label } from "@/components/ui";
 import type { CloudAccountController } from "@/features/settings/hooks/useCloudAccountController";
 import { useTranslation } from "@/i18n";
@@ -69,17 +69,13 @@ export function CloudAccountForm({ controller }: { controller: CloudAccountContr
       </div>
       <div id={feedbackId} className={styles.feedback}>
         {controller.accountAction ? (
-          <FieldFeedback state="pending">
-            {t(controller.accountAction === "sign-up"
+          <StateView mode="loading" placement="control" title={t(controller.accountAction === "sign-up"
               ? "settings.sync.cloud.signingUp"
-              : "settings.sync.cloud.signingIn")}
-          </FieldFeedback>
+              : "settings.sync.cloud.signingIn")} />
         ) : controller.accountError ? (
-          <FieldFeedback state="error">
-            {t(controller.accountError === "sign-up"
+          <StateView mode="error" placement="control" title={t(controller.accountError === "sign-up"
               ? "settings.sync.cloud.signUpError"
-              : "settings.sync.cloud.signInError")}
-          </FieldFeedback>
+              : "settings.sync.cloud.signInError")} />
         ) : controller.accountDirty ? (
           <span className={styles.dirty}>{t("settings.sync.cloud.credentialsUnsaved")}</span>
         ) : null}
@@ -98,7 +94,7 @@ export function CloudAccountForm({ controller }: { controller: CloudAccountContr
           type="button"
           size="sm"
           variant="secondary"
-          state={controller.accountAction === "sign-up" ? "loading" : "normal"}
+          pending={controller.accountAction === "sign-up"}
           disabled={controller.busy || !controller.accountComplete}
           onClick={controller.submitSignUp}
         >
@@ -112,7 +108,7 @@ export function CloudAccountForm({ controller }: { controller: CloudAccountContr
         <Button
           type="submit"
           size="sm"
-          state={controller.accountAction === "sign-in" ? "loading" : "normal"}
+          pending={controller.accountAction === "sign-in"}
           disabled={controller.busy || !controller.accountComplete}
         >
           {controller.accountAction !== "sign-in" ? (
