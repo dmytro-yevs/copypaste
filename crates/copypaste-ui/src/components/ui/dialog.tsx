@@ -1,4 +1,4 @@
-import { useRef, useState, type ComponentProps, type PointerEvent } from "react";
+import { useRef, useState, type ComponentProps, type PointerEvent, type ReactElement, type ReactNode } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 
 import { cn } from "@/lib/cn";
@@ -22,8 +22,33 @@ import styles from "./dialog.module.css";
  * and the scroll lock (`useFocusTrap`, `lib/dialog/scrollLock.ts`) and shipped
  * bugs in both.
  */
-function Dialog(props: ComponentProps<typeof DialogPrimitive.Root>) {
-    return <DialogPrimitive.Root data-slot="dialog" {...props} />;
+export type DialogProps = Omit<ComponentProps<typeof DialogPrimitive.Root>, "children"> & {
+    title?: ReactNode;
+    description?: ReactNode;
+    children?: ReactNode;
+    footer?: ReactNode;
+    trigger?: ReactElement;
+    contentProps?: Omit<ComponentProps<typeof DialogContent>, "children">;
+    showCloseButton?: boolean;
+    closeLabel?: string;
+};
+
+function Dialog({ title, description, children, footer, trigger, contentProps, showCloseButton, closeLabel, ...rootProps }: DialogProps) {
+    return (
+        <DialogPrimitive.Root data-slot="dialog" {...rootProps}>
+            {trigger ? <DialogPrimitive.Trigger asChild>{trigger}</DialogPrimitive.Trigger> : null}
+            {title === undefined ? children : (
+                <DialogContent {...contentProps} showCloseButton={showCloseButton ?? contentProps?.showCloseButton} closeLabel={closeLabel ?? contentProps?.closeLabel}>
+                    <DialogHeader>
+                        <DialogTitle>{title}</DialogTitle>
+                        {description ? <DialogDescription>{description}</DialogDescription> : null}
+                    </DialogHeader>
+                    {children}
+                    {footer ? <DialogFooter>{footer}</DialogFooter> : null}
+                </DialogContent>
+            )}
+        </DialogPrimitive.Root>
+    );
 }
 
 const DialogTrigger = DialogPrimitive.Trigger;
