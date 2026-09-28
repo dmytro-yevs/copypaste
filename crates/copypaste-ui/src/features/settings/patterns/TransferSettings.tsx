@@ -1,7 +1,7 @@
 import { Icon } from "@/components/ui/icon";
 import { useId, useState } from "react";
 
-import { FieldFeedback, SettingsRow } from "@/components/shared";
+import { FieldFeedback } from "@/components/shared";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -14,7 +14,8 @@ import {
   Checkbox,
   Label,
 } from "@/components/ui";
-import { Section } from "@/features/settings/components/Section";
+import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
+import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
 import { useExportHistory, useImportHistory } from "@/hooks/useServiceConfig";
 import { useTranslation } from "@/i18n";
 import type { ImportPreview } from "@/lib/ipc";
@@ -32,57 +33,30 @@ export function TransferSettings() {
 
   return (
     <>
-      <Section title={t("settings.transfer.transferSection")}>
-        <SettingsRow
-          title={t("settings.transfer.export.title")}
-          note={exportHistory.isError ? (
+      <SettingsSchemaRenderer groups={[{ id: "transfer", title: t("settings.transfer.transferSection"), fields: [{
+          kind: "action", definition: settingDefinition("storage", "settings.transfer.export.title"),
+          note: exportHistory.isError ? (
             <span id={exportFeedbackId}>
               <FieldFeedback state="error">History wasn’t exported.</FieldFeedback>
             </span>
-          ) : undefined}
-        >
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={exportHistory.isPending}
-            aria-busy={exportHistory.isPending || undefined}
-            aria-describedby={exportHistory.isError ? exportFeedbackId : undefined}
-            onClick={() => {
+          ) : undefined,
+          label: exportHistory.isPending ? "Exporting…" : t("settings.transfer.export.action"),
+          icon: "download", disabled: exportHistory.isPending, busy: exportHistory.isPending,
+          onAction: () => {
               // Sensitive-item consent is intentionally one export only.
               setIncludeSensitive(false);
               setExportOpen(true);
-            }}
-          >
-            <Icon name="download" aria-hidden="true" />
-            {exportHistory.isPending ? "Exporting…" : t("settings.transfer.export.action")}
-          </Button>
-        </SettingsRow>
+            },
+        }, {
+          kind: "action", definition: settingDefinition("storage", "settings.transfer.import.title"),
+          note: importHistory.prepare.isError || importHistory.apply.isError ? (
+            <span id={importFeedbackId}><FieldFeedback state="error">History wasn’t imported.</FieldFeedback></span>
+          ) : undefined,
+          label: importHistory.isPending ? "Importing…" : t("settings.transfer.import.action"),
+          icon: "upload", disabled: importHistory.isPending, busy: importHistory.isPending,
+          onAction: () => importHistory.prepare.mutate(undefined, { onSuccess: (preview) => setPendingImport(preview) }),
+        }] }]} />
 
-        <SettingsRow
-          title={t("settings.transfer.import.title")}
-          note={importHistory.prepare.isError || importHistory.apply.isError ? (
-            <span id={importFeedbackId}>
-              <FieldFeedback state="error">History wasn’t imported.</FieldFeedback>
-            </span>
-          ) : undefined}
-        >
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={importHistory.isPending}
-            aria-busy={importHistory.isPending || undefined}
-            aria-describedby={importHistory.prepare.isError || importHistory.apply.isError ? importFeedbackId : undefined}
-            onClick={() => {
-              importHistory.prepare.mutate(undefined, {
-                onSuccess: (preview) => setPendingImport(preview),
-              });
-            }}
-          >
-            <Icon name="upload" aria-hidden="true" />
-            {importHistory.isPending ? "Importing…" : t("settings.transfer.import.action")}
-          </Button>
-        </SettingsRow>
-      </Section>
 
       <AlertDialog
         open={exportOpen}

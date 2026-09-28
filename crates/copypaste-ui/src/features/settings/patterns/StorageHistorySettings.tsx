@@ -1,7 +1,6 @@
 import { Icon } from "@/components/ui/icon";
 import { useState } from "react";
 
-import { SettingsRow } from "@/components/shared";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -12,7 +11,8 @@ import {
   AlertDialogTitle,
   Button,
 } from "@/components/ui";
-import { Section } from "@/features/settings/components/Section";
+import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
+import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
 import { useDeferredDelete } from "@/hooks/useDeferredDelete";
 import { statusItemCount, useStatus } from "@/hooks/useStatus";
 import { useTranslation } from "@/i18n";
@@ -28,35 +28,22 @@ export function StorageHistorySettings() {
 
   return (
     <>
-      <Section title={t("settings.storage.historySection")}>
-        <SettingsRow title={t("settings.storage.stored.title")}>
-          <span className={styles.metric}>
+      <SettingsSchemaRenderer groups={[{ id: "history", title: t("settings.storage.historySection"), fields: [{
+        kind: "readonly", definition: settingDefinition("storage", "settings.storage.stored.title"), value: <span className={styles.metric}>
             {status.isPending
               ? "Checking…"
               : status.isError || status.data === undefined
                 ? "Unavailable"
                 : status.data.toLocaleString()}
-          </span>
-        </SettingsRow>
-      </Section>
+          </span>,
+      }] }]} />
 
-      <Section title={t("settings.storage.dangerSection")}>
-        <SettingsRow
-          title={t("settings.storage.clear.title")}
-        >
-          <Button
-            variant="secondary"
-            size="sm"
-            tone="danger"
-            disabled={clearStarting || pendingAll}
-            aria-busy={clearStarting || pendingAll || undefined}
-            onClick={() => setClearOpen(true)}
-          >
-            <Icon name="trash" aria-hidden="true" />
-            {clearStarting || pendingAll ? "Clearing…" : t("settings.storage.clear.action")}
-          </Button>
-        </SettingsRow>
-      </Section>
+      <SettingsSchemaRenderer groups={[{ id: "danger", title: t("settings.storage.dangerSection"), fields: [{
+        kind: "action", definition: settingDefinition("storage", "settings.storage.clear.title"),
+        label: clearStarting || pendingAll ? "Clearing…" : t("settings.storage.clear.action"),
+        tone: "danger", icon: "trash", disabled: clearStarting || pendingAll,
+        busy: clearStarting || pendingAll, onAction: () => setClearOpen(true),
+      }] }]} />
 
       <AlertDialog
         open={clearOpen}
