@@ -3,7 +3,6 @@ import { useId, type ReactNode } from "react";
 import { Icon } from "@/components/ui/icon";
 import { Button } from "@/components/ui";
 import {
-  FieldFeedback,
   MetadataLabel,
   MetadataList,
   MetadataRow,
@@ -258,13 +257,19 @@ export function DeviceDetailPane({
       {target.kind === "peer" ? (
         <div className={styles.actions} aria-label={t("devices.presentation.detail.actions")}>
           {syncReadiness !== "ready" && (
-            <FieldFeedback
+            <StateView
               id={syncReasonId}
-              state={syncReadinessIsLoading(syncReadiness) ? "pending"
-                : syncReadiness === "disabled" || syncReadiness === "no-peers" ? "neutral" : "warning"}
-            >
-              {syncReadinessMessage(syncReadiness)}
-            </FieldFeedback>
+              mode={syncReadinessIsLoading(syncReadiness)
+                ? "loading"
+                : syncReadiness === "disabled" || syncReadiness === "no-peers"
+                  ? "info"
+                  : "warning"}
+              placement="inline"
+              description={syncReadinessMessage(syncReadiness)}
+              icon={syncReadiness === "disabled" || syncReadiness === "no-peers" ? "info" : undefined}
+              role={syncReadiness === "disabled" || syncReadiness === "no-peers" ? "presentation" : "status"}
+              aria-live={syncReadiness === "disabled" || syncReadiness === "no-peers" ? undefined : "polite"}
+            />
           )}
           <Button
             type="button"
