@@ -1,5 +1,5 @@
-import { StatusCard } from "@/components/shared";
-import { Button, Icon } from "@/components/ui";
+import { StateView } from "@/components/shared/StateView";
+import { Button } from "@/components/ui";
 import type { ConnectionSummaryPresentation } from "@/features/devices/model/devicePresentation";
 import { t } from "@/i18n";
 
@@ -21,27 +21,31 @@ export function ConnectionSummary({
       type="button"
       variant="secondary"
       size="compact"
+      icon={summary.action.icon}
       disabled={actionDisabled}
       onClick={onAction}
     >
-      <Icon
-        name={summary.action.icon}
-        aria-hidden="true"
-      />
       {actionBusy ? t("devices.actions.syncing") : actionLabel ?? summary.action.label}
     </Button>
   ) : undefined;
 
+  const mode = summary.status === "positive"
+    ? "success"
+    : summary.status === "attention"
+      ? "warning"
+      : "info";
+
   return (
-    <StatusCard
-      status={summary.status}
+    <StateView
+      mode={mode}
+      placement="inline"
       title={summary.title}
-      detail={summary.supportingLine}
+      description={summary.supportingLine}
       icon={summary.icon}
-      action={action}
-      density="compact"
-      busy={summary.busy}
-      live={summary.live}
+      actions={action}
+      role="status"
+      aria-live={summary.live}
+      aria-busy={summary.busy || undefined}
     />
   );
 }

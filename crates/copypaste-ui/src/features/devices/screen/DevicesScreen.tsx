@@ -1,13 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Container, Screen, ScrollViewport } from "@/components/layout";
 import { ScreenHeader } from "@/components/shared";
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogTitle,
-    VisuallyHidden,
-} from "@/components/ui";
+import { Button, Dialog, VisuallyHidden } from "@/components/ui";
 import { CloudConnectionCard } from "@/features/devices/components/CloudConnectionCard";
 import { ConnectionSummary } from "@/features/devices/components/ConnectionSummary";
 import { capturePresentationOf } from "@/features/capture/model";
@@ -32,7 +26,6 @@ import {
     type DiscoveryConnectState,
 } from "@/features/devices/patterns/DiscoveryPairingFooter";
 import { DevicesDialogs } from "@/features/devices/patterns/DevicesDialogs";
-import { DevicesHeaderActions } from "@/features/devices/patterns/DevicesHeaderActions";
 import { PairingLauncherDialog } from "@/features/devices/patterns/PairingLauncherDialog";
 import {
     DeviceSyncReadinessNotice,
@@ -341,16 +334,22 @@ export function DevicesScreen() {
                 >
                     <ScreenHeader
                         title="Devices"
-                        actions={
-                            <DevicesHeaderActions
-                                pairButtonRef={pairButtonRef}
-                                pairDisabled={pairDisabled}
-                                pairBusy={
-                                    pairing.isChecking || pairing.isPending
-                                }
-                                onPair={openPairing}
-                            />
-                        }
+                        actions={(
+                            <div className={styles.headerActions}>
+                                <Button
+                                    ref={pairButtonRef}
+                                    type="button"
+                                    size="sm"
+                                    disabled={pairDisabled}
+                                    pending={pairing.isChecking || pairing.isPending}
+                                    aria-label="Connect a device"
+                                    icon="plus"
+                                    onClick={openPairing}
+                                >
+                                    Connect a device
+                                </Button>
+                            </div>
+                        )}
                     />
                     <DeviceSyncReadinessNotice
                         readiness={syncReadiness}
@@ -425,32 +424,36 @@ export function DevicesScreen() {
 
             <Dialog
                 open={selected !== null && detailTarget !== null}
-                onOpenChange={(open) => {
-                    if (!open) closeDetail();
-                }}
-            >
-                <DialogContent
-                    presentation={layout === "narrow" ? "sheet" : "drawer"}
-                    showCloseButton={false}
-                    overlayClassName={
-                        layout === "narrow" ? undefined : styles.detailOverlay
-                    }
-                    className={
+                title={(
+                    <VisuallyHidden>
+                        {detailTarget
+                            ? `${detailTarget.name} details`
+                            : "Device details"}
+                    </VisuallyHidden>
+                )}
+                description={(
+                    <VisuallyHidden>
+                        Device status, factual metadata, and available actions.
+                    </VisuallyHidden>
+                )}
+                showCloseButton={false}
+                contentProps={{
+                    presentation: layout === "narrow" ? "sheet" : "drawer",
+                    overlayClassName:
+                        layout === "narrow" ? undefined : styles.detailOverlay,
+                    className:
                         layout === "narrow"
                             ? styles.detailSheet
-                            : styles.detailDrawer
-                    }
-                    onEscapeKeyDown={(event) => {
+                            : styles.detailDrawer,
+                    onEscapeKeyDown: (event) => {
                         if (
-                            document.activeElement instanceof
-                                HTMLInputElement &&
-                            document.activeElement.dataset
-                                .deviceNameInlineEditor === "true"
+                            document.activeElement instanceof HTMLInputElement &&
+                            document.activeElement.dataset.deviceNameInlineEditor === "true"
                         ) {
                             event.preventDefault();
                         }
-                    }}
-                    onCloseAutoFocus={(event) => {
+                    },
+                    onCloseAutoFocus: (event) => {
                         event.preventDefault();
                         const returnKey = detailReturnKey.current;
                         requestAnimationFrame(() => {
@@ -459,30 +462,16 @@ export function DevicesScreen() {
                                     "[data-device-selection-key]",
                                 ),
                             ]
-                                .find(
-                                    (element) =>
-                                        element.dataset.deviceSelectionKey ===
-                                        returnKey,
-                                )
+                                .find((element) => element.dataset.deviceSelectionKey === returnKey)
                                 ?.focus();
                         });
-                    }}
-                >
-                    <VisuallyHidden asChild>
-                        <DialogTitle>
-                            {detailTarget
-                                ? `${detailTarget.name} details`
-                                : "Device details"}
-                        </DialogTitle>
-                    </VisuallyHidden>
-                    <VisuallyHidden asChild>
-                        <DialogDescription>
-                            Device status, factual metadata, and available
-                            actions.
-                        </DialogDescription>
-                    </VisuallyHidden>
-                    {detail}
-                </DialogContent>
+                    },
+                }}
+                onOpenChange={(open) => {
+                    if (!open) closeDetail();
+                }}
+            >
+                {detail}
             </Dialog>
 
             <PairingLauncherDialog
