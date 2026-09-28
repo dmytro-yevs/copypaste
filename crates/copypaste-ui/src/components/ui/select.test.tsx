@@ -22,7 +22,7 @@ const catalog = {
 
 function CatalogProbe({ items, initial = [] }: { items: readonly SelectItem[]; initial?: string[] }) {
     const [values, setValues] = useState(initial);
-    return <Select mode="multiple" display="catalog" items={items} values={values} onValuesChange={setValues} catalog={{ ...catalog, selectedItems: values.map((value) => ({ value, label: value })) }} />;
+    return <TooltipProvider><Select mode="multiple" display="catalog" items={items} values={values} onValuesChange={setValues} catalog={{ ...catalog, selectedItems: values.map((value) => ({ value, label: value })) }} /></TooltipProvider>;
 }
 
 describe("Select", () => {
@@ -46,7 +46,7 @@ describe("Select", () => {
     it("keeps retry available after catalog failure and uses shared states", async () => {
         const user = userEvent.setup();
         const retry = vi.fn();
-        render(<Select mode="multiple" display="catalog" items={[]} values={["manual.unknown"]} onValuesChange={vi.fn()} catalog={{ ...catalog, failed: true, onRetry: retry, selectedItems: [{ value: "manual.unknown", label: "Manual entry" }] }} />);
+        render(<TooltipProvider><Select mode="multiple" display="catalog" items={[]} values={["manual.unknown"]} onValuesChange={vi.fn()} catalog={{ ...catalog, failed: true, onRetry: retry, selectedItems: [{ value: "manual.unknown", label: "Manual entry" }] }} /></TooltipProvider>);
         expect(screen.getByRole("alert").textContent).toContain("Applications unavailable");
         expect(screen.getByText("Manual entry")).toBeTruthy();
         await user.click(screen.getByRole("button", { name: "Try again" }));
@@ -63,6 +63,30 @@ describe("Select", () => {
         await user.keyboard("{Enter}");
         expect(screen.getByRole("button", { name: "Remove app.two" })).toBeTruthy();
         expect(screen.getByRole("list", { name: "Installed applications" })).toBeTruthy();
+    });
+
+    it("skips disabled selected rows and keeps focus at the catalog boundary", async () => {
+        const user = userEvent.setup();
+        render(<CatalogProbe items={[{ value: "app.one", label: "One" }, { value: "app.two", label: "Two" }, { value: "app.three", label: "Three" }]} initial={["app.two"]} />);
+        const one = await screen.findByRole("button", { name: "One" });
+        expect(screen.getByRole("button", { name: "Two" }).hasAttribute("disabled")).toBe(true);
+        one.focus();
+        await user.keyboard("{ArrowDown}");
+        await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Three" })));
+        await user.keyboard("{ArrowDown}");
+        expect(document.activeElement).toBe(screen.getByRole("button", { name: "Three" }));
+        await user.keyboard("{ArrowUp}");
+        await waitFor(() => expect(document.activeElement).toBe(one));
+    });
+
+    it("forwards catalog accessibility and single value attributes", () => {
+        render(<TooltipProvider><Select mode="multiple" display="catalog" id="catalog-control" className="catalog-custom" aria-label="Excluded sources" aria-describedby="catalog-help" aria-invalid items={[]} values={[]} onValuesChange={vi.fn()} catalog={catalog} /><Select aria-label="Single" items={[{ value: "one", label: "One" }]} value="one" onValueChange={vi.fn()} /></TooltipProvider>);
+        const group = screen.getByRole("group", { name: "Excluded sources" });
+        expect(group.id).toBe("catalog-control");
+        expect(group.classList.contains("catalog-custom")).toBe(true);
+        expect(group.getAttribute("aria-describedby")).toBe("catalog-help");
+        expect(group.getAttribute("aria-invalid")).toBe("true");
+        expect(screen.getByRole("combobox", { name: "Single: One" }).getAttribute("data-value")).toBe("one");
     });
 
     it("closes after single selection and stays open after multiple selection", async () => {

@@ -110,7 +110,7 @@ function OptionContent({ item }: { item: SelectItem }) {
 
 function SelectTrigger({
     summary, icon, presentation, className, size, width, state, disabled, measure,
-    active, slot, kind, ...aria
+    active, slot, kind, dataValue, ...aria
 }: {
     summary: string;
     icon?: IconName;
@@ -124,6 +124,7 @@ function SelectTrigger({
     active?: boolean;
     slot: string;
     kind: "single" | "multiple";
+    dataValue?: string;
 } & Pick<SharedProps, "id" | "aria-label" | "aria-labelledby" | "aria-describedby" | "aria-invalid" | "aria-errormessage" | "aria-busy">) {
     const adornmentSize = size === "compact" || size === "sm" ? "compact" : "regular";
     return (
@@ -134,6 +135,7 @@ function SelectTrigger({
                         {...aria}
                         disabled={disabled}
                         data-slot={slot}
+                        data-value={dataValue}
                         data-presentation={presentation}
                         data-active-filter={active || undefined}
                         className={cn(controlSurfaceVariants({ size: size ?? "md", width: width ?? "content", state: disabled ? "disabled" : state }), styles.trigger, width === "fill" ? undefined : styles[measure ?? "auto"], className)}
@@ -171,7 +173,7 @@ function SingleSelect(props: SingleProps) {
     const accessibleLabel = `${purpose}: ${summary}`;
     return (
         <SelectPrimitive.Root value={value} onValueChange={onValueChange} disabled={disabled}>
-            <SelectTrigger {...triggerAccessibility(props)} aria-label={accessibleLabel} summary={summary} icon={leadingIcon ?? selected?.icon} presentation={presentation} className={className} active={active} disabled={disabled} size={size} width={width} state={state} measure={measure} slot="select-trigger" kind="single" />
+            <SelectTrigger {...triggerAccessibility(props)} aria-label={accessibleLabel} summary={summary} icon={leadingIcon ?? selected?.icon} presentation={presentation} className={className} active={active} disabled={disabled} size={size} width={width} state={state} measure={measure} slot="select-trigger" kind="single" dataValue={value} />
             <SelectPrimitive.Portal>
                 <SelectPrimitive.Content position="popper" sideOffset={8} collisionPadding={8} className={styles.content}>
                     <SelectPrimitive.Viewport className={styles.viewport}>
@@ -188,7 +190,7 @@ function SingleSelect(props: SingleProps) {
     );
 }
 
-function CatalogSelect({ items, values, onValuesChange, catalog, disabled }: CatalogMultipleProps) {
+function CatalogSelect({ items, values, onValuesChange, catalog, disabled, id, className, ...props }: CatalogMultipleProps) {
     const [query, setQuery] = useState("");
     const deferredQuery = useDeferredValue(query);
     const searchId = useId();
@@ -207,16 +209,32 @@ function CatalogSelect({ items, values, onValuesChange, catalog, disabled }: Cat
         const index = Number((event.target as HTMLElement).closest<HTMLElement>("[data-index]")?.dataset.index ?? -1);
         if (index < 0) return;
         event.preventDefault();
-        const next = Math.max(0, Math.min(visible.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)));
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        let next = index + direction;
+        while (next >= 0 && next < visible.length && catalog.disableSelectedOptions && selected.has(visible[next].value)) {
+            next += direction;
+        }
+        if (next < 0 || next >= visible.length) return;
         virtualizer.scrollToIndex(next);
-        requestAnimationFrame(() => scrollRef.current?.querySelector<HTMLElement>(`[data-index="${next}"] button`)?.focus());
+        requestAnimationFrame(() => scrollRef.current?.querySelector<HTMLElement>(`[data-index="${next}"] [data-slot="button"]`)?.focus());
     };
     return (
-        <div className={styles.catalog}>
+        <div
+            id={id}
+            role="group"
+            aria-label={props["aria-label"]}
+            aria-labelledby={props["aria-labelledby"]}
+            aria-describedby={props["aria-describedby"]}
+            aria-invalid={props["aria-invalid"]}
+            aria-errormessage={props["aria-errormessage"]}
+            aria-busy={props["aria-busy"] || catalog.loading || catalog.refreshing || undefined}
+            aria-disabled={disabled || undefined}
+            className={cn(styles.catalog, className)}
+        >
             <div className={styles.catalogToolbar}>
                 <label className={styles.visuallyHidden} htmlFor={searchId}>{catalog.searchLabel}</label>
                 <Input id={searchId} size="sm" value={query} disabled={disabled} aria-label={catalog.searchLabel} placeholder={catalog.searchLabel} onChange={(event) => setQuery(event.target.value)} />
-                <Button type="button" variant="ghost" size="compactIcon" disabled={disabled || catalog.refreshing} aria-label={catalog.refreshLabel} onClick={catalog.onRetry}><Icon name="refresh" aria-hidden="true" /></Button>
+                <Button type="button" variant="ghost" size="compactIcon" icon="refresh" label={catalog.refreshLabel} disabled={disabled || catalog.refreshing} onClick={catalog.onRetry} />
             </div>
             <div ref={scrollRef} className={styles.catalogList} aria-busy={catalog.loading || catalog.refreshing || undefined} onKeyDown={onListKeyDown}>
                 {catalog.loading ? <StateView mode="loading" placement="panel" className={styles.catalogState} title={catalog.loadingLabel} />
@@ -228,12 +246,12 @@ function CatalogSelect({ items, values, onValuesChange, catalog, disabled }: Cat
                         if (!item) return null;
                         const checked = selected.has(item.value);
                         return <div key={row.key} ref={virtualizer.measureElement} data-index={row.index} role="listitem" className={styles.catalogRow} style={{ transform: `translateY(${row.start}px)` }}>
-                            <button type="button" className={styles.catalogOption} aria-pressed={checked} disabled={disabled || (checked && catalog.disableSelectedOptions)} onClick={() => choose(item.value)}><OptionContent item={item} /><Icon name={checked ? "check" : "plus"} size="sm" className={styles.optionAction} aria-hidden="true" /></button>
+                            <Button type="button" variant="ghost" size="sm" className={styles.catalogOption} aria-pressed={checked} disabled={disabled || (checked && catalog.disableSelectedOptions)} onClick={() => choose(item.value)}><OptionContent item={item} /><Icon name={checked ? "check" : "plus"} size="sm" className={styles.optionAction} aria-hidden="true" /></Button>
                         </div>;
                     })}
                 </div>}
             </div>
-            {selectedItems.length > 0 && <ul className={styles.selectedList}>{selectedItems.map((item) => <li key={item.value} className={styles.selectedItem}><OptionContent item={item} /><button type="button" className={styles.removeButton} disabled={disabled} aria-label={catalog.removeLabel(item.value)} onClick={() => choose(item.value)}><Icon name="trash" size="sm" aria-hidden="true" /></button></li>)}</ul>}
+            {selectedItems.length > 0 && <ul className={styles.selectedList}>{selectedItems.map((item) => <li key={item.value} className={styles.selectedItem}><OptionContent item={item} /><Button type="button" variant="ghost" size="icon" icon="trash" label={catalog.removeLabel(item.value)} className={styles.removeButton} disabled={disabled} onClick={() => choose(item.value)} /></li>)}</ul>}
         </div>
     );
 }
