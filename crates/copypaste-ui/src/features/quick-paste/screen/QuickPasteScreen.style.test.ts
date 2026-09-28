@@ -10,12 +10,16 @@ const previewStyles = readFileSync(
   resolve(process.cwd(), "src/features/quick-paste/components/QuickPastePreview.module.css"),
   "utf8",
 );
+const sizes = JSON.parse(readFileSync(resolve(process.cwd(), "../../design/tokens/size.json"), "utf8")).size;
+const nativeWindow = readFileSync(resolve(process.cwd(), "src-tauri/src/shell/window.rs"), "utf8");
 
 describe("Quick Paste preview layout", () => {
   it("keeps the 403px list pane fixed while the preview owns its transparent gap", () => {
     expect(styles).toMatch(/\.frame \{[^}]*display: flex;[^}]*background: transparent;/);
     expect(styles.match(/\.frame \{[^}]*gap:/)).toBeNull();
-    expect(styles).toMatch(/\.root \{[^}]*inline-size: 403px;[^}]*flex: none;/);
+    expect(styles).toMatch(/\.root \{[^}]*inline-size: var\(--quick-paste-pane-width\);[^}]*flex: none;/);
+    expect(sizes["quick-paste-pane-width"].$value).toBe("403px");
+    expect(nativeWindow).toContain("const QUICK_PASTE_WIDTH: f64 = 403.0;");
   });
 
   it("places the preview before the list only when native selects the left side", () => {
@@ -24,7 +28,7 @@ describe("Quick Paste preview layout", () => {
   });
 
   it("keeps the native 403px plus 320px allocation inside the outer window", () => {
-    const listWidth = 403;
+    const listWidth = Number.parseFloat(sizes["quick-paste-pane-width"].$value);
     const nativePreviewWidth = 320;
     const gap = 8;
 
