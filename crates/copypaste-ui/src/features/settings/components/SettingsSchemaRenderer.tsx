@@ -3,7 +3,6 @@ import { useEffect, useId, useRef } from "react";
 import { SettingsRow } from "@/components/shared";
 import { StateView } from "@/components/shared/StateView";
 import { Button, Input, Select, Slider, Switch } from "@/components/ui";
-import { Icon } from "@/components/ui/icon";
 import { SettingsGroupSurface } from "@/features/settings/components/SettingsGroupSurface";
 import type { SettingsField, SettingsGroupSchema } from "@/features/settings/model/settingsFieldSchema";
 import { useTranslation } from "@/i18n";
@@ -47,8 +46,9 @@ export function SettingsSchemaField({ field }: { readonly field: SettingsField }
     case "multi-choice": control = <Select mode="multiple" aria-label={title} aria-describedby={describedBy} values={field.value} items={field.options} disabled={field.disabled} allLabel={title} onValuesChange={field.onChange} />; break;
     case "text": control = <Input size="sm" aria-label={title} aria-describedby={describedBy} value={field.value} disabled={field.disabled} placeholder={field.placeholder} onChange={(event) => field.onChange(event.currentTarget.value)} />; break;
     case "number": control = <div className={styles.numberControl}><output className={styles.numberValue}>{field.displayValue ?? field.value.toLocaleString()}</output><Slider className={styles.numberSlider} aria-label={title} aria-describedby={describedBy} value={[field.value]} min={field.min} max={field.max} step={field.step ?? 1} disabled={field.disabled} onValueChange={([value]) => { if (value !== undefined) field.onChange(value); }} /></div>; break;
-    case "readonly": case "status": control = field.value; break;
-    case "action": control = <>{field.href ? <Button asChild size="sm" variant={field.variant ?? "secondary"} tone={field.tone}><a href={field.href} target="_blank" rel="noreferrer" aria-describedby={describedBy}>{field.icon ? <Icon name={field.icon} aria-hidden="true" /> : null}{field.label}</a></Button> : <Button type="button" size="sm" variant={field.variant ?? "secondary"} tone={field.tone} disabled={field.disabled} aria-describedby={describedBy} aria-busy={field.busy || undefined} onClick={field.onAction}>{field.icon ? <Icon name={field.icon} aria-hidden="true" /> : null}{field.label}</Button>}{field.extraActions}</>; break;
+    case "readonly": control = field.value; break;
+    case "status": control = <StateView mode={field.mode ?? (field.busy ? "loading" : "info")} placement="control" title={field.value} description={field.description} actions={field.actions} />; break;
+    case "action": control = <>{field.href ? <Button asChild size="sm" variant={field.variant ?? "secondary"} tone={field.tone} icon={field.icon}><a href={field.href} target="_blank" rel="noreferrer" aria-describedby={describedBy}>{field.label}</a></Button> : <Button type="button" size="sm" variant={field.variant ?? "secondary"} tone={field.tone} icon={field.icon} disabled={field.disabled} aria-describedby={describedBy} pending={field.busy} onClick={field.onAction}>{field.label}</Button>}{field.extraActions}</>; break;
     case "custom": control = field.content; break;
   }
   const note = invalid && field.kind === "choice" ? <><StateView id={errorId} mode="error" placement="control" title={field.validation?.message} />{field.note === undefined ? null : <span id={noteId}>{field.note}</span>}</> : field.note === undefined ? undefined : <span id={noteId}>{field.note}</span>;
