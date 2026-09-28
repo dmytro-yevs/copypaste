@@ -1,14 +1,8 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Icon } from "@/components/ui/icon";
-import { ActionButton, FieldFeedback } from "@/components/shared";
+import { FieldFeedback } from "@/components/shared";
 import {
   Button,
   Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
   Input,
   Label,
   VisuallyHidden,
@@ -105,7 +99,7 @@ export function DeviceNameField({
     ) : (
       <span className={styles.inlineTitle}>
         <h2>{displayedName}</h2>
-        <ActionButton
+        <Button
           ref={triggerRef}
           id={triggerId}
           type="button"
@@ -113,7 +107,7 @@ export function DeviceNameField({
           variant="ghost"
           icon="pencil"
           aria-label={t("devices.own.rename.open")}
-          title={t("devices.own.rename.open")}
+          tooltip={t("devices.own.rename.open")}
           disabled={disabled}
           onClick={() => { rename.reset(); setName(current); setOpen(true); }}
         />
@@ -125,44 +119,68 @@ export function DeviceNameField({
     <div className={showCurrentName ? styles.currentName : undefined}>
       <Dialog
         open={open}
+        title={t("devices.own.rename.title")}
+        description={t("devices.own.rename.description")}
+        trigger={(
+          <Button
+            ref={triggerRef}
+            id={triggerId}
+            type="button"
+            size={showCurrentName ? "sm" : "icon"}
+            variant={showCurrentName ? "secondary" : "ghost"}
+            icon="pencil"
+            aria-label={t("devices.own.rename.open")}
+            aria-describedby={descriptionId}
+            tooltip={t("devices.own.rename.open")}
+            disabled={disabled}
+            pending={rename.isPending}
+            onClick={() => {
+              rename.reset();
+              setOpen(true);
+            }}
+          >
+            {showCurrentName ? <span className={styles.currentNameValue}>{displayedName}</span> : null}
+            {showCurrentName ? "Rename" : null}
+          </Button>
+        )}
+        contentProps={{
+          onCloseAutoFocus: (event) => {
+            event.preventDefault();
+            focusTrigger();
+          },
+        }}
+        footer={(
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={rename.isPending}
+              onClick={() => {
+                setName(current);
+                setOpen(false);
+              }}
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              type="submit"
+              form={`${inputId}-form`}
+              disabled={disabled || unchanged}
+              pending={rename.isPending}
+            >
+              {rename.isPending
+                ? t("devices.own.rename.saving")
+                : t("devices.own.rename.action")}
+            </Button>
+          </>
+        )}
         onOpenChange={(nextOpen) => {
           if (rename.isPending) return;
           setOpen(nextOpen);
         }}
       >
-        <ActionButton
-          ref={triggerRef}
-          id={triggerId}
-          type="button"
-          size={showCurrentName ? "sm" : "icon"}
-          variant={showCurrentName ? "secondary" : "ghost"}
-          icon="pencil"
-          aria-label={t("devices.own.rename.open")}
-          aria-describedby={descriptionId}
-          title={t("devices.own.rename.open")}
-          disabled={disabled}
-          aria-busy={rename.isPending || undefined}
-          onClick={() => {
-            rename.reset();
-            setOpen(true);
-          }}
-        >
-          {showCurrentName ? <span className={styles.currentNameValue}>{displayedName}</span> : null}
-          {showCurrentName ? "Rename" : null}
-        </ActionButton>
-        <DialogContent
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            focusTrigger();
-          }}
-        >
-        <DialogHeader>
-          <DialogTitle>{t("devices.own.rename.title")}</DialogTitle>
-          <DialogDescription>
-            {t("devices.own.rename.description")}
-          </DialogDescription>
-        </DialogHeader>
         <form
+          id={`${inputId}-form`}
           className={styles.form}
           onSubmit={(event) => {
             event.preventDefault();
@@ -194,41 +212,10 @@ export function DeviceNameField({
               </FieldFeedback>
             ) : null}
           </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              disabled={rename.isPending}
-              onClick={() => {
-                setName(current);
-                setOpen(false);
-              }}
-            >
-              {t("common.cancel")}
-            </Button>
-            <Button
-              type="submit"
-              disabled={disabled || unchanged}
-              aria-busy={rename.isPending || undefined}
-            >
-              {rename.isPending ? (
-                <>
-                  <Icon name="spinner"
-                    className={styles.spinner}
-                    aria-hidden="true"
-                  />
-                  {t("devices.own.rename.saving")}
-                </>
-              ) : (
-                t("devices.own.rename.action")
-              )}
-            </Button>
-          </DialogFooter>
           <VisuallyHidden role="status" aria-live="polite">
             {rename.isPending ? t("devices.own.rename.saving") : ""}
           </VisuallyHidden>
         </form>
-        </DialogContent>
       </Dialog>
     </div>
   );

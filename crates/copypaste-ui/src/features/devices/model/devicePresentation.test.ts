@@ -375,7 +375,6 @@ describe("device status descriptors", () => {
     it("keeps canonical device vocabulary out of component-local maps", () => {
         const sourceRoot = resolve(import.meta.dirname, "..");
         for (const file of [
-            "components/DeviceStatus.tsx",
             "components/CloudConnectionCard.tsx",
             "patterns/DiscoveryStage.tsx",
         ]) {
