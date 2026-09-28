@@ -26,6 +26,7 @@
 .card[data-selected="true"] { border-color: var(--selected-edge); background: var(--selected); box-shadow: var(--sh-focus); }
 .card:active { background: var(--selected); }
 .card:focus-visible { outline: 0; box-shadow: var(--sh-focus); }
+.card[data-appearance="discovery"] { overflow: hidden; }
 
 .identityWell {
   display: grid;
@@ -46,6 +47,9 @@
 .separator { flex: none; color: var(--dim); }
 .status { min-inline-size: 0; }
 .chevron { margin-inline-start: auto; flex: none; color: var(--dim); }
+.card[data-appearance="discovery"] .copy { display: block; }
+.card[data-appearance="discovery"] .detailLine { white-space: nowrap; }
+.card[data-appearance="discovery"] .chevron { color: var(--dim); }
 @media (pointer: coarse) { .card { min-block-size: calc(var(--tap-min) + var(--s-6)); } }
 @media (prefers-reduced-motion: reduce) { .card { transition: none; } }
 

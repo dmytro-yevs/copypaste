@@ -5,17 +5,10 @@ import { useEffect, useState } from "react";
 
 import {
   AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  Button,
   Checkbox,
   Label,
 } from "@/components/ui";
-import { InlineNotice } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 import { useTranslation } from "@/i18n";
 import { toFriendly } from "@/lib/errors";
 import type { PeerInfo } from "@/lib/ipc";
@@ -46,15 +39,22 @@ export function RevokeDialog({
   const name = peer?.name ?? t("devices.peer.thisDevice");
 
   return (
-    <AlertDialog open={peer !== null} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle className={styles.dialogTitle}>
-            {t("devices.revoke.title", { name })}
-          </AlertDialogTitle>
-          <AlertDialogDescription>{t("devices.revoke.body")}</AlertDialogDescription>
-        </AlertDialogHeader>
-
+    <AlertDialog
+      open={peer !== null}
+      onOpenChange={onOpenChange}
+      title={<span className={styles.dialogTitle}>{t("devices.revoke.title", { name })}</span>}
+      description={t("devices.revoke.body")}
+      cancel={{ label: t("common.cancel"), disabled: pending }}
+      action={{
+        label: pending ? t("devices.revoke.pending") : t("devices.revoke.action"),
+        variant: "danger",
+        disabled: !acknowledged || pending,
+        pending,
+        onClick: () => {
+          if (peer) void onConfirm(peer);
+        },
+      }}
+    >
         <ul className={styles.consequences}>
           <li>{t("devices.revoke.lostCode")}</li>
           <li>{t("devices.revoke.lostOneSided", { name })}</li>
@@ -73,25 +73,13 @@ export function RevokeDialog({
           </Label>
         </div>
         {error !== null ? (
-          <InlineNotice tone="danger" role="alert">
-            {t("devices.revoke.failed", { error: toFriendly(error) })}
-          </InlineNotice>
+          <StateView
+            mode="error"
+            placement="inline"
+            description={t("devices.revoke.failed", { error: toFriendly(error) })}
+          />
         ) : null}
 
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>{t("common.cancel")}</AlertDialogCancel>
-          <Button
-            disabled={!acknowledged || pending}
-            variant="danger"
-            state={pending ? "loading" : "normal"}
-            onClick={() => {
-              if (peer) void onConfirm(peer);
-            }}
-          >
-            {pending ? t("devices.revoke.pending") : t("devices.revoke.action")}
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
     </AlertDialog>
   );
 }

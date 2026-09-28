@@ -9,10 +9,6 @@ import { useTranslation } from "react-i18next";
 import {
     Button,
     Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
     Icon,
 } from "@/components/ui";
 import { FieldFeedback } from "@/components/shared";
@@ -137,18 +133,19 @@ export function PairingLauncherDialog({
             : t("devices.pairing.previewUnavailable");
 
     return (
-        <Dialog open={open} onOpenChange={close}>
-            <DialogContent
-                onCloseAutoFocus={(event) => {
+        <Dialog
+            open={open}
+            onOpenChange={close}
+            title={title}
+            description={description}
+            contentProps={{
+                onCloseAutoFocus: (event) => {
                     if (!returnFocusRef?.current) return;
                     event.preventDefault();
                     returnFocusRef.current.focus();
-                }}
-            >
-                <DialogHeader>
-                    <DialogTitle>{title}</DialogTitle>
-                    <DialogDescription>{description}</DialogDescription>
-                </DialogHeader>
+                },
+            }}
+        >
 
                 {available && flow === "choices" ? (
                     <div className={styles.choices}>
@@ -269,7 +266,6 @@ export function PairingLauncherDialog({
                         )}
                     </div>
                 ) : null}
-            </DialogContent>
         </Dialog>
     );
 }
