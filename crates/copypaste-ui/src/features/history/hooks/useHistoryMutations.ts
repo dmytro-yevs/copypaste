@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 import { t } from "@/i18n";
 import { clipboardCopyPresentation } from "@/features/history/model/clipPresentation";

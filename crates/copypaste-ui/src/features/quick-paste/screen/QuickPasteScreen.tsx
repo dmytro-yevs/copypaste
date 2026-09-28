@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/notify";
 
 import { Screen, ScrollViewport } from "@/components/layout";
 import { SearchField } from "@/components/shared";

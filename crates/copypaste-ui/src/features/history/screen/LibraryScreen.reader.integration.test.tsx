@@ -29,7 +29,7 @@ const toast = vi.hoisted(() => ({
     warning: vi.fn(),
 }));
 
-vi.mock("sonner", () => ({ toast }));
+vi.mock("@/lib/notify", () => ({ toast }));
 
 vi.mock("@/hooks/useViewportMetrics", async (load) => ({
     ...(await load<typeof import("@/hooks/useViewportMetrics")>()),
