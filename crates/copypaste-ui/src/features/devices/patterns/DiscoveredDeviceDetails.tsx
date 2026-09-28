@@ -4,9 +4,10 @@ import {
     MetadataRow,
     MetadataValue,
 } from "@/components/shared";
-import { DeviceStatus } from "@/features/devices/components/DeviceStatus";
+import { StateView } from "@/components/shared/StateView";
 import {
     discoveredDeviceDetails,
+    deviceStatusMode,
     type DeviceStatusPresentation,
 } from "@/features/devices/model";
 import { t } from "@/i18n";
@@ -31,7 +32,17 @@ export function DiscoveredDeviceDetails({
                         {group.includesStatus ? (
                             <MetadataRow>
                                 <MetadataLabel>{t("devices.detail.status")}</MetadataLabel>
-                                <MetadataValue><DeviceStatus status={status} /></MetadataValue>
+                                <MetadataValue>
+                                    <StateView
+                                        mode={deviceStatusMode(status)}
+                                        placement="control"
+                                        title={status.label}
+                                        icon={status.icon}
+                                        role={status.a11y.role ?? "presentation"}
+                                        aria-live={status.a11y.live}
+                                        aria-busy={status.busy || undefined}
+                                    />
+                                </MetadataValue>
                             </MetadataRow>
                         ) : null}
                         {group.rows.map(([term, value]) => (

@@ -34,6 +34,19 @@ export type {
     DeviceStatusPresentation,
     DeviceStatusTone,
 };
+
+export type DeviceStatusMode = "loading" | "success" | "warning" | "error" | "info";
+
+export function deviceStatusMode(status: DeviceStatusPresentation): DeviceStatusMode {
+    if (status.busy) return "loading";
+    switch (status.tone) {
+        case "ready": return "success";
+        case "attention": return "warning";
+        case "danger": return "error";
+        case "busy": return "loading";
+        case "neutral": return "info";
+    }
+}
 export { connectionSummary };
 export type { ConnectionSummaryPresentation } from "./connection";
 

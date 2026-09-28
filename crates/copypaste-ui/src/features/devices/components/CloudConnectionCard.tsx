@@ -1,6 +1,6 @@
-import { SkeletonText, StatusCard, type StatusCardStatus } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 
-import { Button, Icon } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { cloudConnectionPresentation } from "@/features/devices/model";
 import type { CloudStatusData } from "@/lib/ipc";
 
@@ -17,30 +17,38 @@ export function CloudConnectionCard({
 }) {
     const presentation = cloudConnectionPresentation(status, failed, loading);
     return (
-        <StatusCard
-            status={statusOf(presentation.state)}
+        <StateView
+            mode={cloudStateMode(presentation.state)}
+            placement="panel"
             title={presentation.title}
-            detail={presentation.state === "checking"
-                ? <SkeletonText width="md" />
-                : presentation.detail}
+            description={presentation.detail}
             icon={presentation.icon}
-            variant="prominent"
             role={presentation.role}
-            live={presentation.live}
+            aria-live={presentation.live}
             aria-label={presentation.title}
-            busy={presentation.busy}
-            action={
-                <Button type="button" variant="secondary" size="sm" onClick={onManage}>
-                    <Icon name={presentation.action.icon} size="sm" aria-hidden="true" />
-                    <span>{presentation.action.label}</span>
+            aria-busy={presentation.busy || undefined}
+            actions={
+                <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    icon={presentation.action.icon}
+                    onClick={onManage}
+                >
+                    {presentation.action.label}
                 </Button>
             }
         />
     );
 }
 
-function statusOf(state: ReturnType<typeof cloudConnectionPresentation>["state"]): StatusCardStatus {
-    if (state === "healthy") return "positive";
-    if (state === "attention" || state === "unavailable") return "danger";
-    return "neutral";
+function cloudStateMode(state: ReturnType<typeof cloudConnectionPresentation>["state"]) {
+    switch (state) {
+        case "checking": return "loading" as const;
+        case "unavailable": return "error" as const;
+        case "not-configured": return "offline" as const;
+        case "signed-out":
+        case "attention": return "warning" as const;
+        case "healthy": return "success" as const;
+    }
 }

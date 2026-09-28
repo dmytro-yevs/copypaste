@@ -1,12 +1,12 @@
-import { Icon } from "@/components/ui/icon";
 import type { ReactNode } from "react";
 
 import { Grid } from "@/components/layout";
+import { StateView } from "@/components/shared/StateView";
 import { Button } from "@/components/ui";
-import { DiscoveryDeviceCard } from "@/features/devices/components/DiscoveryDeviceCard";
 import { DeviceCard } from "@/features/devices/components/DeviceCard";
-import { DeviceCardSkeleton } from "@/features/devices/components/DeviceCardSkeleton";
 import {
+    discoveredDeviceIdentity,
+    discoveredStatus,
     ownDeviceStatus,
     peerStatus,
     peerIdentity,
@@ -76,6 +76,7 @@ export function DeviceRoster({
 }: DeviceRosterProps) {
     const { t } = useTranslation();
     const pairingsRemaining = Math.max(0, MAX_PAIRINGS - peers.length);
+    const ownStatus = ownDeviceStatus(false, own.failed, own.privateMode, own.status);
     const discoveryBusy = discoveryLoading || refreshingDiscovery;
     const discoveryState: DiscoveryStageState = discovered.length > 0
         ? "results"
@@ -114,47 +115,50 @@ export function DeviceRoster({
                 </div>
                 <Grid columns={1} gap="sm" className={styles.deviceGrid}>
                     {own.loading ? (
-                        <DeviceCardSkeleton
-                            label={t("devices.own.loading")}
-                            identity={own.identity}
-                            name={own.name}
-                            trustLabel={t("devices.detail.thisDevice")}
+                        <StateView
+                            mode="loading"
+                            placement="inline"
+                            title={t("devices.own.loading")}
+                            aria-label={t("devices.own.loading")}
                         />
                     ) : (
                         <DeviceCard
                             name={own.name}
                             identity={own.identity}
                             trustLabel={t("devices.detail.thisDevice")}
-                            status={ownDeviceStatus(
-                                false,
-                                own.failed,
-                                own.privateMode,
-                                own.status,
-                            )}
+                            status={ownStatus}
+                            ariaLabel={`${own.name}. ${t("devices.detail.thisDevice")}. ${ownStatus.label}.`}
                             selectionKey="own"
                             selected={selected === "own"}
                             onSelect={() => onSelect("own")}
                         />
                     )}
-                    {peers.map((peer) => (
-                        <DeviceCard
+                    {peers.map((peer) => {
+                        const status = peerStatus(
+                            peer,
+                            peerHealth[peer.pairing_id],
+                            syncAllPending || syncingPeerId === peer.pairing_id,
+                        );
+                        const trustLabel = t("devices.peer.nameUnverified");
+                        return <DeviceCard
                             key={peer.pairing_id}
                             name={peer.name}
                             identity={peerIdentity(peer)}
-                            trustLabel={t("devices.peer.nameUnverified")}
-                            status={peerStatus(
-                                peer,
-                                peerHealth[peer.pairing_id],
-                                syncAllPending ||
-                                    syncingPeerId === peer.pairing_id,
-                            )}
+                            trustLabel={trustLabel}
+                            status={status}
+                            ariaLabel={`${peer.name}. ${trustLabel}. ${status.label}.`}
                             selectionKey={`peer:${peer.pairing_id}`}
                             selected={selected === `peer:${peer.pairing_id}`}
                             onSelect={() => onSelect(`peer:${peer.pairing_id}`)}
-                        />
-                    ))}
+                        />;
+                    })}
                     {peersLoading && peers.length === 0 ? (
-                        <DeviceCardSkeleton label={t("devices.syncReadiness.peersLoading")} />
+                        <StateView
+                            mode="loading"
+                            placement="inline"
+                            title={t("devices.syncReadiness.peersLoading")}
+                            aria-label={t("devices.syncReadiness.peersLoading")}
+                        />
                     ) : null}
                 </Grid>
                 {!peersLoading && !peersFailed ? (
@@ -210,19 +214,16 @@ export function DeviceRoster({
                             variant="secondary"
                             disabled={discoveryBusy}
                             aria-busy={refreshingDiscovery || undefined}
+                            icon={
+                                discoveryState === "idle" ||
+                                discoveryState === "checking" ||
+                                refreshingDiscovery
+                                    ? "scan"
+                                    : "refresh"
+                            }
                             onClick={onRefreshDiscovery}
                             className={styles.discoveryAction}
                         >
-                            <Icon
-                                name={
-                                    discoveryState === "idle" ||
-                                    discoveryState === "checking" ||
-                                    refreshingDiscovery
-                                        ? "scan"
-                                        : "refresh"
-                                }
-                                aria-hidden="true"
-                            />
                             {discoveryActionLabel}
                         </Button>
                     </div>
@@ -234,9 +235,17 @@ export function DeviceRoster({
                 >
                     <Grid columns={1} gap="sm" className={styles.discoveryGrid}>
                         {discovered.map((device) => (
-                            <DiscoveryDeviceCard
+                            <DeviceCard
                                 key={device.discovery_id}
-                                device={device}
+                                name={device.name}
+                                identity={discoveredDeviceIdentity(device)}
+                                detail={t("devices.presentation.discoveryCard.subtitle")}
+                                appearance="discovery"
+                                ariaLabel={t("devices.presentation.discoveryCard.ariaLabel", {
+                                    name: device.name,
+                                    status: discoveredStatus(device).label,
+                                })}
+                                selectionKey={`discovered:${device.discovery_id}`}
                                 selected={
                                     selected ===
                                     `discovered:${device.discovery_id}`

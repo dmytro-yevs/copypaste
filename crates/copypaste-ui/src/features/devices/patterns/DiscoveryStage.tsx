@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { EmptyState, StatusCard } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 import {
     discoveryResultsPresentation,
     discoveryStagePresentation,
@@ -29,33 +29,16 @@ export function DiscoveryStage({
     const presentation = discoveryStagePresentation(state);
     const results = discoveryResultsPresentation(deviceCount);
 
-    if (state === "error") {
-        return (
-            <div className={styles.stage} data-state={state}>
-                <EmptyState
-                    compact
-                    fullWidth
-                    busy={presentation.busy}
-                    tone={presentation.tone}
-                    icon={presentation.icon ?? undefined}
-                    title={presentation.title}
-                    body={presentation.body}
-                />
-            </div>
-        );
-    }
-
     if (state !== "results") {
         return (
             <div className={styles.stage} data-state={state}>
-                <StatusCard
-                    status="neutral"
+                <StateView
+                    mode={state === "error" ? "error" : state === "checking" || state === "scanning" ? "loading" : "info"}
+                    placement="panel"
                     title={presentation.title}
-                    detail={presentation.body}
-                    icon={presentation.icon ?? "spinner"}
-                    variant="prominent"
-                    role={presentation.tone === "danger" ? "alert" : "status"}
-                    busy={presentation.busy}
+                    description={presentation.body}
+                    icon={presentation.icon ?? undefined}
+                    aria-busy={presentation.busy || undefined}
                 />
             </div>
         );
@@ -67,16 +50,16 @@ export function DiscoveryStage({
             data-state={state}
             aria-busy={refreshing || undefined}
         >
-            <StatusCard
-                status="neutral"
+            <StateView
+                mode={refreshing ? "loading" : "info"}
+                placement="panel"
                 title={results.label}
-                detail={refreshing ? t("devices.discovered.refreshing") : results.detail}
+                description={refreshing ? t("devices.discovered.refreshing") : results.detail}
                 icon={refreshing ? "spinner" : "devices"}
-                variant="prominent"
                 role="status"
-                live="polite"
-                atomic
-                busy={refreshing}
+                aria-live="polite"
+                aria-atomic="true"
+                aria-busy={refreshing || undefined}
             />
             <div className={styles.results}>{children}</div>
         </div>

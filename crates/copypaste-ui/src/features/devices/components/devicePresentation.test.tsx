@@ -3,11 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ConnectionSummary } from "./ConnectionSummary";
 import { DeviceCard } from "./DeviceCard";
-import { DeviceStatus } from "./DeviceStatus";
 import { CloudConnectionCard } from "./CloudConnectionCard";
+import { StateView } from "@/components/shared/StateView";
 import {
     UNKNOWN_DEVICE_IDENTITY,
     connectionSummary,
+    deviceStatusMode,
     peerStatus,
 } from "@/features/devices/model/devicePresentation";
 import type { PeerInfo } from "@/lib/ipc";
@@ -23,11 +24,19 @@ const PEER: PeerInfo = {
 describe("device presentation components", () => {
   it("renders descriptor tone, label, busy, and decorative icon facts", () => {
     const status = peerStatus(PEER, undefined, true);
-    const { container } = render(<DeviceStatus status={status} />);
-    const rendered = container.querySelector('[data-slot="device-status"]');
+    const { container } = render(
+      <StateView
+        mode={deviceStatusMode(status)}
+        placement="control"
+        title={status.label}
+        icon={status.icon}
+        role="presentation"
+        aria-busy={status.busy || undefined}
+      />,
+    );
+    const rendered = container.querySelector('[data-mode="loading"]');
 
-    expect(rendered?.getAttribute("data-tone")).toBe("busy");
-    expect(rendered?.getAttribute("role")).toBeNull();
+    expect(rendered?.getAttribute("role")).toBe("presentation");
     expect(rendered?.getAttribute("aria-busy")).toBe("true");
     expect(rendered?.textContent).toContain("Syncing");
     expect(rendered?.querySelector('[aria-hidden="true"]')).not.toBeNull();
@@ -38,7 +47,7 @@ describe("device presentation components", () => {
 
     const card = screen.getByRole("status");
     expect(card.getAttribute("aria-live")).toBe("polite");
-    expect(card.getAttribute("data-variant")).toBe("prominent");
+    expect(card.getAttribute("data-mode")).toBe("error");
     expect(screen.getByText("Encrypted cloud")).toBeTruthy();
     expect(screen.getByText("Cloud status is unavailable.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Manage" })).toBeTruthy();
@@ -54,14 +63,13 @@ describe("device presentation components", () => {
 
   it("uses semantic status a11y only when the descriptor requests an announcement", () => {
     render(
-      <DeviceStatus
-        status={{
-          icon: "alert",
-          label: "Needs attention",
-          tone: "attention",
-          busy: false,
-          a11y: { role: "status", live: "polite" },
-        }}
+      <StateView
+        mode="warning"
+        placement="control"
+        title="Needs attention"
+        icon="alert"
+        role="status"
+        aria-live="polite"
       />,
     );
 
@@ -98,7 +106,7 @@ describe("device presentation components", () => {
     );
 
     const card = screen.getByRole("status");
-    expect(card.getAttribute("data-status")).toBe("attention");
+    expect(card.getAttribute("data-mode")).toBe("warning");
     expect(card.getAttribute("aria-live")).toBe("polite");
     expect(card.textContent).toContain("Sync with Studio Mac failed");
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
@@ -111,6 +119,7 @@ describe("device presentation components", () => {
         name={PEER.name}
         identity={UNKNOWN_DEVICE_IDENTITY}
         trustLabel="Unverified device name"
+        ariaLabel="Studio Mac. Unverified device name. Syncing."
         status={status}
         selectionKey="peer:peer-1"
         selected={false}
@@ -120,6 +129,30 @@ describe("device presentation components", () => {
 
     const card = screen.getByRole("button", { name: /Studio Mac\. Unverified device name\. Syncing\./ });
     expect(card.getAttribute("aria-busy")).toBe("true");
+  });
+
+  it("uses the paired card frame for discovery while preserving discovery copy and selection", () => {
+    const onSelect = vi.fn();
+    render(
+      <DeviceCard
+        name="Studio Mac"
+        identity={UNKNOWN_DEVICE_IDENTITY}
+        detail="Nearby · name unverified"
+        appearance="discovery"
+        ariaLabel="Studio Mac. Not paired."
+        selectionKey="discovered:nearby-1"
+        selected
+        onSelect={onSelect}
+      />,
+    );
+
+    const card = screen.getByRole("button", { name: "Studio Mac. Not paired." });
+    expect(card.getAttribute("data-appearance")).toBe("discovery");
+    expect(card.getAttribute("data-device-selection-key")).toBe("discovered:nearby-1");
+    expect(card.getAttribute("aria-expanded")).toBe("true");
+    expect(card.textContent).toContain("Nearby · name unverified");
+    expect(card.textContent).not.toContain("Not paired");
+    expect(screen.getAllByRole("button")).toHaveLength(1);
   });
 
 });

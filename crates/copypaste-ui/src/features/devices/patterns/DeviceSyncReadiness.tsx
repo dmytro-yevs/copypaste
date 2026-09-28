@@ -1,4 +1,4 @@
-import { StatusCard } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 import { Button } from "@/components/ui";
 import {
     syncReadinessIsLoading,
@@ -59,11 +59,12 @@ export function DeviceSyncReadinessNotice({
     const loading = syncReadinessIsLoading(readiness);
     const recovery = syncReadinessRecovery(readiness);
     return (
-        <StatusCard
-            status={loading ? "info" : readiness === "disabled" ? "off" : "attention"}
+        <StateView
+            mode={loading ? "loading" : readiness === "disabled" ? "offline" : "warning"}
+            placement="panel"
             title={syncReadinessMessage(readiness)}
-            busy={loading}
-            action={recovery === null ? undefined : (
+            aria-busy={loading || undefined}
+            actions={recovery === null ? undefined : (
                 <Button variant="secondary" size="sm" onClick={onRecover}>
                     {recovery === "enable-sync"
                         ? t("devices.syncReadiness.openSettings")

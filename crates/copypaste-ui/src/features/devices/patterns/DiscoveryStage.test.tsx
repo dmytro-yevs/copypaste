@@ -50,7 +50,7 @@ describe("DiscoveryStage", () => {
         );
     });
 
-    it("uses a compact busy state before the first discovery response", () => {
+    it("uses the shared loading state before the first discovery response", () => {
         render(
             <DiscoveryStage state="checking" deviceCount={0}>
                 <div>Not rendered</div>
@@ -58,11 +58,11 @@ describe("DiscoveryStage", () => {
         );
 
         expect(screen.getByRole("status").getAttribute("aria-busy")).toBe("true");
-        expect(screen.getByRole("status").getAttribute("data-variant")).toBe("prominent");
+        expect(screen.getByRole("status").getAttribute("data-mode")).toBe("loading");
         expect(screen.getByText("Checking nearby devices…")).toBeTruthy();
     });
 
-    it("uses the shared prominent card while no devices are visible", () => {
+    it("uses the shared info state while no devices are visible", () => {
         render(
             <DiscoveryStage state="idle" deviceCount={0}>
                 <div>Not rendered</div>
@@ -70,7 +70,7 @@ describe("DiscoveryStage", () => {
         );
 
         const card = screen.getByRole("status");
-        expect(card.getAttribute("data-variant")).toBe("prominent");
+        expect(card.getAttribute("data-mode")).toBe("info");
         expect(card.getAttribute("aria-busy")).toBeNull();
     });
 });

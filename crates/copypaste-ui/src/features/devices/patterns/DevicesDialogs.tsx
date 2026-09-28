@@ -1,14 +1,7 @@
 import {
   AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  Button,
 } from "@/components/ui";
-import { InlineNotice } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 import { RevokeDialog } from "@/features/devices/patterns/RevokeDialog";
 import { useTranslation } from "@/i18n";
 import { toFriendly } from "@/lib/errors";
@@ -45,39 +38,35 @@ export function DevicesDialogs({
     <>
       <AlertDialog
         open={unpairPeer !== null}
+        title={(
+          <span className={styles.dialogTitle}>
+            {t("devices.unpair.title", {
+              name: unpairPeer?.name ?? t("devices.peer.thisDevice"),
+            })}
+          </span>
+        )}
+        description={t("devices.unpair.body")}
+        cancel={{ label: t("common.cancel"), disabled: unpairPending }}
+        action={{
+          label: unpairPending ? t("devices.unpair.pending") : t("devices.unpair.action"),
+          variant: "danger",
+          pending: unpairPending,
+          onClick: () => {
+            if (unpairPeer) void onUnpair(unpairPeer);
+          },
+        }}
         onOpenChange={(open) => {
           if (!open && !unpairPending) onCloseUnpair();
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className={styles.dialogTitle}>
-              {t("devices.unpair.title", {
-                name: unpairPeer?.name ?? t("devices.peer.thisDevice"),
-              })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>{t("devices.unpair.body")}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <p className={styles.lost}>{t("devices.unpair.lost")}</p>
-          {unpairError !== null ? (
-            <InlineNotice tone="danger" role="alert">
-              {t("devices.unpair.failed", { error: toFriendly(unpairError) })}
-            </InlineNotice>
-          ) : null}
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={unpairPending}>{t("common.cancel")}</AlertDialogCancel>
-            <Button
-              disabled={unpairPending}
-              variant="danger"
-              state={unpairPending ? "loading" : "normal"}
-              onClick={() => {
-                if (unpairPeer) void onUnpair(unpairPeer);
-              }}
-            >
-              {unpairPending ? t("devices.unpair.pending") : t("devices.unpair.action")}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
+        <p className={styles.lost}>{t("devices.unpair.lost")}</p>
+        {unpairError !== null ? (
+          <StateView
+            mode="error"
+            placement="inline"
+            description={t("devices.unpair.failed", { error: toFriendly(unpairError) })}
+          />
+        ) : null}
       </AlertDialog>
 
       <RevokeDialog

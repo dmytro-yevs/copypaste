@@ -3,17 +3,17 @@ import { useId, type ReactNode } from "react";
 import { Icon } from "@/components/ui/icon";
 import { Button } from "@/components/ui";
 import {
-  ActionButton,
   FieldFeedback,
   MetadataLabel,
   MetadataList,
   MetadataRow,
   MetadataValue,
 } from "@/components/shared";
-import { DeviceKindIcon } from "@/features/devices/components/DeviceKindIcon";
-import { DeviceStatus } from "@/features/devices/components/DeviceStatus";
+import { StateView } from "@/components/shared/StateView";
 import {
   DEVICE_PLATFORM_LABELS,
+  deviceIconKind,
+  deviceStatusMode,
   type DevicePresentationIdentity,
   type DeviceStatusPresentation,
 } from "@/features/devices/model/devicePresentation";
@@ -107,9 +107,20 @@ export function DeviceDetailPane({
   const ownFallback = target.kind === "own" && target.loading
     ? t("devices.detail.checking")
     : t("devices.detail.notAvailable");
+  const targetStatusView = (
+    <StateView
+      mode={deviceStatusMode(target.status)}
+      placement="control"
+      title={target.status.label}
+      icon={target.status.icon}
+      role={target.status.a11y.role ?? "presentation"}
+      aria-live={target.status.a11y.live}
+      aria-busy={target.status.busy || undefined}
+    />
+  );
   const stats: ReadonlyArray<readonly [string, ReactNode]> = target.kind === "own"
     ? [
-        [t("devices.detail.status"), <DeviceStatus status={target.status} />],
+        [t("devices.detail.status"), targetStatusView],
         [t("devices.detail.platform"), platform],
         [t("devices.detail.listenAddress"), target.listenAddress ?? ownFallback],
         [t("devices.own.version"), target.version ?? ownFallback],
@@ -141,7 +152,7 @@ export function DeviceDetailPane({
       ]
     : target.kind === "peer"
       ? [
-          [t("devices.detail.status"), <DeviceStatus status={target.status} />],
+          [t("devices.detail.status"), targetStatusView],
           [t("devices.detail.platform"), t("devices.detail.peerPlatform")],
           [
             t("devices.peer.addressLabel"),
@@ -200,13 +211,13 @@ export function DeviceDetailPane({
       <header className={styles.detailHead}>
         <span>{t("devices.detail.heading")}</span>
         {onClose ? (
-          <ActionButton
+          <Button
             type="button"
             variant="ghost"
             size="icon"
             icon="close"
             aria-label={t("devices.detail.close")}
-            title={t("devices.detail.close")}
+            tooltip={t("devices.detail.close")}
             onClick={onClose}
           />
         ) : null}
@@ -216,7 +227,7 @@ export function DeviceDetailPane({
       <div className={styles.deviceHero}>
         <div className={styles.deviceHeroLayout}>
           <span className={styles.identityWell} aria-hidden="true">
-            <DeviceKindIcon identity={target.identity} />
+            <Icon name={deviceIconKind(target.identity)} size="md" />
           </span>
           <div className={styles.headingCopy}>
             {target.kind === "own" ? <DeviceNameField inlineTitle /> : <h2 className={styles.name}>{target.name}</h2>}
@@ -261,12 +272,12 @@ export function DeviceDetailPane({
             size="sm"
             disabled={syncing || unpairing || revoking || syncReadiness !== "ready"}
             aria-describedby={syncReadiness !== "ready" ? syncReasonId : undefined}
-            state={syncing ? "loading" : "normal"}
+            pending={syncing}
+            icon="refresh"
             onClick={() => {
               if (syncReadiness === "ready") onSync(target.peer);
             }}
           >
-            {!syncing ? <Icon name="refresh" aria-hidden="true" /> : null}
             {syncing
               ? t("devices.presentation.detail.syncing")
               : t("devices.presentation.detail.syncNow")}
@@ -284,10 +295,10 @@ export function DeviceDetailPane({
             tone="danger"
             size="sm"
             disabled={syncing || unpairing || revoking}
-            state={unpairing ? "loading" : "normal"}
+            pending={unpairing}
+            icon="close"
             onClick={() => onUnpair(target.peer)}
           >
-            {!unpairing ? <Icon name="close" aria-hidden="true" /> : null}
             {unpairing
               ? t("devices.presentation.detail.unpairing")
               : t("devices.presentation.detail.unpair")}
@@ -297,11 +308,11 @@ export function DeviceDetailPane({
             variant="danger"
             size="sm"
             disabled={syncing || unpairing || revoking}
-            state={revoking ? "loading" : "normal"}
+            pending={revoking}
+            icon="shieldX"
             onClick={() => onRevoke(target.peer)}
             className={styles.revoke}
           >
-            {!revoking ? <Icon name="shieldX" aria-hidden="true" /> : null}
             {revoking
               ? t("devices.presentation.detail.revoking")
               : t("devices.presentation.detail.revoke")}

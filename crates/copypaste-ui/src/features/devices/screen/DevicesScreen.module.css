@@ -25,6 +25,7 @@
 }
 
 .rosterPane { min-inline-size: 0; }
+.headerActions { display: flex; min-inline-size: 0; align-items: center; justify-content: flex-end; gap: var(--s-2); }
 .detailOverlay { background: var(--scrim); backdrop-filter: var(--scrim-blur); }
 .detailDrawer { display: flex; flex-direction: column; overflow: hidden; }
 .detailSheet { display: flex; inset-inline: var(--s-2); inset-block-end: var(--inset-bottom); block-size: 84dvh; max-block-size: 84dvh; padding: var(--s-4); padding-block-end: max(var(--s-4), env(safe-area-inset-bottom)); flex-direction: column; overflow: hidden; border-radius: var(--r-card) var(--r-card) 0 0; }
@@ -39,4 +40,6 @@
     margin-block-start: var(--s-4);
     margin-inline-start: 0;
   }
+
+  .headerActions { justify-content: flex-start; }
 }
