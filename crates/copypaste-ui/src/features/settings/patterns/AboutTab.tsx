@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { BrandMark } from "@/components/shared";
-import { StateView } from "@/components/shared/StateView";
+import { StateView, type StateMode } from "@/components/shared/StateView";
 import { AlertDialog, Badge } from "@/components/ui";
 import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
 import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
+import { settingsGroups } from "@/features/settings/model/settingsProjection";
+import type { SettingsField } from "@/features/settings/model/settingsFieldSchema";
 import { useUpdateSetting } from "@/features/settings/components/useUpdateSetting";
 import { capturePresentationOf } from "@/features/capture/model";
 import { useCaptureState } from "@/hooks/useCapture";
@@ -35,30 +37,25 @@ export function AboutTab() {
   const snapshot = capture.data;
   const desktopCapture = snapshot?.rung === "desktop";
   const capturePresentation = snapshot === undefined ? undefined : capturePresentationOf(snapshot.health);
-  const captureVariant = desktopCapture ? status.data?.capture_running ? "ok" : "warn" : capturePresentation?.tone === "positive" ? "ok" : capturePresentation?.tone === "danger" ? "error" : capturePresentation?.tone === "attention" ? "warn" : "info";
+  const captureMode: StateMode = desktopCapture ? status.data?.capture_running ? "success" : "warning" : capturePresentation?.tone === "positive" ? "success" : capturePresentation?.tone === "danger" ? "error" : capturePresentation?.tone === "attention" ? "warning" : "info";
   const captureLabel = desktopCapture ? t(status.data?.capture_running ? "settings.about.capture.running" : "settings.about.capture.paused") : snapshot?.headline;
 
+  const fields: SettingsField[] = [
+    { kind: "custom", definition: settingDefinition("about", "settings.about.app.title"), rowless: true, content: <div className={styles.identity}><BrandMark size="app" animated /><div className={styles.identityCopy}><strong>CopyPaste</strong><span>{t("settings.about.app.version", { version })}</span></div><span className={styles.tagline}>{t("settings.about.app.tagline")}</span></div> },
+    update.field,
+    { kind: "status", definition: settingDefinition("about", "settings.about.service.title"), value: status.error ? <StateView mode="error" placement="control" title={friendlyError(classifyError(status.error))} /> : status.data ? t("settings.about.service.version", { version: status.data.version }) : <StateView mode="loading" placement="control" title="Checking…" /> },
+    { kind: "status", definition: settingDefinition("about", "settings.about.capture.title"), value: capture.isError || (desktopCapture && status.isError) ? <StateView mode="warning" placement="control" title={t("settings.about.capture.unavailable")} /> : snapshot && (!desktopCapture || status.data) ? <StateView mode={captureMode} placement="control" title={<>{captureLabel}{!desktopCapture && snapshot.health.state !== "working" ? ` ${t("settings.about.capture.manualAvailable")}` : ""}</>} /> : <StateView mode="loading" placement="control" title={t("settings.about.capture.loading")} aria-label={t("settings.about.capture.loading")} /> },
+    { kind: "readonly", definition: settingDefinition("about", "settings.about.backend.title"), value: status.data ? <Badge variant={backendIsReal ? "secondary" : "warn"} className={styles.valueBadge}>{status.data.clipboard_backend}</Badge> : <StateView mode="loading" placement="control" title="Checking…" /> },
+    { kind: "readonly", definition: settingDefinition("about", "settings.about.protocol.title"), value: status.data ? <Badge variant={mismatch ? "error" : "secondary"} className={styles.valueBadge}>{t("settings.about.protocol.value", { version: status.data.protocol_version })}{mismatch ? ` ${t("settings.about.protocol.mismatch", { version: CURRENT_PROTOCOL_VERSION })}` : ""}</Badge> : <StateView mode="loading" placement="control" title="Checking…" /> },
+    { kind: "readonly", definition: settingDefinition("about", "settings.about.items.title"), value: status.data ? <span className={styles.numeric}>{status.data.item_count.toLocaleString()}</span> : <StateView mode="loading" placement="control" title="Checking…" /> },
+    { kind: "action", definition: settingDefinition("about", "settings.about.links.repository"), label: t("settings.about.links.repository"), href: PRODUCT_REPOSITORY_URL },
+    { kind: "action", definition: settingDefinition("about", "settings.about.links.releases"), label: t("settings.about.links.releases"), href: PRODUCT_RELEASES_URL },
+    { kind: "action", definition: settingDefinition("about", "onboarding.settings.title"), label: t("onboarding.settings.action"), onAction: openOnboarding },
+    { kind: "action", definition: settingDefinition("about", "settings.about.reset.title"), label: t("settings.about.reset.action"), tone: "danger", onAction: () => setResetOpen(true) },
+  ];
+
   return <div className={styles.root}><div className={styles.layout}>
-    <div className={styles.identity} data-settings-search-target={`row:${t("settings.about.app.title")}`}><BrandMark size="app" animated /><div className={styles.identityCopy}><strong>CopyPaste</strong><span>{t("settings.about.app.version", { version })}</span></div><span className={styles.tagline}>{t("settings.about.app.tagline")}</span></div>
-    <SettingsSchemaRenderer groups={[{ id: "updates", fields: [update.field] }]} />
-    <SettingsSchemaRenderer groups={[{
-      id: "runtime", title: t("settings.about.runtime.title"), fields: [
-        { kind: "status", definition: settingDefinition("about", "settings.about.service.title"), value: status.error ? <StateView mode="error" placement="control" title={friendlyError(classifyError(status.error))} /> : status.data ? t("settings.about.service.version", { version: status.data.version }) : <StateView mode="loading" placement="control" title="Checking…" /> },
-        { kind: "status", definition: settingDefinition("about", "settings.about.capture.title"), value: capture.isError || (desktopCapture && status.isError) ? <Badge variant="warn">{t("settings.about.capture.unavailable")}</Badge> : snapshot && (!desktopCapture || status.data) ? <Badge variant={captureVariant} className={styles.valueBadge}>{captureLabel}{!desktopCapture && snapshot.health.state !== "working" ? ` ${t("settings.about.capture.manualAvailable")}` : ""}</Badge> : <Badge variant="secondary" role="status" aria-label={t("settings.about.capture.loading")}>{t("settings.about.capture.loading")}</Badge> },
-        { kind: "readonly", definition: settingDefinition("about", "settings.about.backend.title"), value: status.data ? <Badge variant={backendIsReal ? "secondary" : "warn"} className={styles.valueBadge}>{status.data.clipboard_backend}</Badge> : <StateView mode="loading" placement="control" title="Checking…" /> },
-        { kind: "readonly", definition: settingDefinition("about", "settings.about.protocol.title"), value: status.data ? <Badge variant={mismatch ? "error" : "secondary"} className={styles.valueBadge}>{t("settings.about.protocol.value", { version: status.data.protocol_version })}{mismatch ? ` ${t("settings.about.protocol.mismatch", { version: CURRENT_PROTOCOL_VERSION })}` : ""}</Badge> : <StateView mode="loading" placement="control" title="Checking…" /> },
-        { kind: "readonly", definition: settingDefinition("about", "settings.about.items.title"), value: status.data ? <span className={styles.numeric}>{status.data.item_count.toLocaleString()}</span> : <StateView mode="loading" placement="control" title="Checking…" /> },
-      ],
-    }, {
-      id: "links", title: t("settings.about.links.title"), fields: [
-        { kind: "action", definition: settingDefinition("about", "settings.about.links.repository"), label: t("settings.about.links.repository"), href: PRODUCT_REPOSITORY_URL },
-        { kind: "action", definition: settingDefinition("about", "settings.about.links.releases"), label: t("settings.about.links.releases"), href: PRODUCT_RELEASES_URL },
-      ],
-    }, {
-      id: "welcome", fields: [{ kind: "action", definition: settingDefinition("about", "onboarding.settings.title"), label: t("onboarding.settings.action"), onAction: openOnboarding }],
-    }, {
-      id: "reset", fields: [{ kind: "action", definition: settingDefinition("about", "settings.about.reset.title"), label: t("settings.about.reset.action"), tone: "danger", onAction: () => setResetOpen(true) }],
-    }]} />
+    <SettingsSchemaRenderer groups={settingsGroups("about", fields, (key) => t(key as never))} />
     {update.dialog}
     <AlertDialog open={resetOpen} onOpenChange={setResetOpen} title={t("settings.about.reset.confirmTitle")} description={t("settings.about.reset.confirmDescription")} cancel={{ label: t("common.cancel") }} action={{ label: t("settings.about.reset.action"), variant: "danger", tone: "danger", onClick: () => { resetPrefs(); setResetOpen(false); } }} />
   </div></div>;
