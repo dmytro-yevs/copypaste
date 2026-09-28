@@ -1,6 +1,6 @@
 /** The unrecoverable key state needs a persistent, screen-wide explanation.
  * Service state is intentionally handled by the compact footer affordance. */
-import { Icon } from "@/components/ui/icon";
+import { StateView } from "@/components/shared/StateView";
 
 import { pickBanner } from "@/lib/banners";
 import type { BannerConditions } from "@/lib/banners";
@@ -15,15 +15,13 @@ export function BannerBar({ conditions }: BannerBarProps) {
   if (!banner) return null;
 
   return (
-    <div
+    <StateView
+      mode="error"
+      placement="inline"
       role="alert"
       data-banner={banner.id}
       className={styles.bar}
-    >
-      <div className={styles.layout}>
-        <Icon name="alert" size="sm" className={styles.icon} />
-        <span className={styles.message}>{banner.message}</span>
-      </div>
-    </div>
+      description={banner.message}
+    />
   );
 }
