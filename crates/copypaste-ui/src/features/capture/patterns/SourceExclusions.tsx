@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useId, useMemo, useState } from "react";
 
-import { FieldFeedback } from "@/components/shared";
+import { StateView } from "@/components/shared/StateView";
 import { Button, Input, Select, Surface, iconComponent } from "@/components/ui";
+import { Icon } from "@/components/ui/icon";
 import type { SelectItem } from "@/components/ui/select";
 import { SourceAppIcon } from "@/features/source-apps";
 import { useHistory } from "@/hooks/useHistory";
@@ -16,7 +17,6 @@ import {
     SOURCE_APP_CATALOG_STALE_MS,
 } from "@/lib/scheduling";
 import styles from "./SourceExclusions.module.css";
-import { SourceExclusionsHeader } from "./SourceExclusionsHeader";
 
 interface SourceExclusionsProps {
     ids: readonly string[];
@@ -49,14 +49,37 @@ export function SourceExclusions({
                 data-settings-search-target={`section:${t("settings.service.exclusions.title")}`}
                 className={styles.root}
             >
-                <SourceExclusionsHeader
-                    collapsible={collapsible}
-                    expanded={expanded}
-                    controlsId={controlsId}
-                    android={android}
-                    windows={windows}
-                    onToggle={() => setExpanded((current) => !current)}
-                />
+                <div className={styles.headingGroup}>
+                    <h2 className={styles.heading}>
+                        {collapsible ? (
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                aria-expanded={expanded}
+                                aria-controls={controlsId}
+                                className={styles.disclosure}
+                                onClick={() => setExpanded((current) => !current)}
+                            >
+                                {t("settings.service.exclusions.title")}
+                                <Icon
+                                    name="caretDown"
+                                    size="sm"
+                                    aria-hidden="true"
+                                    className={expanded ? styles.disclosureExpanded : undefined}
+                                />
+                            </Button>
+                        ) : t("settings.service.exclusions.title")}
+                    </h2>
+                    <p className={styles.description}>
+                        {t(
+                            android
+                                ? "settings.service.exclusions.androidLimitation"
+                                : windows
+                                  ? "settings.service.exclusions.windowsDescription"
+                                  : "settings.service.exclusions.description",
+                        )}
+                    </p>
+                </div>
                 <div
                     id={controlsId}
                     hidden={!expanded}
@@ -287,14 +310,10 @@ function ExclusionsEditor({
                     </Button>
                 </div>
                 {validation && (
-                    <FieldFeedback id={validationId} state="error">
-                        {validation}
-                    </FieldFeedback>
+                    <StateView id={validationId} mode="error" placement="inline" title={validation} />
                 )}
                 {!validation && normalizedNotice && (
-                    <FieldFeedback id={noticeId} state="neutral" announce>
-                        {normalizedNotice}
-                    </FieldFeedback>
+                    <StateView id={noticeId} mode="info" placement="inline" title={normalizedNotice} />
                 )}
             </div>
 
