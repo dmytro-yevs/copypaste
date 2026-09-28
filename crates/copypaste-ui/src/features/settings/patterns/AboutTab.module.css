@@ -105,11 +105,6 @@
   color: var(--err-strong);
 }
 
-.valueBadge {
-  max-inline-size: 100%;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
 
 .openList {
   min-inline-size: 0;

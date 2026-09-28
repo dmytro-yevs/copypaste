@@ -45,9 +45,6 @@
   --danger-control-border: rgb(235, 156, 157);
   --update-bg: rgba(251, 251, 255, 0.65);
   --update-available-bg: rgba(206, 205, 250, 0.29);
-  --skeleton-card-bg: rgba(255, 255, 255, 0.63);
-  --artwork-orbit-border: rgba(107, 82, 223, 0.2);
-  --artwork-glow-bg: rgba(107, 82, 223, 0.18);
   --quick-row-hover-bg: rgba(241, 241, 254, 0.74);
   --quick-row-selected-border: rgb(132, 120, 228);
   --swatch-border: rgb(177, 173, 187);
@@ -98,9 +95,6 @@
   --danger-control-border: rgb(229, 164, 150);
   --update-bg: rgba(250, 252, 252, 0.65);
   --update-available-bg: rgba(191, 216, 211, 0.29);
-  --skeleton-card-bg: rgba(255, 255, 255, 0.63);
-  --artwork-orbit-border: rgba(20, 127, 114, 0.2);
-  --artwork-glow-bg: rgba(20, 127, 114, 0.18);
   --quick-row-hover-bg: rgba(237, 244, 243, 0.74);
   --quick-row-selected-border: rgb(82, 152, 141);
   --swatch-border: rgb(165, 182, 179);
@@ -151,9 +145,6 @@
   --danger-control-border: rgb(241, 152, 139);
   --update-bg: rgba(254, 251, 250, 0.65);
   --update-available-bg: rgba(240, 201, 195, 0.29);
-  --skeleton-card-bg: rgba(255, 255, 255, 0.63);
-  --artwork-orbit-border: rgba(189, 73, 62, 0.2);
-  --artwork-glow-bg: rgba(189, 73, 62, 0.18);
   --quick-row-hover-bg: rgba(251, 240, 238, 0.74);
   --quick-row-selected-border: rgb(204, 111, 99);
   --swatch-border: rgb(187, 169, 165);
@@ -204,9 +195,6 @@
   --danger-control-border: rgb(233, 157, 150);
   --update-bg: rgba(251, 251, 252, 0.67);
   --update-available-bg: rgba(206, 208, 212, 0.29);
-  --skeleton-card-bg: rgba(255, 255, 255, 0.65);
-  --artwork-orbit-border: rgba(98, 103, 116, 0.2);
-  --artwork-glow-bg: rgba(98, 103, 116, 0.18);
   --quick-row-hover-bg: rgba(242, 242, 243, 0.76);
   --quick-row-selected-border: rgb(127, 131, 142);
   --swatch-border: rgb(173, 174, 178);
