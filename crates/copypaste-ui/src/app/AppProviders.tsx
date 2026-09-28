@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { lazy, Suspense, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import { AppToaster } from "@/app/shell/AppToaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -8,10 +8,6 @@ import { IpcFailure } from "@/lib/errors";
 import { currentPlatform } from "@/lib/platform";
 
 const RETRY_BACKOFF_MS = [250, 500, 1000, 2000, 2000];
-const PreviewDevtools = import.meta.env.DEV
-  ? lazy(() => import("@/devtools/PreviewDevtools"))
-  : null;
-
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -39,11 +35,6 @@ export function AppProviders({ children }: { children: ReactNode }) {
         <ViewportMetricsProvider>
           {children}
           <AppToaster />
-          {PreviewDevtools ? (
-            <Suspense fallback={null}>
-              <PreviewDevtools />
-            </Suspense>
-          ) : null}
         </ViewportMetricsProvider>
       </TooltipProvider>
     </QueryClientProvider>
