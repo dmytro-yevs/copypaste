@@ -6,6 +6,7 @@ import { connectionSummary, syncReadinessIsLoading, syncReadinessMessage, syncRe
 import { noteSync, type PeerHealthMap } from "@/features/devices/model/peerState";
 import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
 import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
+import { settingsGroups } from "@/features/settings/model/settingsProjection";
 import { usePeers, useSyncNow } from "@/hooks/useDevices";
 import { useServiceConfig } from "@/hooks/useServiceConfig";
 import { statusReachable, useStatus } from "@/hooks/useStatus";
@@ -48,11 +49,9 @@ export function DeviceSyncSettings() {
     : recovery === "retry-peers" ? () => void peers.refetch()
     : recovery === "enable-sync" ? () => { if (focusSyncEnabledControl()) return; setSettingsTab("device-sync"); setView("settings"); }
     : undefined;
-  return <SettingsSchemaRenderer groups={[{
-    id: "devices", title: "Devices", fields: [
+  return <SettingsSchemaRenderer groups={settingsGroups("device-sync", [
       { kind: "custom", definition: settingDefinition("device-sync", "devices.own.rename.label"), content: <DeviceNameField showCurrentName /> },
       { kind: "custom", definition: settingDefinition("device-sync", "settings.sync.paired.title"), content: <div className={styles.pairedActions}><Badge variant={peers.isError ? "warn" : "secondary"}>{peerLabel}</Badge><Button variant="secondary" size="sm" icon="devices" label={t("settings.sync.paired.open")} onClick={() => setView("devices")} /></div> },
       { kind: "action", definition: settingDefinition("device-sync", "settings.sync.now.title"), visible: count !== undefined && count > 0, label: t(sync.isPending ? "settings.sync.now.pending" : "settings.sync.now.action"), icon: "refresh", disabled: sync.isPending || readiness !== "ready", busy: sync.isPending, note: syncNote, onAction: () => { if (readiness !== "ready" || sync.isPending) return; sync.mutate(undefined, { onSuccess: (results) => setHealth((previous) => noteSync(previous, results)) }); }, extraActions: recoveryAction ? <Button variant="ghost" size="sm" onClick={recoveryAction}>{t(recovery === "enable-sync" ? "settings.sync.now.showSetting" : "common.tryAgain")}</Button> : undefined },
-    ],
-  }]} />;
+  ], (key) => t(key as never))} />;
 }
