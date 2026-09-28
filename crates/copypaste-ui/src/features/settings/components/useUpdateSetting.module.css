@@ -1,0 +1,19 @@
+.progress {
+  inline-size: min(calc(var(--s-9) * 3 + var(--s-4)), 100%);
+  block-size: var(--s-2);
+  border: 0;
+  border-radius: var(--r-pill);
+  overflow: hidden;
+  accent-color: var(--accent);
+  background: var(--raised);
+}
+
+.progress::-webkit-progress-bar {
+  border-radius: var(--r-pill);
+  background: var(--raised);
+}
+
+.progress::-webkit-progress-value {
+  border-radius: var(--r-pill);
+  background: var(--accent);
+}
