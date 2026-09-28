@@ -1,281 +1,67 @@
-/**
- * No path (rule 4): nothing here renders a location, and every free-text field
- * is scrubbed in Rust before it arrives, so there is one redactor rather than a
- * second one here.
- *
- * No clipping: every number below is a count, which is what makes a copy button
- * safe to offer at all.
- */
-
+/** Diagnostic reports contain counts only; Rust redacts free text before it arrives. */
 import { useState } from "react";
-
-import { IllustratedErrorState, SettingsRow } from "@/components/shared";
-import {
-  Badge,
-  Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui";
+import { Badge, Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui";
+import { StateView } from "@/components/shared/StateView";
 import { SupportReportActions } from "@/features/diagnostics";
-import { Section } from "@/features/settings/components/Section";
+import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
+import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
 import { RuntimeEventsTab } from "@/features/settings/patterns/RuntimeEventsTab";
-import {
-  useDiagnostics,
-  useSweepNotices,
-} from "@/hooks/useDiagnostics";
+import { useDiagnostics, useSweepNotices } from "@/hooks/useDiagnostics";
 import { useTranslation } from "@/i18n";
 import { isUnavailable } from "@/lib/errors";
 import { shortAge } from "@/lib/format";
-import type {
-  DiagnosticCounters,
-  Diagnostics,
-  DiagnosticsStatus,
-} from "@/service/diagnostics";
+import type { Diagnostics } from "@/service/diagnostics";
 import styles from "./DiagnosticsTab.module.css";
 
 export type DiagnosticsView = "overview" | "runtime-events";
 
-export function DiagnosticsTab({
-  view = "overview",
-  onOpenEvents,
-  onBack,
-}: {
-  view?: DiagnosticsView;
-  onOpenEvents?: () => void;
-  onBack?: () => void;
-}) {
+export function DiagnosticsTab({ view = "overview", onOpenEvents, onBack }: { view?: DiagnosticsView; onOpenEvents?: () => void; onBack?: () => void }) {
   const { t } = useTranslation();
-  if (view === "runtime-events") {
-    return (
-      <div className={`${styles.overview} ${styles.events}`} data-settings-search-target={`row:${t("runtimeLog.title")}`}>
-        {onBack ? (
-          <Button type="button" variant="ghost" size="sm" onClick={onBack}>
-            {t("runtimeLog.back")}
-          </Button>
-        ) : null}
-        <h2 data-settings-search-target={`section:${t("runtimeLog.title")}`} className={styles.eventsTitle}>
-          {t("runtimeLog.title")}
-        </h2>
-        <RuntimeEventsTab />
-      </div>
-    );
-  }
-  return (
-    <div className={styles.overview}>
-      <DiagnosticsOverview />
-      {onOpenEvents ? (
-        <Section title={t("runtimeLog.title")} description={t("runtimeLog.description")}>
-          <SettingsRow title={t("runtimeLog.title")} help={t("runtimeLog.description")}>
-            <Button type="button" variant="secondary" size="sm" onClick={onOpenEvents}>
-              {t("runtimeLog.open")}
-            </Button>
-          </SettingsRow>
-        </Section>
-      ) : null}
-    </div>
-  );
+  if (view === "runtime-events") return <div className={`${styles.overview} ${styles.events}`} data-settings-search-target={`row:${t("runtimeLog.title")}`}>
+    {onBack ? <Button type="button" variant="ghost" size="sm" onClick={onBack}>{t("runtimeLog.back")}</Button> : null}
+    <h2 data-settings-search-target={`section:${t("runtimeLog.title")}`} className={styles.eventsTitle}>{t("runtimeLog.title")}</h2>
+    <RuntimeEventsTab />
+  </div>;
+  return <div className={styles.overview}><DiagnosticsOverview />{onOpenEvents ? <SettingsSchemaRenderer groups={[{
+    id: "runtime-events", title: t("runtimeLog.title"), description: t("runtimeLog.description"), fields: [{
+      kind: "action", definition: settingDefinition("runtime-events", "runtimeLog.title"), label: t("runtimeLog.open"), onAction: onOpenEvents,
+    }],
+  }]} /> : null}</div>;
 }
 
 function DiagnosticsOverview() {
   const { t } = useTranslation();
   const query = useDiagnostics();
   useSweepNotices();
-
   const data = query.data;
   if (data === undefined) {
-    if (query.error === null) return <DiagnosticsLoadingSkeleton />;
-    return (
-      <IllustratedErrorState
-        compact
-        title={t("settings.diagnostics.unavailable")}
-        body={t(
-          isUnavailable(query.error)
-            ? "errors.offline"
-            : "settings.diagnostics.errorBody",
-        )}
-        actions={
-          <Button variant="secondary" onClick={() => void query.refetch()}>
-            {t("common.tryAgain")}
-          </Button>
-        }
-      />
-    );
+    if (query.error === null) return <StateView mode="loading" placement="panel" title={t("settings.diagnostics.loading")} />;
+    return <StateView mode={isUnavailable(query.error) ? "offline" : "error"} placement="panel" role="alert" title={t("settings.diagnostics.unavailable")} description={t(isUnavailable(query.error) ? "errors.offline" : "settings.diagnostics.errorBody")} actions={<Button variant="secondary" onClick={() => void query.refetch()}>{t("common.tryAgain")}</Button>} />;
   }
-
-  return (
-    <div className={styles.overview}>
-      {query.isFetching ? (
-        <p role="status" className={styles.refreshing}>Refreshing diagnostics…</p>
-      ) : null}
-      <Section title={t("settings.diagnostics.running.title")}>
-        <HistoryReadRow historyRead={data.history_read} />
-        <StartedRow counters={data.status?.counters} />
-      </Section>
-
-      <Section
-        title={t("settings.diagnostics.dropped.title")}
-        description={t("settings.diagnostics.dropped.description")}
-      >
-        <DroppedRows status={data.status} />
-      </Section>
-
-      <ReportSection report={data.report} />
-    </div>
-  );
+  const counters = data.status?.counters;
+  return <div className={styles.overview}>
+    {query.isFetching ? <StateView mode="loading" placement="inline" title="Refreshing diagnostics…" /> : null}
+    <SettingsSchemaRenderer groups={[
+      { id: "running", title: t("settings.diagnostics.running.title"), fields: [
+        { kind: "status", definition: settingDefinition("diagnostics", "settings.diagnostics.running.history.title"), value: <Badge variant={data.history_read.state === "readable" ? "ok" : "error"}>{data.history_read.state === "readable" ? t("settings.diagnostics.running.history.readable") : t("settings.diagnostics.running.history.failed", { code: data.history_read.code })}</Badge> },
+        { kind: "readonly", definition: settingDefinition("diagnostics", "settings.diagnostics.running.started.title"), value: <span className={styles.metric}>{counters === undefined ? t("settings.diagnostics.running.started.unknown") : shortAge(Date.now() - counters.uptime_secs * 1000)}</span> },
+      ] },
+      { id: "dropped", title: t("settings.diagnostics.dropped.title"), description: t("settings.diagnostics.dropped.description"), fields: data.status === null ? [{ kind: "status", definition: settingDefinition("diagnostics", "settings.diagnostics.dropped.tooLarge.title"), value: <span className={styles.offline}>{t("errors.offline")}</span> }] : ([
+        ["tooLarge", counters?.rejected_too_large], ["missed", counters?.lost_intermediates], ["swept", counters?.sensitive_swept], ["purged", counters?.index_purged],
+      ] as const).map(([name, count]) => ({ kind: "readonly" as const, definition: settingDefinition("diagnostics", `settings.diagnostics.dropped.${name}.title`), value: <span className={(count ?? 0) > 0 ? styles.warningCount : styles.count}>{(count ?? 0).toLocaleString()}</span> })) },
+    ]} />
+    <ReportSection report={data.report} />
+  </div>;
 }
 
-function DiagnosticsLoadingSkeleton() {
+function ReportSection({ report }: { report: Diagnostics["report"] }) {
   const { t } = useTranslation();
-  return (
-    <div
-      className={styles.loading}
-      role="status"
-      aria-label={t("settings.diagnostics.loading")}
-      aria-busy="true"
-    >
-      {[2, 4, 1].map((rowCount, sectionIndex) => (
-        <section className={styles.loadingSection} key={`${rowCount}-${sectionIndex}`}>
-          <span className={styles.loadingHeading} />
-          <div className={styles.loadingSurface}>
-            {Array.from({ length: rowCount }, (_, rowIndex) => (
-              <div className={styles.loadingRow} key={rowIndex}>
-                <span className={styles.loadingCopy}><i /><i /></span>
-                <span className={styles.loadingValue} />
-              </div>
-            ))}
-          </div>
-        </section>
-      ))}
-    </div>
-  );
-}
-
-function HistoryReadRow({
-  historyRead,
-}: {
-  historyRead: Diagnostics["history_read"];
-}) {
-  const { t } = useTranslation();
-  const readable = historyRead.state === "readable";
-
-  return (
-    <SettingsRow
-      title={t("settings.diagnostics.running.history.title")}
-      help={t("settings.diagnostics.running.history.description")}
-    >
-      <Badge variant={readable ? "ok" : "error"}>
-        {readable
-          ? t("settings.diagnostics.running.history.readable")
-          : t("settings.diagnostics.running.history.failed", {
-              code: historyRead.code,
-            })}
-      </Badge>
-    </SettingsRow>
-  );
-}
-
-function StartedRow({ counters }: { counters: DiagnosticCounters | undefined }) {
-  const { t } = useTranslation();
-  return (
-    <SettingsRow
-      title={t("settings.diagnostics.running.started.title")}
-      help={t("settings.diagnostics.running.started.description")}
-    >
-      <span className={styles.metric}>
-        {counters === undefined
-          ? t("settings.diagnostics.running.started.unknown")
-          : shortAge(Date.now() - counters.uptime_secs * 1000)}
-      </span>
-    </SettingsRow>
-  );
-}
-
-function DroppedRows({ status }: { status: DiagnosticsStatus | null }) {
-  const { t } = useTranslation();
-  if (status === null) {
-    return (
-      <p className={styles.offline}>
-        {t("errors.offline")}
-      </p>
-    );
-  }
-
-  const c = status.counters;
-  return (
-    <>
-      <CountRow name="tooLarge" count={c.rejected_too_large} />
-      <CountRow name="missed" count={c.lost_intermediates} />
-      <CountRow name="swept" count={c.sensitive_swept} />
-      <CountRow name="purged" count={c.index_purged} />
-    </>
-  );
-}
-
-/** Zero is rendered, never hidden: "nothing was dropped" is the answer the
- *  panel most often exists to give, and a row that only appears when it is
- *  non-zero is one nobody knows to look for. */
-function CountRow({
-  name,
-  count,
-}: {
-  name: "tooLarge" | "missed" | "swept" | "purged";
-  count: number;
-}) {
-  const { t } = useTranslation();
-  return (
-    <SettingsRow
-      title={t(`settings.diagnostics.dropped.${name}.title`)}
-      help={t(`settings.diagnostics.dropped.${name}.description`)}
-    >
-      <span
-        className={count > 0 ? styles.warningCount : styles.count}
-      >
-        {count.toLocaleString()}
-      </span>
-    </SettingsRow>
-  );
-}
-
-/** The report is shown before it is copied: a user about to paste something
- *  into a public issue is entitled to read it first, and showing it is the only
- *  honest way to make the claim printed beside the button. */
-function ReportSection({ report }: { report: string }) {
-  const { t } = useTranslation();
-  const empty = report.trim() === "";
   const [open, setOpen] = useState(false);
-
-  return (
-    <Section
-      title="Support"
-    >
-      <SettingsRow
-        title={t("settings.diagnostics.report.title")}
-        help={t("settings.diagnostics.report.description")}
-      >
-        <Button type="button" variant="secondary" size="sm" onClick={() => setOpen(true)}>
-          Open
-        </Button>
-      </SettingsRow>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("settings.diagnostics.report.title")}</DialogTitle>
-            <DialogDescription>
-              {t("settings.diagnostics.report.description")}
-            </DialogDescription>
-          </DialogHeader>
-          <pre className={styles.report}>
-            {empty ? t("settings.diagnostics.report.empty") : report}
-          </pre>
-          <p className={styles.safety}>
-            {t("settings.diagnostics.report.safety")}
-          </p>
-          <SupportReportActions report={empty ? undefined : report} compact />
-        </DialogContent>
-      </Dialog>
-    </Section>
-  );
+  const empty = report.trim() === "";
+  return <>
+    <SettingsSchemaRenderer groups={[{ id: "support", title: "Support", fields: [{
+      kind: "action", definition: settingDefinition("diagnostics", "settings.diagnostics.report.title"), label: "Open", onAction: () => setOpen(true),
+    }] }]} />
+    <Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>{t("settings.diagnostics.report.title")}</DialogTitle><DialogDescription>{t("settings.diagnostics.report.description")}</DialogDescription></DialogHeader><pre className={styles.report}>{empty ? t("settings.diagnostics.report.empty") : report}</pre><p className={styles.safety}>{t("settings.diagnostics.report.safety")}</p><SupportReportActions report={empty ? undefined : report} compact /></DialogContent></Dialog>
+  </>;
 }

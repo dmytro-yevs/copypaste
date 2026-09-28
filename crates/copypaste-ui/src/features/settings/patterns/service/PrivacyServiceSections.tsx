@@ -1,106 +1,38 @@
 import { FieldFeedback } from "@/components/shared";
-import { ChoiceRow } from "@/features/settings/components/ChoiceRow";
-import { Section } from "@/features/settings/components/Section";
-import { SwitchRow } from "@/features/settings/components/SwitchRow";
-import {
-  HISTORY_LIMIT,
-  RETENTION_DAYS,
-  SENSITIVE_TTL_SECS,
-  STORAGE_QUOTA_BYTES,
-} from "@/features/settings/model/serviceChoices";
+import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
+import { HISTORY_LIMIT, RETENTION_DAYS, SENSITIVE_TTL_SECS, STORAGE_QUOTA_BYTES, valuesWith, type Choice } from "@/features/settings/model/serviceChoices";
+import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
+import type { SettingsField } from "@/features/settings/model/settingsFieldSchema";
 import { useTranslation } from "@/i18n";
 import styles from "../ServiceTab.module.css";
 import { ServiceFieldNote } from "./ServiceFieldNote";
 import { useServiceSettings } from "./ServiceSettingsController";
 
+const compactNumber = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 0 });
+
 export function PrivacyServiceSections() {
   const { t } = useTranslation();
   const controller = useServiceSettings();
   const { data } = controller;
-  const sweeping = data.sensitive_ttl_secs > 0;
-
-  return (
-    <>
-      <Section title="Private mode">
-        <SwitchRow
-          title={t("settings.service.privateMode.title")}
-          help={t("settings.service.privateMode.description")}
-          id="private-mode"
-          checked={controller.privateModeEnabled ?? false}
-          disabled={controller.privateModePending}
-          busy={controller.privateModePending}
-          note={
-            controller.privateModePending ? (
-              <FieldFeedback state="pending">
-                Saving…
-              </FieldFeedback>
-            ) : controller.privateModeFailed ? (
-              <FieldFeedback state="error">
-                Private mode wasn’t changed.
-              </FieldFeedback>
-            ) : undefined
-          }
-          onChange={controller.setPrivateMode}
-        />
-      </Section>
-
-      <Section title={t("settings.service.groups.keeping.title")}>
-        <ChoiceRow
-          title={t("settings.service.historyLimit.title")}
-          icon="library"
-          choices={HISTORY_LIMIT}
-          value={data.history_limit}
-          disabled={controller.fieldPending("history_limit")}
-          busy={controller.fieldPending("history_limit")}
-          note={<ServiceFieldNote field="history_limit" />}
-          onChange={(history_limit) => controller.apply({ history_limit })}
-        />
-
-        <ChoiceRow
-          title={t("settings.service.storageQuota.title")}
-          icon="folder"
-          choices={STORAGE_QUOTA_BYTES}
-          value={data.storage_quota_bytes}
-          disabled={controller.fieldPending("storage_quota_bytes")}
-          busy={controller.fieldPending("storage_quota_bytes")}
-          note={<ServiceFieldNote field="storage_quota_bytes" />}
-          onChange={(storage_quota_bytes) =>
-            controller.apply({ storage_quota_bytes })
-          }
-        />
-
-        <ChoiceRow
-          title={t("settings.service.retention.title")}
-          icon="refresh"
-          choices={RETENTION_DAYS}
-          value={data.retention_days}
-          disabled={controller.fieldPending("retention_days")}
-          busy={controller.fieldPending("retention_days")}
-          note={<ServiceFieldNote field="retention_days" />}
-          onChange={(retention_days) => controller.apply({ retention_days })}
-        />
-
-        <ChoiceRow
-          title={t("settings.service.sensitive.title")}
-          icon="alert"
-          note={
-            <ServiceFieldNote field="sensitive_ttl_secs">
-              {sweeping ? (
-                <span className={styles.sensitiveWarning}>
-                  {t("settings.service.sensitive.warning")}
-                </span>
-              ) : null}
-            </ServiceFieldNote>
-          }
-          choices={SENSITIVE_TTL_SECS}
-          value={data.sensitive_ttl_secs}
-          disabled={controller.fieldPending("sensitive_ttl_secs")}
-          busy={controller.fieldPending("sensitive_ttl_secs")}
-          onChange={(sensitive_ttl_secs) =>
-            controller.apply({ sensitive_ttl_secs })
-          }
-        />
-      </Section>
-    </>
-  );
+  type Key = "history_limit" | "storage_quota_bytes" | "retention_days" | "sensitive_ttl_secs";
+  const choice = (key: Key, title: string, options: readonly Choice[], icon: "library" | "folder" | "refresh" | "alert", warning = false): SettingsField => ({
+    kind: "choice", definition: settingDefinition("privacy", title), value: String(data[key]), leadingIcon: icon,
+    options: valuesWith(options, data[key]).map((item) => ({ value: String(item.value), label: item.unit === "items" ? compactNumber.format(item.count) : t(`settings.service.units.${item.unit}`, { count: item.count }) })),
+    disabled: controller.fieldPending(key), busy: controller.fieldPending(key),
+    note: <ServiceFieldNote field={key}>{warning && data.sensitive_ttl_secs > 0 ? <span className={styles.sensitiveWarning}>{t("settings.service.sensitive.warning")}</span> : null}</ServiceFieldNote>,
+    onChange: (value) => controller.apply({ [key]: Number(value) }),
+  });
+  return <SettingsSchemaRenderer groups={[
+    { id: "private-mode", title: "Private mode", fields: [{
+      kind: "boolean", definition: settingDefinition("privacy", "settings.service.privateMode.title"), value: controller.privateModeEnabled ?? false, controlId: "private-mode", disabled: controller.privateModePending, busy: controller.privateModePending,
+      note: controller.privateModePending ? <FieldFeedback state="pending">Saving…</FieldFeedback> : controller.privateModeFailed ? <FieldFeedback state="error">Private mode wasn’t changed.</FieldFeedback> : undefined,
+      onChange: controller.setPrivateMode,
+    }] },
+    { id: "retention", title: t("settings.service.groups.keeping.title"), fields: [
+      choice("history_limit", "settings.service.historyLimit.title", HISTORY_LIMIT, "library"),
+      choice("storage_quota_bytes", "settings.service.storageQuota.title", STORAGE_QUOTA_BYTES, "folder"),
+      choice("retention_days", "settings.service.retention.title", RETENTION_DAYS, "refresh"),
+      choice("sensitive_ttl_secs", "settings.service.sensitive.title", SENSITIVE_TTL_SECS, "alert", true),
+    ] },
+  ]} />;
 }
