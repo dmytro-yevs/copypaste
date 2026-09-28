@@ -31,6 +31,14 @@ describe("composed dialogs", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
+  it("keeps a hidden header available as the dialog's accessible name", () => {
+    render(<TooltipProvider><Dialog open title="Item details" description="Image from clipboard" headerHidden><span>Preview</span></Dialog></TooltipProvider>);
+
+    const dialog = screen.getByRole("dialog", { name: "Item details", description: "Image from clipboard" });
+    expect(dialog).toBeTruthy();
+    expect(screen.getByText("Item details").closest('[data-slot="dialog-header"]')?.getAttribute("style")).toContain("position: absolute");
+  });
+
   it("keeps a confirmation open for an async owner and preserves a safe cancel", () => {
     const onClick = vi.fn();
     const onOpenChange = vi.fn();

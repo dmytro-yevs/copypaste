@@ -4,7 +4,6 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "@/lib/cn";
 import { Button } from "./button";
 import { Icon } from "./icon";
-import { Tooltip } from "./tooltip";
 import { VisuallyHidden } from "./visually-hidden";
 import {
     modalDescriptionClass,
@@ -31,18 +30,22 @@ export type DialogProps = Omit<ComponentProps<typeof DialogPrimitive.Root>, "chi
     contentProps?: Omit<ComponentProps<typeof DialogContent>, "children">;
     showCloseButton?: boolean;
     closeLabel?: string;
+    headerHidden?: boolean;
 };
 
-function Dialog({ title, description, children, footer, trigger, contentProps, showCloseButton, closeLabel, ...rootProps }: DialogProps) {
+function Dialog({ title, description, children, footer, trigger, contentProps, showCloseButton, closeLabel, headerHidden = false, ...rootProps }: DialogProps) {
+    const header = (
+        <DialogHeader>
+            <DialogTitle>{title}</DialogTitle>
+            {description ? <DialogDescription>{description}</DialogDescription> : null}
+        </DialogHeader>
+    );
     return (
         <DialogPrimitive.Root data-slot="dialog" {...rootProps}>
             {trigger ? <DialogPrimitive.Trigger asChild>{trigger}</DialogPrimitive.Trigger> : null}
             {title === undefined ? children : (
                 <DialogContent {...contentProps} showCloseButton={showCloseButton ?? contentProps?.showCloseButton} closeLabel={closeLabel ?? contentProps?.closeLabel}>
-                    <DialogHeader>
-                        <DialogTitle>{title}</DialogTitle>
-                        {description ? <DialogDescription>{description}</DialogDescription> : null}
-                    </DialogHeader>
+                    {headerHidden ? <VisuallyHidden asChild>{header}</VisuallyHidden> : header}
                     {children}
                     {footer ? <DialogFooter>{footer}</DialogFooter> : null}
                 </DialogContent>
@@ -142,19 +145,12 @@ function DialogContent({
                     </VisuallyHidden>
                 ) : null}
                 {showCloseButton && (
-                    <Tooltip content={closeLabel}>
-                        <Button
-                            asChild
-                            variant="ghost"
-                            size="compactIcon"
-                            className={styles.close}
-                        >
-                            <DialogPrimitive.Close data-slot="dialog-close">
-                                <Icon name="close" />
-                                <VisuallyHidden>{closeLabel}</VisuallyHidden>
-                            </DialogPrimitive.Close>
-                        </Button>
-                    </Tooltip>
+                    <Button asChild variant="ghost" size="compactIcon" label={closeLabel} className={styles.close}>
+                        <DialogPrimitive.Close data-slot="dialog-close">
+                            <Icon name="close" />
+                            <VisuallyHidden>{closeLabel}</VisuallyHidden>
+                        </DialogPrimitive.Close>
+                    </Button>
                 )}
             </DialogPrimitive.Content>
         </DialogPortal>
