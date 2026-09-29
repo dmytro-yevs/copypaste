@@ -28,6 +28,14 @@ pub struct Args {
     #[arg(long)]
     pub foreground: bool,
 
+    /// Internal app-to-daemon lifetime contract. The app supplies a private
+    /// stdin pipe and the daemon shuts down when that pipe reaches EOF.
+    ///
+    /// Hidden because a terminal-launched daemon must remain independent of
+    /// its terminal; only the bundled macOS app supplies the pipe.
+    #[arg(long, hide = true)]
+    pub app_parent: bool,
+
     /// TCP port the peer listener binds.
     ///
     /// Fixed by default so an explicit address is short to type. Overriding it
@@ -98,11 +106,19 @@ mod tests {
         Args {
             data_dir: None,
             foreground: false,
+            app_parent: false,
             port: 0,
             device_name: None,
             cloud_url: Some(url.to_string()),
             cloud_anon_key: Some(key.to_string()),
         }
+    }
+
+    #[test]
+    fn standalone_daemon_does_not_require_an_app_parent() {
+        let args = Args::try_parse_from(["copypaste-daemon"])
+            .expect("the ordinary CLI invocation remains valid");
+        assert!(!args.app_parent);
     }
 
     #[cfg(not(feature = "cloud-evidence"))]

@@ -34,14 +34,26 @@ it on is also what makes the daemon run at login — one switch, one owner.
 ## Ownership is per-process, and adoption is read-only
 
 The app stops **only a daemon it started itself**, tracked as a child process
-handle for the lifetime of this app process. A daemon it merely found running is
-adopted read-only: used, reported, never killed.
+handle for the lifetime of this app process. On macOS, the bundled spawn also
+passes one end of a private socketpair as the daemon's standard input and
+retains the other end. If the app exits, crashes, or is killed, the kernel
+closes that end and the daemon's dedicated liveness thread terminates the
+process immediately. This also covers synchronous startup work that cannot
+observe an async cancellation. An ordinary Quit remains the IPC path and
+performs its bounded drain before the app releases the pipe. A daemon it merely
+found running is adopted read-only: used, reported, never killed.
+
+Forced parent death deliberately bypasses Rust teardown, like the `SIGKILL`
+that caused it: the socket can remain as stale filesystem state, but no daemon
+process remains to hold or capture from it. The next start already treats that
+stale endpoint as unreachable. This is distinct from ordinary Quit, which keeps
+the app open until the owned child has drained and reaped.
 
 That asymmetry is deliberate. A daemon the app did not start belongs to
 something else — `brew services`, a terminal, another copy of the app — and an
 app that kills processes it did not start is a worse failure than a duplicate
-one. It also means force-quitting the app orphans its daemon, which the next
-launch detects by version rather than by guessing.
+one. The liveness pipe applies only to an app-spawned daemon, so it cannot turn
+a CLI or Homebrew service into an app-owned process.
 
 ## The four states, and what each does
 
@@ -103,8 +115,6 @@ recording the clipboard is a Quit that did not quit.
   fallback for a build with no bundled daemon, where it is true.
 - `BackendError::Unreachable` no longer tells the user to run a command. The
   screen has a button.
-- Nothing here has been run on macOS. The spawn path, the readiness wait and
-  the stop-on-exit hook are exercised by tests on Linux against a fake binary;
-  whether `Contents/MacOS/copypaste-daemon` starts correctly from inside a
-  quarantined, ad-hoc-signed bundle is unverified and is the second thing to
-  check on a Mac after ADR-0002's hotkey question.
+- The private liveness pipe is a macOS-specific native contract. It must be
+  exercised by killing an isolated app-parent fixture and observing its daemon
+  release the fixture socket; a normal Quit alone does not cover this path.
