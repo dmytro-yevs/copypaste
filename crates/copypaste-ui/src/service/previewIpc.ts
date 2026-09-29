@@ -157,8 +157,6 @@ function statusFixture(historyCount: number): StatusData {
         counters: {
             rejected_too_large: 0,
             lost_intermediates: 0,
-            sensitive_swept: 0,
-            index_purged: 0,
             uptime_secs: 900,
         },
         settings_health: null,

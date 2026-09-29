@@ -78,12 +78,10 @@ export const history = {
     json: "JSON",
     num: "Numbers",
     color: "Colors",
-    secret: "Sensitive",
     unknown: "Other",
   },
 
   type: {
-    secret: "Sensitive",
     image: "Image",
     file: "File",
     sourceFile: "Source file",
@@ -123,25 +121,15 @@ export const history = {
    * carry item content.
    */
   row: {
-    sensitiveName: "Sensitive item, hidden — activate to reveal",
-    sensitiveReveal: "Sensitive content hidden — activate to reveal",
-    sensitivePlaceholder: "Sensitive content hidden",
     empty: "Empty item",
     pinnedPrefix: "Pinned.",
     selectPrefix: "Select",
-    hide: "Hide sensitive content",
-    reveal: "Reveal sensitive content",
     copy: "Copy to clipboard",
     pin: "Pin item",
     unpin: "Unpin item",
     reorder: "Reorder pinned item",
     delete: "Delete item",
     pinnedBadge: "Pinned",
-    sensitiveBadge: "· Sensitive",
-    potentialSensitiveWarning: "Potentially sensitive content",
-    potentialSensitiveBadge: "Potentially sensitive",
-    showOriginal: "Show original content",
-    hideOriginal: "Hide original content",
     open: "Show full contents",
     /** Concatenated with a device name at the call site, for the reason
      *  `pinnedPrefix` is a prefix. */
@@ -154,7 +142,7 @@ export const history = {
   /**
    * The title carries no clip text and neither does anything else here: a
    * template that took an item's content as a variable would put the plaintext
-   * somewhere the sensitive-content rules do not reach (`catalogue.test.ts`).
+   * somewhere the item renderer does not reach (`catalogue.test.ts`).
    */
   detail: {
     title: "Clipboard item",
@@ -212,8 +200,7 @@ export const history = {
      *  beside it. It is the one interpolation here that is not authored copy. */
     noResults: 'No results for "{{query}}"',
     noMatch: "Nothing matches this filter",
-    filteredBody:
-      "Try a different search term. Sensitive items are never indexed, so they never appear in results.",
+    filteredBody: "Try a different search term or filter.",
     loadMore: "Load more history",
     none: {
       title: "Nothing copied yet",
@@ -223,17 +210,6 @@ export const history = {
 
   skipped_one: "{{count}} item could not be read and is not shown.",
   skipped_other: "{{count}} items could not be read and are not shown.",
-
-  reveal: {
-    unavailable: "Sensitive content can't be shown here.",
-    missing: "This item is no longer in your clipboard history.",
-    failed: "CopyPaste couldn't show this sensitive item. Try again.",
-    confirm: {
-      title: "Reveal sensitive content?",
-      body: "This item looks like a password, key or token. It will be shown for 10 seconds, and hidden again as soon as this window loses focus.",
-      action: "Reveal",
-    },
-  },
 
   clear: {
     title: "Clear all clipboard history?",
@@ -278,11 +254,10 @@ export const history = {
     bulkCopied_other: "Copied {{count}} items — press {{shortcut}} to paste",
     bulkCopiedGeneric_one: "Copied {{count}} item to clipboard",
     bulkCopiedGeneric_other: "Copied {{count}} items to clipboard",
-    // Named rather than counted: the skipped rows are protected content, and
-    // "Copied 8 items" over a selection of ten reads as a success.
+    // Named rather than counted: a partial copy needs to be explicit.
     bulkCopiedPartial:
-      "Copied {{done}} of {{total}} — {{skipped}} left out as sensitive or an image",
+      "Copied {{done}} of {{total}} — {{skipped}} images were left out",
     bulkCopyNothing:
-      "Nothing was copied — every selected item is sensitive or an image",
+      "Nothing was copied — every selected item is an image",
   },
 } as const;

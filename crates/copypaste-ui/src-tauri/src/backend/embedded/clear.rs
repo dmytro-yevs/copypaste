@@ -40,7 +40,7 @@ pub(super) async fn clear(backend: &EmbeddedBackend, through: Option<i64>) -> Re
             if removed > 0 {
                 inner.note_version_written(mutation_started);
                 inner.note_local_version(mutation_started);
-                inner.publish_items(false, 0);
+                inner.publish_items(false);
             }
             Ok(removed)
         })

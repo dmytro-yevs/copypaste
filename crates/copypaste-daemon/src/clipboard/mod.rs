@@ -21,9 +21,8 @@
 //!   makes reachable.
 //! * `macos` — `NSPasteboard`, compiled only on macOS. It contains the Cocoa
 //!   spelling and nothing else that could have been tested off a mac.
-//! * `windows` — the same shape against `GetClipboardSequenceNumber` and the
-//!   four do-not-record clipboard formats, compiled only on Windows. Its
-//!   opt-out decision is in `windows_optout`, which is built everywhere.
+//! * `windows` — the same shape against `GetClipboardSequenceNumber`, compiled
+//!   only on Windows.
 //!
 //! This file keeps only what both backends must agree on: the port itself, the
 //! captured value, and the size gate.
@@ -39,10 +38,8 @@
 //!   replaces the content; the surviving clipboard value is always returned.
 //! - **§3.3** the two-sided self-write sentinel, including the *conditional*
 //!   post-stamp (CopyPaste-8yzf) and the reset-on-failure path.
-//! - **I-5 / §3.4** the three `org.nspasteboard.*` opt-out markers, probed
-//!   before any representation is read.
-//! - **§3.9** a short-lived frontmost-app cache, private-mode and exclusion
-//!   gates; known password-manager origins are persisted as sensitive.
+//! - **§3.9** a short-lived frontmost-app cache, private-mode and explicit
+//!   exclusion gates.
 //! - **I-11** text, RTF, HTML, native PNG/TIFF images, and one local file URL
 //!   are captured in a fixed priority order.
 //! - **I-18** `NSData.length` checked before the bytes are copied out.
@@ -63,18 +60,9 @@ mod fake;
 ))]
 mod file_materialize;
 pub(crate) mod format;
-/// The Windows opt-out vocabulary, and which application a change belongs to.
-/// Built everywhere, like `change`, because the decisions they encode are the
-/// ones that must not regress unnoticed.
-///
-/// `windows_attribution` is crate-visible because the capture path's
-/// end-to-end test drives it: what the attribution decides and what reaches
-/// the search index are in different files, and the regression DMY-158 records
-/// only exists between them.
+/// Windows source-app attribution is crate-visible for platform tests.
 #[cfg(any(target_os = "windows", test))]
 pub(crate) mod windows_attribution;
-#[cfg(any(target_os = "windows", test))]
-mod windows_optout;
 
 /// Decisions that must be made before a clipboard representation is read.
 ///
@@ -153,10 +141,6 @@ pub use fake::FakeClipboard;
 /// Current storage and transport hard bound, in bytes.
 #[cfg(any(test, all(target_os = "macos", not(feature = "dev-fake-clipboard"))))]
 const MAX_CAPTURE_BYTES: usize = copypaste_ipc::MAX_CONTENT_BYTES;
-
-/// Credential stores mark a capture sensitive even when its text does not
-/// match a detector rule. Users may still explicitly exclude an app entirely.
-pub(crate) use copypaste_core::sensitive::is_password_manager_app;
 
 /// One captured clipboard change.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -326,7 +310,7 @@ pub fn new_source(data_dir: &std::path::Path) -> std::io::Result<Box<dyn Clipboa
 
 #[cfg(test)]
 mod tests {
-    use super::{is_password_manager_app, CapturePolicy, MAX_CAPTURE_BYTES};
+    use super::{CapturePolicy, MAX_CAPTURE_BYTES};
     use copypaste_ipc::ConfigData;
 
     #[test]
@@ -364,21 +348,6 @@ mod tests {
         ] {
             assert_eq!(policy.limit_bytes(content_type), MAX_CAPTURE_BYTES as u64);
         }
-    }
-
-    #[test]
-    fn credential_store_match_is_case_insensitive_and_covers_supported_apps() {
-        for bundle_id in [
-            "COM.1PASSWORD.1PASSWORD",
-            "com.apple.Passwords",
-            "com.proton.pass",
-            "com.strongbox.passwordsafe",
-            "com.mortenjust.secretive",
-            "com.keepassium.keepassium",
-        ] {
-            assert!(is_password_manager_app(bundle_id), "{bundle_id}");
-        }
-        assert!(!is_password_manager_app("com.apple.TextEdit"));
     }
 
     #[cfg(feature = "dev-fake-clipboard")]

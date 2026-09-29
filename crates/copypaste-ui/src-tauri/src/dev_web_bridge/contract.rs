@@ -57,6 +57,13 @@ pub(crate) struct IdArgs {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ImagePreviewArgs {
+    pub(crate) id: String,
+    pub(crate) max_edge: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
 pub(crate) struct ClipboardWriteAvailabilityArgs {
     #[serde(rename = "contentType")]
     pub(crate) content_type: String,
@@ -329,9 +336,34 @@ mod tests {
     }
 
     #[test]
+    fn image_preview_accepts_optional_camel_case_size() {
+        for (args, expected) in [
+            (serde_json::json!({ "id": "image-1" }), None),
+            (
+                serde_json::json!({ "id": "image-1", "maxEdge": null }),
+                None,
+            ),
+            (
+                serde_json::json!({ "id": "image-1", "maxEdge": 512 }),
+                Some(512),
+            ),
+        ] {
+            let parsed: ImagePreviewArgs = parse(args).unwrap();
+            assert_eq!(parsed.id, "image-1");
+            assert_eq!(parsed.max_edge, expected);
+        }
+        for max_edge in [serde_json::json!(-1), serde_json::json!("512")] {
+            assert!(parse::<ImagePreviewArgs>(serde_json::json!({
+                "id": "image-1",
+                "maxEdge": max_edge,
+            }))
+            .is_err());
+        }
+    }
+
+    #[test]
     fn secrets_pairing_addresses_and_destructive_peer_actions_are_forbidden() {
         for command in [
-            "reveal_item",
             "copy_text",
             "add_item",
             "pair_preview_invite",

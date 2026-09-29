@@ -11,13 +11,12 @@ import type { CardSelectionIntent } from "@/features/history/components/ClipCard
 import { rowLabel } from "@/features/history/model/clipPresentation";
 import { keyboardPinnedOrder } from "@/features/history/model/historyEntries";
 import { markedOrigins, originLabel } from "@/lib/itemOrigin";
-import { HISTORY_LAYOUT_METRICS } from "@/features/history/model/virtualizationMetrics";
 import type { Selection } from "@/features/history/hooks/useSelection";
 import { useTranslation } from "@/i18n";
-import { useViewportMetrics } from "@/hooks/useViewportMetrics";
 import type { Item } from "@/lib/ipc";
 
 interface KeyboardNavigationOptions {
+    inspectorVisible: boolean;
     items: readonly Item[];
     activeId: string | null;
     onActiveIdChange: (id: string | null) => void;
@@ -30,6 +29,7 @@ interface KeyboardNavigationOptions {
 }
 
 export function useHistoryKeyboardNavigation({
+    inspectorVisible,
     items,
     activeId,
     onActiveIdChange,
@@ -40,9 +40,6 @@ export function useHistoryKeyboardNavigation({
     scrollToItemIndex,
     activeRendered,
 }: KeyboardNavigationOptions) {
-    const inspectorVisible =
-        useViewportMetrics().width >=
-        HISTORY_LAYOUT_METRICS.inspector.visibleAtPx;
     const { t } = useTranslation();
     const [announcement, setAnnouncement] = useState("");
     const itemsRef = useRef(items);

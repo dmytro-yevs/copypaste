@@ -36,7 +36,7 @@ pub use payload::{
     DeviceProfileObservation, DiagnosticCounters, DiscoveredData, DiscoveredDevice, ExportData,
     ExportItem, ExternalNetworkObservation, ImagePreview, ImportData, Item, ItemPage,
     PairingInviteData, PairingProgressData, PairingRole, PairingState, PeerInfo, PrivateModeData,
-    SensitiveFinding, SensitiveSpan, StatusData, SyncResult,
+    StatusData, SyncResult,
 };
 pub use response::{ConfigApplied, EventData, EventKind, Response, ResponseData};
 
@@ -84,7 +84,7 @@ pub enum Method {
         #[serde(default)]
         cursor: Option<String>,
     },
-    /// Full-text search. Sensitive items are never indexed and never returned.
+    /// Full-text search across stored history.
     ///
     /// **Not paged, and deliberately so.** It runs against the whole database
     /// and returns the best `limit` matches, so a hit at row 800 is found
@@ -114,23 +114,12 @@ pub enum Method {
     },
     /// One item by id, with its content, and **no side effects**.
     ///
-    /// The read-only twin of [`Method::Copy`]. It exists because a UI that
-    /// wants to *show* an item — a reveal gesture on a sensitive one, a detail
-    /// pane — otherwise has to call `Copy`, which publishes the content to the
-    /// system pasteboard, where every other application can read it. Looking at
-    /// something must not be indistinguishable from copying it.
-    ///
-    /// **It does return the plaintext of a sensitive item, deliberately.** That
-    /// is not a hole in the sensitive-content rules: those are about the item
-    /// never reaching the *search index* and never leaving the *device*, and
-    /// this crosses neither boundary — the socket is `0600`, `List` already
-    /// returns the same plaintext, and the alternative is a client that cannot
-    /// implement reveal at all. Deciding whether to render it is the client's,
-    /// and a client should require an explicit gesture.
+    /// The read-only twin of [`Method::Copy`]. It lets a detail pane read the
+    /// item without publishing it to the system pasteboard.
     Get {
         id: String,
     },
-    /// A decoded, bounded PNG thumbnail for a non-sensitive image item.
+    /// A decoded, bounded PNG thumbnail for an image item.
     ///
     /// Kept separate from `List` so a long history never decrypts or transfers
     /// image bytes until a row actually becomes visible.
@@ -248,17 +237,11 @@ pub enum Method {
     // ---- transfer and database administration -------------------------------
     /// Read history out of the daemon. `limit` of 0 means everything.
     ///
-    /// `include_sensitive` defaults to false on the wire *and* in every client:
-    /// an export is a plaintext file that leaves the app's control, so a
-    /// detected credential is only ever in one because the user asked twice.
     Export {
         #[serde(default)]
         limit: u32,
-        #[serde(default)]
-        include_sensitive: bool,
     },
-    /// Put items back. Each one goes through the same ingest path a capture
-    /// does, so the detector runs again and dedup still applies.
+    /// Put items back through the normal ingest path.
     Import {
         items: Vec<ExportItem>,
     },

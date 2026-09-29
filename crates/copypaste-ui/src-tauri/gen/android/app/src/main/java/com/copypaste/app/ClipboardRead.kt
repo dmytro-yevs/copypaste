@@ -64,11 +64,18 @@ private fun clipFromClipboard(
     sourcePackage: String?,
     sourceName: String?,
 ): CapturedClip? {
-    if (ClipSensitivity.isSensitive(primary)) return null
-    ClipSensitivity.asText(primary)?.let { return textClip(it, source, sourcePackage, sourceName) }
+    textFrom(primary)?.let { return textClip(it, source, sourcePackage, sourceName) }
     val uri = primary.getItemAt(0)?.uri ?: return null
     val declared = primary.description.getMimeType(0)
     return binaryClip(context, uri, declared, source, sourcePackage, sourceName, requireGrant = true)
+}
+
+private fun textFrom(clip: ClipData): String? {
+    for (i in 0 until clip.itemCount) {
+        val text = clip.getItemAt(i)?.text
+        if (!text.isNullOrBlank()) return text.toString()
+    }
+    return null
 }
 
 private fun textClip(

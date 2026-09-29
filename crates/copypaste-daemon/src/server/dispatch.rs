@@ -268,10 +268,7 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
             pinned,
         } => items::pin(state, id, &item_id, pinned),
         Method::ReorderPinned { ids } => items::reorder_pinned(state, id, &ids),
-        Method::Export {
-            limit,
-            include_sensitive,
-        } => transfer::export(state, id, limit, include_sensitive),
+        Method::Export { limit } => transfer::export(state, id, limit),
         Method::Import { items } => transfer::import(state, id, items),
         Method::Backup { dest_path } => dbadmin::backup(state, id, &dest_path),
         Method::Restore { src_path, confirm } => dbadmin::restore(state, id, &src_path, confirm),
@@ -398,10 +395,7 @@ mod tests {
         // The one a user reaches for when nothing else answers.
         assert!(!requires_ready(&Method::Shutdown));
         assert!(requires_ready(&Method::Watch));
-        assert!(requires_ready(&Method::Export {
-            limit: 0,
-            include_sensitive: false
-        }));
+        assert!(requires_ready(&Method::Export { limit: 0 }));
         assert!(requires_ready(&Method::Import { items: Vec::new() }));
         assert!(requires_ready(&Method::Backup {
             dest_path: "x".into()

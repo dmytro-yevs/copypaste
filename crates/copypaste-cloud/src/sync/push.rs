@@ -1,8 +1,7 @@
 //! The upload path: what leaves the device, sealed, signed, and what never does.
 //!
-//! Three rules are enforced here and nowhere else in this module: a tombstone
-//! is sent as a tombstone rather than as a row that happens to have a flag set,
-//! the sensitive gate runs on live rows before anything is sealed or counted,
+//! Two rules are enforced here and nowhere else in this module: a tombstone is
+//! sent as a tombstone rather than as a row that happens to have a flag set,
 //! and every row is signed before it is handed to the transport.
 
 use super::driver::CloudSync;
@@ -71,18 +70,6 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                     item.created_at,
                     origin,
                 )));
-                continue;
-            }
-
-            // The gate, before anything is sealed or counted. A sensitive item
-            // is not merely withheld from this request — it is never given an
-            // opportunity to reach the network at all.
-            if self.sensitive.is_sensitive(&item) {
-                stats.skipped_sensitive += 1;
-                tracing::debug!(
-                    item_id = %item.item_id,
-                    "withholding a sensitive item from upload"
-                );
                 continue;
             }
 
@@ -176,15 +163,10 @@ fn upload_limit(content_type: &str) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::Ordering;
-
-    use super::super::fakes::{
-        config, driver, item, key, session, tombstone, FakeAuth, FakeRest, FakeSource,
-    };
+    use super::super::fakes::{driver, item, key, tombstone, FakeAuth, FakeRest, FakeSource};
     use super::super::source::CloudSource;
     use super::*;
     use crate::crypto::decrypt_row;
-    use crate::sync::SensitiveGuard;
 
     #[tokio::test]
     async fn push_seals_every_row_so_the_backend_never_sees_plaintext() {
@@ -307,80 +289,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_sensitive_item_is_never_uploaded() {
-        // CopyPaste-20yw / AT-56. The store is *supposed* to filter these; this
-        // asserts the second layer, because this is data leaving the machine.
-        let source = FakeSource::with_outgoing(vec![
-            item("safe", 1_000, "a normal snippet"),
-            item("secret", 2_000, "AKIAIOSFODNN7EXAMPLE"),
-        ]);
-        let sync = CloudSync::new(
-            FakeRest::default(),
-            FakeAuth::default(),
-            key(),
-            config(),
-            session("token-1"),
-            SensitiveGuard::new(|item| item.item_id == "secret"),
-        );
+    async fn credential_shaped_text_is_uploaded_as_ordinary_content() {
+        let source = FakeSource::with_outgoing(vec![item(
+            "credential-shaped",
+            1_000,
+            "AKIAIOSFODNN7EXAMPLE",
+        )]);
+        let sync = driver(FakeRest::default(), FakeAuth::default());
 
         let stats = sync.push(&source).await.unwrap();
 
         assert_eq!(stats.uploaded, 1);
-        assert_eq!(stats.skipped_sensitive, 1);
-
-        let rows = sync.rest.rows.lock().unwrap();
-        assert!(rows.contains_key("safe"));
-        assert!(
-            !rows.contains_key("secret"),
-            "a sensitive item reached the backend"
+        let row = &sync.rest.rows.lock().unwrap()["credential-shaped"];
+        assert_eq!(
+            decrypt_row(&row.ciphertext, &row.nonce, &key(), "credential-shaped")
+                .unwrap()
+                .as_slice(),
+            b"AKIAIOSFODNN7EXAMPLE"
         );
-    }
-
-    #[tokio::test]
-    async fn a_sensitive_tombstone_is_uploaded() {
-        let mut dead = tombstone("secret", 3_000);
-        dead.content = zeroize::Zeroizing::new(b"AKIAIOSFODNN7EXAMPLE".to_vec());
-        let source = FakeSource::with_outgoing(vec![dead]);
-        let sync = CloudSync::new(
-            FakeRest::default(),
-            FakeAuth::default(),
-            key(),
-            config(),
-            session("token-1"),
-            SensitiveGuard::new(|item| item.item_id == "secret"),
-        );
-
-        let stats = sync.push(&source).await.unwrap();
-        assert_eq!(stats.tombstoned, 1);
-        assert_eq!(stats.skipped_sensitive, 0);
-
-        let rows = sync.rest.rows.lock().unwrap();
-        let row = rows
-            .get("secret")
-            .expect("sensitive tombstone was withheld");
-        assert!(row.deleted);
-        assert!(row.ciphertext.is_empty());
-    }
-
-    #[tokio::test]
-    async fn a_sensitive_item_is_withheld_even_when_it_is_the_only_one() {
-        // The batching must not turn "nothing to upload" into an empty request
-        // that still counts as an upload.
-        let source = FakeSource::with_outgoing(vec![item("secret", 1_000, "x")]);
-        let sync = CloudSync::new(
-            FakeRest::default(),
-            FakeAuth::default(),
-            key(),
-            config(),
-            session("token-1"),
-            SensitiveGuard::new(|_| true),
-        );
-
-        let stats = sync.push(&source).await.unwrap();
-        assert_eq!(stats.uploaded, 0);
-        assert_eq!(stats.skipped_sensitive, 1);
-        assert_eq!(sync.rest.upserts.load(Ordering::SeqCst), 0);
-        assert!(sync.rest.rows.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

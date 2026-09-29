@@ -24,7 +24,6 @@ export function QuickPastePreview({
     item,
     fullContent,
     fullContentFailed,
-    revealedContent: null,
   });
   const loading = item.truncated && body.state === "content" && body.source === "preview";
 

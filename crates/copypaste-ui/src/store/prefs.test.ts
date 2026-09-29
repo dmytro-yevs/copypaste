@@ -304,13 +304,15 @@ describe("onboarding progress", () => {
     })).toEqual({
       step: "sync",
       captureSkipped: true,
-      privacySkipped: false,
-      syncChoice: "both",
-      captureSetupMethod: null,
-      captureSetupStage: "choose",
+      captureSetupMethod: "shizuku",
     });
     expect(parseOnboardingProgress({ onboarding: { step: "unknown" } }))
       .toEqual(DEFAULT_ONBOARDING_PROGRESS);
+  });
+
+  it.each([["privacy", "permissions"], ["complete", "sync"]])("migrates the removed %s step to %s", (before, after) => {
+    expect(parseOnboardingProgress({ onboarding: { step: before, captureSetupMethod: null } }))
+      .toMatchObject({ step: after, captureSetupMethod: "shizuku" });
   });
 
   it("does not resolve an Android setup checkpoint before the native store saves", async () => {
@@ -325,7 +327,6 @@ describe("onboarding progress", () => {
 
     const checkpoint = usePrefs.getState().checkpointOnboarding({
       captureSetupMethod: "shizuku",
-      captureSetupStage: "commands",
     });
     let complete = false;
     void checkpoint.then(() => { complete = true; });

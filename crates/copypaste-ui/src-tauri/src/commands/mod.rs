@@ -10,11 +10,8 @@
 //! Two conventions hold throughout:
 //!
 //! * **Items cross as [`crate::model::UiItem`], never as
-//!   [`copypaste_ipc::Item`].** The conversion drops a sensitive item's
-//!   plaintext at this boundary; see `crate::model` for why that is structural.
-//! * **Operations travel by id.** `copy`, `delete` and `pin` name an item and
-//!   the backend does the work, so a secret never has to be in the WebView in
-//!   order to be acted on.
+//!   [`copypaste_ipc::Item`].**
+//! * **Operations travel by id.** `copy`, `delete` and `pin` name an item.
 //!
 //! Split by what the commands are *for*, because that is what changes together
 //! and because one file per concern keeps each well inside the rule 5 budget.

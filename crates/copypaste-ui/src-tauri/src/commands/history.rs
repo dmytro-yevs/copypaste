@@ -1,4 +1,4 @@
-//! History commands: list, search, add, copy, reveal, delete, delete_all,
+//! History commands: list, search, add, copy, delete, delete_all,
 //! set_pinned.
 //!
 //! # Naming
@@ -10,8 +10,6 @@
 //! `crates/copypaste-ui/src/lib/ipc.ts` is already written against exactly
 //! these names.
 //!
-//! The exception is [`reveal_item`], which has no `Method` behind it. See its
-//! docs.
 
 use tauri::{AppHandle, Runtime, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -145,9 +143,7 @@ async fn list_page(backend: &impl Backend, limit: u32, cursor: Option<&str>) -> 
     Ok(backend.list(limit, cursor).await?.into())
 }
 
-/// Full-text search. Sensitive items are never indexed and never returned, so
-/// a result set cannot contain one — the `UiItem` conversion is the belt to
-/// that pair of braces.
+/// Full-text search over stored history.
 #[tauri::command]
 pub async fn search(
     backend: State<'_, SelectedBackend>,
@@ -170,9 +166,7 @@ pub async fn add_item(backend: State<'_, SelectedBackend>, content: String) -> R
 
 /// Put an item's content on the system clipboard.
 ///
-/// Takes an id. The content never enters the WebView, which is what lets a
-/// sensitive item be copied at all (ADR-0001: the user then presses Cmd+V —
-/// the app never synthesises a paste).
+/// Takes an id and writes the stored content to the system clipboard.
 #[tauri::command]
 pub async fn copy_item<R: Runtime>(
     app: AppHandle<R>,
@@ -196,45 +190,15 @@ pub async fn copy_item_as_plain_text<R: Runtime>(
     Ok(item.into())
 }
 
-/// The deliberate reveal gesture: return one item's plaintext.
-///
-/// The single route back to a secret, and it is a command of its own so that it
-/// is visible in the handler list, greppable, and impossible to reach by
-/// accident from a list render. Everything else about a sensitive item —
-/// copying it, pinning it, deleting it — goes by id and needs none of this.
-///
-/// Manifest 06 SCRH-7 requires a revealed item to re-hide on window blur and
-/// after a timeout. That is the frontend's job, and it is only possible because
-/// the plaintext arrives here as a one-off value rather than living in the list
-/// state.
-#[tauri::command]
-pub async fn reveal_item(backend: State<'_, SelectedBackend>, id: String) -> Result<String> {
-    Ok(backend.get(&id).await?.content)
-}
-
-/// Return the complete body of a non-sensitive item.
-///
-/// Unlike `reveal_item`, this command is safe for the authenticated local
-/// development bridge: the sensitivity guard runs after the authoritative
-/// item read and before plaintext crosses into the WebView.
+/// Return the complete body of an item.
 #[tauri::command]
 pub async fn get_item_body(backend: State<'_, SelectedBackend>, id: String) -> Result<String> {
-    let item = backend.get(&id).await?;
-    if item.is_sensitive {
-        return Err(BackendError::Invalid(
-            "Sensitive content cannot be displayed here.",
-        ));
-    }
-    Ok(item.content)
+    Ok(backend.get(&id).await?.content)
 }
 
 /// One clipboard write for the whole selection.
 ///
-/// Answers how many items actually reached the clipboard, which is not
-/// `ids.len()`: a sensitive or binary item is deliberately left out, because
-/// assembling a secret into a text blob is the one thing the id-only path
-/// exists to prevent. The count is what lets the caller say so instead of
-/// reporting a plain success over content the user cannot see.
+/// Answers how many text items actually reached the clipboard.
 ///
 /// A row that vanished between the selection and this call fails the whole
 /// command and writes nothing. The clipboard is one slot: partial content under
@@ -261,7 +225,7 @@ async fn joined_text(backend: &impl Backend, ids: &[String]) -> Result<(String, 
     let mut parts: Vec<String> = Vec::with_capacity(ids.len());
     for id in ids {
         let item = backend.get(id).await?;
-        if item.is_sensitive || copypaste_ipc::content_type::is_binary(&item.content_type) {
+        if copypaste_ipc::content_type::is_binary(&item.content_type) {
             continue;
         }
         parts.push(item.content);
@@ -270,8 +234,7 @@ async fn joined_text(backend: &impl Backend, ids: &[String]) -> Result<(String, 
     Ok((parts.join("\n"), copied))
 }
 
-/// A lazy thumbnail for an image row. This cannot return a sensitive image:
-/// the backend refuses it before any bytes cross into the WebView.
+/// A lazy thumbnail for an image row.
 #[tauri::command]
 pub async fn get_image_preview(
     backend: State<'_, SelectedBackend>,
@@ -617,20 +580,13 @@ mod tests {
         assert!(!shown.contains('/'), "{shown}");
     }
 
-    fn listed(
-        id: &str,
-        content: &str,
-        content_type: &str,
-        is_sensitive: bool,
-    ) -> copypaste_ipc::Item {
+    fn listed(id: &str, content: &str, content_type: &str) -> copypaste_ipc::Item {
         copypaste_ipc::Item {
             id: id.into(),
             content: content.into(),
             content_type: content_type.into(),
             created_at: 0,
             pinned: false,
-            is_sensitive,
-            sensitive_finding: None,
             origin_device_id: "fake-device".into(),
             origin_device_name: None,
             source_app_bundle_id: None,
@@ -645,8 +601,8 @@ mod tests {
         let long = "y".repeat(copypaste_ipc::limits::LIST_PREVIEW_BYTES * 2);
         let backend = FakeBackend::failing().with_page(Page {
             items: vec![
-                listed("a", &long, "text/plain", false),
-                listed("b", "second", "text/plain", false),
+                listed("a", &long, "text/plain"),
+                listed("b", "second", "text/plain"),
             ],
             ..Page::default()
         });
@@ -659,12 +615,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_bulk_copy_leaves_out_flagged_and_binary_items() {
+    async fn a_bulk_copy_leaves_out_binary_items() {
         let backend = FakeBackend::failing().with_page(Page {
             items: vec![
-                listed("a", "kept", "text/plain", false),
-                listed("b", "AKIAsecret", "text/plain", true),
-                listed("c", "[Image]", "image/png", false),
+                listed("a", "kept", "text/plain"),
+                listed("b", "second", "text/plain"),
+                listed("c", "[Image]", "image/png"),
             ],
             ..Page::default()
         });
@@ -675,16 +631,14 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(text, "kept");
-        // Three selected, one copied. The caller needs the difference to avoid
-        // reporting a plain success over a clipboard holding a third of it.
-        assert_eq!(copied, 1);
+        assert_eq!(text, "kept\nsecond");
+        assert_eq!(copied, 2);
     }
 
     #[tokio::test]
     async fn a_bulk_copy_refuses_whole_rather_than_copying_a_fragment() {
         let backend = FakeBackend::failing().with_page(Page {
-            items: vec![listed("a", "kept", "text/plain", false)],
+            items: vec![listed("a", "kept", "text/plain")],
             ..Page::default()
         });
 

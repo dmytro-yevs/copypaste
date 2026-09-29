@@ -4,7 +4,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use copypaste_core::{Detector, Keyring, Store};
+use copypaste_core::{Keyring, Store};
 use copypaste_p2p::discovery::Discovery;
 use copypaste_p2p::peers::PeerStore;
 
@@ -204,7 +204,6 @@ fn reopen_with(
     let state = AppState::new(
         store,
         keyring,
-        Arc::new(Detector::new().expect("detector")),
         clipboard,
         meta,
         P2p::new(peers, Some(discovery), 0, true),

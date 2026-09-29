@@ -132,7 +132,6 @@ fn apply(store: &Store, (id, content, ciphertext, nonce, hash): Sealed) -> bool 
             content_hash: &hash,
             created_at: T0,
             deleted: false,
-            is_sensitive: false,
             origin_device_id: "peer-device",
             app_bundle_id: Some("com.example.benchmark"),
             app_name: Some("Benchmark App"),

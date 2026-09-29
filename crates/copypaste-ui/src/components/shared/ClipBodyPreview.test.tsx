@@ -35,8 +35,4 @@ describe("ClipBodyPreview", () => {
     else expect(container.textContent).toContain(content === "C:\\Users\\Avery\\report.pdf" ? "report.pdf" : content);
   });
 
-  it("keeps sensitive content masked before either list surface can render it", () => {
-    const { container } = render(<ClipBodyPreview kind="secret" content="" masked previewLines={3} />);
-    expect(container.querySelectorAll("i")).toHaveLength(3);
-  });
 });

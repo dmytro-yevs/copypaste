@@ -90,10 +90,6 @@ export const settings = {
       description: "Only limits what is shown; it never deletes history.",
       unlimited: "Unlimited",
     },
-    warnBeforeReveal: {
-      title: "Warn before revealing",
-      description: "Ask before showing detected secrets. They hide after 10 seconds or when CopyPaste loses focus.",
-    },
     allowScreenshots: {
       title: "Allow screenshots",
       description: "Lets the CopyPaste shell and Quick Paste appear in captures and app previews. Pairing prompts stay protected.",
@@ -180,14 +176,9 @@ export const settings = {
       dialogTitle: "Export your clipboard history?",
       dialogBody:
         "What is written is plain readable text, not encrypted. Keep it somewhere you would keep a document full of passwords.",
-      includeSensitive: "Include items that look like passwords or keys",
-      includeSensitiveHint:
-        "Off by default. Turning it on writes detected credentials out in the clear.",
       confirm: "Choose where to save",
       done_one: "Exported {{count}} item",
       done_other: "Exported {{count}} items",
-      withheld_one: "{{count}} that looks like a secret was left out",
-      withheld_other: "{{count}} that look like secrets were left out",
       unreadable_one: "{{count}} could not be read",
       unreadable_other: "{{count}} could not be read",
       nonText_one: "{{count}} was not text",
@@ -307,10 +298,6 @@ export const settings = {
         title: "Copies replaced before they could be read",
         description: "They changed before CopyPaste could read them.",
       },
-      swept: {
-        title: "Detected secrets deleted automatically",
-        description: "Auto-deleted by your secret-retention setting. This cannot be undone.",
-      },
       purged: {
         title: "Search entries removed at startup",
         description: "The items remain, but they are no longer searchable.",
@@ -331,11 +318,6 @@ export const settings = {
       empty: "Nothing to report yet.",
     },
 
-    /** The sweep now announces itself. Before the service carried the count on
-     *  its change event, an auto-deletion could only be noticed as an item that
-     *  had gone missing. */
-    swept_one: "{{count}} detected secret was deleted automatically",
-    swept_other: "{{count}} detected secrets were deleted automatically",
   },
 
   about: {

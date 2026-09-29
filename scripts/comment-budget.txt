@@ -34,17 +34,12 @@ crates/copypaste-core/src/crypto/keystore/android.rs
 crates/copypaste-core/src/crypto/keystore/mod.rs
 crates/copypaste-core/src/crypto/mod.rs
 crates/copypaste-core/src/ingest.rs
-crates/copypaste-core/src/sensitive/mod.rs
-crates/copypaste-core/src/sensitive/purge.rs
-crates/copypaste-core/src/sensitive/validators.rs
-crates/copypaste-core/src/sensitive/wipe.rs
 crates/copypaste-core/src/storage/connection.rs
 crates/copypaste-core/src/storage/items.rs
 crates/copypaste-core/src/storage/mod.rs
 crates/copypaste-core/src/storage/page.rs
 crates/copypaste-core/src/storage/pinning.rs
 crates/copypaste-core/src/storage/search.rs
-crates/copypaste-core/src/storage/versions.rs
 crates/copypaste-core/src/sync/merge.rs
 crates/copypaste-core/src/sync/mod.rs
 crates/copypaste-core/src/sync/source.rs
@@ -79,7 +74,6 @@ crates/copypaste-p2p/src/peers/mod.rs
 crates/copypaste-p2p/src/peers/store.rs
 crates/copypaste-p2p/src/sync/merge.rs
 crates/copypaste-p2p/src/sync/session.rs
-crates/copypaste-p2p/src/sync/source.rs
 crates/copypaste-p2p/src/transport/handshake.rs
 crates/copypaste-p2p/src/transport/mod.rs
 crates/copypaste-p2p/src/transport/session.rs
@@ -92,11 +86,9 @@ crates/copypaste-ui/src-tauri/src/capture/intake.rs
 crates/copypaste-ui/src-tauri/src/capture/model.rs
 crates/copypaste-ui/src-tauri/src/commands/clipboard.rs
 crates/copypaste-ui/src-tauri/src/commands/config.rs
-crates/copypaste-ui/src-tauri/src/commands/history.rs
 crates/copypaste-ui/src-tauri/src/commands/mod.rs
 crates/copypaste-ui/src-tauri/src/commands/transfer.rs
 crates/copypaste-ui/src-tauri/src/lib.rs
-crates/copypaste-ui/src-tauri/src/model.rs
 crates/copypaste-ui/src-tauri/src/service/locate.rs
 crates/copypaste-ui/src-tauri/src/service/push.rs
 crates/copypaste-ui/src-tauri/src/shell/hotkey.rs

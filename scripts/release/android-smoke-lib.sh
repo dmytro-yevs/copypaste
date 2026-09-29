@@ -727,7 +727,7 @@ self_test() {
         && ok "the pairing provider marker alone is not React hydration" \
         || bad "the pairing provider marker alone is not React hydration" "got '$kids $authored $named $interactive'"
 
-    printf '%s%s<node class="android.webkit.WebView" text="CopyPaste"><node class="android.view.View" resource-id="root"/><node class="android.widget.TextView" text="WELCOME"/><node class="android.widget.TextView" text="Your clipboard finally remembers."/><node class="android.widget.Button" text="Set up capture" clickable="true"/></node>%s' \
+    printf '%s%s<node class="android.webkit.WebView" text="CopyPaste"><node class="android.view.View" resource-id="root"/><node class="android.widget.TextView" text="WELCOME"/><node class="android.widget.TextView" text="Copy once. Keep it."/><node class="android.widget.Button" text="Get started" clickable="true"/></node>%s' \
         "$head" "$shell_open" "$shell_close" > "$t/paint-onboarding.xml"
     read -r _ authored named interactive _ <<<"$(webview_content "$t/paint-onboarding.xml")"
     webview_hydrated "$authored" "$named" "$interactive" \

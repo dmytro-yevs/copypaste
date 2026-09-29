@@ -10,7 +10,6 @@ const SEARCHABLE_FIELDS: readonly Omit<SettingsFieldDefinition, "id">[] = [
 
   { kind: "boolean", section: "clipboard", title: "settings.list.groupByDevice.title", description: "settings.list.groupByDevice.description" },
   { kind: "number", section: "clipboard", title: "settings.list.historyDisplayLimit.title", description: "settings.list.historyDisplayLimit.description", keywords: ["items", "limit"] },
-  { kind: "boolean", section: "privacy", title: "settings.list.warnBeforeReveal.title", description: "settings.list.warnBeforeReveal.description", keywords: ["password", "secret", "token"] },
   { kind: "boolean", section: "privacy", title: "settings.list.allowScreenshots.title", description: "settings.list.allowScreenshots.description", keywords: ["screen recording", "privacy"], capability: "screenshots" },
 
   { kind: "custom", section: "shortcuts", title: "settings.shortcut.title", description: "settings.shortcut.description", keywords: ["hotkey", "keyboard", "quick paste"] },
@@ -28,7 +27,6 @@ const SEARCHABLE_FIELDS: readonly Omit<SettingsFieldDefinition, "id">[] = [
   { kind: "choice", section: "privacy", title: "settings.service.historyLimit.title", description: "settings.service.historyLimit.description" },
   { kind: "choice", section: "privacy", title: "settings.service.storageQuota.title", description: "settings.service.storageQuota.description" },
   { kind: "choice", section: "privacy", title: "settings.service.retention.title", description: "settings.service.retention.description" },
-  { kind: "choice", section: "privacy", title: "settings.service.sensitive.title", description: "settings.service.sensitive.description", keywords: ["password", "key", "token", "delete"] },
   { kind: "boolean", section: "clipboard", title: "settings.service.notify.title", description: "settings.service.notify.description", keywords: ["notification"], capability: "copyNotifications" },
   { kind: "boolean", section: "clipboard", title: "settings.service.sound.title", description: "settings.service.sound.description" },
   { kind: "boolean", section: "device-sync", title: "settings.service.syncEnabled.title", description: "settings.service.syncEnabled.description", keywords: ["pair", "devices"] },
@@ -57,7 +55,6 @@ const SEARCHABLE_FIELDS: readonly Omit<SettingsFieldDefinition, "id">[] = [
   { kind: "readonly", section: "diagnostics", title: "settings.diagnostics.running.started.title", description: "settings.diagnostics.running.started.description" },
   { kind: "dynamic", section: "diagnostics", title: "settings.diagnostics.dropped.tooLarge.title", description: "settings.diagnostics.dropped.tooLarge.description" },
   { kind: "readonly", section: "diagnostics", title: "settings.diagnostics.dropped.missed.title", description: "settings.diagnostics.dropped.missed.description" },
-  { kind: "readonly", section: "diagnostics", title: "settings.diagnostics.dropped.swept.title", description: "settings.diagnostics.dropped.swept.description" },
   { kind: "readonly", section: "diagnostics", title: "settings.diagnostics.dropped.purged.title", description: "settings.diagnostics.dropped.purged.description" },
   { kind: "action", section: "diagnostics", title: "settings.diagnostics.report.title", keywords: ["copy", "export", "logs", "support"] },
 
@@ -103,7 +100,7 @@ const SECTION_DEFINITIONS: readonly PreferenceSectionDefinition[] = [
   {
     value: "privacy",
     label: "Privacy & retention",
-    description: "Private mode, sensitive content and retention",
+    description: "Private mode and retention",
     icon: "service",
   },
   {
@@ -169,8 +166,8 @@ export const SETTINGS_GROUP_DEFINITIONS: readonly SettingsGroupDefinition[] = [
   { section: "clipboard", id: "notifications", title: "settings.service.groups.telling.title", fields: ["settings.service.notify.title", "settings.service.sound.title"] },
   { section: "clipboard", id: "history-list", title: "History list", fields: ["settings.list.groupByDevice.title", "settings.list.historyDisplayLimit.title"] },
   { section: "privacy", id: "private-mode", title: "Private mode", fields: ["settings.service.privateMode.title"] },
-  { section: "privacy", id: "retention", title: "settings.service.groups.keeping.title", fields: ["settings.service.historyLimit.title", "settings.service.storageQuota.title", "settings.service.retention.title", "settings.service.sensitive.title"] },
-  { section: "privacy", id: "reveal-protection", title: "Reveal protection", fields: ["settings.list.warnBeforeReveal.title", "settings.list.allowScreenshots.title"] },
+  { section: "privacy", id: "retention", title: "settings.service.groups.keeping.title", fields: ["settings.service.historyLimit.title", "settings.service.storageQuota.title", "settings.service.retention.title"] },
+  { section: "privacy", id: "screen-protection", title: "Screen protection", fields: ["settings.list.allowScreenshots.title"] },
   { section: "shortcuts", id: "shortcut", fields: ["settings.shortcut.title"] },
   { section: "shortcuts", id: "startup", title: "settings.startup.title", fields: ["settings.startup.openAtLogin.title"] },
   { section: "device-sync", id: "devices", title: "Devices", fields: ["devices.own.rename.label", "settings.sync.paired.title", "settings.sync.now.title"] },
@@ -182,7 +179,7 @@ export const SETTINGS_GROUP_DEFINITIONS: readonly SettingsGroupDefinition[] = [
   { section: "storage", id: "recovery", title: "settings.transfer.recoverySection", fields: ["settings.transfer.backup.title", "settings.transfer.restore.title"] },
   { section: "storage", id: "danger", title: "settings.storage.dangerSection", fields: ["settings.storage.clear.title"] },
   { section: "diagnostics", id: "running", title: "settings.diagnostics.running.title", fields: ["settings.diagnostics.running.history.title", "settings.diagnostics.running.started.title"] },
-  { section: "diagnostics", id: "dropped", title: "settings.diagnostics.dropped.title", description: "settings.diagnostics.dropped.description", fields: ["settings.diagnostics.dropped.tooLarge.title", "settings.diagnostics.dropped.missed.title", "settings.diagnostics.dropped.swept.title", "settings.diagnostics.dropped.purged.title"] },
+  { section: "diagnostics", id: "dropped", title: "settings.diagnostics.dropped.title", description: "settings.diagnostics.dropped.description", fields: ["settings.diagnostics.dropped.tooLarge.title", "settings.diagnostics.dropped.missed.title", "settings.diagnostics.dropped.purged.title"] },
   { section: "diagnostics", id: "support", title: "Support", fields: ["settings.diagnostics.report.title"] },
   { section: "diagnostics", id: "runtime-events", title: "runtimeLog.title", description: "runtimeLog.description", fields: ["runtimeLog.title"] },
   { section: "about", id: "identity", surface: false, fields: ["settings.about.app.title"] },

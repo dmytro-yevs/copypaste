@@ -347,15 +347,12 @@ export async function dismissFirstRun(browser: Browser): Promise<void> {
   await browser.waitUntil(
     async () => browser.execute((primaryNavigation: string) => {
       if (document.querySelector(primaryNavigation)) return true;
-      const explore = Array.from(
-        document.querySelectorAll<HTMLButtonElement>(
-          '[data-onboarding-step="welcome"] button',
-        ),
-      ).find((button) => button.textContent?.trim() === "Explore first");
-      if (!explore) return false;
-      // This dismissal is setup for unrelated product tests. Platform drivers
-      // disagree on hit-testing the tall welcome grid; tested actions do not.
-      explore.click();
+      const root = document.querySelector<HTMLElement>("[data-onboarding-step]");
+      const step = root?.dataset.onboardingStep;
+      const label = step === "welcome" ? "Get started" : step === "background" ? "Not now" : step === "sync" ? "Open Library" : "Continue";
+      const next = Array.from(root?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+        .find((button) => button.textContent?.trim() === label && !button.disabled);
+      next?.click();
       return false;
     }, PRIMARY_NAVIGATION),
     {

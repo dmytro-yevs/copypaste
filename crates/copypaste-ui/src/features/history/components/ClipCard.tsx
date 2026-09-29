@@ -27,8 +27,6 @@ export type CardSelectionIntent = "toggle" | "range";
 interface ClipCardProps {
     item: Item;
     state: "default" | "active" | "checked" | "dragging" | "pending";
-    revealedContent: string | null;
-    revealPending: boolean;
     origin: OriginDevice | null;
     selectionActive: boolean;
     checked: boolean;
@@ -48,8 +46,6 @@ interface PressState {
 function ClipCardImpl({
     item,
     state,
-    revealedContent,
-    revealPending,
     origin,
     selectionActive,
     checked,
@@ -70,9 +66,6 @@ function ClipCardImpl({
         [item],
     );
     const source = clipSourceMetadata(item);
-    const revealed = revealedContent !== null;
-    const masked = item.is_sensitive && !revealed;
-    const potentialFinding = item.is_sensitive ? null : item.sensitive_finding;
     const stranded = wontSync(item);
     const label = rowLabel(
         item,
@@ -80,12 +73,7 @@ function ClipCardImpl({
         preview,
         tr,
     );
-    const body =
-        potentialFinding !== null
-            ? potentialFinding.redacted_preview
-            : revealedContent !== null
-              ? revealedContent
-              : preview;
+    const body = preview;
 
     const stopPress = useCallback(() => {
         if (press.current !== null) {
@@ -154,7 +142,6 @@ function ClipCardImpl({
             data-kind={kind}
             data-selection-active={selectionActive || undefined}
             data-checked={checked || undefined}
-            aria-busy={masked && revealPending ? true : undefined}
         >
             <Button
                 variant="ghost"
@@ -207,7 +194,6 @@ function ClipCardImpl({
                     bodyClassName={styles.body}
                     preview={{
                         kind,
-                        masked,
                         content: body,
                         previewLines,
                         imagePreview,
@@ -227,12 +213,6 @@ function ClipCardImpl({
                         content: body,
                         badges: [
                             ...(item.pinned ? [{ icon: "pin" as const, label: tr("history.row.pinnedBadge") }] : []),
-                            ...(potentialFinding !== null ? [{
-                                icon: "sensitive" as const,
-                                tone: "warning" as const,
-                                label: tr("history.row.potentialSensitiveBadge"),
-                                title: tr("history.row.potentialSensitiveWarning"),
-                            }] : []),
                             ...(stranded ? [{
                                 icon: "cloudOff" as const,
                                 tone: "warning" as const,

@@ -44,6 +44,7 @@ pub fn snapshot<R: Runtime>(app: &AppHandle<R>) -> Result<OnboardingPermissions,
         platform(),
         notification_status(app)?,
         tile_status(app)?,
+        background_activity_status(app)?,
     ))
 }
 
@@ -54,6 +55,7 @@ pub fn request<R: Runtime>(
     match id {
         PermissionId::Notifications => request_notifications(app)?,
         PermissionId::Tile => request_tile(app)?,
+        PermissionId::BackgroundActivity => request_background_activity(app)?,
     }
     snapshot(app)
 }
@@ -64,6 +66,7 @@ pub fn open_settings<R: Runtime>(
 ) -> Result<OnboardingPermissions, BackendError> {
     match id {
         PermissionId::Notifications => open_notification_settings(app)?,
+        PermissionId::BackgroundActivity => request_background_activity(app)?,
         PermissionId::Tile => {
             // The tile prompt is the OS sheet. Settings has no dedicated pane.
             request_tile(app)?;
@@ -100,6 +103,32 @@ fn tile_status<R: Runtime>(app: &AppHandle<R>) -> Result<PermissionStatus, Backe
     {
         let _ = app;
         Ok(PermissionStatus::Unavailable)
+    }
+}
+
+fn background_activity_status<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<PermissionStatus, BackendError> {
+    #[cfg(target_os = "android")]
+    {
+        android::background_activity_status(app)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok(PermissionStatus::NotRequired)
+    }
+}
+
+fn request_background_activity<R: Runtime>(app: &AppHandle<R>) -> Result<(), BackendError> {
+    #[cfg(target_os = "android")]
+    {
+        android::request_background_activity(app)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok(())
     }
 }
 
@@ -172,9 +201,15 @@ mod tests {
             PermissionHost::Macos,
             PermissionStatus::Denied,
             PermissionStatus::Unavailable,
+            PermissionStatus::NotRequired,
         );
         assert_eq!(snapshot.clipboard_status, PermissionStatus::NotRequired);
         assert!(!snapshot.notifications.required);
         assert!(!snapshot.tile.required);
+        assert!(!snapshot.background_activity.required);
+        assert_eq!(
+            snapshot.background_activity.status,
+            PermissionStatus::NotRequired
+        );
     }
 }

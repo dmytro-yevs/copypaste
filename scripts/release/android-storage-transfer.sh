@@ -471,10 +471,8 @@ print(json.dumps({
         "content_type": "text/plain",
         "created_at": int(time.time() * 1000),
         "pinned": False,
-        "is_sensitive": False,
     }],
     "skipped_non_text": 0,
-    "skipped_sensitive": 0,
     "skipped_undecryptable": 0,
 }))
 PY

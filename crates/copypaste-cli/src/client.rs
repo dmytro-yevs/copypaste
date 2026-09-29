@@ -712,7 +712,7 @@ mod tests {
         let stub = StubDaemon::start(
             "roundtrip",
             vec![StubAction::Reply(
-                r#"{"id":{id},"ok":true,"data":{"page":{"items":[{"id":"a","content":"hi","content_type":"text/plain","created_at":5,"pinned":false,"is_sensitive":false}],"skipped_undecryptable":0}}}"#
+                r#"{"id":{id},"ok":true,"data":{"page":{"items":[{"id":"a","content":"hi","content_type":"text/plain","created_at":5,"pinned":false}],"skipped_undecryptable":0}}}"#
                     .to_string(),
             )],
         );
@@ -899,10 +899,7 @@ mod tests {
             Method::Discovered,
             Method::Rescan,
             Method::CloudStatus,
-            Method::Export {
-                limit: 0,
-                include_sensitive: false,
-            },
+            Method::Export { limit: 0 },
         ] {
             assert_eq!(timeout_for(&method), REQUEST_TIMEOUT, "{method:?}");
         }
@@ -1217,7 +1214,7 @@ mod tests {
     #[test]
     fn item_pages_deserialise_into_typed_items_and_a_skip_count() {
         let line = r#"{"id":1,"ok":true,"data":{"page":{"items":[{"id":"a","content":"hi",
-            "content_type":"text/plain","created_at":5,"pinned":true,"is_sensitive":false}],
+            "content_type":"text/plain","created_at":5,"pinned":true}],
             "skipped_undecryptable":3}}}"#;
         let response: Response = serde_json::from_str(line).unwrap();
         let page = expect_page(into_data(response).unwrap()).unwrap();
@@ -1259,16 +1256,12 @@ mod tests {
     #[test]
     fn an_export_does_not_decode_as_a_page() {
         let line = r#"{"id":1,"ok":true,"data":{"export":{"items":[],"skipped_non_text":1,
-            "skipped_sensitive":2,"skipped_undecryptable":3}}}"#;
+            "skipped_undecryptable":3}}}"#;
         let response: Response = serde_json::from_str(line).unwrap();
         let export = expect_export(into_data(response).unwrap()).unwrap();
         assert_eq!(
-            (
-                export.skipped_non_text,
-                export.skipped_sensitive,
-                export.skipped_undecryptable
-            ),
-            (1, 2, 3)
+            (export.skipped_non_text, export.skipped_undecryptable),
+            (1, 3)
         );
     }
 
@@ -1289,7 +1282,7 @@ mod tests {
             "storage_quota_bytes":10737418240,
             "max_text_size_bytes":10485760,"max_image_size_bytes":67108864,
             "max_file_size_bytes":104857600,"max_decoded_image_mb":50,
-            "sensitive_ttl_secs":0,"excluded_app_bundle_ids":[],
+            "excluded_app_bundle_ids":[],
             "lan_visibility":true,"sync_enabled":true},"restart_required":["lan_visibility"]}}}"#;
         let response: Response = serde_json::from_str(line).unwrap();
         let applied = expect_config(into_data(response).unwrap()).unwrap();

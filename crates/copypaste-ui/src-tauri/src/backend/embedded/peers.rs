@@ -388,7 +388,6 @@ pub(super) fn source(inner: &Arc<Inner>) -> StoreSource {
     StoreSource::with_retention_settings(
         inner.state.store.clone(),
         Arc::clone(&inner.state.keyring),
-        Arc::clone(&inner.state.detector),
         inner.state.device_id.clone(),
         inner.state.device_name(),
         move || settings.settings(),
@@ -415,7 +414,7 @@ fn remember(inner: &Arc<Inner>, outcome: &SyncOutcome) {
         tracing::warn!(error = ?e, "could not record a peer device name");
     }
     if outcome.stats.received > 0 {
-        inner.publish_items(false, 0);
+        inner.publish_items(false);
     }
 }
 

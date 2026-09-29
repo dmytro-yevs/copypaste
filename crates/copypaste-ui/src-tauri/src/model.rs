@@ -1,49 +1,9 @@
-//! The types the WebView is allowed to see — and the boundary that decides it.
-//!
-//! # Why this file exists at all
-//!
-//! [`copypaste_ipc::Item`] carries plaintext `content`. That is correct on the
-//! wire: the daemon decrypts on the way out and the socket is `0600`. It is not
-//! correct in a WebView. Once a string is in the JS heap it is reachable by
-//! every component, by the accessibility tree, by devtools, by a heap snapshot,
-//! and by anything that later serialises a props object into a log. Manifest 06
-//! INV-10 requires that sensitive content be **absent** from the view rather
-//! than obscured on top of it, and "obscured on top of it" is exactly what you
-//! get if the plaintext crosses the bridge and a component is trusted to hide
-//! it.
-//!
-//! So the plaintext is discarded **here**, at the process boundary, before
-//! serialisation. A sensitive item reaches React as an item with no content at
-//! all.
-//!
-//! # Why it is structural rather than a rule
-//!
-//! The obvious alternative is a per-command "remember to blank `content`"
-//! rule. Manifest 06 INV-10 requires a structural boundary instead.
-//!
-//! Instead:
-//!
-//! * [`UiItem`] has no public constructor and no public struct literal — its
-//!   fields are private, so the only way to make one is [`UiItem::from`], and
-//!   that function is total.
-//! * Every command signature returns `UiItem` / `Vec<UiItem>`, never
-//!   [`copypaste_ipc::Item`]. A new command physically cannot return the wire
-//!   type without changing its own signature to say so.
-//! * `content` is `Option<String>` rather than a `String` that happens to be
-//!   empty, so "there is no content" is a state the frontend's type checker
-//!   sees, not a value it has to test for.
-//!
-//! The one deliberate way back to plaintext is
-//! [`crate::commands::history::reveal_item`], which takes an id, returns one
-//! item's text, and exists because the user asked for it by pressing a button.
-//! Everything else — copy, delete, pin — travels by id and does its work in the
-//! backend, so the secret never needs to be in the WebView to be *used*.
+//! UI-facing history DTOs.
 
 #[cfg(target_os = "android")]
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use copypaste_ipc::{
-    ContentClass, DiscoveredDevice, ImagePreview, Item, PeerInfo, SensitiveFinding, StatusData,
-    SyncResult,
+    ContentClass, DiscoveredDevice, ImagePreview, Item, PeerInfo, StatusData, SyncResult,
 };
 use copypaste_source_app::AppIcon;
 use serde::Serialize;
@@ -58,18 +18,12 @@ use crate::backend::UiError;
 #[cfg_attr(feature = "typescript", ts(rename = "Item", export_to = "ipc.ts"))]
 pub struct UiItem {
     id: String,
-    /// `None` for a sensitive item — not an empty string, and not a mask. The
-    /// plaintext was dropped before this value existed.
-    content: Option<String>,
+    content: String,
     content_type: String,
     content_class: ContentClass,
     /// Milliseconds since the Unix epoch.
     created_at: i64,
     pinned: bool,
-    is_sensitive: bool,
-    /// Inert detector metadata. A high-confidence item never carries even a
-    /// redacted preview across this boundary.
-    sensitive_finding: Option<SensitiveFinding>,
     /// Which device captured this. Not secret, and the whole point of it is to
     /// be shown: an item that arrived from the Mac and one captured on this
     /// phone are different things to a user, and the android access doc's §5
@@ -89,7 +43,7 @@ pub struct UiItem {
     truncated: bool,
 }
 
-/// A thumbnail produced on demand from a non-sensitive image item.
+/// A thumbnail produced on demand from an image item.
 ///
 /// The field is base64 rather than a path or an original payload; React turns
 /// it into a short-lived Blob URL and revokes it when the virtual row leaves.
@@ -191,23 +145,13 @@ impl From<ImagePreview> for UiImagePreview {
 
 impl From<Item> for UiItem {
     fn from(item: Item) -> Self {
-        // The whole point of the file, in one branch. `item.content` is moved
-        // into the `Some` or dropped on the spot; there is no path that keeps
-        // it and no way to opt out.
-        let (content, sensitive_finding) = if item.is_sensitive {
-            (None, None)
-        } else {
-            (Some(item.content), item.sensitive_finding)
-        };
         Self {
             id: item.id,
-            content,
+            content: item.content,
             content_class: copypaste_ipc::content_type::classify(&item.content_type),
             content_type: item.content_type,
             created_at: item.created_at,
             pinned: item.pinned,
-            is_sensitive: item.is_sensitive,
-            sensitive_finding,
             origin_device_id: item.origin_device_id,
             origin_device_name: item.origin_device_name,
             source_app_bundle_id: item.source_app_bundle_id,
@@ -223,20 +167,9 @@ impl UiItem {
     pub fn id(&self) -> &str {
         &self.id
     }
-
-    /// Whether the detector flagged this item.
-    pub fn is_sensitive(&self) -> bool {
-        self.is_sensitive
-    }
-
-    /// Whether any content survived the boundary. Always false for a sensitive
-    /// item.
-    pub fn has_content(&self) -> bool {
-        self.content.is_some()
-    }
 }
 
-/// Convert a page of wire items, dropping sensitive plaintext as it goes.
+/// Convert a page of wire items for the WebView.
 pub fn ui_items(items: Vec<Item>) -> Vec<UiItem> {
     items.into_iter().map(UiItem::from).collect()
 }
@@ -349,15 +282,13 @@ pub type UiDiscovered = DiscoveredDevice;
 mod tests {
     use super::*;
 
-    fn wire(content: &str, is_sensitive: bool) -> Item {
+    fn wire(content: &str) -> Item {
         Item {
             id: "item-1".into(),
             content: content.into(),
             content_type: "text/plain".into(),
             created_at: 1_700_000_000_000,
             pinned: false,
-            is_sensitive,
-            sensitive_finding: None,
             origin_device_id: "device-1".into(),
             origin_device_name: Some("Mac".into()),
             source_app_bundle_id: Some("com.apple.Safari".into()),
@@ -369,8 +300,7 @@ mod tests {
 
     #[test]
     fn ordinary_content_crosses_the_boundary_intact() {
-        let item = UiItem::from(wire("hello", false));
-        assert!(item.has_content());
+        let item = UiItem::from(wire("hello"));
         let json = serde_json::to_string(&item).unwrap();
         assert!(json.contains("hello"), "{json}");
         assert!(json.contains(r#""content_class":"text""#), "{json}");
@@ -378,77 +308,17 @@ mod tests {
 
     #[test]
     fn unknown_content_type_crosses_as_other_without_a_ui_guess() {
-        let mut item = wire("future bytes", false);
+        let mut item = wire("future bytes");
         item.content_type = "application/x-future".into();
         let json = serde_json::to_string(&UiItem::from(item)).unwrap();
         assert!(json.contains(r#""content_class":"other""#), "{json}");
     }
 
     #[test]
-    fn inert_finding_metadata_crosses_with_a_redacted_preview() {
-        let mut wire = wire("mail alice@example.com", false);
-        wire.sensitive_finding = Some(SensitiveFinding {
-            label: "email".into(),
-            spans: vec![copypaste_ipc::SensitiveSpan { start: 5, end: 22 }],
-            spans_truncated: false,
-            redacted_preview: "mail ***REDACTED***".into(),
-        });
-
-        let json = serde_json::to_string(&UiItem::from(wire)).unwrap();
-        assert!(json.contains(r#""label":"email""#), "{json}");
-        assert!(json.contains("mail ***REDACTED***"), "{json}");
-    }
-
-    /// The load-bearing test: a sensitive item's plaintext must not appear in
-    /// the JSON that reaches the WebView, in any form — not the value, not a
-    /// mask of it, not a truncated preview.
-    #[test]
-    fn sensitive_plaintext_never_reaches_the_serialised_form() {
-        let secret = "AKIAIOSFODNN7EXAMPLE";
-        let mut wire = wire(secret, true);
-        wire.sensitive_finding = Some(SensitiveFinding {
-            label: "untrusted".into(),
-            spans: Vec::new(),
-            spans_truncated: false,
-            redacted_preview: "surrounding plaintext".into(),
-        });
-        let item = UiItem::from(wire);
-
-        assert!(!item.has_content());
-        let json = serde_json::to_string(&item).unwrap();
-        assert!(!json.contains(secret), "sensitive plaintext leaked: {json}");
-        assert!(!json.contains("AKIA"), "a prefix leaked: {json}");
-        assert!(!json.contains("surrounding plaintext"), "{json}");
-        assert!(!json.contains("untrusted"), "{json}");
-        assert!(json.contains("\"content\":null"), "{json}");
-        // The flag itself must survive: the view needs to know to render a
-        // placeholder rather than an empty row.
-        assert!(json.contains("\"is_sensitive\":true"), "{json}");
-    }
-
-    /// Sensitive content must not survive by being long enough to be
-    /// truncated somewhere else instead.
-    #[test]
-    fn a_long_sensitive_payload_is_dropped_whole() {
-        let secret = "x".repeat(100_000);
-        let item = UiItem::from(wire(&secret, true));
-        let json = serde_json::to_string(&item).unwrap();
-        assert!(!json.contains("xxxx"), "part of a long secret survived");
-    }
-
-    #[test]
-    fn a_page_is_filtered_item_by_item() {
-        let items = ui_items(vec![wire("public", false), wire("secret", true)]);
-        let json = serde_json::to_string(&items).unwrap();
-        assert!(json.contains("public"));
-        assert!(!json.contains("secret"), "{json}");
-    }
-
-    #[test]
     fn a_page_keeps_its_total_when_the_visible_rows_are_capped() {
         let page = UiPage::with_total(
             crate::backend::Page {
-                items: vec![wire("public", false)],
+                items: vec![wire("public")],
                 ..Default::default()
             },
             214,
@@ -457,13 +327,10 @@ mod tests {
         assert!(json.contains("\"total\":214"), "{json}");
     }
 
-    /// The id must survive, because every other operation on a sensitive item
-    /// (copy, pin, delete) travels by id instead of by content.
     #[test]
     fn the_id_survives_so_the_item_is_still_operable() {
-        let item = UiItem::from(wire("secret", true));
+        let item = UiItem::from(wire("value"));
         assert_eq!(item.id(), "item-1");
-        assert!(item.is_sensitive());
     }
 
     #[test]

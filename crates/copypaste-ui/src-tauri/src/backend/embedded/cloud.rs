@@ -13,7 +13,7 @@ use copypaste_cloud::credentials::CloudStateKey;
 use copypaste_cloud::credentials::SIGN_OUT_KEYS;
 use copypaste_cloud::crypto::derive_sync_key;
 use copypaste_cloud::rest::SupabaseRest;
-use copypaste_cloud::sync::{CloudSync, SensitiveGuard, SyncError};
+use copypaste_cloud::sync::{CloudSync, SyncError};
 use copypaste_cloud::{CloudConfig, SyncKey};
 use copypaste_core::sync::RoundGate;
 use copypaste_ipc::{CloudStatusData, CloudSyncData, ErrorCode};
@@ -250,7 +250,7 @@ impl EmbeddedCloud {
                 self.note_success(&inner.state.store, &driver, completed);
                 let _ = source.commit_upload_floor(started);
                 if stats.applied > 0 {
-                    inner.publish_items(false, 0);
+                    inner.publish_items(false);
                 }
                 Ok(to_wire(stats))
             }
@@ -395,15 +395,7 @@ fn make_driver(inner: &Arc<Inner>, config: CloudConfig, key: SyncKey, session: S
         key,
         config,
         session,
-        sensitive_guard(&inner.state.detector),
     )
-}
-
-fn sensitive_guard(detector: &Arc<copypaste_core::Detector>) -> SensitiveGuard {
-    let detector = Arc::clone(detector);
-    SensitiveGuard::new(move |item| {
-        std::str::from_utf8(&item.content).is_ok_and(|text| detector.is_sensitive(text))
-    })
 }
 
 fn auth_error(error: AuthError) -> BackendError {
@@ -442,7 +434,6 @@ fn to_wire(stats: copypaste_cloud::SyncStats) -> CloudSyncData {
         tombstoned: n(stats.tombstoned),
         downloaded: n(stats.downloaded),
         applied: n(stats.applied),
-        skipped_sensitive: n(stats.skipped_sensitive),
         skipped_undecryptable: n(stats.skipped_undecryptable),
         skipped_forged: n(stats.skipped_forged),
         skipped_future: n(stats.skipped_future),
@@ -526,7 +517,6 @@ mod tests {
                 user_id: "user-1".into(),
                 expires_at_ms: 123_000,
             },
-            sensitive_guard(&state.detector),
         ))
     }
 
@@ -549,7 +539,6 @@ mod tests {
             key,
             config,
             session,
-            sensitive_guard(&state.detector),
         ));
         *cloud.account() = Some(Account {
             email: "a@example.com".into(),

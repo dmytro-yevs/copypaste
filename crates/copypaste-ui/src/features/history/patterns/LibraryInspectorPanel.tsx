@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef } from "react";
 
 import {
     DeviceMeta,
@@ -13,7 +13,7 @@ import {
 import { Button, Icon, iconComponent } from "@/components/ui";
 import { StateView } from "@/components/shared/StateView";
 import { ClipBodyNotices, ClipBodyView } from "@/features/history/patterns/ClipBodyPresentation";
-import { clipboardCopyPresentation, clipCopyAction, clipPotentialRevealAction } from "@/features/history/model/clipPresentation";
+import { clipboardCopyPresentation, clipCopyAction } from "@/features/history/model/clipPresentation";
 import { useClipboardWriteAvailability } from "@/hooks/useClipboardWriteAvailability";
 import { originName, type OriginDevice } from "@/lib/itemOrigin";
 import { SourceAppIcon } from "@/features/source-apps";
@@ -27,13 +27,9 @@ import styles from "./LibraryInspectorPanel.module.css";
 interface LibraryInspectorPanelProps {
     item: Item | null;
     origin: OriginDevice | null;
-    revealedContent: string | null;
     fullContent: string | null;
     fullContentFailed: boolean;
-    revealPending: boolean;
     copyPending?: boolean;
-    onReveal: (item: Item) => void;
-    onHide: () => void;
     onCopy: (item: Item) => void;
     onTogglePin: (item: Item) => void;
     onDelete: (item: Item) => void;
@@ -44,13 +40,9 @@ interface LibraryInspectorPanelProps {
 export function LibraryInspectorPanel({
     item,
     origin,
-    revealedContent,
     fullContent,
     fullContentFailed,
-    revealPending,
     copyPending = false,
-    onReveal,
-    onHide,
     onCopy,
     onTogglePin,
     onDelete,
@@ -65,11 +57,6 @@ export function LibraryInspectorPanel({
         sawPending: boolean;
         abandoned: boolean;
     } | null>(null);
-    const [shownFinding, setShownFinding] = useState<{
-        id: string;
-        finding: NonNullable<Item["sensitive_finding"]>;
-    } | null>(null);
-    useEffect(() => setShownFinding(null), [item?.id]);
     useLayoutEffect(() => {
         const attempt = copyFocusRef.current;
         if (!attempt) return;
@@ -123,10 +110,8 @@ export function LibraryInspectorPanel({
               ? { status: "failed" }
               : { status: "resolved", availability: availability.data },
     );
-    const revealed = revealedContent !== null;
     const close = () => {
         if (copyPending) return;
-        if (revealed) onHide();
         onClose();
     };
 
@@ -159,23 +144,15 @@ export function LibraryInspectorPanel({
     }
 
     const kind = kindOf(item);
-    const potentialFinding = !item.is_sensitive ? item.sensitive_finding : null;
-    const potentialRevealed =
-        potentialFinding !== null &&
-        shownFinding?.id === item.id &&
-        shownFinding.finding === potentialFinding;
     const body = resolveClipBodyPresentation({
         item,
         fullContent,
         fullContentFailed,
-        revealedContent,
-        showPotentialSensitiveOriginal: potentialRevealed,
     });
     const source = clipSourceMetadata(item);
     const content = body.state === "content" ? body.content : "";
     const type = clipTypeMetadata(kind, content || item.content || "");
     const copyAction = clipCopyAction(kind);
-    const potentialRevealAction = clipPotentialRevealAction(potentialRevealed);
     const SourceIcon = iconComponent(source.icon);
     const device = origin ? originName(origin) : t("common.unknown");
     const created = absoluteTime(item.created_at);
@@ -203,10 +180,7 @@ export function LibraryInspectorPanel({
                         disabled={copyPending}
                         aria-label={t("history.row.open")}
                         title={t("history.row.open")}
-                        onClick={(event) => {
-                            setShownFinding(null);
-                            onOpenReader(item, event.currentTarget);
-                        }}
+                        onClick={(event) => onOpenReader(item, event.currentTarget)}
                     />
                     <Button
                         ref={copyButtonRef}
@@ -261,27 +235,6 @@ export function LibraryInspectorPanel({
                         title={t("history.row.delete")}
                         onClick={() => onDelete(item)}
                     />
-                    {potentialFinding !== null ? (
-                        <Button
-                            variant="secondary"
-                            icon={potentialRevealAction.icon}
-                            disabled={copyPending}
-                            aria-pressed={potentialRevealed}
-                            onClick={() =>
-                                setShownFinding(
-                                    potentialRevealed
-                                        ? null
-                                        : { id: item.id, finding: potentialFinding },
-                                )
-                            }
-                        >{potentialRevealAction.label}</Button>
-                    ) : null}
-                    {revealed ? (
-                        <Button variant="secondary" disabled={copyPending} onClick={onHide}>
-                            <Icon name="eyeOff" />
-                            {t("history.detail.hide")}
-                        </Button>
-                    ) : null}
                 </>
             }
             metadata={
@@ -373,7 +326,6 @@ export function LibraryInspectorPanel({
                 reason={copyAvailability.reason}
                 canRetry={copyAvailability.canRetry}
                 onRetry={() => void availability.refetch()}
-                potentialFinding={potentialFinding !== null}
             />
             <PreviewSurface
                 className={styles.preview}
@@ -415,9 +367,6 @@ export function LibraryInspectorPanel({
                                 item={item}
                                 kind={kind}
                                 body={body}
-                                copyPending={copyPending}
-                                revealPending={revealPending}
-                                onReveal={onReveal}
                             />
                         </div>
                     </div>

@@ -190,10 +190,8 @@ describe("fail-closed product surfaces", () => {
     await openTab("Storage & history");
     await clickButton(app.browser, "Export…");
     await waitForText(app.browser, "Export your clipboard history?");
-    const includeSensitive = await app.browser.$("#export-include-sensitive");
-    expect(await includeSensitive.getAttribute("aria-checked")).toBe("false");
     expect(await visibleText(app.browser)).toContain(
-      "Turning it on writes detected credentials out in the clear.",
+      "What is written is plain readable text, not encrypted.",
     );
     await clickButton(app.browser, "Cancel");
 
