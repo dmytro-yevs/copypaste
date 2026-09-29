@@ -36,7 +36,7 @@ pub(super) fn to_wire_and_payload(
         warn!(error = ?e, "could not resolve an item's origin device");
         state.meta.here()
     });
-    to_wire_with(row, &origin, &state.keyring.item_key(), &state.detector)
+    to_wire_with(row, &origin, &state.keyring.item_key())
 }
 
 /// Convert with the origin and item key already resolved.
@@ -47,7 +47,6 @@ fn to_wire_with(
     row: StoredItem,
     origin: &crate::meta::Origin,
     key: &copypaste_core::ItemKey,
-    detector: &copypaste_core::Detector,
 ) -> Result<(Item, ClipboardPayload), copypaste_core::CryptoError> {
     // The item id is the AAD: a row decrypted under another row's identity must
     // fail authentication, not fall back to a plaintext read (AGENTS.md rule 4,
@@ -59,18 +58,12 @@ fn to_wire_with(
     let too_large_to_sync =
         copypaste_cloud::sync::too_large_to_sync(&row.content_type, payload.byte_len());
     let content = payload.display_text();
-    let sensitive_finding = (!row.is_sensitive
-        && copypaste_ipc::content_type::is_text(&row.content_type))
-    .then(|| detector.inert_finding_metadata(&content))
-    .flatten();
     let item = Item {
         id: row.id,
         content,
         content_type: row.content_type,
         created_at: row.created_at,
         pinned: row.pinned,
-        is_sensitive: row.is_sensitive,
-        sensitive_finding,
         origin_device_id: origin.device_id.clone(),
         origin_device_name: origin.device_name.clone(),
         source_app_bundle_id: row.app_bundle_id,
@@ -113,7 +106,7 @@ pub(super) fn decrypt_rows(state: &AppState, rows: Vec<StoredItem>) -> ItemPage 
     for row in rows {
         let row_id = row.id.clone();
         let origin = origins.get(&row_id).unwrap_or(&here);
-        match to_wire_with(row, origin, &key, &state.detector) {
+        match to_wire_with(row, origin, &key) {
             Ok((item, _)) => page.items.push(item),
             Err(e) => {
                 warn!(id = %row_id, error = ?e, "skipping an item that failed to decrypt");

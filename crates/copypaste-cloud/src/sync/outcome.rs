@@ -18,8 +18,6 @@ pub struct SyncStats {
     pub downloaded: usize,
     /// Rows the store actually took.
     pub applied: usize,
-    /// Local items withheld by the [`SensitiveGuard`](super::SensitiveGuard).
-    pub skipped_sensitive: usize,
     /// Remote rows that would not open. Never treated as a delete (INV-N3).
     pub skipped_undecryptable: usize,
     /// Remote rows whose metadata was unsigned or wrongly signed, and which
@@ -46,7 +44,6 @@ impl SyncStats {
             tombstoned: self.tombstoned + other.tombstoned,
             downloaded: self.downloaded + other.downloaded,
             applied: self.applied + other.applied,
-            skipped_sensitive: self.skipped_sensitive + other.skipped_sensitive,
             skipped_undecryptable: self.skipped_undecryptable + other.skipped_undecryptable,
             skipped_forged: self.skipped_forged + other.skipped_forged,
             skipped_future: self.skipped_future + other.skipped_future,

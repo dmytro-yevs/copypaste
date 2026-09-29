@@ -154,8 +154,7 @@ mod tests {
     use tokio::sync::Notify;
 
     use super::super::fakes::{
-        allow_everything, cloud_row, config, driver, item, key, session, FakeAuth, FakeRest,
-        FakeSource, Reply,
+        cloud_row, config, driver, item, key, session, FakeAuth, FakeRest, FakeSource, Reply,
     };
     use super::*;
     use crate::auth::Session;
@@ -213,7 +212,6 @@ mod tests {
             key(),
             config(),
             session("token-1"),
-            allow_everything(),
         )
     }
 

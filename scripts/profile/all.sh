@@ -27,9 +27,9 @@ section() { printf '\n\n######## %s\n\n' "$*"; }
 section "daemon idle (battery proxy)"
 "$HERE/quiet-run.sh" "${MAX_LOAD:-2.0}" "${MAX_WAIT:-600}" -- "$HERE/daemon-idle.sh" 300 500 1000 5000
 
-section "capture, history and detection microbenchmarks"
+section "capture and history microbenchmarks"
 cd "$ROOT"
-for bench in detect capture binary history storage sync; do
+for bench in capture binary history storage sync; do
     "$HERE/quiet-run.sh" "${MAX_LOAD:-2.0}" "${MAX_WAIT:-600}" -- \
         $CARGO bench -p copypaste-core --bench "$bench"
 done

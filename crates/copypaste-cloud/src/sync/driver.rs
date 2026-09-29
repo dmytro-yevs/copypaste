@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use super::cadence::AdaptiveCadence;
 use super::outcome::{SyncError, SyncStats};
-use super::source::{CloudSource, SensitiveGuard};
+use super::source::CloudSource;
 use super::transport::{AuthApi, RestApi};
 use crate::auth::Session;
 use crate::crypto::SyncKey;
@@ -19,7 +19,6 @@ pub struct CloudSync<R: RestApi, A: AuthApi> {
     // A 401 rotates this for every later request; never hold it across an await.
     session: Mutex<SessionState>,
     pub(super) refresh_lock: tokio::sync::Mutex<()>,
-    pub(super) sensitive: SensitiveGuard,
     pub(super) cadence: AdaptiveCadence,
     pub(super) push_channel: AtomicBool,
     // Tests set this to zero; retry duration math is exercised separately.
@@ -46,16 +45,7 @@ impl<R: RestApi, A: AuthApi> std::fmt::Debug for CloudSync<R, A> {
 }
 
 impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
-    /// Requires a sensitivity gate: live sensitive payloads must never sync
-    /// (manifest 05 T-7).
-    pub fn new(
-        rest: R,
-        auth: A,
-        key: SyncKey,
-        config: CloudConfig,
-        session: Session,
-        sensitive: SensitiveGuard,
-    ) -> Self {
+    pub fn new(rest: R, auth: A, key: SyncKey, config: CloudConfig, session: Session) -> Self {
         Self {
             rest,
             auth,
@@ -67,7 +57,6 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
                 fenced: false,
             }),
             refresh_lock: tokio::sync::Mutex::new(()),
-            sensitive,
             cadence: AdaptiveCadence::default(),
             push_channel: AtomicBool::new(false),
             delay_scale: 1.0,
@@ -175,15 +164,12 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::fakes::{
-        allow_everything, cloud_row, driver, item, FakeAuth, FakeRest, FakeSource,
-    };
+    use super::super::fakes::{cloud_row, driver, item, FakeAuth, FakeRest, FakeSource};
 
     #[test]
-    fn the_driver_and_the_guard_redact_their_debug_output() {
+    fn the_driver_redacts_its_debug_output() {
         let sync = driver(FakeRest::default(), FakeAuth::default());
         assert_eq!(format!("{sync:?}"), "CloudSync { .. }");
-        assert_eq!(format!("{:?}", allow_everything()), "SensitiveGuard { .. }");
     }
 
     #[tokio::test]

@@ -5,7 +5,7 @@
 //! behave the way the daemon's must — so those live here once rather than three
 //! times.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use tokio::sync::mpsc;
@@ -76,7 +76,6 @@ pub(crate) struct TestSource {
     device_id: String,
     device_name: String,
     items: Mutex<HashMap<String, SyncItem>>,
-    sensitive: Mutex<HashSet<String>>,
     /// Items the source hands back even though they were not requested —
     /// used to prove the session refuses them.
     smuggle: Mutex<Vec<SyncItem>>,
@@ -88,13 +87,8 @@ impl TestSource {
             device_id: device_id.into(),
             device_name: format!("{device_id} name"),
             items: Mutex::new(items.into_iter().map(|i| (i.item_id.clone(), i)).collect()),
-            sensitive: Mutex::new(HashSet::new()),
             smuggle: Mutex::new(Vec::new()),
         }
-    }
-
-    pub(crate) fn mark_sensitive(&self, id: &str) {
-        self.sensitive.lock().unwrap().insert(id.into());
     }
 
     /// Arrange for `fetch` to return this item whatever it was asked for.
@@ -118,13 +112,11 @@ impl TestSource {
         after_id: Option<&str>,
         limit: usize,
     ) -> Vec<ItemSummary> {
-        let sensitive = self.sensitive.lock().unwrap();
         let mut v: Vec<_> = self
             .items
             .lock()
             .unwrap()
             .values()
-            .filter(|i| i.deleted || !sensitive.contains(&i.item_id))
             .map(|i| i.summary())
             .filter(|s| super::summary::summary_key(s) >= since_ms)
             .collect();
@@ -164,14 +156,8 @@ impl SyncSource for TestSource {
     }
 
     fn fetch(&self, ids: &[String]) -> Result<Vec<SyncItem>, SyncError> {
-        let sensitive = self.sensitive.lock().unwrap();
         let items = self.items.lock().unwrap();
-        let mut out: Vec<_> = ids
-            .iter()
-            .filter_map(|id| items.get(id))
-            .filter(|item| item.deleted || !sensitive.contains(&item.item_id))
-            .cloned()
-            .collect();
+        let mut out: Vec<_> = ids.iter().filter_map(|id| items.get(id)).cloned().collect();
         out.extend(self.smuggle.lock().unwrap().iter().cloned());
         Ok(out)
     }

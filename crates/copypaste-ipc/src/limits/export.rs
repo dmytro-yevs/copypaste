@@ -40,7 +40,6 @@ impl ExportFrameBudget {
         let empty = ExportData {
             items: Vec::new(),
             skipped_non_text: u32::MAX,
-            skipped_sensitive: u32::MAX,
             skipped_undecryptable: u32::MAX,
         };
         let mut cursor = Cursor::new(scratch.as_mut());
@@ -101,7 +100,6 @@ mod tests {
             content_type: "text/plain".into(),
             created_at: i64::MAX,
             pinned: true,
-            is_sensitive: true,
         }
     }
 
@@ -111,7 +109,6 @@ mod tests {
             ResponseData::Export(ExportData {
                 items,
                 skipped_non_text: u32::MAX,
-                skipped_sensitive: u32::MAX,
                 skipped_undecryptable: u32::MAX,
             }),
         )

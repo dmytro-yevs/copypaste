@@ -29,11 +29,10 @@ body = "the quick brown fox jumps over the lazy dog " * 12
 print(json.dumps({
     "items": [
         {"content": f"item {i:07d} {body}", "content_type": "text",
-         "created_at": 1700000000000 + i * 1000, "pinned": False,
-         "is_sensitive": False}
+         "created_at": 1700000000000 + i * 1000, "pinned": False}
         for i in range(n)
     ],
-    "skipped_non_text": 0, "skipped_sensitive": 0, "skipped_undecryptable": 0,
+    "skipped_non_text": 0, "skipped_undecryptable": 0,
 }))
 PY
 "$CLI" import "$DAEMON_DATA_DIR/seed.json"

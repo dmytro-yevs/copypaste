@@ -9,9 +9,7 @@
 
 use std::path::Path;
 
-use copypaste_core::{
-    compute_content_hash, encrypt, Detector, Keyring, NewItem, Store, StoredItem,
-};
+use copypaste_core::{compute_content_hash, encrypt, Keyring, NewItem, Store, StoredItem};
 
 /// Deterministic, so a re-run compares against the same key schedule.
 pub const SECRET: [u8; 32] = [0x5a; 32];
@@ -23,15 +21,11 @@ pub fn keyring() -> Keyring {
     Keyring::from_secret(&SECRET)
 }
 
-pub fn detector() -> Detector {
-    Detector::new().expect("the ruleset must compile")
-}
-
 pub fn store_in(dir: &Path) -> Store {
     Store::open(&dir.join("bench-v2.db"), &keyring().db_key()).expect("store")
 }
 
-/// A clipping of `bytes` benign ASCII that no rule matches.
+/// A clipping of `bytes` of ASCII text.
 ///
 /// `seed` makes it unique, which is what keeps the dedup probe missing and the
 /// insert doing real work.
@@ -56,7 +50,6 @@ pub fn row(keyring: &Keyring, text: &str, created_at: i64) -> NewItem {
         nonce,
         content_type: "text".to_string(),
         content_hash: compute_content_hash(text.as_bytes()),
-        is_sensitive: false,
         search_text: Some(text.to_string()),
         created_at,
         app_bundle_id: None,
