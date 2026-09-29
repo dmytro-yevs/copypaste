@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -13,12 +14,25 @@ import { isAndroidPlatform } from "@/lib/platform";
 export const ONBOARDING_PERMISSIONS_KEY = ["onboarding-permissions"] as const;
 
 export function useOnboardingPermissions() {
-  return useQuery<OnboardingPermissions>({
+  const query = useQuery<OnboardingPermissions>({
     queryKey: ONBOARDING_PERMISSIONS_KEY,
     queryFn: ({ signal }) => permissionSnapshot({ signal }),
     enabled: hasNativeBridge() || isAndroidPlatform(),
     retry: false,
   });
+  const refresh = query.refetch;
+  useEffect(() => {
+    const onResume = () => {
+      if (document.visibilityState === "visible" && (hasNativeBridge() || isAndroidPlatform())) void refresh();
+    };
+    window.addEventListener("focus", onResume);
+    document.addEventListener("visibilitychange", onResume);
+    return () => {
+      window.removeEventListener("focus", onResume);
+      document.removeEventListener("visibilitychange", onResume);
+    };
+  }, [refresh]);
+  return query;
 }
 
 export function usePermissionRequest() {

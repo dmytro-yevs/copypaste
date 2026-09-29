@@ -19,17 +19,8 @@ use copypaste_ipc::{
     SyncResult,
 };
 
-/// Stand-in printed instead of a sensitive item's content.
-///
-/// The list view must never render the plaintext of an item the detector
-/// flagged (AGENTS.md rule 4 / port manifest 07 I9). Spelled the same way the
-/// core redactor spells it so the two read as one convention.
-pub const REDACTED: &str = "***REDACTED***";
-
 /// Marks a pinned row.
 pub const PIN_GLYPH: &str = "*";
-/// Marks a sensitive row.
-pub const SENSITIVE_GLYPH: &str = "!";
 /// Marks a row cloud sync will not carry, because it is over the per-item cap.
 pub const TOO_LARGE_GLYPH: &str = "~";
 
@@ -92,11 +83,7 @@ pub fn one_line(content: &str, max: usize) -> String {
 
 /// What a row shows in its content column.
 ///
-/// Sensitive items are redacted here, once, so no caller can forget.
 pub fn item_preview(item: &Item, max: usize) -> String {
-    if item.is_sensitive {
-        return REDACTED.to_string();
-    }
     let line = one_line(&item.content, max);
     if line.is_empty() {
         // A representation with no printable form — an image, a file — says
@@ -109,14 +96,11 @@ pub fn item_preview(item: &Item, max: usize) -> String {
     line
 }
 
-/// Per-row flag glyphs: pinned, sensitive, and too large to sync.
+/// Per-row flag glyphs: pinned and too large to sync.
 pub fn item_flags(item: &Item) -> String {
     let mut flags = String::new();
     if item.pinned {
         flags.push_str(PIN_GLYPH);
-    }
-    if item.is_sensitive {
-        flags.push_str(SENSITIVE_GLYPH);
     }
     if item.too_large_to_sync {
         flags.push_str(TOO_LARGE_GLYPH);
@@ -167,9 +151,6 @@ pub fn items_table(items: &[Item], now_ms: i64, empty: &str) -> String {
     let mut legend = Vec::new();
     if items.iter().any(|i| i.pinned) {
         legend.push(format!("{PIN_GLYPH} pinned"));
-    }
-    if items.iter().any(|i| i.is_sensitive) {
-        legend.push(format!("{SENSITIVE_GLYPH} sensitive (content hidden)"));
     }
     if items.iter().any(|i| i.too_large_to_sync) {
         legend.push(format!("{TOO_LARGE_GLYPH} too large to sync"));
@@ -347,8 +328,6 @@ mod tests {
             content_type: "text".into(),
             created_at: 1_000_000,
             pinned: false,
-            is_sensitive: false,
-            sensitive_finding: None,
             origin_device_id: "9e1d0000-0000-4000-8000-00000000000a".into(),
             origin_device_name: Some("This Mac".into()),
             source_app_bundle_id: None,
@@ -415,25 +394,6 @@ mod tests {
     }
 
     #[test]
-    fn sensitive_content_is_never_rendered() {
-        let mut it = item("sk-live-4eC39HqLyjWDarjtT1zdp7dc");
-        it.is_sensitive = true;
-        let preview = item_preview(&it, 56);
-        assert_eq!(preview, REDACTED);
-        assert!(!preview.contains("sk-live"));
-    }
-
-    #[test]
-    fn sensitive_content_is_absent_from_the_whole_table() {
-        let mut it = item("AKIAIOSFODNN7EXAMPLE");
-        it.is_sensitive = true;
-        let table = items_table(&[it], 1_000_000, "no items");
-        assert!(!table.contains("AKIAIOSFODNN7EXAMPLE"), "{table}");
-        assert!(table.contains(REDACTED), "{table}");
-        assert!(table.contains(SENSITIVE_GLYPH), "{table}");
-    }
-
-    #[test]
     fn a_representation_with_no_text_says_what_it_is() {
         let mut it = item("");
         it.content_type = "image/png".into();
@@ -443,18 +403,13 @@ mod tests {
     }
 
     #[test]
-    fn flags_mark_pinned_sensitive_and_unsyncable() {
+    fn flags_mark_pinned_and_unsyncable() {
         let mut it = item("x");
         assert_eq!(item_flags(&it), "");
         it.pinned = true;
         assert_eq!(item_flags(&it), PIN_GLYPH);
-        it.is_sensitive = true;
-        assert_eq!(item_flags(&it), format!("{PIN_GLYPH}{SENSITIVE_GLYPH}"));
         it.too_large_to_sync = true;
-        assert_eq!(
-            item_flags(&it),
-            format!("{PIN_GLYPH}{SENSITIVE_GLYPH}{TOO_LARGE_GLYPH}")
-        );
+        assert_eq!(item_flags(&it), format!("{PIN_GLYPH}{TOO_LARGE_GLYPH}"));
     }
 
     /// An item that will never reach the other device must not look like one

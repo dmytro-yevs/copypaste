@@ -37,7 +37,6 @@ const minutes = (value: number): Choice => ({
   unit: "minutes",
   count: value / 60,
 });
-const hours = (value: number): Choice => ({ value, unit: "hours", count: value / 3600 });
 const days = (value: number): Choice => ({ value, unit: "days", count: value });
 const items = (value: number): Choice => ({ value, unit: "items", count: value });
 const megabytes = (mb: number): Choice => ({
@@ -142,18 +141,6 @@ export const MAX_DECODED_IMAGE_MB: readonly Choice[] = [
   megabyteValue(50),
   megabyteValue(100),
   megabyteValue(250),
-];
-
-/**
- * `30` first, matching `copypaste_core::sensitive::DEFAULT_SENSITIVE_TTL` and
- * the shipped `ConfigData` default. `0` remains the explicit off sentinel.
- */
-export const SENSITIVE_TTL_SECS: readonly Choice[] = [
-  OFF,
-  seconds(30),
-  minutes(300),
-  hours(3600),
-  hours(21600),
 ];
 
 /**

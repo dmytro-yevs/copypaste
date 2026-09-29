@@ -44,33 +44,25 @@ export const COLOR_THEMES = APPEARANCE_SERIALIZATION.colorThemes;
 
 export const ONBOARDING_STEPS = [
   "welcome",
+  "permissions",
+  "background",
   "capture",
-  "privacy",
   "sync",
-  "complete",
 ] as const;
 
 export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
-export type OnboardingSyncChoice = "lan" | "cloud" | "both" | "later" | null;
-export type CaptureSetupMethod = "shizuku" | "adb" | null;
-export type CaptureSetupStage = "choose" | "commands" | "verify" | "complete";
+export type CaptureSetupMethod = "shizuku" | "adb";
 
 export interface OnboardingProgress {
   step: OnboardingStep;
   captureSkipped: boolean;
-  privacySkipped: boolean;
-  syncChoice: OnboardingSyncChoice;
   captureSetupMethod: CaptureSetupMethod;
-  captureSetupStage: CaptureSetupStage;
 }
 
 export const DEFAULT_ONBOARDING_PROGRESS: OnboardingProgress = {
   step: "welcome",
   captureSkipped: false,
-  privacySkipped: false,
-  syncChoice: null,
-  captureSetupMethod: null,
-  captureSetupStage: "choose",
+  captureSetupMethod: "shizuku",
 };
 
 export type { ColorTheme, ThemePref, Translucency };
@@ -97,18 +89,15 @@ const FIELD = {
     .refine((value) =>
       (HISTORY_DISPLAY_LIMITS as readonly number[]).includes(value),
     ),
-  warnBeforeReveal: z.boolean(),
   allowScreenshots: z.boolean(),
   onboardingComplete: z.boolean(),
 } as const;
 
 const ONBOARDING_PROGRESS = z.object({
-  step: z.enum(ONBOARDING_STEPS),
+  step: z.enum([...ONBOARDING_STEPS, "privacy", "complete"]).transform((step) =>
+    step === "privacy" ? "permissions" : step === "complete" ? "sync" : step),
   captureSkipped: z.boolean(),
-  privacySkipped: z.boolean(),
-  syncChoice: z.enum(["lan", "cloud", "both", "later"]).nullable(),
-  captureSetupMethod: z.enum(["shizuku", "adb"]).nullable(),
-  captureSetupStage: z.enum(["choose", "commands", "verify", "complete"]),
+  captureSetupMethod: z.enum(["shizuku", "adb"]).nullable().transform((method) => method ?? "shizuku"),
 });
 
 export function parseOnboardingProgress(raw: unknown): OnboardingProgress {

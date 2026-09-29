@@ -85,16 +85,12 @@ describe("toast StateView adapter", () => {
     expect(entry.options).not.toHaveProperty("cancel");
     expect(entry.options).not.toHaveProperty("description");
 
-    const state = entry.element as ReactElement<StateViewProps>;
-    expect(state.props).toMatchObject({
-      mode: "error",
-      role: "group",
-      "aria-live": "off",
-      title: "Could not save",
-      description: "Try again in a moment.",
-    });
-
     renderLatestToast();
+    const state = screen.getByRole("group");
+    expect(state.getAttribute("data-mode")).toBe("error");
+    expect(state.getAttribute("aria-live")).toBe("off");
+    expect(state.textContent).toContain("Could not save");
+    expect(state.textContent).toContain("Try again in a moment.");
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Keep" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("button", { name: "Close" }).hasAttribute("disabled")).toBe(true);
@@ -108,8 +104,6 @@ describe("toast StateView adapter", () => {
       action: { label: "Undo", onClick: onUndo },
     });
 
-    const state = latestToast().element as ReactElement<StateViewProps>;
-    expect((state.props.description as ReactElement).type).toBe(UndoCountdown);
     expect(id).toBe("undo-toast");
 
     renderLatestToast();

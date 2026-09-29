@@ -129,12 +129,12 @@ export function LibraryToolbar({
 
     return (
         <>
-            <Container width="library" gutter="screen" className={styles.header}>
+            <Container width="fluid" gutter="screen" className={styles.header}>
                 <ScreenHeader title={t("history.header.title")} />
             </Container>
 
             <Container
-                width="library"
+                width="fluid"
                 gutter="screen"
                 className={styles.toolbarShell}
             >

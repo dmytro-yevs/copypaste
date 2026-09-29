@@ -22,7 +22,7 @@ const ipc = vi.hoisted(() => ({
     copyItem: vi.fn(),
     getClipboardWriteAvailability: vi.fn(),
 }));
-const viewport = vi.hoisted(() => ({ width: 1200 }));
+const viewport = vi.hoisted(() => ({ width: 1200, contentWidth: undefined as number | undefined }));
 const toast = vi.hoisted(() => ({
     error: vi.fn(),
     success: vi.fn(),
@@ -48,6 +48,7 @@ vi.mock("@/lib/ipc", async (load) => ({
 
 const longBody = "full line\n".repeat(200);
 const longItem = item({ id: "long", content: "short preview", truncated: true });
+const measureElement = HTMLElement.prototype.getBoundingClientRect;
 
 function renderScreen(items: Item[] = [longItem]) {
     const client = testClient();
@@ -70,6 +71,13 @@ function renderScreen(items: Item[] = [longItem]) {
 
 describe("LibraryScreen reader reachability", () => {
     beforeEach(() => {
+        viewport.contentWidth = undefined;
+        vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+            const bounds = measureElement.call(this);
+            if (this.getAttribute("data-slot") !== "screen") return bounds;
+            const width = viewport.contentWidth ?? viewport.width;
+            return { ...bounds, width, right: bounds.left + width };
+        });
         window.sessionStorage.clear();
         useUi.setState({ activeId: null, query: "" });
         ipc.captureState.mockReset().mockResolvedValue(captureSnapshot());
@@ -105,6 +113,15 @@ describe("LibraryScreen reader reachability", () => {
         await user.keyboard("{Escape}");
         await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
         expect(document.activeElement).toBe(openReader);
+    });
+
+    it("uses the available content width for the inspector on a wide window", async () => {
+        viewport.width = 1200;
+        viewport.contentWidth = 600;
+        const { user } = renderScreen();
+        expect(screen.queryByRole("complementary", { name: "Inspector" })).toBeNull();
+        await user.click(await screen.findByRole("button", { name: "short preview" }));
+        expect(await screen.findByRole("dialog", { name: "Clipboard item" })).toBeTruthy();
     });
 
     it("shows an empty library and exposes recovery after a failed fetch", async () => {

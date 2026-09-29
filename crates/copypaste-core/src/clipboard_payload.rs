@@ -1,4 +1,4 @@
-//! Decrypted item content, classified once for every clipboard writer.
+//! Decrypted item content for every clipboard writer.
 
 use zeroize::Zeroizing;
 
@@ -29,7 +29,7 @@ pub enum ClipboardPayload {
 }
 
 impl ClipboardPayload {
-    /// Authenticate and classify one stored row.
+    /// Authenticate and decode one stored row.
     ///
     /// `copypaste_ipc::ContentClass` remains the one vocabulary owner.
     /// This type lives in `copypaste-core` because that crate already owns both
@@ -142,7 +142,6 @@ mod tests {
                 nonce,
                 content_type: content_type.to_string(),
                 content_hash: crate::compute_content_hash(bytes),
-                is_sensitive: false,
                 search_text: copypaste_ipc::content_type::is_text(content_type)
                     .then(|| String::from_utf8_lossy(bytes).into_owned()),
                 created_at: 1,

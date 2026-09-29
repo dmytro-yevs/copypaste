@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -16,73 +16,6 @@ vi.mock("@/features/clip-content/hooks/useImagePreview", () => ({
 }));
 
 describe("ClipDetailDialog notices", () => {
-  it("keeps a pending sensitive body masked with the shared loading indicator", () => {
-    render(
-      <TooltipProvider>
-        <ClipDetailDialog
-          item={item({ content: "private body", is_sensitive: true })}
-          origin={null}
-          initialExpanded
-          fullContent="private body"
-          fullContentFailed={false}
-          revealedContent={null}
-          revealPending
-          onReveal={vi.fn()}
-          onHide={vi.fn()}
-          onCopy={vi.fn()}
-          onTogglePin={vi.fn()}
-          onDelete={vi.fn()}
-          onClose={vi.fn()}
-          onReturnFocus={vi.fn()}
-        />
-      </TooltipProvider>,
-    );
-
-    const reveal = screen.getByRole("button", { name: "Sensitive content hidden — activate to reveal" });
-    expect(reveal.hasAttribute("disabled")).toBe(true);
-    expect(reveal.querySelectorAll('[data-mode="loading"][data-placement="control"]')).toHaveLength(1);
-    expect(screen.queryByText("private body")).toBeNull();
-  });
-
-  it("keeps a potential original redacted until shown in the reader", async () => {
-    const user = userEvent.setup();
-    render(
-      <TooltipProvider>
-        <ClipDetailDialog
-          item={item({
-            content: "original value",
-            sensitive_finding: {
-              label: "possible secret",
-              spans: [{ start: 0, end: 8 }],
-              spans_truncated: false,
-              redacted_preview: "redacted value",
-            },
-          })}
-          origin={null}
-          initialExpanded
-          fullContent="original value"
-          fullContentFailed={false}
-          revealedContent={null}
-          revealPending={false}
-          onReveal={vi.fn()}
-          onHide={vi.fn()}
-          onCopy={vi.fn()}
-          onTogglePin={vi.fn()}
-          onDelete={vi.fn()}
-          onClose={vi.fn()}
-          onReturnFocus={vi.fn()}
-        />
-      </TooltipProvider>,
-    );
-
-    const contents = screen.getByRole("region", { name: "Item contents" });
-    expect(contents.textContent).toBe("redacted value");
-    await user.click(screen.getByRole("button", { name: "Show original content" }));
-    expect(contents.textContent).toBe("original value");
-    await user.click(screen.getByRole("button", { name: "Hide original content" }));
-    expect(contents.textContent).toBe("redacted value");
-  });
-
   it("blocks Escape, close, backdrop and mutations until copy succeeds", async () => {
     const user = userEvent.setup();
     let finish!: () => void;
@@ -98,10 +31,6 @@ describe("ClipDetailDialog notices", () => {
           initialExpanded
           fullContent={null}
           fullContentFailed={false}
-          revealedContent={null}
-          revealPending={false}
-          onReveal={vi.fn()}
-          onHide={vi.fn()}
           onCopy={onCopy}
           onTogglePin={onTogglePin}
           onDelete={onDelete}
@@ -147,10 +76,6 @@ describe("ClipDetailDialog notices", () => {
           initialExpanded
           fullContent={null}
           fullContentFailed={false}
-          revealedContent={null}
-          revealPending={false}
-          onReveal={vi.fn()}
-          onHide={vi.fn()}
           onCopy={() => new Promise<void>((_resolve, reject) => { fail = reject; })}
           onTogglePin={vi.fn()}
           onDelete={vi.fn()}
@@ -188,10 +113,6 @@ describe("ClipDetailDialog notices", () => {
       initialExpanded: true,
       fullContent: null,
       fullContentFailed: false,
-      revealedContent: null,
-      revealPending: false,
-      onReveal: vi.fn(),
-      onHide: vi.fn(),
       onCopy,
       onTogglePin: vi.fn(),
       onDelete: vi.fn(),
@@ -219,27 +140,15 @@ describe("ClipDetailDialog notices", () => {
     await vi.waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   });
 
-  it("uses shared status notices for sync and sensitive-content warnings", () => {
+  it("shows a sync warning in the reader", () => {
     render(
       <TooltipProvider>
         <ClipDetailDialog
-          item={item({
-            too_large_to_sync: true,
-            sensitive_finding: {
-              label: "possible token",
-              spans: [{ start: 0, end: 5 }],
-              spans_truncated: false,
-              redacted_preview: "••••• content",
-            },
-          })}
+          item={item({ too_large_to_sync: true })}
           origin={null}
           initialExpanded
           fullContent="plain content"
           fullContentFailed={false}
-          revealedContent={null}
-          revealPending={false}
-          onReveal={vi.fn()}
-          onHide={vi.fn()}
           onCopy={vi.fn()}
           onTogglePin={vi.fn()}
           onDelete={vi.fn()}
@@ -249,24 +158,13 @@ describe("ClipDetailDialog notices", () => {
       </TooltipProvider>,
     );
 
-    expect(screen.getAllByRole("status")).toHaveLength(1);
     expect(t("history.inspector.tooLarge")).toBe(
       "Too large to sync — this item stays on this device",
     );
     expect(t("history.inspector.tooLarge")).not.toBe(
       "Too large · peer sync only",
     );
-    const syncNotice = screen
-      .getAllByText("Too large to sync — this item stays on this device")
-      .map((element) => element.closest<HTMLElement>('[data-mode="warning"]'))
-      .find((element) => element !== null);
-    expect(syncNotice).toBeTruthy();
-    expect(
-      within(syncNotice!).getByText(
-        "Too large to sync — this item stays on this device",
-      ),
-    ).toBeTruthy();
-    expect(screen.getByText("Potentially sensitive content")).toBeTruthy();
+    expect(screen.getByText("Too large to sync — this item stays on this device")).toBeTruthy();
   });
 
   it("uses the shared unavailable state instead of a failed body preview", () => {
@@ -278,10 +176,6 @@ describe("ClipDetailDialog notices", () => {
           initialExpanded
           fullContent={null}
           fullContentFailed
-          revealedContent={null}
-          revealPending={false}
-          onReveal={vi.fn()}
-          onHide={vi.fn()}
           onCopy={vi.fn()}
           onTogglePin={vi.fn()}
           onDelete={vi.fn()}
@@ -310,10 +204,6 @@ describe("ClipDetailDialog notices", () => {
           initialExpanded
           fullContent={null}
           fullContentFailed={false}
-          revealedContent={null}
-          revealPending={false}
-          onReveal={vi.fn()}
-          onHide={vi.fn()}
           onCopy={vi.fn()}
           onTogglePin={vi.fn()}
           onDelete={vi.fn()}

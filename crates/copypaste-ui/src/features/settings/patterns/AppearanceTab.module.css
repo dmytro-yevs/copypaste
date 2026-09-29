@@ -32,7 +32,7 @@
 .themeGrid {
   display: grid;
   min-inline-size: 0;
-  grid-template-columns: repeat(auto-fit, minmax(calc(var(--s-9) * 4), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--s-9) * 4)), 1fr));
   gap: var(--s-3);
 }
 

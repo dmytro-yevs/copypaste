@@ -632,7 +632,6 @@ mod tests {
             other => panic!("expected an item, got {other:?}"),
         };
         assert_eq!(added.content, "round trip");
-        assert!(!added.is_sensitive);
 
         // list sees it, and reports that nothing was unreadable.
         let response = client
@@ -985,7 +984,6 @@ mod tests {
                 event: copypaste_ipc::EventKind::Items,
                 item_count: 1,
                 captured: false,
-                swept: 0,
             })
             .unwrap();
         events_tx
@@ -993,7 +991,6 @@ mod tests {
                 event: copypaste_ipc::EventKind::Items,
                 item_count: 2,
                 captured: true,
-                swept: 0,
             })
             .unwrap();
 

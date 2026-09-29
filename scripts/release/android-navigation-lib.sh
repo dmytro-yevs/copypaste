@@ -137,7 +137,7 @@ tap_until_state() { # <selector> <artifact> <predicate> <none|up|down> [timeout]
 }
 
 wait_app_navigable() { # <artifact> [timeout] [dump] [scroll] [tap] [pace]
-    tap_until_state "Explore first" "$1" app_navigation_holds up \
+    tap_until_state "$ANDROID_ONBOARDING_ACTIONS" "$1" app_navigation_holds up \
         "${2:-${WAIT_SECS:-45}}" "${3:-dump_hierarchy}" \
         "${4:-scroll_content}" "${5:-tap_transition_point}" "${6:-settle_pace}"
 }
@@ -191,7 +191,7 @@ swipe_onboarding_content() { # <artifact>
 
 android_welcome_holds() { # <artifact>
     hierarchy_is_app "$1" || return 1
-    node_exists_exact "$1" "WELCOME|Explore first"
+    node_exists_exact "$1" "Welcome|Get started|Continue|Not now|Open Library"
 }
 
 # Exact component, same bounded `am start -W` the launch path already uses.
@@ -215,7 +215,7 @@ android_shell_not_missing() { return 1; }
 # then dumped NexusLauncher All Apps. One-shot handoff, never a foreign tap.
 ANDROID_OWNED_SHELL_HANDOFF=0
 
-# Run 34007760276: API 33 Welcome kept Explore first at [0,0][0,0];
+# Run 34007760276: API 33 Welcome kept Get started at [0,0][0,0];
 # tap_until_state then called scroll_content and landed on NexusLauncher.
 # Run 34016710899: GMS then dependency-killed the app; the next dump was
 # NexusLauncher All Apps. Relaunch MainActivity once; never gesture foreign.
@@ -252,10 +252,10 @@ android_recover_onboarding() { # <artifact> [timeout] [dump] [swipe] [tap] [pace
                 fi
                 return 1
             fi
-            point="$(action_center "$artifact" "Explore first")"
+            point="$(action_center "$artifact" "$ANDROID_ONBOARDING_ACTIONS")"
             if [[ -n "$point" ]]; then
                 "$tap" "$point" || return 1
-            elif enabled_action_exists_exact "$artifact" "Explore first"; then
+            elif enabled_action_exists_exact "$artifact" "$ANDROID_ONBOARDING_ACTIONS"; then
                 "$swipe" "$artifact" || return 1
             fi
         elif (( saw_welcome && relaunched == 0 )) && "$shell_missing" "$artifact"; then
@@ -285,8 +285,8 @@ reach_settings_tab() { # <artifact> [timeout]
                 return 1
             fi
             point=""
-            if enabled_action_exists_exact "$artifact" "Explore first"; then
-                point="$(action_center "$artifact" "Explore first")"
+            if enabled_action_exists_exact "$artifact" "$ANDROID_ONBOARDING_ACTIONS"; then
+                point="$(action_center "$artifact" "$ANDROID_ONBOARDING_ACTIONS")"
             fi
             if [[ -n "$point" ]]; then
                 tap_transition_point "$point" || return 1
@@ -401,7 +401,7 @@ navigation_transition_self_test() { # <temp>
 
 navigation_shell_readiness_self_test() { # <temp>
     local temp="$1" onboarding ready disabled absent zero covered observed
-    onboarding='<node text="Explore first" bounds="[20,400][300,450]" enabled="true" clickable="true"/>'
+    onboarding='<node text="Get started" bounds="[20,400][300,450]" enabled="true" clickable="true"/>'
     ready='<node text="Settings" bounds="[207,583][303,635]" enabled="true" clickable="true"/>'
     disabled='<node text="Settings" bounds="[207,583][303,635]" enabled="false" clickable="true"/>'
     absent='<node text="Loading…" bounds="[29,405][291,434]" enabled="true"/>'
@@ -427,8 +427,8 @@ navigation_shell_readiness_self_test() { # <temp>
             && [[ $UI_FIXTURE_INDEX -eq 2 && $UI_FIXTURE_TAPS -eq 1 ]] \
             && cmp -s "$observed" "$temp/settings-ready.xml"
     ) \
-        && ok "shell readiness rechecks Settings after Explore first" \
-        || bad "shell readiness rechecks Settings after Explore first"
+        && ok "shell readiness rechecks Settings after Get started" \
+        || bad "shell readiness rechecks Settings after Get started"
 
     (
         dump_hierarchy() { ui_fixture_dump "$@"; }
@@ -510,9 +510,9 @@ android_onboarding_recovery_self_test() { # <temp>
     local temp="$1" pkg="${PKG:-com.copypaste.app}"
     local main="${MAIN:-$pkg/${APP_NAMESPACE:-$pkg}.MainActivity}"
     local welcome_zero welcome_edge tappable shell settings_only launcher all_apps
-    welcome_zero="<?xml version=\"1.0\"?><hierarchy><node package=\"$pkg\" bounds=\"[0,0][320,640]\"><node text=\"WELCOME\" bounds=\"[24,101][85,115]\" enabled=\"true\"/><node text=\"Explore first\" class=\"android.widget.Button\" package=\"$pkg\" enabled=\"true\" clickable=\"true\" bounds=\"[0,0][0,0]\"/></node></hierarchy>"
-    welcome_edge="<?xml version=\"1.0\"?><hierarchy><node package=\"$pkg\" bounds=\"[0,0][320,640]\"><node text=\"WELCOME\" bounds=\"[24,101][85,115]\" enabled=\"true\"/><node text=\"Explore first\" class=\"android.widget.Button\" package=\"$pkg\" enabled=\"true\" clickable=\"true\" bounds=\"[24,616][296,616]\"/></node></hierarchy>"
-    tappable="<?xml version=\"1.0\"?><hierarchy><node package=\"$pkg\" bounds=\"[0,0][320,640]\"><node text=\"Explore first\" class=\"android.widget.Button\" package=\"$pkg\" enabled=\"true\" clickable=\"true\" bounds=\"[20,400][300,450]\"/></node></hierarchy>"
+    welcome_zero="<?xml version=\"1.0\"?><hierarchy><node package=\"$pkg\" bounds=\"[0,0][320,640]\"><node text=\"WELCOME\" bounds=\"[24,101][85,115]\" enabled=\"true\"/><node text=\"Get started\" class=\"android.widget.Button\" package=\"$pkg\" enabled=\"true\" clickable=\"true\" bounds=\"[0,0][0,0]\"/></node></hierarchy>"
+    welcome_edge="<?xml version=\"1.0\"?><hierarchy><node package=\"$pkg\" bounds=\"[0,0][320,640]\"><node text=\"WELCOME\" bounds=\"[24,101][85,115]\" enabled=\"true\"/><node text=\"Get started\" class=\"android.widget.Button\" package=\"$pkg\" enabled=\"true\" clickable=\"true\" bounds=\"[24,616][296,616]\"/></node></hierarchy>"
+    tappable="<?xml version=\"1.0\"?><hierarchy><node package=\"$pkg\" bounds=\"[0,0][320,640]\"><node text=\"Get started\" class=\"android.widget.Button\" package=\"$pkg\" enabled=\"true\" clickable=\"true\" bounds=\"[20,400][300,450]\"/></node></hierarchy>"
     shell="<?xml version=\"1.0\"?><hierarchy><node package=\"$pkg\" bounds=\"[0,0][320,640]\"><node text=\"Primary\" bounds=\"[0,570][320,640]\"><node text=\"Library\" package=\"$pkg\" bounds=\"[17,583][113,635]\" enabled=\"true\" clickable=\"true\"/><node text=\"Devices\" package=\"$pkg\" bounds=\"[112,583][208,635]\" enabled=\"true\" clickable=\"true\"/><node text=\"Settings\" package=\"$pkg\" bounds=\"[207,583][303,635]\" enabled=\"true\" clickable=\"true\"/></node></node></hierarchy>"
     settings_only="<?xml version=\"1.0\"?><hierarchy><node package=\"$pkg\" bounds=\"[0,0][320,640]\"><node text=\"Settings\" package=\"$pkg\" bounds=\"[207,583][303,635]\" enabled=\"true\" clickable=\"true\"/></node></hierarchy>"
     launcher='<?xml version="1.0"?><hierarchy><node package="com.google.android.apps.nexuslauncher" bounds="[0,0][320,640]"><node text="Settings" package="com.google.android.apps.nexuslauncher" bounds="[247,464][305,579]" enabled="true" clickable="true"/></node></hierarchy>'
@@ -524,6 +524,22 @@ android_onboarding_recovery_self_test() { # <temp>
     printf '%s\n' "$settings_only" > "$temp/welcome-settings-only.xml"
     printf '%s\n' "$launcher" > "$temp/welcome-launcher.xml"
     printf '%s\n' "$all_apps" > "$temp/welcome-all-apps.xml"
+
+    local step_label step_index=0
+    for step_label in "Get started" "Continue" "Not now" "Open Library"; do
+        printf '<hierarchy><node package="%s" bounds="[0,0][320,640]"><node text="%s" enabled="true" clickable="true" bounds="[20,400][300,450]"/></node></hierarchy>\n' \
+            "$pkg" "$step_label" > "$temp/onboarding-step-$step_index.xml"
+        step_index=$((step_index + 1))
+    done
+    (
+        ui_fixtures "$temp/onboarding-step-0.xml" "$temp/onboarding-step-1.xml" \
+            "$temp/onboarding-step-2.xml" "$temp/onboarding-step-3.xml" "$temp/welcome-shell.xml"
+        android_recover_onboarding "$temp/onboarding-sequence.xml" 3 \
+            ui_fixture_dump onboarding_fixture_swipe navigation_fixture_tap ui_fixture_pace \
+            && [[ $UI_FIXTURE_TAPS -eq 4 ]] \
+            && ok "new onboarding traverses permissions and skips optional setup before Library" \
+            || bad "new onboarding traverses permissions and skips optional setup before Library"
+    )
 
     [[ "$(onboarding_content_swipe "$temp/welcome-zero.xml")" == "160 368 192" ]] \
         && [[ "$(onboarding_content_swipe "$temp/welcome-edge.xml")" == "160 368 192" ]] \
@@ -574,8 +590,8 @@ android_onboarding_recovery_self_test() { # <temp>
                   && $UI_FIXTURE_SCROLLS -eq 0 ]] \
             && cmp -s "$temp/welcome-zero-observed.xml" "$temp/welcome-shell.xml"
     ) \
-        && ok "API 33 Welcome zero bounds swipes contained then taps Explore first" \
-        || bad "API 33 Welcome zero bounds swipes contained then taps Explore first"
+        && ok "API 33 Welcome zero bounds swipes contained then taps Get started" \
+        || bad "API 33 Welcome zero bounds swipes contained then taps Get started"
 
     (
         dump_hierarchy() { ui_fixture_dump "$@"; }
@@ -593,8 +609,8 @@ android_onboarding_recovery_self_test() { # <temp>
                   && $UI_FIXTURE_SCROLLS -eq 0 ]] \
             && cmp -s "$temp/welcome-edge-observed.xml" "$temp/welcome-shell.xml"
     ) \
-        && ok "API 36 Welcome edge zero height swipes contained then taps Explore first" \
-        || bad "API 36 Welcome edge zero height swipes contained then taps Explore first"
+        && ok "API 36 Welcome edge zero height swipes contained then taps Get started" \
+        || bad "API 36 Welcome edge zero height swipes contained then taps Get started"
 
     (
         dump_hierarchy() { ui_fixture_dump "$@"; }
@@ -611,8 +627,8 @@ android_onboarding_recovery_self_test() { # <temp>
                   && $UI_FIXTURE_SCROLLS -eq 0 ]] \
             && cmp -s "$temp/welcome-tappable-observed.xml" "$temp/welcome-shell.xml"
     ) \
-        && ok "a tappable Explore first is tapped without a swipe" \
-        || bad "a tappable Explore first is tapped without a swipe"
+        && ok "a tappable Get started is tapped without a swipe" \
+        || bad "a tappable Get started is tapped without a swipe"
 
     (
         dump_hierarchy() { ui_fixture_dump "$@"; }
@@ -735,8 +751,8 @@ android_onboarding_recovery_self_test() { # <temp>
             && [[ $ONBOARDING_FIXTURE_SWIPES -eq 0 && $UI_FIXTURE_TAPS -ge 1 \
                   && $UI_FIXTURE_SCROLLS -eq 0 ]]
     ) \
-        && ok "Explore first that never yields the shell fails closed" \
-        || bad "Explore first that never yields the shell fails closed"
+        && ok "Get started that never yields the shell fails closed" \
+        || bad "Get started that never yields the shell fails closed"
 
     (
         dump_hierarchy() { ui_fixture_dump "$@"; }
@@ -791,8 +807,8 @@ android_onboarding_recovery_self_test() { # <temp>
                   && $ANDROID_OWNED_SHELL_HANDOFF -eq 1 ]] \
             && cmp -s "$temp/handoff-explore-observed.xml" "$temp/welcome-shell.xml"
     ) \
-        && ok "an app-owned Explore first dump still taps through to Settings" \
-        || bad "an app-owned Explore first dump still taps through to Settings"
+        && ok "an app-owned Get started dump still taps through to Settings" \
+        || bad "an app-owned Get started dump still taps through to Settings"
 
     (
         dump_hierarchy() { ui_fixture_dump "$@"; }
@@ -943,7 +959,7 @@ android_navigation_self_test() { # <temp>
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_open</node></hierarchy>" > "$temp/navigable.xml"
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_starting<node text=\"Loading…\" bounds=\"[29,405][291,434]\" enabled=\"true\"/></node></hierarchy>" > "$temp/starting.xml"
     printf '%s\n' '<?xml version="1.0"?><hierarchy><node><node text="Loading…" bounds="[29,405][291,434]" enabled="true"/></node></hierarchy>' > "$temp/shell-less.xml"
-    nav_onboarding='<node text="Explore first" bounds="[20,400][300,450]" enabled="true" clickable="true"/>'
+    nav_onboarding='<node text="Get started" bounds="[20,400][300,450]" enabled="true" clickable="true"/>'
     printf '%s\n' "<?xml version=\"1.0\"?><hierarchy><node>$nav_onboarding</node></hierarchy>" > "$temp/onboarding.xml"
 
     app_navigation_holds "$temp/navigable.xml" \
@@ -974,8 +990,8 @@ android_navigation_self_test() { # <temp>
         navigation_fixture_scroll navigation_fixture_tap ui_fixture_pace \
         && [[ "$UI_FIXTURE_INDEX" == 2 && $UI_FIXTURE_TAPS -eq 1 ]] \
         && cmp -s "$temp/observed.xml" "$temp/navigable.xml" \
-        && ok "readiness rechecks navigation after Explore first" \
-        || bad "readiness rechecks navigation after Explore first"
+        && ok "readiness rechecks navigation after Get started" \
+        || bad "readiness rechecks navigation after Get started"
     ui_fixtures "$temp/starting.xml" "$temp/starting.xml"
     wait_app_navigable "$temp/observed.xml" 2 ui_fixture_dump \
         navigation_fixture_scroll navigation_fixture_tap ui_fixture_pace \

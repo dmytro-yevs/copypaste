@@ -310,9 +310,7 @@ mod tests {
     use copypaste_cloud::auth::Session;
     use copypaste_cloud::crypto::{encrypt_row, SyncKey};
     use copypaste_cloud::rest::CloudItem;
-    use copypaste_cloud::sync::{
-        AuthApi, AuthFault, CloudSync, RestApi, SensitiveGuard, TransportFault,
-    };
+    use copypaste_cloud::sync::{AuthApi, AuthFault, CloudSync, RestApi, TransportFault};
     use copypaste_cloud::CloudConfig;
     use tokio::sync::Notify;
 
@@ -415,7 +413,6 @@ mod tests {
                 user_id: "user-1".into(),
                 expires_at_ms: i64::MAX,
             },
-            SensitiveGuard::new(|_| false),
         ));
         let source = StoreSource::for_sync_cycle(Arc::clone(&state), state.cloud.sync_cancel());
         let pull = tokio::spawn({
@@ -455,22 +452,15 @@ mod tests {
         assert!(!items[0].deleted);
     }
 
-    /// The first layer of "a sensitive item never leaves the device": it is not
-    /// in the outbound query at all, so the driver's guard is a second layer
-    /// rather than the only one (AT-56 / `CopyPaste-20yw`).
     #[test]
-    fn a_sensitive_item_is_never_offered_for_upload() {
+    fn every_text_item_is_offered_for_upload() {
         let (source, state, _dir) = source("alpha");
         add(&state, "an ordinary snippet");
-        let secret = add(&state, "AKIAIOSFODNN7EXAMPLE");
+        let second = add(&state, "second snippet");
 
         let items = source.local_changes_since(0).unwrap();
-        assert!(
-            !ids(&items).contains(&secret.as_str()),
-            "a sensitive item reached the upload path: {:?}",
-            ids(&items)
-        );
-        assert_eq!(items.len(), 1);
+        assert_eq!(items.len(), 2);
+        assert!(ids(&items).contains(&second.as_str()));
     }
 
     #[test]
@@ -880,7 +870,6 @@ mod round_tests {
                 nonce,
                 content_type: "text".into(),
                 content_hash: copypaste_core::compute_content_hash(b"sealed elsewhere"),
-                is_sensitive: false,
                 search_text: None,
                 created_at,
                 app_bundle_id: None,
@@ -961,7 +950,6 @@ mod round_tests {
                 content_hash: &copypaste_core::compute_content_hash(b"readable now"),
                 created_at: 1_000,
                 deleted: false,
-                is_sensitive: false,
                 origin_device_id: "",
                 app_bundle_id: None,
                 app_name: None,

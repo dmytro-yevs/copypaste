@@ -12,7 +12,6 @@ const CONFIG = {
   max_image_size_bytes: 4 * 1024 * 1024,
   max_file_size_bytes: 4 * 1024 * 1024,
   max_decoded_image_mb: 50,
-  sensitive_ttl_secs: 30,
   excluded_app_bundle_ids: [],
   lan_visibility: true,
   sync_enabled: true,

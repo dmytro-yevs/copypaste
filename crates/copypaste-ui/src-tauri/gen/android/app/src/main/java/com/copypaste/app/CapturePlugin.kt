@@ -10,7 +10,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.os.PowerManager
 import android.provider.Settings
 import android.util.Base64
 import android.util.Log
@@ -145,7 +144,8 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
     fun openShizuku(invoke: Invoke) {
         val packageManager = activity.applicationContext.packageManager
         val intent = packageManager.getLaunchIntentForPackage(SHIZUKU_PACKAGE)
-        if (intent == null || !launch(intent)) {
+            ?: Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/download/"))
+        if (!launch(intent)) {
             invoke.reject("Shizuku could not be opened on this device.")
             return
         }
@@ -181,14 +181,7 @@ class CapturePlugin(private val activity: Activity) : Plugin(activity) {
             invoke.resolve(JSObject())
             return
         }
-        val power = activity.getSystemService(PowerManager::class.java)
-        val intent = if (power?.isIgnoringBatteryOptimizations(activity.packageName) == true) {
-            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-        } else {
-            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                .setData(Uri.parse("package:${activity.packageName}"))
-        }
-        if (!launch(intent)) {
+        if (!launch(BackgroundActivity.settingsIntent(activity))) {
             invoke.reject("Battery settings could not be opened on this device.")
             return
         }
