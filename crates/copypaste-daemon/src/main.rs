@@ -39,7 +39,7 @@ use crate::meta::Meta;
 use crate::p2p::P2p;
 use crate::runtime::run_with_bounded_shutdown;
 use crate::settings::Settings;
-use crate::startup::{halt_or_fail, relocate, wait_for_shutdown};
+use crate::startup::{halt_or_fail, relocate, wait_for_shutdown, watch_app_parent};
 
 pub use crate::state::AppState;
 
@@ -53,6 +53,10 @@ fn main() -> anyhow::Result<()> {
 
 async fn run() -> anyhow::Result<()> {
     let args = Args::parse();
+    // Start this before opening durable state. If the app died during its own
+    // startup, EOF is noticed while the daemon is still coming up rather than
+    // only after it has bound the socket and started capture.
+    watch_app_parent(args.app_parent)?;
 
     // `--data-dir` moves both defaults; an explicit `COPYPASTE_SOCKET` still
     // wins so every process can name the same isolated instance.
