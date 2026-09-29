@@ -136,10 +136,7 @@ fn cases(root: &Path) -> Vec<Method> {
         Method::SyncNow { pairing_id: None },
         Method::Discovered,
         Method::Rescan,
-        Method::Export {
-            limit: 0,
-            include_sensitive: false,
-        },
+        Method::Export { limit: 0 },
         Method::Import { items: Vec::new() },
         Method::Backup {
             dest_path: root.join("contract-backup.db").display().to_string(),

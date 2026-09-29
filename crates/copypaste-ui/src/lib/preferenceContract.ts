@@ -23,9 +23,6 @@ export interface Prefs {
   previewLines: number;
   sortByDevice: boolean;
   historyDisplayLimit: (typeof HISTORY_DISPLAY_LIMITS)[number];
-  /** Default on (n9gp). There is deliberately no "Mask sensitive data" toggle
-   * beside it: the bridge drops plaintext before it crosses into the WebView. */
-  warnBeforeReveal: boolean;
   /** INV-35, inverted: the window remains content-protected unless this is on. */
   allowScreenshots: boolean;
   onboardingComplete: boolean;
@@ -36,7 +33,6 @@ export const DEFAULT_PREFS: Prefs = {
   previewLines: DEFAULT_PREVIEW_LINES,
   sortByDevice: false,
   historyDisplayLimit: 1000,
-  warnBeforeReveal: true,
   allowScreenshots: false,
   onboardingComplete: false,
 };

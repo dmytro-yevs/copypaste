@@ -1,10 +1,7 @@
-//! The local seam: what the driver is allowed to see of the daemon's history,
-//! and the gate every item passes before it may leave the machine.
+//! The local seam: what the driver is allowed to see of the daemon's history.
 //!
 //! Nothing here touches the network, and nothing here touches SQLite. It is the
 //! contract between the two.
-
-use std::sync::Arc;
 
 use zeroize::Zeroizing;
 
@@ -74,11 +71,6 @@ pub trait CloudSource: Send + Sync {
     /// Inclusive on purpose: re-offering the boundary row costs one idempotent
     /// upsert, and excluding it loses every row that shares the boundary
     /// millisecond.
-    ///
-    /// **Sensitive items must not appear here.** The driver checks again
-    /// ([`SensitiveGuard`]) because this is data leaving the user's machine and
-    /// one enforcement point is one bug away from none — but the filter belongs
-    /// here too, where the detector already ran at capture time.
     ///
     /// # Errors
     ///
@@ -246,43 +238,5 @@ pub trait CloudSource: Send + Sync {
     fn set_watermark_keyset(&self, ms: i64, item_id: &str) -> Result<(), SyncError> {
         let _ = item_id;
         self.set_watermark(ms)
-    }
-}
-
-// The sensitive-content gate
-
-/// The last check before an item leaves the machine.
-///
-/// `CloudSource` filters sensitive items already — the detector ran at capture
-/// time and the store knows the answer. This is the second layer, and it exists
-/// because manifest 05 AT-56 (`CopyPaste-20yw`) requires both the regular upload
-/// query and backlog sweep to enforce the sensitive-content gate.
-///
-/// It is required by [`CloudSync::new`](super::CloudSync::new) rather than
-/// defaulted, so there is no way to construct a driver that uploads unchecked.
-/// It is a callback rather than a detector because the detector already exists —
-/// `copypaste-core`'s `sensitive::Detector`, with the full ruleset, the
-/// confidence model and the false-positive defences of manifest 07.
-/// Re-implementing even a "quick check" here would be a second regex engine,
-/// which is one of the duplications `AGENTS.md` rule 1 was written about. The
-/// daemon wires the real detector in `cloud::sensitive_guard`.
-#[derive(Clone)]
-pub struct SensitiveGuard(Arc<dyn Fn(&LocalItem) -> bool + Send + Sync>);
-
-impl SensitiveGuard {
-    /// Wrap a predicate. `true` means "never upload this".
-    pub fn new(f: impl Fn(&LocalItem) -> bool + Send + Sync + 'static) -> Self {
-        Self(Arc::new(f))
-    }
-
-    /// Would this item be withheld?
-    pub fn is_sensitive(&self, item: &LocalItem) -> bool {
-        (self.0)(item)
-    }
-}
-
-impl std::fmt::Debug for SensitiveGuard {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SensitiveGuard").finish_non_exhaustive()
     }
 }

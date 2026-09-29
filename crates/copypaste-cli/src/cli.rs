@@ -46,8 +46,6 @@ pub(crate) enum Command {
     },
 
     /// Full-text search over clipboard history.
-    ///
-    /// Sensitive items are never indexed, so they never appear in results.
     Search {
         /// What to search for.
         query: String,
@@ -177,9 +175,6 @@ pub(crate) enum Command {
     },
 
     /// Write clipboard history to a file, as JSON.
-    ///
-    /// Sensitive items are withheld unless `--include-sensitive` is passed, and
-    /// everything left out is reported on stderr rather than hidden.
     Export {
         /// Where to write. Written to stdout when omitted.
         #[arg(long, short = 'o', value_name = "FILE")]
@@ -187,17 +182,9 @@ pub(crate) enum Command {
         /// Export at most this many items, newest first. All of them by default.
         #[arg(long, short = 'n', default_value_t = 0)]
         limit: u32,
-        /// Include items the detector flagged.
-        ///
-        /// An export is a plaintext file. Passing this puts credentials in it.
-        #[arg(long)]
-        include_sensitive: bool,
     },
 
     /// Read a file written by `copypaste export` back into history.
-    ///
-    /// Every item goes through the same checks a copy does, so the detector
-    /// runs again and duplicates collapse.
     Import {
         /// The file to read. Read from stdin when omitted.
         file: Option<PathBuf>,
@@ -270,9 +257,6 @@ pub(crate) enum ConfigAction {
         /// Maximum decoded image memory in MiB. Minimum: 1 MiB.
         #[arg(long)]
         max_decoded_image_mb: Option<u32>,
-        /// Delete a flagged item after this many seconds. 0 disables it.
-        #[arg(long)]
-        sensitive_ttl_secs: Option<u64>,
         /// Bundle ids never to capture from, comma-separated. Empty clears it.
         #[arg(long, value_name = "IDS")]
         excluded_apps: Option<String>,
@@ -369,7 +353,6 @@ pub(crate) fn config_patch(action: &ConfigAction) -> ConfigPatch {
         max_image_size_bytes,
         max_file_size_bytes,
         max_decoded_image_mb,
-        sensitive_ttl_secs,
         excluded_apps,
         lan_visibility,
         sync_enabled,
@@ -390,7 +373,6 @@ pub(crate) fn config_patch(action: &ConfigAction) -> ConfigPatch {
         max_image_size_bytes: *max_image_size_bytes,
         max_file_size_bytes: *max_file_size_bytes,
         max_decoded_image_mb: *max_decoded_image_mb,
-        sensitive_ttl_secs: *sensitive_ttl_secs,
         excluded_app_bundle_ids: excluded_apps.as_ref().map(|raw| {
             raw.split(',')
                 .map(str::trim)
@@ -535,8 +517,6 @@ mod tests {
             "104857600",
             "--max-decoded-image-mb",
             "50",
-            "--sensitive-ttl-secs",
-            "60",
             "--excluded-apps",
             "com.example.One, , org.example.Two",
             "--lan-visibility",
@@ -566,7 +546,6 @@ mod tests {
                 max_image_size_bytes: Some(67_108_864),
                 max_file_size_bytes: Some(104_857_600),
                 max_decoded_image_mb: Some(50),
-                sensitive_ttl_secs: Some(60),
                 excluded_app_bundle_ids: Some(vec![
                     "com.example.One".to_string(),
                     "org.example.Two".to_string(),

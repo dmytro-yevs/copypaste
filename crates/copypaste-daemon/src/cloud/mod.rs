@@ -28,7 +28,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use copypaste_cloud::auth::SupabaseAuth;
 use copypaste_cloud::credentials::CloudStateKey;
 use copypaste_cloud::rest::SupabaseRest;
-use copypaste_cloud::sync::{CloudSync, SensitiveGuard};
+use copypaste_cloud::sync::CloudSync;
 use copypaste_cloud::CloudConfig;
 use copypaste_core::sync::{RoundGate, RoundGuard};
 use copypaste_core::StoreError;
@@ -436,24 +436,6 @@ pub fn note_version_written(state: &AppState, created_at_ms: i64) {
     state.cloud.note_version_written(&state.meta, created_at_ms);
 }
 
-/// The gate every item passes before it may leave the device.
-///
-/// The store already filters sensitive rows out of the outbound query; this is
-/// the second layer, and it exists because manifest 05 AT-56
-/// (`CopyPaste-20yw`) requires the regular upload and backlog sweep to enforce
-/// the same gate. It calls the daemon's own detector rather than implementing a
-/// second regex engine that could disagree with capture-time detection.
-fn sensitive_guard(state: &AppState) -> SensitiveGuard {
-    let detector = Arc::clone(&state.detector);
-    SensitiveGuard::new(move |item| {
-        std::str::from_utf8(&item.content)
-            // Not decodable as text: nothing the ruleset can judge, and not
-            // something to guess about. The store's capture-time flag is the
-            // first layer and has already had its say.
-            .is_ok_and(|text| detector.is_sensitive(text))
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -678,24 +660,5 @@ mod tests {
         for secret in ["a@example.com", "access-1", "refresh-1", "supabase.co"] {
             assert!(!rendered.contains(secret), "{secret} leaked: {rendered}");
         }
-    }
-
-    #[test]
-    fn the_upload_gate_asks_this_devices_detector() {
-        let (state, _dir) = test_state("alpha");
-        let guard = sensitive_guard(&state);
-        let item = |content: &str| copypaste_cloud::sync::LocalItem {
-            item_id: "a".into(),
-            content: zeroize::Zeroizing::new(content.as_bytes().to_vec()),
-            content_type: "text".into(),
-            payload_metadata: None,
-            source_app_bundle_id: None,
-            source_app_name: None,
-            created_at: 1_000,
-            deleted: false,
-            origin_device_id: "device-a".into(),
-        };
-        assert!(guard.is_sensitive(&item("AKIAIOSFODNN7EXAMPLE")));
-        assert!(!guard.is_sensitive(&item("an ordinary snippet")));
     }
 }

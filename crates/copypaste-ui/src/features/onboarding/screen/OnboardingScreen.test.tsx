@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { useEffect } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
-import type { ReactNode } from "react";
 
 import { TooltipProvider } from "@/components/ui";
 import { DEFAULT_ONBOARDING_PROGRESS, usePrefs } from "@/store/prefs";
@@ -8,190 +8,89 @@ import { useUi } from "@/store/ui";
 import { OnboardingScreen } from "./OnboardingScreen";
 
 const platform = vi.hoisted(() => ({ android: false }));
-const serviceConfig = vi.hoisted(() => ({ mutate: vi.fn() }));
-const startup = vi.hoisted(() => ({
-  data: false,
-  isPending: false,
-  isError: false,
-  savePending: false,
-  saveError: false,
-  mutate: vi.fn(),
-}));
-
-vi.mock("@/lib/platform", () => ({
-  currentPlatform: () => platform.android ? "android" : "macos",
-  isAndroidPlatform: () => platform.android,
-}));
-vi.mock("@/features/capture", () => ({
-  CaptureSetupController: () => <p>Native capture setup</p>,
-}));
-vi.mock("@/features/onboarding/patterns/AndroidCaptureSetup", () => ({
-  AndroidCaptureSetup: () => <p>Android capture choices</p>,
-}));
-vi.mock("@/features/pairing", () => ({
-  usePairing: () => ({
-    protectedPresentationAvailable: false,
-    webPreview: false,
-    isChecking: false,
-    isPending: false,
-    run: vi.fn(),
-  }),
-}));
-vi.mock("@/features/devices/patterns/PairingLauncherDialog", () => ({
-  PairingLauncherDialog: () => null,
-}));
-vi.mock("@/features/settings/patterns/service/ClipboardServiceSections", () => ({
-  ClipboardNotificationSection: () => <p>Notifications</p>,
-}));
-vi.mock("@/features/settings/patterns/service/PrivacyServiceSections", () => ({
-  PrivacyServiceSections: () => <p>Retention</p>,
-}));
-vi.mock("@/features/settings/patterns/service/ServiceSettingsController", () => ({
-  ServiceSettingsProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
-}));
-vi.mock("@/features/settings/patterns/CloudSyncSettings", () => ({
-  CloudSyncSettings: () => <p>Cloud setup</p>,
-}));
-vi.mock("@/features/settings/patterns/ListTab", () => ({
-  ListTab: () => <p>Reveal and screenshots</p>,
-}));
-vi.mock("@/hooks/useOpenAtLogin", () => ({
-  useOpenAtLogin: () => ({ data: startup.data, isPending: startup.isPending, isError: startup.isError }),
-  useSetOpenAtLogin: () => ({ mutate: startup.mutate, isPending: startup.savePending, isError: startup.saveError }),
-}));
-vi.mock("@/hooks/useServiceConfig", () => ({
-  useSetServiceConfig: () => ({ mutate: serviceConfig.mutate, isPending: false }),
+vi.mock("@/lib/platform", () => ({ isAndroidPlatform: () => platform.android }));
+vi.mock("@/features/capture/patterns/AndroidBackgroundSetup", () => ({ AndroidBackgroundSetup: ({ onReadyChange }: { onReadyChange: (ready: boolean) => void }) => { useEffect(() => onReadyChange(true), [onReadyChange]); return <p>Shizuku and ADB setup</p>; } }));
+vi.mock("@/features/onboarding/patterns/OnboardingPermissions", () => ({
+  OnboardingPermissions: ({ android }: { android: boolean }) => <p>{android ? "Android permissions" : "Desktop permissions"}</p>,
 }));
 
 beforeEach(() => {
   platform.android = false;
-  startup.data = false;
-  startup.isPending = false;
-  startup.isError = false;
-  startup.savePending = false;
-  startup.saveError = false;
-  startup.mutate.mockReset();
-  serviceConfig.mutate.mockReset().mockImplementation((_patch: unknown, options?: {
-    onSuccess?: () => void;
-  }) => {
-    options?.onSuccess?.();
-  });
-  usePrefs.setState({
-    onboardingComplete: false,
-    onboarding: { ...DEFAULT_ONBOARDING_PROGRESS },
-  });
+  usePrefs.setState({ onboardingComplete: false, onboarding: { ...DEFAULT_ONBOARDING_PROGRESS } });
+  useUi.setState({ onboardingOpen: true, view: "settings" });
+});
+afterEach(() => useUi.setState({ onboardingOpen: false, view: "history" }));
+const mount = () => render(<TooltipProvider><OnboardingScreen /></TooltipProvider>);
+const click = (name: string) => fireEvent.click(screen.getByRole("button", { name }));
+
+it.each(["devices", "history"] as const)("finishes the three-screen desktop path in %s", (destination) => {
+  mount();
+  expect(screen.getByText("Step 1 of 3")).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Copy once. Keep it." })).toBeTruthy();
+  click("Get started");
+  expect(screen.getByText("Desktop permissions")).toBeTruthy();
+  click("Continue");
+  expect(screen.getByRole("heading", { name: "Set up sync now?" })).toBeTruthy();
+  expect(screen.getByText("Step 3 of 3")).toBeTruthy();
+  click(destination === "devices" ? "Start sync" : "Open Library");
+  expect(usePrefs.getState().onboardingComplete).toBe(true);
+  expect(useUi.getState()).toMatchObject({ view: destination, onboardingOpen: false });
 });
 
-afterEach(() => {
-  useUi.setState({ onboardingOpen: false, view: "history" });
-});
-
-it("uses step buttons instead of incomplete tab semantics", () => {
-  render(
-    <TooltipProvider>
-      <OnboardingScreen />
-    </TooltipProvider>,
-  );
-
-  const steps = screen.getByRole("navigation", { name: "Onboarding steps" });
-  const firstStep = screen.getByRole("button", { name: "Step 1 of 5" });
-  expect(steps.contains(firstStep)).toBe(true);
-  expect(screen.queryByRole("tablist")).toBeNull();
-  expect(firstStep.getAttribute("aria-current")).toBe("step");
-
-  fireEvent.click(screen.getByRole("button", { name: "Step 2 of 5" }));
-  expect(firstStep.getAttribute("aria-current")).toBeNull();
-  expect(screen.getByRole("button", { name: "Step 2 of 5" }).getAttribute("aria-current")).toBe("step");
-});
-
-it("persists a sequential flow and deliberate optional skips", () => {
-  render(
-    <TooltipProvider>
-      <OnboardingScreen />
-    </TooltipProvider>,
-  );
-
-  fireEvent.click(screen.getByRole("button", { name: "Set up capture" }));
-  expect(screen.getByRole("button", { name: "Continue" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
-  expect(usePrefs.getState().onboarding.captureSkipped).toBe(true);
-  expect(screen.getByRole("heading", { name: "Keep control of what CopyPaste remembers." })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Keep defaults" }));
-  expect(usePrefs.getState().onboarding.privacySkipped).toBe(true);
-  fireEvent.click(screen.getByRole("radio", { name: /Set up sync later/ }));
-  expect(usePrefs.getState().onboarding.syncChoice).toBe("later");
-  fireEvent.click(screen.getByRole("button", { name: "Finish setup" }));
-  expect(screen.getByRole("heading", { name: "CopyPaste is ready for you." })).toBeTruthy();
-});
-
-it("resumes the persisted step and supports Android-specific capture controls", () => {
+it("lets Android skip background setup and open Library", () => {
   platform.android = true;
-  usePrefs.setState({
-    onboarding: { ...DEFAULT_ONBOARDING_PROGRESS, step: "capture" },
-  });
-  render(
-    <TooltipProvider>
-      <OnboardingScreen />
-    </TooltipProvider>,
-  );
-  expect(screen.getByText("Native capture setup")).toBeTruthy();
-  expect(screen.getByText("Android capture choices")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Step 2 of 5" }).getAttribute("aria-current")).toBe("step");
+  mount();
+  click("Get started");
+  expect(screen.getByText("Android permissions")).toBeTruthy();
+  click("Continue");
+  expect(screen.getByRole("heading", { name: "Save copies from other apps." })).toBeTruthy();
+  click("Not now");
+  expect(usePrefs.getState().onboarding.captureSkipped).toBe(true);
+  expect(screen.queryByText("Shizuku and ADB setup")).toBeNull();
+  expect(screen.getByText("Step 4 of 4")).toBeTruthy();
+  click("Back");
+  expect(screen.getByRole("heading", { name: "Save copies from other apps." })).toBeTruthy();
+  click("Not now");
+  click("Open Library");
+  expect(useUi.getState().view).toBe("history");
 });
 
-it("applies cloud and later sync choices before allowing completion", () => {
-  usePrefs.setState({
-    onboarding: { ...DEFAULT_ONBOARDING_PROGRESS, step: "sync" },
-  });
-  render(
-    <TooltipProvider>
-      <OnboardingScreen />
-    </TooltipProvider>,
-  );
-
-  fireEvent.click(screen.getByRole("radio", { name: /Encrypted cloud sync/ }));
-  expect(serviceConfig.mutate).toHaveBeenLastCalledWith(
-    { sync_enabled: true, lan_visibility: false },
-    expect.any(Object),
-  );
-  expect(usePrefs.getState().onboarding.syncChoice).toBe("cloud");
-
-  fireEvent.click(screen.getByRole("radio", { name: /Set up sync later/ }));
-  expect(serviceConfig.mutate).toHaveBeenLastCalledWith(
-    { sync_enabled: false, lan_visibility: false },
-    expect.any(Object),
-  );
-  expect(usePrefs.getState().onboarding.syncChoice).toBe("later");
+it("includes the optional Android setup only when chosen", () => {
+  platform.android = true;
+  usePrefs.getState().setOnboarding({ step: "background", captureSkipped: true });
+  mount();
+  click("Set up background capture");
+  expect(screen.getByText("Shizuku and ADB setup")).toBeTruthy();
+  expect(screen.getByText("Step 4 of 5")).toBeTruthy();
+  expect(usePrefs.getState().onboarding.captureSkipped).toBe(false);
+  click("Continue");
+  click("Back");
+  expect(screen.getByText("Shizuku and ADB setup")).toBeTruthy();
+  click("Continue");
+  click("Start sync");
+  expect(useUi.getState().view).toBe("devices");
 });
 
-it("keeps sync completion disabled while a native choice is pending", () => {
-  serviceConfig.mutate.mockImplementation(() => {});
-  usePrefs.setState({
-    onboarding: { ...DEFAULT_ONBOARDING_PROGRESS, step: "sync" },
-  });
-  render(
-    <TooltipProvider>
-      <OnboardingScreen />
-    </TooltipProvider>,
-  );
-
-  fireEvent.click(screen.getByRole("radio", { name: /Nearby devices/ }));
-  expect(screen.getByRole("button", { name: "Finish setup" }).hasAttribute("disabled")).toBe(true);
+it("resumes Android setup and focuses each new heading", () => {
+  platform.android = true;
+  usePrefs.getState().setOnboarding({ step: "capture", captureSetupMethod: "adb" });
+  mount();
+  expect(screen.getByText("Shizuku and ADB setup")).toBeTruthy();
+  click("Continue");
+  expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Set up sync now?" }));
+  expect(usePrefs.getState().onboarding.captureSetupMethod).toBe("adb");
 });
 
-it("keeps startup accessible and blocks changes while checking", () => {
-  usePrefs.setState({ onboarding: { ...DEFAULT_ONBOARDING_PROGRESS, step: "privacy" } });
-  const view = render(<TooltipProvider><OnboardingScreen /></TooltipProvider>);
-  const control = screen.getByRole("switch", { name: "Open at login" });
-  fireEvent.click(control);
-  expect(startup.mutate).toHaveBeenCalledWith(true);
+it("routes desktop capture entry points to permissions without Android setup", () => {
+  useUi.getState().openCaptureSettings();
+  mount();
+  expect(screen.getByText("Desktop permissions")).toBeTruthy();
+  expect(screen.queryByText("Shizuku and ADB setup")).toBeNull();
+});
 
-  startup.isPending = true;
-  view.rerender(<TooltipProvider><OnboardingScreen /></TooltipProvider>);
-  const checking = screen.getByRole("switch", { name: "Open at login" });
-  expect(checking.hasAttribute("disabled")).toBe(true);
-  expect(checking.getAttribute("aria-busy")).toBe("true");
-  const noteId = checking.getAttribute("aria-describedby");
-  expect(noteId).toBeTruthy();
-  expect(document.getElementById(noteId!)?.textContent).toContain("Checking startup setting");
+it("reopens welcome from Settings after completion", () => {
+  usePrefs.setState({ onboardingComplete: true, onboarding: { ...DEFAULT_ONBOARDING_PROGRESS, step: "sync" } });
+  useUi.getState().openOnboarding();
+  mount();
+  expect(screen.getByRole("heading", { name: "Copy once. Keep it." })).toBeTruthy();
 });

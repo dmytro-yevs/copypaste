@@ -132,10 +132,8 @@ export function getClipboardWriteAvailability(
   return call(UI_COMMANDS.clipboard_write_availability, { contentType, mode });
 }
 
-/** One clipboard write for the whole selection, and the count that actually
- *  reached it — sensitive and binary rows are excluded by the backend, so a
- *  result below `ids.length` is a partial the caller must report rather than
- *  round up to "Copied". Rejects, writing nothing, if a row has gone. */
+/** One clipboard write for the whole selection. A result below `ids.length`
+ * reports a partial copy. Rejects, writing nothing, if a row has gone. */
 export function copyItems(ids: readonly string[]): Promise<number> {
   return call(UI_COMMANDS.copy_items, { ids });
 }
@@ -144,15 +142,7 @@ export function addItem(content: string): Promise<Item> {
   return call(UI_COMMANDS.add_item, { content });
 }
 
-/** One item's plaintext, on demand. Held in component state and dropped when
- *  the reveal expires (INV-11) — never in the query cache, which outlives the
- *  row and would restore it on the next render. */
-export function revealItem(id: string): Promise<string> {
-  return call(UI_COMMANDS.reveal_item, { id });
-}
-
-/** Complete plaintext for a non-sensitive item. The native command rejects
- * sensitive rows before content crosses the WebView boundary. */
+/** Complete plaintext for a truncated item. */
 export function getItemBody(id: string): Promise<string> {
   return call(UI_COMMANDS.get_item_body, { id });
 }
@@ -419,10 +409,8 @@ export function setPrivateMode(enabled: boolean): Promise<PrivateModeData> {
 /** INV-12 held by the shape of the command: the platform's own panel asks and
  *  answers in Rust, so no path is passed in and none comes back. `null` means
  *  the user closed the panel, which is not a failure. */
-export function exportHistory(
-  includeSensitive: boolean,
-): Promise<ExportReport | null> {
-  return call(UI_COMMANDS.export_history, { includeSensitive });
+export function exportHistory(): Promise<ExportReport | null> {
+  return call(UI_COMMANDS.export_history);
 }
 
 /** Choose, read and parse only. `null` means the panel was closed. */

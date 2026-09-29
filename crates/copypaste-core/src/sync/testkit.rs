@@ -1,15 +1,14 @@
-//! A store, a keyring, a detector and a device id — one device, for the merge
+//! A store, a keyring and a device id — one device, for the merge
 //! and source tests. Test-only.
 
 use std::sync::Arc;
 
 use super::{RemoteVersion, StoreSource};
-use crate::{Detector, Keyring, Store};
+use crate::{Keyring, Store};
 
 pub(super) struct Fixture {
     pub store: Store,
     pub keyring: Arc<Keyring>,
-    pub detector: Arc<Detector>,
     pub here: String,
 }
 
@@ -27,7 +26,6 @@ pub(super) fn fixture_named(name: &str) -> Fixture {
     Fixture {
         store,
         keyring: Arc::new(keyring),
-        detector: Arc::new(Detector::new().expect("detector")),
         here,
     }
 }
@@ -41,7 +39,6 @@ impl Fixture {
         StoreSource::new(
             self.store.clone(),
             Arc::clone(&self.keyring),
-            Arc::clone(&self.detector),
             self.here.clone(),
             "test-device".to_string(),
             copypaste_ipc::ConfigData::default(),

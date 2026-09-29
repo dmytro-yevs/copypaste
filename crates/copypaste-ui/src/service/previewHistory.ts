@@ -21,7 +21,7 @@ const LONG_READER_PREVIEW = LONG_READER_BODY.slice(0, 180);
 
 function item(
     id: string,
-    content: string | null,
+    content: string,
     contentClass: Item["content_class"],
     overrides: Partial<Item> = {},
 ): Item {
@@ -32,8 +32,6 @@ function item(
         content_class: contentClass,
         created_at: Date.now() - 30_000,
         pinned: false,
-        is_sensitive: false,
-        sensitive_finding: null,
         origin_device_id: "preview-device",
         origin_device_name: "Preview device",
         source_app_bundle_id: null,
@@ -52,7 +50,7 @@ function items(): Item[] {
             source_app_bundle_id: "com.example.editor",
             source_app_name: "Example Editor",
         }),
-        item("preview-image", null, "image"),
+        item("preview-image", "", "image"),
         item("preview-file", "[file]", "file", { content_type: "file" }),
         item(
             "preview-unknown",

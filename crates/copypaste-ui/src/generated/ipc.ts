@@ -4,11 +4,11 @@ export type ConfigApplied = { config: ConfigData, restart_required: Array<string
 
 export type CloudStatusData = { configured: boolean, signed_in: boolean, key_ready: boolean, email: string | null, last_sync_ms: number | null, last_error: string | null, poll_interval_secs: number, unreadable_uploads: number, };
 
-export type CloudSyncData = { uploaded: number, tombstoned: number, downloaded: number, applied: number, skipped_sensitive: number, skipped_undecryptable: number, skipped_forged: number, skipped_future: number, skipped_too_large: number, };
+export type CloudSyncData = { uploaded: number, tombstoned: number, downloaded: number, applied: number, skipped_undecryptable: number, skipped_forged: number, skipped_future: number, skipped_too_large: number, };
 
-export type ConfigData = { private_mode: boolean, poll_interval_ms: number, history_limit: number, storage_quota_bytes: number, retention_days: number, dedup_window_secs: number, max_text_size_bytes: number, max_image_size_bytes: number, max_file_size_bytes: number, max_decoded_image_mb: number, sensitive_ttl_secs: number, excluded_app_bundle_ids: Array<string>, lan_visibility: boolean, sync_enabled: boolean, notify_on_copy: boolean, sound_on_copy: boolean, };
+export type ConfigData = { private_mode: boolean, poll_interval_ms: number, history_limit: number, storage_quota_bytes: number, retention_days: number, dedup_window_secs: number, max_text_size_bytes: number, max_image_size_bytes: number, max_file_size_bytes: number, max_decoded_image_mb: number, excluded_app_bundle_ids: Array<string>, lan_visibility: boolean, sync_enabled: boolean, notify_on_copy: boolean, sound_on_copy: boolean, };
 
-export type ConfigPatch = { private_mode?: boolean | null, poll_interval_ms?: number | null, history_limit?: number | null, storage_quota_bytes?: number | null, retention_days?: number | null, dedup_window_secs?: number | null, max_text_size_bytes?: number | null, max_image_size_bytes?: number | null, max_file_size_bytes?: number | null, max_decoded_image_mb?: number | null, sensitive_ttl_secs?: number | null, excluded_app_bundle_ids?: Array<string> | null, lan_visibility?: boolean | null, sync_enabled?: boolean | null, notify_on_copy?: boolean | null, sound_on_copy?: boolean | null, };
+export type ConfigPatch = { private_mode?: boolean | null, poll_interval_ms?: number | null, history_limit?: number | null, storage_quota_bytes?: number | null, retention_days?: number | null, dedup_window_secs?: number | null, max_text_size_bytes?: number | null, max_image_size_bytes?: number | null, max_file_size_bytes?: number | null, max_decoded_image_mb?: number | null, excluded_app_bundle_ids?: Array<string> | null, lan_visibility?: boolean | null, sync_enabled?: boolean | null, notify_on_copy?: boolean | null, sound_on_copy?: boolean | null, };
 
 export type ContentClass = "text" | "image" | "file" | "other";
 
@@ -34,19 +34,19 @@ export type QuickPastePreviewSide = "left" | "right" | "hidden";
 
 export type QuickPastePreviewLayout = { side: QuickPastePreviewSide, width: number, };
 
-export type CapturedPayload = { id: string, source: CaptureSource, isSensitive: boolean, };
+export type CapturedPayload = { id: string, source: CaptureSource, };
 
 export type PermissionHost = "macos" | "windows" | "android" | "linux";
 
-export type OnboardingPermissionId = "notifications" | "tile";
+export type OnboardingPermissionId = "notifications" | "tile" | "background_activity";
 
 export type OnboardingPermissionStatus = "prompt" | "granted" | "denied" | "not_required" | "unavailable";
 
 export type OnboardingPermissionItem = { id: OnboardingPermissionId, status: OnboardingPermissionStatus, required: boolean, };
 
-export type OnboardingPermissions = { platform: PermissionHost, notifications: OnboardingPermissionItem, tile: OnboardingPermissionItem, clipboardStatus: OnboardingPermissionStatus, };
+export type OnboardingPermissions = { platform: PermissionHost, notifications: OnboardingPermissionItem, tile: OnboardingPermissionItem, backgroundActivity: OnboardingPermissionItem, clipboardStatus: OnboardingPermissionStatus, };
 
-export type DiagnosticCounters = { rejected_too_large: number, lost_intermediates: number, sensitive_swept: number, index_purged: number, uptime_secs: number, };
+export type DiagnosticCounters = { rejected_too_large: number, lost_intermediates: number, uptime_secs: number, };
 
 export type RuntimeLogProcess = "app" | "daemon";
 
@@ -88,11 +88,11 @@ export type EventKind = "items" | "peers";
 
 export type TauriEventName = "copypaste://changed" | "copypaste://push-state" | "copypaste://captured" | "copypaste://capture-state" | "private-mode-changed" | "autostart-changed" | "open-settings";
 
-export type ChangePayload = { topic: EventKind, item_count: number, swept: number, };
+export type ChangePayload = { topic: EventKind, item_count: number, };
 
 export type PushStatePayload = { live: boolean, };
 
-export type ExportReport = { exported: number, skipped_sensitive: number, skipped_non_text: number, skipped_undecryptable: number, };
+export type ExportReport = { exported: number, skipped_non_text: number, skipped_undecryptable: number, };
 
 export type ImportData = { inserted: number, skipped: number, skipped_duplicate: number, skipped_empty: number, skipped_too_large: number, pins_failed: number, };
 
@@ -104,11 +104,7 @@ export type SourceAppIcon = { png_base64: string, width: number, height: number,
 
 export type InstalledSourceApp = { package_id: string, label: string, };
 
-export type SensitiveSpan = { start: number, end: number, };
-
-export type SensitiveFinding = { label: string, spans: Array<SensitiveSpan>, spans_truncated: boolean, redacted_preview: string, };
-
-export type Item = { id: string, content: string | null, content_type: string, content_class: ContentClass, created_at: number, pinned: boolean, is_sensitive: boolean, sensitive_finding: SensitiveFinding | null, origin_device_id: string, origin_device_name: string | null, source_app_bundle_id: string | null, source_app_name: string | null, too_large_to_sync: boolean, truncated: boolean, };
+export type Item = { id: string, content: string, content_type: string, content_class: ContentClass, created_at: number, pinned: boolean, origin_device_id: string, origin_device_name: string | null, source_app_bundle_id: string | null, source_app_name: string | null, too_large_to_sync: boolean, truncated: boolean, };
 
 export type ItemPage = { items: Array<Item>, total: number, skipped_undecryptable: number, next_cursor: string | null, };
 

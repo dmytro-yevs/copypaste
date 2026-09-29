@@ -51,37 +51,6 @@ rather than minted over, and a database sitting next to a missing secret means
 we looked in the wrong place — either way, replacing the secret would orphan the
 history.
 
-## Sensitive content
-
-A detector flags clipboard content that looks like a credential — the ruleset in
-`crates/copypaste-core/src/sensitive/rules.rs`, taken from gitleaks where an
-equivalent exists, with NFKC normalisation, Luhn validation for card numbers, and
-entropy and allowlist gates against false positives.
-
-What follows from a match:
-
-- **It is never written to the search index.** A write guard drops the index
-  text whatever the caller passed, the flag is re-read inside the writing
-  transaction, and `is_sensitive = 0` is joined into the search SQL itself. The
-  sync-apply path is a fourth writer and enforces the same rule.
-- **A rule added later still reaches rows captured before it.**
-  `sensitive::purge_indexed_secrets` runs at daemon start and drops from the
-  index anything the *current* ruleset calls sensitive. Index only: it never
-  deletes a row and never writes `is_sensitive`, because that flag is what
-  authorises the wipe below, and a re-derived one would be a deletion nobody
-  reviewed.
-- **It never leaves the device.** Peer sync does not list it and cloud sync
-  refuses to upload it.
-- **Automatic deletion is on** — `sensitive_ttl_secs` defaults to `30`.
-  Flagged items are hard-deleted once the TTL elapses, but only if they were
-  flagged at capture *and* plaintext still scans above the 0.85 auto-wipe
-  floor when the sweep reads them. Settings can set the TTL to `0` to disable.
-
-Detection is best-effort. One adversarial pass over the ruleset found two whole
-classes it did not see — quoted values, and `aws_secret_access_key` — and both
-are closed; assume a third exists. Do not rely on this as the only control over
-what reaches your clipboard history.
-
 ## Local IPC
 
 The daemon listens on a Unix domain socket at mode `0600`, owned by the running
@@ -128,9 +97,9 @@ share.
 
 **Wired into the daemon and the CLI, and never once spoken to a real Supabase
 project.** `scripts/demo-cloud.sh` drives two real daemons against a local stub
-(`scripts/cloud-stub.py`) imitating GoTrue and PostgREST, asserting convergence,
-that a sensitive item never leaves its device, and that only ciphertext reaches
-the backend. It cannot tell you a real deployment accepts any of it.
+(`scripts/cloud-stub.py`) imitating GoTrue and PostgREST, asserting convergence
+and that only ciphertext reaches the backend. It cannot tell you a real
+deployment accepts any of it.
 
 Rows are sealed client-side under an Argon2id key derived from a passphrase that
 never leaves the device, so the server holds ciphertext and metadata only.
@@ -158,10 +127,6 @@ environment or stdin and has no flag for either, because process arguments are
 readable by every process running as the same user. The passphrase is zeroized
 once the key is derived; the request frame it arrived in is not, so it is "not
 persisted" rather than "not in memory".
-
-What leaves the device is gated twice — the outbound query never lists a
-sensitive row, and the driver re-checks each item against the same detector
-before sealing it.
 
 The backend sees an account email, device ids, content types, payload sizes and
 timestamps. Content stays end-to-end encrypted.
@@ -248,5 +213,5 @@ With `gitleaks` on `PATH`, the same checks run locally:
 synthetic fixtures by rule id and literal, never by path — a path entry makes
 gitleaks skip the whole file, which would stop it scanning a fixture's
 neighbours. `.gitleaksignore` pins reviewed pre-v2 history findings by commit.
-The scan is not the in-product clipboard detector: `config/gitleaks/` is that
-detector's vendored rule source and must not be pointed at CI.
+This repository scan is separate from the application and has no runtime effect
+on captured clipboard items.

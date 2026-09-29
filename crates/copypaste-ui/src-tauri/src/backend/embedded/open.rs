@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use copypaste_ipc::{EventData, EventKind};
-use tokio::sync::{watch, Notify, OnceCell};
+use tokio::sync::OnceCell;
 
 use super::cloud::EmbeddedCloud;
 use super::peers::PeerNode;
@@ -26,8 +26,6 @@ pub(super) struct Inner {
     /// one — see `Clipboard`.
     pub(super) clipboard: Box<dyn Clipboard>,
     pub(super) events: tokio::sync::broadcast::Sender<copypaste_ipc::EventData>,
-    pub(super) retention_wake: Arc<Notify>,
-    pub(super) retention_shutdown: watch::Sender<()>,
     pub(super) cloud: EmbeddedCloud,
 }
 
@@ -36,19 +34,17 @@ impl Inner {
         self.state.settings.snapshot().config
     }
 
-    pub(super) fn items_event(&self, captured: bool, swept: u32) -> EventData {
+    pub(super) fn items_event(&self, captured: bool) -> EventData {
         EventData {
             event: EventKind::Items,
             item_count: self.state.store.count().unwrap_or(0),
             captured,
-            swept,
         }
     }
 
-    pub(super) fn publish_items(&self, captured: bool, swept: u32) {
-        self.retention_wake.notify_one();
+    pub(super) fn publish_items(&self, captured: bool) {
         if self.events.receiver_count() > 0 {
-            let _ = self.events.send(self.items_event(captured, swept));
+            let _ = self.events.send(self.items_event(captured));
         }
     }
 
@@ -58,13 +54,8 @@ impl Inner {
                 event: EventKind::Peers,
                 item_count: self.state.store.count().unwrap_or(0),
                 captured: false,
-                swept: 0,
             });
         }
-    }
-
-    pub(super) fn wake_retention(&self) {
-        self.retention_wake.notify_one();
     }
 
     pub(super) fn note_version_written(&self, created_at: i64) {
@@ -133,19 +124,14 @@ impl EmbeddedBackend {
         clipboard: Box<dyn Clipboard>,
         events: tokio::sync::broadcast::Sender<copypaste_ipc::EventData>,
     ) -> Result<Self> {
-        let (retention_shutdown, _) = watch::channel(());
         let cloud = EmbeddedCloud::open(&state)?;
         let inner = Arc::new(Inner {
             state,
             node: OnceCell::new(),
             clipboard,
             events,
-            retention_wake: Arc::new(Notify::new()),
-            retention_shutdown,
             cloud,
         });
-        super::retention::sweep(&inner);
-        super::retention::start(&inner);
         super::device_name::start(&inner);
         let backend = Self { inner };
         backend.inner.cloud.ensure_poller(&backend.inner);

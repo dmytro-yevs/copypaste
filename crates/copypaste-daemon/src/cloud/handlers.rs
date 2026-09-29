@@ -261,7 +261,7 @@ mod tests {
     use copypaste_cloud::crypto::encrypt_row;
     use copypaste_cloud::rest::CloudItem;
     use copypaste_cloud::sync::{
-        AuthApi, AuthFault, CloudSource, CloudSync, RestApi, SensitiveGuard, TransportFault,
+        AuthApi, AuthFault, CloudSource, CloudSync, RestApi, TransportFault,
     };
     use copypaste_cloud::{CloudConfig, SyncKey};
 
@@ -337,7 +337,6 @@ mod tests {
                 user_id: "new-account".into(),
                 expires_at_ms: i64::MAX,
             },
-            SensitiveGuard::new(|_| false),
         )
     }
 

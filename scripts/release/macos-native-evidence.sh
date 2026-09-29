@@ -356,7 +356,7 @@ PY
         find-unique-exact-description-role)
           if [[ "$2" == "Library" && "$3" == "AXButton" ]]; then
             library_queries=$((library_queries + 1))
-            if [[ "$mode" == already-past || ( "$mode" == delayed && "$library_queries" -gt 1 ) ]]; then
+            if [[ "$mode" == already-past || ( "$mode" == sequential && "$presses" -eq 3 ) || ( "$mode" == delayed && "$library_queries" -gt 1 ) ]]; then
               recovery_trace="${recovery_trace:+$recovery_trace }library-success"
               printf 'AXButton\tLibrary\n'
               return 0
@@ -367,17 +367,24 @@ PY
           return 1
           ;;
         find-safe-role)
-          if [[ "$2" == "Explore first" && "$3" == "AXButton" && "$mode" == delayed ]]; then
+          if [[ "$mode" == sequential ]]; then
+            local labels=("Get started" "Continue" "Open Library")
+            if [[ "$2" == "${labels[$presses]}" && "$3" == "AXButton" ]]; then
+              printf 'AXButton\t%s\n' "$2"
+              return 0
+            fi
+          fi
+          if [[ "$2" == "Get started" && "$3" == "AXButton" && "$mode" == delayed ]]; then
             explore_queries=$((explore_queries + 1))
             recovery_trace="${recovery_trace:+$recovery_trace }explore-find"
-            printf 'AXButton\tExplore first\n'
+            printf 'AXButton\tGet started\n'
             return 0
           fi
           echo "no accessible element named $2" >&2
           return 1
           ;;
         press-exact)
-          [[ "$2" == "Explore first" && "$mode" == delayed ]] || return 1
+          [[ ( "$2" == "Get started" && "$mode" == delayed ) || "$mode" == sequential ]] || return 1
           presses=$((presses + 1))
           recovery_trace="${recovery_trace:+$recovery_trace }explore-press"
           return 0
@@ -387,8 +394,16 @@ PY
     }
     mac_recover_onboarding "$out/recovery-delayed.tsv" 2 mac_recovery_fixture_pace mac_recovery_fixture_clock \
       && [[ "$recovery_trace" == "library-miss explore-find explore-press pace-tick library-success" && "$presses" == 1 && "$library_queries" == 2 && "$explore_queries" == 1 && "$paced_seconds" == 1 ]] \
-      && ok "delayed onboarding presses Explore first once before Library appears" \
-      || bad "delayed onboarding presses Explore first once before Library appears"
+      && ok "delayed onboarding presses Get started once before Library appears" \
+      || bad "delayed onboarding presses Get started once before Library appears"
+    mode=sequential
+    paced_seconds=0
+    presses=0
+    library_queries=0
+    mac_recover_onboarding "$out/recovery-sequential.tsv" 4 mac_recovery_fixture_pace mac_recovery_fixture_clock \
+      && [[ "$presses" -eq 3 ]] \
+      && ok "onboarding reaches Library through Welcome, Permissions and Sync" \
+      || bad "onboarding reaches Library through Welcome, Permissions and Sync"
     mode=already-past
     paced_seconds=0
     library_queries=0
@@ -803,7 +818,7 @@ PY
   mac_recover_onboarding() {
     [[ "$1" == "$out/onboarding.tsv" ]] || return 1
     onboarding_recoveries=$((onboarding_recoveries + 1))
-    printf 'AXButton\tExplore first\n' > "$1"
+    printf 'AXButton\tGet started\n' > "$1"
   }
   route_profile_self_test() {
     local saved_profile="$SMOKE_PROFILE"

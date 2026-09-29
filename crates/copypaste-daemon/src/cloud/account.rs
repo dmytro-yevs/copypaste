@@ -10,7 +10,7 @@ use copypaste_cloud::sync::{CloudSync, SyncError};
 use copypaste_cloud::{CloudConfig, SyncKey};
 use tokio_util::sync::CancellationToken;
 
-use super::{sensitive_guard, Cloud, Driver};
+use super::{Cloud, Driver};
 use crate::AppState;
 
 pub(crate) const MSG_ACCOUNT_CHANGED: &str = "the sync account changed during this operation";
@@ -106,7 +106,6 @@ impl Cloud {
             key,
             config,
             session,
-            sensitive_guard(state),
         ));
 
         if let Some(previous) = account.as_ref() {
@@ -214,7 +213,6 @@ impl Cloud {
             key,
             config,
             session,
-            sensitive_guard(state),
         ));
         if state
             .store

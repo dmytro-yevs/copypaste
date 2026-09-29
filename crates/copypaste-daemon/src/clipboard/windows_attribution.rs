@@ -1,7 +1,6 @@
 //! What Windows attribution decides, apart from the syscalls that answer it.
 //!
-//! The same split as [`super::windows_optout`], for the same reason: what only
-//! one platform can run is what regresses unnoticed. Every rule here — which
+//! What only one platform can run is what regresses unnoticed. Every rule here — which
 //! change an identity belongs to, what a user's exclusion entry means, and what
 //! an unattributable change costs — is exercised by `cargo test` on any host.
 
@@ -11,12 +10,11 @@ use typed_path::Utf8WindowsPath;
 /// The process that wrote the clipboard, as an item carries it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SourceApp {
-    /// The process image file name, lowercased: `1password.exe`.
+    /// The process image file name, lowercased.
     ///
     /// Windows has no bundle identifier. The file name is the only stable
-    /// identity a process reliably has, and lowercasing it is what makes it
-    /// comparable — `copypaste_core::sensitive::is_password_manager_app`
-    /// lowercases before matching, and [`is_excluded`] compares canonical keys.
+    /// identity a process reliably has, and lowercasing it makes
+    /// [`is_excluded`] compare canonical keys.
     pub(crate) id: String,
     /// The same name without its extension, for display.
     pub(crate) name: String,
@@ -70,10 +68,8 @@ impl Attribution {
     /// Manifest 01 §3.9(c) bounds how stale an identity may be by a TTL just
     /// above one poll period; on Windows the bound can be zero, because
     /// `GetClipboardSequenceNumber` names the change the identity belongs to.
-    /// A 750 ms TTL spans more than one 500 ms tick, so an ordinary copy
-    /// followed by a password manager's copy inherited the first app — past
-    /// both the exclusion list and the credential-store sensitivity floor
-    /// (DMY-158, the shape of CopyPaste-8ebg.57).
+    /// A 750 ms TTL spans more than one 500 ms tick, so an ordinary copy can
+    /// inherit the wrong source application and bypass an explicit exclusion.
     pub(crate) fn for_change(
         &mut self,
         change: i64,
@@ -188,10 +184,7 @@ mod tests {
         SourceApp::from_image_path(id).expect("a file name is an image path")
     }
 
-    /// DMY-158. The poll interval is 500 ms and the cache was 750 ms, so this is
-    /// two ordinary copies a third of a second apart: the second inherited the
-    /// first app, and a password manager's copy reached ingest as ordinary text
-    /// from Notepad — sensitive floor not applied, exclusion list not consulted.
+    /// Two copies a third of a second apart must keep their distinct writers.
     #[test]
     fn a_second_change_is_attributed_to_its_own_writer_not_the_previous_one() {
         let mut attribution = Attribution::default();
@@ -205,10 +198,6 @@ mod tests {
         assert_eq!(ordinary.expect("resolved").id, "notepad.exe");
         let credential = credential.expect("resolved");
         assert_eq!(credential.id, "1password.exe");
-        assert!(
-            copypaste_core::sensitive::is_password_manager_app(&credential.id),
-            "the credential store must reach ingest as itself, or its copy is indexed"
-        );
         assert_eq!(attribution.resolutions(), 2);
     }
 

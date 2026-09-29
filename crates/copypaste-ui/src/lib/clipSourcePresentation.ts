@@ -16,7 +16,6 @@ export type ClipPresentationIcon =
   | "mail"
   | "messages"
   | "palette"
-  | "sensitive"
   | "terminal"
   | "text"
   | "unknown";

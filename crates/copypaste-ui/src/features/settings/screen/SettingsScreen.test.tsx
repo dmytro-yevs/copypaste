@@ -342,11 +342,12 @@ it("connects settings tabs to their panels and supports roving keyboard navigati
   const appearance = screen.getByRole("tab", { name: "Appearance" });
   const panel = screen.getByRole("tabpanel");
   expect(tablist.contains(appearance)).toBe(true);
+  expect(tablist.getAttribute("aria-orientation")).toBe("vertical");
   expect(panel.getAttribute("aria-labelledby")).toBe(appearance.id);
   expect(appearance.getAttribute("aria-controls")).toBe(panel.id);
 
   appearance.focus();
-  fireEvent.keyDown(appearance, { key: "ArrowRight" });
+  fireEvent.keyDown(appearance, { key: "ArrowDown" });
   const clipboard = screen.getByRole("tab", { name: "Clipboard behavior" });
   await waitFor(() => {
     expect(document.activeElement).toBe(clipboard);
@@ -366,13 +367,13 @@ it("connects settings tabs to their panels and supports roving keyboard navigati
     expect(appearance.getAttribute("aria-selected")).toBe("true");
   });
 
-  fireEvent.keyDown(appearance, { key: "ArrowLeft" });
+  fireEvent.keyDown(appearance, { key: "ArrowUp" });
   await waitFor(() => {
     expect(document.activeElement).toBe(about);
     expect(about.getAttribute("aria-selected")).toBe("true");
   });
 
-  fireEvent.keyDown(about, { key: "ArrowRight" });
+  fireEvent.keyDown(about, { key: "ArrowDown" });
   await waitFor(() => {
     expect(document.activeElement).toBe(appearance);
     expect(appearance.getAttribute("aria-selected")).toBe("true");

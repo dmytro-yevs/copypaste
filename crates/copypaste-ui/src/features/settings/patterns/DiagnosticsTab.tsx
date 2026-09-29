@@ -8,7 +8,7 @@ import { settingDefinition } from "@/features/settings/model/settingsSchemaCatal
 import { settingsGroups } from "@/features/settings/model/settingsProjection";
 import type { SettingsField } from "@/features/settings/model/settingsFieldSchema";
 import { RuntimeEventsTab } from "@/features/settings/patterns/RuntimeEventsTab";
-import { useDiagnostics, useSweepNotices } from "@/hooks/useDiagnostics";
+import { useDiagnostics } from "@/hooks/useDiagnostics";
 import { useTranslation } from "@/i18n";
 import { isUnavailable } from "@/lib/errors";
 import { shortAge } from "@/lib/format";
@@ -32,7 +32,6 @@ export function DiagnosticsTab({ view = "overview", onOpenEvents, onBack }: { vi
 function DiagnosticsOverview() {
   const { t } = useTranslation();
   const query = useDiagnostics();
-  useSweepNotices();
   const data = query.data;
   if (data === undefined) {
     if (query.error === null) return <StateView mode="loading" placement="panel" title={t("settings.diagnostics.loading")} />;
@@ -43,7 +42,7 @@ function DiagnosticsOverview() {
     { kind: "status", definition: settingDefinition("diagnostics", "settings.diagnostics.running.history.title"), mode: data.history_read.state === "readable" ? "success" : "error", value: data.history_read.state === "readable" ? t("settings.diagnostics.running.history.readable") : t("settings.diagnostics.running.history.failed", { code: data.history_read.code }) },
     { kind: "readonly", definition: settingDefinition("diagnostics", "settings.diagnostics.running.started.title"), value: <span className={styles.metric}>{counters === undefined ? t("settings.diagnostics.running.started.unknown") : shortAge(Date.now() - counters.uptime_secs * 1000)}</span> },
     ...(data.status === null ? [{ kind: "status" as const, definition: settingDefinition("diagnostics", "settings.diagnostics.dropped.tooLarge.title"), mode: "offline" as const, value: t("errors.offline") }] : ([
-      ["tooLarge", counters?.rejected_too_large], ["missed", counters?.lost_intermediates], ["swept", counters?.sensitive_swept], ["purged", counters?.index_purged],
+      ["tooLarge", counters?.rejected_too_large], ["missed", counters?.lost_intermediates],
     ] as const).map(([name, count]) => ({ kind: "readonly" as const, definition: settingDefinition("diagnostics", `settings.diagnostics.dropped.${name}.title`), value: <span className={(count ?? 0) > 0 ? styles.warningCount : styles.count}>{(count ?? 0).toLocaleString()}</span> }))),
   ];
   return <div className={styles.overview}>

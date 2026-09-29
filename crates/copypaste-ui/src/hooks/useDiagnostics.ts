@@ -1,13 +1,9 @@
-import { useEffect } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "@/lib/notify";
 
 import { t } from "@/i18n";
 import { toFriendly } from "@/lib/errors";
 import { copyText } from "@/lib/ipc";
-import { subscribeNativeEvent } from "@/lib/tauriEventRegistry";
-import { EVENT_CHANGED } from "@/hooks/usePush";
-import type { ChangePayload } from "@/generated/ipc";
 import {
   exportSupportBundle,
   getDiagnostics,
@@ -50,26 +46,4 @@ export function useExportSupportBundle() {
     },
     onError: (raw) => toast.error(toFriendly(raw)),
   });
-}
-
-/**
- * The sweep is the only history change the user did not ask for: without a
- * notice they find an item missing and have nothing to attribute it to. A
- * count, never the rows — the event carries no content.
- *
- * The panel keeps a running total whether or not this window was open, because
- * a notice nobody saw is not a record.
- */
-export function useSweepNotices() {
-  const qc = useQueryClient();
-
-  useEffect(() => {
-    return subscribeNativeEvent<ChangePayload>(EVENT_CHANGED, (event) => {
-      const swept = event.payload.swept;
-      if (swept > 0) {
-        toast.warning(t("settings.diagnostics.swept", { count: swept }));
-        void qc.invalidateQueries({ queryKey: DIAGNOSTICS_KEY });
-      }
-    });
-  }, [qc]);
 }

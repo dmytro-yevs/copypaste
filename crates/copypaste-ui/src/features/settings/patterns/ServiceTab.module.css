@@ -15,11 +15,3 @@
 }
 
 .exclusionsFeedback { padding: 0 var(--s-3) var(--s-3); }
-
-.sensitiveWarning {
-  font-size: var(--fs-xs);
-}
-
-.sensitiveWarning {
-  color: var(--warn-strong);
-}

@@ -47,7 +47,6 @@ interface CliResult {
 interface CliItem {
   id: string;
   content: string;
-  is_sensitive: boolean;
   pinned: boolean;
 }
 
