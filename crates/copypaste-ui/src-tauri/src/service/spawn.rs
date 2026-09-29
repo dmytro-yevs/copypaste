@@ -2,12 +2,17 @@
 //!
 //! Separate from the supervisor because the supervisor's concern is *when* to
 //! start and stop the service, and this module's is what a started child is on
-//! each platform. Only Windows needs anything beyond `Command::spawn`.
+//! each platform. Windows has a job object; macOS has a private liveness pipe.
 
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
-#[cfg(windows)]
+#[cfg(target_os = "macos")]
+use std::os::fd::OwnedFd;
+#[cfg(target_os = "macos")]
+use std::os::unix::net::UnixStream;
+
+#[cfg(any(target_os = "macos", windows))]
 use super::child::{ChildExitCode, ChildState};
 use super::startup_diagnostics;
 #[cfg(windows)]
@@ -20,9 +25,14 @@ pub(super) fn spawn_process(binary: &Path) -> Result<Box<dyn ChildProcess>> {
     command
         .arg("--foreground")
         // A child holding the app's descriptors keeps them open past a crash.
-        .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    #[cfg(target_os = "macos")]
+    let liveness = MacParentLiveness::new()?;
+    #[cfg(target_os = "macos")]
+    command.arg("--app-parent").stdin(liveness.daemon_stdin);
+    #[cfg(not(target_os = "macos"))]
+    command.stdin(Stdio::null());
     platform(&mut command);
 
     let child = command.spawn().map_err(|error| {
@@ -31,6 +41,9 @@ pub(super) fn spawn_process(binary: &Path) -> Result<Box<dyn ChildProcess>> {
         BackendError::Internal(MSG_START_FAILED.into())
     })?;
     startup_diagnostics::child_started(binary, child.id());
+    #[cfg(target_os = "macos")]
+    return adopt(child, liveness.app_end);
+    #[cfg(not(target_os = "macos"))]
     adopt(child)
 }
 
@@ -47,9 +60,67 @@ fn platform(command: &mut Command) {
     command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(target_os = "macos")))]
 fn adopt(child: Child) -> Result<Box<dyn ChildProcess>> {
     Ok(Box::new(child))
+}
+
+/// The parent retains one end of a socketpair while the daemon reads its
+/// standard input. Killing the parent closes that end in the kernel, which is
+/// observable by the daemon even when neither the supervisor nor `Drop` runs.
+///
+/// This is deliberately macOS-only: Windows already has the stronger job
+/// object binding below, Android has no external daemon, and a CLI-launched
+/// daemon must retain its ordinary standard input and independent lifetime.
+#[cfg(target_os = "macos")]
+struct MacParentLiveness {
+    app_end: UnixStream,
+    daemon_stdin: Stdio,
+}
+
+#[cfg(target_os = "macos")]
+impl MacParentLiveness {
+    fn new() -> Result<Self> {
+        let (app_end, daemon_end) = UnixStream::pair().map_err(|error| {
+            tracing::warn!(%error, "could not create the daemon parent-liveness pipe");
+            BackendError::Internal(MSG_START_FAILED.into())
+        })?;
+        let daemon_fd: OwnedFd = daemon_end.into();
+        Ok(Self {
+            app_end,
+            daemon_stdin: Stdio::from(std::fs::File::from(daemon_fd)),
+        })
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn adopt(child: Child, app_end: UnixStream) -> Result<Box<dyn ChildProcess>> {
+    Ok(Box::new(MacParentBoundChild {
+        child,
+        _app_end: app_end,
+    }))
+}
+
+/// Retaining the app end is the lifetime contract. The child gets EOF when
+/// this process exits normally, crashes, or is killed with SIGKILL.
+#[cfg(target_os = "macos")]
+struct MacParentBoundChild {
+    child: Child,
+    _app_end: UnixStream,
+}
+
+#[cfg(target_os = "macos")]
+impl ChildProcess for MacParentBoundChild {
+    fn state(&mut self) -> std::io::Result<ChildState> {
+        self.child.try_wait().map(|status| match status {
+            Some(status) => ChildState::Exited(ChildExitCode::from_status(status)),
+            None => ChildState::Running,
+        })
+    }
+
+    fn reap(&mut self) -> std::io::Result<ChildExitCode> {
+        self.child.wait().map(ChildExitCode::from_status)
+    }
 }
 
 /// Bind the child to a job object that dies with this process, or refuse to
@@ -204,6 +275,56 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .expect("ping.exe")
+    }
+
+    /// The macOS binding is a kernel-owned descriptor, so it survives the
+    /// paths where the app cannot run Rust cleanup (a crash or SIGKILL). This
+    /// uses an isolated helper rather than the real daemon: the helper blocks
+    /// on the exact stdin endpoint the daemon receives, and succeeds only
+    /// after the app end is closed.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn closing_the_app_liveness_endpoint_ends_the_child() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = tempfile::tempdir().expect("tempdir");
+        let helper = directory.path().join("daemon-liveness-helper");
+        std::fs::write(&helper, "#!/bin/sh\ncat >/dev/null\n").expect("helper");
+        let mut permissions = std::fs::metadata(&helper)
+            .expect("helper metadata")
+            .permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&helper, permissions).expect("make helper executable");
+
+        let liveness = MacParentLiveness::new().expect("liveness pipe");
+        let mut child = Command::new(&helper)
+            .stdin(liveness.daemon_stdin)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("start helper");
+
+        drop(liveness.app_end);
+        assert!(
+            child.wait().expect("reap helper").success(),
+            "the daemon-side stdin did not receive EOF when its app endpoint closed"
+        );
+    }
+
+    /// External native evidence launches only this test, then kills its test
+    /// process with SIGKILL. The process intentionally never returns while it
+    /// owns the daemon endpoint. Its helper receives the production arguments
+    /// and writes only paths supplied by the evidence runner, never user data.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_sigkill_parent_harness() {
+        let Ok(helper) = std::env::var("COPYPASTE_LIVENESS_HARNESS_HELPER") else {
+            return;
+        };
+        let _child = spawn_process(Path::new(&helper)).expect("start liveness helper");
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+        }
     }
 
     /// A real child through the production binding, not a job the test built
