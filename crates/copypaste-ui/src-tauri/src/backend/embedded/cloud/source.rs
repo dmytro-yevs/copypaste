@@ -33,7 +33,6 @@ impl StoreSource {
         let shared = copypaste_core::StoreSource::new(
             inner.state.store.clone(),
             Arc::clone(&inner.state.keyring),
-            Arc::clone(&inner.state.detector),
             inner.state.device_id.clone(),
             inner.state.device_name(),
             inner.settings(),
@@ -253,7 +252,7 @@ mod tests {
     use crate::backend::Backend;
     use copypaste_cloud::auth::{Session, SupabaseAuth};
     use copypaste_cloud::rest::SupabaseRest;
-    use copypaste_cloud::sync::{CloudSource, CloudSync, SensitiveGuard};
+    use copypaste_cloud::sync::{CloudSource, CloudSync};
     use copypaste_cloud::{CloudConfig, SyncKey};
     use copypaste_ipc::ExportItem;
     use copypaste_p2p::protocol::{content_hash, SyncItem};
@@ -273,7 +272,6 @@ mod tests {
                 user_id: "user-1".into(),
                 expires_at_ms: 123_000,
             },
-            SensitiveGuard::new(|_| false),
         ))
     }
 
@@ -365,7 +363,6 @@ mod tests {
                 content_type: copypaste_ipc::content_type::TEXT.into(),
                 created_at: 1_000,
                 pinned: false,
-                is_sensitive: false,
             }])
             .await
             .unwrap();

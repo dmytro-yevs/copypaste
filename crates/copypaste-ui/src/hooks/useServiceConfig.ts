@@ -150,9 +150,6 @@ function summarise(parts: readonly (string | null)[]): string {
 function exportSummary(report: ExportReport): string {
   return summarise([
     t("settings.transfer.export.done", { count: report.exported }),
-    report.skipped_sensitive > 0
-      ? t("settings.transfer.export.withheld", { count: report.skipped_sensitive })
-      : null,
     report.skipped_non_text > 0
       ? t("settings.transfer.export.nonText", { count: report.skipped_non_text })
       : null,
@@ -168,12 +165,12 @@ function exportSummary(report: ExportReport): string {
  *  no toast. A withheld count raises the toast to a warning rather than adding
  *  a line to a success: it must not read as "done". */
 export function useExportHistory() {
-  return useMutation<ExportReport | null, unknown, boolean>({
-    mutationFn: (includeSensitive) => exportHistory(includeSensitive),
+  return useMutation<ExportReport | null, unknown, void>({
+    mutationFn: () => exportHistory(),
     onSuccess: (report) => {
       if (report === null) return;
       const message = exportSummary(report);
-      if (report.skipped_sensitive > 0 || report.skipped_undecryptable > 0) {
+      if (report.skipped_undecryptable > 0) {
         toast.warning(message);
       } else {
         toast.success(message);

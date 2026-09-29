@@ -51,14 +51,6 @@ impl Drop for PushMonitor {
 pub struct ChangePayload {
     pub topic: EventKind,
     pub item_count: u64,
-    /// Detected secrets the auto-wipe sweep deleted in this change; zero on
-    /// every other one.
-    ///
-    /// Forwarded rather than dropped because it is the only history change the
-    /// user did not ask for, and a deletion nobody is told about is AGENTS.md
-    /// rule 4's worst outcome arriving quietly. A count, never ids: the rows
-    /// are gone and the event carries no content either way.
-    pub swept: u32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -145,7 +137,6 @@ fn emit_change<R: Runtime>(app: &AppHandle<R>, event: EventData) {
         ChangePayload {
             topic: event.event,
             item_count: event.item_count,
-            swept: event.swept,
         },
     );
     // Not forwarded to the WebView: the notification is posted natively, and a
@@ -174,23 +165,9 @@ mod tests {
         let json = serde_json::to_string(&ChangePayload {
             topic: EventKind::Items,
             item_count: 12,
-            swept: 0,
         })
         .unwrap();
-        assert_eq!(json, r#"{"topic":"items","item_count":12,"swept":0}"#);
-    }
-
-    /// The count is on the frame the frontend already listens to, so a sweep
-    /// announces itself without a second subscription to keep alive.
-    #[test]
-    fn a_sweep_reaches_the_payload_with_its_count() {
-        let payload = ChangePayload {
-            topic: EventKind::Items,
-            item_count: 3,
-            swept: 2,
-        };
-        let json = serde_json::to_string(&payload).unwrap();
-        assert!(json.contains(r#""swept":2"#), "{json}");
+        assert_eq!(json, r#"{"topic":"items","item_count":12}"#);
     }
 
     #[tokio::test]

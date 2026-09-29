@@ -54,16 +54,6 @@ describe("the catalogue", () => {
   });
 });
 
-describe("the potential-sensitive history copy", () => {
-  it("describes uncertainty and exposes explicit local disclosure actions", () => {
-    expect(en.history.row.potentialSensitiveWarning).toBe(
-      "Potentially sensitive content",
-    );
-    expect(en.history.row.showOriginal).toBe("Show original content");
-    expect(en.history.row.hideOriginal).toBe("Hide original content");
-  });
-});
-
 describe("no user-facing string can carry a filesystem path (INV-12)", () => {
   const SHAPES: ReadonlyArray<readonly [string, RegExp]> = [
     ["an absolute unix path", /\/(?:Users|home|private|var|tmp|etc|opt|usr|Applications|Library)\//],
@@ -115,8 +105,7 @@ describe("no user-facing string can carry a filesystem path (INV-12)", () => {
 
 /**
  * A clipping's text must not be an argument to `t`. A template is a second
- * place the plaintext lives, outside everything the sensitive-content rule
- * guards — and `previewOf` output is the same string the row is masking.
+ * place the plaintext lives, outside the item renderer that owns it.
  */
 it("offers no interpolation a clipping could be poured into", () => {
   const FORBIDDEN = new Set([

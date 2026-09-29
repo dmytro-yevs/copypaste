@@ -99,10 +99,10 @@ a add "alpha two"
 b add "bravo one"
 ok "A has 2 items, B has 1"
 
-step "A secret on A, which must never leave it"
+step "Credential-shaped text is stored as ordinary content"
 a add "AKIAIOSFODNN7EXAMPLE"
-has_item "AKIAIOSFODNN7EXAMPLE" a || fail "the secret was not stored on A"
-ok "stored on A, flagged by the detector"
+has_item "AKIAIOSFODNN7EXAMPLE" a || fail "the text was not stored on A"
+ok "stored without classification"
 
 step "Pair: A mints a code, both devices confirm the same SAS"
 PAIR_OUT=$(a pair create)
@@ -166,15 +166,12 @@ for item in "alpha one" "alpha two" "alpha three" "bravo one" "bravo two"; do
 done
 ok "all five items on both devices"
 
-step "The secret stayed on A"
-has_item "AKIAIOSFODNN7EXAMPLE" a || fail "the secret vanished from A — data loss"
-if has_item "AKIAIOSFODNN7EXAMPLE" b; then
-    fail "SENSITIVE CONTENT WAS SYNCED TO THE PEER"
-fi
-if b search "AKIAIOSFODNN7EXAMPLE" 2>/dev/null | grep -q "AKIAIOSFODNN7EXAMPLE"; then
-    fail "SENSITIVE CONTENT REACHED THE PEER'S SEARCH INDEX"
-fi
-ok "sensitive item present on its origin, absent from the peer"
+step "Credential-shaped text syncs and is searchable on the peer"
+has_item "AKIAIOSFODNN7EXAMPLE" a || fail "the text vanished from A"
+has_item "AKIAIOSFODNN7EXAMPLE" b || fail "the text was withheld from the peer"
+b search "AKIAIOSFODNN7EXAMPLE" --json | grep -q "AKIAIOSFODNN7EXAMPLE" \
+    || fail "the peer did not index the text"
+ok "text present and searchable on both devices"
 
 step "Syncing again transfers nothing"
 b sync

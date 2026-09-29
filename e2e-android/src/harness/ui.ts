@@ -111,12 +111,12 @@ export async function dismissFirstRun(app: AndroidApp): Promise<void> {
       if (await navigationIsReady(app)) return true;
       return app.withPage((page) =>
         page.evaluate(() => {
-          const explore = Array.from(
-            document.querySelectorAll<HTMLButtonElement>(
-              '[data-onboarding-step="welcome"] button',
-            ),
-          ).find((button) => button.textContent?.trim() === "Explore first");
-          explore?.click();
+          const root = document.querySelector<HTMLElement>("[data-onboarding-step]");
+          const step = root?.dataset.onboardingStep;
+          const label = step === "welcome" ? "Get started" : step === "background" ? "Not now" : step === "sync" ? "Open Library" : "Continue";
+          const next = Array.from(root?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+            .find((button) => button.textContent?.trim() === label && !button.disabled);
+          next?.click();
           return false;
         }),
       );

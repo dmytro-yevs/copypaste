@@ -11,16 +11,14 @@ export interface ClipTypeMetadata {
 }
 
 export type ClipBodyPresentation =
-  | { readonly state: "masked" }
   | { readonly state: "unavailable" }
   | {
       readonly state: "content";
       readonly content: string;
-      readonly source: "preview" | "full" | "reveal" | "redacted";
+      readonly source: "preview" | "full";
     };
 
 const TYPE = {
-  secret: { label: "history.type.secret", icon: "sensitive" },
   image: { label: "history.type.image", icon: "fileImage" },
   file: { label: "history.type.file", icon: "file" },
   url: { label: "history.type.url", icon: "link" },
@@ -40,28 +38,12 @@ export function resolveClipBodyPresentation({
   item,
   fullContent,
   fullContentFailed,
-  revealedContent,
-  showPotentialSensitiveOriginal = false,
 }: {
   readonly item: Item;
   readonly fullContent: string | null;
   readonly fullContentFailed: boolean;
-  readonly revealedContent: string | null;
-  readonly showPotentialSensitiveOriginal?: boolean;
 }): ClipBodyPresentation {
-  if (item.is_sensitive) {
-    return revealedContent === null
-      ? { state: "masked" }
-      : { state: "content", content: revealedContent, source: "reveal" };
-  }
   if (item.truncated && fullContentFailed) return { state: "unavailable" };
-  if (item.sensitive_finding !== null && !showPotentialSensitiveOriginal) {
-    return {
-      state: "content",
-      content: item.sensitive_finding.redacted_preview,
-      source: "redacted",
-    };
-  }
   if (fullContent !== null) {
     return { state: "content", content: fullContent, source: "full" };
   }

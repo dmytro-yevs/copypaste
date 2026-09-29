@@ -23,7 +23,7 @@ if (false) {
   // @ts-expect-error Argument types come from the command contract.
   void call(UI_COMMANDS.copy_item, { id: 42 });
   // @ts-expect-error The availability command takes a content type, not content.
-  void call(UI_COMMANDS.clipboard_write_availability, { content: "secret" });
+  void call(UI_COMMANDS.clipboard_write_availability, { content: "invalid" });
   // @ts-expect-error The native command requires an explicit mode.
   void call(UI_COMMANDS.clipboard_write_availability, { contentType: "text" });
   void call(UI_COMMANDS.clipboard_write_availability, {

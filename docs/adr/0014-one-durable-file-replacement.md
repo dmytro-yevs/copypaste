@@ -7,7 +7,7 @@ Status: accepted
 `copypaste-fs::write_atomically` is the only tmpfile-and-rename in the
 workspace. Five call sites had a copy — `copypaste-p2p::peers::file`,
 `copypaste-p2p::peers::cursor`, `copypaste-ui::shell::shortcut`,
-`copypaste-ui::backend::embedded::state`, and the `sensitive-rules` generator —
+`copypaste-ui::backend::embedded::state` —
 along with two copies each of the `0600` helper and the directory `fsync`.
 
 They had drifted, which is the cost rule 1 names. The peer sync cursors were

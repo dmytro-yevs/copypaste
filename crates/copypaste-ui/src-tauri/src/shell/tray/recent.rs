@@ -1,38 +1,24 @@
-//! What the menu-bar item is allowed to say about the clipboard.
-//!
-//! A flagged item is not listed at all — not masked, not a placeholder, not a
-//! disabled "1 sensitive clipping hidden" row. The list can withhold one
-//! because there it is behind a deliberate reveal; a menu cannot withhold, is
-//! not scrollable past, is often on screen during a screen share, and is drawn
-//! where nothing this app owns can redact it. The hidden-count row is the
-//! tempting version and still leaks: it tells a shoulder a secret was copied a
-//! moment ago, which is most of what an observer wanted.
-//!
-//! [`Clipping::from_item`] is total and answers `None` for a flagged item, so
-//! the rule cannot be forgotten at a call site (manifest 06).
+//! Recent clipboard entries for the menu-bar item.
 
 use copypaste_ipc::Item;
 
 /// How many clippings the menu offers.
 ///
-/// A menu offers the ten most recent safe clippings. The popup is still the
+/// A menu offers the ten most recent clippings. The popup is still the
 /// place for search and the full history; ten keeps the tray useful without
 /// making it a second history view.
 pub const SLOTS: usize = 10;
 
 /// How many rows to ask the backend for.
 ///
-/// More than [`SLOTS`], because flagged items are dropped from the answer: a
-/// page of exactly ten would leave the menu short by however many of them the
-/// user had just copied, which reads as clippings going missing.
-pub const FETCH: u32 = 40;
+pub const FETCH: u32 = SLOTS as u32;
 
 /// Longest menu label; beyond this a macOS menu grows wider than its screen.
 const MAX_LABEL_CHARS: usize = 40;
 
 /// One clipping, as a menu is allowed to see it.
 ///
-/// Constructed only by [`Clipping::from_item`]; see the module docs.
+/// Constructed only by [`Clipping::from_item`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Clipping {
     id: String,
@@ -40,12 +26,7 @@ pub struct Clipping {
 }
 
 impl Clipping {
-    /// `None` for a flagged item, always. The plaintext is dropped on the spot
-    /// rather than shortened, so no prefix of a secret survives into a label.
     pub fn from_item(item: &Item) -> Option<Self> {
-        if item.is_sensitive {
-            return None;
-        }
         let label = label_for(&item.content);
         if label.is_empty() {
             return None;
@@ -56,8 +37,7 @@ impl Clipping {
         })
     }
 
-    /// The item's id. `copy_item` travels by id, so the plaintext never has to
-    /// leave the backend in order to be put on the clipboard.
+    /// The item's id.
     pub fn id(&self) -> &str {
         &self.id
     }
@@ -93,15 +73,13 @@ fn label_for(content: &str) -> String {
 mod tests {
     use super::*;
 
-    fn item(id: &str, content: &str, is_sensitive: bool) -> Item {
+    fn item(id: &str, content: &str) -> Item {
         Item {
             id: id.into(),
             content: content.into(),
             content_type: "text/plain".into(),
             created_at: 1_700_000_000_000,
             pinned: false,
-            is_sensitive,
-            sensitive_finding: None,
             origin_device_id: "device-1".into(),
             origin_device_name: None,
             source_app_bundle_id: None,
@@ -111,45 +89,34 @@ mod tests {
         }
     }
 
-    /// The load-bearing test. A tray menu is unblurrable, unrevealable and
-    /// often screen-shared, so a flagged item must produce no menu entry at
-    /// all — not a masked one, and not a shortened one.
     #[test]
-    fn a_sensitive_item_produces_no_menu_entry() {
-        let secret = "AKIAIOSFODNN7EXAMPLE";
-        assert_eq!(Clipping::from_item(&item("row-1", secret, true)), None);
+    fn a_long_clipping_is_bounded_in_the_menu() {
+        let content = "x".repeat(100_000);
+        let label = Clipping::from_item(&item("row-1", &content))
+            .unwrap()
+            .label()
+            .to_string();
+        assert_eq!(label.chars().count(), MAX_LABEL_CHARS);
+        assert!(label.ends_with('…'));
     }
 
-    /// Its plaintext must not survive by being long enough to be truncated
-    /// into a label instead of dropped.
     #[test]
-    fn a_long_secret_leaks_no_prefix_into_a_label() {
-        let secret = "x".repeat(100_000);
-        assert_eq!(Clipping::from_item(&item("row-1", &secret, true)), None);
-    }
-
-    /// Filtering is per item, and a flagged one must not take a slot with it —
-    /// the entries after it move up rather than the menu going short.
-    #[test]
-    fn a_flagged_item_is_skipped_and_the_rest_still_fill_the_menu() {
-        let mut items = vec![item("row-0", "public zero", false)];
-        items.push(item("row-secret", "AKIAIOSFODNN7EXAMPLE", true));
+    fn the_menu_preserves_the_first_entries() {
+        let mut items = vec![item("row-0", "public zero")];
+        items.push(item("row-secret", "AKIAIOSFODNN7EXAMPLE"));
         for i in 1..=SLOTS {
-            items.push(item(&format!("row-{i}"), &format!("public {i}"), false));
+            items.push(item(&format!("row-{i}"), &format!("public {i}")));
         }
 
         let shown = menu_clippings(&items);
         assert_eq!(shown.len(), SLOTS);
-        for clipping in &shown {
-            assert_ne!(clipping.id(), "row-secret");
-            assert!(!clipping.label().contains("AKIA"), "{}", clipping.label());
-        }
+        assert_eq!(shown[1].id(), "row-secret");
     }
 
     #[test]
     fn the_menu_never_offers_more_than_its_slots() {
         let items: Vec<Item> = (0..50)
-            .map(|i| item(&format!("row-{i}"), &format!("entry {i}"), false))
+            .map(|i| item(&format!("row-{i}"), &format!("entry {i}")))
             .collect();
         assert_eq!(menu_clippings(&items).len(), SLOTS);
     }
@@ -158,15 +125,14 @@ mod tests {
     /// arrive as one readable line rather than as its words run together.
     #[test]
     fn a_multi_line_clipping_becomes_one_line() {
-        let clipping = Clipping::from_item(&item("row-1", "first\n\tsecond   third", false))
-            .expect("not flagged");
+        let clipping =
+            Clipping::from_item(&item("row-1", "first\n\tsecond   third")).expect("not blank");
         assert_eq!(clipping.label(), "first second third");
     }
 
     #[test]
     fn a_long_label_is_bounded_and_ends_in_an_ellipsis() {
-        let clipping =
-            Clipping::from_item(&item("row-1", &"ab".repeat(200), false)).expect("not flagged");
+        let clipping = Clipping::from_item(&item("row-1", &"ab".repeat(200))).expect("not blank");
         assert_eq!(clipping.label().chars().count(), MAX_LABEL_CHARS);
         assert!(clipping.label().ends_with('…'));
     }
@@ -175,14 +141,13 @@ mod tests {
     /// at a byte index panics, and the panic would be in the tray refresh.
     #[test]
     fn truncation_does_not_split_a_multi_byte_character() {
-        let clipping =
-            Clipping::from_item(&item("row-1", &"é".repeat(200), false)).expect("not flagged");
+        let clipping = Clipping::from_item(&item("row-1", &"é".repeat(200))).expect("not blank");
         assert_eq!(clipping.label().chars().count(), MAX_LABEL_CHARS);
     }
 
     /// A clipping that is only whitespace would be a blank, clickable row.
     #[test]
     fn a_blank_clipping_is_not_offered() {
-        assert_eq!(Clipping::from_item(&item("row-1", "   \n\t ", false)), None);
+        assert_eq!(Clipping::from_item(&item("row-1", "   \n\t ")), None);
     }
 }

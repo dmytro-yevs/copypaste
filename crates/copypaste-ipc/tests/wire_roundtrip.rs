@@ -4,8 +4,8 @@ use copypaste_ipc::{
     BackupData, CloudStatusData, CloudSyncData, ConfigApplied, ConfigData, DiagnosticCounters,
     DiscoveredData, DiscoveredDevice, ErrorCode, EventData, EventKind, ExportData, ExportItem,
     ImagePreview, ImportData, Item, ItemPage, Method, PairingInviteData, PairingProgressData,
-    PairingRole, PairingState, PrivateModeData, Request, Response, ResponseData, SensitiveFinding,
-    SensitiveSpan, StatusData, SyncResult, PROTOCOL_VERSION,
+    PairingRole, PairingState, PrivateModeData, Request, Response, ResponseData, StatusData,
+    SyncResult, PROTOCOL_VERSION,
 };
 use serde_json::{json, Value};
 
@@ -16,8 +16,6 @@ fn item() -> Item {
         content_type: "text/plain".into(),
         created_at: 1,
         pinned: false,
-        is_sensitive: false,
-        sensitive_finding: None,
         origin_device_id: "device-1".into(),
         origin_device_name: Some("Laptop".into()),
         source_app_bundle_id: None,
@@ -33,7 +31,6 @@ fn export_item() -> ExportItem {
         content_type: "text/plain".into(),
         created_at: 1,
         pinned: false,
-        is_sensitive: false,
     }
 }
 
@@ -110,7 +107,6 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
         ResponseData::Export(ExportData {
             items: vec![export_item()],
             skipped_non_text: 1,
-            skipped_sensitive: 2,
             skipped_undecryptable: 3,
         }),
         ResponseData::Import(ImportData {
@@ -140,7 +136,6 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             event: EventKind::Items,
             item_count: 1,
             captured: true,
-            swept: 0,
         }),
         ResponseData::Page(ItemPage {
             items: vec![item()],
@@ -194,7 +189,6 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             tombstoned: 2,
             downloaded: 3,
             applied: 4,
-            skipped_sensitive: 5,
             skipped_undecryptable: 6,
             skipped_forged: 7,
             skipped_future: 8,
@@ -231,7 +225,6 @@ fn collection_variants_round_trip_when_empty() {
         ResponseData::Export(ExportData {
             items: Vec::new(),
             skipped_non_text: 0,
-            skipped_sensitive: 0,
             skipped_undecryptable: 0,
         }),
         ResponseData::Discovered(DiscoveredData {
@@ -370,13 +363,7 @@ fn export_request_fields_default_to_safe_values() {
     }))
     .unwrap();
     assert_eq!(request.protocol_version, PROTOCOL_VERSION);
-    assert!(matches!(
-        request.method,
-        Method::Export {
-            limit: 0,
-            include_sensitive: false
-        }
-    ));
+    assert!(matches!(request.method, Method::Export { limit: 0 }));
 }
 
 #[test]
@@ -400,7 +387,7 @@ fn device_name_request_is_typed_and_round_trips() {
 }
 
 #[test]
-fn omitted_import_sensitivity_defaults_to_false() {
+fn export_item_uses_its_textual_fields_only() {
     let wire: Value = json!({
         "content": "hello",
         "content_type": "text/plain",
@@ -408,7 +395,7 @@ fn omitted_import_sensitivity_defaults_to_false() {
         "pinned": false
     });
     let item: ExportItem = serde_json::from_value(wire).unwrap();
-    assert!(!item.is_sensitive);
+    assert_eq!(item.content, "hello");
 }
 
 #[test]
@@ -418,33 +405,10 @@ fn an_item_with_no_truncated_flag_reads_as_a_whole_body() {
         "content": "hello",
         "content_type": "text/plain",
         "created_at": 1,
-        "pinned": false,
-        "is_sensitive": false
+        "pinned": false
     });
     let item: Item = serde_json::from_value(wire).unwrap();
     assert!(!item.truncated);
-    assert!(item.sensitive_finding.is_none());
-}
-
-#[test]
-fn an_inert_sensitive_finding_round_trips_as_additive_metadata() {
-    let mut item = item();
-    item.sensitive_finding = Some(SensitiveFinding {
-        label: "email".into(),
-        spans: vec![SensitiveSpan { start: 5, end: 22 }],
-        spans_truncated: false,
-        redacted_preview: "mail ***REDACTED***".into(),
-    });
-
-    let wire = serde_json::to_value(&item).unwrap();
-    assert_eq!(wire["sensitive_finding"]["label"], "email");
-    assert_eq!(wire["sensitive_finding"]["spans"][0]["start"], 5);
-    assert_eq!(
-        wire["sensitive_finding"]["redacted_preview"],
-        "mail ***REDACTED***"
-    );
-    let back: Item = serde_json::from_value(wire).unwrap();
-    assert_eq!(back.sensitive_finding, item.sensitive_finding);
 }
 
 #[test]

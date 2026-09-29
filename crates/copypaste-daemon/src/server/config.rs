@@ -214,7 +214,6 @@ mod tests {
             .expect("the real sweep must wake watchers");
         assert_eq!(event.event, copypaste_ipc::EventKind::Items);
         assert!(!event.captured);
-        assert_eq!(event.swept, 0, "ordinary retention is not an auto-wipe");
 
         let _ = call(
             &state,

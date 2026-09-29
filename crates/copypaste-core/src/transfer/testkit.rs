@@ -3,12 +3,11 @@
 
 use copypaste_ipc::ConfigData;
 
-use crate::{Detector, Keyring, Store};
+use crate::{Keyring, Store};
 
 pub(super) struct Fixture {
     pub store: Store,
     pub keyring: Keyring,
-    pub detector: Detector,
     pub settings: ConfigData,
 }
 
@@ -23,7 +22,6 @@ pub(super) fn fixture_named(name: &str) -> Fixture {
     Fixture {
         store: Store::open_in_memory(&keyring.db_key()).expect("in-memory store"),
         keyring,
-        detector: Detector::new().expect("detector"),
         settings: ConfigData::default(),
     }
 }
@@ -40,7 +38,6 @@ impl Fixture {
     pub(super) fn add_typed(&self, content: &str, content_type: &str) -> String {
         crate::ingest(
             &self.store,
-            &self.detector,
             &self.keyring,
             content,
             content_type,

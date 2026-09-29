@@ -8,7 +8,7 @@
 //! process whose problem no restart touches.
 //!
 //! Only the failures in [`super::messages::Refusal`] come here. Everything else
-//! still exits: a daemon that cannot bind its port or cannot build its detector
+//! still exits: a daemon that cannot bind its port
 //! has no fixed sentence to offer, and pretending it has one would be worse
 //! than the exit code.
 //!

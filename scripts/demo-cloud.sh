@@ -8,8 +8,8 @@
 # verification, and this container cannot reach a real Supabase project.
 #
 # What a pass means: the daemon is wired to `copypaste-cloud` and driven only
-# through the CLI; two devices converge sharing nothing but a passphrase; a
-# sensitive item never leaves the device that captured it; the backend receives
+# through the CLI; two devices converge sharing nothing but a passphrase; the
+# backend receives
 # ciphertext only (asserted against the stub's dump of every row it was given);
 # and the client's request shapes are the ones PostgREST needs — the stub
 # rejects a newest-first page and a strict bound on the millisecond alone, the
@@ -142,15 +142,11 @@ UPLOADED=$(synced a uploaded)
 [[ "$UPLOADED" -ge 1 ]] || fail "the backlog sweep uploaded $UPLOADED items"
 ok "uploaded $UPLOADED item(s) captured before sign-in"
 
-step "A secret on A, which must never leave it"
+step "Credential-shaped text follows ordinary encrypted sync"
 a add "AKIAIOSFODNN7EXAMPLE"
-has_item "AKIAIOSFODNN7EXAMPLE" a || fail "the secret was not stored on A"
-# The round reports 0 withheld because the *store* filter caught it first: the
-# outbound query never lists a sensitive row, so the driver's `SensitiveGuard`
-# — the second layer — has nothing left to refuse. Both layers are required
-# (AT-56 / CopyPaste-20yw); what matters below is that the backend never sees it.
-WITHHELD=$(synced a skipped_sensitive)
-ok "stored on A; the outbound query withheld it before the upload gate ($WITHHELD refused at the gate)"
+has_item "AKIAIOSFODNN7EXAMPLE" a || fail "the text was not stored on A"
+a cloud sync >/dev/null || fail "sync on A failed"
+ok "ordinary text stored and uploaded"
 
 step "B signs in to the same account with the same passphrase"
 b cloud sign-in --email demo@example.com || fail "sign-in on B failed"
@@ -164,18 +160,13 @@ has_item "captured before signing in" b || fail "B never received A's item"
 has_item "from device b" a || fail "A never received B's item"
 ok "both devices hold the union, sharing only a passphrase"
 
-step "The secret stayed on A"
-has_item "AKIAIOSFODNN7EXAMPLE" a || fail "the secret vanished from A — data loss"
-if has_item "AKIAIOSFODNN7EXAMPLE" b; then
-    fail "SENSITIVE CONTENT WAS SYNCED THROUGH THE CLOUD"
-fi
-if grep -q "AKIAIOSFODNN7EXAMPLE" "$STUB_DUMP"; then
-    fail "SENSITIVE CONTENT REACHED THE BACKEND"
-fi
-ok "sensitive item present on its origin, absent from the peer and the backend"
+step "Every text item reaches the other device"
+has_item "AKIAIOSFODNN7EXAMPLE" a || fail "the text vanished from A"
+has_item "AKIAIOSFODNN7EXAMPLE" b || fail "the text was withheld from B"
+ok "credential-shaped text is present on both devices"
 
 step "The backend holds ciphertext only"
-for plaintext in "captured before signing in" "from device b"; do
+for plaintext in "captured before signing in" "from device b" "AKIAIOSFODNN7EXAMPLE"; do
     if grep -qF "$plaintext" "$STUB_DUMP"; then
         fail "PLAINTEXT REACHED THE BACKEND: $plaintext"
     fi

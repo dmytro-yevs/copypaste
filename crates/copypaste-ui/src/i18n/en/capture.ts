@@ -28,57 +28,10 @@ export const capture = {
 
   setup: {
     always: {
-      title: "Save current clipboard",
-      body: "Save a copy while CopyPaste is open.",
-      action: "Save now",
       saved: "Saved to your history",
       nothing: "There was nothing on the clipboard to save",
     },
 
-    ladder: {
-      title: "Capturing from other apps",
-      label: "Setup steps",
-      install: "Install Shizuku",
-      start: "Start Shizuku",
-      permission: "Give CopyPaste permission in Shizuku",
-      armed: "Turn on background capture",
-      /** Each step says where it stands in words as well as in a glyph — a
-       *  checklist that is only a colour is not a checklist (A11Y-10). */
-      done: "Done",
-      next: "Next",
-      todo: "Not done yet",
-    },
-
-    action: {
-      arm: "Turn on background capture",
-      permission: "Ask Shizuku for permission",
-      /** Neither installing nor starting Shizuku is something CopyPaste can do,
-       *  so the only honest button on those steps is the one that re-reads. */
-      checkAgain: "Check again",
-      busy: "Working…",
-    },
-
-    enable: {
-      title: "Capture from other apps",
-      body: "Save new copies automatically while using other apps.",
-    },
-
-    /** A copy that was taken and not stored is the failure this whole feature
-     *  is about, so it is stated rather than logged. */
-    dropped_one: "{{count}} copy was captured but couldn't be saved.",
-    dropped_other: "{{count}} copies were captured but couldn't be saved.",
-
-    lastSaved: "Last saved {{age}}",
-  },
-
-  help: {
-    title: "Setup instructions",
-    summary: "Shizuku, permissions and battery settings",
-    body:
-      "Use Shizuku on this phone or run the provided adb commands from a computer to grant setup permissions. Shizuku is not needed after setup.",
-    openShizuku: "Open Shizuku",
-    openDeveloperOptions: "Developer options",
-    requestBattery: "Battery settings",
   },
 
   options: {

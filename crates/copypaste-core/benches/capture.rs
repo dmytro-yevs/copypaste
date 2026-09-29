@@ -1,6 +1,6 @@
 //! The capture path: what one clipboard poll costs once something is on it.
 //!
-//! `ingest` is the whole pipeline — dedup probe, detect, encrypt, insert,
+//! `ingest` is the whole pipeline — dedup probe, encrypt, insert,
 //! index, cap sweep, retention sweep — and the `stage/*` group is the same
 //! pipeline taken apart, so a total that moves can be attributed rather than
 //! guessed at.
@@ -11,7 +11,6 @@
 
 use std::hint::black_box;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 
@@ -19,7 +18,7 @@ use copypaste_core::{compute_content_hash, encrypt, ingest_into, Store};
 use copypaste_ipc::ConfigData;
 
 mod support;
-use support::{clipping, detector, fill, keyring, row, T0};
+use support::{clipping, fill, keyring, row, T0};
 
 /// Sizes, the history each is measured against, and how many samples are
 /// affordable. A store of 10 000 four-MiB items does not exist, so the cap case
@@ -50,7 +49,6 @@ fn ingest(c: &mut Criterion) {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = support::store_in(dir.path());
         let keyring = keyring();
-        let detector = detector();
         let settings = settings(history);
         fill(&store, &keyring, history, bytes.min(4 * 1024));
 
@@ -60,16 +58,8 @@ fn ingest(c: &mut Criterion) {
             b.iter_batched(
                 || clipping(bytes, seed()),
                 |text| {
-                    ingest_into(
-                        &store,
-                        &detector,
-                        &keyring,
-                        &text,
-                        "text",
-                        T0,
-                        black_box(&settings),
-                    )
-                    .expect("ingest")
+                    ingest_into(&store, &keyring, &text, "text", T0, black_box(&settings))
+                        .expect("ingest")
                 },
                 criterion::BatchSize::SmallInput,
             );
@@ -80,7 +70,6 @@ fn ingest(c: &mut Criterion) {
 
 fn stages(c: &mut Criterion) {
     let keyring = keyring();
-    let detector = detector();
     let key = keyring.item_key();
 
     for (label, bytes, history, samples) in CASES {
@@ -94,9 +83,6 @@ fn stages(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(bytes as u64));
         group.sample_size(samples);
 
-        group.bench_function("detect", |b| {
-            b.iter(|| detector.is_sensitive(black_box(&text)));
-        });
         group.bench_function("hash", |b| {
             b.iter(|| compute_content_hash(black_box(text.as_bytes())));
         });
@@ -147,38 +133,7 @@ fn sweeps(c: &mut Criterion) {
     group.finish();
 }
 
-/// What the poll loop costs when the clipboard has not moved: the whole tick
-/// below `ClipboardSource::poll` is a no-op, so this is the sweep pair alone.
-fn idle_tick(c: &mut Criterion) {
-    let keyring = keyring();
-    let dir = tempfile::tempdir().expect("tempdir");
-    let store = support::store_in(dir.path());
-    fill(&store, &keyring, 2_000, 256);
-    let detector = detector();
-    let key = keyring.item_key();
-
-    c.bench_function("capture/idle_tick/sensitive_sweep_disabled", |b| {
-        b.iter(|| {
-            copypaste_core::sweep_sensitive(&store, &detector, &key, Duration::ZERO, black_box(T0))
-        });
-    });
-    c.bench_function("capture/idle_tick/sensitive_sweep_enabled", |b| {
-        b.iter(|| {
-            copypaste_core::sweep_sensitive(
-                &store,
-                &detector,
-                &key,
-                Duration::from_secs(30),
-                black_box(T0),
-            )
-        });
-    });
-}
-
 fn open(c: &mut Criterion) {
-    c.bench_function("capture/detector_new", |b| {
-        b.iter(|| copypaste_core::Detector::new().expect("ruleset"));
-    });
     c.bench_function("capture/store_open", |b| {
         b.iter_batched(
             || tempfile::tempdir().expect("tempdir"),
@@ -191,5 +146,5 @@ fn open(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, ingest, stages, sweeps, idle_tick, open);
+criterion_group!(benches, ingest, stages, sweeps, open);
 criterion_main!(benches);

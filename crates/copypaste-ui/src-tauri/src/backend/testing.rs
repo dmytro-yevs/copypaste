@@ -123,11 +123,6 @@ impl Backend for FakeBackend {
             content_type: "text/plain".into(),
             created_at: 0,
             pinned: false,
-            // The detector lives behind the backend, so the fake stands in for
-            // it with the one rule the intake tests need: anything containing
-            // this marker is treated as a secret.
-            is_sensitive: content.contains("AKIA"),
-            sensitive_finding: None,
             origin_device_id: "fake-device".into(),
             origin_device_name: None,
             source_app_bundle_id: None,
@@ -297,7 +292,7 @@ impl Backend for FakeBackend {
         Err(refused())
     }
 
-    async fn export(&self, _limit: u32, _include_sensitive: bool) -> Result<ExportData> {
+    async fn export(&self, _limit: u32) -> Result<ExportData> {
         Err(refused())
     }
 

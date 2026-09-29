@@ -578,11 +578,12 @@ mod tests {
     }
 
     #[test]
-    fn password_manager_copies_keep_their_origin_for_sensitive_ingest() {
+    fn credential_origin_copies_remain_ordinary_captures() {
         let mut cb = fake();
         cb.set_frontmost_app(Some("com.1password.1password"));
         cb.push_external("generated-password");
-        let capture = cb.poll().expect("the sensitive floor is applied by ingest");
+        let capture = cb.poll().expect("the copy is captured");
+        assert_eq!(capture.content, "generated-password");
         assert_eq!(
             capture.app_bundle_id.as_deref(),
             Some("com.1password.1password")

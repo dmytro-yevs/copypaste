@@ -40,10 +40,6 @@ thiserror.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 hex.workspace = true
-regex.workspace = true
-unicode-normalization.workspace = true
-iban_validate.workspace = true
-card-validate.workspace = true
 image.workspace = true
 # Owner-only staging files close the restore validation/swap race. This crate
 # already ships through both product backends, so the dependency graph is unchanged.
@@ -159,8 +155,4 @@ harness = false
 
 [[bench]]
 name = "sync"
-harness = false
-
-[[bench]]
-name = "detect"
 harness = false

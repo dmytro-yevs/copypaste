@@ -371,12 +371,14 @@ function Complete-WindowsFirstRun([Diagnostics.Process]$App) {
         if ($null -ne (Get-UiaNamedElement $App "Settings" $true)) {
             return New-ProbeReady $true
         }
-        $explore = Get-UiaNamedElement $App "Explore first" $true
-        if ($null -ne $explore) {
-            Invoke-UiaElement $explore "Explore first"
-            return New-ProbeNotReady "welcome dismissed"
+        foreach ($action in @("Get started", "Continue", "Open Library")) {
+            $button = Get-UiaNamedElement $App $action $true
+            if ($null -ne $button) {
+                Invoke-UiaElement $button $action
+                return New-ProbeNotReady "onboarding advanced"
+            }
         }
-        return New-ProbeNotReady "neither Explore first nor Settings is on screen"
+        return New-ProbeNotReady "neither an onboarding action nor Settings is on screen"
     } { Get-UiaSummary $App } 20000 | Out-Null
 }
 
@@ -787,9 +789,9 @@ function Test-WindowsUiEvidenceHelpers {
     }
     Test-UiaSnapshotHelpers
     $names = @(Get-UiaSnapshotNames ([ordered]@{
-        nodes = @([ordered]@{ name = "Explore first" }, [ordered]@{ control_type = "ControlType.Button" })
+        nodes = @([ordered]@{ name = "Get started" }, [ordered]@{ control_type = "ControlType.Button" })
     }))
-    Assert-True ($names.Count -eq 1 -and $names[0] -eq "Explore first") `
+    Assert-True ($names.Count -eq 1 -and $names[0] -eq "Get started") `
         "UIA diagnostics did not tolerate a node without a name"
     Assert-True ((Get-UiaControlTypeName ([Windows.Automation.ControlType]::Button)) -eq "ControlType.Button") `
         "a registered control type was not read from the element"

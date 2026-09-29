@@ -2,7 +2,7 @@
 //!
 //! The CLI speaks IPC and nothing else: it does not depend on
 //! `copypaste-core`, so it cannot open the database, hold a key, or decide what
-//! is sensitive. Everything it knows comes back over the socket as typed
+//! has any content classification. Everything it knows comes back over the socket as typed
 //! [`copypaste_ipc`] values.
 //!
 //! Layout:
@@ -133,14 +133,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 Method::Discovered
             }
         }
-        Command::Export {
-            limit,
-            include_sensitive,
-            ..
-        } => Method::Export {
-            limit: *limit,
-            include_sensitive: *include_sensitive,
-        },
+        Command::Export { limit, .. } => Method::Export { limit: *limit },
         Command::Import { file } => Method::Import {
             items: read_export(file.as_deref())?.items,
         },
@@ -407,10 +400,8 @@ mod tests {
                 content_type: "text/plain".to_string(),
                 created_at: 1,
                 pinned: false,
-                is_sensitive: false,
             }],
             skipped_non_text: 0,
-            skipped_sensitive: 0,
             skipped_undecryptable: 0,
         }
     }
@@ -504,7 +495,6 @@ mod tests {
         let command = Command::Export {
             output: Some(path.clone()),
             limit: 0,
-            include_sensitive: false,
         };
         let export = one_item_export();
         let response = Response::ok(41, ResponseData::Export(export.clone()));
@@ -549,7 +539,6 @@ mod tests {
         let command = Command::Export {
             output: Some(path.clone()),
             limit: 0,
-            include_sensitive: false,
         };
         for (code, expected_exit) in [
             (ErrorCode::NotFound, error::EXIT_NOT_FOUND),

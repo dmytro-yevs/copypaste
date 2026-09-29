@@ -15,7 +15,7 @@ The sync layer owns:
 
 - stable cross-device identity and deterministic conflict resolution;
 - tombstone, pin and replay semantics;
-- sensitive-content and size gates before egress;
+- size gates before egress;
 - P2P and cloud transport adaptation;
 - cloud authentication, signed row metadata, REST pagination and Realtime;
 - independent upload and download cursors;
@@ -98,11 +98,6 @@ Versions stamped more than 24 hours ahead of the local clock are refused by
 both P2P and cloud. Refusal skips one version, not the complete round. The two
 transport constants have a parity test. Negative timestamps are clamped before
 sorting so normalization cannot reorder a page after cursor decisions.
-
-Sensitive live items are neither advertised nor served by P2P and are rejected
-again at the cloud egress boundary. A payload-less sensitive tombstone may sync
-so deletion still converges. Remote content is run through the local detector;
-the sender cannot declare a value safe or inject search text.
 
 An over-limit live value is withheld and reported, never deleted locally. The
 content-type owner selects the text or binary upload bound.
@@ -281,7 +276,7 @@ made from a stale planning snapshot.
 
 The Noise-authenticated channel carries bounded typed messages. Pairing trust,
 SAS confirmation and revocation remain in the pairing contract; sync does not
-add a weaker fallback identity. P2P and cloud share future-skew, sensitivity,
+add a weaker fallback identity. P2P and cloud share future-skew,
 payload-validation and content-merge decisions even though pin transport and
 authentication differ.
 
@@ -300,9 +295,6 @@ authentication differ.
 
 ### 9.2 Security and refusals
 
-- Live sensitive items produce no P2P summary, fetch response or cloud row.
-- Sensitive tombstones sync with no payload and preserve local sensitivity.
-- Remote content is redetected locally and never inserts sensitive search text.
 - Wrong key, wrong item AAD, modified ciphertext and invalid signature are
   counted skips, never deletes or partial rows.
 - A forged far-future row cannot drag the cursor forward or censor honest rows.
@@ -371,7 +363,6 @@ current contract. Their meaning remains stable when test names or modules move.
 | **AT-45** | A cloud push followed by pull opens to the original bytes through the production ciphertext representation. |
 | **AT-51** | Schema audit proves forced account-scoped RLS, revoked anonymous access and server-owned account identity. |
 | **AT-52** | The `(user_id, item_id)` unique conflict target exists and a merge-duplicates upsert resolves against it. |
-| **AT-56** | Live sensitive payloads never leave the device; their payload-less tombstones propagate and remain deletions. |
 
 ## 10. Module and dependency rules
 

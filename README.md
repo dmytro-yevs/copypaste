@@ -34,7 +34,6 @@ separately ([ADR-0013](docs/adr/0013-windows-as-a-third-platform.md)).
 |---|---|
 | Crypto | XChaCha20-Poly1305 + HKDF-SHA256, item id bound as AAD, fail-closed, zeroized |
 | Storage | One SQLCipher schema, r2d2 pool, FTS5 search, tombstones, pins, cap eviction |
-| Secret detection | Ruleset sourced from gitleaks, NFKC normalisation, Luhn validation, confidence bands; a flagged item never reaches the index and never leaves the device. A purge pass at daemon start re-decides the index question for rows captured before a rule existed |
 | Capture | Native macOS and Windows capture behind one trait, including sequence-based change detection, burst handling, self-write suppression and platform opt-outs |
 | IPC | Owner-only Unix socket or Windows named pipe, newline-JSON, `LinesCodec` framing; `copypaste-ipc` is the shared contract used by daemon, CLI and Tauri |
 | CLI | `crates/copypaste-cli/src/cli.rs` is the verb list — `copypaste --help` prints it. `--json` on any of them, for scripting |
@@ -49,7 +48,7 @@ separately ([ADR-0013](docs/adr/0013-windows-as-a-third-platform.md)).
 |---|---|
 | The macOS shell — tray, popover, global hotkey, launch at login, notification and sound on copy, WKWebView | `macos-check` on `macos-14` runs the real `NSPasteboard` and the real Keychain on every push and pull request, and an empty run fails the job; those two are verified. Nothing anywhere registers a shortcut, posts a notification or renders a frame on WKWebView. |
 | Android beyond launch and storage | The emulator matrix installs debug and release x86_64 test APKs. It establishes launch, a painted WebView, Keystore persistence, SQLCipher storage, R8 and signing. Its API 36 leg also proves Quick Settings tile capture, fail-closed background-service state and `FLAG_SECURE`. The Shizuku UserService capture path still needs device evidence for privileged logcat, overlay focus, Android 12+ privacy UI, binder loss and OEM battery managers; [`docs/rewrite/android-spike.md`](docs/rewrite/android-spike.md) lists the remaining device evidence. |
-| Cloud sync against Supabase | Two layers, established separately. The stronger one is the release gate: `release.yml`'s `supabase` job runs `supabase/tests/real-supabase.sh`, which brings up a **disposable local Supabase stack** through the Supabase CLI, applies `supabase/`'s migrations with `supabase db reset`, asserts schema, RLS behaviour and retention/paging from SQL, then drives auth, PostgREST and Realtime through the `real_supabase_contract` integration test — and blocks publication when it fails. It runs only on the release workflow, so no pull request exercises it. The weaker one is the demo: `scripts/demo-cloud.sh` drives two daemons through sign-in, convergence and sensitive-item refusal against a **local stub** (`scripts/cloud-stub.py`), and no workflow runs it. Neither layer leaves the runner: no hosted or production Supabase project is part of any check. |
+| Cloud sync against Supabase | Two layers, established separately. The stronger one is the release gate: `release.yml`'s `supabase` job runs `supabase/tests/real-supabase.sh`, which brings up a **disposable local Supabase stack** through the Supabase CLI, applies `supabase/`'s migrations with `supabase db reset`, asserts schema, RLS behaviour and retention/paging from SQL, then drives auth, PostgREST and Realtime through the `real_supabase_contract` integration test — and blocks publication when it fails. It runs only on the release workflow, so no pull request exercises it. The weaker one is the demo: `scripts/demo-cloud.sh` drives two daemons through sign-in and convergence against a **local stub** (`scripts/cloud-stub.py`), and no workflow runs it. Neither layer leaves the runner: no hosted or production Supabase project is part of any check. |
 | The app on a shipping engine | The `e2e/` suite drives the built app through `tauri-driver` → `WebKitWebDriver` under Xvfb, and WebKitGTK 2.52 does execute JavaScript and compute layout there. That is the browser layer: it establishes the shared React app's behaviour and nothing about WKWebView or the Android WebView. |
 | Packaging and release | `release.yml` builds, signs and smoke-installs the DMG on `macos-14`, but only on a tag — so `codesign`, `hdiutil` and the Tauri bundler never run on a pull request, and the smoke script's app-launch and Keychain-after-resign legs report rather than fail. `brew install --cask` as a user runs it is unexercised; `check.sh` round-trips the generators. |
 | mDNS discovery | This container has no multicast. Discovery is a convenience; an explicit `--addr` always works and is what the demo and the tests use. |
@@ -67,8 +66,8 @@ vocabulary for these types. Every captured type is stored under its own limit
 class and listed. Text entries paste back as plain text; images and files retain
 their payload. Image rows provide bounded previews sized for the display.
 
-Frontmost application identity is retained as provenance and as an independent
-sensitivity signal.
+Frontmost application identity is retained as provenance and for the explicit
+source-app exclusion policy.
 
 ## Build and run
 
@@ -125,9 +124,8 @@ It starts a daemon and a loopback-only bridge on an ephemeral port. The bridge
 creates a one-run bearer token, allows requests only from Vite's
 `http://127.0.0.1:1420` origin, and exposes only the safe history/status/
 settings/peer actions needed by the preview. It is not compiled into Tauri,
-release, or Android builds. The adapter deliberately refuses sensitive-item
-reveal, raw clipboard reads, file panels, and every production-only native
-command.
+release, or Android builds. The adapter deliberately refuses raw clipboard
+reads, file panels, and every production-only native command.
 
 On macOS, this starts a debug daemon, records its structured events locally,
 and opens the Tauri app against that daemon:
@@ -166,8 +164,7 @@ bug ids. A subsystem is not done until its manifest's tests pass.
 
 Read [`port-manifest/README.md`](docs/rewrite/port-manifest/README.md) first. It
 records, per manifest, which sections bind. Platform quirks, security
-properties, the accessibility contract and the detection ruleset bind
-throughout.
+properties and the accessibility contract bind throughout.
 
 ## Decisions
 

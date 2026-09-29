@@ -127,7 +127,6 @@ const icons = {
     pin: PushPin,
     unpin: PushPinSlash,
     search: MagnifyingGlass,
-    sensitive: ShieldWarning,
     settings: GearSix,
     terminal: TerminalWindow,
     text: TextT,

@@ -59,18 +59,8 @@ pub(super) fn restore(state: &AppState, id: u64, src_path: &str, confirm: bool) 
     if !src.is_file() {
         return Response::err(id, ErrorCode::NotFound, MSG_RESTORE_NOT_FOUND);
     }
-    match state
-        .store
-        .restore_from(&src, &state.keyring.db_key(), &state.detector)
-    {
-        Ok(report) => {
-            if report.purged > 0 {
-                info!(
-                    purged = report.purged,
-                    scanned = report.scanned,
-                    "removed sensitive restored search entries"
-                );
-            }
+    match state.store.restore_from(&src, &state.keyring.db_key()) {
+        Ok(()) => {
             // Every restored row is "written below the cloud cursor" as far as
             // the upload floor is concerned — their stamps are older than it —
             // so without this the restored history would never leave the device
@@ -131,8 +121,6 @@ mod tests {
     use crate::testutil::{add, contents, test_state};
     use copypaste_ipc::Method;
 
-    const RESTORED_SECRET: &str = "AKIAIOSFODNN7EXAMPLE";
-
     fn call(state: &AppState, method: Method) -> Response {
         crate::server::dispatch::dispatch_store(state, 1, method)
     }
@@ -154,17 +142,6 @@ mod tests {
                 confirm,
             },
         )
-    }
-
-    fn replace_index_text(state: &AppState, id: &str, text: &str) {
-        let conn = open_validated(state.db_path(), &state.keyring.db_key()).unwrap();
-        conn.execute("DELETE FROM clipboard_fts WHERE id = ?1", [id])
-            .unwrap();
-        conn.execute(
-            "INSERT INTO clipboard_fts (id, content_text) VALUES (?1, ?2)",
-            rusqlite::params![id, text],
-        )
-        .unwrap();
     }
 
     fn fts_rows(state: &AppState, id: &str) -> i64 {
@@ -451,10 +428,9 @@ mod tests {
     }
 
     #[test]
-    fn a_restore_commits_only_after_the_current_detector_purges_fts() {
+    fn a_restore_commits_only_after_the_restore_succeeds() {
         let (state, dir) = test_state("alpha");
         let leaked = add(&state, "kept history row");
-        replace_index_text(&state, &leaked, RESTORED_SECRET);
         add(&state, "ordinary restored search marker");
         let backup = dir.path().join("history.backup");
         assert!(backup_to(&state, &backup).ok);
@@ -465,8 +441,7 @@ mod tests {
         assert!(response.ok, "{:?}", response.error);
         assert!(!deleted(&state, &leaked), "the restored row was committed");
         assert!(state.store.get(&leaked).unwrap().is_some());
-        assert_eq!(fts_rows(&state, &leaked), 0);
-        assert!(state.store.search(RESTORED_SECRET, 10).unwrap().is_empty());
+        assert_eq!(fts_rows(&state, &leaked), 1);
         assert_eq!(
             state
                 .store

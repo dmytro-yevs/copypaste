@@ -65,7 +65,7 @@ pub use driver::CloudSync;
 pub use outcome::{SyncError, SyncStats};
 pub use pull::MAX_FUTURE_SKEW_MS;
 pub use push::{too_large_to_sync, MAX_BINARY_BYTES, MAX_TEXT_BYTES};
-pub use source::{Applied, CloudSource, LocalItem, SensitiveGuard};
+pub use source::{Applied, CloudSource, LocalItem};
 pub use store::{floor_after_round, Offer, Scan, StoreView, UPLOAD_SCAN_LIMIT};
 pub use transport::{AuthApi, AuthFault, RestApi, TransportFault};
 pub use unreadable::{Sweep, UnreadableUploads, UploadFloor};
@@ -75,9 +75,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use super::fakes::{
-        allow_everything, config, item, key, session, FakeAuth, FakeRest, FakeSource, ACCOUNT, PASS,
-    };
+    use super::fakes::{config, item, key, session, FakeAuth, FakeRest, FakeSource, ACCOUNT, PASS};
     use super::retry::{MAX_RETRY_AFTER, RETRY_AFTER_FALLBACK};
     use super::*;
     use crate::rest::CloudItem;
@@ -96,7 +94,6 @@ mod tests {
             key(),
             config(),
             session("token-1"),
-            allow_everything(),
         );
         device_a.push(&a_source).await.unwrap();
 
@@ -108,7 +105,6 @@ mod tests {
             crate::crypto::derive_sync_key(PASS, ACCOUNT).unwrap(),
             config(),
             session("token-2"),
-            allow_everything(),
         );
         let stats = device_b.pull(&b_source).await.unwrap();
 
@@ -145,7 +141,6 @@ mod tests {
             key(),
             config(),
             session("token-1"),
-            allow_everything(),
         );
         device_a.push(&a_source).await.unwrap();
 
@@ -156,7 +151,6 @@ mod tests {
             crate::crypto::derive_sync_key(PASS, ACCOUNT).unwrap(),
             config(),
             session("token-2"),
-            allow_everything(),
         );
         assert_eq!(device_b.pull(&b_source).await.unwrap().applied, 1);
 

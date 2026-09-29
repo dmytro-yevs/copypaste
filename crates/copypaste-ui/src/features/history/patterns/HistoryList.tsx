@@ -19,12 +19,10 @@ import type { Selection } from "@/features/history/hooks/useSelection";
 import styles from "./HistoryList.module.css";
 
 interface HistoryListProps {
+    inspectorVisible: boolean;
     items: readonly Item[];
     activeId: string | null;
     onActiveIdChange: (id: string | null) => void;
-    revealedId: string | null;
-    revealedContent: string | null;
-    revealPendingId: string | null;
     previewLines: number;
     groupedByDevice: boolean;
     selection: Selection;
@@ -38,12 +36,10 @@ interface HistoryListProps {
 }
 
 export function HistoryList({
+    inspectorVisible,
     items,
     activeId,
     onActiveIdChange,
-    revealedId,
-    revealedContent,
-    revealPendingId,
     previewLines,
     groupedByDevice,
     selection,
@@ -92,6 +88,7 @@ export function HistoryList({
         onKeyDown,
         activeDescendant,
     } = useHistoryKeyboardNavigation({
+        inspectorVisible,
         items,
         activeId,
         onActiveIdChange,
@@ -122,9 +119,6 @@ export function HistoryList({
                         totalSize={virtualizer.getTotalSize()}
                         items={items}
                         activeId={activeId}
-                        revealedId={revealedId}
-                        revealedContent={revealedContent}
-                        revealPendingId={revealPendingId}
                         previewLines={previewLines}
                         selectionActive={selection.active}
                         selected={selection.selected}

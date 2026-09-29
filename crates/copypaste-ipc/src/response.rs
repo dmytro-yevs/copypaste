@@ -50,13 +50,6 @@ pub struct EventData {
     /// id; subscribers re-read through ordinary methods.
     #[serde(default)]
     pub captured: bool,
-
-    /// Secrets deleted by auto-wipe in this change; zero otherwise. This count
-    /// makes an unrequested deletion visible without exposing ids or content.
-    ///
-    /// Defaulted so watchers built before the field keep decoding.
-    #[serde(default)]
-    pub swept: u32,
 }
 
 /// One reply. `ok` distinguishes success from failure without inspecting the

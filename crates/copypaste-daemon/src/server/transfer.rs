@@ -1,7 +1,6 @@
 //! `export` and `import` on the wire.
 //!
-//! The rules — the three skip counts, the `include_sensitive` opt-in, and the
-//! detector re-running over every imported item (manifest 04, PG-26) — are
+//! The rules for export and import are
 //! [`copypaste_core::transfer`], because Android has no daemon and reaches them
 //! by linking the core in-process. What is left here is what only a daemon has:
 //! mapping a failure onto a pathless `Response`, and waking the two sync
@@ -15,8 +14,8 @@ use crate::AppState;
 
 const MSG_IMPORT_NON_TEXT: &str = "this export contains an item that is not text";
 
-pub(super) fn export(state: &AppState, id: u64, limit: u32, include_sensitive: bool) -> Response {
-    match copypaste_core::transfer::export(&state.store, &state.keyring, limit, include_sensitive) {
+pub(super) fn export(state: &AppState, id: u64, limit: u32) -> Response {
+    match copypaste_core::transfer::export(&state.store, &state.keyring, limit) {
         Ok(data) => Response::ok(id, ResponseData::Export(data)),
         Err(copypaste_core::transfer::ExportError::ContentTooLarge) => Response::err(
             id,
@@ -35,7 +34,6 @@ pub(super) fn import(state: &AppState, id: u64, items: Vec<ExportItem>) -> Respo
     let oldest = items.iter().map(|item| item.created_at).min();
     match copypaste_core::transfer::import_with_current_retention(
         &state.store,
-        &state.detector,
         &state.keyring,
         &settings,
         || state.settings.get().clone(),
@@ -79,7 +77,7 @@ mod tests {
     use copypaste_core::MAX_IMPORT_ITEMS;
     use copypaste_ipc::{ExportData, Method};
 
-    fn seed_legacy_text(state: &AppState, id: &str, content: &str, sensitive: bool) {
+    fn seed_legacy_text(state: &AppState, id: &str, content: &str) {
         let key = state.keyring.item_key();
         let (nonce, content_ciphertext) = copypaste_core::encrypt(content.as_bytes(), &key, id)
             .expect("the current item key seals the direct legacy row");
@@ -91,8 +89,7 @@ mod tests {
                 nonce,
                 content_type: copypaste_ipc::content_type::TEXT.to_string(),
                 content_hash: copypaste_core::compute_content_hash(content.as_bytes()),
-                is_sensitive: sensitive,
-                search_text: (!sensitive).then(|| content.to_string()),
+                search_text: Some(content.to_string()),
                 created_at: copypaste_core::now_ms(),
                 app_bundle_id: None,
                 app_name: None,
@@ -101,8 +98,8 @@ mod tests {
             .expect("a pre-limit row is still a valid stored row");
     }
 
-    fn export_of(state: &AppState, include_sensitive: bool) -> ExportData {
-        match export(state, 1, 0, include_sensitive).data {
+    fn export_of(state: &AppState) -> ExportData {
+        match export(state, 1, 0).data {
             Some(ResponseData::Export(data)) => data,
             other => panic!("{other:?}"),
         }
@@ -117,7 +114,7 @@ mod tests {
         let (source, _a) = test_state("alpha");
         crate::testutil::add(&source, "first");
         crate::testutil::add(&source, "second");
-        let exported = export_of(&source, false);
+        let exported = export_of(&source);
         assert_eq!(exported.items.len(), 2);
 
         let (target, _b) = test_state("beta");
@@ -131,51 +128,6 @@ mod tests {
         let mut round_tripped = crate::testutil::contents(&target);
         round_tripped.sort();
         assert_eq!(round_tripped, ["first", "second"]);
-    }
-
-    /// The withheld count reaching the wire is what the whole opt-in is for: a
-    /// user who is not told believes they exported everything.
-    #[test]
-    fn a_withheld_item_is_counted_on_the_wire_and_its_content_is_not_there() {
-        let (state, _dir) = test_state("alpha");
-        crate::testutil::add(&state, "ordinary");
-        crate::testutil::add(&state, "AKIAIOSFODNN7EXAMPLE");
-
-        let data = export_of(&state, false);
-        assert_eq!(data.items.len(), 1);
-        assert_eq!(data.skipped_sensitive, 1);
-        assert!(!serde_json::to_string(&data)
-            .unwrap()
-            .contains("AKIAIOSFODNN7EXAMPLE"));
-        assert_eq!(export_of(&state, true).items.len(), 2);
-    }
-
-    /// PG-26 through the dispatch path the CLI and the app actually take —
-    /// `copypaste_core::transfer` owns the rule, and this is what proves the
-    /// handler still routes through it rather than inserting the file's claim.
-    #[test]
-    fn an_import_cannot_smuggle_a_credential_in_marked_clean() {
-        let (state, _dir) = test_state("alpha");
-        import_of(
-            &state,
-            vec![ExportItem {
-                content: "AKIAIOSFODNN7EXAMPLE".into(),
-                content_type: "text".into(),
-                created_at: 1_700_000_000_000,
-                pinned: false,
-                is_sensitive: false,
-            }],
-        );
-        let row = state.store.list(10, 0).unwrap().remove(0);
-        assert!(row.is_sensitive, "the detector did not re-run on import");
-        assert!(
-            state
-                .store
-                .search("AKIAIOSFODNN7EXAMPLE", 10)
-                .unwrap()
-                .is_empty(),
-            "an imported credential reached the search index"
-        );
     }
 
     /// An imported history has to reach the account, and the only thing that
@@ -201,14 +153,12 @@ mod tests {
                     content_type: "text".into(),
                     created_at: old,
                     pinned: false,
-                    is_sensitive: false,
                 },
                 ExportItem {
                     content: "newer".into(),
                     content_type: "text".into(),
                     created_at: old + 60_000,
                     pinned: false,
-                    is_sensitive: false,
                 },
             ],
         );
@@ -227,7 +177,7 @@ mod tests {
     fn an_import_of_items_already_present_leaves_the_floor_where_it_was() {
         let (state, _dir) = test_state("alpha");
         crate::testutil::add(&state, "already here");
-        let exported = export_of(&state, false);
+        let exported = export_of(&state);
 
         let floor = copypaste_core::now_ms();
         state
@@ -259,7 +209,6 @@ mod tests {
             content_type: "text".into(),
             created_at: 1,
             pinned: false,
-            is_sensitive: false,
         };
         let response = import_of(&state, vec![item; MAX_IMPORT_ITEMS + 1]);
         assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
@@ -276,7 +225,6 @@ mod tests {
                 content_type: copypaste_ipc::content_type::IMAGE_PNG.into(),
                 created_at: 1,
                 pinned: false,
-                is_sensitive: false,
             }],
         );
         assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
@@ -291,10 +239,9 @@ mod tests {
             &state,
             "daemon-export-legacy",
             &"\u{1}".repeat(copypaste_ipc::MAX_CONTENT_BYTES + 1),
-            false,
         );
 
-        let response = export(&state, 1, 0, false);
+        let response = export(&state, 1, 0);
         assert!(!response.ok);
         assert_eq!(response.error_code, Some(ErrorCode::ContentTooLarge));
         assert!(response.data.is_none());
@@ -309,14 +256,14 @@ mod tests {
             "\u{2}{}",
             "\u{1}".repeat(copypaste_ipc::MAX_CONTENT_BYTES - 1)
         );
-        seed_legacy_text(&state, "daemon-aggregate-first", &first, false);
+        seed_legacy_text(&state, "daemon-aggregate-first", &first);
         state
             .store
             .set_pinned("daemon-aggregate-first", true)
             .unwrap();
-        seed_legacy_text(&state, "daemon-aggregate-second", &second, false);
+        seed_legacy_text(&state, "daemon-aggregate-second", &second);
 
-        let response = export(&state, 1, 0, false);
+        let response = export(&state, 1, 0);
         assert!(!response.ok);
         assert_eq!(response.error_code, Some(ErrorCode::ContentTooLarge));
         assert_eq!(

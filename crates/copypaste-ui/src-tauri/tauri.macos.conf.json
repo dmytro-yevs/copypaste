@@ -7,8 +7,6 @@
         "title": "CopyPaste",
         "width": 1100,
         "height": 760,
-        "minWidth": 720,
-        "minHeight": 460,
         "resizable": true,
         "alwaysOnTop": false,
         "decorations": true,

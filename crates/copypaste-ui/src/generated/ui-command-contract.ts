@@ -11,7 +11,6 @@ export const UI_COMMANDS = {
   copy_item: "copy_item",
   copy_item_as_plain_text: "copy_item_as_plain_text",
   clipboard_write_availability: "clipboard_write_availability",
-  reveal_item: "reveal_item",
   get_item_body: "get_item_body",
   copy_items: "copy_items",
   get_image_preview: "get_image_preview",
@@ -110,7 +109,6 @@ export interface UiCommandArgs {
   copy_item: { id: string };
   copy_item_as_plain_text: { id: string };
   clipboard_write_availability: { contentType: string; mode: "original" | "plain_text" };
-  reveal_item: { id: string };
   get_item_body: { id: string };
   copy_items: { ids: readonly string[] };
   get_image_preview: { id: string; maxEdge?: number };
@@ -166,7 +164,7 @@ export interface UiCommandArgs {
   set_config: { patch: ConfigPatch };
   get_private_mode: undefined;
   set_private_mode: { enabled: boolean };
-  export_history: { includeSensitive: boolean };
+  export_history: undefined;
   prepare_import_history: undefined;
   apply_import_history: { token: string };
   cancel_import_history: { token: string };
@@ -207,7 +205,6 @@ export interface UiCommandResult {
   copy_item: Item;
   copy_item_as_plain_text: Item;
   clipboard_write_availability: "available" | "unsupported_content_type" | "unsupported_on_platform";
-  reveal_item: string;
   get_item_body: string;
   copy_items: number;
   get_image_preview: ImagePreview;
@@ -308,7 +305,6 @@ export const NATIVE_UI_COMMAND_NAMES = [
   UI_COMMANDS.copy_item,
   UI_COMMANDS.copy_item_as_plain_text,
   UI_COMMANDS.clipboard_write_availability,
-  UI_COMMANDS.reveal_item,
   UI_COMMANDS.get_item_body,
   UI_COMMANDS.copy_items,
   UI_COMMANDS.get_image_preview,

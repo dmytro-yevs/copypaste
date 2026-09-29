@@ -13,7 +13,6 @@ use zeroize::Zeroizing;
 
 use super::prepare::prepare_remote_version;
 use super::{MSG_ENCRYPT, MSG_STORE};
-use crate::sensitive::Detector;
 use crate::storage::{origin_or, Store, StoredItem, Version};
 use crate::Keyring;
 
@@ -174,7 +173,6 @@ impl MergeError {
 pub fn apply_remote_version(
     store: &Store,
     keyring: &Keyring,
-    detector: &Detector,
     here: &str,
     incoming: &RemoteVersion<'_>,
 ) -> Result<bool, MergeError> {
@@ -182,15 +180,7 @@ pub fn apply_remote_version(
         return Ok(false);
     }
     let local = local_version(store, incoming.item_id)?;
-    apply_remote_version_with_pin_state(
-        store,
-        keyring,
-        detector,
-        here,
-        incoming,
-        None,
-        local.as_ref(),
-    )
+    apply_remote_version_with_pin_state(store, keyring, here, incoming, None, local.as_ref())
 }
 
 fn local_version(store: &Store, item_id: &str) -> Result<Option<Version>, MergeError> {
@@ -299,7 +289,6 @@ pub(super) fn payload_is_refused(incoming: &RemoteVersion<'_>) -> bool {
 pub fn apply_remote_p2p_version_with_pin_stamp(
     store: &Store,
     keyring: &Keyring,
-    detector: &Detector,
     here: &str,
     incoming: &RemoteVersion<'_>,
     pinned: bool,
@@ -339,7 +328,6 @@ pub fn apply_remote_p2p_version_with_pin_stamp(
         apply_remote_version_with_pin_state(
             store,
             keyring,
-            detector,
             here,
             incoming,
             Some((pinned, pin_order, pin_updated_at, remote_pin_wins)),
@@ -366,15 +354,12 @@ pub fn apply_remote_p2p_version_with_pin_stamp(
 fn apply_remote_version_with_pin_state(
     store: &Store,
     keyring: &Keyring,
-    detector: &Detector,
     here: &str,
     incoming: &RemoteVersion<'_>,
     pin_state: Option<(bool, Option<f64>, i64, bool)>,
     local: Option<&Version>,
 ) -> Result<bool, MergeError> {
-    let Some(prepared) =
-        prepare_remote_version(keyring, detector, here, incoming, pin_state, local)?
-    else {
+    let Some(prepared) = prepare_remote_version(keyring, here, incoming, pin_state, local)? else {
         return Ok(false);
     };
     let stored = store.upsert(&prepared.as_incoming()).map_err(|e| {
@@ -394,14 +379,7 @@ mod tests {
 
     impl Fixture {
         fn apply(&self, incoming: &RemoteVersion<'_>) -> bool {
-            apply_remote_version(
-                &self.store,
-                &self.keyring,
-                &self.detector,
-                &self.here,
-                incoming,
-            )
-            .expect("merge")
+            apply_remote_version(&self.store, &self.keyring, &self.here, incoming).expect("merge")
         }
 
         fn apply_p2p(
@@ -413,7 +391,6 @@ mod tests {
             apply_remote_p2p_version_with_pin_stamp(
                 &self.store,
                 &self.keyring,
-                &self.detector,
                 &self.here,
                 incoming,
                 pinned,
@@ -502,7 +479,6 @@ mod tests {
                     nonce: vec![2],
                     content_type: "text".into(),
                     content_hash: old_hash,
-                    is_sensitive: false,
                     search_text: None,
                     created_at: 1_000,
                     app_bundle_id: None,
@@ -531,7 +507,7 @@ mod tests {
                 app_name: None,
             };
             assert!(
-                apply_remote_version(&f.store, &f.keyring, &f.detector, &f.here, &exact_incoming)
+                apply_remote_version(&f.store, &f.keyring, &f.here, &exact_incoming)
                     .expect("exact cap applies"),
                 "{name} at the cap was rejected"
             );
@@ -555,13 +531,7 @@ mod tests {
                 app_name: None,
             };
             assert_eq!(
-                apply_remote_version(
-                    &f.store,
-                    &f.keyring,
-                    &f.detector,
-                    &f.here,
-                    &oversized_incoming,
-                ),
+                apply_remote_version(&f.store, &f.keyring, &f.here, &oversized_incoming,),
                 Err(MergeError::TooLarge),
                 "{name} must fail before a SQL write"
             );
@@ -774,7 +744,6 @@ mod tests {
         let outcome = apply_remote_p2p_version_with_pin_stamp(
             &f.store,
             &f.keyring,
-            &f.detector,
             &f.here,
             &stale,
             true,
@@ -808,20 +777,6 @@ mod tests {
         assert!(f.store.get("keeper").unwrap().unwrap().pinned);
     }
 
-    #[test]
-    fn an_incoming_secret_is_flagged_here_and_kept_out_of_the_index() {
-        let f = fixture();
-        f.apply(&version("leaky", "AKIAIOSFODNN7EXAMPLE", 1_000));
-
-        let row = f.store.get("leaky").unwrap().expect("stored");
-        assert!(row.is_sensitive, "the local detector must have the say");
-        assert!(f
-            .store
-            .search("AKIAIOSFODNN7EXAMPLE", 10)
-            .unwrap()
-            .is_empty());
-    }
-
     /// A locally captured row stores no origin, so the substitution is what
     /// makes this device's own item come back as a tie rather than as a
     /// stranger's version (INV-I2).
@@ -836,7 +791,6 @@ mod tests {
                 nonce: vec![2],
                 content_type: "text".into(),
                 content_hash: crate::storage::compute_content_hash(b"mine"),
-                is_sensitive: false,
                 search_text: None,
                 created_at: 1_000,
                 app_bundle_id: None,
@@ -850,35 +804,6 @@ mod tests {
             origin_device_id: &f.here,
             ..version("mine", "mine", 1_000)
         }));
-    }
-
-    #[test]
-    fn a_tombstone_does_not_clear_the_sensitive_flag() {
-        let f = fixture();
-        f.apply(&version("leaky", "AKIAIOSFODNN7EXAMPLE", 1_000));
-        let stamp = f.store.version("leaky").unwrap().unwrap().created_at + 1;
-
-        assert!(f.apply(&RemoteVersion {
-            content: "",
-            deleted: true,
-            ..version("leaky", "", stamp)
-        }));
-
-        let row = f
-            .store
-            .version_summary("leaky")
-            .unwrap()
-            .expect("tombstone");
-        assert!(row.deleted);
-        assert!(
-            row.is_sensitive,
-            "a delete cleared the sensitive flag; the secret becomes indexable again"
-        );
-        assert!(f
-            .store
-            .search("AKIAIOSFODNN7EXAMPLE", 10)
-            .unwrap()
-            .is_empty());
     }
 
     #[test]

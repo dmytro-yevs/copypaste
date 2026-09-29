@@ -20,14 +20,6 @@
 //! closed it. A dismissed file picker rendered as an error is the shape of bug
 //! that teaches people to ignore error toasts.
 //!
-//! # What the counts are for
-//!
-//! An export withholds every item the detector flagged unless it is asked twice
-//! — the wire default is `false` and the caller has to opt in — and it
-//! *counts* what it withheld. A user who is not told believes they exported
-//! everything, which they find out at the moment the export was supposed to
-//! save them (`P2-tj9s`, `CopyPaste-93yr`). [`ExportReport`] therefore carries
-//! all three skip counts, always, including when they are zero.
 
 use std::fs::File;
 use std::io::BufReader;
@@ -66,8 +58,6 @@ const MAX_IMPORT_FILE_BYTES: u64 = 64 * 1024 * 1024;
 #[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct ExportReport {
     pub exported: u32,
-    /// Flagged items withheld because the caller did not ask for them.
-    pub skipped_sensitive: u32,
     /// Items that are not representable in the plaintext export.
     pub skipped_non_text: u32,
     pub skipped_undecryptable: u32,
@@ -77,7 +67,6 @@ impl From<&ExportData> for ExportReport {
     fn from(data: &ExportData) -> Self {
         Self {
             exported: u32::try_from(data.items.len()).unwrap_or(u32::MAX),
-            skipped_sensitive: data.skipped_sensitive,
             skipped_non_text: data.skipped_non_text,
             skipped_undecryptable: data.skipped_undecryptable,
         }
@@ -162,18 +151,14 @@ impl PendingImportState {
 
 /// Write history to a file the user picks.
 ///
-/// `include_sensitive` is the second ask. The first is the dialog that offers
-/// it; passing `true` puts credentials in a plaintext file that leaves the
-/// app's control.
 #[tauri::command]
 pub async fn export_history<R: Runtime>(
     app: AppHandle<R>,
     backend: State<'_, SelectedBackend>,
-    include_sensitive: bool,
 ) -> Result<Option<ExportReport>> {
     // The read happens before the panel opens, so a build that cannot export
     // says so instead of asking where to put nothing.
-    let data = backend.export(0, include_sensitive).await?;
+    let data = backend.export(0).await?;
 
     let Some(dest) = document::save_panel_file(&app, EXPORT_NAME).await else {
         return Ok(None);
@@ -289,7 +274,7 @@ mod tests {
     use super::*;
     use copypaste_ipc::ExportItem;
 
-    fn data(items: usize, skipped_sensitive: u32) -> ExportData {
+    fn data(items: usize) -> ExportData {
         ExportData {
             items: (0..items)
                 .map(|n| ExportItem {
@@ -297,29 +282,19 @@ mod tests {
                     content_type: "text/plain".into(),
                     created_at: 0,
                     pinned: false,
-                    is_sensitive: false,
                 })
                 .collect(),
             skipped_non_text: 1,
-            skipped_sensitive,
             skipped_undecryptable: 2,
         }
     }
 
-    /// The count is the whole point: a shorter file and a smaller history are
-    /// the same thing to a user who is not told.
     #[test]
-    fn the_report_carries_every_skip_count_including_zero() {
-        let report = ExportReport::from(&data(3, 0));
+    fn the_report_carries_export_and_remaining_skip_counts() {
+        let report = ExportReport::from(&data(3));
         assert_eq!(report.exported, 3);
-        assert_eq!(report.skipped_sensitive, 0);
         let json = serde_json::to_string(&report).unwrap();
-        assert!(json.contains("\"skipped_sensitive\":0"), "{json}");
-    }
-
-    #[test]
-    fn a_withheld_item_is_counted_rather_than_dropped_quietly() {
-        assert_eq!(ExportReport::from(&data(1, 4)).skipped_sensitive, 4);
+        assert!(json.contains("\"skipped_non_text\":1"), "{json}");
     }
 
     /// Every sentence this file can show is authored here and holds no path.
@@ -343,7 +318,7 @@ mod tests {
     /// produces, so a file moves between the CLI and the window.
     #[test]
     fn an_export_round_trips_through_the_form_it_is_written_in() {
-        let encoded = serde_json::to_string_pretty(&data(2, 0)).unwrap();
+        let encoded = serde_json::to_string_pretty(&data(2)).unwrap();
         let decoded: ExportData = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded.items.len(), 2);
         assert_eq!(decoded.skipped_undecryptable, 2);
@@ -383,7 +358,7 @@ mod tests {
     fn a_valid_file_previews_its_item_count_without_exposing_contents() {
         let pending = PendingImportState::default();
         let file = tempfile::NamedTempFile::new().unwrap();
-        serde_json::to_writer(file.as_file(), &data(3, 0)).unwrap();
+        serde_json::to_writer(file.as_file(), &data(3)).unwrap();
 
         let preview = preview_file(&pending, file.path()).unwrap();
         assert_eq!(preview.item_count, 3);
@@ -395,7 +370,7 @@ mod tests {
     #[test]
     fn cancelling_is_idempotent_and_releases_the_pending_import() {
         let pending = PendingImportState::default();
-        let preview = pending.replace(data(1, 0)).unwrap();
+        let preview = pending.replace(data(1)).unwrap();
 
         pending.cancel(&preview.token).unwrap();
         pending.cancel(&preview.token).unwrap();
@@ -408,7 +383,7 @@ mod tests {
     #[test]
     fn a_confirmation_token_releases_items_exactly_once() {
         let pending = PendingImportState::default();
-        let preview = pending.replace(data(2, 0)).unwrap();
+        let preview = pending.replace(data(2)).unwrap();
 
         assert_eq!(pending.take(&preview.token).unwrap().len(), 2);
         assert!(matches!(
@@ -420,8 +395,8 @@ mod tests {
     #[test]
     fn replacing_a_preview_makes_the_old_token_stale() {
         let pending = PendingImportState::default();
-        let old = pending.replace(data(1, 0)).unwrap();
-        let current = pending.replace(data(2, 0)).unwrap();
+        let old = pending.replace(data(1)).unwrap();
+        let current = pending.replace(data(2)).unwrap();
 
         pending.cancel(&old.token).unwrap();
         assert!(matches!(

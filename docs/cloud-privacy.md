@@ -42,9 +42,6 @@ nothing about content.
 - **It cannot forge a version.** The fields sync orders on are in the clear
   because the backend pages on them, but they are signed on the device under a
   key derived from the same passphrase. See below.
-- **It cannot see items marked sensitive.** Anything the detector flags — a
-  password, a key, a card number — is withheld from upload entirely, at two
-  independent points. It never leaves the device that captured it.
 - **It cannot read another account's rows**, and neither can you: row-level
   security pivots on `user_id` and is enforced *and* forced.
 

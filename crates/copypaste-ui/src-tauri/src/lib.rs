@@ -12,8 +12,7 @@
 //! * [`commands`] — the `#[tauri::command]` surface, written once against that
 //!   alias and containing no `cfg` at all. Identical command names and shapes
 //!   on both platforms is what stops the React side growing platform branches.
-//! * [`model`] — the boundary that discards a sensitive item's plaintext before
-//!   it can reach the WebView.
+//! * [`model`] — UI-facing history and device DTOs.
 //! * [`service`] — who starts and stops the daemon. The app does, and it stops
 //!   only what it started (ADR-0004).
 //! * [`shell`] — menu-bar item, popover placement, global hotkey, launch at
@@ -497,7 +496,7 @@ mod tests {
     }
 
     #[test]
-    fn macos_main_window_preserves_defaults_at_binding_minimum() {
+    fn macos_main_window_allows_compact_layouts() {
         let config: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.macos.conf.json"))
                 .expect("the macOS Tauri config is valid JSON");
@@ -507,8 +506,8 @@ mod tests {
         assert_eq!(main["label"], "main");
         assert_eq!(main["width"], 1100);
         assert_eq!(main["height"], 760);
-        assert_eq!(main["minWidth"], 720);
-        assert_eq!(main["minHeight"], 460);
+        assert!(main.get("minWidth").is_none());
+        assert!(main.get("minHeight").is_none());
         assert_eq!(main["skipTaskbar"], false);
         assert_eq!(main["titleBarStyle"], "Visible");
         assert_eq!(main["hiddenTitle"], true);
@@ -555,8 +554,8 @@ mod tests {
         assert_eq!(main["label"], "main");
         assert_eq!(main["width"], 1100);
         assert_eq!(main["height"], 760);
-        assert_eq!(main["minWidth"], 720);
-        assert_eq!(main["minHeight"], 460);
+        assert!(main.get("minWidth").is_none());
+        assert!(main.get("minHeight").is_none());
         assert_eq!(main["transparent"], false);
         // INV-35 holds on Windows through SetWindowDisplayAffinity, so the
         // screenshot exclusion must be asserted here as well as on macOS.

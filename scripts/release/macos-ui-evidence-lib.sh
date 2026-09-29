@@ -416,7 +416,7 @@ mac_recovery_wall_clock() {
 }
 
 mac_recover_onboarding() { # <safe probe artifact> [timeout] [pace] [clock]
-    local probe="$1" timeout="${2:-30}" pace="${3:-sleep}" clock="${4:-mac_recovery_wall_clock}" error="${1}.err" started now pressed=no
+    local probe="$1" timeout="${2:-30}" pace="${3:-sleep}" clock="${4:-mac_recovery_wall_clock}" error="${1}.err" started now action pressed="|"
     mkdir -p "$(dirname "$probe")"
     started="$("$clock")"
     while :; do
@@ -427,28 +427,33 @@ mac_recover_onboarding() { # <safe probe artifact> [timeout] [pace] [clock]
         elif ! grep -Fq "no accessible element named" "$error"; then
             return 2
         fi
-        if [[ "$pressed" == no ]]; then
-            if mac_ax find-safe-role "Explore first" "AXButton" > "$probe" 2> "$error"; then
-                mac_press_exact_button "Explore first" > /dev/null 2> "$error" || return 2
-                pressed=yes
+        for action in "Get started" "Continue" "Open Library"; do
+            [[ "$pressed" == *"|$action|"* ]] && continue
+            if mac_ax find-safe-role "$action" "AXButton" > "$probe" 2> "$error"; then
+                mac_press_exact_button "$action" > /dev/null 2> "$error" || return 2
+                pressed="$pressed$action|"
+                break
             elif ! grep -Fq "no accessible element named" "$error"; then
                 return 2
             fi
-        fi
+        done
         "$pace" 1
     done
     return 1
 }
 
 mac_reach_settings() { # <dump> [timeout]
-    local dump="$1" timeout="${2:-30}" started="$SECONDS"
+    local dump="$1" timeout="${2:-30}" started="$SECONDS" action
     mac_ax enable >/dev/null 2>&1 || true
     while (( SECONDS - started < timeout )); do
         mac_ax find "Settings" > "$dump" 2>/dev/null && return 0
         # The welcome flow replaces the shell; dismiss it before Settings exists.
-        if mac_ax find "Explore first" > /dev/null 2>&1; then
-            mac_ax press "Explore first" >/dev/null 2>&1 || true
-        fi
+        for action in "Get started" "Continue" "Open Library"; do
+            if mac_ax find "$action" > /dev/null 2>&1; then
+                mac_ax press "$action" >/dev/null 2>&1 || return 1
+                break
+            fi
+        done
         # WKWebView AX can stay empty; the tray menu item still opens Settings.
         if mac_ax menu-press "Open Settings" >/dev/null 2>&1; then
             sleep 1
@@ -509,8 +514,8 @@ mac_ui_self_test() {
             find-safe-role)
                 if [[ "$4" == "Library" && "$5" == "AXHeading" ]]; then
                     printf 'AXHeading\tLibrary\n'
-                elif [[ "$4" == "Explore first" && "$5" == "AXButton" ]]; then
-                    printf 'AXButton\tExplore first\n'
+                elif [[ "$4" == "Get started" && "$5" == "AXButton" ]]; then
+                    printf 'AXButton\tGet started\n'
                 else
                     return 1
                 fi
@@ -523,7 +528,7 @@ mac_ui_self_test() {
                 fi
                 ;;
             press-exact)
-                if [[ "$4" == "Library" || "$4" == "Explore first" ]]; then
+                if [[ "$4" == "Library" || "$4" == "Get started" ]]; then
                     printf 'ok\n'
                 else
                     return 1

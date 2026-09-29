@@ -5,11 +5,11 @@
 //! `Option`s existed only because construction was spread across the builders.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
-use copypaste_core::{Detector, Keyring, Store};
+use copypaste_core::{Keyring, Store};
 use copypaste_ipc::{DiagnosticCounters, EventData, EventKind};
 use tokio::sync::{broadcast, watch, OwnedRwLockReadGuard, RwLock};
 
@@ -25,10 +25,6 @@ pub struct AppState {
     /// `Arc` because `copypaste_core::StoreSource` holds one for as long as the
     /// peer listener runs, and the device secret is not `Clone` on purpose.
     pub keyring: Arc<Keyring>,
-    /// `Arc` because the cloud upload gate holds one too. A second `Detector`
-    /// would be a second ruleset (AGENTS.md rule 1) free to disagree with the
-    /// one capture uses.
-    pub detector: Arc<Detector>,
     /// `std::sync::Mutex`, not `tokio`'s: the guard is never held across an
     /// `.await`, so a `copy` cannot queue behind a capture tick for longer than
     /// one pasteboard access.
@@ -55,13 +51,6 @@ pub struct AppState {
     backend_name: &'static str,
     ready: AtomicBool,
     capture_running: AtomicBool,
-    /// Set rather than passed: decided outside construction, read by `status`,
-    /// and threading it through `new` would touch every caller for a value none
-    /// of them has an opinion about. Same for `ready` and `index_purged`.
-    /// The clipboard's own two counters live on the port; these are the ones
-    /// nothing else owns.
-    sensitive_swept: AtomicU64,
-    index_purged: AtomicU64,
     started_at: Instant,
 }
 
@@ -74,7 +63,6 @@ impl AppState {
     pub fn new(
         store: Store,
         keyring: Arc<Keyring>,
-        detector: Arc<Detector>,
         clipboard: Box<dyn ClipboardSource>,
         meta: Meta,
         p2p: P2p,
@@ -86,7 +74,6 @@ impl AppState {
         Self {
             store,
             keyring,
-            detector,
             clipboard: Mutex::new(clipboard),
             meta,
             p2p,
@@ -101,8 +88,6 @@ impl AppState {
             backend_name,
             ready: AtomicBool::new(false),
             capture_running: AtomicBool::new(false),
-            sensitive_swept: AtomicU64::new(0),
-            index_purged: AtomicU64::new(0),
             started_at: Instant::now(),
         }
     }
@@ -162,17 +147,7 @@ impl AppState {
     /// back.
     pub fn note_local_change(&self) {
         self.p2p.node().note_local_version(copypaste_core::now_ms());
-        self.publish(EventKind::Items, false, 0);
-        self.p2p.wake();
-        self.cloud.wake();
-    }
-
-    /// The auto-wipe sweep deleted `count` secrets — the only local change the
-    /// user did not ask for, so the count travels with it.
-    pub fn note_sensitive_swept(&self, count: u32) {
-        self.sensitive_swept
-            .fetch_add(u64::from(count), Ordering::Relaxed);
-        self.publish(EventKind::Items, false, count);
+        self.publish(EventKind::Items, false);
         self.p2p.wake();
         self.cloud.wake();
     }
@@ -185,21 +160,21 @@ impl AppState {
     /// it.
     pub fn note_capture(&self, floor_ms: i64) {
         self.p2p.node().note_local_version(floor_ms);
-        self.publish(EventKind::Items, true, 0);
+        self.publish(EventKind::Items, true);
         self.p2p.wake();
         self.cloud.wake();
     }
 
     /// History changed because a peer or the cloud delivered something.
     pub fn note_remote_change(&self) {
-        self.publish(EventKind::Items, false, 0);
+        self.publish(EventKind::Items, false);
     }
 
     pub fn note_peers_changed(&self) {
-        self.publish(EventKind::Peers, false, 0);
+        self.publish(EventKind::Peers, false);
     }
 
-    fn publish(&self, event: EventKind, captured: bool, swept: u32) {
+    fn publish(&self, event: EventKind, captured: bool) {
         // Having no subscriber is the ordinary case: the CLI does not subscribe
         // and the app may not be running. `item_count` costs a `SELECT COUNT(*)`
         // over the live set, so it is not built for nobody. Safe against the
@@ -212,7 +187,6 @@ impl AppState {
             event,
             item_count: self.store.count().unwrap_or(0),
             captured,
-            swept,
         });
     }
 
@@ -245,10 +219,6 @@ impl AppState {
         self.capture_running.store(running, Ordering::Release);
     }
 
-    pub fn set_index_purged(&self, purged: u64) {
-        self.index_purged.store(purged, Ordering::Release);
-    }
-
     /// Assembled here rather than in the status handler because two of the five
     /// are behind the clipboard mutex: a caller reading them itself would take
     /// that lock a second time for the same reply.
@@ -263,8 +233,6 @@ impl AppState {
         DiagnosticCounters {
             rejected_too_large,
             lost_intermediates,
-            sensitive_swept: self.sensitive_swept.load(Ordering::Relaxed),
-            index_purged: self.index_purged.load(Ordering::Acquire),
             uptime_secs: self.started_at.elapsed().as_secs(),
         }
     }

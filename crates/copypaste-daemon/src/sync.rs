@@ -18,7 +18,6 @@ pub fn store_source(state: &Arc<AppState>) -> StoreSource {
     StoreSource::with_retention_settings(
         state.store.clone(),
         Arc::clone(&state.keyring),
-        Arc::clone(&state.detector),
         state.meta.device_id().to_string(),
         state.meta.device_name(),
         move || settings.settings.get().clone(),

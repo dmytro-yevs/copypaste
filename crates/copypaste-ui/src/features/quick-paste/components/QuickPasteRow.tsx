@@ -80,13 +80,9 @@ export function QuickPasteRow({
     item,
     fullContent,
     fullContentFailed,
-    revealedContent: null,
   });
-  const hasPotentialFinding = item.sensitive_finding !== null;
   const cardContent =
-    body.state === "content" && body.source === "redacted"
-      ? body.content
-      : body.state === "unavailable" || body.state === "masked"
+    body.state === "unavailable"
         ? ""
         : kind === "unknown"
           ? rowLabel
@@ -188,7 +184,6 @@ export function QuickPasteRow({
           bodyClassName={styles.body}
           preview={{
             kind,
-            masked: body.state === "masked",
             content: compactContent,
             previewLines: QUICK_PASTE_PREVIEW_LINES,
             imagePreview: image ? <ClipImageLoader id={item.id} size="fill" /> : undefined,
@@ -204,13 +199,6 @@ export function QuickPasteRow({
             devicePresentation: "label",
           }}
           hideMetadata
-          bodyAccessory={hasPotentialFinding ? (
-            <span className={styles.sensitiveBadge} data-tone="warning" title={t("quickPaste.row.potentialSensitive")}>
-              <span aria-hidden="true">•</span>
-              <Icon name="sensitive" size="xs" weight="bold" />
-              <span>{t("quickPaste.row.potentialSensitive")}</span>
-            </span>
-          ) : null}
           afterBody={active && copyAvailability.reason !== null ? (
           <StateView
             mode={copyAvailability.canRetry ? "warning" : "info"}

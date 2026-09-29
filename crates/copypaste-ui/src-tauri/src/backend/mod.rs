@@ -131,7 +131,7 @@ pub trait Backend: PairingBackend + Send + Sync + 'static {
     /// previous page, and `None` asks for the first.
     async fn list(&self, limit: u32, cursor: Option<&str>) -> Result<Page>;
 
-    /// Full-text search. Sensitive items are never indexed and never returned.
+    /// Full-text search.
     ///
     /// Not paged — [`Page::next_cursor`] is always `None`. It runs against the
     /// whole database and returns the best `limit` matches; FTS5 `rank` is a
@@ -206,13 +206,10 @@ pub trait Backend: PairingBackend + Send + Sync + 'static {
         .await
     }
 
-    /// Fetch one item by id, including a sensitive one's plaintext.
-    ///
-    /// The only route back to a secret, and it exists for the explicit reveal
-    /// gesture. See `crate::model` for why nothing else needs one.
+    /// Fetch one item by id.
     async fn get(&self, id: &str) -> Result<Item>;
 
-    /// Decode one non-sensitive history image into a bounded preview on demand.
+    /// Decode one history image into a bounded preview on demand.
     async fn image_preview(&self, id: &str, max_edge: Option<u32>) -> Result<ImagePreview>;
 
     /// Return persisted source-icon metadata by item id, without returning its body.
@@ -222,14 +219,12 @@ pub trait Backend: PairingBackend + Send + Sync + 'static {
 
     /// Put an item's content on the system clipboard.
     ///
-    /// Takes an id, not content, so a sensitive item can be copied without its
-    /// plaintext ever entering the WebView.
+    /// Takes an item id so native clipboard writes preserve its format.
     async fn copy(&self, id: &str) -> Result<Item>;
 
     /// Put only an item's textual representation on the system clipboard.
     ///
-    /// This is the backend half of Quick Paste's ⌥Enter action. It remains an
-    /// id-based operation, so a sensitive item still never enters the WebView.
+    /// This is the backend half of Quick Paste's ⌥Enter action.
     /// Only `text` and `text/*` rows have this representation; binary rows are
     /// refused instead of copying their UI placeholder.
     async fn copy_as_plain_text(&self, id: &str) -> Result<Item>;
@@ -351,10 +346,8 @@ pub trait Backend: PairingBackend + Send + Sync + 'static {
 
     /// Read history out. `limit` of 0 means everything.
     ///
-    /// [`ExportData`] carries three skip counts and they are the reason this
-    /// returns the whole struct rather than a `Vec`: an export that quietly
-    /// withheld a flagged item is one the user believes is complete.
-    async fn export(&self, limit: u32, include_sensitive: bool) -> Result<ExportData>;
+    /// [`ExportData`] carries skip counts, so export returns the whole result.
+    async fn export(&self, limit: u32) -> Result<ExportData>;
 
     /// Put items back, through the same ingest path a capture takes.
     async fn import(&self, items: Vec<ExportItem>) -> Result<ImportData>;

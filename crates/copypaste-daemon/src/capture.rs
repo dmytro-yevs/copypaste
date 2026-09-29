@@ -4,7 +4,7 @@
 //! this crate's callers name it where they always did. It lives in the core
 //! because Android links the core in-process and cannot depend on this crate,
 //! which is a binary with no `lib` target. A second ingest path could bypass
-//! dedup, secret detection, or retention.
+//! dedup or retention.
 //!
 //! Manifest 01's data-loss rules that this file is responsible for:
 //!
@@ -19,7 +19,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use copypaste_source_app::SourceAppIconCache;
@@ -67,7 +67,6 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) -> a
         "clipboard capture started"
     );
 
-    let mut last_sweep = Instant::now();
     let pending = Arc::new(Mutex::new(None));
 
     let result = 'capture: loop {
@@ -109,20 +108,11 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) -> a
             // of catch-up ticks — the clipboard has no backlog to drain, only a
             // current value — and the wait is recomputed each time round.
             _ = tokio::time::sleep(wait) => {
-                // The sweep used to ride every poll. It cannot any more — an
-                // unchanged clipboard no longer reaches `tick` — so it gets a
-                // cadence of its own, and none at all while it is switched off.
-                let sweep_due = state.settings.get().sensitive_ttl_secs > 0
-                    && last_sweep.elapsed() >= SWEEP_INTERVAL;
-
                 // Bound to a local so the clipboard guard is released before
                 // the handoff below rather than held across it.
                 let changed = pending.lock().unwrap_or_else(|e| e.into_inner()).is_some() || state.clipboard().changed();
-                if !changed && !sweep_due {
+                if !changed {
                     continue;
-                }
-                if sweep_due {
-                    last_sweep = Instant::now();
                 }
 
                 let state = Arc::clone(&state);
@@ -131,7 +121,7 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) -> a
                 // for the IPC server — and reaching it costs six thread wakeups,
                 // which is why an idle clipboard stops short of here.
                 let pending = Arc::clone(&pending);
-                match tokio::task::spawn_blocking(move || tick_slot(&state, sweep_due, &pending)).await {
+                match tokio::task::spawn_blocking(move || tick_slot(&state, &pending)).await {
                     Ok(
                         CaptureOutcome::NoCapture
                         | CaptureOutcome::Stored
@@ -151,43 +141,6 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) -> a
     result
 }
 
-/// Delete detected secrets whose TTL has elapsed.
-///
-/// Best-effort, and deliberately never fatal to a tick: the sweep deletes user
-/// data, so a failure must leave the data alone and retry, not stop capture
-/// (AGENTS.md rule 4). `0` disables it. The shipped default is 30 seconds.
-fn sweep_sensitive_items(state: &AppState) {
-    let (mutation_started, removed) = state.store.with_retention(|| {
-        let ttl = Duration::from_secs(state.settings.get().sensitive_ttl_secs);
-        // Capture before wipe stamps so the upload floor cannot land above the
-        // tombstone `created_at` (decrypt/judge can cross a millisecond).
-        let mutation_started = copypaste_core::now_ms();
-        let removed = copypaste_core::sensitive::sweep_sensitive(
-            &state.store,
-            &state.detector,
-            &state.keyring.item_key(),
-            ttl,
-            mutation_started,
-        );
-        (mutation_started, removed)
-    });
-    match removed {
-        Ok(0) => {}
-        // `note_sensitive_swept` rather than `note_local_change`: this is the
-        // one history change nobody asked for, and a client cannot say so on an
-        // event that only reports that the count moved.
-        Ok(removed) => {
-            crate::cloud::note_version_written(state, mutation_started);
-            state.note_sensitive_swept(u32::try_from(removed).unwrap_or(u32::MAX));
-        }
-        Err(e) => warn!(error = ?e, "the sensitive-item sweep failed"),
-    }
-}
-
-/// How often the sensitive-item sweep runs while it is switched on. A TTL is
-/// measured in seconds at least, so it does not need the poll interval.
-const SWEEP_INTERVAL: Duration = Duration::from_secs(1);
-
 /// One poll. Returns `Ok(())` when there was nothing to capture.
 enum CaptureOutcome {
     NoCapture,
@@ -202,19 +155,15 @@ struct PendingCapture {
     settings: copypaste_ipc::ConfigData,
 }
 
-fn tick_slot(
-    state: &AppState,
-    sweep_due: bool,
-    slot: &Mutex<Option<PendingCapture>>,
-) -> CaptureOutcome {
+fn tick_slot(state: &AppState, slot: &Mutex<Option<PendingCapture>>) -> CaptureOutcome {
     let mut slot = slot.lock().unwrap_or_else(|e| e.into_inner());
-    tick(state, sweep_due, &mut slot)
+    tick(state, &mut slot)
 }
 fn drain_pending(state: &AppState, slot: &Mutex<Option<PendingCapture>>) -> CaptureOutcome {
     let mut slot = slot.lock().unwrap_or_else(|e| e.into_inner());
-    tick(state, false, &mut slot)
+    tick(state, &mut slot)
 }
-fn tick(state: &AppState, sweep_due: bool, slot: &mut Option<PendingCapture>) -> CaptureOutcome {
+fn tick(state: &AppState, slot: &mut Option<PendingCapture>) -> CaptureOutcome {
     // The guard is taken for the pasteboard read alone and dropped before the
     // ingest, so an in-flight `copy` waits on one accessor call, not on a
     // database write.
@@ -225,9 +174,6 @@ fn tick(state: &AppState, sweep_due: bool, slot: &mut Option<PendingCapture>) ->
     let capture = state
         .clipboard()
         .poll_with_policy(crate::clipboard::CapturePolicy::new(&settings));
-    if sweep_due {
-        sweep_sensitive_items(state);
-    }
     let Some(capture) = capture else {
         return CaptureOutcome::NoCapture;
     };
@@ -343,11 +289,7 @@ pub(crate) fn ingest_capture(
     created_at: i64,
 ) -> Result<Ingested, IngestError> {
     let capture = capture.borrow();
-    let sensitive_floor = capture
-        .app_bundle_id
-        .as_deref()
-        .is_some_and(crate::clipboard::is_password_manager_app);
-    let payload_metadata = capture_metadata(capture, sensitive_floor);
+    let payload_metadata = capture_metadata(capture);
     match (
         capture.content_type.as_str(),
         capture.binary_content.as_deref(),
@@ -360,12 +302,10 @@ pub(crate) fn ingest_capture(
         {
             copypaste_core::ingest::ingest_into_with_capture_source_metadata_with_current_retention(
                 &state.store,
-                &state.detector,
                 &state.keyring,
                 &capture.content,
                 &capture.content_type,
                 created_at,
-                sensitive_floor,
                 capture.app_bundle_id.as_deref(),
                 capture.app_name.as_deref(),
                 payload_metadata.as_ref(),
@@ -387,7 +327,6 @@ pub(crate) fn ingest_capture(
                 bytes,
                 content_type,
                 created_at,
-                sensitive_floor,
                 capture.app_bundle_id.as_deref(),
                 capture.app_name.as_deref(),
                 payload_metadata.as_ref(),
@@ -407,7 +346,6 @@ pub(crate) fn ingest_capture(
                 &bytes,
                 copypaste_ipc::content_type::FILE,
                 created_at,
-                sensitive_floor,
                 capture.app_bundle_id.as_deref(),
                 capture.app_name.as_deref(),
                 payload_metadata.as_ref(),
@@ -420,21 +358,20 @@ pub(crate) fn ingest_capture(
 
 fn capture_metadata(
     capture: &crate::clipboard::Capture,
-    sensitive_floor: bool,
 ) -> Option<copypaste_core::PayloadMetadata> {
-    capture_metadata_with(capture, sensitive_floor, |app_id| {
+    capture_metadata_with(capture, |app_id| {
         source_icon_cache().resolve_desktop(app_id)
     })
 }
 
 fn capture_metadata_with(
     capture: &crate::clipboard::Capture,
-    sensitive_floor: bool,
     resolver: impl FnOnce(&str) -> Option<copypaste_source_app::AppIcon>,
 ) -> Option<copypaste_core::PayloadMetadata> {
-    let source_app_icon = (!sensitive_floor)
-        .then(|| capture.app_bundle_id.as_deref().and_then(resolver))
-        .flatten()
+    let source_app_icon = capture
+        .app_bundle_id
+        .as_deref()
+        .and_then(resolver)
         .and_then(|icon| {
             let png = STANDARD.decode(icon.png_base64).ok()?;
             copypaste_core::SourceAppIconMetadata::new(&png, icon.width, icon.height)
@@ -496,12 +433,10 @@ pub fn ingest_at(
     // UUIDs and an extra argument on a path that has no opinion about sync.
     copypaste_core::ingest::ingest_into_with_capture_source_with_current_retention(
         &state.store,
-        &state.detector,
         &state.keyring,
         content,
         content_type,
         created_at,
-        false,
         None,
         None,
         &settings,
@@ -512,7 +447,7 @@ pub fn ingest_at(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::clipboard::windows_attribution::{Attribution, SourceApp};
+    use crate::clipboard::windows_attribution::SourceApp;
     use crate::testutil::test_state;
     use copypaste_ipc::transport;
     use copypaste_ipc::{ErrorCode, Method, Request, Response, PROTOCOL_VERSION};
@@ -847,206 +782,6 @@ mod tests {
         drop(guard);
     }
 
-    /// DMY-158, the whole path and not one predicate of it.
-    ///
-    /// Two clipboard changes a third of a second apart, the second written by a
-    /// credential store. The attribution decision, the sensitivity floor, the
-    /// search index and the set a sync session advertises live in four files;
-    /// this is the test that runs them as one. Before the fix the second change
-    /// inherited the first application's identity, so the floor never applied
-    /// and the password was both searchable and syncable — no assertion on
-    /// `is_password_manager_app` alone can see that.
-    #[test]
-    fn a_rapid_second_capture_from_a_credential_store_reaches_neither_search_nor_sync() {
-        let (state, _dir) = test_state("credential-store-burst");
-        let mut attribution = Attribution::default();
-
-        // Resolved exactly as the Windows backend resolves them: once per
-        // clipboard change, inside what used to be one 750 ms cache window.
-        let ordinary =
-            attribution.for_change(41, || SourceApp::from_image_path(r"C:\Windows\notepad.exe"));
-        let credential = attribution.for_change(42, || {
-            SourceApp::from_image_path(r"C:\Users\ann\AppData\Local\1Password\app\8\1Password.exe")
-        });
-        let now = copypaste_core::now_ms();
-        let notes = ingest_capture(
-            &state,
-            &state.settings.get(),
-            captured("thursday agenda notes", ordinary),
-            now,
-        )
-        .expect("the ordinary capture is stored")
-        .into_item();
-        let secret = ingest_capture(
-            &state,
-            &state.settings.get(),
-            captured("correct horse battery staple", credential),
-            now + 1,
-        )
-        .expect("the credential capture is stored")
-        .into_item();
-
-        assert!(
-            secret.is_sensitive,
-            "a credential store's copy was stored as ordinary text"
-        );
-
-        // The index answers for the ordinary row, so an empty result for the
-        // secret is the gate and not a broken query.
-        let found: Vec<String> = state
-            .store
-            .search("thursday", 10)
-            .expect("search")
-            .into_iter()
-            .map(|item| item.id)
-            .collect();
-        assert_eq!(found, vec![notes.id.clone()]);
-        assert!(
-            state
-                .store
-                .search("battery", 10)
-                .expect("search")
-                .is_empty(),
-            "the password reached full-text search"
-        );
-
-        // What a sync session advertises: sensitive rows are not in it, and a
-        // peer cannot ask for what was never offered.
-        let advertised: Vec<String> = state
-            .store
-            .summaries_since(0, None, 100)
-            .expect("summaries")
-            .into_iter()
-            .map(|version| version.id)
-            .collect();
-        assert!(advertised.contains(&notes.id));
-        assert!(
-            !advertised.contains(&secret.id),
-            "the password was offered to a sync session"
-        );
-    }
-
-    /// DMY-158 failure-before: when the attribution cache shares one identity
-    /// across two changes (the TTL bug), a credential store's password passes
-    /// the sensitivity floor, reaches full-text search and is offered to sync.
-    #[test]
-    fn shared_attribution_lets_a_credential_stores_copy_into_search_and_sync() {
-        let (state, _dir) = test_state("shared-attribution-vuln");
-        let mut attribution = Attribution::default();
-
-        let ordinary =
-            attribution.for_change(41, || SourceApp::from_image_path(r"C:\Windows\notepad.exe"));
-        // Same sequence number: the cache answers from the first resolution,
-        // so the credential store is attributed to Notepad.
-        let misattributed = attribution.for_change(41, || unreachable!("the cache must answer"));
-        assert_eq!(
-            misattributed.as_ref().map(|a| a.id.as_str()),
-            Some("notepad.exe"),
-            "the cache must return the first identity"
-        );
-
-        let now = copypaste_core::now_ms();
-        let notes = ingest_capture(
-            &state,
-            &state.settings.get(),
-            captured("thursday agenda notes", ordinary),
-            now,
-        )
-        .unwrap()
-        .into_item();
-        let wrong = ingest_capture(
-            &state,
-            &state.settings.get(),
-            captured("correct horse battery staple", misattributed),
-            now + 1,
-        )
-        .unwrap()
-        .into_item();
-
-        assert!(
-            !wrong.is_sensitive,
-            "misattributed to Notepad, the secret was not flagged"
-        );
-        assert!(
-            !state.store.search("battery", 10).unwrap().is_empty(),
-            "the password reached full-text search under the wrong identity"
-        );
-        let advertised: Vec<String> = state
-            .store
-            .summaries_since(0, None, 100)
-            .expect("summaries")
-            .into_iter()
-            .map(|version| version.id)
-            .collect();
-        assert!(
-            advertised.contains(&wrong.id),
-            "the password must leak to sync under shared attribution"
-        );
-        assert!(
-            advertised.contains(&notes.id),
-            "the ordinary item must still be advertised"
-        );
-    }
-
-    /// DMY-158: the two writers resolve within 750 ms, which is the window
-    /// the old TTL cache would have collapsed. Measured to confirm the fix
-    /// does not regress even with per-change resolution.
-    #[test]
-    fn two_writer_attribution_is_measured_within_750ms() {
-        let (state, _dir) = test_state("timed-two-writer");
-        let mut attribution = Attribution::default();
-
-        let started = std::time::Instant::now();
-        let ordinary =
-            attribution.for_change(51, || SourceApp::from_image_path(r"C:\Windows\notepad.exe"));
-        let credential = attribution.for_change(52, || {
-            SourceApp::from_image_path(r"C:\Users\ann\AppData\Local\1Password\app\8\1Password.exe")
-        });
-        let elapsed = started.elapsed();
-
-        assert!(
-            elapsed.as_millis() < 750,
-            "two resolutions took {}ms; must fit in the old 750ms window",
-            elapsed.as_millis()
-        );
-        let ordinary = ordinary.expect("first writer");
-        let credential = credential.expect("second writer");
-        assert_eq!(ordinary.id, "notepad.exe");
-        assert_eq!(credential.id, "1password.exe");
-        assert_ne!(ordinary.id, credential.id, "distinct writers");
-
-        let now = copypaste_core::now_ms();
-        let notes = ingest_capture(
-            &state,
-            &state.settings.get(),
-            captured("meeting agenda", Some(ordinary)),
-            now,
-        )
-        .expect("ordinary")
-        .into_item();
-        let secret = ingest_capture(
-            &state,
-            &state.settings.get(),
-            captured("correct horse battery staple", Some(credential)),
-            now + 1,
-        )
-        .expect("credential")
-        .into_item();
-
-        assert!(secret.is_sensitive);
-        assert!(!notes.is_sensitive);
-        assert!(state.store.search("battery", 10).unwrap().is_empty());
-        let advertised: Vec<String> = state
-            .store
-            .summaries_since(0, None, 100)
-            .unwrap()
-            .into_iter()
-            .map(|v| v.id)
-            .collect();
-        assert!(!advertised.contains(&secret.id));
-        assert!(advertised.contains(&notes.id));
-    }
-
     #[test]
     fn image_capture_values_are_stored_as_binary_without_search_text() {
         let (state, _dir) = test_state("image-capture");
@@ -1206,208 +941,6 @@ mod tests {
         .is_ok());
     }
 
-    /// `sensitive_ttl_secs` ships at 30 seconds; this test turns it on
-    /// explicitly so the fixture does not depend on the default.
-    #[test]
-    fn a_sweep_reports_how_many_secrets_it_deleted() {
-        let (state, _dir) = test_state("alpha");
-        state
-            .settings
-            .apply(
-                &state.meta,
-                &copypaste_ipc::ConfigPatch {
-                    sensitive_ttl_secs: Some(30),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        // Captured long enough ago to be past a 30-second deadline.
-        let old = copypaste_core::now_ms() - 10 * 60 * 1000;
-        ingest_at(&state, "AKIAIOSFODNN7EXAMPLE", "text", old).unwrap();
-
-        let mut events = state.subscribe();
-        sweep_sensitive_items(&state);
-
-        let event = events.try_recv().expect("the sweep publishes an event");
-        assert_eq!(event.swept, 1);
-        assert_eq!(event.item_count, 0);
-        assert!(!event.captured);
-    }
-
-    /// The sweep used to ride every poll. Now that an unchanged clipboard
-    /// never reaches `tick`, the loop decides when it is due — and a `tick`
-    /// that swept regardless would put the database back on every poll.
-    #[test]
-    fn only_a_due_tick_sweeps() {
-        let (state, _dir) = test_state("alpha");
-        state
-            .settings
-            .apply(
-                &state.meta,
-                &copypaste_ipc::ConfigPatch {
-                    sensitive_ttl_secs: Some(30),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        let old = copypaste_core::now_ms() - 10 * 60 * 1000;
-        ingest_at(&state, "AKIAIOSFODNN7EXAMPLE", "text", old).unwrap();
-
-        let mut pending = None;
-        assert!(matches!(
-            tick(&state, false, &mut pending),
-            CaptureOutcome::NoCapture
-        ));
-        assert_eq!(
-            state.store.count().unwrap(),
-            1,
-            "a tick that was not due swept"
-        );
-
-        assert!(matches!(
-            tick(&state, true, &mut pending),
-            CaptureOutcome::NoCapture
-        ));
-        assert_eq!(state.store.count().unwrap(), 0, "a due tick did not sweep");
-    }
-
-    /// A sweep that removed nothing must stay silent, or a client would post a
-    /// "deleted" notice on every poll tick.
-    #[test]
-    fn a_sweep_with_nothing_to_delete_publishes_nothing() {
-        let (state, _dir) = test_state("alpha");
-        ingest(&state, "an ordinary clipping", "text").unwrap();
-        let mut events = state.subscribe();
-        sweep_sensitive_items(&state);
-        assert!(events.try_recv().is_err());
-    }
-
-    #[test]
-    fn a_disabled_sensitive_ttl_keeps_an_expired_secret() {
-        let (state, _dir) = test_state("ttl-off");
-        state
-            .settings
-            .apply(
-                &state.meta,
-                &copypaste_ipc::ConfigPatch {
-                    sensitive_ttl_secs: Some(0),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        let item = ingest_at(
-            &state,
-            "AKIAIOSFODNN7EXAMPLE",
-            copypaste_ipc::content_type::TEXT,
-            copypaste_core::now_ms().saturating_sub(120_000),
-        )
-        .unwrap()
-        .into_item();
-
-        sweep_sensitive_items(&state);
-        assert!(state.store.get(&item.id).unwrap().is_some());
-    }
-
-    #[test]
-    fn a_sensitive_sweep_pulls_the_cloud_upload_floor_back() {
-        let (state, _dir) = test_state("alpha");
-        state
-            .settings
-            .apply(
-                &state.meta,
-                &copypaste_ipc::ConfigPatch {
-                    sensitive_ttl_secs: Some(30),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        let old = copypaste_core::now_ms() - 10 * 60 * 1000;
-        ingest_at(&state, "AKIAIOSFODNN7EXAMPLE", "text", old).unwrap();
-        let ahead = copypaste_core::now_ms().saturating_add(60_000);
-        state
-            .meta
-            .set_state_ms(crate::cloud::KEY_UPLOAD_FLOOR, ahead)
-            .unwrap();
-
-        sweep_sensitive_items(&state);
-
-        let floor = state.meta.state_ms(crate::cloud::KEY_UPLOAD_FLOOR).unwrap();
-        assert!(floor < ahead, "the sweep left the upload floor ahead");
-        assert!(
-            state
-                .store
-                .versions_since(floor, 100)
-                .unwrap()
-                .iter()
-                .any(|row| row.deleted),
-            "the wipe tombstone was not offered"
-        );
-    }
-
-    /// Every other history change reports `swept: 0`, so a client can branch on
-    /// it without asking what kind of change it was.
-    #[test]
-    fn an_ordinary_change_carries_no_swept_count() {
-        let (state, _dir) = test_state("alpha");
-        let mut events = state.subscribe();
-        state.note_local_change();
-        assert_eq!(events.try_recv().expect("an event").swept, 0);
-    }
-
-    #[test]
-    fn detected_sensitive_capture_never_reaches_fts_or_sync() {
-        let (state, _dir) = test_state("sensitive-capture");
-        let stored = ingest(
-            &state,
-            "AKIAIOSFODNN7EXAMPLE",
-            copypaste_ipc::content_type::TEXT,
-        )
-        .unwrap()
-        .into_item();
-        assert!(stored.is_sensitive);
-        assert!(state.store.search("generated", 10).unwrap().is_empty());
-        assert!(
-            state
-                .store
-                .versions_since(i64::MIN, 100)
-                .unwrap()
-                .is_empty(),
-            "sensitive rows never enter sync"
-        );
-    }
-
-    #[test]
-    fn credential_store_origin_is_persisted_and_forces_sensitive() {
-        let (state, _dir) = test_state("credential-store-origin");
-        let stored = ingest_capture(
-            &state,
-            &state.settings.get(),
-            crate::clipboard::Capture {
-                content: "xK9mQ3nR7pT2vW5".to_string(),
-                binary_content: None,
-                file_path: None,
-                file_metadata: None,
-                content_type: copypaste_ipc::content_type::TEXT.to_string(),
-                app_bundle_id: Some("COM.1Password.Desktop".to_string()),
-                app_name: Some("1Password".to_string()),
-            },
-            copypaste_core::now_ms(),
-        )
-        .unwrap()
-        .into_item();
-        assert!(stored.is_sensitive);
-        assert_eq!(
-            stored.app_bundle_id.as_deref(),
-            Some("COM.1Password.Desktop")
-        );
-        assert_eq!(stored.app_name.as_deref(), Some("1Password"));
-        assert!(state
-            .store
-            .search("xK9mQ3nR7pT2vW5", 10)
-            .unwrap()
-            .is_empty());
-    }
-
     struct OnceCapture {
         inner: Option<crate::clipboard::Capture>,
     }
@@ -1435,6 +968,13 @@ mod tests {
 
     #[test]
     fn a_recopy_wakes_the_ui_and_sync_like_a_fresh_capture() {
+        // `persist_pending` has test-only fault injection shared by the async
+        // shutdown tests above. Keep this normal-path assertion out of that
+        // injected scope, or parallel test execution can turn its recopy into
+        // a synthetic retry.
+        let _serial = TEST_PERSIST_SERIAL
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let content = "the same clipping again";
         let (state, _dir) = crate::testutil::test_state_with_clipboard(
             "recopy-wake",
@@ -1449,10 +989,7 @@ mod tests {
 
         let mut events = state.subscribe();
         let mut pending = None;
-        assert!(matches!(
-            tick(&state, false, &mut pending),
-            CaptureOutcome::Stored
-        ));
+        assert!(matches!(tick(&state, &mut pending), CaptureOutcome::Stored));
 
         let after = state.store.get(&first.id).unwrap().unwrap();
         assert!(
@@ -1469,43 +1006,5 @@ mod tests {
             "UI watchers and notify_on_copy stay asleep on recopy"
         );
         assert_eq!(event.item_count, 1);
-        assert_eq!(event.swept, 0);
-    }
-
-    #[test]
-    fn password_manager_recopy_promotes_an_existing_duplicate_to_sensitive() {
-        let (state, _dir) = test_state("credential-store-duplicate");
-        let content = "ordinary-looking clipboard value";
-        let first = ingest(&state, content, copypaste_ipc::content_type::TEXT)
-            .unwrap()
-            .into_item();
-        assert!(!first.is_sensitive);
-        assert_eq!(state.store.search("ordinary-looking", 10).unwrap().len(), 1);
-
-        let duplicate = ingest_capture(
-            &state,
-            &state.settings.get(),
-            crate::clipboard::Capture {
-                content: content.to_string(),
-                binary_content: None,
-                file_path: None,
-                file_metadata: None,
-                content_type: copypaste_ipc::content_type::TEXT.to_string(),
-                app_bundle_id: Some("com.1password.desktop".to_string()),
-                app_name: Some("1Password".to_string()),
-            },
-            copypaste_core::now_ms(),
-        )
-        .unwrap()
-        .into_item();
-
-        assert_eq!(duplicate.id, first.id);
-        assert!(duplicate.is_sensitive);
-        assert!(state
-            .store
-            .search("ordinary-looking", 10)
-            .unwrap()
-            .is_empty());
-        assert!(state.store.versions_since(i64::MIN, 10).unwrap().is_empty());
     }
 }

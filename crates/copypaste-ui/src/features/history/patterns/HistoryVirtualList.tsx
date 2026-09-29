@@ -21,9 +21,6 @@ interface HistoryVirtualListProps {
   totalSize: number;
   items: readonly Item[];
   activeId: string | null;
-  revealedId: string | null;
-  revealedContent: string | null;
-  revealPendingId: string | null;
   previewLines: number;
   selectionActive: boolean;
   selected: ReadonlySet<string>;
@@ -40,9 +37,6 @@ export function HistoryVirtualList({
   totalSize,
   items,
   activeId,
-  revealedId,
-  revealedContent,
-  revealPendingId,
   previewLines,
   selectionActive,
   selected,
@@ -100,18 +94,12 @@ export function HistoryVirtualList({
               state={
                 sortable?.dragging
                   ? "dragging"
-                  : item.id === revealPendingId
-                    ? "pending"
-                    : selected.has(item.id)
+                  : selected.has(item.id)
                       ? "checked"
                       : item.id === activeId
                         ? "active"
                         : "default"
               }
-              revealedContent={
-                item.id === revealedId ? revealedContent : null
-              }
-              revealPending={item.id === revealPendingId}
               origin={markedOrigin(item, markedOrigins)}
               selectionActive={selectionActive}
               checked={selected.has(item.id)}

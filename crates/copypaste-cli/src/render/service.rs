@@ -14,24 +14,14 @@ use super::relative_time;
 
 /// What an export left behind, for stderr.
 ///
-/// Every count is printed, including zero, for the same reason `withheld` is in
-/// [`cloud_sync_text`]: a number that only appears when it is non-zero is one
-/// nobody knows to look for.
 pub fn export_summary(export: &ExportData) -> String {
-    let mut lines = vec![format!(
-        "exported {} items; withheld {} sensitive, skipped {} non-text, {} unreadable",
+    let lines = vec![format!(
+        "exported {} items; skipped {} non-text, {} unreadable",
         export.items.len(),
-        export.skipped_sensitive,
         export.skipped_non_text,
         export.skipped_undecryptable,
     )];
-    if export.skipped_sensitive > 0 {
-        lines.push(
-            "Sensitive items are withheld by default. Pass --include-sensitive to \
-             include them — the export is a plaintext file."
-                .to_string(),
-        );
-    }
+    let mut lines = lines;
     lines.push(String::new());
     lines.join("\n")
 }
@@ -72,15 +62,6 @@ pub fn config_text(applied: &ConfigApplied) -> String {
             format!("{} MiB", config.max_decoded_image_mb),
         ),
         setting(
-            "sensitive ttl",
-            match config.sensitive_ttl_secs {
-                // `0` is "never delete", not "delete immediately". Rendering it
-                // as a number would read as the opposite of what it means.
-                0 => "off".to_string(),
-                secs => format!("{secs} s"),
-            },
-        ),
-        setting(
             "excluded apps",
             if config.excluded_app_bundle_ids.is_empty() {
                 "none".to_string()
@@ -115,12 +96,6 @@ fn yes_no(value: bool) -> String {
 /// One line per change event, for `copypaste watch`.
 pub fn event_text(event: &EventData) -> String {
     match event.event {
-        // First: a deletion nobody asked for outranks the fact that the count
-        // moved, and it is the only event here that reports lost data.
-        EventKind::Items if event.swept > 0 => format!(
-            "deleted {} sensitive item(s) past their time to live ({} in history)",
-            event.swept, event.item_count
-        ),
         // The capture case is called out because it is the one a person
         // watching the stream is usually waiting for, and because it is what
         // the notification and the sound are gated on (parity finding 18).
@@ -219,19 +194,12 @@ pub fn cloud_status_text(status: &CloudStatusData, now_ms: i64) -> String {
 
 /// Render one cloud round.
 ///
-/// `withheld` is always printed, including zero: it is the line a user checks
-/// the "a sensitive item is never uploaded" rule against, and a count that only
-/// appears when it is non-zero is one nobody knows to look for.
 pub fn cloud_sync_text(stats: &CloudSyncData) -> String {
     let mut lines = vec![
         format!("{:<12} {}", "uploaded", stats.uploaded),
         format!("{:<12} {}", "deleted", stats.tombstoned),
         format!("{:<12} {}", "downloaded", stats.downloaded),
         format!("{:<12} {}", "applied", stats.applied),
-        format!(
-            "{:<12} {} (sensitive, never uploaded)",
-            "withheld", stats.skipped_sensitive
-        ),
     ];
     if stats.skipped_undecryptable > 0 {
         lines.push(format!(
@@ -359,7 +327,6 @@ mod tests {
             tombstoned: 0,
             downloaded: 0,
             applied: 0,
-            skipped_sensitive: 0,
             skipped_undecryptable: 0,
             skipped_forged: 0,
             skipped_future: 0,
@@ -405,7 +372,6 @@ mod tests {
             event: EventKind::Items,
             item_count: 3,
             captured: true,
-            swept: 0,
         });
         assert!(captured.contains("captured"), "{captured}");
 
@@ -413,22 +379,7 @@ mod tests {
             event: EventKind::Items,
             item_count: 3,
             captured: false,
-            swept: 0,
         });
         assert!(!other.contains("captured"), "{other}");
-    }
-
-    /// The auto-wipe is the only thing here that deletes without being asked,
-    /// so "items changed" is not an adequate report of it.
-    #[test]
-    fn a_sweep_says_that_something_was_deleted() {
-        let swept = event_text(&EventData {
-            event: EventKind::Items,
-            item_count: 3,
-            captured: false,
-            swept: 2,
-        });
-        assert!(swept.contains("deleted 2"), "{swept}");
-        assert!(swept.contains("sensitive"), "{swept}");
     }
 }

@@ -139,17 +139,15 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | The Keychain item survives a re-signed binary (manifest 02 §3.8) | macOS | **NOT VERIFIED IN CI** — REPORTED leg, tag-only |
 | The aarch64 hardware SHA-2 path executes as built | Android | **NOT VERIFIED IN CI** — publication uses GitHub-hosted emulator smoke of the signed universal APK; physical `arm64-v8a` execution is no longer a publish gate |
 
-### Storage and detection
+### Storage
 
 | Requirement | Authoritative layer | State |
 |---|---|---|
 | SQLCipher at rest, no plaintext in the file | Rust | Verified — and confirmed against a pulled database on Android |
 | Schema, dedup interval, tombstones, pins, FTS5, keyset pagination | Rust | Verified |
-| A sensitive item never reaches the index (write, read, purge) | Rust | Verified |
-| Retention: history cap, TTL, sensitive auto-wipe | Rust | Verified |
+| Retention: history cap, TTL | Rust | Verified |
 | Export, import, backup, restore over IPC | Rust | Verified |
 | The same four from the Settings screen | Windows, Browser (WebKitGTK) | **NOT VERIFIED IN CI** — the Windows run asserts export and restore safety dialogs, but native file pickers prevent completing these flows through WebDriver |
-| Secret-detection ruleset, NFKC, Luhn, confidence bands | Rust | Verified |
 
 ### IPC and daemon
 
@@ -180,7 +178,6 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | History render, virtualisation, row-height reservation (INV-5) | Browser (WebKitGTK) | Verified |
 | Scroll anchoring and shrink clamp (INV-1/6) | Browser (WebKitGTK) | Verified |
 | Search, filter, sort, bulk actions | Browser (WebKitGTK) | Verified |
-| A sensitive item is absent from the document, not obscured | Browser (WebKitGTK) | Verified |
 | Settings tabs, preferences surviving a reload (INV-22) | Browser (WebKitGTK) | Verified |
 | Devices and pairing screens, the service-offline screen | Browser (WebKitGTK) | Verified |
 | Keyboard navigation, focus, accessibility tree (the 15 A11Y rules) | Browser (WebKitGTK) | Verified as DOM and ARIA |
@@ -191,7 +188,6 @@ the requirement. `NOT VERIFIED IN CI` — no run anywhere establishes it.
 | The app renders on the Android WebView | Android | Verified — both APK legs fail unless the screen is awake and uiautomator reports named WebView content |
 | The frontend mounts and lays out in the Android WebView | Android | Verified — `e2e-android/` requires a populated React root and non-zero history-row boxes |
 | Navigation and keyboard input on Android | Android | Verified — the CDP harness taps between screens and types a search that must filter the list |
-| A sensitive item is absent from the Android document | Android | Verified — the harness checks `outerHTML` and every live input value |
 | No filesystem path in any Android accessible string (INV-12) | Android | Verified — the harness sweeps text and naming attributes |
 | Android UI beyond mount, navigation, typing and the two disclosure sweeps | Android | **NOT VERIFIED IN CI** — CDP sees no pixels, TalkBack or native surface |
 | The release APK cannot enable WebView debugging | Android | Verified — release smoke rejects wry's debugger call and fails closed if its neighbouring JNI markers are absent |

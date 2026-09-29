@@ -81,3 +81,23 @@ pub fn open_notification_settings(app: &AppHandle<impl Runtime>) -> Result<(), B
     let _: Empty = call(app, "openNotificationSettings", Empty {})?;
     Ok(())
 }
+
+pub fn background_activity_status(
+    app: &AppHandle<impl Runtime>,
+) -> Result<PermissionStatus, BackendError> {
+    #[derive(Deserialize)]
+    struct Facts {
+        granted: bool,
+    }
+    let facts: Facts = call(app, "backgroundActivityFacts", Empty {})?;
+    Ok(if facts.granted {
+        PermissionStatus::Granted
+    } else {
+        PermissionStatus::Prompt
+    })
+}
+
+pub fn request_background_activity(app: &AppHandle<impl Runtime>) -> Result<(), BackendError> {
+    let _: Empty = call(app, "requestBackgroundActivity", Empty {})?;
+    Ok(())
+}

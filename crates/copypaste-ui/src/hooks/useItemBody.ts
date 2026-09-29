@@ -13,7 +13,7 @@ export function useItemBody(item: Item | null): ItemBody {
     id: string;
     text: string | null;
   } | null>(null);
-  const id = item?.truncated && !item.is_sensitive ? item.id : null;
+  const id = item?.truncated ? item.id : null;
 
   useEffect(() => {
     if (id === null) {

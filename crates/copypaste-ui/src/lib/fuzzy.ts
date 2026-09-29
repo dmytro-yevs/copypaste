@@ -9,8 +9,7 @@
 import fuzzysort from "fuzzysort";
 
 /** A `Prepared` target is indexed once; see `fuzzyTargets` for why that matters
- *  at 200 items. `null` marks a candidate that must never match — a sensitive
- *  item's absent plaintext, not a miss. */
+ *  at 200 items. `null` marks a candidate with no text to match. */
 export type FuzzyTarget = Fuzzysort.Prepared | string | null | undefined;
 
 function bestScore(query: string, targets: readonly FuzzyTarget[]): number | null {

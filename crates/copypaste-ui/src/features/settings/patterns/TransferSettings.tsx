@@ -1,11 +1,7 @@
 import { useId, useState } from "react";
 
 import { StateView } from "@/components/shared/StateView";
-import {
-  AlertDialog,
-  Checkbox,
-  Label,
-} from "@/components/ui";
+import { AlertDialog } from "@/components/ui";
 import { SettingsSchemaRenderer } from "@/features/settings/components/SettingsSchemaRenderer";
 import { settingDefinition } from "@/features/settings/model/settingsSchemaCatalog";
 import { settingsGroups } from "@/features/settings/model/settingsProjection";
@@ -13,14 +9,12 @@ import type { SettingsField } from "@/features/settings/model/settingsFieldSchem
 import { useExportHistory, useImportHistory } from "@/hooks/useServiceConfig";
 import { useTranslation } from "@/i18n";
 import type { ImportPreview } from "@/lib/ipc";
-import styles from "./StorageTab.module.css";
 
 export function TransferSettings() {
   const { t } = useTranslation();
   const exportHistory = useExportHistory();
   const importHistory = useImportHistory();
   const [exportOpen, setExportOpen] = useState(false);
-  const [includeSensitive, setIncludeSensitive] = useState(false);
   const [pendingImport, setPendingImport] = useState<ImportPreview | null>(null);
   const exportFeedbackId = useId();
   const importFeedbackId = useId();
@@ -31,7 +25,7 @@ export function TransferSettings() {
     ) : undefined,
     label: exportHistory.isPending ? "Exporting…" : t("settings.transfer.export.action"),
     icon: "download", disabled: exportHistory.isPending, busy: exportHistory.isPending,
-    onAction: () => { setIncludeSensitive(false); setExportOpen(true); },
+    onAction: () => setExportOpen(true),
   }, {
     kind: "action", definition: settingDefinition("storage", "settings.transfer.import.title"),
     note: importHistory.prepare.isError || importHistory.apply.isError ? (
@@ -56,22 +50,8 @@ export function TransferSettings() {
         title={t("settings.transfer.export.dialogTitle")}
         description={t("settings.transfer.export.dialogBody")}
         cancel={{ label: t("common.cancel"), disabled: exportHistory.isPending }}
-        action={{ label: exportHistory.isPending ? "Exporting…" : t("settings.transfer.export.confirm"), pending: exportHistory.isPending, onClick: () => exportHistory.mutate(includeSensitive, { onSuccess: () => setExportOpen(false) }) }}
-      >
-          <div className={styles.exportOptions}>
-            <div className={styles.checkboxRow}>
-              <Checkbox
-                id="export-include-sensitive"
-                checked={includeSensitive}
-                onCheckedChange={(checked) => setIncludeSensitive(checked === true)}
-              />
-              <Label htmlFor="export-include-sensitive">
-                {t("settings.transfer.export.includeSensitive")}
-              </Label>
-            </div>
-            <p className={styles.hint}>{t("settings.transfer.export.includeSensitiveHint")}</p>
-          </div>
-      </AlertDialog>
+        action={{ label: exportHistory.isPending ? "Exporting…" : t("settings.transfer.export.confirm"), pending: exportHistory.isPending, onClick: () => exportHistory.mutate(undefined, { onSuccess: () => setExportOpen(false) }) }}
+      />
 
       <AlertDialog
         open={pendingImport !== null}

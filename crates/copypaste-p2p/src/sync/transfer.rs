@@ -50,8 +50,7 @@ pub(super) async fn serve_items<C: SyncChannel, S: SyncSource>(
     for chunk in allowed.chunks(MAX_ITEMS_PER_MESSAGE) {
         for mut item in source.fetch(chunk)? {
             if !advertised.contains_key(&item.item_id) {
-                // The source returned something it was not asked for. This
-                // layer owns the final sensitive-content egress guard.
+                // The source returned something it was not asked for.
                 tracing::warn!("source returned an item outside the advertised set; dropping it");
                 continue;
             }

@@ -7,7 +7,7 @@ import styles from "./Container.module.css";
 
 const containerVariants = cva(styles.root, {
   variants: {
-    width: { fluid: styles.fluid, reading: styles.reading, library: styles.library },
+    width: { fluid: styles.fluid, reading: styles.reading },
     gutter: { none: styles.gutterNone, compact: styles.gutterCompact, screen: styles.gutterScreen },
   },
   defaultVariants: { width: "fluid", gutter: "screen" },

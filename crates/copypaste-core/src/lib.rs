@@ -1,4 +1,4 @@
-//! Core: crypto, storage, and sensitive-content detection.
+//! Core: crypto and storage.
 
 // `forbid` everywhere it can be kept, which is every target but one. Windows
 // has no safe path to DPAPI: the wrappers on crates.io free the unsealed buffer
@@ -16,7 +16,6 @@ pub mod image_preview;
 pub mod ingest;
 pub mod p2p_contract;
 pub mod retention;
-pub mod sensitive;
 pub mod storage;
 pub mod sync;
 pub mod transfer;
@@ -35,14 +34,9 @@ pub use ingest::{
     ingest_into_with_capture_source, ingest_into_with_capture_source_metadata,
     ingest_into_with_capture_source_metadata_with_current_retention, IngestError, Ingested,
 };
-pub use sensitive::{
-    purge_indexed_secrets, purge_indexed_secrets_in_transaction, sweep_sensitive, Detector,
-    Finding, PurgeReport, Severity, DEFAULT_SENSITIVE_TTL, SENSITIVE_TTL_DISABLED,
-};
 pub use storage::{
     compute_content_hash, origin_or, verify_integrity, verify_schema, DeviceIdentity, IncomingItem,
-    IndexedText, Ingest, ItemCursor, NewItem, Page, RestoreError, Store, StoreError, StoredItem,
-    Version,
+    Ingest, ItemCursor, NewItem, Page, RestoreError, Store, StoreError, StoredItem, Version,
 };
 pub use sync::{local_winner_stamp, MergeError, OpenVersionError, RemoteVersion, StoreSource};
 pub use transfer::{export, import, ImportError, MAX_IMPORT_ITEMS};

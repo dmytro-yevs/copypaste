@@ -193,8 +193,8 @@ pub enum ReadOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Clip {
-    /// Exactly one payload form is present. Text stays text through the shared
-    /// detector; binary is base64 only for the JNI JSON bridge and is decoded
+    /// Exactly one payload form is present. Text stays text; binary is base64
+    /// only for the JNI JSON bridge and is decoded
     /// before it reaches the binary ingest path.
     #[serde(default)]
     pub text: Option<String>,

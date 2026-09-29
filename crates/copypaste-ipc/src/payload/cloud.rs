@@ -49,9 +49,6 @@ pub struct CloudSyncData {
     pub tombstoned: u32,
     pub downloaded: u32,
     pub applied: u32,
-    /// Withheld from upload because the detector flagged them. Never zero by
-    /// accident: this is the count the user can check the rule against.
-    pub skipped_sensitive: u32,
     pub skipped_undecryptable: u32,
     /// Remote rows whose metadata signature did not verify, refused before the
     /// merge saw them.
@@ -71,9 +68,7 @@ pub struct CloudSyncData {
     /// (8 MiB for text, 10 MiB otherwise).
     ///
     /// Withheld, never deleted: the item stays on this device in full, it
-    /// simply does not reach the account. It is counted for the same reason
-    /// `skipped_sensitive` is — a round that uploaded fewer items than the user
-    /// expected has to be able to say why — and because without it an item that
+    /// simply does not reach the account. It is counted because without it an item that
     /// will *never* reach the other device is indistinguishable from one that
     /// is merely still in the queue. [`Item::too_large_to_sync`] is the
     /// per-item half of the same answer.

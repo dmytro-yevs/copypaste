@@ -7,16 +7,14 @@ import { previewLineCount, type PreviewDensitySurface } from "@/lib/previewDensi
 import { HighlightedCode } from "./HighlightedCode";
 import styles from "./ClipBodyPreview.module.css";
 
-export function ClipBodyPreview({ kind, content, masked = false, previewLines, imagePreview, surface = "history" }: {
+export function ClipBodyPreview({ kind, content, previewLines, imagePreview, surface = "history" }: {
   kind: Kind;
   content: string;
-  masked?: boolean;
   previewLines: number;
   imagePreview?: ReactNode;
   surface?: PreviewDensitySurface;
 }) {
   const title = kind === "file" || kind === "path" ? fileDisplayName(content) : content;
-  if (masked) return <div className={styles.secret} aria-hidden="true"><i /><i /><i /></div>;
   if (kind === "image") return <div className={styles.thumbnail}>{imagePreview}</div>;
   if (kind === "color") {
     const color = content.trim();

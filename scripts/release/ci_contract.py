@@ -87,7 +87,7 @@ def critical_pr_errors(ci):
         "npx vitest run",
         "tests/smoke.e2e.test.ts",
         "tests/history-render.e2e.test.ts",
-        "tests/sensitive.e2e.test.ts",
+        "tests/plain-content.e2e.test.ts",
         "tests/windows-surfaces.windows.e2e.test.ts",
     ):
         if marker not in windows_commands:

@@ -21,7 +21,6 @@ The capture boundary owns:
 - applying platform opt-outs, private mode and source-app exclusions before a
   value enters process memory;
 - reading and size-gating a plain-text value;
-- classifying source-app sensitivity;
 - handing the value to the shared encrypted ingest path;
 - reporting lost intermediate changes and size rejections without exposing
   content.
@@ -33,9 +32,9 @@ shipping implementation. Android's user-mediated capture routes enter the same
 product ingest policy but do not pretend that an unrestricted background
 clipboard monitor exists.
 
-Paste-back, content encryption, storage transactions, sync conflict resolution
-and the secret-pattern ruleset are owned by their respective modules. Capture
-may call those owners but may not restate their formats or decisions.
+Paste-back, content encryption, storage transactions and sync conflict
+resolution are owned by their respective modules. Capture may call those owners
+but may not restate their formats or decisions.
 
 ## 2. Change detection
 
@@ -85,16 +84,14 @@ the same primitive.
 - **I-7:** When source exclusions are configured and the source application
   cannot be attributed, capture fails closed for that change. With no exclusion
   configured, missing attribution alone does not suppress capture.
-- **I-8:** Source attribution still runs when the exclusion set is empty because
-  credential-store classification is an independent consumer.
+- **I-8:** Source attribution still runs when the exclusion set is empty so
+  captured items retain provenance when the platform makes it available.
 - **I-9:** Logs and public errors contain no clipboard content, filename, path or
   recoverable content fingerprint. Bounded counts, sequence values, item ids and
   bundle/package identifiers are permitted.
 - **I-10:** A plaintext dedup digest is never logged with correlating metadata.
 
-Credential-store attribution is sufficient to mark an item sensitive even when
-its text does not match a detector rule. Explicit user exclusion remains
-stronger and prevents capture entirely.
+Explicit user exclusion prevents capture entirely.
 
 ### 3.2 Current representation contract
 
@@ -121,8 +118,8 @@ refuses the operation instead of coercing bytes through text.
 - **I-20:** SQLite, encryption, image work, filesystem reads and process work run
   off the async reactor. A database guard is never held across an await.
 - **I-21:** Every helper process is reaped on success, failure and cancellation.
-- **I-36:** A malformed value, platform error, blocking-task failure, detector
-  failure, encryption failure or database failure cannot kill the monitor loop.
+- **I-36:** A malformed value, platform error, blocking-task failure,
+  encryption failure or database failure cannot kill the monitor loop.
 - **I-39:** A size rejection increments a readable diagnostic counter. It is not
   represented only by a log line.
 
@@ -136,7 +133,7 @@ successful persistence.
 The platform poll interval, live limits, private mode and exclusion policy are
 read from current settings. A change takes effect without restarting the
 daemon. The event channel may coalesce refresh work, but it must preserve
-capture and auto-wipe counts that make data changes visible.
+capture counts that make data changes visible.
 
 ## 5. Ingest and identity
 
@@ -153,11 +150,6 @@ It does not construct a storage row or encryption envelope independently.
 - **I-29:** A new capture receives a stable logical `item_id`, current timestamp
   and source-app metadata when known. Transport-specific ordering fields are
   derived by the sync owner, not stamped ad hoc by capture.
-- **I-30:** Content detection and source-app classification are independent
-  sensitivity signals; either is sufficient.
-- **I-31:** A sensitive item's expiry uses the user-configured sensitive TTL.
-- **I-32:** Re-copying a sensitive item recomputes expiry from the new capture
-  time.
 - **I-33:** A failed dedup lookup falls through to normal insert. A duplicate is
   safer than a lost capture.
 - **I-34:** A row deleted concurrently between lookup and refresh produces no
@@ -165,9 +157,7 @@ It does not construct a storage row or encryption envelope independently.
 - **I-35:** Local persistence does not depend on any sync transport being
   enabled or reachable.
 
-Sensitive items are excluded from search indexing at ingest and read back
-through the sensitive-content contract. Capture never inserts into FTS
-directly.
+Capture never inserts into FTS directly.
 
 ## 6. Source-app policy
 
@@ -203,7 +193,6 @@ display string.
   while it was active.
 - Unknown attribution with a non-empty exclusion list skips; the same unknown
   attribution with an empty list captures.
-- A known credential-store origin marks otherwise unremarkable text sensitive.
 - The exact size boundary succeeds, one byte over fails before owned allocation,
   and the readable rejection counter increases.
 - Captured content, paths and fingerprints are absent from logs and rendered
@@ -221,8 +210,6 @@ display string.
 - Identical captured content creates one row and refreshes it; a dedup-query
   failure still preserves the new capture.
 - Dedup notification ids always resolve to a stored row.
-- Sensitive detection or credential-store attribution keeps the item out of
-  search, and re-copy refreshes its sensitive expiry.
 - Disabled, offline or failing sync never prevents local storage.
 
 ### 7.4 Platform and lifecycle
@@ -248,9 +235,9 @@ display string.
 `ClipboardSource` is the platform seam. The pure change tracker owns sequence
 and self-write state exactly once. Platform modules translate native values and
 apply pre-read gates; the capture service owns orchestration; core ingest owns
-dedup, sensitivity, encryption and persistence.
+dedup, encryption and persistence.
 
 Use maintained platform bindings, property-list/URL parsers, hashing,
 content-type and async blocking facilities. A platform backend may not add a
-second tracker, detector, row constructor or format parser hidden behind its
+second tracker, row constructor or format parser hidden behind its
 native module.

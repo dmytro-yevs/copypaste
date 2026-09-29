@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CaptureStatus } from "@/features/capture";
 import { Container, Screen, SplitPane } from "@/components/layout";
 import { HistoryDialogs } from "@/features/history/patterns/HistoryDialogs";
-import { RevealNotice } from "@/features/history/patterns/RevealNotice";
 import { SkippedNotice } from "@/features/history/patterns/SkippedNotice";
 import { ClipDetailDialog } from "@/features/history/patterns/ClipDetailDialog";
 import { HistoryList } from "@/features/history/patterns/HistoryList";
@@ -25,13 +24,12 @@ import { useStatus } from "@/hooks/useStatus";
 import type { StatusData } from "@/lib/ipc";
 import { useHistoryController } from "@/features/history/hooks/useHistoryController";
 import { useHistorySelection } from "@/features/history/hooks/useHistorySelection";
-import { useReveal } from "@/features/history/hooks/useReveal";
 import { t } from "@/i18n";
 import type { Item } from "@/lib/ipc";
 import { useItemBody } from "@/hooks/useItemBody";
 import { usePrefs } from "@/store/prefs";
 import { useUi } from "@/store/ui";
-import { useViewportMetrics } from "@/hooks/useViewportMetrics";
+import { useObservedElementSize, useViewportMetrics } from "@/hooks/useViewportMetrics";
 import styles from "./LibraryScreen.module.css";
 
 const captureModes = (data: StatusData) => ({
@@ -42,13 +40,13 @@ const INSPECTOR_SIZE_KEY = "copypaste.library.inspector-width";
 const INSPECTOR_OPEN_KEY = "copypaste.library.inspector-open";
 
 function initialInspectorSize(): number {
-    const { defaultPx, minPx } = HISTORY_LAYOUT_METRICS.inspector;
+    const { defaultPx } = HISTORY_LAYOUT_METRICS.inspector;
     if (typeof window === "undefined") return defaultPx;
     try {
         const stored = Number(
             window.sessionStorage.getItem(INSPECTOR_SIZE_KEY),
         );
-        if (Number.isFinite(stored) && stored >= minPx) return stored;
+        if (Number.isFinite(stored) && stored > 0) return stored;
     } catch {
         return defaultPx;
     }
@@ -100,13 +98,14 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
     const searchRef = useRef<HTMLInputElement>(null);
     const listRef = useRef<HTMLDivElement>(null);
     const detailTriggerRef = useRef<HTMLElement | null>(null);
+    const { width: viewportWidth } = useViewportMetrics();
+    const { ref: screenRef, width: screenWidth } = useObservedElementSize<HTMLElement>();
     const desktopInspector =
-        useViewportMetrics().width >=
+        (screenWidth || viewportWidth) >=
         HISTORY_LAYOUT_METRICS.inspector.visibleAtPx;
 
     const history = useHistoryController(pushLive);
     const bulk = useHistorySelection(history.items);
-    const reveal = useReveal();
     const copy = useCopy();
     const pin = usePin();
     const reorder = useReorderPinned();
@@ -240,12 +239,10 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
                     />
                 ) : null}
                 <HistoryList
+                    inspectorVisible={desktopInspector}
                     items={items}
                     activeId={activeId}
                     onActiveIdChange={changeActiveId}
-                    revealedId={reveal.revealedId}
-                    revealedContent={reveal.revealedContent}
-                    revealPendingId={reveal.pendingId}
                     previewLines={previewLines}
                     groupedByDevice={history.groupedByDevice}
                     selection={selection}
@@ -360,7 +357,7 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
                 <SkippedNotice count={history.skipped} />
             </div>
 
-            <Container width="library" gutter="screen" asChild>
+            <Container width="fluid" gutter="screen" asChild>
                 <section
                     className={styles.stream}
                     aria-label={t("history.stream.label")}
@@ -369,29 +366,16 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
                 </section>
             </Container>
 
-            <RevealNotice message={reveal.error} />
-
             <ClipDetailDialog
                 item={detail?.item ?? null}
                 origin={detail?.origin ?? null}
                 initialExpanded={desktopInspector}
                 fullContent={detailBody.text}
                 fullContentFailed={detailBody.failed}
-                revealedContent={
-                    detail && reveal.revealedId === detail.item.id
-                        ? reveal.revealedContent
-                        : null
-                }
-                revealPending={reveal.pendingId === detailId}
-                onReveal={reveal.request}
-                onHide={reveal.hide}
                 onCopy={copy.mutateAsync}
                 onTogglePin={pin.mutate}
                 onDelete={history.remove}
-                onClose={() => {
-                    if (reveal.revealedId === detailId) reveal.hide();
-                    setDetailId(null);
-                }}
+                onClose={() => setDetailId(null)}
                 onReturnFocus={() => {
                     if (detailTriggerRef.current?.isConnected) {
                         detailTriggerRef.current.focus();
@@ -403,11 +387,6 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
             />
 
             <HistoryDialogs
-                reveal={{
-                    open: reveal.confirming,
-                    onCancel: reveal.cancel,
-                    onConfirm: reveal.confirm,
-                }}
                 bulkDelete={{
                     open: bulk.confirmingDelete,
                     count: selection.items.length,
@@ -425,17 +404,9 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
                 origin={
                     inspected ? originOf(inspected) : null
                 }
-                revealedContent={
-                    inspected?.id === reveal.revealedId
-                        ? reveal.revealedContent
-                        : null
-                }
                 fullContent={detailBody.text}
                 fullContentFailed={detailBody.failed}
-                revealPending={inspected?.id === reveal.pendingId}
                 copyPending={copy.isPending}
-                onReveal={reveal.request}
-                onHide={reveal.hide}
                 onCopy={copy.mutate}
                 onTogglePin={pin.mutate}
                 onDelete={history.remove}
@@ -445,22 +416,14 @@ export function LibraryScreen({ pushLive = false }: LibraryScreenProps) {
         ) : undefined;
 
     return (
-        <Screen className={styles.screen}>
+        <Screen ref={screenRef} className={styles.screen}>
             <SplitPane
                 primary={primary}
                 secondary={inspector}
                 primaryId="library-stream"
                 secondaryId="library-inspector"
-                primaryMinSize={
-                    desktopInspector
-                        ? pixels(HISTORY_LAYOUT_METRICS.inspector.primaryMinPx)
-                        : 0
-                }
                 secondaryDefaultSize={pixels(inspectorSize)}
                 secondarySize={pixels(inspectorSize)}
-                secondaryMinSize={pixels(
-                    HISTORY_LAYOUT_METRICS.inspector.minPx,
-                )}
                 secondaryMaxSize={HISTORY_LAYOUT_METRICS.inspector.maxSize}
                 separatorLabel={t("history.inspector.resize")}
                 onSecondarySizeChange={persistInspectorSize}

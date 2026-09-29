@@ -519,7 +519,7 @@ describe("preview scenario service", () => {
           {
             id: "preview-image",
             content_class: "image",
-            content: null,
+            content: "",
           },
           {
             id: "preview-file",
@@ -556,7 +556,6 @@ describe("preview scenario service", () => {
     expect(source).toMatchObject({
       content_type: "text/plain",
       content_class: "text",
-      is_sensitive: false,
       truncated: true,
     });
     expect(source?.content).toBe(sourceBody.value.slice(0, source?.content?.length ?? 0));

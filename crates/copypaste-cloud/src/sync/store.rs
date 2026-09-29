@@ -393,7 +393,7 @@ pub type SharedStoreView = Arc<StoreView>;
 
 #[cfg(test)]
 mod tests {
-    use copypaste_core::{Detector, IncomingItem, Keyring};
+    use copypaste_core::{IncomingItem, Keyring};
 
     use super::*;
 
@@ -428,7 +428,6 @@ mod tests {
             let shared = StoreSource::new(
                 self.store.clone(),
                 Arc::new(Keyring::from_secret(&SECRET)),
-                Arc::new(Detector::new().expect("detector")),
                 self.here.clone(),
                 "here".to_string(),
                 copypaste_ipc::ConfigData::default(),
@@ -462,7 +461,6 @@ mod tests {
                     content_hash: &hash,
                     created_at,
                     deleted: false,
-                    is_sensitive: false,
                     origin_device_id: "",
                     app_bundle_id: None,
                     app_name: None,

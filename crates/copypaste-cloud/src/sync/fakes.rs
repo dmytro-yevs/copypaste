@@ -48,10 +48,6 @@ pub(super) fn session(access: &str) -> Session {
     }
 }
 
-pub(super) fn allow_everything() -> SensitiveGuard {
-    SensitiveGuard::new(|_| false)
-}
-
 pub(super) fn item(id: &str, created_at: i64, content: &str) -> LocalItem {
     LocalItem {
         item_id: id.into(),
@@ -113,15 +109,7 @@ pub(super) fn signed(mut row: CloudItem) -> CloudItem {
 }
 
 pub(super) fn driver(rest: FakeRest, auth: FakeAuth) -> CloudSync<FakeRest, FakeAuth> {
-    CloudSync::new(
-        rest,
-        auth,
-        key(),
-        config(),
-        session("token-1"),
-        allow_everything(),
-    )
-    .without_retry_delays()
+    CloudSync::new(rest, auth, key(), config(), session("token-1")).without_retry_delays()
 }
 
 // The fake store

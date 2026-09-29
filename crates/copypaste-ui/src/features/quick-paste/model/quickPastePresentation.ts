@@ -8,20 +8,10 @@ export interface QuickPastePresentation {
 }
 
 export function quickPastePresentation(item: Item): QuickPastePresentation {
-  if (item.is_sensitive) {
-    return {
-      rowLabel: t("quickPaste.row.sensitive"),
-      searchLabel: "••••••••",
-    };
-  }
   const kind = kindOf(item);
   if (kind === "image") return { rowLabel: t("quickPaste.row.image"), searchLabel: t("quickPaste.row.image") };
   if (kind === "file") return { rowLabel: t("quickPaste.row.file"), searchLabel: t("quickPaste.row.file") };
   if (kind === "unknown") return { rowLabel: t("quickPaste.row.unsupported"), searchLabel: t("quickPaste.row.unsupported") };
-  if (item.sensitive_finding !== null) {
-    const label = item.sensitive_finding.redacted_preview.trim() || t("quickPaste.row.empty");
-    return { rowLabel: label, searchLabel: label };
-  }
   const label = item.content?.trim() || t("quickPaste.row.empty");
   return { rowLabel: label, searchLabel: label };
 }

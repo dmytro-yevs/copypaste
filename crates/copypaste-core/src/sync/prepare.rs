@@ -10,7 +10,6 @@ use copypaste_p2p::sync::{merge_decision, MergeDecision};
 use tracing::{debug, warn};
 
 use super::merge::{remote_summary, stored_summary, MergeError, RemoteVersion};
-use crate::sensitive::Detector;
 use crate::storage::{origin_or, IncomingItem, Version};
 use crate::Keyring;
 
@@ -27,7 +26,6 @@ pub(super) struct Prepared {
     content_hash: String,
     created_at: i64,
     deleted: bool,
-    is_sensitive: bool,
     origin_device_id: String,
     app_bundle_id: Option<String>,
     app_name: Option<String>,
@@ -51,7 +49,6 @@ impl Prepared {
             pin_order: self.pin_order,
             pin_updated_at: self.pin_updated_at,
             origin_device_id: origin_or(&self.origin_device_id, here).to_string(),
-            is_sensitive: self.is_sensitive,
         }
     }
 
@@ -64,7 +61,6 @@ impl Prepared {
             content_hash: &self.content_hash,
             created_at: self.created_at,
             deleted: self.deleted,
-            is_sensitive: self.is_sensitive,
             origin_device_id: &self.origin_device_id,
             app_bundle_id: self.app_bundle_id.as_deref(),
             app_name: self.app_name.as_deref(),
@@ -82,7 +78,6 @@ impl Prepared {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn prepare_remote_version(
     keyring: &Keyring,
-    detector: &Detector,
     here: &str,
     incoming: &RemoteVersion<'_>,
     pin_state: Option<(bool, Option<f64>, i64, bool)>,
@@ -142,16 +137,6 @@ pub(super) fn prepare_remote_version(
         }
     }
 
-    let is_sensitive = if incoming.deleted {
-        local.is_some_and(|l| l.is_sensitive)
-    } else {
-        copypaste_ipc::content_type::is_text(incoming.content_type)
-            && detector.is_sensitive(incoming.content)
-    };
-    if is_sensitive && incoming.payload_metadata.is_some() {
-        return Ok(None);
-    }
-
     let sealed = if incoming.deleted {
         None
     } else {
@@ -199,15 +184,13 @@ pub(super) fn prepare_remote_version(
         content_hash: content_hash.to_string(),
         created_at: incoming.created_at,
         deleted: incoming.deleted,
-        is_sensitive,
         origin_device_id: incoming.origin_device_id.to_string(),
         app_bundle_id: incoming.app_bundle_id.map(str::to_string),
         app_name: incoming.app_name.map(str::to_string),
         pinned,
         pin_order,
         pin_updated_at,
-        search_text: if is_sensitive
-            || incoming.deleted
+        search_text: if incoming.deleted
             || copypaste_ipc::content_type::is_binary(incoming.content_type)
         {
             None

@@ -2,10 +2,8 @@
 //!
 //! Three rules the session depends on and cannot check for itself:
 //!
-//! * **[`summaries`] never lists a live sensitive item.** A sensitive tombstone
-//!   is listed because it has no payload and is required to delete a stale peer
-//!   copy. `serve_items` refuses anything outside the advertised set, while
-//!   [`fetch`] filters again and the session filters a third time.
+//! * **[`summaries`] lists every stored version.** `serve_items` refuses
+//!   anything outside the advertised set.
 //! * **[`fetch`] returns plaintext**, decrypted under the local item key. The
 //!   sender's ciphertext is useless to a peer — the AEAD binds the item id to a
 //!   key derived from *this* device's secret — so content crosses the Noise
@@ -33,7 +31,6 @@ use super::merge::{
 };
 use super::MSG_STORE;
 use crate::retention::{RetentionGate, RETENTION_DEBOUNCE};
-use crate::sensitive::Detector;
 use crate::storage::{origin_or, Store, StoredItem};
 use crate::Keyring;
 
@@ -44,13 +41,11 @@ const MAX_SUMMARIES_PER_SESSION: i64 =
 
 /// A [`SyncSource`] over a [`Store`].
 ///
-/// Holds the keyring and the detector as well as the store: applying an item
-/// needs the keyring to re-seal it and the detector to decide whether it is
-/// sensitive *here*, which is not necessarily what the sender decided.
+/// Holds the keyring as well as the store: applying an item needs the keyring
+/// to re-seal it locally.
 pub struct StoreSource {
     store: Store,
     keyring: Arc<Keyring>,
-    detector: Arc<Detector>,
     device_id: String,
     device_name: String,
     retention_settings: Arc<dyn Fn() -> copypaste_ipc::ConfigData + Send + Sync>,
@@ -71,19 +66,13 @@ impl StoreSource {
     pub fn new(
         store: Store,
         keyring: Arc<Keyring>,
-        detector: Arc<Detector>,
         device_id: String,
         device_name: String,
         settings: copypaste_ipc::ConfigData,
     ) -> Self {
-        Self::with_retention_settings(
-            store,
-            keyring,
-            detector,
-            device_id,
-            device_name,
-            move || settings.clone(),
-        )
+        Self::with_retention_settings(store, keyring, device_id, device_name, move || {
+            settings.clone()
+        })
     }
 
     /// Build a source whose remote-merge retention policy is read when a
@@ -93,7 +82,6 @@ impl StoreSource {
     pub fn with_retention_settings(
         store: Store,
         keyring: Arc<Keyring>,
-        detector: Arc<Detector>,
         device_id: String,
         device_name: String,
         settings: impl Fn() -> copypaste_ipc::ConfigData + Send + Sync + 'static,
@@ -101,7 +89,6 @@ impl StoreSource {
         Self {
             store,
             keyring,
-            detector,
             device_id,
             device_name,
             retention_settings: Arc::new(settings),
@@ -146,13 +133,7 @@ impl StoreSource {
 
     /// Merge one remote version in, whichever transport carried it.
     pub fn apply_version(&self, incoming: &RemoteVersion<'_>) -> Result<bool, MergeError> {
-        let applied = apply_remote_version(
-            &self.store,
-            &self.keyring,
-            &self.detector,
-            &self.device_id,
-            incoming,
-        )?;
+        let applied = apply_remote_version(&self.store, &self.keyring, &self.device_id, incoming)?;
         if applied {
             self.enforce_retention();
             if let Some(hook) = &self.on_applied {
@@ -179,7 +160,6 @@ impl StoreSource {
         let applied = super::batch::apply_remote_versions(
             &self.store,
             &self.keyring,
-            &self.detector,
             &self.device_id,
             incoming,
         )?;
@@ -374,7 +354,6 @@ impl SyncSource for StoreSource {
             let outcomes = apply_remote_p2p_versions(
                 &self.store,
                 &self.keyring,
-                &self.detector,
                 &self.device_id,
                 &versions,
                 &pins,
@@ -436,7 +415,6 @@ mod tests {
     fn add(f: &crate::sync::testkit::Fixture, id: &str, content: &str, created_at: i64) -> String {
         let key = f.keyring.item_key();
         let (nonce, ciphertext) = crate::encrypt(content.as_bytes(), &key, id).unwrap();
-        let is_sensitive = f.detector.is_sensitive(content);
         f.store
             .insert(NewItem {
                 id: id.to_string(),
@@ -444,12 +422,7 @@ mod tests {
                 nonce,
                 content_type: "text".into(),
                 content_hash: crate::storage::compute_content_hash(content.as_bytes()),
-                is_sensitive,
-                search_text: if is_sensitive {
-                    None
-                } else {
-                    Some(content.to_string())
-                },
+                search_text: Some(content.to_string()),
                 created_at,
                 app_bundle_id: None,
                 app_name: None,
@@ -508,7 +481,6 @@ mod tests {
         let source = StoreSource::new(
             f.store.clone(),
             Arc::clone(&f.keyring),
-            Arc::clone(&f.detector),
             identity.device_id.clone(),
             identity.device_name,
             copypaste_ipc::ConfigData::default(),
@@ -518,44 +490,6 @@ mod tests {
             .set_device_name(&identity.device_id, "New name")
             .unwrap();
         assert_eq!(source.device_name(), "New name");
-    }
-
-    #[test]
-    fn a_sensitive_item_is_neither_advertised_nor_served() {
-        let f = fixture();
-        let id = add(&f, "leaky", "AKIAIOSFODNN7EXAMPLE", 1_000);
-        let source = f.source();
-
-        assert!(
-            !source.summaries(0).unwrap().iter().any(|s| s.item_id == id),
-            "a sensitive item reached the advertised set"
-        );
-        assert!(
-            source.fetch(&[id]).unwrap().is_empty(),
-            "a sensitive item was served on request"
-        );
-    }
-
-    #[test]
-    fn a_sensitive_tombstone_is_advertised_and_served_empty() {
-        let f = fixture();
-        let id = add(&f, "secret", "AKIAIOSFODNN7EXAMPLE", 1_000);
-        assert!(f.store.delete(&id).unwrap());
-        let source = f.source();
-
-        assert!(source
-            .summaries(0)
-            .unwrap()
-            .iter()
-            .any(|summary| summary.item_id == id && summary.deleted));
-        let item = source
-            .fetch(std::slice::from_ref(&id))
-            .unwrap()
-            .pop()
-            .unwrap();
-        assert!(item.deleted);
-        assert!(item.content.is_empty());
-        assert!(item.content_hash.is_empty());
     }
 
     #[test]
@@ -645,7 +579,6 @@ mod tests {
         let source = StoreSource::new(
             f.store.clone(),
             Arc::clone(&f.keyring),
-            Arc::clone(&f.detector),
             f.here.clone(),
             "test-device".to_string(),
             copypaste_ipc::ConfigData {
@@ -675,7 +608,6 @@ mod tests {
         let source = StoreSource::new(
             f.store.clone(),
             Arc::clone(&f.keyring),
-            Arc::clone(&f.detector),
             f.here.clone(),
             "test-device".to_string(),
             copypaste_ipc::ConfigData {
@@ -752,7 +684,6 @@ mod tests {
         let source = StoreSource::with_retention_settings(
             f.store.clone(),
             Arc::clone(&f.keyring),
-            Arc::clone(&f.detector),
             f.here.clone(),
             "test-device".to_string(),
             {
@@ -789,7 +720,6 @@ mod tests {
         let source = StoreSource::with_retention_settings(
             f.store.clone(),
             Arc::clone(&f.keyring),
-            Arc::clone(&f.detector),
             f.here.clone(),
             "test-device".to_string(),
             {
@@ -832,35 +762,6 @@ mod tests {
             f.store.get("peer-item").unwrap().unwrap().created_at,
             2_000_000
         );
-    }
-
-    #[test]
-    fn an_incoming_secret_is_flagged_by_this_devices_detector() {
-        let f = fixture_named("beta");
-        let source = f.source();
-        assert!(source
-            .apply(peer_item(
-                "leaky",
-                "AKIAIOSFODNN7EXAMPLE",
-                1_700_000_000_000
-            ))
-            .unwrap());
-
-        let row = f.store.get("leaky").unwrap().expect("stored");
-        assert!(row.is_sensitive, "the local detector must have the say");
-        assert!(
-            f.store
-                .search("AKIAIOSFODNN7EXAMPLE", 10)
-                .unwrap()
-                .is_empty(),
-            "an applied secret reached the search index"
-        );
-        // And it does not go back out again.
-        assert!(!source
-            .summaries(0)
-            .unwrap()
-            .iter()
-            .any(|s| s.item_id == "leaky"));
     }
 
     #[test]
@@ -929,7 +830,6 @@ mod tests {
                 nonce,
                 content_type: "text".into(),
                 content_hash: crate::storage::compute_content_hash(b"not ours"),
-                is_sensitive: false,
                 search_text: None,
                 created_at: 1_000,
                 app_bundle_id: None,

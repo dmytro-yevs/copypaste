@@ -1,5 +1,5 @@
 //! What stays and what goes: the lookup and the restamp behind dedup, and the
-//! sweeps that enforce the history cap, the age limit and the sensitive TTL.
+//! sweeps that enforce the history cap, the age limit and the storage quota.
 //!
 //! One rule spans all of it and is the reason they share a module: **a pinned
 //! item is never removed by anything in here.** Dedup folds one into a bump
@@ -124,30 +124,6 @@ const AGE_VICTIMS_SQL: &str = concat!(
     " WHERE deleted = 0 AND pinned = 0 AND created_at < ?1       ORDER BY created_at ASC, id ASC LIMIT ?2"
 );
 
-/// `idx_items_sensitive_wipe`'s partial predicate is these two WHERE clauses, so
-/// both cost what the sensitive set costs and it is empty where no secret was
-/// ever copied — which is what makes the `CopyPaste-98ja` probe free. Written
-/// differently SQLite declines it (`CopyPaste-crh3.3`); `INDEXED BY` errors.
-const SENSITIVE_EXISTS_SQL: &str = concat!(
-    "SELECT EXISTS(SELECT 1 FROM ",
-    "clipboard_items INDEXED BY idx_items_sensitive_wipe",
-    " WHERE is_sensitive = 1 AND pinned = 0 AND deleted = 0)"
-);
-
-const OLDEST_SENSITIVE_SQL: &str = concat!(
-    "SELECT MIN(created_at) FROM ",
-    "clipboard_items INDEXED BY idx_items_sensitive_wipe",
-    " WHERE is_sensitive = 1 AND pinned = 0 AND deleted = 0"
-);
-
-const EXPIRED_SENSITIVE_SQL: &str = concat!(
-    "SELECT ",
-    item_columns!(),
-    " FROM clipboard_items INDEXED BY idx_items_sensitive_wipe \
-      WHERE is_sensitive = 1 AND pinned = 0 AND deleted = 0 AND created_at < ?1 \
-      ORDER BY created_at ASC, id ASC LIMIT ?2"
-);
-
 impl Store {
     /// Most recent live item with this content hash at or after `since_ms`.
     ///
@@ -256,51 +232,6 @@ impl Store {
                 return Ok(removed);
             }
         }
-    }
-
-    /// Is there anything the sensitive sweep could possibly delete?
-    ///
-    /// `CopyPaste-98ja`: on a machine that has never copied a secret, the sweep's
-    /// select-and-delete transaction otherwise ran every few seconds forever for
-    /// nothing. Answers `true` on a query error so a broken probe can never
-    /// suppress the sweep — the TTL is a security guarantee and the probe is
-    /// only an optimisation.
-    #[must_use]
-    pub(crate) fn has_wipeable_sensitive(&self) -> bool {
-        let Ok(conn) = self.conn() else {
-            return true;
-        };
-        conn.query_row(SENSITIVE_EXISTS_SQL, [], |r| r.get::<_, bool>(0))
-            .unwrap_or(true)
-    }
-
-    /// Oldest row the sensitive sweep may need to examine.
-    ///
-    /// The caller still has to re-check the plaintext before deletion; this is
-    /// only the next derived deadline for scheduling that bounded sweep.
-    pub fn oldest_wipeable_sensitive_ms(&self) -> Result<Option<i64>, StoreError> {
-        let conn = self.conn()?;
-        conn.query_row(OLDEST_SENSITIVE_SQL, [], |row| row.get(0))
-            .map_err(Into::into)
-    }
-
-    /// Sensitive, unpinned, live rows whose capture is older than `cutoff_ms`.
-    ///
-    /// Candidates for the auto-wipe, not victims of it: whether a row may
-    /// actually be deleted is decided from its plaintext against the confidence
-    /// floor, in [`crate::sensitive::sweep_sensitive`]. Pinned rows are excluded
-    /// here rather than at the delete, so no later edit can lose the exemption
-    /// (manifest 03 I9).
-    pub(crate) fn expired_sensitive(
-        &self,
-        cutoff_ms: i64,
-        limit: i64,
-    ) -> Result<Vec<StoredItem>, StoreError> {
-        let conn = self.conn()?;
-        let mut stmt = conn.prepare_cached(EXPIRED_SENSITIVE_SQL)?;
-        let columns = ItemColumns::resolve(&stmt)?;
-        let rows = stmt.query_map(params![cutoff_ms, limit], |row| row_to_item(row, &columns))?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 }
 
@@ -425,9 +356,7 @@ pub use copypaste_p2p::protocol::plaintext_content_hash as compute_content_hash;
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::{
-        fts_row_count, hash_of, item, plan_of, sensitive_item, store, T0,
-    };
+    use super::super::test_support::{fts_row_count, hash_of, item, plan_of, store, T0};
     use super::*;
 
     /// Every sweep query must reach its index. `INDEXED BY` makes a mismatched
@@ -513,7 +442,6 @@ mod tests {
             content_hash: "peerhash",
             created_at: T0 + 900_000,
             deleted: false,
-            is_sensitive: false,
             origin_device_id: "peer",
             app_bundle_id: None,
             app_name: None,
@@ -576,42 +504,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(drifted, 0, "content_bytes drifted after {after}");
-    }
-
-    #[test]
-    fn both_sensitive_queries_use_the_partial_wipe_index() {
-        let s = store();
-        s.insert(item("payload", T0)).unwrap();
-        for (label, sql) in [
-            ("probe", SENSITIVE_EXISTS_SQL),
-            ("sweep", EXPIRED_SENSITIVE_SQL),
-        ] {
-            let plan = plan_of(&s, sql);
-            assert!(
-                plan.iter().any(|d| d.contains("idx_items_sensitive_wipe")),
-                "the sensitive {label} must use its partial index, got {plan:?}"
-            );
-            assert!(
-                !plan.iter().any(|d| d.contains("TEMP B-TREE")),
-                "the sensitive {label} must not sort, got {plan:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn oldest_wipeable_sensitive_ignores_pins_and_tombstones() {
-        let s = store();
-        assert_eq!(s.oldest_wipeable_sensitive_ms().unwrap(), None);
-
-        let oldest = s.insert(sensitive_item("old", T0)).unwrap();
-        let newer = s.insert(sensitive_item("new", T0 + 60_000)).unwrap();
-        assert_eq!(s.oldest_wipeable_sensitive_ms().unwrap(), Some(T0));
-
-        assert!(s.set_pinned(&oldest.id, true).unwrap());
-        assert_eq!(s.oldest_wipeable_sensitive_ms().unwrap(), Some(T0 + 60_000));
-
-        assert!(s.delete(&newer.id).unwrap());
-        assert_eq!(s.oldest_wipeable_sensitive_ms().unwrap(), None);
     }
 
     /// One item bigger than the whole quota is permanently over it, and it is

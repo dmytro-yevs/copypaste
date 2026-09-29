@@ -1,13 +1,8 @@
 //! The history as a sync session sees it: every version, tombstones included,
 //! and the last-write-wins write that stores the one that won.
 //!
-//! Two rules the transports depend on and cannot check for themselves:
+//! One rule the transports depend on and cannot check for itself:
 //!
-//! * **[`Store::summaries`] and [`Store::versions`] never return a sensitive
-//!   item.** That is what makes "a sensitive item never leaves the device" a
-//!   property of the protocol rather than a promise: a session serves only ids
-//!   it advertised, so an item outside the summary list cannot be requested out
-//!   of this device.
 //! * **A tombstone is a version.** It keeps its item's `content_hash`.
 //!   [`Store::delete`] restamps `created_at` so the tombstone wins on merge
 //!   key 1; key 3 (`deleted`) still breaks an exact-stamp tie.
@@ -40,10 +35,6 @@ pub struct Version {
     pub pin_updated_at: i64,
     /// Empty means "captured on this device" — see [`origin_or`].
     pub origin_device_id: String,
-    /// Read by the merge for the tombstone case: an incoming delete must not
-    /// clear the flag, or the item is re-indexed and the secret becomes
-    /// searchable.
-    pub is_sensitive: bool,
 }
 
 /// One version arriving from another device, already sealed under the local key.
@@ -56,7 +47,6 @@ pub struct IncomingItem<'a> {
     pub content_hash: &'a str,
     pub created_at: i64,
     pub deleted: bool,
-    pub is_sensitive: bool,
     pub origin_device_id: &'a str,
     pub app_bundle_id: Option<&'a str>,
     pub app_name: Option<&'a str>,
@@ -64,8 +54,7 @@ pub struct IncomingItem<'a> {
     pub pinned: bool,
     pub pin_order: Option<f64>,
     pub pin_updated_at: i64,
-    /// Plaintext for the search index. Ignored when the item is sensitive or a
-    /// tombstone — the write-time layer of "sensitive items are never indexed".
+    /// Plaintext for the search index. Ignored for tombstones.
     pub search_text: Option<&'a str>,
     pub payload_metadata: Option<&'a str>,
 }
@@ -97,7 +86,7 @@ const SUMMARY_CHUNK: usize = 500;
 macro_rules! version_columns {
     () => {
         "created_at, id, content_hash, deleted, origin_device_id, \
-         pinned, pin_order, pin_updated_at, is_sensitive"
+         pinned, pin_order, pin_updated_at"
     };
 }
 
@@ -111,7 +100,6 @@ fn row_to_version(row: &rusqlite::Row<'_>) -> rusqlite::Result<Version> {
         pinned: row.get(5)?,
         pin_order: row.get(6)?,
         pin_updated_at: row.get(7)?,
-        is_sensitive: row.get(8)?,
     })
 }
 
@@ -168,17 +156,12 @@ impl Store {
 
     /// Everything eligible to sync, newest first, tombstones included.
     ///
-    /// Live sensitive items are excluded here and nowhere else matters more.
-    /// Their payload-less tombstones remain eligible so auto-wipe converges on
-    /// peers without disclosing the secret.
     pub fn summaries(&self, limit: i64) -> Result<Vec<Version>, StoreError> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare_cached(concat!(
             "SELECT ",
             version_columns!(),
-            " FROM clipboard_items \
-              WHERE deleted = 1 OR is_sensitive = 0 \
-              ORDER BY created_at DESC, id DESC LIMIT ?1"
+            " FROM clipboard_items ORDER BY created_at DESC, id DESC LIMIT ?1"
         ))?;
         let rows = stmt.query_map([limit], row_to_version)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -205,10 +188,9 @@ impl Store {
             "SELECT ",
             version_columns!(),
             " FROM clipboard_items \
-               WHERE (deleted = 1 OR is_sensitive = 0) \
-                 AND (MAX(created_at, pin_updated_at) > ?1 \
+               WHERE MAX(created_at, pin_updated_at) > ?1 \
                       OR (MAX(created_at, pin_updated_at) = ?1 \
-                          AND (?2 IS NULL OR id > ?2))) \
+                          AND (?2 IS NULL OR id > ?2)) \
                ORDER BY MAX(created_at, pin_updated_at) ASC, id ASC LIMIT ?3"
         ))?;
         let rows = stmt.query_map(params![since_ms, after_id, limit], row_to_version)?;
@@ -219,9 +201,7 @@ impl Store {
     ///
     /// [`Store::version`] for a caller that only compares metadata: the merge
     /// reads eight scalars and the full projection makes it read and copy the
-    /// ciphertext BLOB to do it. Sensitive rows are included for the same
-    /// reason they are in [`Store::version`] — the merge has to compare against
-    /// one — and `is_sensitive` is part of the answer, not filtered out of it.
+    /// ciphertext BLOB to do it.
     pub fn version_summary(&self, id: &str) -> Result<Option<Version>, StoreError> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare_cached(concat!(
@@ -246,11 +226,7 @@ impl Store {
         version_summaries_on(&conn, ids)
     }
 
-    /// One row as the merge sees it — live, tombstoned, or sensitive.
-    ///
-    /// Sensitive rows are *included*, unlike everywhere else: an incoming
-    /// version has to be compared against one, or a peer's copy of something
-    /// this device flagged would be stored a second time under the same id.
+    /// One row as the merge sees it — live or tombstoned.
     pub fn version(&self, id: &str) -> Result<Option<StoredItem>, StoreError> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare_cached(concat!(
@@ -264,9 +240,7 @@ impl Store {
             .optional()?)
     }
 
-    /// The rows behind a request, still encrypted. Live sensitive items and
-    /// unknown ids are omitted; sensitive tombstones are included because they
-    /// carry no payload and are the delete protocol's only data.
+    /// The rows behind a request, still encrypted. Unknown ids are omitted.
     pub fn versions(&self, ids: &[String]) -> Result<Vec<StoredItem>, StoreError> {
         if ids.is_empty() {
             return Ok(Vec::new());
@@ -283,8 +257,7 @@ impl Store {
             .collect::<Vec<_>>()
             .join(",");
         let sql = format!(
-            "SELECT {} FROM clipboard_items \
-              WHERE (deleted = 1 OR is_sensitive = 0) AND id IN ({placeholders})",
+            "SELECT {} FROM clipboard_items WHERE id IN ({placeholders})",
             item_columns!()
         );
         let mut stmt = conn.prepare(&sql)?;
@@ -295,8 +268,7 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Every version stamped at or after `since_ms`, oldest first, sensitive
-    /// items excluded.
+    /// Every version stamped at or after `since_ms`, oldest first.
     ///
     /// `>=` rather than `>` because the cursor is inclusive — re-sending the
     /// boundary row costs one idempotent upsert, and excluding it loses every
@@ -326,9 +298,8 @@ impl Store {
             "SELECT ",
             item_columns!(),
             " FROM clipboard_items \
-               WHERE (deleted = 1 OR is_sensitive = 0) \
-                 AND (created_at > ?1 \
-                      OR (created_at = ?1 AND (?2 IS NULL OR id > ?2))) \
+               WHERE created_at > ?1 \
+                     OR (created_at = ?1 AND (?2 IS NULL OR id > ?2)) \
                ORDER BY created_at ASC, id ASC LIMIT ?3"
         ))?;
         let columns = ItemColumns::resolve(&stmt)?;
@@ -345,11 +316,10 @@ impl Store {
     /// on how far back that goes.
     pub fn oldest_version_ms(&self) -> Result<Option<i64>, StoreError> {
         let conn = self.conn()?;
-        let oldest: Option<i64> = conn.query_row(
-            "SELECT MIN(created_at) FROM clipboard_items WHERE deleted = 1 OR is_sensitive = 0",
-            [],
-            |row| row.get(0),
-        )?;
+        let oldest: Option<i64> =
+            conn.query_row("SELECT MIN(created_at) FROM clipboard_items", [], |row| {
+                row.get(0)
+            })?;
         Ok(oldest)
     }
 
@@ -431,30 +401,23 @@ pub(super) fn upsert_in_tx(
         .search_text
         .filter(|t| !incoming.deleted && !t.trim().is_empty());
     let fts_rowid = match indexable {
-        Some(text) => insert_fts_in_tx(
-            tx,
-            incoming.id,
-            text,
-            incoming.is_sensitive,
-            incoming.content_type,
-        )?,
+        Some(text) => insert_fts_in_tx(tx, incoming.id, text, incoming.content_type)?,
         None => None,
     };
 
     let written = tx.execute(
             "INSERT INTO clipboard_items \
                  (id, content_ciphertext, nonce, content_type, content_hash, \
-                  is_sensitive, pinned, pin_order, pin_updated_at, created_at, deleted, origin_device_id, app_bundle_id, app_name, \
+                  pinned, pin_order, pin_updated_at, created_at, deleted, origin_device_id, app_bundle_id, app_name, \
                   payload_metadata, fts_rowid, content_bytes) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
-                     LENGTH(COALESCE(?2, X'')) + LENGTH(COALESCE(?15, ''))) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, \
+                     LENGTH(COALESCE(?2, X'')) + LENGTH(COALESCE(?14, ''))) \
              ON CONFLICT(id) DO UPDATE SET \
                  content_ciphertext = excluded.content_ciphertext, \
                  content_bytes      = excluded.content_bytes, \
                  nonce              = excluded.nonce, \
                  content_type       = excluded.content_type, \
                  content_hash       = excluded.content_hash, \
-                 is_sensitive       = excluded.is_sensitive, \
                  created_at         = excluded.created_at, \
                  deleted            = excluded.deleted, \
                  origin_device_id   = excluded.origin_device_id, \
@@ -471,7 +434,6 @@ pub(super) fn upsert_in_tx(
                 incoming.nonce,
                 incoming.content_type,
                 incoming.content_hash,
-                incoming.is_sensitive,
                 pinned,
                 pin_order,
                 pin_updated_at,
@@ -500,7 +462,7 @@ pub(super) fn upsert_in_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::test_support::{fts_row_count, item, plan_of, sensitive_item, store, T0};
+    use crate::storage::test_support::{fts_row_count, item, plan_of, store, T0};
 
     fn incoming<'a>(id: &'a str, hash: &'a str, created_at: i64) -> IncomingItem<'a> {
         IncomingItem {
@@ -511,7 +473,6 @@ mod tests {
             content_hash: hash,
             created_at,
             deleted: false,
-            is_sensitive: false,
             origin_device_id: "device-a",
             app_bundle_id: None,
             app_name: None,
@@ -524,12 +485,10 @@ mod tests {
     }
 
     #[test]
-    fn summaries_exclude_sensitive_items_and_include_tombstones() {
+    fn summaries_include_live_items_and_tombstones() {
         let s = store();
         let plain = s.insert(item("plain", T0)).unwrap();
-        let secret = s
-            .insert(sensitive_item("AKIA-shaped", T0 + 60_000))
-            .unwrap();
+        let other = s.insert(item("other", T0 + 60_000)).unwrap();
         let gone = s.insert(item("gone", T0 + 120_000)).unwrap();
         assert!(s.delete(&gone.id).unwrap());
 
@@ -540,10 +499,7 @@ mod tests {
             ids.contains(&gone.id.as_str()),
             "a tombstone is a version, not an absence"
         );
-        assert!(
-            !ids.contains(&secret.id.as_str()),
-            "a sensitive item must never be advertised"
-        );
+        assert!(ids.contains(&other.id.as_str()), "{ids:?}");
 
         let tombstone = summaries.iter().find(|v| v.id == gone.id).unwrap();
         assert!(tombstone.deleted);
@@ -554,54 +510,35 @@ mod tests {
     }
 
     #[test]
-    fn versions_omit_sensitive_and_unknown_ids_and_never_duplicate() {
+    fn versions_omit_unknown_ids_and_never_duplicate() {
         let s = store();
         let plain = s.insert(item("plain", T0)).unwrap();
-        let secret = s.insert(sensitive_item("secret", T0 + 60_000)).unwrap();
+        let other = s.insert(item("other", T0 + 60_000)).unwrap();
 
         let rows = s
             .versions(&[
                 plain.id.clone(),
                 plain.id.clone(),
-                secret.id,
+                other.id.clone(),
                 "never-existed".to_string(),
             ])
             .unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].id, plain.id);
-        assert_eq!(rows[0].content_ciphertext, b"ct:plain");
+        assert_eq!(rows.len(), 2);
+        let row_by_id: HashMap<&str, &StoredItem> =
+            rows.iter().map(|row| (row.id.as_str(), row)).collect();
+        assert_eq!(row_by_id[plain.id.as_str()].content_ciphertext, b"ct:plain");
+        assert_eq!(row_by_id[other.id.as_str()].content_ciphertext, b"ct:other");
         assert!(s.versions(&[]).unwrap().is_empty());
     }
 
+    /// `version` includes tombstones because the merge has to compare against
+    /// them.
     #[test]
-    fn a_sensitive_tombstone_is_advertised_and_served_without_a_payload() {
+    fn version_returns_tombstones() {
         let s = store();
-        let secret = s.insert(sensitive_item("secret", T0)).unwrap();
-        assert!(s.delete(&secret.id).unwrap());
-
-        let summaries = s.summaries(100).unwrap();
-        assert!(summaries
-            .iter()
-            .any(|item| item.id == secret.id && item.deleted));
-
-        let rows = s.versions(std::slice::from_ref(&secret.id)).unwrap();
-        assert_eq!(rows.len(), 1);
-        assert!(rows[0].deleted);
-        assert!(rows[0].content_ciphertext.is_empty());
-        assert!(rows[0].nonce.is_empty());
-        assert!(rows[0].content_hash.is_empty());
-    }
-
-    /// `version` is the only read that returns a tombstone or a flagged row,
-    /// because the merge has to compare against both.
-    #[test]
-    fn version_returns_tombstones_and_sensitive_rows() {
-        let s = store();
-        let secret = s.insert(sensitive_item("secret", T0)).unwrap();
         let gone = s.insert(item("gone", T0 + 60_000)).unwrap();
         s.delete(&gone.id).unwrap();
 
-        assert!(s.version(&secret.id).unwrap().unwrap().is_sensitive);
         let tombstone = s.version(&gone.id).unwrap().unwrap();
         assert!(tombstone.deleted);
         assert!(tombstone.content_ciphertext.is_empty());
@@ -632,21 +569,6 @@ mod tests {
         assert_eq!(stored.content_hash, "hash-remote");
         assert_eq!(stored.origin_device_id, "device-a");
         assert!(!s.search("remote", 10).unwrap().is_empty());
-    }
-
-    #[test]
-    fn an_upsert_of_a_sensitive_version_keeps_it_out_of_the_index() {
-        let s = store();
-        s.upsert(&IncomingItem {
-            is_sensitive: true,
-            // Even when a caller supplies it, as the store's own layer does.
-            search_text: Some("AKIAIOSFODNN7EXAMPLE"),
-            ..incoming("flagged", "hash-flagged", 5_000)
-        })
-        .unwrap();
-
-        assert!(s.search("AKIAIOSFODNN7EXAMPLE", 10).unwrap().is_empty());
-        assert!(s.version("flagged").unwrap().unwrap().is_sensitive);
     }
 
     #[test]
@@ -752,12 +674,12 @@ mod tests {
         let s = store();
         let a = s.insert(item("a", T0)).unwrap();
         let b = s.insert(item("b", T0 + 60_000)).unwrap();
-        s.insert(sensitive_item("secret", T0 + 120_000)).unwrap();
+        let c = s.insert(item("c", T0 + 120_000)).unwrap();
 
         let rows = s.versions_since(T0, 100).unwrap();
         let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
-        assert_eq!(ids, [a.id.as_str(), b.id.as_str()]);
-        assert_eq!(s.versions_since(T0 + 60_000, 100).unwrap().len(), 1);
+        assert_eq!(ids, [a.id.as_str(), b.id.as_str(), c.id.as_str()]);
+        assert_eq!(s.versions_since(T0 + 60_000, 100).unwrap().len(), 2);
         assert_eq!(s.oldest_version_ms().unwrap(), Some(T0));
     }
 
@@ -789,10 +711,8 @@ mod tests {
     /// materialises a temp B-tree over every qualifying row. Measured 9.06 ms →
     /// 0.86 ms at 5 000 rows.
     ///
-    /// The partial predicate has to be written exactly as `idx_items_syncable`
-    /// declares it or SQLite silently declines the index (`CopyPaste-crh3.3`),
-    /// and here that predicate is also what keeps a live sensitive item out of
-    /// an advertisement — so this test guards a disclosure, not a stall.
+    /// The projection and sort order have to match `idx_items_syncable`, or
+    /// SQLite silently declines the index (`CopyPaste-crh3.3`).
     #[test]
     fn the_sync_read_is_served_by_its_covering_index_without_a_sort() {
         let s = store();
@@ -803,7 +723,6 @@ mod tests {
                 "SELECT ",
                 version_columns!(),
                 " FROM clipboard_items \
-                  WHERE deleted = 1 OR is_sensitive = 0 \
                   ORDER BY created_at DESC, id DESC LIMIT ?1"
             ),
         );
@@ -827,10 +746,9 @@ mod tests {
                 "SELECT ",
                 version_columns!(),
                 " FROM clipboard_items \
-                   WHERE (deleted = 1 OR is_sensitive = 0) \
-                     AND (MAX(created_at, pin_updated_at) > ?1 \
+                   WHERE MAX(created_at, pin_updated_at) > ?1 \
                           OR (MAX(created_at, pin_updated_at) = ?1 \
-                              AND (?2 IS NULL OR id > ?2))) \
+                              AND (?2 IS NULL OR id > ?2)) \
                    ORDER BY MAX(created_at, pin_updated_at) ASC, id ASC LIMIT ?3"
             ),
         );
@@ -888,48 +806,15 @@ mod tests {
         assert_eq!(rest[0].id, first_two[1], "the boundary must drain by id");
     }
 
-    /// The same exclusion `summaries` enforces: a live sensitive item must not
-    /// be advertised by the incremental read either, and its tombstone must.
+    /// `version_summary` is `version` without the ciphertext, for the merge.
     #[test]
-    fn the_cursor_excludes_live_sensitive_items_and_includes_their_tombstones() {
+    fn a_version_summary_carries_merge_metadata_and_no_payload() {
         let s = store();
-        let secret = s.insert(sensitive_item("AKIA-shaped", T0)).unwrap();
-        assert!(!s
-            .summaries_since(T0, None, 100)
-            .unwrap()
-            .iter()
-            .any(|v| v.id == secret.id));
-
-        assert!(s.delete(&secret.id).unwrap());
-        let tombstone = s
-            .summaries_since(T0, None, 100)
-            .unwrap()
-            .into_iter()
-            .find(|v| v.id == secret.id)
-            .expect("a sensitive tombstone is still a version");
-        assert!(tombstone.deleted);
-        assert!(tombstone.is_sensitive);
-    }
-
-    /// `version_summary` is `version` without the ciphertext, for the merge —
-    /// and `is_sensitive` is load-bearing in it: the tombstone branch reads the
-    /// local flag, so losing it would let an incoming delete clear the flag and
-    /// let the item back into the search index.
-    #[test]
-    fn a_version_summary_carries_the_sensitive_flag_and_no_payload() {
-        let s = store();
-        let secret = s.insert(sensitive_item("secret", T0)).unwrap();
         let gone = s.insert(item("gone", T0 + 60_000)).unwrap();
         s.delete(&gone.id).unwrap();
 
-        let flagged = s.version_summary(&secret.id).unwrap().unwrap();
-        assert!(flagged.is_sensitive);
-        assert!(!flagged.deleted);
-        assert_eq!(flagged.created_at, T0);
-
         let tombstone = s.version_summary(&gone.id).unwrap().unwrap();
         assert!(tombstone.deleted);
-        assert!(!tombstone.is_sensitive);
 
         // Same answer as the full read, minus the payload.
         let full = s.version(&gone.id).unwrap().unwrap();
@@ -1006,25 +891,19 @@ mod tests {
     }
 
     /// The page read must answer exactly as the one-at-a-time read does, for
-    /// every row it is given — including the tombstones and sensitive rows the
-    /// merge has to compare against.
+    /// every row it is given — including tombstones the merge has to compare
+    /// against.
     #[test]
     fn a_page_read_agrees_with_reading_the_same_rows_one_at_a_time() {
         let s = store();
         s.upsert(&incoming("live", "hash-a", T0)).unwrap();
         s.upsert(&IncomingItem {
-            is_sensitive: true,
-            search_text: None,
-            ..incoming("secret", "hash-b", T0)
-        })
-        .unwrap();
-        s.upsert(&IncomingItem {
             deleted: true,
-            ..incoming("gone", "hash-c", T0)
+            ..incoming("gone", "hash-b", T0)
         })
         .unwrap();
 
-        let ids = ["live", "secret", "gone"];
+        let ids = ["live", "gone"];
         let page = s.version_summaries(&ids).unwrap();
         for id in ids {
             assert_eq!(

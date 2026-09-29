@@ -142,12 +142,11 @@ async fn round_with_permit(
             if stats.applied > 0 {
                 state.note_remote_change();
             }
-            if stats.changed() || stats.skipped_sensitive > 0 {
+            if stats.changed() {
                 info!(
                     uploaded = stats.uploaded,
                     tombstoned = stats.tombstoned,
                     applied = stats.applied,
-                    withheld = stats.skipped_sensitive,
                     "cloud sync round"
                 );
             }
@@ -208,7 +207,6 @@ fn to_wire(stats: copypaste_cloud::SyncStats) -> CloudSyncData {
         tombstoned: count(stats.tombstoned),
         downloaded: count(stats.downloaded),
         applied: count(stats.applied),
-        skipped_sensitive: count(stats.skipped_sensitive),
         skipped_undecryptable: count(stats.skipped_undecryptable),
         skipped_forged: count(stats.skipped_forged),
         skipped_future: count(stats.skipped_future),

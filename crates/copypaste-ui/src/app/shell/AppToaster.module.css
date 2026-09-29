@@ -14,7 +14,7 @@
   --error-bg: var(--toast-error-bg);
   --error-border: var(--toast-error-border);
   --error-text: var(--err-strong);
-  --border-radius: var(--r-pill);
+  --border-radius: var(--r-card);
   inline-size: min(calc(var(--s-9) * 10), calc(100vw - var(--inset-left) - var(--inset-right) - var(--s-6))) !important;
   max-inline-size: calc(100vw - var(--inset-left) - var(--inset-right) - var(--s-6));
   z-index: var(--z-toast);
@@ -23,10 +23,10 @@
 :global([data-sonner-toaster][data-sonner-theme] [data-sonner-toast].copypaste-toast[data-styled="false"]) {
   box-sizing: border-box;
   display: block;
-  inline-size: fit-content;
-  min-inline-size: min(calc(var(--s-8) * 7), 100%);
-  max-inline-size: min(calc(var(--s-9) * 10), 100%);
-  padding: var(--s-2) var(--s-3);
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  padding: var(--s-3);
   border: var(--stroke-1) solid var(--normal-border);
   border-radius: var(--border-radius);
   color: var(--normal-text);
@@ -53,6 +53,22 @@
 :global([data-sonner-toaster][data-sonner-theme] [data-sonner-toast].copypaste-toast[data-styled="false"] [data-mode]) {
   inline-size: 100%;
   padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  align-self: center;
+}
+
+:global(.copypaste-toast-layout) {
+  display: grid;
+  min-inline-size: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--s-2);
+}
+
+:global(.copypaste-toast-layout > [data-toast-close]) {
+  color: var(--dim);
 }
 
 :global([data-sonner-toaster][data-sonner-theme] [data-description]) {

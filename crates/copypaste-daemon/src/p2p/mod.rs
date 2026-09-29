@@ -335,7 +335,7 @@ mod tests {
     /// and then reads — a race. `NoiseChannel::wait_for_close` is what closes
     /// it. This test failed roughly one run in ten before that existed.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn two_daemons_converge_without_leaking_a_secret() {
+    async fn two_daemons_converge_all_captured_items() {
         let (a, _da) = test_state("alpha");
         let (b, _db) = test_state("beta");
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -343,7 +343,7 @@ mod tests {
 
         add(&a, "from a");
         add(&b, "from b");
-        add(&a, "AKIAIOSFODNN7EXAMPLE");
+        add(&a, "third item");
 
         let response = crate::p2p::handlers::sync_now(&b, 1, Some(&pairing_id)).await;
         assert!(response.ok, "{:?}", response.error);
@@ -360,14 +360,8 @@ mod tests {
                 "B is missing {item}: {on_b:?}"
             );
         }
-        assert!(
-            on_a.iter().any(|c| c == "AKIAIOSFODNN7EXAMPLE"),
-            "the secret must stay on the device that captured it"
-        );
-        assert!(
-            !on_b.iter().any(|c| c == "AKIAIOSFODNN7EXAMPLE"),
-            "a sensitive item crossed the wire: {on_b:?}"
-        );
+        assert!(on_a.iter().any(|c| c == "third item"));
+        assert!(on_b.iter().any(|c| c == "third item"));
 
         // The same item ids on both sides, which is what makes the second
         // session free rather than a second copy of everything.
@@ -376,7 +370,6 @@ mod tests {
             .list(100, 0)
             .unwrap()
             .into_iter()
-            .filter(|row| !row.is_sensitive)
             .map(|row| row.id)
             .collect();
         let ids_b: std::collections::HashSet<String> = b

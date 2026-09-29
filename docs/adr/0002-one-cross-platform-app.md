@@ -100,9 +100,8 @@ notice — it only knows about the five keys. Re-read
 
 **Manifest 06's behaviour half remains binding**, exactly as
 `docs/rewrite/port-manifest/README.md` says: scroll anchoring, the row-height
-over-reservation rule, the 15 accessibility requirements, sensitive content
-absent from the view rather than obscured, no filesystem path in any
-user-facing error. A webview does not get to drop these any more than a native
+over-reservation rule, the 15 accessibility requirements, no filesystem path
+in any user-facing error. A webview does not get to drop these any more than a native
 app did — it just has to satisfy them with DOM and ARIA instead of SwiftUI and
 TalkBack.
 

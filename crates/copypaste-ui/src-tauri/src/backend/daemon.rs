@@ -400,14 +400,8 @@ impl Backend for DaemonBackend {
         expect_private_mode(self.call(Method::SetPrivateMode { enabled }).await?)
     }
 
-    async fn export(&self, limit: u32, include_sensitive: bool) -> Result<ExportData> {
-        expect_export(
-            self.call(Method::Export {
-                limit,
-                include_sensitive,
-            })
-            .await?,
-        )
+    async fn export(&self, limit: u32) -> Result<ExportData> {
+        expect_export(self.call(Method::Export { limit }).await?)
     }
 
     async fn import(&self, items: Vec<ExportItem>) -> Result<ImportData> {
@@ -530,8 +524,7 @@ mod tests {
         let page = expect_page(
             into_data(parse(
                 r#"{"id":1,"ok":true,"data":{"page":{"items":[{"id":"a","content":"hi",
-                   "content_type":"text/plain","created_at":5,"pinned":true,
-                   "is_sensitive":false}],"skipped_undecryptable":0}}}"#,
+                   "content_type":"text/plain","created_at":5,"pinned":true}],"skipped_undecryptable":0}}}"#,
             ))
             .unwrap(),
         )
@@ -766,14 +759,13 @@ mod tests {
         let export = expect_export(
             into_data(parse(
                 r#"{"id":1,"ok":true,"data":{"export":{"items":[{"content":"hi","content_type":"text/plain",
-                   "created_at":5,"pinned":false,"is_sensitive":false}],"skipped_non_text":1,
-                   "skipped_sensitive":2,"skipped_undecryptable":3}}}"#,
+                   "created_at":5,"pinned":false}],"skipped_non_text":1,
+                   "skipped_undecryptable":3}}}"#,
             ))
             .unwrap(),
         )
         .unwrap();
         assert_eq!(export.items.len(), 1);
-        assert_eq!(export.skipped_sensitive, 2);
     }
 
     #[test]

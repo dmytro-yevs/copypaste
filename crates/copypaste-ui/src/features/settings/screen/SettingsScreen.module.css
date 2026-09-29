@@ -32,7 +32,6 @@
   display: flex;
   block-size: 100%;
   min-block-size: 100%;
-  max-inline-size: calc(var(--s-9) * 28);
   padding-block-end: var(--s-7);
   flex-direction: column;
 }

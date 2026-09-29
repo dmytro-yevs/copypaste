@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use copypaste_cloud::sync::{Applied, CloudSource, LocalItem, SensitiveGuard};
+use copypaste_cloud::sync::{Applied, CloudSource, LocalItem};
 use copypaste_cloud::{
     CloudConfig, CloudCrypto, CloudItem, CloudSync, RealtimeEvent, RealtimeSubscription,
     SupabaseAuth, SupabaseRest,
@@ -171,9 +171,9 @@ async fn real_supabase_contract() {
         row.item_id == "real-convergence" && row.deleted && row.ciphertext.is_empty()
     }));
 
-    let sensitive = LocalItem {
-        item_id: "real-sensitive".into(),
-        content: zeroize::Zeroizing::new(b"must never leave this device".to_vec()),
+    let credential_shaped = LocalItem {
+        item_id: "real-credential-shaped".into(),
+        content: zeroize::Zeroizing::new(b"AKIAIOSFODNN7EXAMPLE".to_vec()),
         content_type: "text".into(),
         payload_metadata: None,
         source_app_bundle_id: None,
@@ -183,7 +183,7 @@ async fn real_supabase_contract() {
         origin_device_id: "device-a".into(),
     };
     let source = Source {
-        items: vec![sensitive],
+        items: vec![credential_shaped],
         watermark: Mutex::new(0),
     };
     let sync = CloudSync::new(
@@ -192,12 +192,10 @@ async fn real_supabase_contract() {
         copypaste_cloud::derive_sync_key(PASSPHRASE, &alice.user_id).expect("sync key"),
         config,
         alice,
-        SensitiveGuard::new(|item| item.item_id == "real-sensitive"),
     );
-    let stats = sync.push(&source).await.expect("sensitive-only push");
-    assert_eq!(stats.skipped_sensitive, 1);
-    assert_eq!(stats.uploaded, 0);
-    assert!(!rest
+    let stats = sync.push(&source).await.expect("credential-shaped push");
+    assert_eq!(stats.uploaded, 1);
+    assert!(rest
         .fetch_since(
             &sync.inspect_session(|session| session.access_token.clone()),
             created_at + 3,
@@ -205,9 +203,9 @@ async fn real_supabase_contract() {
             10,
         )
         .await
-        .expect("sensitive refusal query")
+        .expect("credential-shaped query")
         .iter()
-        .any(|row| row.item_id == "real-sensitive"));
+        .any(|row| row.item_id == "real-credential-shaped"));
 
     realtime.close().await;
 }

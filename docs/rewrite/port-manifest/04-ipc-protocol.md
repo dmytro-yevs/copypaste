@@ -148,12 +148,11 @@ as a known code and do not acquire a guessed retry policy.
   policy; clients do not invent different maxima.
 - A settings patch is all-or-nothing: one invalid value rejects the patch and
   leaves the effective configuration unchanged.
-- Export excludes sensitive content unless the explicit include flag is true.
 - After authentication, a legacy text body over the supported full-body limit
   `MAX_CONTENT_BYTES` is refused by get, native copy, plain-text copy and an
-  included export as non-retryable `content_too_large`. Default sensitive and
-  non-text export exclusions retain their filtering-before-authentication
-  precedence. List, search and pin/unpin instead return a bounded preview
+  export as non-retryable `content_too_large`. Non-text export exclusions retain
+  their filtering-before-authentication precedence. List, search and pin/unpin
+  instead return a bounded preview
   marked `truncated`; the stored ciphertext is never altered.
 - An export whose included aggregate would exceed one response frame is refused
   whole as non-retryable `content_too_large`; it has no partial-success or
@@ -179,9 +178,9 @@ to the system clipboard. Native copy and plain-text copy are separate explicit
 actions.
 
 Watch events carry only the event kind and bounded counters such as live item
-count, capture occurrence and auto-wiped count. They carry no item id, source
-path, clipboard content or secret finding. Subscribers re-read through normal
-typed methods, preserving one authorization and redaction path.
+count and capture occurrence. They carry no item id, source path or clipboard
+content. Subscribers re-read through normal typed methods, preserving one
+authorization and redaction path.
 
 ## 6. Readiness and shutdown
 
@@ -257,35 +256,27 @@ Stable rule IDs used by source comments:
 
 - **I9:** clients branch on the machine-readable error enum, never message text.
 - **I14:** the owner-only local endpoint is the authentication boundary.
-- **PG-26:** import re-runs detector, size and dedup policy and cannot smuggle a
-  credential back in marked clean.
 
 ## 8. Method behaviour that must survive refactors
 
 - List uses an opaque total-order cursor and is stable under concurrent inserts.
-- Search scans the full FTS match set up to its bounded result limit and never
-  returns sensitive items.
+- Search scans the full FTS match set up to its bounded result limit.
 - Delete-all accepts a capture ceiling so an undo delay cannot delete items
   captured after the user's gesture.
 - A full pinned ordering tolerates peers deleting or unpinning an id while the
   client holds the list.
-- Item reveal is read-only and sensitive plaintext appears only after the
-  client-owned explicit reveal gesture.
 - Get, native copy, plain-text copy and included export refuse authenticated
   legacy text over the supported full-body limit before any clipboard write;
   list, search and pin/unpin retain bounded previews and protection controls.
 - Export refuses, rather than truncates, an included aggregate that cannot fit
   its one bounded typed response.
-- Export defaults to excluding sensitive items. Import reruns detector, size and
-  dedup policy rather than inserting rows directly.
-- Backup refuses overwrite. Restore validates current key, schema, integrity
-  and sensitive index before durable replacement.
+- Import reruns size and dedup policy rather than inserting rows directly.
+- Backup refuses overwrite. Restore validates current key, schema and integrity
+  before durable replacement.
 - Pairing persists nothing until both peers confirm the handshake-bound SAS.
 - Unpair and revoke remain distinct: revoke bars the compromised pairing
   identity; unpair only forgets the local relationship.
 - Settings responses never echo credentials.
-- Watch coalescing may reduce refresh traffic but must preserve auto-wipe counts
-  so unrequested deletion remains visible.
 
 ## 9. Acceptance tests
 
@@ -336,18 +327,16 @@ Stable rule IDs used by source comments:
 ### 9.5 Product methods
 
 - Cursor paging is stable under concurrent capture and rejects invalid cursors.
-- List/search clamp shared limits and never expose tombstones or forbidden
-  sensitive index content.
-- Get/reveal has no clipboard side effect; native and plain-text copy exercise
-  their distinct backends.
+- List/search clamp shared limits and never expose tombstones.
+- Get has no clipboard side effect; native and plain-text copy exercise their
+  distinct backends.
 - Delete-all ceiling preserves a capture arriving during the undo window.
 - Pin reorder tolerates unknown ids and keeps a total order.
-- Export/import sensitive defaults and skip counts are exact.
 - Backup/restore failure leaves current data and pool untouched.
 - Pairing covers invite, join, bound SAS confirmation, cancel, timeout, unpair
   and revoke without alternate command paths.
-- Watch receives items/peers changes, includes capture and swept counts, carries
-  no content and survives concurrent one-shot requests.
+- Watch receives items/peers changes, includes capture counts, carries no
+  content and survives concurrent one-shot requests.
 - Configuration redacts secrets and rejects an invalid patch atomically.
 
 ## 10. Load-bearing choices

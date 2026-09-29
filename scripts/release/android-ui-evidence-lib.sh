@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+ANDROID_ONBOARDING_ACTIONS="Get started|Continue|Not now|Open Library"
+
 selector_center() { # <xml> <selector alternatives separated by |> <any|exact|action|rendered|current>
     python3 - "$1" "$2" "$3" <<'PY'
 import re
@@ -297,7 +299,7 @@ tap_selector() { # <selector> <artifact> [timeout]
 
 reach_settings_tab() { # <artifact> [timeout]
     local artifact="$1" timeout="${2:-${WAIT_SECS:-45}}"
-    tap_until_state "Explore first" "$artifact" settings_tab_holds up "$timeout"
+    tap_until_state "$ANDROID_ONBOARDING_ACTIONS" "$artifact" settings_tab_holds up "$timeout"
 }
 
 settings_tab_holds() { # <artifact>

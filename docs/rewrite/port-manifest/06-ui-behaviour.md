@@ -36,13 +36,7 @@ or user-agent string.
 - **INV-14:** A full-body read failure is an explicit unavailable state. A
   truncated list preview is never presented as the complete body.
 
-### 1.2 Sensitive data and errors
-
-- **INV-15:** Masked content is absent from DOM text, accessible names, search
-  targets and shared caches. Blur alone is not masking.
-- **INV-16:** Revealed plaintext is ephemeral component state, never React Query
-  data, a global store, diagnostic event or log. It re-hides after the configured
-  timeout and on visibility loss.
+### 1.2 Protected data and errors
 - **INV-17:** The pairing QR payload never enters the DOM. A protected native
   renderer receives it through the bounded host contract.
 - **INV-18:** SAS digits are inert display text. The app provides explicit
@@ -176,15 +170,12 @@ the nearest surviving row and clamp.
 
 ### 4.2 Body presentation
 
-One React-free resolver maps list preview, full-body result, full-body failure,
-sensitivity, reveal state and media kind to a discriminated presentation:
-masked, unavailable, image, code or text. Inspector and expanded reader consume
-the same resolver.
+One React-free resolver maps list preview, full-body result, full-body failure
+and media kind to a discriminated presentation: unavailable, image, code or
+text. Inspector and expanded reader consume the same resolver.
 
-List payloads are previews. Non-sensitive Inspector/detail views request full
-content by id. Sensitive content never crosses that operation and uses the
-separate reveal command only after an explicit gesture. If full content cannot
-be read, both surfaces say it is unavailable.
+List payloads are previews. Inspector and detail views request full content by
+id. If full content cannot be read, both surfaces say it is unavailable.
 
 One presentation record owns singular type labels, filter labels, icon and copy
 action copy. File display name, origin display name and absolute time each have
@@ -193,7 +184,7 @@ generic even when a display name contains a platform word.
 
 ### 4.3 Actions
 
-- Copy, plain-text copy, pin, unpin, delete and reveal are explicit actions.
+- Copy, plain-text copy, pin, unpin and delete are explicit actions.
 - Inspector and detail use identical copy icon/label policy for the same kind.
 - Multi-select actions snapshot selected ids and release busy state in a
   `finally` path.
@@ -202,7 +193,6 @@ generic even when a display name contains a platform word.
   captured action set.
 - Delete-all passes the capture ceiling associated with the user's gesture so a
   later capture survives.
-- Search and copy targets use masked presentation for sensitive items.
 - Import requires confirmation before any database mutation and refreshes
   History after success.
 
@@ -320,7 +310,7 @@ Keyboard behaviour:
 Popup refresh occurs on show/focus, a visibility-gated interval and explicit
 retry. Results are sequence-tagged. Loading an intentionally cleared cache shows
 a neutral blank/loading state rather than claiming History is empty. Search uses
-masked display labels and never plaintext from sensitive items.
+its canonical result labels.
 
 Tray setup never blocks on IPC. Private-mode check state and recent items are
 filled asynchronously from daemon truth. Recent labels are bounded and collapse
@@ -383,8 +373,6 @@ are contained, never cropped.
   update after keyboard movement.
 - `truncated + full-body failure` renders unavailable in both Inspector and
   detail; success replaces the preview in both.
-- Sensitive content remains absent from DOM, accessibility tree, search and
-  caches until reveal, then re-hides on both timeout and visibility loss.
 - Singular item labels and plural filter labels remain distinct; copy action
   presentation matches across surfaces.
 - Unix/Windows filenames, origin fallback and absolute time use their canonical

@@ -3,9 +3,7 @@ use tracing::{info, warn};
 
 use crate::retention;
 use crate::storage::{Store, StoreError};
-use crate::{
-    ingest::ingest_into_batched, now_ms, CryptoError, Detector, IngestError, Ingested, Keyring,
-};
+use crate::{ingest::ingest_into_batched, now_ms, CryptoError, IngestError, Ingested, Keyring};
 
 /// Ceiling on one import batch. The IPC frame cap bounds the bytes; this bounds
 /// the work, so a single request cannot hold the database mutex for minutes.
@@ -38,13 +36,9 @@ pub enum ImportError {
 
 /// Put exported items back, through the same ingest a capture takes.
 ///
-/// The caller's `is_sensitive` is a **floor, never a ceiling**: every item is
-/// re-run through the detector, so a hand-edited export cannot reintroduce a
-/// credential marked clean (manifest 04, PG-26). Nothing is written until the
-/// whole batch has passed the two bounds above.
+/// Nothing is written until the whole batch has passed the two bounds above.
 pub fn import(
     store: &Store,
-    detector: &Detector,
     keyring: &Keyring,
     settings: &ConfigData,
     items: Vec<ExportItem>,
@@ -53,7 +47,6 @@ pub fn import(
     let retention_settings = settings.clone();
     import_with_current_retention(
         store,
-        detector,
         keyring,
         &ingress_settings,
         move || retention_settings.clone(),
@@ -63,12 +56,9 @@ pub fn import(
 
 /// Import with a live retention policy for the batch's terminal sweep.
 ///
-/// `settings` is deliberately still the ingress snapshot: its size and
-/// sensitive-content decisions applied to every item before it reached this
-/// batch.
+/// `settings` is deliberately still the ingress snapshot for every item.
 pub fn import_with_current_retention(
     store: &Store,
-    detector: &Detector,
     keyring: &Keyring,
     settings: &ConfigData,
     current_settings: impl Fn() -> ConfigData,
@@ -105,12 +95,10 @@ pub fn import_with_current_retention(
             .min(now_ms().saturating_add(MAX_IMPORT_FUTURE_SKEW_MS));
         match ingest_into_batched(
             &batch,
-            detector,
             keyring,
             &item.content,
             &item.content_type,
             created_at,
-            item.is_sensitive,
         ) {
             Ok(Ingested::Stored(stored)) => {
                 result.inserted += 1;
@@ -205,12 +193,11 @@ mod tests {
             content_type: copypaste_ipc::content_type::TEXT.to_string(),
             created_at: 1_700_000_000_000,
             pinned: false,
-            is_sensitive: false,
         }
     }
 
     fn import_into(f: &Fixture, items: Vec<ExportItem>) -> Result<ImportData, ImportError> {
-        import(&f.store, &f.detector, &f.keyring, &f.settings, items)
+        import(&f.store, &f.keyring, &f.settings, items)
     }
 
     #[test]
@@ -219,14 +206,12 @@ mod tests {
         let keyring = Arc::new(Keyring::from_secret(&[5u8; 32]));
         let db_key = keyring.db_key();
         let store = Store::open(&dir.path().join("history.db"), &db_key).unwrap();
-        let detector = Arc::new(Detector::new().unwrap());
         let ingress = ConfigData {
             history_limit: 1,
             ..ConfigData::default()
         };
         crate::ingest::ingest_into(
             &store,
-            &detector,
             &keyring,
             "first",
             copypaste_ipc::content_type::TEXT,
@@ -244,14 +229,12 @@ mod tests {
         });
         let worker = {
             let store = store.clone();
-            let detector = Arc::clone(&detector);
             let keyring = Arc::clone(&keyring);
             let current = Arc::clone(&current);
             let ingress = ingress.clone();
             std::thread::spawn(move || {
                 import_with_current_retention(
                     &store,
-                    &detector,
                     &keyring,
                     &ingress,
                     || current.lock().unwrap().clone(),
@@ -274,7 +257,7 @@ mod tests {
         let source = fixture_named("alpha");
         source.add("first");
         source.add("second");
-        let exported = export(&source.store, &source.keyring, 0, false).unwrap();
+        let exported = export(&source.store, &source.keyring, 0).unwrap();
 
         let target = fixture_named("beta");
         let result = import_into(&target, exported.items).unwrap();
@@ -286,37 +269,16 @@ mod tests {
         assert_eq!(target.contents(), ["first", "second"]);
     }
 
-    /// PG-26. An export edited to claim a credential is clean must not import as
-    /// clean: the detector is re-run and the two are OR-ed. This is the property
-    /// that matters most in the module — an import is the one path by which a
-    /// user's own file decides what the database believes.
     #[test]
-    fn an_import_cannot_smuggle_a_credential_in_marked_clean() {
+    fn credential_shaped_text_imports_and_is_searchable() {
         let f = fixture();
         import_into(&f, vec![item("AKIAIOSFODNN7EXAMPLE")]).unwrap();
 
         let row = f.store.list(10, 0).unwrap().remove(0);
-        assert!(row.is_sensitive, "the detector did not re-run on import");
-        assert!(
-            f.store
-                .search("AKIAIOSFODNN7EXAMPLE", 10)
-                .unwrap()
-                .is_empty(),
-            "an imported credential reached the search index"
+        assert_eq!(
+            row.id,
+            f.store.search("AKIAIOSFODNN7EXAMPLE", 10).unwrap()[0].id
         );
-    }
-
-    /// An exported sensitive classification remains binding even if the current
-    /// detector no longer recognises the text.
-    #[test]
-    fn an_exported_sensitive_item_never_reaches_fts() {
-        let f = fixture();
-        let mut claimed = item("just a note");
-        claimed.is_sensitive = true;
-        import_into(&f, vec![claimed]).unwrap();
-
-        assert!(f.store.list(10, 0).unwrap().remove(0).is_sensitive);
-        assert!(f.store.search("note", 10).unwrap().is_empty());
     }
 
     #[test]
@@ -338,7 +300,7 @@ mod tests {
         let created_at = source.store.get(&id).unwrap().unwrap().created_at;
 
         let target = fixture_named("beta");
-        let exported = export(&source.store, &source.keyring, 0, false).unwrap();
+        let exported = export(&source.store, &source.keyring, 0).unwrap();
         import_into(&target, exported.items).unwrap();
 
         let row = target.store.list(10, 0).unwrap().remove(0);
@@ -399,7 +361,7 @@ mod tests {
     }
 
     #[test]
-    fn text_subtypes_round_trip_with_pins_and_sensitive_classification() {
+    fn text_subtypes_round_trip_with_pins() {
         let source = fixture_named("text-subtypes-source");
         let pinned = source.add_typed("pinned text", copypaste_ipc::content_type::TEXT);
         source.store.set_pinned(&pinned, true).unwrap();
@@ -413,7 +375,7 @@ mod tests {
             source.add_typed(content, content_type);
         }
 
-        let exported = export(&source.store, &source.keyring, 0, true).unwrap();
+        let exported = export(&source.store, &source.keyring, 0).unwrap();
         assert_eq!(exported.items.len(), 6);
         let target = fixture_named("text-subtypes-target");
         assert_eq!(import_into(&target, exported.items).unwrap().inserted, 6);
@@ -427,12 +389,12 @@ mod tests {
         assert!(rows
             .iter()
             .any(|row| row.pinned && row.content_type == "text"));
-        assert!(rows.iter().any(|row| row.is_sensitive));
         assert!(target
             .store
             .search("AKIAIOSFODNN7EXAMPLE", 10)
             .unwrap()
-            .is_empty());
+            .iter()
+            .any(|row| row.content_hash == crate::compute_content_hash(b"AKIAIOSFODNN7EXAMPLE")));
     }
 
     /// An entry that cannot be stored at all is counted, not fatal: losing the
@@ -564,7 +526,6 @@ mod tests {
         for (content, created_at) in &entries {
             crate::ingest::ingest_into(
                 &per_item.store,
-                &per_item.detector,
                 &per_item.keyring,
                 content,
                 copypaste_ipc::content_type::TEXT,

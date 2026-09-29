@@ -21,5 +21,5 @@ migration.
 ## Validation
 
 Core tests cover decoder dimensions, compressed and base64 bounds, strict
-envelopes, legacy file parsing, sensitive-item icon stripping, storage quota,
+envelopes, legacy file parsing, storage quota,
 bounded pages, P2P metadata shape validation, and cloud signature binding.

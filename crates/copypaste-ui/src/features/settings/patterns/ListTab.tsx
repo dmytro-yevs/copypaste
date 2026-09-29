@@ -16,7 +16,6 @@ export function ListTab({ ready, supportsScreenshots, scope = "all" }: ListTabPr
   const { t } = useTranslation();
   const sortByDevice = usePrefs((s) => s.sortByDevice);
   const historyDisplayLimit = usePrefs((s) => s.historyDisplayLimit);
-  const warnBeforeReveal = usePrefs((s) => s.warnBeforeReveal);
   const allowScreenshots = usePrefs((s) => s.allowScreenshots);
   const set = usePrefs((s) => s.set);
   if (!ready) return null;
@@ -28,7 +27,6 @@ export function ListTab({ ready, supportsScreenshots, scope = "all" }: ListTabPr
     },
   ];
   const privacyFields: SettingsField[] = [
-    { kind: "boolean", definition: settingDefinition("privacy", "settings.list.warnBeforeReveal.title"), value: warnBeforeReveal, controlId: "warn-before-reveal", onChange: (value) => set("warnBeforeReveal", value) },
     { kind: "boolean", definition: settingDefinition("privacy", "settings.list.allowScreenshots.title"), value: allowScreenshots, controlId: "allow-screenshots", visible: supportsScreenshots, onChange: (value) => set("allowScreenshots", value) },
   ];
   return <div className={styles.root}>

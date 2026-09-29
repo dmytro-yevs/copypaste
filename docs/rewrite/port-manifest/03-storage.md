@@ -17,7 +17,7 @@ Storage owns:
 - per-connection keying and pragma policy;
 - encrypted item rows, tombstones, pin state and device-local settings;
 - atomic dedup, delete, index and retention operations;
-- the FTS5 search index and its sensitive-content exclusion;
+- the FTS5 search index;
 - deterministic keyset pagination;
 - bounded read pooling and durable backup/restore of v2 data.
 
@@ -58,27 +58,12 @@ stops being supported. It must not arrive as a convenience branch in `open`.
 - Decryption failure never falls back to plaintext or another key. A page may
   skip and count an unreadable row, but may not accept its bytes.
 
-### 3.2 Sensitive content and FTS
+### 3.2 FTS lifecycle
 
-Sensitive content never reaches search results. All layers are mandatory:
-
-1. The insert path drops search text when the item is sensitive, even if a
-   caller supplied non-empty plaintext.
-2. The FTS write re-reads sensitivity inside the transaction before inserting
-   an index row.
-3. The search query joins only live, non-sensitive, searchable content, so a
-   stale or manually planted FTS row cannot surface.
-4. A bounded purge removes index rows that have no live searchable owner and
-   re-evaluates indexed text against the current detector rules.
-
-The purge removes only FTS entries. It never deletes, tombstones or newly flags
-the clipboard item. That asymmetry is deliberate: a false positive may make an
-item temporarily unsearchable, but must not destroy user data.
-
-Every delete, tombstone and sensitivity transition removes the matching FTS row
-in the same transaction. Every indexed insert commits the item and index entry
-in the same transaction. FTS row identifiers and row back-pointers are cleared
-together so a reused FTS rowid cannot target the wrong item.
+Every indexed insert commits the item and index entry in the same transaction.
+Every delete and tombstone removes the matching FTS row in that transaction.
+FTS row identifiers and row back-pointers are cleared together so a reused FTS
+rowid cannot target the wrong item.
 
 ### 3.3 Dedup and ingest
 
@@ -132,9 +117,7 @@ transaction, with lookup-dependent cleanup occurring before the row disappears.
 
 ### 3.11 Retention and quota
 
-- TTL and sensitive auto-wipe operate only on live, unpinned rows.
-- Sensitive deletion requires the configured high-confidence verdict. Lower
-  confidence may flag or de-index, not delete.
+- TTL and quota eviction operate only on live, unpinned rows.
 - Retention work is bounded and batchable; one sweep cannot hold the database
   lock or materialize all payloads without a limit.
 - Byte quota is calculated from maintained size metadata and covering indexes,
@@ -175,7 +158,7 @@ Search sanitizes arbitrary text into an FTS expression without exposing FTS
 operators unintentionally. Unicode alphanumerics survive; malformed quotes,
 reserved operators, NUL and punctuation cannot produce SQL or FTS syntax
 errors. Empty sanitized input returns no results. Search remains restricted to
-live, non-sensitive content even when the index is stale.
+live content even when the index is stale.
 
 Search allocation belongs to storage. It lazily maps the ranked FTS prefix,
 measures actual ciphertext lengths, retains the first match even when it alone
@@ -195,13 +178,11 @@ match. Callers do not trim a materialized search result or map later matches.
   current device key, exact schema and integrity check, and durably swaps only
   after all checks pass.
 - A failed restore leaves the working database and active pool unchanged.
-- Restored search state is purged against current sensitive rules before the
-  replacement is committed for use.
 - User-facing administration errors contain no source path, destination path
   or username.
 - Export/import of the product's current interchange format is not a database
-  schema path. Imported items pass through normal size, detector, dedup and
-  indexing rules.
+  schema path. Imported items pass through normal size, dedup and indexing
+  rules.
 
 ## 5. Acceptance tests
 
@@ -216,19 +197,7 @@ match. Callers do not trim a materialized search result or map later matches.
 - Concurrent readers do not block each other; concurrent writers lose no
   committed update.
 
-### 5.2 Sensitive index
-
-- Supplying search text for a sensitive item creates no FTS row.
-- Direct FTS upsert for a sensitive id is refused inside the transaction.
-- A planted stale FTS row for a sensitive item is never returned by search.
-- Marking an item sensitive removes its index entry atomically.
-- The startup purge removes stale/unsearchable entries and is idempotent.
-- A rule added after capture removes the matching index entry but preserves the
-  clipboard item and its ciphertext.
-- An undecodable index row does not prevent later rows from being checked.
-- Purge memory is bounded by row and byte caps.
-
-### 5.3 Dedup, tombstones and pinning
+### 5.2 Dedup, tombstones and pinning
 
 - Two concurrent equal ingests produce one live row and both callers receive
   the winner's id.
@@ -248,19 +217,14 @@ Stable acceptance IDs used by source comments:
 - **Q10:** a page read skips and counts a row whose authenticated content cannot
   be opened; it never bypasses authentication.
 
-### 5.4 Retention
+### 5.3 Retention
 
 - Expiry boundary tests cover before, at and after the deadline.
-- Low-confidence sensitive findings do not delete an item.
-- High-confidence auto-wipe removes only eligible unpinned items and reports the
-  count to the event layer.
-- A database error in the “has sensitive items” optimization fails closed and
-  does not suppress the sweep.
 - Quota eviction keeps the newest unpinned row, chooses deterministic victims
   and leaves total removable bytes within policy when possible.
 - Cleanup rolls back as one unit on an injected FTS/dependent-state failure.
 
-### 5.5 Pagination and search
+### 5.4 Pagination and search
 
 - Cursor paging is stable under a concurrent insert above the window.
 - Equal timestamps, NULL pin order and transitions between pinned/unpinned runs
@@ -269,9 +233,9 @@ Stable acceptance IDs used by source comments:
 - Query plans use the intended bounded seek indexes at deep history depths.
 - Unicode, hyphenated, quoted, operator-only and adversarial search input never
   panics and returns the intended prefix matches.
-- Search never returns tombstones or sensitive rows.
+- Search never returns tombstones.
 
-### 5.6 Backup and restore
+### 5.5 Backup and restore
 
 - Backup refuses overwrite and round-trips current v2 history.
 - Wrong-key, corrupt, wrong-schema and failed-integrity candidates do not replace
@@ -279,7 +243,6 @@ Stable acceptance IDs used by source comments:
 - An interrupted durable swap yields either the old valid file or the new valid
   file, never a partially copied destination.
 - The rebuilt pool observes restored data and no stale pool remains active.
-- Sensitive-index purge runs before restored history becomes searchable.
 
 ## 6. Load-bearing implementation choices
 
@@ -287,7 +250,5 @@ Stable acceptance IDs used by source comments:
 - Bind row projections by name or generate mapper and projection together.
 - Use maintained pooling, migration-free schema creation, temporary-file and
   durable-replacement packages already present in the tree.
-- Keep sensitive write/read/purge checks separate because they defend different
-  trust boundaries; share predicates and test vectors so they cannot drift.
 - Keep keyset cursors opaque. Their representation may change with the order,
   while clients depend only on round-tripping the token.

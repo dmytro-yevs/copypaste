@@ -120,21 +120,6 @@ export const settingsService = {
     decodedImage: "Choose a decoded image budget of at least 1 MB.",
   },
 
-  sensitive: {
-    title: "Delete detected secrets after",
-    description: "Deletes detected passwords, keys and tokens after this time.",
-    /** Rule 4: auto-deletion is unrecoverable, so turning it on says so at
-     *  the control rather than in a manual. */
-    warning:
-      "Detected secrets are deleted without asking and cannot be recovered.",
-    /** Was "the service doesn't report when this runs". It does now — the
-     *  change event carries the count — so the warning names where the
-     *  running total is instead of admitting there isn't one. */
-    announced:
-      "Each deletion is announced and counted in Diagnostics.",
-    off: "Off — flagged items are kept until you delete them.",
-  },
-
   notify: {
     title: "Notify on capture",
     description: "Only when CopyPaste is in the background.",

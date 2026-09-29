@@ -26,6 +26,7 @@ pub enum PermissionHost {
 pub enum PermissionId {
     Notifications,
     Tile,
+    BackgroundActivity,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,6 +69,7 @@ pub struct OnboardingPermissions {
     pub platform: PermissionHost,
     pub notifications: PermissionItem,
     pub tile: PermissionItem,
+    pub background_activity: PermissionItem,
     /// Clipboard capture itself never needs a TCC / runtime grant on the
     /// shipped platforms. Android background capture is optional Shizuku.
     pub clipboard_status: PermissionStatus,
@@ -88,11 +90,16 @@ impl OnboardingPermissions {
         platform: PermissionHost,
         notifications: PermissionStatus,
         tile: PermissionStatus,
+        background_activity: PermissionStatus,
     ) -> Self {
         Self {
             platform,
             notifications: PermissionItem::of(PermissionId::Notifications, notifications),
             tile: PermissionItem::of(PermissionId::Tile, tile),
+            background_activity: PermissionItem::of(
+                PermissionId::BackgroundActivity,
+                background_activity,
+            ),
             clipboard_status: PermissionStatus::NotRequired,
         }
     }

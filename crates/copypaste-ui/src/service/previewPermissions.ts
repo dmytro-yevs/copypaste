@@ -4,6 +4,7 @@ let permissions: OnboardingPermissions = {
   platform: "android",
   notifications: { id: "notifications", status: "prompt", required: false },
   tile: { id: "tile", status: "prompt", required: false },
+  backgroundActivity: { id: "background_activity", status: "prompt", required: false },
   clipboardStatus: "not_required",
 };
 
@@ -12,9 +13,7 @@ export function previewPermissionSnapshot(): OnboardingPermissions {
 }
 
 export function grantPreviewPermission(id: OnboardingPermissionId): OnboardingPermissions {
-  permissions = {
-    ...permissions,
-    [id]: { ...permissions[id], status: "granted" },
-  };
+  const key = id === "background_activity" ? "backgroundActivity" : id;
+  permissions = { ...permissions, [key]: { ...permissions[key], status: "granted" } };
   return permissions;
 }

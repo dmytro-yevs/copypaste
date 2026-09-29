@@ -21,9 +21,8 @@ Any other failure is P0 until classified below.
    Keep the Mac firewall enabled and permit incoming connections for CopyPaste.
    Verify that both Devices screens load and that sync is enabled.
 3. Give each test a unique ordinary-text marker, for example
-   `p0-qr-mac-to-phone-YYYYMMDD-HHMM`. Confirm that it is not classified as
-   sensitive. Use **Sync now** for every assertion; automatic cadence is not
-   timing evidence.
+   `p0-qr-mac-to-phone-YYYYMMDD-HHMM`. Use **Sync now** for every assertion;
+   automatic cadence is not timing evidence.
 4. Before the Android lifecycle test, enable its foreground capture service and
    confirm the ongoing capture notification. This is what is intended to keep
    the process containing the embedded peer listener alive.
@@ -59,7 +58,7 @@ the peer list, saved address, and both marker counts changed.
 | Network topology | P0-7 fails exactly as expected, or a managed network blocks the required TCP/multicast path and VPN has not yet been tried. | Record policy and route. Run P0-8 before treating it as an environment-only block. |
 | Build/install block | No matching APK or Mac app can launch, or Android native compilation is blocked by the missing Tauri Gradle settings script/JDK mismatch. | Record toolchain versions and first failing command; this blocks all hardware claims, not P2P correctness. |
 | Device/OS policy | Android kills the process despite the visible foreground service, VPN policy forbids peer TCP, or macOS has a managed firewall rule. | Repeat once on a second supported device/network. If reproducible, file P0 with policy details; if not, retain as environment evidence. |
-| Test setup | Different build hashes, old pairing/history, sensitive marker, missing foreground-service notification, or an unrecorded network change. | Invalidate the row and rerun from clean disposable profiles. |
+| Test setup | Different build hashes, old pairing/history, a non-unique marker, missing foreground-service notification, or an unrecorded network change. | Invalidate the row and rerun from clean disposable profiles. |
 
 The protocol reason for P0-4, P0-6, and P0-8 is deliberate: each successful
 Noise session carries the peer's listening address in authenticated Hello and

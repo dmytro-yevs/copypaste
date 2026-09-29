@@ -82,22 +82,14 @@ pub(crate) async fn call(
             backend
                 .get(&args.id)
                 .await
-                .and_then(|item| {
-                    if item.is_sensitive {
-                        Err(BackendError::Invalid(
-                            "Sensitive content cannot be displayed here.",
-                        ))
-                    } else {
-                        Ok(item.content)
-                    }
-                })
+                .map(|item| item.content)
                 .map_err(failure)
                 .and_then(value)
         }
         BridgeCommand::ImagePreview => {
-            let args: IdArgs = parse(request.args)?;
+            let args: ImagePreviewArgs = parse(request.args)?;
             backend
-                .image_preview(&args.id)
+                .image_preview(&args.id, args.max_edge)
                 .await
                 .map(UiImagePreview::from)
                 .map_err(failure)

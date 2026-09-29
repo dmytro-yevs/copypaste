@@ -241,12 +241,11 @@ TOP_ID=$("$CLI" list --limit 1 --json | tr -d ' \n' | grep -o '"id":"[^"]*"' | h
 [[ "$TOP_ID" == "$FIRST_ID" ]] && ok "pinned item sorts above newer unpinned" \
     || fail "pin ordering broken: expected $FIRST_ID at top, got $TOP_ID"
 
-step "Secret detection — an AWS key must be flagged and kept out of the index"
+step "Credential-shaped text remains ordinary searchable content"
 "$CLI" add "AKIAIOSFODNN7EXAMPLE"
-if "$CLI" search "AKIAIOSFODNN7EXAMPLE" 2>/dev/null | grep -q "AKIAIOSFODNN7EXAMPLE"; then
-    fail "SENSITIVE CONTENT REACHED THE SEARCH INDEX"
-fi
-ok "sensitive item is not searchable"
+"$CLI" search "AKIAIOSFODNN7EXAMPLE" --json | grep -q "AKIAIOSFODNN7EXAMPLE" \
+    || fail "ordinary text was withheld from search"
+ok "the original text is searchable"
 
 step "At rest: the database must not contain plaintext"
 DB=$(find "$DATA_DIR" -name '*.db' | head -1)
@@ -273,22 +272,18 @@ fi
 "$CLI" config show | grep -q "250 ms" || fail "a rejected setting changed the daemon"
 ok "poll interval is 250 ms; an out-of-range value was refused and changed nothing"
 
-step "Export — sensitive items are withheld by default and the count is reported"
+step "Export preserves every supported text item"
 EXPORT="$DATA_DIR/history.json"
 "$CLI" export --output "$EXPORT" 2>"$DATA_DIR/export.err" || fail "export failed"
-if grep -q "AKIAIOSFODNN7EXAMPLE" "$EXPORT"; then
-    fail "A SENSITIVE ITEM WAS WRITTEN TO THE EXPORT BY DEFAULT"
-fi
-grep -q "withheld 1 sensitive" "$DATA_DIR/export.err" || fail "the export did not report what it withheld"
-ok "secret withheld, and the export said so"
+grep -q "AKIAIOSFODNN7EXAMPLE" "$EXPORT" || fail "ordinary text was withheld from export"
+ok "export preserved the original text"
 
-step "Import — the detector runs again, so an edited export cannot smuggle one back"
-sed 's/"content": "note two"/"content": "AKIAIOSFODNN7EXAMPLE"/' "$EXPORT" > "$DATA_DIR/tampered.json"
-"$CLI" import "$DATA_DIR/tampered.json" >/dev/null || fail "import failed"
-if "$CLI" search "AKIAIOSFODNN7EXAMPLE" --json | grep -q "AKIAIOSFODNN7EXAMPLE"; then
-    fail "AN IMPORTED CREDENTIAL REACHED THE SEARCH INDEX"
-fi
-ok "re-detected on the way in, and kept out of the index"
+step "Import preserves text without classification"
+sed 's/"content": "note two"/"content": "AKIAIOSFODNN7EXAMPLE imported"/' "$EXPORT" > "$DATA_DIR/edited.json"
+"$CLI" import "$DATA_DIR/edited.json" >/dev/null || fail "import failed"
+"$CLI" search "AKIAIOSFODNN7EXAMPLE imported" --json | grep -q "AKIAIOSFODNN7EXAMPLE imported" \
+    || fail "imported text was withheld from search"
+ok "imported text is searchable without alteration"
 
 step "Backup and restore — a damaged backup cannot replace a working history"
 BACKUP="$DATA_DIR/history.backup"

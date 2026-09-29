@@ -13,7 +13,6 @@ CREATE TABLE clipboard_items (
     content_type       TEXT    NOT NULL,
     -- SHA-256 hex of the pre-encryption bytes. Kept on tombstones on purpose.
     content_hash       TEXT    NOT NULL DEFAULT '',
-    is_sensitive       INTEGER NOT NULL DEFAULT 0,
     pinned             INTEGER NOT NULL DEFAULT 0,
     -- REAL so a reorder can insert between two neighbours without renumbering.
     pin_order          REAL,
@@ -86,13 +85,6 @@ CREATE INDEX idx_items_evictable
     ON clipboard_items(created_at, id, content_bytes)
     WHERE deleted = 0 AND pinned = 0;
 
--- Serves the sensitive TTL sweep and the probe that keeps it off the write
--- path. Empty on a machine that has never copied a secret, which is what makes
--- that probe free.
-CREATE INDEX idx_items_sensitive_wipe
-    ON clipboard_items(created_at, id)
-    WHERE is_sensitive = 1 AND pinned = 0 AND deleted = 0;
-
 -- The byte quota's hot gate reads only this column and its partial predicate.
 -- Keeping ciphertext out of the table scan avoids touching every encrypted
 -- payload on each accepted capture.
@@ -100,21 +92,16 @@ CREATE INDEX idx_items_unpinned_bytes
     ON clipboard_items(content_bytes)
     WHERE deleted = 0 AND pinned = 0;
 
--- Serves the sync read, covering. The partial predicate must stay written
--- exactly as the query writes it or SQLite silently declines the index
--- (`CopyPaste-crh3.3`); here that predicate is also what keeps a live sensitive
--- item out of an advertisement, so a drift is a disclosure, not a slow query.
+-- Serves the sync read, covering.
 CREATE INDEX idx_items_syncable
     ON clipboard_items(created_at, id, content_hash, deleted, origin_device_id,
-                       pinned, pin_order, pin_updated_at, is_sensitive)
-    WHERE deleted = 1 OR is_sensitive = 0;
+                       pinned, pin_order, pin_updated_at);
 
 -- Serves the incremental variant. Pin state moves on `pin_updated_at`, not on
 -- `created_at`, so a cursor over `created_at` alone silently stops propagating
 -- pin and unpin to old items (manifest 05 §3.6).
 CREATE INDEX idx_items_sync_cursor
-    ON clipboard_items(MAX(created_at, pin_updated_at), id)
-    WHERE deleted = 1 OR is_sensitive = 0;
+    ON clipboard_items(MAX(created_at, pin_updated_at), id);
 
 -- SQLite has no constant-time row count. This singleton is derived state;
 -- triggers maintain it in the item transaction.

@@ -67,7 +67,10 @@ export const useUi = create<UiStore>()((set, get) => ({
         : { dismissed: [...state.dismissed, id] },
     ),
   isDismissed: (id) => get().dismissed.includes(id),
-  openOnboarding: () => set({ onboardingOpen: true }),
+  openOnboarding: () => {
+    usePrefs.getState().setOnboarding({ step: "welcome" });
+    set({ onboardingOpen: true });
+  },
   openOnboardingAt: (step) => {
     usePrefs.getState().setOnboarding({ step });
     set({ onboardingOpen: true });

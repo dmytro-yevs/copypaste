@@ -12,7 +12,7 @@
 //! clipboard stays greppable in one place.
 //!
 //! It is not the same job as `commands::history::copy_item`, which takes an
-//! *id* so that a sensitive item's plaintext never has to enter the WebView at
+//! *id* so native clipboard writes preserve the stored payload format.
 //! all. Here diagnostics text is already visible in the app; what remains is
 //! not handing the capability to everything else running in the page.
 

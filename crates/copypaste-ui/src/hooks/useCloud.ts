@@ -89,7 +89,6 @@ export function useCloudSignOut() {
 
 function withheld(result: CloudSyncData): number {
   return (
-    result.skipped_sensitive +
     result.skipped_undecryptable +
     result.skipped_forged +
     result.skipped_future +

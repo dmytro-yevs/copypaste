@@ -31,7 +31,7 @@ export function AppToaster() {
   const dockedOffset = {
     top: "calc(var(--inset-top) + var(--s-3))",
     right: "calc(var(--inset-right) + var(--s-3))",
-    bottom: "calc(var(--tabbar-h) + var(--inset-bottom) + var(--s-3))",
+    bottom: "calc(var(--s-9) + var(--s-7) + var(--s-1) + var(--inset-bottom) + var(--s-3))",
     left: "calc(var(--inset-left) + var(--s-3))",
   };
   const paneOffset = { bottom: "calc(var(--ctl-h-sm) + var(--s-3))" };
@@ -46,7 +46,6 @@ export function AppToaster() {
       position="bottom-center"
       theme={theme}
       closeButton
-      richColors
       duration={3000}
       expand
       gap={8}

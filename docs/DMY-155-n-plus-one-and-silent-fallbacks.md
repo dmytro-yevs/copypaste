@@ -4,6 +4,9 @@
 **Scope:** Rust, SQL/storage/search, crypto/sync/cloud/network, Tauri IPC, React/query/rendering, Windows native, Android native, release/E2E scripts.
 **Method:** Parallel per-area exploration with structured evidence collection. No production code edits.
 
+Secret-detection and automatic-wipe findings from this historical audit were
+removed on 2026-09-30 because that application feature no longer exists.
+
 **43 unique candidates found across 8 subsystems. 6 N+1 paths, 34 silent fallbacks, 3 both.**
 **5 P0 (data loss / destructive), 10 P1 (user-visible incorrect state), 13 P2 (performance / UI cosmetic), 10 P3 (documented/latent/dev-only), 5 non-actionable (documented, no batch alternative).**
 
@@ -11,17 +14,7 @@
 
 ## P0 — Data loss / silent capture failure / destructive fallback
 
-### 1. `wipe_sensitive` per-victim IMMEDIATE write transaction — N+1
-
-| Field | Value |
-|-------|-------|
-| **path** | `crates/copypaste-core/src/sensitive/wipe.rs:119-121` → `storage/items.rs:297-333` (`wipe_sensitive_if_unchanged`) |
-| **caller** | `capture.rs:101` `sweep_sensitive_items` → clipboard poll `tick` (every 1 s while TTL enabled) |
-| **platform** | macOS / Android / Windows — no cfg gate |
-| **evidence** | `for (id, created_at, content_hash) in victims { removed += store.wipe_sensitive_if_unchanged(...)?; }` — each call opens one `IMMEDIATE` lock + `tx.commit()` + fsync, plus one per-row `fts_rowid` SELECT. All sibling sweeps (retention, pinning, delete_all) batch into one transaction; this is the sole destructive loop that does not. |
-| **class** | N+1 |
-
-### 2. `ShizukuClipboard.pollOnce` — permission failure returns null, clip lost forever
+### 1. `ShizukuClipboard.pollOnce` — permission failure returns null, clip lost forever
 
 | Field | Value |
 |-------|-------|
@@ -171,10 +164,8 @@
 
 | # | Location | Class | Notes |
 |---|----------|-------|-------|
-| 16 | `crates/copypaste-core/src/sensitive/wipe.rs:88-92` — decrypt failure skips row | SF | Logged, fail-closed (safe direction). `unjudged` not on wire. |
 | 17 | `crates/copypaste-core/src/storage/retention.rs:22-40` — eviction errors dropped | SF | Every ingest triggers this; quota breach invisible to user. Logged only. |
 | 18 | `crates/copypaste-core/src/storage/state.rs:87-93` — unparseable cursor → 0 | SF | Full-history re-download. Documented. |
-| 19 | `crates/copypaste-core/src/storage/retention.rs:253-259` — wipe probe fail-open → full sweep every tick | SF | Security-driven; no log line. |
 | 20 | `crates/copypaste-core/src/storage/retention.rs:335-338` — constraint violation → successful bump | SF | No data lost; freshness hint goes stale. |
 | 21 | `crates/copypaste-daemon/src/server/items.rs:40-46` + `crates/copypaste-daemon/src/server/items/wire.rs:105-108` — status count→0 / origin→"here" | SF | Both already-logged, both documented, both safe-direction. Count=0 has no health flag. |
 | 22 | `crates/copypaste-daemon/src/server/dbadmin.rs:47` — backup `size_bytes: 0` if stat fails | SF | Low; the backup exists. |
@@ -249,8 +240,7 @@
 
 ## Priority action items (top 5)
 
-1. **P0-1** `wipe_sensitive` per-victim transaction — refactor to batch victims into one IMMEDIATE write tx (follow `retention.rs` and `delete_all` pattern).
-2. **P0-2** `ShizukuClipboard.pollOnce` null on permission failure — add retry, surface failure to UI, distinguish "empty clipboard" from "read failed".
-3. **P0-3** `credentials.rs` parse failure — log which field failed and why before clearing; consider fail-closed instead of clearing.
-4. **P0-4** Android intake requeue forever — consult `is_structural` for `Invalid` errors; surface permanent refusal to user.
-5. **P1-6** Realtime protocol failures uncounted — add counters for frame-level vs record-level parse failures; surface in `cloud status`.
+1. **P0-2** `ShizukuClipboard.pollOnce` null on permission failure — add retry, surface failure to UI, distinguish "empty clipboard" from "read failed".
+2. **P0-3** `credentials.rs` parse failure — log which field failed and why before clearing; consider fail-closed instead of clearing.
+3. **P0-4** Android intake requeue forever — consult `is_structural` for `Invalid` errors; surface permanent refusal to user.
+4. **P1-6** Realtime protocol failures uncounted — add counters for frame-level vs record-level parse failures; surface in `cloud status`.

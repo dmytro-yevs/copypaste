@@ -8,8 +8,7 @@ use copypaste_ipc::{
     DeviceObservationProvenance, DeviceObservationTrust, DevicePlatform, DevicePresence,
     DevicePresenceObservation, DeviceProfileObservation, DiagnosticCounters, DiscoveredDevice,
     ErrorCode, EventKind, ExternalNetworkObservation, ImportData, Liveness, PairingRole,
-    PairingState, PeerInfo, PrivateModeData, SensitiveFinding, SensitiveSpan, SettingsHealth,
-    StatusData,
+    PairingState, PeerInfo, PrivateModeData, SettingsHealth, StatusData,
 };
 use copypaste_runtime_log::{
     LogLevel as RuntimeLogLevel, Process as RuntimeLogProcess, RuntimeEvent as RuntimeLogEvent,
@@ -110,8 +109,6 @@ pub fn export(out_dir: impl AsRef<Path>) -> Result<(), ExportError> {
     declaration::<UiImagePreview>(&config, &mut output);
     declaration::<UiSourceAppIcon>(&config, &mut output);
     declaration::<UiInstalledSourceApp>(&config, &mut output);
-    declaration::<SensitiveSpan>(&config, &mut output);
-    declaration::<SensitiveFinding>(&config, &mut output);
     declaration::<UiItem>(&config, &mut output);
     declaration::<UiPage>(&config, &mut output);
     declaration::<Liveness>(&config, &mut output);
@@ -322,14 +319,12 @@ mod tests {
         assert!(generated.contains(
             "export type CaptureSnapshot = { rung: CaptureRung, health: CaptureHealth, shizuku: ShizukuProbe, nextStep: CaptureNextStep, headline: string, detail: string | null, lastReadOkAt: number | null, lastCaptureAt: number | null, droppedClips: number, toastSuppressed: boolean, toastAcknowledged: boolean, rearmRequested: boolean, };"
         ));
-        assert!(generated.contains(
-            "export type CapturedPayload = { id: string, source: CaptureSource, isSensitive: boolean, };"
-        ));
+        assert!(generated
+            .contains("export type CapturedPayload = { id: string, source: CaptureSource, };"));
         assert!(!generated.contains("export type Clip ="));
         assert!(generated.contains("export type PermissionHost ="));
-        assert!(generated.contains(
-            "export type ChangePayload = { topic: EventKind, item_count: number, swept: number, };"
-        ));
+        assert!(generated
+            .contains("export type ChangePayload = { topic: EventKind, item_count: number, };"));
         assert!(generated.contains("export * from \"./ui-command-contract\";"));
         assert!(!generated.contains("export const UI_COMMANDS = {"));
         assert!(commands.contains("export const UI_COMMANDS = {"));
@@ -415,10 +410,9 @@ mod tests {
             serde_json::to_value(CapturedPayload {
                 id: "item-1".into(),
                 source: CaptureSource::ProcessText,
-                is_sensitive: true,
             })
             .unwrap(),
-            json!({ "id": "item-1", "source": "process_text", "isSensitive": true })
+            json!({ "id": "item-1", "source": "process_text" })
         );
     }
 }

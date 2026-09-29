@@ -1,15 +1,7 @@
 {
   "layout": {
-    "$description": "Window and container geometry for the two form factors: a resizable macOS window with a menu-bar popover, and a full-screen Android activity. There are no breakpoint tokens here on purpose — the compact/expanded boundary is Tailwind's own `sm` (640px), which every phone in portrait is below and every supported macOS window is above; a second boundary beside Tailwind's is how two scales start.",
+    "$description": "Shared geometry for resizable macOS and Windows windows and Android activities. The UI adapts to the available width without a desktop window minimum. Breakpoints live in src/lib/layoutBreakpoints.ts.",
     "$type": "dimension",
-    "main-min-w": {
-      "$value": "720px",
-      "$description": "Main window minimum width (A11Y-15). Must match tauri.conf.json. macOS only — an Android activity is whatever the device is, so A11Y-15's 'everything stays reachable' has to hold well below this as well."
-    },
-    "main-min-h": {
-      "$value": "460px",
-      "$description": "Main window minimum height (A11Y-15)."
-    },
     "popover-w": {
       "$value": "380px",
       "$description": "The macOS menu-bar popover, and the tighter of the two width constraints the shared components face: a row that fits here fits a phone."

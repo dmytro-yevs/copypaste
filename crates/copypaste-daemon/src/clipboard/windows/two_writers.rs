@@ -25,10 +25,7 @@ use super::{Capture, ClipboardSource, WindowsClipboard, OPEN_ATTEMPTS};
 use crate::capture::ingest_capture;
 use crate::testutil::test_state;
 
-/// The child that stands in for a credential store. The production table in
-/// `copypaste_core::sensitive` matches `1password`, so the sensitivity floor
-/// has to fire on this writer's identity while its content looks like nothing
-/// at all — which is the property a misattribution silently removes.
+/// The child stands in for a second writer with a distinct source identity.
 const CREDENTIAL_IMAGE: &str = "1password.exe";
 const ORDINARY_IMAGE: &str = "copypaste-test-editor.exe";
 
@@ -113,31 +110,26 @@ fn two_processes_get_distinct_attributions() {
         elapsed.as_millis()
     );
 
-    // The same captures, through the real pipeline: what makes the second one
-    // sensitive is its origin, since nothing in its text is a secret shape.
+    // The same captures go through the real pipeline with their own source
+    // attribution.
     let (state, _data) = test_state("two-writer-attribution");
     let now = copypaste_core::now_ms();
     let settings = state.settings.get().clone();
     let notes = ingest_capture(&state, &settings, first, now)
         .expect("the ordinary capture")
         .into_item();
-    let secret = ingest_capture(&state, &settings, second, now + 1)
-        .expect("the credential capture")
+    let second = ingest_capture(&state, &settings, second, now + 1)
+        .expect("the second capture")
         .into_item();
 
-    assert!(!notes.is_sensitive);
+    assert_eq!(second.app_bundle_id.as_deref(), Some(CREDENTIAL_IMAGE));
     assert!(
-        secret.is_sensitive,
-        "a credential store's copy was stored as ordinary text"
-    );
-    assert_eq!(secret.app_bundle_id.as_deref(), Some(CREDENTIAL_IMAGE));
-    assert!(
-        state
+        !state
             .store
             .search("battery", 10)
             .expect("search")
             .is_empty(),
-        "the password reached full-text search"
+        "the second capture did not reach full-text search"
     );
     assert!(
         !state.store.search("agenda", 10).expect("search").is_empty(),
@@ -153,8 +145,8 @@ fn two_processes_get_distinct_attributions() {
         .collect();
     assert!(advertised.contains(&notes.id));
     assert!(
-        !advertised.contains(&secret.id),
-        "the password was offered to a sync session"
+        advertised.contains(&second.id),
+        "the second capture was not offered to sync"
     );
 }
 

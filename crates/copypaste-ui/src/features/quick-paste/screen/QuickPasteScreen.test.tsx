@@ -20,12 +20,6 @@ const ipc = vi.hoisted(() => ({
 const lifecycle = vi.hoisted(() => ({ dismiss: vi.fn(), generation: 0 }));
 const toast = vi.hoisted(() => ({ error: vi.fn() }));
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => { resolve = done; });
-  return { promise, resolve };
-}
-
 vi.mock("@/lib/notify", () => ({ toast }));
 vi.mock("@/features/quick-paste/hooks/useQuickPasteLifecycle", () => ({
   useQuickPasteLifecycle: () => ({
@@ -52,16 +46,12 @@ describe("quickPastePresentation", () => {
     expect(quickPastePresentation(unsupported).searchLabel).toBe("Unsupported clipboard content");
   });
 
-  it.each(["", "   "])("does not expose raw content when a finding redacts to %j", (redacted_preview) => {
-    const raw = "raw secret fragment";
-    const presentation = quickPastePresentation(item({
-      content: raw,
-      sensitive_finding: { label: "possible token", spans: [], spans_truncated: false, redacted_preview },
-    }));
+  it("exposes arbitrary clipboard text to the local search", () => {
+    const raw = "api_key=abc123; password=plain-text";
+    const presentation = quickPastePresentation(item({ content: raw }));
 
-    expect(presentation.searchLabel).toBe("Empty item");
-    expect(presentation.rowLabel).toBe("Empty item");
-    expect(presentation.searchLabel).not.toContain(raw);
+    expect(presentation.searchLabel).toBe(raw);
+    expect(presentation.rowLabel).toBe(raw);
   });
 
   beforeEach(() => {
@@ -140,9 +130,9 @@ describe("quickPastePresentation", () => {
     expect(ipc.setQuickPastePreview).toHaveBeenCalledWith(false);
   });
 
-  it("keeps sensitive selections out of the side preview", async () => {
-    const secret = item({ content: null, is_sensitive: true, content_type: "text/plain" });
-    ipc.listItems.mockResolvedValue(page([secret]));
+  it("opens a side preview for arbitrary selected text", async () => {
+    const plain = item({ content: "api_key=abc123; password=plain-text", content_type: "text/plain" });
+    ipc.listItems.mockResolvedValue(page([plain]));
     render(
       <QueryClientProvider client={testClient()}>
         <TooltipProvider><QuickPasteScreen /></TooltipProvider>
@@ -150,8 +140,7 @@ describe("quickPastePresentation", () => {
     );
 
     await screen.findByRole("listitem");
-    expect(screen.queryByRole("complementary", { name: "Clipboard preview pane" })).toBeNull();
-    expect(ipc.setQuickPastePreview).not.toHaveBeenCalledWith(true);
+    await waitFor(() => expect(ipc.setQuickPastePreview).toHaveBeenCalledWith(true));
   });
 
   it("keeps the list pane in place when native preview space is unavailable", async () => {
@@ -166,35 +155,6 @@ describe("quickPastePresentation", () => {
     await waitFor(() => expect(ipc.setQuickPastePreview).toHaveBeenCalledWith(true));
     expect(container.querySelector('[data-preview-side="hidden"] > [aria-label="Quick Paste"]')).not.toBeNull();
     expect(screen.queryByRole("complementary", { name: "Clipboard preview pane" })).toBeNull();
-  });
-
-  it("ignores an outdated open response after selection closes and reopens preview space", async () => {
-    const first = deferred<{ side: "right"; width: number }>();
-    let opens = 0;
-    ipc.setQuickPastePreview.mockImplementation((open: boolean) => {
-      if (!open) return Promise.resolve({ side: "hidden", width: 0 });
-      opens += 1;
-      return opens === 1 ? first.promise : Promise.resolve({ side: "right", width: 320 });
-    });
-    const initial = item({ id: "initial", content: "initial preview" });
-    const sensitive = item({ id: "sensitive", content: null, is_sensitive: true });
-    const replacement = item({ id: "replacement", content: "replacement preview" });
-    ipc.listItems.mockResolvedValue(page([initial, sensitive, replacement]));
-    const user = userEvent.setup();
-    render(
-      <QueryClientProvider client={testClient()}>
-        <TooltipProvider><QuickPasteScreen /></TooltipProvider>
-      </QueryClientProvider>,
-    );
-
-    await screen.findAllByRole("listitem");
-    await user.click(screen.getByRole("searchbox"));
-    await user.keyboard("{ArrowDown}{ArrowDown}");
-    const preview = await screen.findByRole("complementary", { name: "Clipboard preview pane" });
-    expect(within(preview).getByText("replacement preview")).toBeTruthy();
-
-    await act(async () => { first.resolve({ side: "right", width: 320 }); });
-    expect(within(preview).getByText("replacement preview")).toBeTruthy();
   });
 
   it.each([
@@ -299,13 +259,12 @@ describe("quickPastePresentation", () => {
     expect(ipc.copyItem).not.toHaveBeenCalled();
   });
 
-  it("keeps inferred path and sensitive text copyable using stored MIME and id only", async () => {
+  it("keeps inferred path text copyable using stored MIME and id only", async () => {
     const target = item({
-      id: "sensitive-path",
+      id: "plain-path",
       content: "/private/secret/location",
       content_type: "text/plain",
       content_class: "text",
-      is_sensitive: true,
     });
     ipc.listItems.mockResolvedValue(page([target]));
     ipc.copyItem.mockResolvedValue(undefined);
@@ -316,7 +275,7 @@ describe("quickPastePresentation", () => {
       </QueryClientProvider>,
     );
     await screen.findByRole("listitem");
-    await waitFor(() => expect(screen.getByRole("button", { name: "Copy Sensitive content" }).hasAttribute("disabled")).toBe(false));
+    await waitFor(() => expect(screen.getByRole("button", { name: `Copy ${target.content}` }).hasAttribute("disabled")).toBe(false));
     await user.click(screen.getByRole("searchbox"));
     await user.keyboard("{Enter}");
     await waitFor(() => expect(ipc.copyItem).toHaveBeenCalledWith(target.id));

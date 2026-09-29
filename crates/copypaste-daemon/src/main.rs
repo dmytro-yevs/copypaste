@@ -28,7 +28,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use clap::Parser;
-use copypaste_core::{Detector, Keyring, Store};
+use copypaste_core::{Keyring, Store};
 use copypaste_p2p::discovery::Discovery;
 use copypaste_p2p::peers::PeerStore;
 use tracing::{info, warn};
@@ -110,35 +110,6 @@ async fn run() -> anyhow::Result<()> {
         Ok(store) => store,
         Err(e) => return halt_or_fail(&socket_path, e, "open the history database").await,
     };
-    let detector = Arc::new(Detector::new().context("build the sensitive-content detector")?);
-
-    // The third enforcement layer for "sensitive items must never reach the
-    // search index" (AGENTS.md rule 4). `is_sensitive` is decided once at
-    // capture, so a row taken before a detector rule existed keeps its
-    // plaintext searchable; this is the only thing that ever revisits it. It
-    // touches the index and never the history. Fail closed: serving search
-    // with uncleared sensitive FTS is worse than refusing to become ready.
-    let mut index_purged = 0u64;
-    match copypaste_core::purge_indexed_secrets(&store, &detector) {
-        Ok(report) if report.purged > 0 => {
-            index_purged = report.purged;
-            tracing::info!(
-                purged = report.purged,
-                scanned = report.scanned,
-                "removed search-index rows the current ruleset calls sensitive"
-            )
-        }
-        Ok(_) => {}
-        Err(e) => {
-            return halt_or_fail(
-                &socket_path,
-                server::messages::SearchIndexPurgeFailed(e),
-                "clear sensitive content from the search index",
-            )
-            .await;
-        }
-    }
-
     let source = clipboard::new_source(&data_dir).context("initialize the clipboard backend")?;
 
     // Peer sync. The identity is minted in the database the store just opened,
@@ -178,7 +149,6 @@ async fn run() -> anyhow::Result<()> {
     let state = Arc::new(AppState::new(
         store,
         keyring,
-        detector,
         source,
         meta,
         p2p,
@@ -186,7 +156,6 @@ async fn run() -> anyhow::Result<()> {
         settings,
         db_path.clone(),
     ));
-    state.set_index_purged(index_purged);
     state.set_ready(true);
     let cloud_signed_in = state.cloud.restore(&state);
     info!(

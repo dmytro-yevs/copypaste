@@ -13,7 +13,6 @@
 //! maintaining a second implementation.
 
 use crate::retention::RetentionBatch;
-use crate::sensitive::Detector;
 use crate::storage::{Ingest, NewItem, Store, StoreError, StoredItem};
 use crate::{now_ms, CryptoError, Keyring};
 
@@ -70,34 +69,26 @@ pub enum IngestError {
     Storage(#[from] StoreError),
 }
 
-/// Detect, encrypt, deduplicate, store — the one path into the database.
+/// Encrypt, deduplicate, store — the one path into the database.
 ///
 /// Stamped now. Use [`ingest_into`] to keep an imported item's own capture
 /// time.
 pub fn ingest(
     store: &Store,
-    detector: &Detector,
     keyring: &Keyring,
     content: &str,
     content_type: &str,
     settings: &copypaste_ipc::ConfigData,
 ) -> Result<Ingested, IngestError> {
-    ingest_with_current_retention(
-        store,
-        detector,
-        keyring,
-        content,
-        content_type,
-        settings,
-        || settings.clone(),
-    )
+    ingest_with_current_retention(store, keyring, content, content_type, settings, || {
+        settings.clone()
+    })
 }
 
 /// Ingest a captured value while retaining the ingress snapshot for admission
 /// and reading the destructive retention policy only after the store barrier.
 pub fn ingest_with_current_retention(
     store: &Store,
-    detector: &Detector,
     keyring: &Keyring,
     content: &str,
     content_type: &str,
@@ -106,12 +97,10 @@ pub fn ingest_with_current_retention(
 ) -> Result<Ingested, IngestError> {
     ingest_into_with_capture_source_with_current_retention(
         store,
-        detector,
         keyring,
         content,
         content_type,
         now_ms(),
-        false,
         None,
         None,
         settings,
@@ -131,7 +120,6 @@ pub fn ingest_with_current_retention(
 #[allow(clippy::too_many_arguments)]
 pub fn ingest_into(
     store: &Store,
-    detector: &Detector,
     keyring: &Keyring,
     content: &str,
     content_type: &str,
@@ -140,42 +128,29 @@ pub fn ingest_into(
 ) -> Result<Ingested, IngestError> {
     ingest_into_with_capture_context(
         store,
-        detector,
         keyring,
         content,
         content_type,
         created_at,
-        false,
         None,
         settings,
     )
 }
 
-/// [`ingest_into`] for one item of a batch, with a persisted sensitive
-/// classification that may only make the result stricter. Backups are evidence
-/// that a prior detector found a secret; a newer detector failing to recognise
-/// it must not re-index it.
-///
-/// The store and settings come from the [`RetentionBatch`], so the sweep this
-/// call defers is necessarily owed on the store it just wrote to. Passing them
-/// separately made the token a flag that proved nothing.
+/// [`ingest_into`] for one item of a retention batch.
 pub(crate) fn ingest_into_batched(
     batch: &RetentionBatch<'_>,
-    detector: &Detector,
     keyring: &Keyring,
     content: &str,
     content_type: &str,
     created_at: i64,
-    sensitive_floor: bool,
 ) -> Result<Ingested, IngestError> {
     ingest_text(
         batch.store(),
-        detector,
         keyring,
         content,
         content_type,
         created_at,
-        sensitive_floor,
         None,
         None,
         None,
@@ -186,28 +161,22 @@ pub(crate) fn ingest_into_batched(
 
 /// Ingest a locally captured value with provenance supplied by the platform.
 ///
-/// The app-origin classification is a floor: a known credential store must
-/// keep its value out of FTS even when the content detector finds no pattern.
 #[allow(clippy::too_many_arguments)]
 pub fn ingest_into_with_capture_context(
     store: &Store,
-    detector: &Detector,
     keyring: &Keyring,
     content: &str,
     content_type: &str,
     created_at: i64,
-    sensitive_floor: bool,
     app_bundle_id: Option<&str>,
     settings: &copypaste_ipc::ConfigData,
 ) -> Result<Ingested, IngestError> {
     ingest_into_with_capture_source(
         store,
-        detector,
         keyring,
         content,
         content_type,
         created_at,
-        sensitive_floor,
         app_bundle_id,
         None,
         settings,
@@ -220,24 +189,20 @@ pub fn ingest_into_with_capture_context(
 #[allow(clippy::too_many_arguments)]
 pub fn ingest_into_with_capture_source(
     store: &Store,
-    detector: &Detector,
     keyring: &Keyring,
     content: &str,
     content_type: &str,
     created_at: i64,
-    sensitive_floor: bool,
     app_bundle_id: Option<&str>,
     app_name: Option<&str>,
     settings: &copypaste_ipc::ConfigData,
 ) -> Result<Ingested, IngestError> {
     ingest_into_with_capture_source_metadata(
         store,
-        detector,
         keyring,
         content,
         content_type,
         created_at,
-        sensitive_floor,
         app_bundle_id,
         app_name,
         None,
@@ -251,12 +216,10 @@ pub fn ingest_into_with_capture_source(
 #[allow(clippy::too_many_arguments)]
 pub fn ingest_into_with_capture_source_metadata(
     store: &Store,
-    detector: &Detector,
     keyring: &Keyring,
     content: &str,
     content_type: &str,
     created_at: i64,
-    sensitive_floor: bool,
     app_bundle_id: Option<&str>,
     app_name: Option<&str>,
     payload_metadata: Option<&crate::PayloadMetadata>,
@@ -264,12 +227,10 @@ pub fn ingest_into_with_capture_source_metadata(
 ) -> Result<Ingested, IngestError> {
     ingest_into_with_capture_source_metadata_with_current_retention(
         store,
-        detector,
         keyring,
         content,
         content_type,
         created_at,
-        sensitive_floor,
         app_bundle_id,
         app_name,
         payload_metadata,
@@ -283,12 +244,10 @@ pub fn ingest_into_with_capture_source_metadata(
 #[allow(clippy::too_many_arguments)]
 pub fn ingest_into_with_capture_source_metadata_with_current_retention(
     store: &Store,
-    detector: &Detector,
     keyring: &Keyring,
     content: &str,
     content_type: &str,
     created_at: i64,
-    sensitive_floor: bool,
     app_bundle_id: Option<&str>,
     app_name: Option<&str>,
     payload_metadata: Option<&crate::PayloadMetadata>,
@@ -297,12 +256,10 @@ pub fn ingest_into_with_capture_source_metadata_with_current_retention(
 ) -> Result<Ingested, IngestError> {
     ingest_text(
         store,
-        detector,
         keyring,
         content,
         content_type,
         created_at,
-        sensitive_floor,
         app_bundle_id,
         app_name,
         payload_metadata,
@@ -316,12 +273,10 @@ pub fn ingest_into_with_capture_source_metadata_with_current_retention(
 #[allow(clippy::too_many_arguments)]
 pub fn ingest_into_with_capture_source_with_current_retention(
     store: &Store,
-    detector: &Detector,
     keyring: &Keyring,
     content: &str,
     content_type: &str,
     created_at: i64,
-    sensitive_floor: bool,
     app_bundle_id: Option<&str>,
     app_name: Option<&str>,
     settings: &copypaste_ipc::ConfigData,
@@ -329,12 +284,10 @@ pub fn ingest_into_with_capture_source_with_current_retention(
 ) -> Result<Ingested, IngestError> {
     ingest_into_with_capture_source_metadata_with_current_retention(
         store,
-        detector,
         keyring,
         content,
         content_type,
         created_at,
-        sensitive_floor,
         app_bundle_id,
         app_name,
         None,
@@ -352,12 +305,10 @@ enum Sweep<'a> {
 #[allow(clippy::too_many_arguments)]
 fn ingest_text(
     store: &Store,
-    detector: &Detector,
     keyring: &Keyring,
     content: &str,
     content_type: &str,
     created_at: i64,
-    sensitive_floor: bool,
     app_bundle_id: Option<&str>,
     app_name: Option<&str>,
     payload_metadata: Option<&crate::PayloadMetadata>,
@@ -373,14 +324,7 @@ fn ingest_text(
         return Err(IngestError::TooLarge);
     }
 
-    // Classify before dedup. A password-manager capture can be identical to a
-    // row first copied from an ordinary app; dedup must promote that row rather
-    // than returning it with its old, searchable classification.
-    // The withholding gate, not the deletion gate: this flag decides indexing,
-    // sync and the preview, and `sweep_sensitive` re-derives its own verdict
-    // from the plaintext before anything is removed (manifest I2, §6.2).
-    let is_sensitive = sensitive_floor || detector.is_sensitive(content);
-    let payload_metadata = encode_payload_metadata(payload_metadata, content_type, is_sensitive)?;
+    let payload_metadata = encode_payload_metadata(payload_metadata, content_type)?;
     let hash = crate::storage::compute_content_hash(content.as_bytes());
 
     // The AEAD binds the item id as associated data (manifest 02: "AAD must
@@ -391,7 +335,7 @@ fn ingest_text(
     // carries `id` rather than the store minting one.
     let item_id = uuid::Uuid::new_v4().to_string();
     let seal_id = item_id.clone();
-    let indexable = !is_sensitive && copypaste_ipc::content_type::is_text(content_type);
+    let indexable = copypaste_ipc::content_type::is_text(content_type);
 
     let ingested = store.insert_or_bump_late_sealed(
         NewItem {
@@ -400,7 +344,6 @@ fn ingest_text(
             nonce: Vec::new(),
             content_type: content_type.to_string(),
             content_hash: hash,
-            is_sensitive,
             search_text: None,
             created_at,
             app_bundle_id: app_bundle_id.map(str::to_owned),
@@ -431,7 +374,6 @@ pub fn ingest_binary_into_with_capture_context(
     bytes: &[u8],
     content_type: &str,
     created_at: i64,
-    sensitive_floor: bool,
     app_bundle_id: Option<&str>,
     payload_metadata: Option<&crate::FileMetadata>,
     settings: &copypaste_ipc::ConfigData,
@@ -442,7 +384,6 @@ pub fn ingest_binary_into_with_capture_context(
         bytes,
         content_type,
         created_at,
-        sensitive_floor,
         app_bundle_id,
         None,
         payload_metadata,
@@ -458,7 +399,6 @@ pub fn ingest_binary_into_with_capture_source(
     bytes: &[u8],
     content_type: &str,
     created_at: i64,
-    sensitive_floor: bool,
     app_bundle_id: Option<&str>,
     app_name: Option<&str>,
     payload_metadata: Option<&crate::FileMetadata>,
@@ -474,7 +414,6 @@ pub fn ingest_binary_into_with_capture_source(
         bytes,
         content_type,
         created_at,
-        sensitive_floor,
         app_bundle_id,
         app_name,
         payload_metadata.as_ref(),
@@ -494,7 +433,6 @@ pub fn ingest_binary_into_with_capture_source_metadata(
     bytes: &[u8],
     content_type: &str,
     created_at: i64,
-    sensitive_floor: bool,
     app_bundle_id: Option<&str>,
     app_name: Option<&str>,
     payload_metadata: Option<&crate::PayloadMetadata>,
@@ -513,8 +451,7 @@ pub fn ingest_binary_into_with_capture_source_metadata(
     // One SHA-256 pass, four spellings: the item id, the envelope header the
     // STREAM AAD covers, and the row's `content_hash`. Hashing per spelling
     // cost a 4 MiB screenshot three redundant passes on the capture path.
-    let payload_metadata =
-        encode_payload_metadata(payload_metadata, content_type, sensitive_floor)?;
+    let payload_metadata = encode_payload_metadata(payload_metadata, content_type)?;
     let digest = crate::binary::content_digest(bytes);
     let item_id = crate::binary::item_id_from_digest(&digest);
     let ciphertext =
@@ -527,7 +464,6 @@ pub fn ingest_binary_into_with_capture_source_metadata(
         nonce: Vec::new(),
         content_type: content_type.to_owned(),
         content_hash: crate::binary::content_hash(&digest),
-        is_sensitive: sensitive_floor,
         search_text: None,
         created_at,
         app_bundle_id: app_bundle_id.map(str::to_owned),
@@ -543,21 +479,10 @@ pub fn ingest_binary_into_with_capture_source_metadata(
 fn encode_payload_metadata(
     metadata: Option<&crate::PayloadMetadata>,
     content_type: &str,
-    is_sensitive: bool,
 ) -> Result<Option<String>, IngestError> {
     let Some(metadata) = metadata else {
         return Ok(None);
     };
-    if is_sensitive {
-        let Some(file) = metadata.file.as_ref() else {
-            return Ok(None);
-        };
-        let file = crate::PayloadMetadata {
-            file: Some(file.clone()),
-            source_app_icon: None,
-        };
-        return encode_payload_metadata(Some(&file), content_type, false);
-    }
     if let (None, Some(file)) = (&metadata.source_app_icon, &metadata.file) {
         return serde_json::to_string(file)
             .ok()
@@ -585,7 +510,6 @@ mod tests {
 
     struct Fixture {
         store: Store,
-        detector: Detector,
         keyring: Keyring,
         settings: ConfigData,
     }
@@ -594,7 +518,6 @@ mod tests {
         let keyring = Keyring::from_secret(&[5u8; 32]);
         Fixture {
             store: Store::open_in_memory(&keyring.db_key()).expect("in-memory store"),
-            detector: Detector::new().expect("detector"),
             keyring,
             settings: ConfigData::default(),
         }
@@ -604,7 +527,6 @@ mod tests {
         fn at(&self, content: &str, created_at: i64) -> Result<Ingested, IngestError> {
             ingest_into(
                 &self.store,
-                &self.detector,
                 &self.keyring,
                 content,
                 "text",
@@ -620,7 +542,6 @@ mod tests {
                 bytes,
                 copypaste_ipc::content_type::IMAGE_PNG,
                 created_at,
-                false,
                 None,
                 None,
                 &self.settings,
@@ -648,12 +569,11 @@ mod tests {
         let keyring = Arc::new(Keyring::from_secret(&[5u8; 32]));
         let db_key = keyring.db_key();
         let store = Store::open(&dir.path().join("history.db"), &db_key).unwrap();
-        let detector = Arc::new(Detector::new().unwrap());
         let ingress = ConfigData {
             history_limit: 1,
             ..ConfigData::default()
         };
-        ingest_into(&store, &detector, &keyring, "first", "text", T0, &ingress).unwrap();
+        ingest_into(&store, &keyring, "first", "text", T0, &ingress).unwrap();
 
         let current = Arc::new(Mutex::new(ingress.clone()));
         let (entered_tx, entered_rx) = mpsc::channel();
@@ -664,7 +584,6 @@ mod tests {
         });
         let worker = {
             let store = store.clone();
-            let detector = Arc::clone(&detector);
             let keyring = Arc::clone(&keyring);
             let current = Arc::clone(&current);
             let ingress = ingress.clone();
@@ -675,12 +594,10 @@ mod tests {
                 };
                 ingest_into_with_capture_source_metadata_with_current_retention(
                     &store,
-                    &detector,
                     &keyring,
                     "second",
                     "text",
                     T0 + 1,
-                    false,
                     None,
                     None,
                     Some(&metadata),
@@ -747,7 +664,6 @@ mod tests {
             &[1; 8],
             copypaste_ipc::content_type::IMAGE_PNG,
             T0,
-            false,
             None,
             None,
             &f.settings,
@@ -760,7 +676,6 @@ mod tests {
                 &[2; 9],
                 copypaste_ipc::content_type::IMAGE_TIFF,
                 T0 + 1,
-                false,
                 None,
                 None,
                 &f.settings,
@@ -773,7 +688,6 @@ mod tests {
             &[3; 12],
             copypaste_ipc::content_type::FILE,
             T0 + 2,
-            false,
             None,
             None,
             &f.settings,
@@ -786,7 +700,6 @@ mod tests {
                 &[4; 13],
                 copypaste_ipc::content_type::FILE,
                 T0 + 3,
-                false,
                 None,
                 None,
                 &f.settings,
@@ -824,136 +737,19 @@ mod tests {
         assert_eq!(f.store.count().unwrap(), 1);
     }
 
-    /// The write-time layer of "a sensitive item never reaches the search
-    /// index" (manifest 03 S4).
     #[test]
-    fn a_detected_secret_is_flagged_and_kept_out_of_the_index() {
-        let f = fixture();
-        let stored = f.at("AKIAIOSFODNN7EXAMPLE", T0).unwrap().into_item();
-
-        assert!(stored.is_sensitive);
-        assert!(f
-            .store
-            .search("AKIAIOSFODNN7EXAMPLE", 10)
-            .unwrap()
-            .is_empty());
-        // ...and it is still stored and still readable: flagging is not
-        // deleting (AGENTS.md rule 4).
-        assert_eq!(f.plaintext(&stored), "AKIAIOSFODNN7EXAMPLE");
-    }
-
-    #[test]
-    fn inert_findings_remain_detected_searchable_and_unclassified() {
-        let f = fixture();
-        let text = "Send to alice@example.com from 192.168.1.100:8080";
-        let findings = f.detector.scan_all(text);
-        assert!(findings.iter().any(|finding| finding.rule == "email"));
-        assert!(findings
-            .iter()
-            .any(|finding| finding.rule == "ip_with_port"));
-        assert!(findings
-            .iter()
-            .all(|finding| finding.severity == crate::sensitive::Severity::Flag));
-
-        let stored = f.at(text, T0).unwrap().into_item();
-        assert!(!stored.is_sensitive);
-        assert_eq!(fts_row_count(&f.store, &stored.id), 1);
-        assert_eq!(f.store.search("alice", 10).unwrap().len(), 1);
-    }
-
-    #[test]
-    fn embedded_high_match_classifies_the_whole_item_but_keeps_low_findings() {
-        let f = fixture();
-        let text = "mail alice@example.com token AKIAIOSFODNN7EXAMPLE";
-        let findings = f.detector.scan_all(text);
-        assert_eq!(findings.len(), 2);
-        assert!(findings.iter().any(|finding| finding.rule == "email"));
-        assert!(findings
-            .iter()
-            .any(|finding| finding.rule == "aws_access_key"));
-
-        let stored = f.at(text, T0).unwrap().into_item();
-        assert!(stored.is_sensitive);
-        assert_eq!(fts_row_count(&f.store, &stored.id), 0);
-        assert!(f.store.search("alice", 10).unwrap().is_empty());
-    }
-
-    #[test]
-    fn embedded_luhn_valid_card_authorises_sensitive_classification() {
-        let f = fixture();
-        let text = "please charge 4111 1111 1111 1111 today";
-        let stored = f.at(text, T0).unwrap().into_item();
-
-        assert!(stored.is_sensitive);
-        assert_eq!(fts_row_count(&f.store, &stored.id), 0);
-        assert!(f.store.search("charge", 10).unwrap().is_empty());
-    }
-
-    #[test]
-    fn a_sensitive_recopy_promotes_and_unindexes_the_existing_row() {
-        let f = fixture();
-        let first = f.at("ordinary reusable value", T0).unwrap().into_item();
-        assert!(!first.is_sensitive);
-        assert_eq!(fts_row_count(&f.store, &first.id), 1);
-        assert!(f.detector.scan("ordinary reusable value").is_none());
-
-        let recopy = ingest_into_with_capture_context(
-            &f.store,
-            &f.detector,
-            &f.keyring,
-            "ordinary reusable value",
-            copypaste_ipc::content_type::TEXT,
-            T0 + 7 * 86_400_000,
-            true,
-            Some("com.1password.1password"),
-            &f.settings,
-        )
-        .unwrap();
-
-        assert!(matches!(recopy, Ingested::Duplicate(_)));
-        let promoted = recopy.into_item();
-        assert_eq!(promoted.id, first.id);
-        assert_eq!(promoted.created_at, T0 + 7 * 86_400_000);
-        assert!(promoted.is_sensitive);
-        assert_eq!(fts_row_count(&f.store, &first.id), 0);
-        assert_eq!(f.plaintext(&promoted), "ordinary reusable value");
-        assert_eq!(f.store.count().unwrap(), 1);
-    }
-
-    #[test]
-    fn a_high_confidence_secret_recopy_restarts_its_ttl() {
-        const SECRET: &str = "AKIAIOSFODNN7EXAMPLE";
-
-        let f = fixture();
-        let first = f.at(SECRET, T0).unwrap().into_item();
-        let recopy = f.at(SECRET, T0 + 25_000).unwrap();
-        assert!(matches!(recopy, Ingested::Duplicate(_)));
-        let bumped = recopy.into_item();
-        assert_eq!(bumped.id, first.id);
-        assert_eq!(bumped.created_at, T0 + 25_000);
-
-        let key = f.keyring.item_key();
-        let removed = crate::sensitive::sweep_sensitive(
-            &f.store,
-            &f.detector,
-            &key,
-            std::time::Duration::from_secs(30),
-            T0 + 30_000,
-        )
-        .unwrap();
-        assert_eq!(removed, 0, "the original deadline must no longer apply");
-        assert!(f.store.get(&first.id).unwrap().is_some());
-
-        let removed = crate::sensitive::sweep_sensitive(
-            &f.store,
-            &f.detector,
-            &key,
-            std::time::Duration::from_secs(30),
-            T0 + 56_000,
-        )
-        .unwrap();
-        assert_eq!(removed, 1);
-        assert!(f.store.get(&first.id).unwrap().is_none());
+    fn every_text_shape_is_preserved_and_searchable() {
+        for (text, query) in [
+            ("AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE"),
+            ("mail alice@example.com token AKIAIOSFODNN7EXAMPLE", "alice"),
+            ("please charge 4111 1111 1111 1111 today", "charge"),
+        ] {
+            let f = fixture();
+            let stored = f.at(text, T0).unwrap().into_item();
+            assert_eq!(f.plaintext(&stored), text);
+            assert_eq!(fts_row_count(&f.store, &stored.id), 1);
+            assert_eq!(f.store.search(query, 10).unwrap().len(), 1);
+        }
     }
 
     #[test]
@@ -961,7 +757,6 @@ mod tests {
         let f = fixture();
         let stored = ingest_into(
             &f.store,
-            &f.detector,
             &f.keyring,
             "encoded image stand-in",
             "image/png",
@@ -985,7 +780,6 @@ mod tests {
             &bytes,
             copypaste_ipc::content_type::IMAGE_PNG,
             T0,
-            false,
             Some("com.apple.Preview"),
             None,
             &f.settings,
@@ -1021,7 +815,6 @@ mod tests {
             b"pdf bytes",
             copypaste_ipc::content_type::FILE,
             T0,
-            false,
             Some("com.example.writer"),
             Some("Writer"),
             Some(&metadata),
@@ -1039,7 +832,7 @@ mod tests {
     }
 
     #[test]
-    fn sensitive_capture_drops_source_icon_but_keeps_protected_content() {
+    fn text_capture_preserves_source_icon_metadata() {
         let f = fixture();
         let metadata = crate::PayloadMetadata {
             file: None,
@@ -1047,12 +840,10 @@ mod tests {
         };
         let stored = ingest_into_with_capture_source_metadata(
             &f.store,
-            &f.detector,
             &f.keyring,
             "AKIAIOSFODNN7EXAMPLE",
             "text",
             T0,
-            false,
             Some("com.example.writer"),
             Some("Writer"),
             Some(&metadata),
@@ -1060,13 +851,15 @@ mod tests {
         )
         .unwrap()
         .into_item();
-        assert!(stored.is_sensitive);
-        assert!(stored.payload_metadata.is_none());
-        assert!(f
-            .store
-            .search("AKIAIOSFODNN7EXAMPLE", 10)
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            stored
+                .payload_metadata
+                .as_deref()
+                .and_then(|json| crate::PayloadMetadata::from_json(json, &stored.content_type)),
+            Some(metadata),
+        );
+        assert_eq!(f.plaintext(&stored), "AKIAIOSFODNN7EXAMPLE");
+        assert_eq!(f.store.search("AKIAIOSFODNN7EXAMPLE", 10).unwrap().len(), 1);
     }
 
     #[test]

@@ -1,9 +1,3 @@
-/**
- * Nothing here ever sees the plaintext of a sensitive item: the bridge sends
- * `content: null` for one (INV-10), so `previewOf` is only ever reached for
- * content that exists, and `kindOf` decides `secret` from the flag rather than
- * from the text.
- */
 import type { Item } from "./ipc";
 
 /* ------------------------------------------------------------------ age --- */
@@ -64,7 +58,6 @@ export function truncate(text: string, max: number): string {
 /** The kind set is closed and ends in `unknown`; each maps onto a `--c-*`
  *  token, and an unrecognised kind renders as `unknown` rather than blank. */
 export type Kind =
-  | "secret"
   | "image"
   | "file"
   | "url"
@@ -90,7 +83,6 @@ const RULES: ReadonlyArray<readonly [Kind, RegExp]> = [
  * decoration from its contents, but an unfamiliar binary type stays unknown.
  */
 export function kindOf(item: Item): Kind {
-  if (item.is_sensitive) return "secret";
   switch (item.content_class) {
     case "image":
       return "image";

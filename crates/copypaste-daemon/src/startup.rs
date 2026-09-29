@@ -121,7 +121,7 @@ pub fn watch_app_parent(enabled: bool) -> anyhow::Result<()> {
             match stdin.read(&mut byte) {
                 Ok(0) => {
                     // A SIGKILL can arrive while synchronous startup code is
-                    // opening the store or building the detector. Those calls
+                    // opening the store. That call
                     // cannot observe a Tokio cancellation until they return,
                     // so waiting for the async shutdown path would still let
                     // an orphan capture after its app is gone. Ordinary Quit

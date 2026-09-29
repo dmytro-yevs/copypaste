@@ -123,12 +123,7 @@ pub(super) fn search(state: &AppState, id: u64, query: &str, limit: u32) -> Resp
         .store
         .search_bounded(query, limit, MAX_PAGE_CONTENT_BYTES)
     {
-        Ok(mut rows) => {
-            // Read-time enforcement of "sensitive items are never searchable".
-            // The store already keeps them out of the index at write time; this
-            // is the second of the three layers the rule demands, and it is
-            // what protects a database written before the rule existed.
-            rows.retain(|row| !row.is_sensitive);
+        Ok(rows) => {
             let mut page = decrypt_rows(state, rows);
             for item in &mut page.items {
                 bound_item_preview(item);
@@ -154,12 +149,10 @@ pub(super) fn image_preview(
         Ok(None) => return Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
         Err(error) => return storage_error(id, "image_preview", &error),
     };
-    if row.is_sensitive
-        || !matches!(
-            copypaste_ipc::content_type::classify(&row.content_type),
-            copypaste_ipc::ContentClass::Image
-        )
-    {
+    if !matches!(
+        copypaste_ipc::content_type::classify(&row.content_type),
+        copypaste_ipc::ContentClass::Image
+    ) {
         return Response::err(id, ErrorCode::InvalidRequest, MSG_IMAGE_PREVIEW);
     }
     let bytes = match copypaste_core::open_binary(
@@ -208,9 +201,7 @@ pub(super) fn source_app_icon(state: &AppState, id: u64, item_id: &str) -> Respo
 }
 
 pub(super) fn add(state: &AppState, id: u64, content: &str) -> Response {
-    // Same ingest path as the capture loop: detector, encrypt, dedup, insert,
-    // evict. `add` cannot skip the detector — an item entering here is exactly
-    // as likely to be a credential as one copied from the pasteboard.
+    // Same ingest path as the capture loop: encrypt, dedup, insert and evict.
     match capture::ingest(state, content, copypaste_ipc::content_type::TEXT) {
         Ok(ingested) => match to_wire(state, ingested.into_item()) {
             Ok(item) => {
@@ -377,7 +368,6 @@ mod tests {
                 nonce,
                 content_type: content_type.to_string(),
                 content_hash: copypaste_core::compute_content_hash(content.as_bytes()),
-                is_sensitive: false,
                 search_text: Some(content.to_string()),
                 created_at: copypaste_core::now_ms(),
                 app_bundle_id: None,
@@ -399,7 +389,6 @@ mod tests {
             bytes,
             content_type,
             copypaste_core::now_ms(),
-            false,
             None,
             metadata,
             &state.settings.get(),
@@ -477,11 +466,6 @@ mod tests {
         };
         assert_eq!(whole.items.len(), PAGE);
         assert!(whole.items.iter().all(|item| item.truncated));
-        assert!(whole.items.iter().all(|item| {
-            item.sensitive_finding.as_ref().is_none_or(|finding| {
-                finding.spans.len() <= copypaste_core::sensitive::MAX_SURFACED_SENSITIVE_SPANS
-            })
-        }));
         for item in &mut whole.items {
             item.content = item.content.repeat(BODY / LIST_PREVIEW_BYTES);
             item.truncated = false;
@@ -490,9 +474,7 @@ mod tests {
             .unwrap()
             .len();
 
-        let item_bound = LIST_PREVIEW_BYTES * 2
-            + copypaste_core::sensitive::MAX_SURFACED_SENSITIVE_SPANS * 48
-            + 768;
+        let item_bound = LIST_PREVIEW_BYTES * 2 + 768;
         assert!(
             bounded <= PAGE * item_bound,
             "a bounded page of {PAGE} items serialised to {bounded} bytes"
@@ -502,24 +484,6 @@ mod tests {
             "{unbounded} was not larger than {bounded}"
         );
         eprintln!("page bytes: bounded {bounded}, whole bodies {unbounded}");
-    }
-
-    #[test]
-    fn status_carries_the_counters_nothing_used_to_read() {
-        let (state, _dir) = test_state("counters");
-        state.note_sensitive_swept(2);
-        state.set_index_purged(7);
-
-        let counters = match status(&state, 1).data {
-            Some(ResponseData::Status(s)) => s.counters,
-            other => panic!("{other:?}"),
-        };
-        assert_eq!(counters.sensitive_swept, 2);
-        assert_eq!(counters.index_purged, 7);
-        // Reached the port rather than being defaulted at the wire: the fake
-        // backend answers 0 for both, and the point is that it was asked.
-        assert_eq!(counters.rejected_too_large, 0);
-        assert_eq!(counters.lost_intermediates, 0);
     }
 
     #[test]
@@ -554,13 +518,6 @@ mod tests {
         assert_eq!(json, copypaste_ipc::redact::scrub_paths(&json), "{json}");
     }
 
-    /// A sensitive item is stored, is visible in `list`, and is never returned
-    /// by `search`.
-    ///
-    /// The store keeps it out of the FTS index at write time; this covers the
-    /// server's read-time layer, which is what protects a database written
-    /// before the rule existed (AGENTS.md rule 4 — "enforced at write time, at
-    /// read time, and by a purge migration").
     /// Reading must never have the side effect of copying: `get` returns the
     /// content, and the clipboard is untouched by it.
     #[test]
@@ -633,7 +590,6 @@ mod tests {
                 nonce: source.nonce.clone(),
                 content_type: TEXT.into(),
                 content_hash: "wrong-aad-content-hash".into(),
-                is_sensitive: false,
                 search_text: None,
                 created_at: source.created_at.saturating_sub(1),
                 app_bundle_id: None,
@@ -752,7 +708,6 @@ mod tests {
         assert_eq!(page.items.len(), 1);
         assert_eq!(page.items[0].id, ranked[0].id);
         assert!(page.next_cursor.is_none());
-        assert!(page.items.iter().all(|item| !item.is_sensitive));
         assert!(serde_json::to_string(&page).unwrap().len() <= copypaste_ipc::MAX_FRAME_BYTES);
     }
 
@@ -830,88 +785,6 @@ mod tests {
         // An unknown id is not_found, not an empty success.
         let missing = get(&state, 5, "00000000-0000-0000-0000-000000000000");
         assert_eq!(missing.error_code, Some(ErrorCode::NotFound));
-    }
-
-    #[test]
-    fn search_never_returns_a_sensitive_item() {
-        let (state, _dir) = test_state("server");
-
-        let secret = "AKIAIOSFODNN7EXAMPLE";
-        let response = dispatch_store(
-            &state,
-            1,
-            Method::Add {
-                content: secret.into(),
-            },
-        );
-        let added = match response.data {
-            Some(ResponseData::Item(item)) => item,
-            other => panic!("expected an item, got {other:?}"),
-        };
-        assert!(added.is_sensitive, "the detector must flag an AWS key id");
-        assert!(added.sensitive_finding.is_none());
-
-        // Data loss is the worse outcome: flagged, but still stored and still
-        // listed.
-        let response = dispatch_store(
-            &state,
-            2,
-            Method::List {
-                limit: 50,
-                cursor: None,
-            },
-        );
-        match response.data {
-            Some(ResponseData::Page(page)) => {
-                assert!(page.items.iter().any(|item| item.id == added.id));
-            }
-            other => panic!("expected a page, got {other:?}"),
-        }
-
-        let response = dispatch_store(
-            &state,
-            3,
-            Method::Search {
-                query: secret.into(),
-                limit: 50,
-            },
-        );
-        match response.data {
-            Some(ResponseData::Page(page)) => assert!(
-                !page.items.iter().any(|item| item.id == added.id),
-                "a sensitive item reached the search results"
-            ),
-            other => panic!("expected a page, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn inert_findings_are_redacted_for_display_but_remain_searchable() {
-        let (state, _dir) = test_state("inert-sensitive-finding");
-        let text = "mail alice@example.com about the release";
-        let added = match add(&state, 1, text).data {
-            Some(ResponseData::Item(item)) => item,
-            other => panic!("expected an item, got {other:?}"),
-        };
-
-        assert!(!added.is_sensitive);
-        let finding = added.sensitive_finding.as_ref().unwrap();
-        assert_eq!(finding.label, "email");
-        assert_eq!(finding.spans.len(), 1);
-        assert!(!finding.redacted_preview.contains("alice@example.com"));
-
-        match search(&state, 2, "alice", 20).data {
-            Some(ResponseData::Page(page)) => {
-                assert!(page.items.iter().any(|item| item.id == added.id));
-            }
-            other => panic!("expected a page, got {other:?}"),
-        }
-        assert!(state
-            .store
-            .summaries(20)
-            .unwrap()
-            .iter()
-            .any(|version| version.id == added.id));
     }
 
     /// B-1 / `CopyPaste-8ebg.57`, at the wire: a capture landing above the
@@ -1082,7 +955,6 @@ mod tests {
             &source,
             copypaste_ipc::content_type::IMAGE_PNG,
             copypaste_core::now_ms(),
-            false,
             None,
             None,
             &state.settings.get(),
@@ -1172,15 +1044,14 @@ mod tests {
     }
 
     #[test]
-    fn image_preview_refuses_a_sensitive_item() {
-        let (state, _dir) = test_state("image-preview-sensitive");
+    fn image_preview_refuses_an_undecodable_image() {
+        let (state, _dir) = test_state("image-preview-invalid");
         let image = copypaste_core::ingest_binary_into_with_capture_context(
             &state.store,
             &state.keyring,
             b"bytes",
             copypaste_ipc::content_type::IMAGE_PNG,
             copypaste_core::now_ms(),
-            true,
             None,
             None,
             &state.settings.get(),

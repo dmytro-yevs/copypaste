@@ -25,8 +25,6 @@ const inspectorStyles = readFileSync(
 );
 
 const callbacks = {
-  onReveal: vi.fn(),
-  onHide: vi.fn(),
   onCopy: vi.fn(),
   onTogglePin: vi.fn(),
   onDelete: vi.fn(),
@@ -42,10 +40,8 @@ function inspector(
       <LibraryInspectorPanel
         item={item()}
         origin={null}
-        revealedContent={null}
         fullContent={null}
         fullContentFailed={false}
-        revealPending={false}
         {...callbacks}
         {...overrides}
       />
@@ -54,40 +50,13 @@ function inspector(
 }
 
 describe("LibraryInspectorPanel", () => {
-  it("keeps a pending sensitive preview masked with the shared loading indicator", () => {
-    render(inspector({
-      item: item({ content: "private body", is_sensitive: true }),
-      fullContent: "private body",
-      revealPending: true,
-    }));
-
-    const reveal = screen.getByRole("button", { name: "Sensitive content hidden — activate to reveal" });
-    expect(reveal.hasAttribute("disabled")).toBe(true);
-    expect(reveal.querySelectorAll('[data-mode="loading"][data-placement="control"]')).toHaveLength(1);
-    expect(screen.queryByText("private body")).toBeNull();
-  });
-
-  it("opens the reader and reveals a potential original only after a gesture", async () => {
+  it("opens the reader for arbitrary text", async () => {
     const user = userEvent.setup();
-    const target = item({
-      content: "original token",
-      sensitive_finding: {
-        label: "possible token",
-        spans: [{ start: 9, end: 14 }],
-        spans_truncated: false,
-        redacted_preview: "redacted token",
-      },
-    });
+    const target = item({ content: "api_key=abc123; password=plain-text" });
     callbacks.onOpenReader.mockClear();
     render(inspector({ item: target }));
 
-    expect(screen.getByText("Potentially sensitive content")).toBeTruthy();
-    expect(screen.getByText("redacted token")).toBeTruthy();
-    expect(screen.queryByText("original token")).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Show original content" }));
-    expect(screen.getByText("original token")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Hide original content" }));
-    expect(screen.queryByText("original token")).toBeNull();
+    expect(screen.getByText(target.content!)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Show full contents" }));
     expect(callbacks.onOpenReader).toHaveBeenCalledWith(target, expect.any(HTMLElement));
   });
@@ -158,24 +127,6 @@ describe("LibraryInspectorPanel", () => {
       "Example Editor",
     );
     expect(sourceCopy?.querySelector("small")).not.toBeNull();
-  });
-
-  it("keeps sensitive plaintext out until an ephemeral reveal is supplied", () => {
-    const secret = item({ is_sensitive: true });
-    const { rerender } = render(inspector({ item: secret }));
-
-    expect(
-      screen.getByRole("button", {
-        name: "Sensitive content hidden — activate to reveal",
-      }),
-    ).toBeTruthy();
-    expect(screen.queryByText("revealed once")).toBeNull();
-
-    rerender(inspector({ item: secret, revealedContent: "revealed once" }));
-    expect(screen.getByText("revealed once")).toBeTruthy();
-
-    rerender(inspector({ item: secret, revealedContent: null }));
-    expect(screen.queryByText("revealed once")).toBeNull();
   });
 
   it("does not restore Copy focus after the user focuses elsewhere", async () => {

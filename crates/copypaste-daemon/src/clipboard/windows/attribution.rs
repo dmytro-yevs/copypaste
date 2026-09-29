@@ -1,8 +1,7 @@
 //! Which application put this on the clipboard, asked of Win32.
 //!
-//! Manifest 07 wants the source as a sensitivity signal — a credential store's
-//! copy is sensitive whatever its text looks like — and the settings want it as
-//! an exclusion key. Nothing here is collected for its own sake, and the window
+//! Settings use the source as an exclusion key. Nothing here is collected for
+//! its own sake, and the window
 //! title is never read: it is user content, and a title on every history row is
 //! a second copy of what the user was looking at.
 //!

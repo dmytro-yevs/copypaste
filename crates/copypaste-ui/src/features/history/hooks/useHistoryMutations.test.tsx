@@ -60,14 +60,14 @@ describe("useCopy feedback", () => {
     expect(toast.success.mock.calls[0]?.[0]).not.toContain(target.content);
   });
 
-  it("refuses unsupported formats before asking native to copy sensitive content", async () => {
+  it("refuses unsupported formats before asking native to copy", async () => {
     getClipboardWriteAvailability.mockResolvedValue("unsupported_on_platform");
     const client = testClient();
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
     const { result } = renderHook(() => useCopy(), { wrapper });
-    const target = item({ content_type: "file", is_sensitive: true, content: "secret" });
+    const target = item({ content_type: "file", content: "ordinary file text" });
 
     await act(async () => {
       await expect(result.current.mutateAsync(target)).rejects.toThrow("Clipboard write unavailable");

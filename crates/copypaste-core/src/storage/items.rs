@@ -1,7 +1,6 @@
 //! Item CRUD: everything that writes or reads a `clipboard_items` row without
-//! going through FTS or a retention sweep. Two invariants live here: layer 1 of
-//! the sensitive/FTS exclusion (in [`Store::insert_or_bump`]), and that
-//! a delete is a *tombstone*, not a row removal.
+//! going through FTS or a retention sweep. A delete is a *tombstone*, not a
+//! row removal.
 
 use std::ops::ControlFlow;
 
@@ -22,26 +21,6 @@ const LIVE_ITEMS_SQL: &str = concat!(
     " FROM clipboard_items WHERE deleted = 0 \
       ORDER BY pinned DESC, pin_order ASC, created_at DESC, id DESC"
 );
-
-fn promote_sensitive_in_tx(
-    tx: &rusqlite::Transaction<'_>,
-    mut item: StoredItem,
-) -> rusqlite::Result<StoredItem> {
-    if item.is_sensitive {
-        return Ok(item);
-    }
-    // This must share the classification update's transaction: otherwise a
-    // password-manager re-copy can leave an ordinary row searchable. The index
-    // row goes first, while `fts_rowid` still names it.
-    delete_fts_row_in_tx(tx, &item.id)?;
-    tx.execute(
-        "UPDATE clipboard_items SET is_sensitive = 1, fts_rowid = NULL \
-          WHERE id = ?1 AND deleted = 0",
-        [&item.id],
-    )?;
-    item.is_sensitive = true;
-    Ok(item)
-}
 
 impl Store {
     /// Stores a capture, or promotes the row that already holds this content.
@@ -85,10 +64,7 @@ impl Store {
         E: From<StoreError>,
         F: FnOnce() -> Result<(Vec<u8>, Vec<u8>, Option<String>), E>,
     {
-        // `CopyPaste-i6pp` layer 1: unconditional, and it ignores what the caller
-        // passed. A sensitive item is never indexed.
-        let indexable =
-            !item.is_sensitive && copypaste_ipc::content_type::is_text(&item.content_type);
+        let indexable = copypaste_ipc::content_type::is_text(&item.content_type);
 
         // The caller's id, not a fresh one: the ciphertext is already sealed
         // against it (see `NewItem::id`).
@@ -101,11 +77,6 @@ impl Store {
         if let Some(existing) =
             newest_live_with_hash(&tx, &item.content_hash, i64::MIN).map_err(StoreError::from)?
         {
-            let existing = if item.is_sensitive {
-                promote_sensitive_in_tx(&tx, existing).map_err(StoreError::from)?
-            } else {
-                existing
-            };
             let bumped = bump_in_tx(
                 &tx,
                 &existing,
@@ -122,15 +93,10 @@ impl Store {
         let search_text = plaintext
             .as_deref()
             .filter(|t| indexable && !t.trim().is_empty());
-        if !indexable && plaintext.is_some() {
-            tracing::warn!(
-                "search_text supplied for a sensitive item; dropping it (it must be None)"
-            );
-        }
-
         let fts_rowid = match search_text {
-            Some(text) => insert_fts_in_tx(&tx, &id, text, item.is_sensitive, &item.content_type)
-                .map_err(StoreError::from)?,
+            Some(text) => {
+                insert_fts_in_tx(&tx, &id, text, &item.content_type).map_err(StoreError::from)?
+            }
             None => None,
         };
 
@@ -140,17 +106,16 @@ impl Store {
             // whole payload to the WAL a second time.
             "INSERT INTO clipboard_items \
                  (id, content_ciphertext, nonce, content_type, content_hash, \
-                  is_sensitive, pinned, pin_order, created_at, deleted, app_bundle_id, app_name, payload_metadata, \
+                  pinned, pin_order, created_at, deleted, app_bundle_id, app_name, payload_metadata, \
                   fts_rowid, content_bytes) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, NULL, ?7, 0, ?8, ?9, ?10, ?11, \
-                     LENGTH(COALESCE(?2, X'')) + LENGTH(COALESCE(?10, '')))",
+             VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL, ?6, 0, ?7, ?8, ?9, ?10, \
+                     LENGTH(COALESCE(?2, X'')) + LENGTH(COALESCE(?9, '')))",
             params![
                 &id,
                 &content_ciphertext,
                 &nonce,
                 &item.content_type,
                 &item.content_hash,
-                item.is_sensitive,
                 item.created_at,
                 &item.app_bundle_id,
                 &item.app_name,
@@ -174,11 +139,6 @@ impl Store {
                     .map_err(StoreError::from)?;
                 return match existing {
                     Some(existing) => {
-                        let existing = if item.is_sensitive {
-                            promote_sensitive_in_tx(&tx, existing).map_err(StoreError::from)?
-                        } else {
-                            existing
-                        };
                         let bumped = bump_in_tx(
                             &tx,
                             &existing,
@@ -208,7 +168,6 @@ impl Store {
             pinned: false,
             pin_order: None,
             pin_updated_at: 0,
-            is_sensitive: item.is_sensitive,
             deleted: false,
             // A capture on this device. The empty sentinel rather than a device
             // id the store has no business knowing — see `versions::origin_or`.
@@ -223,16 +182,6 @@ impl Store {
     /// the two happened.
     pub fn insert(&self, item: NewItem) -> Result<StoredItem, StoreError> {
         self.insert_or_bump(item).map(Ingest::into_item)
-    }
-
-    /// Raises a live row's sensitivity classification and removes its FTS
-    /// entry in the same transaction.
-    pub fn promote_to_sensitive(&self, item: StoredItem) -> Result<StoredItem, StoreError> {
-        let mut conn = self.conn()?;
-        let tx = write_tx(&mut conn)?;
-        let promoted = promote_sensitive_in_tx(&tx, item)?;
-        tx.commit()?;
-        Ok(promoted)
     }
 
     /// Pinned first, then newest first, by offset.
@@ -307,22 +256,14 @@ impl Store {
         let conn = self.conn()?;
         let row = conn
             .query_row(
-                "SELECT payload_metadata, content_type, is_sensitive FROM clipboard_items \
+                "SELECT payload_metadata, content_type FROM clipboard_items \
                  WHERE id = ?1 AND deleted = 0",
                 [id],
-                |row| {
-                    Ok((
-                        row.get::<_, Option<String>>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, bool>(2)?,
-                    ))
-                },
+                |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()?;
-        Ok(row.and_then(|(metadata, content_type, sensitive)| {
-            (!sensitive)
-                .then_some(metadata)
-                .flatten()
+        Ok(row.and_then(|(metadata, content_type)| {
+            metadata
                 .and_then(|metadata| crate::PayloadMetadata::from_json(&metadata, &content_type))
                 .and_then(|metadata| metadata.source_app_icon)
         }))
@@ -341,7 +282,7 @@ impl Store {
         let changed = tx.execute(
             "UPDATE clipboard_items \
                 SET deleted = 1, content_ciphertext = NULL, content_bytes = 0, nonce = NULL, \
-                    content_hash = CASE WHEN is_sensitive = 1 THEN '' ELSE content_hash END, \
+                    content_hash = content_hash, \
                     created_at = CASE \
                         WHEN created_at = 9223372036854775807 THEN created_at \
                         ELSE MAX(created_at + 1, ?2) \
@@ -353,56 +294,6 @@ impl Store {
         )?;
         tx.commit()?;
         Ok(changed > 0)
-    }
-
-    /// Turn exactly the sensitive version inspected by the auto-wipe into a
-    /// tombstone. The predicates close the select/decrypt/delete race: a pin
-    /// or a re-copy after the sweep selected its candidate must keep the item.
-    #[cfg(test)]
-    pub(crate) fn wipe_sensitive_if_unchanged(
-        &self,
-        id: &str,
-        created_at: i64,
-        content_hash: &str,
-    ) -> Result<bool, StoreError> {
-        Ok(self.wipe_sensitive_batch_if_unchanged(&[(
-            id.to_string(),
-            created_at,
-            content_hash.to_string(),
-        )])? > 0)
-    }
-
-    pub(crate) fn wipe_sensitive_batch_if_unchanged(
-        &self,
-        victims: &[(String, i64, String)],
-    ) -> Result<u64, StoreError> {
-        if victims.is_empty() {
-            return Ok(0);
-        }
-        let mut conn = self.conn()?;
-        let tx = write_tx(&mut conn)?;
-        let now = crate::now_ms();
-        let mut removed = 0u64;
-        for (id, created_at, content_hash) in victims {
-            let fts_rowid: Option<i64> = tx
-                .query_row(
-                    "SELECT fts_rowid FROM clipboard_items WHERE id = ?1",
-                    [id],
-                    |r| r.get(0),
-                )
-                .optional()?
-                .flatten();
-            let changed = tx.execute(
-                "UPDATE clipboard_items                     SET deleted = 1, content_ciphertext = NULL, content_bytes = 0, nonce = NULL,                         content_hash = '', pinned = 0, pin_order = NULL, app_bundle_id = NULL, app_name = NULL,                         payload_metadata = NULL, fts_rowid = NULL,                         created_at = CASE                             WHEN created_at = 9223372036854775807 THEN created_at                             ELSE MAX(created_at + 1, ?4)                         END                   WHERE id = ?1 AND created_at = ?2 AND content_hash = ?3                     AND is_sensitive = 1 AND pinned = 0 AND deleted = 0",
-                params![id, created_at, content_hash, now],
-            )?;
-            if let (true, Some(rowid)) = (changed > 0, fts_rowid) {
-                tx.execute("DELETE FROM clipboard_fts WHERE rowid = ?1", [rowid])?;
-            }
-            removed += u64::from(changed > 0);
-        }
-        tx.commit()?;
-        Ok(removed)
     }
 
     /// Soft-deletes every live item, returning how many were affected.
@@ -457,7 +348,6 @@ impl Store {
         let changed = tx.execute(
             "UPDATE clipboard_items \
                 SET deleted = 1, content_ciphertext = NULL, content_bytes = 0, nonce = NULL, \
-                    content_hash = CASE WHEN is_sensitive = 1 THEN '' ELSE content_hash END, \
                     created_at = CASE \
                         WHEN created_at = 9223372036854775807 THEN created_at \
                         ELSE MAX(created_at + 1, ?1) \
@@ -493,7 +383,7 @@ mod tests {
 
     use super::super::model::NewItem;
     use super::super::test_support::{
-        fts_dump, fts_row_count, item, plant_fts_row, sensitive_item, store, KEY, T0,
+        fts_dump, fts_row_count, item, plant_fts_row, store, KEY, T0,
     };
     use super::super::{Store, StoreError};
 
@@ -587,7 +477,6 @@ mod tests {
         assert_eq!(fetched.content_type, "text");
         assert_eq!(fetched.created_at, T0);
         assert!(!fetched.pinned);
-        assert!(!fetched.is_sensitive);
 
         assert!(s.get("no-such-id").unwrap().is_none());
     }
@@ -750,22 +639,16 @@ mod tests {
         assert_eq!(fts_dump(&s), "");
     }
 
-    /// A sensitive item is out of the index before the clear, is not put into it
-    /// by the clear, and is still out of it afterwards while it remains live —
-    /// the state an undone clear leaves behind.
     #[test]
-    fn a_sensitive_item_spared_by_the_bound_never_enters_the_index() {
+    fn a_text_item_after_the_clear_bound_remains_indexed() {
         let s = store();
         let doomed = s.insert(item("ordinary", T0)).unwrap();
         let bound = s.max_rowid().unwrap();
-        let secret = s.insert(sensitive_item("swordfish", T0 + 1_000)).unwrap();
-
-        assert_eq!(fts_row_count(&s, &secret.id), 0);
+        let keep = s.insert(item("swordfish", T0 + 1_000)).unwrap();
         assert_eq!(s.delete_all_through(bound).unwrap(), 1);
-
-        assert_eq!(fts_row_count(&s, &secret.id), 0);
+        assert_eq!(fts_row_count(&s, &keep.id), 1);
         assert_eq!(fts_row_count(&s, &doomed.id), 0);
-        assert!(s.search("swordfish", 10).unwrap().is_empty());
+        assert_eq!(s.search("swordfish", 10).unwrap().len(), 1);
         assert_eq!(s.count().unwrap(), 1);
     }
 
@@ -774,7 +657,12 @@ mod tests {
     #[test]
     fn a_planted_index_row_does_not_survive_the_clear() {
         let s = store();
-        let secret = s.insert(sensitive_item("swordfish", T0)).unwrap();
+        let secret = s
+            .insert(NewItem {
+                search_text: None,
+                ..item("swordfish", T0)
+            })
+            .unwrap();
         plant_fts_row(&s, &secret.id, "swordfish");
         assert_eq!(fts_row_count(&s, &secret.id), 1);
 

@@ -22,7 +22,6 @@ canonical owner of dependency versions and RustSec reasoning.
 | Task supervision | `JoinSet` |
 | Data dirs | `directories` |
 | Atomic file write | `tempfile` |
-| Secret detection | selected **gitleaks** rules through the in-process detector |
 
 **Why there is no TLS row.** The peer channel was going to be TLS with a
 fingerprint-pinning verifier and a balanced PAKE for pairing. Noise `NNpsk0`
@@ -125,8 +124,7 @@ including virtual lists; custom gesture state would duplicate all of it.
 below the boundary and are shared by both targets.
 
 **Manifest 06 still binds — its behaviour half.** Scroll anchoring, row heights
-reserving the full cap, the 15 accessibility requirements, sensitive content
-being absent from the view rather than covered over, no filesystem path in a
+reserving the full cap, the 15 accessibility requirements, no filesystem path in a
 user-facing error, and the 73 acceptance tests. Its *visual* half — palette,
   token values, scales, and `design-reference.html` — is excluded from the
   current visual system.
@@ -178,9 +176,6 @@ regression.
 4. **SQLCipher rekey via `sqlcipher_export` + ATTACH + atomic rename.** The
    SQLCipher-recommended crash-safe path; `PRAGMA rekey` was rejected for good
    reason. *Not built* — v2 has no rotation path.
-5. **Curated secret-detection ruleset.** No maintained Rust crate *is* a
-   ruleset. Source the patterns from gitleaks; the in-process scanner stays.
-
 The fingerprint-pinning cert verifier was an earned exception only while the
 peer channel was TLS. Noise removed the problem rather than the code, which is
 the better outcome.
@@ -197,9 +192,8 @@ the better outcome.
 - **The security properties bind the only format.** Fail closed on a wrong
   key or a wrong AAD, never fall back to a plaintext read; the AAD binds item
   identity; key material is zeroized; comparisons are constant-time.
-- **Sensitive items never reach the search index**, and no error string shown to
-  a user may contain a filesystem path — the daemon socket path discloses the
-  local username.
+- No error string shown to a user may contain a filesystem path — the daemon
+  socket path discloses the local username.
 - **The port manifests are the acceptance criteria.** Read
   [`port-manifest/README.md`](port-manifest/README.md) first: it records which
   behaviour is binding and excluded formats must not return.

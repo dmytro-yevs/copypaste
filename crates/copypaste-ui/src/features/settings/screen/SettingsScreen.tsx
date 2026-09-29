@@ -311,7 +311,7 @@ export function SettingsScreen() {
           className={styles.compactViewport}
           padding="compact"
         >
-          <Container width="reading" gutter="none">
+          <Container width="fluid" gutter="none">
             <SettingsCompactNavigation
               sections={sections}
               active={mobileSection}
@@ -330,6 +330,7 @@ export function SettingsScreen() {
               actions={search}
             />
             <Tabs
+              orientation="vertical"
               value={desktopSection}
               onValueChange={(value) => openSection(value as PreferenceSection)}
               variant="bare"

@@ -95,40 +95,6 @@
     max-block-size: 100%;
     flex: 0 1 auto;
 }
-.protected {
-    --button-content-gap: 0;
-
-    display: grid;
-    inline-size: 100%;
-    block-size: 100%;
-    min-block-size: 0;
-    padding: var(--s-3);
-    place-items: center;
-    align-content: center;
-    gap: var(--s-2);
-    border: 0;
-    border-radius: var(--r-card);
-    color: var(--withheld-fg);
-    background: var(--withheld);
-    white-space: normal;
-}
-.protected > [data-slot="button-content"] { display: contents; }
-.protectedLines {
-    display: grid;
-    inline-size: 100%;
-    gap: var(--s-2);
-}
-.protectedLines i {
-    block-size: var(--s-2);
-    border-radius: var(--r-pill);
-    background: var(--protected-line-bg);
-}
-.protectedLines i:nth-child(2) {
-    inline-size: 76%;
-}
-.protectedLines i:last-child {
-    inline-size: 58%;
-}
 .unavailable {
     display: grid;
     inline-size: 100%;

@@ -7,7 +7,7 @@ import {
 import { StateView } from "@/components/shared/StateView";
 import { ClipBodyNotices, ClipBodyView } from "@/features/history/patterns/ClipBodyPresentation";
 import { originName, wontSync, type OriginDevice } from "@/lib/itemOrigin";
-import { clipboardCopyPresentation, clipCopyAction, clipPotentialRevealAction } from "@/features/history/model/clipPresentation";
+import { clipboardCopyPresentation, clipCopyAction } from "@/features/history/model/clipPresentation";
 import { useClipboardWriteAvailability } from "@/hooks/useClipboardWriteAvailability";
 import { LibraryInspectorPanel } from "@/features/history/patterns/LibraryInspectorPanel";
 import { useViewportMetrics } from "@/hooks/useViewportMetrics";
@@ -32,10 +32,6 @@ interface ClipDetailDialogProps {
     /** A failed whole-body read renders unavailable, never a preview fragment
      *  presented as complete content. */
     fullContentFailed?: boolean;
-    revealedContent: string | null;
-    revealPending: boolean;
-    onReveal: (item: Item) => void;
-    onHide: () => void;
     onCopy: (item: Item) => Promise<unknown>;
     onTogglePin: (item: Item) => void;
     onDelete: (item: Item) => void;
@@ -52,10 +48,6 @@ export function ClipDetailDialog({
     initialExpanded = false,
     fullContent,
     fullContentFailed,
-    revealedContent,
-    revealPending,
-    onReveal,
-    onHide,
     onCopy,
     onTogglePin,
     onDelete,
@@ -78,41 +70,23 @@ export function ClipDetailDialog({
               : { status: "resolved", availability: availability.data },
     );
 
-    const revealed = item !== null && revealedContent !== null;
-    const potentialFinding =
-        item !== null && !item.is_sensitive ? item.sensitive_finding : null;
-    const [shownFinding, setShownFinding] = useState<{
-        id: string;
-        finding: NonNullable<Item["sensitive_finding"]>;
-    } | null>(null);
     useEffect(() => {
         setExpanded(initialExpanded);
-        setShownFinding(null);
     }, [initialExpanded, item?.id]);
     useEffect(() => {
         copyGenerationRef.current += 1;
         copyingRef.current = false;
         setCopying(false);
     }, [item?.id]);
-    const potentialRevealed =
-        potentialFinding !== null &&
-        shownFinding !== null &&
-        shownFinding.id === item?.id &&
-        shownFinding.finding === potentialFinding;
     const kind = item ? kindOf(item) : "text";
-    // Revealed plaintext remains an ephemeral argument from useReveal; this
-    // pure resolver retains no copy outside the current render.
     const body = item
         ? resolveClipBodyPresentation({
               item,
               fullContent,
               fullContentFailed: fullContentFailed === true,
-              revealedContent,
-              showPotentialSensitiveOriginal: potentialRevealed,
           })
         : null;
     const copyAction = clipCopyAction(kind);
-    const potentialRevealAction = clipPotentialRevealAction(potentialRevealed);
 
     const meta = item
         ? [absoluteTime(item.created_at), clipTypeMetadata(kind).label]
@@ -124,7 +98,6 @@ export function ClipDetailDialog({
     const close = () => {
         if (copyingRef.current) return;
         setExpanded(initialExpanded);
-        setShownFinding(null);
         onClose();
     };
 
@@ -180,19 +153,6 @@ export function ClipDetailDialog({
                 },
             }}
             footer={expanded ? <>
-                {potentialFinding !== null && <Button
-                    variant="secondary"
-                    icon={potentialRevealAction.icon}
-                    disabled={copying}
-                    aria-pressed={potentialRevealed}
-                    onClick={() => setShownFinding(potentialRevealed ? null : {
-                        id: item!.id,
-                        finding: potentialFinding,
-                    })}
-                >{potentialRevealAction.label}</Button>}
-                {revealed && <Button variant="secondary" icon="eyeOff" disabled={copying} onClick={onHide}>
-                    {t("history.detail.hide")}
-                </Button>}
                 {item && <Button
                     variant="secondary"
                     icon={item.pinned ? "unpin" : "pin"}
@@ -216,13 +176,9 @@ export function ClipDetailDialog({
             {!expanded && item ? <LibraryInspectorPanel
                 item={item}
                 origin={origin}
-                revealedContent={revealedContent}
                 fullContent={fullContent}
                 fullContentFailed={fullContentFailed === true}
-                revealPending={revealPending}
                 copyPending={copying}
-                onReveal={onReveal}
-                onHide={onHide}
                 onCopy={(target) => startCopy(target, false)}
                 onTogglePin={onTogglePin}
                 onDelete={(target) => { onDelete(target); close(); }}
@@ -240,16 +196,12 @@ export function ClipDetailDialog({
                     reason={copyAvailability.reason}
                     canRetry={copyAvailability.canRetry}
                     onRetry={() => void availability.refetch()}
-                    potentialFinding={potentialFinding !== null}
                 />
                 {item && body && <ClipBodyView
                     mode="reader"
                     item={item}
                     kind={kind}
                     body={body}
-                    copyPending={copying}
-                    revealPending={revealPending}
-                    onReveal={onReveal}
                 />}
             </>}
         </Dialog>

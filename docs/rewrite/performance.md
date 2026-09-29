@@ -141,9 +141,7 @@ second, forever, on a clipboard nobody has touched.**
 The handoff was unconditional: every tick went to the blocking pool to ask a
 question whose answer was almost always "nothing changed". `ClipboardSource`
 now answers that on the async side (`changed()`, a bare `changeCount` read),
-and only a tick with something to do is handed off. The sensitive-item sweep
-used to ride the poll and so moved onto its own cadence, and does not run at
-all while `sensitive_ttl_secs` is `0`. The shipped default is `30`; `0` remains the off sentinel.
+and only a tick with something to do is handed off.
 
 Re-measured on the same harness, `NO_MDNS=1`, 500 ms, load 2.67:
 
@@ -245,27 +243,9 @@ constant at the two small sizes and large at 4 MiB. Load is not the explanation
 do not quote the totals as a decomposition until someone accounts for the
 remainder.
 
-Detection alone, `--bench detect`:
-
-| | 64 B | 1 KiB | 116 KB | 1 MiB | 4 MiB |
-|---|---|---|---|---|---|
-| benign | 362 ns | 2.94 µs | 230 µs | 2.07 ms | 8.33 ms |
-| matching | 1.14 µs | 4.69 µs | 280 µs | 2.49 ms | 10.02 ms |
-
-Text that matches rules costs about 1.2× text that does not. The earlier 4×
-figure was load, not detection. This group is a no-regression check and nothing
-more: `benign` has no matches, so the floor-membership filter F-CORE-4 added
-never bites, and `matching` fires a rule above the floor immediately, so it
-cannot skip anything either. F-CORE-4's own number is the in-process A/B in
-`the_predicate_is_cheaper_than_the_ranked_scan_it_replaced`.
-
-`Detector::new()` is **102 ms**, once per process and never per call
-(`CopyPaste-mnte`). `capture/store_open` is not quoted: the group aborts on
-this host because it opens a fresh pool per iteration and runs out of threads,
-on this tree and on the pre-wave one alike.
-
-The idle tick with the sensitive sweep off — the shipped default — is
-**3.33 ns**. With it on it is 218 µs against a 2 000-row history.
+`capture/store_open` is not quoted: the group aborts on this host because it
+opens a fresh pool per iteration and runs out of threads, on this tree and on
+the pre-wave one alike.
 
 ---
 
@@ -379,8 +359,8 @@ was only a smoke test.
 
 `insert_or_bump_late_sealed` evaluates the sealing closure only after the
 transaction has taken the dedup decision. A re-copy therefore avoids HKDF,
-XChaCha20-Poly1305 and the plaintext clone; the content hash, sensitivity flag
-and AAD-bound item id stay eager because the decision needs them.
+XChaCha20-Poly1305 and the plaintext clone; the content hash and AAD-bound item
+id stay eager because the decision needs them.
 
 Only the before-baseline exists, measured at p50 against 2,000 rows on a
 contended host: 351 µs at 256 B, 365 µs at 4 KiB, 1.448 ms at 64 KiB and

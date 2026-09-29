@@ -111,6 +111,11 @@
     outline: 0;
   }
 
+  /* A caller's layout must never make an inactive Radix panel occupy space. */
+  .content[hidden] {
+    display: none !important;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .trigger { transition: none; }
   }

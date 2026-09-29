@@ -18,7 +18,7 @@ use copypaste_p2p::protocol::{content_hash, SyncItem};
 use copypaste_p2p::sync::SyncSource;
 
 mod support;
-use support::{clipping, detector, fill, keyring, T0};
+use support::{clipping, fill, keyring, T0};
 
 /// `ConfigData::history_limit` defaults to 10 000; these bracket it.
 const HISTORIES: [usize; 3] = [500, 2_000, 8_000];
@@ -62,7 +62,6 @@ fn source(store: copypaste_core::Store, history: usize) -> StoreSource {
     StoreSource::new(
         store,
         Arc::new(keyring()),
-        Arc::new(detector()),
         "bench-device".into(),
         "bench".into(),
         ConfigData {

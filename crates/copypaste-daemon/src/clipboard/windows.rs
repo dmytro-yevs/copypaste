@@ -21,7 +21,6 @@ mod two_writers;
 
 use super::change::{Change, ChangeTracker};
 use super::windows_attribution::{is_excluded, Attribution};
-use super::windows_optout as optout;
 use super::{Capture, CapturePolicy, ClipboardSource};
 use read::{Reading, Representation};
 
@@ -41,45 +40,9 @@ const OPEN_ATTEMPTS: usize = 10;
 /// clearly unrelated burst (CopyPaste-8yzf).
 const MAX_SELF_WRITE_DELTA: i64 = 16;
 
-/// Clipboard formats registered once, not once per tick (§3.12's rule in
-/// Windows spelling: `RegisterClipboardFormatW` interns a name for the life of
-/// the session, so the atom is a process-lifetime constant).
-struct OptOutFormats {
-    presence: Vec<u32>,
-    flags: Vec<u32>,
-}
-
-impl OptOutFormats {
-    fn register() -> Self {
-        Self {
-            presence: register_all(&optout::PRESENCE_MARKERS),
-            flags: register_all(&optout::FLAG_MARKERS),
-        }
-    }
-}
-
-fn register_all(names: &[&str]) -> Vec<u32> {
-    names
-        .iter()
-        .filter_map(|name| match raw::register_format(name) {
-            Some(id) => Some(id.get()),
-            None => {
-                // Not fatal, and not silent: this build can no longer see one
-                // of the ways a password manager says "do not record me".
-                warn!(
-                    marker = *name,
-                    "a clipboard opt-out format could not be registered"
-                );
-                None
-            }
-        })
-        .collect()
-}
-
 pub struct WindowsClipboard {
     tracker: ChangeTracker,
     rejected_too_large: u64,
-    opt_out: OptOutFormats,
     formats: read::RegisteredFormats,
     staging: Option<staging::StagingArea>,
     attribution: Attribution,
@@ -91,7 +54,6 @@ impl WindowsClipboard {
         Ok(Self {
             tracker: ChangeTracker::new(),
             rejected_too_large: 0,
-            opt_out: OptOutFormats::register(),
             formats: read::RegisteredFormats::register(),
             staging: None,
             attribution: Attribution::default(),
@@ -121,32 +83,6 @@ impl WindowsClipboard {
                 None
             }
         }
-    }
-
-    /// The two presence markers, probed with `IsClipboardFormatAvailable`.
-    ///
-    /// I-5 / §3.4 in Windows spelling, and stricter than the macOS path can be:
-    /// this needs neither the clipboard open nor any data read, so a marked
-    /// password is never even mapped into this process. A clipboard carrying a
-    /// marker *and* ordinary text is dropped entirely; that is intentional.
-    fn marked_do_not_record(&self) -> bool {
-        self.opt_out
-            .presence
-            .iter()
-            .any(|&format| raw::is_format_avail(format))
-    }
-
-    /// The two flag markers. Requires the clipboard open, and reads four bytes
-    /// of flag — never a representation.
-    fn flag_forbids_capture(&self) -> bool {
-        self.opt_out.flags.iter().any(|&format| {
-            if !raw::is_format_avail(format) {
-                return false;
-            }
-            let mut payload = Vec::new();
-            let read = raw::get_vec(format, &mut payload).is_ok();
-            optout::flag_forbids_capture(read.then_some(payload.as_slice()))
-        })
     }
 
     fn reject_too_large(&mut self, bytes: u64, cap: u64) {
@@ -234,18 +170,6 @@ impl ClipboardSource for WindowsClipboard {
             return None;
         }
 
-        if self.marked_do_not_record() {
-            // I-9: no content, no format name.
-            debug!(
-                change_count = count,
-                "clipboard change is marked do-not-record; dropped"
-            );
-            // I-3: acknowledged, or it is re-offered forever. This also
-            // consumes the sentinel if the marked change was somehow ours.
-            self.tracker.observe(count);
-            return None;
-        }
-
         // Everything below reads from the clipboard, so it must be open first.
         // The cursor has deliberately not moved yet: a clipboard we could not
         // open is a change we have not seen.
@@ -278,23 +202,14 @@ impl ClipboardSource for WindowsClipboard {
             }
         }
 
-        if self.flag_forbids_capture() {
-            debug!(
-                change_count = count,
-                "clipboard change is flagged do-not-record; dropped"
-            );
-            return None;
-        }
-
         // Private mode is a capture gate, not an ingest choice: acknowledge the
         // change without reading attribution or data.
         if policy.settings.private_mode {
             return None;
         }
 
-        // §3.9(a): resolved on every change, whether or not the exclusion list
-        // is empty, because its second consumer is the credential-store
-        // sensitivity floor (CopyPaste-44rq.43).
+        // Resolve attribution on every change so explicit app exclusions are
+        // applied consistently.
         let source_app = self.source_app(count);
         self.attribution.note(source_app.as_ref());
         let app_bundle_id = source_app.as_ref().map(|app| app.id.clone());
@@ -432,9 +347,8 @@ impl ClipboardSource for WindowsClipboard {
 
 // Tests — the half of manifest 01 that only Windows can answer
 //
-// `change` and `windows_optout` are testable anywhere. What is not is whether
+// `change` and attribution are testable anywhere. What is not is whether
 // the sequence number moves at all, how far one write of ours moves it, and
-// whether `IsClipboardFormatAvailable` sees what a password manager registers.
 // The first two wrong break §3.3 in the two ways `change` records.
 //
 // `#[ignore]`: these drive the machine's real clipboard, so a run replaces
@@ -873,78 +787,6 @@ mod tests {
         assert!(clipboard.lost_intermediates_count() >= lost);
     }
 
-    /// I-5, T-14, T-15, T-16 in Windows spelling. The marker is written
-    /// *alongside* ordinary text, which is the shape a password manager
-    /// produces and the case that must still be dropped entirely.
-    #[test]
-    #[ignore = "drives the real Windows clipboard"]
-    fn every_presence_marker_drops_the_change_and_advances_the_cursor() {
-        let _lock = serialised();
-        let mut clipboard = WindowsClipboard::new().unwrap();
-
-        for name in optout::PRESENCE_MARKERS {
-            let format = raw::register_format(name)
-                .expect("register the marker")
-                .get();
-            let text = utf16("a master password");
-            write_formats(&[(formats::CF_UNICODETEXT, &text), (format, &[0])]);
-            assert!(
-                raw::is_format_avail(format),
-                "{name} could not be put on the clipboard"
-            );
-            assert!(
-                clipboard.poll().is_none(),
-                "{name} did not suppress the change"
-            );
-            assert!(
-                clipboard.poll().is_none(),
-                "I-3: {name} left the change to be re-offered forever"
-            );
-        }
-
-        write_text("an ordinary copy");
-        assert_eq!(
-            clipboard
-                .poll()
-                .expect("a marked change must not wedge the poll")
-                .content,
-            "an ordinary copy"
-        );
-    }
-
-    /// The other half of the ruleset, where presence is not the signal: the
-    /// same format permits capture at 1 and forbids it at 0.
-    #[test]
-    #[ignore = "drives the real Windows clipboard"]
-    fn a_zero_flag_drops_the_change_and_a_one_flag_does_not() {
-        let _lock = serialised();
-        let mut clipboard = WindowsClipboard::new().unwrap();
-
-        for name in optout::FLAG_MARKERS {
-            let format = raw::register_format(name)
-                .expect("register the marker")
-                .get();
-            let text = utf16("a master password");
-            write_formats(&[
-                (formats::CF_UNICODETEXT, &text),
-                (format, &0u32.to_le_bytes()),
-            ]);
-            assert!(
-                clipboard.poll().is_none(),
-                "{name} = 0 did not suppress the change"
-            );
-
-            write_formats(&[
-                (formats::CF_UNICODETEXT, &text),
-                (format, &1u32.to_le_bytes()),
-            ]);
-            assert!(
-                clipboard.poll().is_some(),
-                "{name} = 1 permits capture and must not drop the change"
-            );
-        }
-    }
-
     /// I-18, I-39, T-30, T-33. §6.5 requires the rejection counter to be
     /// asserted and user-visible.
     #[test]
@@ -988,8 +830,7 @@ mod tests {
         );
     }
 
-    /// Manifest 07's signal: the origin is what makes a capture sensitive, and
-    /// it must survive the poll for ingest to apply the floor.
+    /// The source application survives the poll for explicit exclusion policy.
     ///
     /// A test write owns no clipboard window, so this exercises the foreground
     /// fallback and needs an interactive desktop — with no foreground window

@@ -559,45 +559,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_sensitive_item_is_never_advertised_or_served() {
+    async fn credential_shaped_text_syncs_as_ordinary_content() {
         let a = TestSource::new(
             "dev-a",
-            vec![
-                item("public", 100, "fine", "dev-a"),
-                item("secret", 200, "hunter2", "dev-a"),
-            ],
+            vec![item(
+                "credential-shaped",
+                200,
+                "AKIAIOSFODNN7EXAMPLE",
+                "dev-a",
+            )],
         );
-        a.mark_sensitive("secret");
         let b = TestSource::new("dev-b", vec![]);
 
         let (oa, ob) = session(&a, &b).await;
 
-        assert!(b.get("public").is_some());
-        assert!(b.get("secret").is_none(), "a sensitive item was synced");
-        assert_eq!(oa.stats.sent, 1);
-        assert_eq!(ob.stats.received, 1);
-    }
-
-    #[tokio::test]
-    async fn a_sensitive_tombstone_syncs_empty_while_a_live_secret_is_excluded() {
-        let secret = "previous secret";
-        let a = TestSource::new(
-            "dev-a",
-            vec![
-                item("live-secret", 300, "hunter2", "dev-a"),
-                tombstone("deleted-secret", 200, &content_hash(secret), "dev-a"),
-            ],
+        assert_eq!(
+            b.get("credential-shaped").unwrap().content,
+            "AKIAIOSFODNN7EXAMPLE"
         );
-        a.mark_sensitive("live-secret");
-        a.mark_sensitive("deleted-secret");
-        let b = TestSource::new("dev-b", vec![item("deleted-secret", 100, secret, "dev-a")]);
-
-        let (oa, ob) = session(&a, &b).await;
-
-        assert!(b.get("live-secret").is_none(), "a live secret was synced");
-        let tombstone = b.get("deleted-secret").expect("tombstone was not synced");
-        assert!(tombstone.deleted);
-        assert!(tombstone.content.is_empty(), "tombstone carried content");
         assert_eq!((oa.stats.sent, ob.stats.received), (1, 1));
     }
 

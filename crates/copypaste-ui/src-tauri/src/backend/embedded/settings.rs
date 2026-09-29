@@ -143,10 +143,6 @@ impl SettingsTransition {
         &self.applied.config
     }
 
-    fn should_enforce_retention(&self) -> bool {
-        copypaste_core::retention::policy_tightened(&self.before, &self.applied.config)
-    }
-
     fn lan_visibility_changed(&self) -> bool {
         self.applied.config.lan_visibility != self.before.lan_visibility
     }
@@ -242,12 +238,11 @@ fn apply_runtime_effects(inner: &Inner, transition: &SettingsTransition) {
     let removed = copypaste_core::retention::reconcile_policy(
         &inner.state.store,
         || inner.settings(),
-        transition.should_enforce_retention(),
+        copypaste_core::retention::policy_tightened(&transition.before, &transition.applied.config),
     );
     if removed > 0 {
-        inner.publish_items(false, 0);
+        inner.publish_items(false);
     }
-    inner.wake_retention();
     if transition.lan_visibility_changed() {
         if let Some(node) = inner.node.get() {
             node.set_lan_visibility(transition.config().lan_visibility);
@@ -620,7 +615,6 @@ mod tests {
         let event = events.recv().await.unwrap();
         assert_eq!(event.event, EventKind::Items);
         assert!(!event.captured);
-        assert_eq!(event.swept, 0, "ordinary retention is not an auto-wipe");
 
         backend
             .set_config(ConfigPatch {

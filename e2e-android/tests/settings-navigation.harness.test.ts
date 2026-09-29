@@ -26,8 +26,6 @@ function item(id: string, content: string | null, contentType = "text"): Item {
         : "other",
     created_at: 0,
     pinned: false,
-    is_sensitive: content === null,
-    sensitive_finding: null,
     origin_device_id: "device",
     origin_device_name: null,
     source_app_bundle_id: null,

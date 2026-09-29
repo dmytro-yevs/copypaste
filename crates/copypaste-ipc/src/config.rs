@@ -78,15 +78,6 @@ pub enum Liveness {
 ///
 /// `sound_on_copy` and `notify_on_copy` are separate live settings. Platform
 /// feedback never depends on notification permission.
-///
-/// One field was **considered and refused**: a user-settable sensitive-content
-/// confidence threshold. Manifest 07 I4 makes index exclusion unconditional on
-/// confidence — any validated match at any confidence stays out of the search
-/// index — so a threshold would have nothing to govern there. The only place a
-/// confidence number decides anything is the auto-wipe floor, and putting a
-/// slider on that lets a user set it to zero and have the TTL sweep delete
-/// everything the detector flags. Data loss is the worst outcome (AGENTS.md
-/// rule 4), and this one would be silent and irreversible.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
@@ -116,23 +107,6 @@ pub struct ConfigData {
     pub max_file_size_bytes: u64,
     /// Maximum decoded image memory, in MiB. **Live.**
     pub max_decoded_image_mb: u32,
-    /// Seconds after which an item the detector flagged is deleted.
-    ///
-    /// `0` is an explicit **disabled** sentinel, not "delete immediately" — the
-    /// distinction is the whole of `CopyPaste-8ebg.1`, and getting it backwards
-    /// destroys user data that is not recoverable (AGENTS.md rule 4). **Live.**
-    ///
-    /// Only findings above the detector's auto-wipe floor are ever deleted, and
-    /// `copypaste_core::sensitive::sweep_sensitive` re-scans the plaintext at
-    /// delete time rather than trusting a stored flag, so lowering this cannot
-    /// widen *what* is deleted, only hasten it.
-    ///
-    /// # On by default
-    ///
-    /// Manifest 01 §4 and manifest 07 §6.2 give `30`. Settings exposes the
-    /// control, including `0` as an explicit off sentinel, and the same row
-    /// warns that a wipe is irreversible.
-    pub sensitive_ttl_secs: u64,
     /// Bundle ids whose copies are never captured, e.g. a password manager.
     /// **Live.**
     ///
@@ -189,7 +163,6 @@ impl Default for ConfigData {
             max_image_size_bytes: MAX_IMAGE_SIZE_BYTES,
             max_file_size_bytes: MAX_FILE_SIZE_BYTES,
             max_decoded_image_mb: MAX_DECODED_IMAGE_MB,
-            sensitive_ttl_secs: 30,
             excluded_app_bundle_ids: Vec::new(),
             lan_visibility: true,
             sync_enabled: true,
@@ -209,7 +182,6 @@ const MAX_TEXT_SIZE_RANGE: (u64, u64) = (MIN_TEXT_SIZE_BYTES, MAX_TEXT_SIZE_BYTE
 const MAX_IMAGE_SIZE_RANGE: (u64, u64) = (MIN_IMAGE_SIZE_BYTES, MAX_IMAGE_SIZE_BYTES);
 const MAX_FILE_SIZE_RANGE: (u64, u64) = (MIN_FILE_SIZE_BYTES, MAX_FILE_SIZE_BYTES);
 const MAX_DECODED_IMAGE_MB_RANGE: (u32, u32) = (MIN_DECODED_IMAGE_MB, u32::MAX);
-const SENSITIVE_TTL_SECS: (u64, u64) = (0, 86_400);
 /// A bundle id is `com.example.app`; the cap is generous and exists so the list
 /// cannot be used to grow the config file without limit.
 const MAX_EXCLUSIONS: usize = 256;
@@ -274,8 +246,6 @@ pub struct ConfigPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_decoded_image_mb: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sensitive_ttl_secs: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub excluded_app_bundle_ids: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lan_visibility: Option<bool>,
@@ -325,9 +295,6 @@ impl ConfigPatch {
             next.max_decoded_image_mb =
                 range("max_decoded_image_mb", v, MAX_DECODED_IMAGE_MB_RANGE)?;
         }
-        if let Some(v) = self.sensitive_ttl_secs {
-            next.sensitive_ttl_secs = range("sensitive_ttl_secs", v, SENSITIVE_TTL_SECS)?;
-        }
         if let Some(list) = &self.excluded_app_bundle_ids {
             if list.len() > MAX_EXCLUSIONS {
                 return Err(ConfigError::TooMany {
@@ -374,7 +341,6 @@ impl From<&ConfigData> for ConfigPatch {
             max_image_size_bytes: Some(c.max_image_size_bytes),
             max_file_size_bytes: Some(c.max_file_size_bytes),
             max_decoded_image_mb: Some(c.max_decoded_image_mb),
-            sensitive_ttl_secs: Some(c.sensitive_ttl_secs),
             excluded_app_bundle_ids: Some(c.excluded_app_bundle_ids.clone()),
             lan_visibility: Some(c.lan_visibility),
             sync_enabled: Some(c.sync_enabled),
@@ -412,7 +378,6 @@ impl ConfigData {
             ("max_image_size_bytes", Liveness::Live),
             ("max_file_size_bytes", Liveness::Live),
             ("max_decoded_image_mb", Liveness::Live),
-            ("sensitive_ttl_secs", Liveness::Live),
             ("excluded_app_bundle_ids", Liveness::Live),
             ("lan_visibility", Liveness::Live),
             ("sync_enabled", Liveness::Live),
@@ -555,10 +520,6 @@ mod tests {
                 max_decoded_image_mb: Some(MIN_DECODED_IMAGE_MB - 1),
                 ..Default::default()
             },
-            ConfigPatch {
-                sensitive_ttl_secs: Some(86_401),
-                ..Default::default()
-            },
         ];
         for patch in bad {
             assert!(patch.apply(&base).is_err(), "{patch:?} was accepted");
@@ -656,29 +617,6 @@ mod tests {
         assert_eq!(MAX_FILE_SIZE_RANGE.1, hard);
     }
 
-    /// `0` disables the sweep. It must not be mistaken for "delete now", and it
-    /// must not be rejected as out of range.
-    #[test]
-    fn zero_is_a_valid_disabled_sentinel_not_an_error() {
-        let base = ConfigData::default();
-        for patch in [
-            ConfigPatch {
-                sensitive_ttl_secs: Some(0),
-                ..Default::default()
-            },
-            ConfigPatch {
-                retention_days: Some(0),
-                ..Default::default()
-            },
-            ConfigPatch {
-                dedup_window_secs: Some(0),
-                ..Default::default()
-            },
-        ] {
-            assert!(patch.apply(&base).is_ok(), "{patch:?}");
-        }
-    }
-
     #[test]
     fn storage_quota_defaults_to_ten_gib_and_rejects_less_than_fifty_mib() {
         let base = ConfigData::default();
@@ -691,19 +629,6 @@ mod tests {
         .apply(&base)
         .unwrap();
         assert_eq!(next.storage_quota_bytes, MIN_STORAGE_QUOTA_BYTES);
-    }
-
-    #[test]
-    fn the_sensitive_wipe_defaults_on_and_can_be_switched_off() {
-        assert_eq!(ConfigData::default().sensitive_ttl_secs, 30);
-
-        let off = ConfigPatch {
-            sensitive_ttl_secs: Some(0),
-            ..Default::default()
-        }
-        .apply(&ConfigData::default())
-        .unwrap();
-        assert_eq!(off.sensitive_ttl_secs, 0);
     }
 
     /// Parity finding 18. Both are off out of the box: a clipboard manager

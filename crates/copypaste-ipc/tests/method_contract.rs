@@ -78,7 +78,7 @@ fn catalog() -> Vec<Value> {
         json!({"method":"sync_now","params":{"pairing_id":null}}),
         json!({"method":"discovered"}),
         json!({"method":"rescan"}),
-        json!({"method":"export","params":{"limit":0,"include_sensitive":false}}),
+        json!({"method":"export","params":{"limit":0}}),
         json!({"method":"import","params":{"items":[]}}),
         json!({"method":"backup","params":{"dest_path":"backup.db"}}),
         json!({"method":"restore","params":{"src_path":"backup.db","confirm":true}}),

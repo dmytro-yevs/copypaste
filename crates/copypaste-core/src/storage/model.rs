@@ -11,7 +11,7 @@ use rusqlite::{ErrorCode, Row};
 macro_rules! item_columns {
     () => {
         "id, content_ciphertext, nonce, content_type, content_hash, created_at, \
-         pinned, pin_order, pin_updated_at, is_sensitive, deleted, origin_device_id, \
+         pinned, pin_order, pin_updated_at, deleted, origin_device_id, \
          app_bundle_id, app_name, payload_metadata"
     };
 }
@@ -23,8 +23,7 @@ macro_rules! item_columns_ci {
         "ci.id AS id, ci.content_ciphertext AS content_ciphertext, ci.nonce AS nonce, \
          ci.content_type AS content_type, ci.content_hash AS content_hash, \
          ci.created_at AS created_at, ci.pinned AS pinned, ci.pin_order AS pin_order, \
-         ci.pin_updated_at AS pin_updated_at, \
-         ci.is_sensitive AS is_sensitive, ci.deleted AS deleted, \
+         ci.pin_updated_at AS pin_updated_at, ci.deleted AS deleted, \
          ci.origin_device_id AS origin_device_id, ci.app_bundle_id AS app_bundle_id, \
          ci.app_name AS app_name, ci.payload_metadata AS payload_metadata"
     };
@@ -36,7 +35,7 @@ macro_rules! item_columns_ci {
 /// is why a copy of the table has to name its columns rather than `SELECT *`.
 macro_rules! stored_item_columns {
     () => {
-        "id, content_ciphertext, nonce, content_type, content_hash, is_sensitive, \
+        "id, content_ciphertext, nonce, content_type, content_hash, \
          pinned, pin_order, pin_updated_at, created_at, deleted, origin_device_id, \
          app_bundle_id, app_name, payload_metadata, fts_rowid"
     };
@@ -56,12 +55,7 @@ pub struct NewItem {
     pub nonce: Vec<u8>,
     pub content_type: String,
     pub content_hash: String,
-    pub is_sensitive: bool,
-    /// Plaintext for the search index. MUST be `None` when `is_sensitive` is
-    /// true. [`super::Store::insert`] enforces this rather than trusting it: a
-    /// non-`None` value on a sensitive item is dropped (and logged), never
-    /// indexed. The insert itself still succeeds — refusing it would lose the
-    /// user's clipboard content, and data loss is the worst outcome.
+    /// Plaintext for the ordinary search index.
     pub search_text: Option<String>,
     /// Milliseconds since the Unix epoch.
     pub created_at: i64,
@@ -129,7 +123,6 @@ pub struct StoredItem {
     pub pinned: bool,
     pub pin_order: Option<f64>,
     pub pin_updated_at: i64,
-    pub is_sensitive: bool,
     /// A tombstone. `Store::get` and `Store::list` never return one; the sync
     /// reads in [`super::versions`] do, because a delete is a version.
     pub deleted: bool,
@@ -185,7 +178,7 @@ pub enum StoreError {
     InvalidDeviceName,
 }
 
-pub(super) const ITEM_COLUMN_COUNT: usize = 15;
+pub(super) const ITEM_COLUMN_COUNT: usize = 14;
 
 pub(super) struct ItemColumns([usize; ITEM_COLUMN_COUNT]);
 
@@ -217,12 +210,11 @@ pub(super) fn row_to_item(row: &Row<'_>, columns: &ItemColumns) -> rusqlite::Res
         pinned: row.get(at[6])?,
         pin_order: row.get(at[7])?,
         pin_updated_at: row.get(at[8])?,
-        is_sensitive: row.get(at[9])?,
-        deleted: row.get(at[10])?,
-        origin_device_id: row.get(at[11])?,
-        app_bundle_id: row.get(at[12])?,
-        app_name: row.get(at[13])?,
-        payload_metadata: row.get(at[14])?,
+        deleted: row.get(at[9])?,
+        origin_device_id: row.get(at[10])?,
+        app_bundle_id: row.get(at[11])?,
+        app_name: row.get(at[12])?,
+        payload_metadata: row.get(at[13])?,
     })
 }
 
@@ -265,7 +257,7 @@ mod tests {
             concat!("SELECT ", item_columns!(), " FROM clipboard_items"),
             concat!("SELECT ", item_columns_ci!(), " FROM clipboard_items ci"),
             "SELECT payload_metadata, app_name, app_bundle_id, origin_device_id, deleted, \
-             is_sensitive, pin_updated_at, pin_order, pinned, created_at, content_hash, \
+             pin_updated_at, pin_order, pinned, created_at, content_hash, \
              content_type, nonce, content_ciphertext, id FROM clipboard_items",
         ] {
             let mut stmt = conn.prepare(sql).unwrap();

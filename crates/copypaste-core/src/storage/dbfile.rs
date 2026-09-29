@@ -101,12 +101,7 @@ impl super::Store {
     }
 
     /// Stage and validate a same-device encrypted backup, then atomically replace history.
-    pub fn restore_from(
-        &self,
-        src: &Path,
-        db_key: &[u8; 32],
-        detector: &crate::Detector,
-    ) -> Result<crate::PurgeReport, RestoreError> {
+    pub fn restore_from(&self, src: &Path, db_key: &[u8; 32]) -> Result<(), RestoreError> {
         let staged = self
             .stage_restore_candidate(src)
             .map_err(RestoreError::Failed)?;
@@ -136,7 +131,7 @@ impl super::Store {
         conn.execute(&attach, [staged.path().to_string_lossy().as_ref()])
             .map_err(StoreError::from)
             .map_err(RestoreError::Failed)?;
-        let result = (|| -> rusqlite::Result<crate::PurgeReport> {
+        let result = (|| -> rusqlite::Result<()> {
             let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             for table in RESTORED_TABLES {
                 tx.execute(&format!("DELETE FROM {table}"), [])?;
@@ -160,7 +155,7 @@ impl super::Store {
                 "INSERT INTO clipboard_fts (rowid, id, content_text) \
                  SELECT ci.fts_rowid, fts.id, fts.content_text FROM restore_src.clipboard_fts fts \
                  JOIN restore_src.clipboard_items ci ON ci.id = fts.id \
-                 WHERE ci.deleted = 0 AND ci.is_sensitive = 0 \
+                 WHERE ci.deleted = 0 \
                    AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%')",
                 [],
             )?;
@@ -176,9 +171,8 @@ impl super::Store {
                  ON CONFLICT(device_id) DO UPDATE SET name = excluded.name",
                 [],
             )?;
-            let report = crate::purge_indexed_secrets_in_transaction(&tx, detector)?;
             tx.commit()?;
-            Ok(report)
+            Ok(())
         })();
         let _ = conn.execute("DETACH DATABASE restore_src", []);
         result
@@ -266,7 +260,6 @@ mod tests {
                  nonce BLOB,
                  content_type TEXT NOT NULL,
                  content_hash TEXT NOT NULL DEFAULT '',
-                 is_sensitive INTEGER NOT NULL DEFAULT 0,
                  pinned INTEGER NOT NULL DEFAULT 0,
                  pin_order REAL,
                  created_at INTEGER NOT NULL,
@@ -288,10 +281,10 @@ mod tests {
              );
              INSERT INTO clipboard_items (
                  id, content_ciphertext, nonce, content_type, content_hash,
-                 is_sensitive, pinned, pin_order, created_at, deleted
+                 pinned, pin_order, created_at, deleted
              ) VALUES (
                  'keep-me', X'010203', X'040506', 'text/plain', 'hash',
-                 0, 0, NULL, 1234, 0
+                 0, NULL, 1234, 0
              );
              INSERT INTO clipboard_fts(rowid, id, content_text)
              VALUES (1, 'keep-me', 'indexed marker');
@@ -323,7 +316,7 @@ mod tests {
                 "SELECT COUNT(*) FROM sqlite_schema
                  WHERE name IN (
                      'clipboard_live_count', 'sync_device_state', 'sync_device_name',
-                     'idx_items_sensitive_wipe', 'idx_items_syncable'
+                     'idx_items_syncable'
                  )",
                 [],
                 |row| row.get(0),
@@ -421,9 +414,7 @@ mod tests {
         store.backup_to(&backup).unwrap();
         store.insert(item("later row", T0 + 1)).unwrap();
 
-        store
-            .restore_from(&backup, &KEY, &crate::Detector::new().unwrap())
-            .unwrap();
+        store.restore_from(&backup, &KEY).unwrap();
         assert_eq!(store.count().unwrap(), 1);
 
         drop(store);
@@ -432,9 +423,7 @@ mod tests {
 
         let junk = dir.path().join("junk.backup");
         std::fs::write(&junk, b"not a database").unwrap();
-        assert!(store
-            .restore_from(&junk, &KEY, &crate::Detector::new().unwrap())
-            .is_err());
+        assert!(store.restore_from(&junk, &KEY).is_err());
         assert_eq!(store.count().unwrap(), 1, "failed restore changed history");
     }
 
@@ -453,9 +442,7 @@ mod tests {
         drop(candidate);
         store.insert(item("later row", T0 + 60_000)).unwrap();
 
-        store
-            .restore_from(&backup, &KEY, &crate::Detector::new().unwrap())
-            .unwrap();
+        store.restore_from(&backup, &KEY).unwrap();
         assert_eq!(store.count().unwrap(), 1);
     }
 
@@ -469,9 +456,7 @@ mod tests {
         other.insert(item("foreign", T0)).unwrap();
         drop(other);
 
-        assert!(store
-            .restore_from(&foreign, &KEY, &crate::Detector::new().unwrap())
-            .is_err());
+        assert!(store.restore_from(&foreign, &KEY).is_err());
         assert_eq!(store.count().unwrap(), 1);
     }
 
@@ -492,9 +477,7 @@ mod tests {
             .unwrap();
         drop(conn);
 
-        store
-            .restore_from(&backup, &KEY, &crate::Detector::new().unwrap())
-            .unwrap();
+        store.restore_from(&backup, &KEY).unwrap();
 
         let drifted: i64 = store
             .conn()
@@ -525,7 +508,7 @@ mod tests {
         store.insert(item("live row", T0 + 1)).unwrap();
 
         assert!(matches!(
-            store.restore_from(&backup, &KEY, &crate::Detector::new().unwrap()),
+            store.restore_from(&backup, &KEY),
             Err(RestoreError::InvalidBackup(StoreError::InvalidSchema))
         ));
         assert_eq!(store.count().unwrap(), 2);
@@ -542,9 +525,7 @@ mod tests {
             .set_device_name(&identity.device_id, "Current name")
             .unwrap();
 
-        store
-            .restore_from(&backup, &KEY, &crate::Detector::new().unwrap())
-            .unwrap();
+        store.restore_from(&backup, &KEY).unwrap();
 
         assert_eq!(store.current_device_name().unwrap(), "Current name");
         let names = store
@@ -554,37 +535,16 @@ mod tests {
     }
 
     #[test]
-    fn restore_purges_sensitive_search_text_before_commit() {
+    fn restore_preserves_all_text_and_its_search_index() {
         let dir = tempfile::tempdir().unwrap();
         let (store, _path) = file_store(&dir);
-        let restored = store.insert(item("ordinary row", T0)).unwrap();
-        let conn = store.conn().unwrap();
-        let rowid: i64 = conn
-            .query_row(
-                "SELECT fts_rowid FROM clipboard_items WHERE id = ?1",
-                [&restored.id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        conn.execute("DELETE FROM clipboard_fts WHERE rowid = ?1", [rowid])
-            .unwrap();
-        conn.execute(
-            "INSERT INTO clipboard_fts (rowid, id, content_text) VALUES (?1, ?2, ?3)",
-            rusqlite::params![rowid, &restored.id, "AKIAIOSFODNN7EXAMPLE"],
-        )
-        .unwrap();
-        drop(conn);
-        let backup = dir.path().join("sensitive-index.backup");
+        let restored = store.insert(item("AKIAIOSFODNN7EXAMPLE", T0)).unwrap();
+        let backup = dir.path().join("text-index.backup");
         store.backup_to(&backup).unwrap();
         store.delete_all().unwrap();
-
-        let report = store
-            .restore_from(&backup, &KEY, &crate::Detector::new().unwrap())
-            .unwrap();
-
-        assert_eq!(report.purged, 1);
+        store.restore_from(&backup, &KEY).unwrap();
         assert!(store.get(&restored.id).unwrap().is_some());
-        assert!(store.search("AKIAIOSFODNN7EXAMPLE", 10).unwrap().is_empty());
+        assert_eq!(store.search("AKIAIOSFODNN7EXAMPLE", 10).unwrap().len(), 1);
     }
 
     #[test]
@@ -607,7 +567,7 @@ mod tests {
         drop(conn);
 
         assert!(matches!(
-            store.restore_from(&backup, &KEY, &crate::Detector::new().unwrap()),
+            store.restore_from(&backup, &KEY),
             Err(RestoreError::Failed(_))
         ));
         assert_eq!(store.count().unwrap(), 1);

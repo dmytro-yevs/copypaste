@@ -284,7 +284,7 @@ pub async fn pair_cancel(
 pub async fn pair_secure_state(window: WebviewWindow, app: AppHandle) -> Result<SecurePairingView> {
     #[cfg(target_os = "macos")]
     {
-        return crate::pairing_presentation::macos::state(window, app).await;
+        crate::pairing_presentation::macos::state(window, app).await
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -303,7 +303,7 @@ pub async fn pair_secure_reveal_invite(
 ) -> Result<SecureInviteView> {
     #[cfg(target_os = "macos")]
     {
-        return crate::pairing_presentation::macos::reveal_invite(window, app, generation).await;
+        crate::pairing_presentation::macos::reveal_invite(window, app, generation).await
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -322,7 +322,7 @@ pub async fn pair_secure_reveal_sas(
 ) -> Result<SecureSasView> {
     #[cfg(target_os = "macos")]
     {
-        return crate::pairing_presentation::macos::reveal_sas(window, app, generation).await;
+        crate::pairing_presentation::macos::reveal_sas(window, app, generation).await
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -343,7 +343,7 @@ pub async fn pair_secure_join(
 ) -> Result<PairingCeremony> {
     #[cfg(target_os = "macos")]
     {
-        return crate::pairing_presentation::macos::join(window, app, generation, code, addr).await;
+        crate::pairing_presentation::macos::join(window, app, generation, code, addr).await
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -363,7 +363,7 @@ pub async fn pair_secure_decide(
 ) -> Result<PairingCeremony> {
     #[cfg(target_os = "macos")]
     {
-        return crate::pairing_presentation::macos::decide(window, app, generation, accept).await;
+        crate::pairing_presentation::macos::decide(window, app, generation, accept).await
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -389,7 +389,7 @@ pub async fn pair_secure_close(window: WebviewWindow, app: AppHandle) -> Result<
             ));
         }
         crate::pairing_presentation::macos::destroy_window(&app);
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(target_os = "macos"))]
     {

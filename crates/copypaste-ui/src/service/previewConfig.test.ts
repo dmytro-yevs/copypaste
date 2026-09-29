@@ -18,7 +18,7 @@ describe("preview config read models", () => {
       },
       restart_required: [],
     });
-    expect(Object.keys(applied.config)).toHaveLength(16);
+    expect(Object.keys(applied.config)).toHaveLength(15);
     expect(privateMode).toEqual({
       private_mode: applied.config.private_mode,
       private_mode_epoch: 0,

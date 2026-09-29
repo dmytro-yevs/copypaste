@@ -15,18 +15,13 @@ import type {
   StatusData,
 } from "@/lib/ipc";
 
-/** A test item. `content: null` is what the bridge sends for a sensitive one —
- *  the plaintext is dropped before it crosses (INV-10). */
-export function item(over: Partial<Item> = {}): Item {
-  const sensitive = over.is_sensitive ?? false;
+export function item(over: Omit<Partial<Item>, "content"> & { content?: string | null } = {}): Item {
   return {
     id: "row-1",
-    content: sensitive ? null : "an ordinary clipboard entry",
     content_type: "text/plain",
     content_class: "text",
     created_at: 1_700_000_000_000,
     pinned: false,
-    is_sensitive: sensitive,
     origin_device_id: "device-1",
     origin_device_name: "This Mac",
     source_app_bundle_id: null,
@@ -34,7 +29,7 @@ export function item(over: Partial<Item> = {}): Item {
     too_large_to_sync: false,
     truncated: false,
     ...over,
-    sensitive_finding: over.sensitive_finding ?? null,
+    content: over.content ?? "an ordinary clipboard entry",
   };
 }
 
@@ -72,8 +67,6 @@ export function status(over: Partial<StatusData> = {}): StatusData {
     counters: {
       rejected_too_large: 0,
       lost_intermediates: 0,
-      sensitive_swept: 0,
-      index_purged: 0,
       uptime_secs: 60,
     },
     settings_health: null,

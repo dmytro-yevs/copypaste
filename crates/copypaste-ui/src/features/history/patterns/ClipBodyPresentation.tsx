@@ -1,4 +1,4 @@
-import { Button, Icon } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { PreviewSurface } from "@/components/shared";
 import { StateView } from "@/components/shared/StateView";
 import { ClipImageLoader } from "@/features/clip-content";
@@ -10,11 +10,10 @@ import type { Item } from "@/lib/ipc";
 import inspectorStyles from "./LibraryInspectorPanel.module.css";
 import readerStyles from "./ClipDetailDialog.module.css";
 
-export function ClipBodyNotices({ reason, canRetry, onRetry, potentialFinding }: {
+export function ClipBodyNotices({ reason, canRetry, onRetry }: {
     reason: string | null;
     canRetry: boolean;
     onRetry: () => void;
-    potentialFinding: boolean;
 }) {
     const { t } = useTranslation();
     return <>
@@ -26,45 +25,18 @@ export function ClipBodyNotices({ reason, canRetry, onRetry, potentialFinding }:
             title={reason}
             actions={canRetry ? <Button variant="secondary" size="sm" onClick={onRetry}>{t("history.copyAvailability.retry")}</Button> : undefined}
         /> : null}
-        {potentialFinding ? <StateView mode="warning" placement="inline" role="status" icon="sensitive" title={t("history.row.potentialSensitiveWarning")} /> : null}
     </>;
 }
 
-export function ClipBodyView({ mode, item, kind, body, copyPending, revealPending, onReveal }: {
+export function ClipBodyView({ mode, item, kind, body }: {
     mode: "inspector" | "reader";
     item: Item;
     kind: Kind;
     body: Body;
-    copyPending: boolean;
-    revealPending: boolean;
-    onReveal: (item: Item) => void;
 }) {
     const { t } = useTranslation();
     const reader = mode === "reader";
     const content = body.state === "content" ? body.content : "";
-    if (body.state === "masked") {
-        return <Button
-            type="button"
-            variant="ghost"
-            disabled={copyPending}
-            pending={revealPending}
-            aria-label={t("history.row.sensitiveReveal")}
-            className={reader ? readerStyles.masked : inspectorStyles.protected}
-            onClick={() => !revealPending && onReveal(item)}
-        >
-            {reader ? <>
-                <span aria-hidden="true" className={readerStyles.redactions}>
-                    <span className={readerStyles.redactionLong} />
-                    <span className={readerStyles.redactionShort} />
-                    <span className={readerStyles.redactionMedium} />
-                </span>
-            </> : <>
-                <span aria-hidden="true" className={inspectorStyles.protectedLines}><i /><i /><i /></span>
-                {!revealPending && <Icon name="eye" size="sm" />}
-                <strong>{t("history.row.sensitivePlaceholder")}</strong>
-            </>}
-        </Button>;
-    }
     const unavailable = body.state === "unavailable";
     const loading = body.state === "content" && body.source === "preview";
     if (unavailable || loading) {

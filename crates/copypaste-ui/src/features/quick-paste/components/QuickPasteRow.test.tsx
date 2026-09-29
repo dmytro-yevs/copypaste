@@ -136,27 +136,26 @@ describe("QuickPasteRow", () => {
   it("uses the pin control as the sole visible pinned indicator", () => {
     const { container } = render(
       <TooltipProvider>
-        <QuickPasteRow item={item({ pinned: true, sensitive_finding: { label: "possible token", spans: [], spans_truncated: false, redacted_preview: "••••• fragment" } })} active={false} shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed={false} onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
+        <QuickPasteRow item={item({ pinned: true })} active={false} shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed={false} onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
       </TooltipProvider>,
     );
 
     expect(screen.queryByText("Pinned")).toBeNull();
     expect(screen.getByRole("button", { name: "Unpin" }).getAttribute("aria-pressed")).toBe("true");
-    expect(container.querySelector('[data-tone="warning"]')).toBeTruthy();
+    expect(container.querySelector('[data-tone="warning"]')).toBeNull();
     expect(container.querySelector('[role="listitem"]')?.getAttribute("data-pinned")).toBe("true");
   });
 
-  it.each(["", "   "])("keeps a %j finding redaction out of the row label and DOM", (redacted_preview) => {
-    const raw = "raw secret fragment";
+  it("shows arbitrary text in the row label and DOM", () => {
+    const raw = "api_key=abc123; password=plain-text";
     render(
       <TooltipProvider>
-        <QuickPasteRow item={item({ content: raw, sensitive_finding: { label: "possible token", spans: [], spans_truncated: false, redacted_preview } })} active shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed={false} onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
+        <QuickPasteRow item={item({ content: raw })} active shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed={false} onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
       </TooltipProvider>,
     );
 
-    expect(screen.getByRole("button", { name: "Copy Empty item" })).toBeTruthy();
-    expect(screen.queryByText(raw)).toBeNull();
-    expect(screen.queryByLabelText(raw)).toBeNull();
+    expect(screen.getByRole("button", { name: `Copy ${raw}` })).toBeTruthy();
+    expect(screen.getByText(raw)).toBeTruthy();
   });
 
   it("keeps the resolved full body out of the compact row", () => {
@@ -170,16 +169,15 @@ describe("QuickPasteRow", () => {
     expect(screen.queryByText("complete body")).toBeNull();
   });
 
-  it("keeps a potential-sensitive failed body out of the compact row", () => {
-    const raw = "raw secret fragment";
+  it("keeps a failed truncated body out of the compact row", () => {
+    const raw = "ordinary truncated fragment";
     render(
       <TooltipProvider>
-        <QuickPasteRow item={item({ content: raw, truncated: true, sensitive_finding: { label: "possible token", spans: [], spans_truncated: false, redacted_preview: "••••• fragment" } })} active shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
+        <QuickPasteRow item={item({ content: raw, truncated: true })} active shortcut={null} pinPending={false} origin={null} fullContent={null} fullContentFailed onSelect={() => {}} onSelectFromKeyboard={() => {}} onCopy={() => {}} onTogglePin={() => {}} />
       </TooltipProvider>,
     );
 
     expect(screen.queryByText(raw)).toBeNull();
-    expect(screen.getByText("Potentially sensitive")).toBeTruthy();
     expect(screen.queryByText(raw)).toBeNull();
   });
 });

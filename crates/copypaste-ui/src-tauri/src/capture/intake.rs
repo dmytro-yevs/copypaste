@@ -3,7 +3,7 @@
 //! Every rung 0 surface — the share sheet, the text-selection action, the
 //! Quick Settings tile — and rung 2's background listener end here, and all of
 //! them end at [`crate::backend::Backend::add`]. There is no second ingest
-//! path; dedup, secret detection,
+//! path; dedup,
 //! eviction and the size cap are all decisions this file must not re-make
 //! (AGENTS.md rule 1).
 //!
@@ -95,8 +95,6 @@ const MAX_BUFFERED: usize = 128;
 pub struct CapturedPayload {
     pub id: String,
     pub source: CaptureSource,
-    /// So the list can render the placeholder row without a second call.
-    pub is_sensitive: bool,
 }
 
 /// Clips taken from the platform and not yet stored.
@@ -590,7 +588,6 @@ async fn announce<R: Runtime>(
         CapturedPayload {
             id: item.id().to_string(),
             source,
-            is_sensitive: item.is_sensitive(),
         },
     );
 
@@ -606,7 +603,6 @@ async fn announce<R: Runtime>(
             topic: EventKind::Items,
             item_count,
             // A capture, never a sweep: this build has no auto-wipe loop.
-            swept: 0,
         },
     );
 }
@@ -838,12 +834,8 @@ mod tests {
         let json = serde_json::to_string(&CapturedPayload {
             id: "item-1".into(),
             source: CaptureSource::Share,
-            is_sensitive: true,
         })
         .unwrap();
-        assert_eq!(
-            json,
-            r#"{"id":"item-1","source":"share","isSensitive":true}"#
-        );
+        assert_eq!(json, r#"{"id":"item-1","source":"share"}"#);
     }
 }

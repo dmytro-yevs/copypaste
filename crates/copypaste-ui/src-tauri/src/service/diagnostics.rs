@@ -219,12 +219,6 @@ fn report(
         "missed-changes",
         &c.lost_intermediates.to_string(),
     );
-    line(
-        &mut out,
-        "secrets-auto-deleted",
-        &c.sensitive_swept.to_string(),
-    );
-    line(&mut out, "index-rows-purged", &c.index_purged.to_string());
 
     scrub_paths(&out)
 }
@@ -327,8 +321,6 @@ mod tests {
             counters: DiagnosticCounters {
                 rejected_too_large: 3,
                 lost_intermediates: 1,
-                sensitive_swept: 2,
-                index_purged: 5,
                 uptime_secs: 12_045,
             },
             settings_health: None,
@@ -392,8 +384,6 @@ mod tests {
             "items: 42",
             "refused-too-large: 3",
             "missed-changes: 1",
-            "secrets-auto-deleted: 2",
-            "index-rows-purged: 5",
         ] {
             assert!(text.contains(expected), "missing {expected:?} in:\n{text}");
         }

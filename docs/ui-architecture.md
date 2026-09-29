@@ -83,11 +83,11 @@ accepting arbitrary external geometry. State is expressed with native/ARIA or
 | `PreviewSurface` | `Surface` | padding and scroll plus surface modifiers | Library Inspector and detail views |
 | `NavigationItem` | `Button` + `Icon` + `Tooltip` | `layout=sidebar|dock`, active/disabled | desktop sidebar and mobile dock |
 | `ClipCard` | `Surface` + `Button` + card-local `SelectionControl` | selection state, content kind, preview lines | measured History virtual rows |
-| Clip body/media family | `Stack`, `Surface`, `Icon`, media element | normalized kind, intrinsic size/fit, masked/loading/error | ClipCard, Inspector, Quick Paste |
+| Clip body/media family | `Stack`, `Surface`, `Icon`, media element | normalized kind, intrinsic size/fit, loading/error | ClipCard, Inspector, Quick Paste |
 | Source metadata family | `Inline`, `AppIcon`, `Icon` | density, wrap, semantic badges | ClipCard and Inspector |
 | History list family | `ScrollViewport` + measured ClipCards | grouping, selection, estimates replaced by measurements | LibraryScreen |
 | Library toolbar/Inspector | container/flow layouts + shared controls/surfaces | search/filter/selection and item state | LibraryScreen |
-| `CaptureSetup` | settings controls and StateView | normalized capture snapshot; query/retry belongs to CaptureSetupController | capture setup and onboarding |
+| `AndroidBackgroundSetup` | method selector, guided Shizuku steps, ADB commands and StateView | live capture snapshot; durable actions belong to useAndroidCaptureSetup | optional Android onboarding setup |
 | Settings schema | canonical section/group/field definitions + live controller bindings + one renderer | navigation, search targets, visibility, disclosures and standard controls | all nine sections |
 | `ApplicationShell` | `AppFrame` + navigation family | compact/expanded width and platform surface | app routes |
 
@@ -136,11 +136,10 @@ context, a title, or an accessible name.
   surface with `object-fit: contain`. Cropping is not a consumer option.
 
 History list payloads are previews. Inspector and expanded-reader surfaces use
-the shared `useItemBody` query, which resolves the non-sensitive full value by
-item id through `get_item_body`. A sensitive value never crosses that command;
-its separate reveal contract remains platform-gated. If the backend cannot
-return the full value, the reader shows an explicit unavailable state and does
-not present the preview fragment as complete content.
+the shared `useItemBody` query, which resolves the full value by item id through
+`get_item_body`. If the backend cannot return the full value, the reader shows
+an explicit unavailable state and does not present the preview fragment as
+complete content.
 
 Code preview source is detected by `lowlight` with a selectively registered
 `highlight.js` grammar set. The resulting HAST is converted to React nodes by
@@ -246,7 +245,7 @@ change lives in the component, pattern or screen that owns the composition.
 
 ## State and protected presentation boundaries
 
-StateView owns the only loading graphic. Feature resolvers and hooks retain priority, recovery, invalidation, sensitive-content and async lifecycle rules. Sonner schedules notifications; `lib/notify` renders their contents through StateView and Button. Startup failure has a dependency-free DOM fallback so missing React or styles cannot hide the error.
+StateView owns the only loading graphic. Feature resolvers and hooks retain priority, recovery, invalidation and async lifecycle rules. Sonner schedules notifications; `lib/notify` renders their contents through StateView and Button. Startup failure has a dependency-free DOM fallback so missing React or styles cannot hide the error.
 
 Settings section controllers bind current values, callbacks, availability and specialized interactions to the canonical field/group catalog. Search and navigation use that catalog. Specialized shortcut recording, account/pairing operations and runtime logs remain bounded slots; standard rows and disclosures belong to the schema renderer.
 

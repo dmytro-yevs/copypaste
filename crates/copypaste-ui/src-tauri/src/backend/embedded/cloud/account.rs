@@ -182,7 +182,6 @@ impl EmbeddedCloud {
             key,
             config,
             session,
-            super::sensitive_guard(&state.detector),
         ));
         let mut account = self.account();
         if store
@@ -377,7 +376,7 @@ mod tests {
     use tokio::sync::Notify;
 
     use super::*;
-    use crate::backend::embedded::cloud::{sensitive_guard, UploadCursor};
+    use crate::backend::embedded::cloud::UploadCursor;
 
     fn state(dir: &tempfile::TempDir) -> Arc<crate::backend::embedded::state::BackendState> {
         Arc::new(
@@ -424,7 +423,6 @@ mod tests {
                 user_id: user_id.into(),
                 expires_at_ms: 123_000,
             },
-            sensitive_guard(&state.detector),
         ))
     }
 
