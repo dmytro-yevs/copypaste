@@ -101,3 +101,48 @@ pub async fn wait_for_shutdown(mut requested: watch::Receiver<bool>) -> anyhow::
     }
     Ok(())
 }
+
+/// Start observing the stdin pipe the bundled macOS app passes to its daemon.
+/// A CLI invocation never sets the hidden flag, so it does not acquire this
+/// watcher and its stdin remains untouched.
+#[cfg(unix)]
+pub fn watch_app_parent(enabled: bool) -> anyhow::Result<()> {
+    if !enabled {
+        return Ok(());
+    }
+    std::thread::Builder::new()
+        .name("copypaste-parent-liveness".into())
+        .spawn(move || {
+        use std::io::Read as _;
+
+        let mut stdin = std::io::stdin();
+        let mut byte = [0_u8; 1];
+        loop {
+            match stdin.read(&mut byte) {
+                Ok(0) => {
+                    // A SIGKILL can arrive while synchronous startup code is
+                    // opening the store or building the detector. Those calls
+                    // cannot observe a Tokio cancellation until they return,
+                    // so waiting for the async shutdown path would still let
+                    // an orphan capture after its app is gone. Ordinary Quit
+                    // reaches the IPC drain before this endpoint is closed;
+                    // EOF is the crash/forced-kill path and must end now.
+                    std::process::exit(0);
+                }
+                Ok(_) => warn!("the app parent-liveness pipe sent data; ignoring it"),
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) => {
+                    warn!(%error, "could not read the app parent-liveness pipe; stopping the daemon");
+                    std::process::exit(0);
+                }
+            }
+        }
+        })
+        .context("start the app parent-liveness watcher")?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+pub fn watch_app_parent(_enabled: bool) -> anyhow::Result<()> {
+    Ok(())
+}
