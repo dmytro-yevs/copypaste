@@ -16,7 +16,6 @@ mod messages;
 mod open;
 mod pairing;
 mod peers;
-mod retention;
 mod rows;
 mod settings;
 mod state;
@@ -347,8 +346,8 @@ impl Backend for EmbeddedBackend {
         settings::set_private_mode(self, enabled).await
     }
 
-    async fn export(&self, limit: u32, include_sensitive: bool) -> Result<ExportData> {
-        self.blocking(move |inner| transfer::export(inner, limit, include_sensitive))
+    async fn export(&self, limit: u32) -> Result<ExportData> {
+        self.blocking(move |inner| transfer::export(inner, limit))
             .await
     }
 
@@ -357,7 +356,7 @@ impl Backend for EmbeddedBackend {
             let imported = transfer::import(inner, items)?;
             if imported.inserted > 0 {
                 inner.note_oldest_version(inner.state.store.oldest_version_ms().ok().flatten());
-                inner.publish_items(false, 0);
+                inner.publish_items(false);
             }
             Ok(imported)
         })
@@ -940,50 +939,6 @@ mod tests {
             .any(|bytes| bytes == plaintext.as_bytes()));
     }
 
-    /// AGENTS.md rule 4, the write-time layer: a detected secret is stored but
-    /// never indexed, on this platform as on the other.
-    #[tokio::test]
-    async fn a_captured_secret_is_stored_and_stays_out_of_the_index() {
-        let (backend, _clip, _dir) = backend();
-        let item = backend.add("AKIAIOSFODNN7EXAMPLE").await.unwrap();
-        assert!(item.is_sensitive, "the detector did not flag a known key");
-        assert!(item.sensitive_finding.is_none());
-        assert!(
-            backend
-                .search("AKIAIOSFODNN7EXAMPLE", 20)
-                .await
-                .unwrap()
-                .items
-                .is_empty(),
-            "a sensitive item reached the search index"
-        );
-        // …and it is still the user's data: reachable by id, which is how the
-        // reveal gesture gets to it.
-        assert!(backend.get(&item.id).await.unwrap().is_sensitive);
-    }
-
-    #[tokio::test]
-    async fn inert_findings_match_the_daemon_contract_and_stay_searchable() {
-        let (backend, _clip, _dir) = backend();
-        let item = backend
-            .add("mail alice@example.com about the release")
-            .await
-            .unwrap();
-
-        assert!(!item.is_sensitive);
-        let finding = item.sensitive_finding.as_ref().unwrap();
-        assert_eq!(finding.label, "email");
-        assert_eq!(finding.spans.len(), 1);
-        assert!(!finding.redacted_preview.contains("alice@example.com"));
-        assert!(backend
-            .search("alice", 20)
-            .await
-            .unwrap()
-            .items
-            .iter()
-            .any(|found| found.id == item.id));
-    }
-
     #[tokio::test]
     async fn an_empty_capture_is_refused_without_storing_anything() {
         let (backend, _clip, _dir) = backend();
@@ -1050,7 +1005,6 @@ mod tests {
                 event: copypaste_ipc::EventKind::Peers,
                 item_count: u64::MAX,
                 captured: true,
-                swept: u32::MAX,
             });
         }
 
@@ -1062,7 +1016,6 @@ mod tests {
             if event.item_count == 0 {
                 assert_eq!(event.event, copypaste_ipc::EventKind::Items);
                 assert!(!event.captured);
-                assert_eq!(event.swept, 0);
                 break;
             }
         }

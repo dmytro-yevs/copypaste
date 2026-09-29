@@ -45,9 +45,8 @@ export function isFilteringView(view: ViewOptions): boolean {
   return view.kinds.length > 0 || view.devices.length > 0;
 }
 
-/** Not every `Kind`: `unknown` is what an item with no content resolves to, so
- *  offering it would present "sensitive items and empty ones" as a category.
- *  `secret` is offered; the rows stay masked when it answers. */
+/** `unknown` is what an item with no content resolves to, so it is not offered
+ *  as a filter category. */
 export const FILTERABLE_KINDS: readonly Kind[] = [
   "text",
   "image",
@@ -59,7 +58,6 @@ export const FILTERABLE_KINDS: readonly Kind[] = [
   "json",
   "num",
   "color",
-  "secret",
 ];
 
 const SORT_KEY = {
@@ -120,11 +118,7 @@ export function applyView(
  * `Prepared` target is indexed once. Measured at 200 items × 2 KB: 12.65 ms
  * per keystroke raw, 0.05 ms prepared.
  *
- * The cache holds plaintext, so `is_sensitive` is checked *here*, before the
- * write, and never by a caller afterwards. A revealed secret cannot reach it:
- * the item still carries `content: null` (INV-10) and the plaintext lives only
- * in `useReveal`'s state, which INV-11 expires. `release` exists so the owner
- * can drop the lot on unmount.
+ * `release` exists so the owner can drop cached prepared targets on unmount.
  */
 export interface FuzzyTargets {
   prepare: (item: Item) => Fuzzysort.Prepared | null;
@@ -136,7 +130,7 @@ export function fuzzyTargets(): FuzzyTargets {
   const cache = new Map<string, { source: string; target: Fuzzysort.Prepared }>();
   return {
     prepare(item) {
-      if (item.is_sensitive || item.content === null) return null;
+      if (item.content === null) return null;
       const held = cache.get(item.id);
       if (held !== undefined && held.source === item.content) return held.target;
       const target = fuzzysort.prepare(previewOf(item.content));
@@ -162,9 +156,7 @@ export function fuzzyItems(
   targets?: FuzzyTargets,
 ): readonly Item[] {
   return rankFuzzy(items, query, (item) =>
-    // A sensitive item has no plaintext to search (INV-10), and one that is
-    // still masked must not be reachable by guessing at its content.
-    item.is_sensitive || item.content === null
+    item.content === null
       ? [null]
       : [targets?.prepare(item) ?? previewOf(item.content)],
   );
@@ -177,7 +169,7 @@ export function mergeSearchResults(
   const seen = new Set<string>();
   const merged: Item[] = [];
   for (const item of [...fuzzy, ...server]) {
-    if (item.is_sensitive || seen.has(item.id)) continue;
+    if (seen.has(item.id)) continue;
     seen.add(item.id);
     merged.push(item);
   }

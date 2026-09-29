@@ -1,358 +1,118 @@
-import { useId, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode, type Ref } from "react";
+import { useLayoutEffect, useRef, useState, type ComponentProps } from "react";
 
 import { Screen } from "@/components/layout";
 import { BrandMark } from "@/components/shared/BrandMark";
-import { SettingsRow } from "@/components/shared/SettingsRow";
-import { StateView } from "@/components/shared/StateView";
-import { Button, Icon, Switch, type IconName } from "@/components/ui";
-import { CaptureSetupController } from "@/features/capture";
-import { PairingLauncherDialog } from "@/features/devices/patterns/PairingLauncherDialog";
-import { AndroidCaptureSetup } from "@/features/onboarding/patterns/AndroidCaptureSetup";
-import { usePairing } from "@/features/pairing";
-import { ClipboardNotificationSection } from "@/features/settings/patterns/service/ClipboardServiceSections";
-import { PrivacyServiceSections } from "@/features/settings/patterns/service/PrivacyServiceSections";
-import { ServiceSettingsProvider } from "@/features/settings/patterns/service/ServiceSettingsController";
-import { CloudSyncSettings } from "@/features/settings/patterns/CloudSyncSettings";
-import { ListTab } from "@/features/settings/patterns/ListTab";
-import { settingsCapabilities } from "@/features/settings/model/settingsNavigation";
-import { useOpenAtLogin, useSetOpenAtLogin } from "@/hooks/useOpenAtLogin";
-import { useSetServiceConfig } from "@/hooks/useServiceConfig";
+import { Button, Icon } from "@/components/ui";
+import { AndroidBackgroundSetup } from "@/features/capture/patterns/AndroidBackgroundSetup";
+import { onboardingFlow } from "@/features/onboarding/model/onboardingFlow";
+import { OnboardingPermissions } from "@/features/onboarding/patterns/OnboardingPermissions";
 import { useTranslation } from "@/i18n";
-import { currentPlatform, isAndroidPlatform } from "@/lib/platform";
-import {
-  ONBOARDING_STEPS,
-  type OnboardingStep,
-  type OnboardingSyncChoice,
-  usePrefs,
-} from "@/store/prefs";
+import { isAndroidPlatform } from "@/lib/platform";
+import { usePrefs, type OnboardingStep } from "@/store/prefs";
 import { useUi, type View } from "@/store/ui";
 import styles from "./OnboardingScreen.module.css";
-
-export const ONBOARDING_SLIDE_IDS = ONBOARDING_STEPS;
-const SLIDE_COUNT = ONBOARDING_SLIDE_IDS.length;
-const SYNC_CHOICES = [["lan", "devices", "onboarding.sync.lan", "onboarding.sync.lanDetail"], ["cloud", "cloud", "onboarding.sync.cloud", "onboarding.sync.cloudDetail"], ["both", "transfer", "onboarding.sync.both", "onboarding.sync.bothDetail"], ["later", "more", "onboarding.sync.later", "onboarding.sync.laterDetail"]] as const satisfies ReadonlyArray<readonly [Exclude<OnboardingSyncChoice, null>, IconName, string, string]>;
 
 export function OnboardingScreen(props: Omit<ComponentProps<typeof Screen>, "children">) {
   const { t } = useTranslation();
   const progress = usePrefs((state) => state.onboarding);
   const setOnboarding = usePrefs((state) => state.setOnboarding);
-  const [syncSaving, setSyncSaving] = useState(false);
-  const index = ONBOARDING_SLIDE_IDS.indexOf(progress.step);
   const android = isAndroidPlatform();
+  const [captureBusy, setCaptureBusy] = useState(false);
+  const [captureReady, setCaptureReady] = useState(false);
+  const [captureActions, setCaptureActions] = useState<HTMLDivElement | null>(null);
+  const { step, steps, index, previous } = onboardingFlow(android, progress);
+  const capturePending = step === "capture" && captureBusy;
   const viewportRef = useRef<HTMLDivElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   useLayoutEffect(() => {
     if (viewportRef.current) viewportRef.current.scrollTop = 0;
     headingRef.current?.focus({ preventScroll: true });
-  }, [progress.step]);
+  }, [step]);
 
-  const go = (step: OnboardingStep) => setOnboarding({ step });
-
-  const finish = (view: View = "history") => {
+  const go = (next: OnboardingStep) => setOnboarding({ step: next });
+  const finish = (view: View) => {
     usePrefs.getState().set("onboardingComplete", true);
-    setOnboarding({ step: "complete" });
+    setOnboarding({ step: "sync" });
     useUi.getState().setView(view);
     useUi.getState().closeOnboarding();
   };
 
-  const pagination = (
-    <div className={styles.dotsPosition}>
-      <nav className={styles.dots} aria-label={t("onboarding.slidesLabel")}>
-        {Array.from({ length: SLIDE_COUNT }, (_, dotIndex) => (
-          <Button
-            key={dotIndex}
-            type="button"
-            variant="ghost"
-            size="compactIcon"
-            className={styles.dot}
-            aria-label={t("onboarding.slideLabel", { current: dotIndex + 1, total: SLIDE_COUNT })}
-            aria-current={dotIndex === index ? "step" : undefined}
-            onClick={() => go(ONBOARDING_SLIDE_IDS[dotIndex])}
-          />
-        ))}
-      </nav>
-    </div>
-  );
-
   return (
-    <Screen
-      {...props}
-      data-onboarding-root=""
-      data-onboarding=""
-      data-onboarding-step={ONBOARDING_SLIDE_IDS[index]}
-      className={styles.root}
-    >
-      <div className={styles.stage}>
-        <div className={styles.window} data-onboarding-scroll="" ref={viewportRef}>
-          {progress.step === "welcome" ? (
-            <OnboardingSlide
-              eyebrow={t("onboarding.welcome.eyebrow")}
-              title={t("onboarding.welcome.title")}
-              body={t("onboarding.welcome.body")}
-              headingRef={headingRef}
-              content={<BrandMark size="app" animated />}
-              pagination={pagination}
-              lockup
-              primary={{ label: t("onboarding.welcome.action"), onClick: () => go("capture") }}
-              secondary={{ label: t("onboarding.welcome.secondary"), onClick: () => finish() }}
-            />
-          ) : progress.step === "capture" ? (
-            <OnboardingSlide
-              eyebrow={t("onboarding.capture.eyebrow")}
-              title={t("onboarding.capture.title")}
-              body={t(android ? "onboarding.capture.androidBody" : "onboarding.capture.body")}
-              headingRef={headingRef}
-              content={android ? <AndroidCaptureOnboarding /> : <CaptureSetupController />}
-              contentInteractive
-              pagination={pagination}
-              primary={{
-                label: t("onboarding.continue"),
-                onClick: () => go("privacy"),
-              }}
-              secondary={{
-                label: t("onboarding.skip"),
-                onClick: () => {
-                  setOnboarding({ captureSkipped: true });
-                  go("privacy");
-                },
-              }}
-            />
-          ) : progress.step === "privacy" ? (
-            <OnboardingSlide
-              eyebrow={t("onboarding.privacy.eyebrow")}
-              title={t("onboarding.privacy.title")}
-              body={t("onboarding.privacy.body")}
-              headingRef={headingRef}
-              content={<PrivacyAndBasics />}
-              contentInteractive
-              pagination={pagination}
-              primary={{ label: t("onboarding.privacy.action"), onClick: () => go("sync") }}
-              secondary={{
-                label: t("onboarding.privacy.secondary"),
-                onClick: () => {
-                  setOnboarding({ privacySkipped: true });
-                  go("sync");
-                },
-              }}
-            />
-          ) : progress.step === "sync" ? (
-            <OnboardingSlide
-              eyebrow={t("onboarding.sync.eyebrow")}
-              title={t("onboarding.sync.title")}
-              body={t("onboarding.sync.body")}
-              headingRef={headingRef}
-              content={<SyncSetup
-                choice={progress.syncChoice}
-                onChoose={(syncChoice) => setOnboarding({ syncChoice })}
-                onPendingChange={setSyncSaving}
-              />}
-              contentInteractive
-              pagination={pagination}
-              primary={{ label: t("onboarding.sync.action"), onClick: () => go("complete"), disabled: syncSaving }}
-              secondary={{ label: t("onboarding.back"), onClick: () => go("privacy") }}
-            />
-          ) : (
-            <OnboardingSlide
-              eyebrow={t("onboarding.complete.eyebrow")}
-              title={t("onboarding.complete.title")}
-              body={t("onboarding.complete.body")}
-              headingRef={headingRef}
-              content={<BrandMark size="app" animated />}
-              pagination={pagination}
-              primary={{ label: t("onboarding.complete.action"), onClick: () => finish() }}
-              secondary={{ label: t("onboarding.complete.secondary"), onClick: () => go("sync") }}
-            />
-          )}
-
+    <Screen {...props} data-onboarding-root="" data-onboarding="" data-onboarding-platform={android ? "android" : "desktop"} data-onboarding-step={step} className={styles.root}>
+      <div className={styles.shell}>
+        <header className={styles.topbar}>
+          {previous ? <Button className={styles.back} disabled={capturePending} variant="ghost" icon="back" onClick={() => go(previous)}>{t("onboarding.back")}</Button> : <div className={styles.brand}><BrandMark size="sidebar" /><span>CopyPaste</span></div>}
+          <span className={styles.stepCount}>{t("onboarding.slideLabel", { current: index + 1, total: steps.length })}</span>
+        </header>
+        <ol className={styles.progress} aria-label={t("onboarding.slidesLabel")}>
+          {steps.map((id, position) => (
+            <li key={id} aria-current={step === id ? "step" : undefined} data-done={position < index || undefined}>
+              <span>{t(`onboarding.${id}.eyebrow`)}</span>
+            </li>
+          ))}
+        </ol>
+        <div className={styles.scroll} data-onboarding-scroll="" ref={viewportRef}>
+          <section className={styles.page} aria-labelledby="onboarding-title" key={step}>
+            {step === "welcome" ? <WelcomeArtwork /> : step === "sync" ? <SyncArtwork /> : null}
+            <div className={styles.copy}>
+              <span className={styles.eyebrow}>{t(`onboarding.${step}.eyebrow`)}</span>
+              <h1 id="onboarding-title" ref={headingRef} tabIndex={-1}>{t(`onboarding.${step}.title`)}</h1>
+              <p>{t(`onboarding.${step}.body`)}</p>
+            </div>
+            {step === "permissions" ? <OnboardingPermissions android={android} /> : null}
+            {step === "background" ? (
+              <div className={styles.explanation}>
+                <div className={styles.methodSummary}><Icon name="mobile" size="lg" /><div><strong>Shizuku</strong><p>{t("onboarding.background.shizuku")}</p></div></div>
+                <div className={styles.methodSummary}><Icon name="terminal" size="lg" /><div><strong>ADB</strong><p>{t("onboarding.background.adb")}</p></div></div>
+                <p className={styles.note}>{t("onboarding.background.optional")}</p>
+              </div>
+            ) : null}
+            {step === "capture" ? <AndroidBackgroundSetup onReadyChange={setCaptureReady} onBusyChange={setCaptureBusy} actionContainer={captureActions} /> : null}
+          </section>
         </div>
+        <footer className={styles.footer}>
+          <div className={styles.actions}>
+            {step === "sync" ? (
+              <>
+                <Button size="lg" onClick={() => finish("devices")}>{t("onboarding.sync.action")}</Button>
+                <Button size="lg" variant="secondary" onClick={() => finish("history")}>{t("onboarding.sync.secondary")}</Button>
+              </>
+            ) : step === "background" ? (
+              <>
+                <Button size="lg" onClick={() => setOnboarding({ step: "capture", captureSkipped: false })}>{t("onboarding.background.action")}</Button>
+                <Button size="lg" variant="secondary" disabled={capturePending} onClick={() => setOnboarding({ step: "sync", captureSkipped: true })}>{t("onboarding.skip")}</Button>
+              </>
+            ) : step === "capture" && !captureReady ? (
+              <>
+                <div className={styles.captureAction} ref={setCaptureActions} />
+                <Button size="lg" variant="secondary" disabled={capturePending} onClick={() => setOnboarding({ step: "sync", captureSkipped: true })}>{t("onboarding.skip")}</Button>
+              </>
+            ) : (
+              <Button size="lg" disabled={capturePending} onClick={() => go(step === "welcome" ? "permissions" : step === "permissions" && android ? "background" : "sync")}>
+                {t(step === "welcome" ? "onboarding.welcome.action" : "onboarding.continue")}
+              </Button>
+            )}
+          </div>
+        </footer>
       </div>
     </Screen>
   );
 }
 
-function OnboardingSlide({
-  eyebrow,
-  title,
-  body,
-  headingRef,
-  content,
-  pagination,
-  contentInteractive = false,
-  lockup = false,
-  primary,
-  secondary,
-}: {
-  eyebrow: string;
-  title: string;
-  body: string;
-  headingRef: Ref<HTMLHeadingElement>;
-  content: ReactNode;
-  pagination: ReactNode;
-  contentInteractive?: boolean;
-  lockup?: boolean;
-  primary: { label: string; onClick: () => void; disabled?: boolean };
-  secondary: { label: string; onClick: () => void };
-}) {
+function WelcomeArtwork() {
   return (
-    <section className={styles.slide}>
-      <div className={styles.copy}>
-        {lockup ? (
-          <div className={styles.lockup}>
-            <span className={styles.lockupLayout}>
-              <span className={styles.lockupMark}><BrandMark size="app" animated /></span>
-              <span className={styles.lockupName}>
-                <strong>CopyPaste</strong>
-                <small>Private clipboard memory</small>
-              </span>
-            </span>
-          </div>
-        ) : null}
-        <span className={styles.eyebrow}>{eyebrow}</span>
-        <h1 ref={headingRef} tabIndex={-1}>{title}</h1>
-        <p>{body}</p>
-      </div>
-      <div className={styles.content} data-interactive={contentInteractive || undefined}>
-        {content}
-      </div>
-      <footer className={styles.actions}>{pagination}<Button size="md" disabled={primary.disabled} onClick={primary.onClick}>{primary.label}</Button><Button size="md" variant="secondary" onClick={secondary.onClick}>{secondary.label}</Button></footer>
-    </section>
-  );
-}
-
-function AndroidCaptureOnboarding() {
-  return (
-    <>
-      <CaptureSetupController />
-      <AndroidCaptureSetup />
-    </>
-  );
-}
-
-function PrivacyAndBasics() {
-  const capabilities = settingsCapabilities(currentPlatform());
-
-  return (
-    <div className={styles.privacyFlow}>
-      <ListTab ready supportsScreenshots={capabilities.screenshots} scope="privacy" />
-      <ServiceSettingsProvider requiresPrivateMode>
-        <PrivacyServiceSections />
-        {!isAndroidPlatform() ? (
-          <ClipboardNotificationSection supportsCopyNotifications={capabilities.copyNotifications} />
-        ) : null}
-      </ServiceSettingsProvider>
-      {capabilities.startup ? <StartupOption /> : null}
+    <div className={styles.artwork} aria-hidden="true">
+      <div className={styles.clipBack}><Icon name="link" size="lg" /><span /><span /></div>
+      <div className={styles.clipFront}><BrandMark size="app" /><div><i /><i /><i /></div><span className={styles.clipCheck}><Icon name="check" size="md" /></span></div>
     </div>
   );
 }
 
-function StartupOption() {
-  const { t } = useTranslation();
-  const noteId = useId();
-  const startup = useOpenAtLogin();
-  const saveStartup = useSetOpenAtLogin();
-  const unavailable = startup.isError || saveStartup.isError;
-
+function SyncArtwork() {
   return (
-    <SettingsRow
-      title={t("onboarding.startup.title")}
-      note={startup.isPending || unavailable ? (
-        <StateView
-          id={noteId}
-          mode={startup.isPending ? "loading" : "error"}
-          placement="control"
-          title={t(startup.isPending ? "onboarding.startup.checking" : "onboarding.startup.unavailable")}
-          role="none"
-        />
-      ) : undefined}
-    >
-      <Switch
-        id="onboarding-open-at-login"
-        aria-label={t("onboarding.startup.title")}
-        aria-describedby={startup.isPending || unavailable ? noteId : undefined}
-        aria-busy={startup.isPending || saveStartup.isPending || undefined}
-        checked={startup.data ?? false}
-        disabled={startup.isPending || unavailable || saveStartup.isPending}
-        onCheckedChange={(open) => saveStartup.mutate(open)}
-      />
-    </SettingsRow>
-  );
-}
-
-function SyncSetup({
-  choice,
-  onChoose,
-  onPendingChange,
-}: {
-  choice: OnboardingSyncChoice;
-  onChoose: (choice: OnboardingSyncChoice) => void;
-  onPendingChange: (pending: boolean) => void;
-}) {
-  const { t } = useTranslation();
-  const [pairingOpen, setPairingOpen] = useState(false);
-  const pairing = usePairing();
-  const syncConfig = useSetServiceConfig();
-  const [saveFailed, setSaveFailed] = useState(false);
-  const lanSelected = choice === "lan" || choice === "both";
-  const cloudSelected = choice === "cloud" || choice === "both";
-
-  const choose = (next: Exclude<OnboardingSyncChoice, null>) => {
-    const config = next === "lan" || next === "both"
-      ? { sync_enabled: true, lan_visibility: true }
-      : next === "cloud"
-        ? { sync_enabled: true, lan_visibility: false }
-        : { sync_enabled: false, lan_visibility: false };
-    setSaveFailed(false);
-    onPendingChange(true);
-    syncConfig.mutate(config, {
-      onSuccess: () => {
-        onChoose(next);
-        onPendingChange(false);
-      },
-      onError: () => {
-        setSaveFailed(true);
-        onPendingChange(false);
-      },
-    });
-  };
-
-  return (
-    <div>
-      <div className={styles.syncChoices} role="radiogroup" aria-label={t("onboarding.sync.eyebrow")}>
-        {SYNC_CHOICES.map(([value, icon, label, detail]) => (
-          <Button
-            key={value}
-            type="button"
-            variant="secondary"
-            className={styles.syncChoice}
-            role="radio"
-            aria-checked={choice === value}
-            disabled={syncConfig.isPending}
-            onClick={() => choose(value)}
-          >
-            <Icon name={icon} size="sm" aria-hidden="true" />
-            <span><strong>{t(label)}</strong><small>{t(detail)}</small></span>
-          </Button>
-        ))}
-      </div>
-      {lanSelected ? (
-        <Button type="button" variant="secondary" onClick={() => setPairingOpen(true)}>
-          {t("onboarding.sync.setupLan")}
-        </Button>
-      ) : null}
-      {cloudSelected ? <CloudSyncSettings /> : null}
-      {choice !== null ? <StateView mode="success" placement="inline" role="none" title={t("onboarding.sync.selectionSaved")} /> : null}
-      {saveFailed ? <StateView mode="error" placement="inline" role="alert" title={t("onboarding.sync.saveFailed")} /> : null}
-      <PairingLauncherDialog
-        open={pairingOpen}
-        available={pairing.protectedPresentationAvailable || pairing.webPreview}
-        preview={pairing.webPreview}
-        disabled={pairing.isChecking || pairing.isPending}
-        pairing={pairing}
-        onOpenChange={setPairingOpen}
-        onCreate={() => pairing.run("create")}
-        onJoin={() => pairing.run("join")}
-      />
+    <div className={styles.syncArtwork} aria-hidden="true">
+      <div><Icon name="laptop" size="lg" /></div><span /><Icon name="transfer" size="lg" /><span /><div><Icon name="mobile" size="lg" /></div>
     </div>
   );
 }

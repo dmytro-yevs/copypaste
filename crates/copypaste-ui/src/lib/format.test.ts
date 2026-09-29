@@ -26,16 +26,12 @@ describe("kindOf", () => {
   });
 
   it.each([
-    ["text", "unknown"],
+    ["text", "text"],
     ["image", "image"],
     ["file", "file"],
     ["other", "unknown"],
   ] as const)("preserves %s precedence when content is absent", (content_class, expected) => {
     expect(kindOf(item({ content_class, content: null }))).toBe(expected);
-  });
-
-  it("keeps sensitive content ahead of its authoritative base class", () => {
-    expect(kindOf(item({ content_class: "image", is_sensitive: true, content: null }))).toBe("secret");
   });
 
   it("does not let a contradictory image MIME type override Other", () => {

@@ -39,8 +39,6 @@ export function clipboardCopyPresentation(state: ClipboardCopyState): ClipboardC
 }
 
 type RowLabelKey =
-  | "history.row.sensitiveName"
-  | "history.row.potentialSensitiveWarning"
   | "history.row.empty"
   | "history.row.pinnedPrefix"
   | "history.row.fromPrefix"
@@ -50,12 +48,6 @@ export function clipCopyAction(kind: Kind): ClipCopyActionPresentation {
   return kind === "image"
     ? { icon: "image", label: t("history.detail.copyImage") }
     : { icon: "copy", label: t("history.detail.copy") };
-}
-
-export function clipPotentialRevealAction(revealed: boolean): { icon: "eye" | "eyeOff"; label: string } {
-  return revealed
-    ? { icon: "eyeOff", label: t("history.row.hideOriginal") }
-    : { icon: "eye", label: t("history.row.showOriginal") };
 }
 
 export function historyKindFilterLabel(kind: "all" | Kind): string {
@@ -69,18 +61,12 @@ export function rowLabel(
   translate: (key: RowLabelKey) => string,
 ): string {
   let body: string;
-  if (item.is_sensitive) {
-    body = translate("history.row.sensitiveName");
-  } else if (item.sensitive_finding !== null) {
-    body = `${translate("history.row.potentialSensitiveWarning")}. ${item.sensitive_finding.redacted_preview}`;
-  } else {
-    const kind = kindOf(item);
-    body = item.content_class !== "text"
-      ? clipTypeMetadata(kind).label
-      : item.content === null
-        ? translate("history.row.empty")
-        : (preview ?? previewOf(item.content));
-  }
+  const kind = kindOf(item);
+  body = item.content_class !== "text"
+    ? clipTypeMetadata(kind).label
+    : item.content === null
+      ? translate("history.row.empty")
+      : (preview ?? previewOf(item.content));
   const named = item.pinned ? `${translate("history.row.pinnedPrefix")} ${body}` : body;
   const marks: string[] = [];
   if (origin !== null) marks.push(`${translate("history.row.fromPrefix")} ${origin}`);

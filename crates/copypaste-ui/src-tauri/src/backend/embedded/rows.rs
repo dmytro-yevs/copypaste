@@ -62,10 +62,6 @@ impl Inner {
         let device_id = origin_or(&row.origin_device_id, &self.state.device_id).to_string();
         let origin_device_name = names.get(&device_id).cloned();
         let content = payload.display_text();
-        let sensitive_finding = (!row.is_sensitive
-            && copypaste_ipc::content_type::is_text(&row.content_type))
-        .then(|| self.state.detector.inert_finding_metadata(&content))
-        .flatten();
         let too_large_to_sync =
             copypaste_cloud::sync::too_large_to_sync(&row.content_type, payload.byte_len());
         let item = Item {
@@ -74,8 +70,6 @@ impl Inner {
             content_type: row.content_type,
             created_at: row.created_at,
             pinned: row.pinned,
-            is_sensitive: row.is_sensitive,
-            sensitive_finding,
             origin_device_id: device_id,
             origin_device_name,
             source_app_bundle_id: row.app_bundle_id,
@@ -164,7 +158,7 @@ impl Inner {
             Ok(None) => return Err(BackendError::NotFound(MSG_NO_ITEM)),
             Err(_) => return Err(BackendError::internal("history could not be read")),
         };
-        if row.is_sensitive || !supports_image_preview(&row.content_type) {
+        if !supports_image_preview(&row.content_type) {
             return Err(BackendError::Invalid("That image preview is unavailable."));
         }
         let bytes = open_binary(
@@ -208,13 +202,7 @@ pub(super) fn status_of(inner: &Inner) -> Result<copypaste_ipc::StatusData> {
         clipboard_backend: super::messages::BACKEND_NAME.to_string(),
         private_mode: settings.config.private_mode,
         private_mode_epoch: settings.private_mode_epoch,
-        // Android has no daemon poller, but it does run the same startup FTS
-        // purge as the daemon. Surface that one counter rather than claiming
-        // the purge never happened.
-        counters: copypaste_ipc::DiagnosticCounters {
-            index_purged: inner.state.index_purged,
-            ..Default::default()
-        },
+        counters: copypaste_ipc::DiagnosticCounters::default(),
         // Android has no daemon, but it does have a persisted settings record
         // and it does fail closed on one it cannot read (DMY155-B2). Reporting
         // `None` here would leave the user running on privacy values they never

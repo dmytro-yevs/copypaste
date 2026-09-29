@@ -35,7 +35,6 @@ function config(over: Partial<ConfigData> = {}): ConfigData {
     max_image_size_bytes: 4 * 1_048_576,
     max_file_size_bytes: 4 * 1_048_576,
     max_decoded_image_mb: 50,
-    sensitive_ttl_secs: 30,
     excluded_app_bundle_ids: [],
     lan_visibility: true,
     sync_enabled: true,

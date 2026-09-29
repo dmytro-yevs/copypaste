@@ -13,6 +13,7 @@
 }
 
 .keycaps {
+  flex-wrap: wrap;
   gap: var(--s-1);
   /* apply fgp */
 }
@@ -34,6 +35,7 @@
 
 .controlRow {
   max-inline-size: 100%;
+  flex-wrap: wrap;
   gap: var(--s-2);
   /* apply fgp */
 }
@@ -41,10 +43,10 @@
 .captureButton {
   --button-content-gap: var(--s-2);
 
-  min-inline-size: calc(var(--s-8) * 4);
+  min-inline-size: 0;
   max-inline-size: 100%;
   min-block-size: var(--tap-min);
-  block-size: var(--tap-min);
+  block-size: auto;
   padding-inline: var(--s-3);
   border: var(--stroke-1) solid;
   border-radius: var(--r-ctl);

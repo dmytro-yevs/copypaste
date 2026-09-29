@@ -22,7 +22,6 @@ use super::merge::{
     stored_summary, MergeError, P2pApply, RemoteVersion,
 };
 use super::prepare::{prepare_remote_version, Prepared};
-use crate::sensitive::Detector;
 use crate::storage::{IncomingItem, MergePageError, Store, Version};
 use crate::Keyring;
 
@@ -55,11 +54,10 @@ const SNAPSHOT_ATTEMPTS: usize = 2;
 pub fn apply_remote_versions(
     store: &Store,
     keyring: &Keyring,
-    detector: &Detector,
     here: &str,
     incoming: &[RemoteVersion<'_>],
 ) -> Result<Vec<bool>, MergeError> {
-    Ok(apply_page(store, keyring, detector, here, incoming, None)?
+    Ok(apply_page(store, keyring, here, incoming, None)?
         .into_iter()
         .map(ApplyFlags::any)
         .collect())
@@ -68,13 +66,12 @@ pub fn apply_remote_versions(
 pub fn apply_remote_p2p_versions(
     store: &Store,
     keyring: &Keyring,
-    detector: &Detector,
     here: &str,
     incoming: &[RemoteVersion<'_>],
     pins: &[P2pPin],
 ) -> Result<Vec<P2pApply>, MergeError> {
     debug_assert_eq!(incoming.len(), pins.len());
-    let applied = apply_page(store, keyring, detector, here, incoming, Some(pins))?;
+    let applied = apply_page(store, keyring, here, incoming, Some(pins))?;
     Ok(applied
         .into_iter()
         .map(|flags| P2pApply {
@@ -99,7 +96,6 @@ impl ApplyFlags {
 fn apply_page(
     store: &Store,
     keyring: &Keyring,
-    detector: &Detector,
     here: &str,
     incoming: &[RemoteVersion<'_>],
     pins: Option<&[P2pPin]>,
@@ -114,8 +110,7 @@ fn apply_page(
     })?;
 
     for _ in 0..SNAPSHOT_ATTEMPTS {
-        let (prepared, slots, pin_only) =
-            prepare(keyring, detector, here, incoming, pins, &snapshot)?;
+        let (prepared, slots, pin_only) = prepare(keyring, here, incoming, pins, &snapshot)?;
         let writes: Vec<IncomingItem<'_>> = prepared.iter().map(Prepared::as_incoming).collect();
         match store.merge_page(&ids, &snapshot, &writes) {
             Ok(written) => {
@@ -153,7 +148,6 @@ fn apply_page(
                 redo_after_refusals(
                     store,
                     keyring,
-                    detector,
                     here,
                     incoming,
                     pins,
@@ -184,7 +178,6 @@ fn apply_page(
 #[allow(clippy::type_complexity)]
 fn prepare(
     keyring: &Keyring,
-    detector: &Detector,
     here: &str,
     incoming: &[RemoteVersion<'_>],
     pins: Option<&[P2pPin]>,
@@ -224,14 +217,7 @@ fn prepare(
                 remote_pin_wins,
             )
         });
-        match prepare_remote_version(
-            keyring,
-            detector,
-            here,
-            item,
-            pin_state,
-            local.get(item.item_id),
-        )? {
+        match prepare_remote_version(keyring, here, item, pin_state, local.get(item.item_id))? {
             Some(ready) => {
                 local.insert(item.item_id.to_string(), ready.as_version(here));
                 slots.push(Some(prepared.len()));
@@ -262,7 +248,6 @@ fn prepare(
 fn redo_after_refusals(
     store: &Store,
     keyring: &Keyring,
-    detector: &Detector,
     here: &str,
     incoming: &[RemoteVersion<'_>],
     pins: Option<&[P2pPin]>,
@@ -293,7 +278,6 @@ fn redo_after_refusals(
                 let outcome = apply_remote_p2p_version_with_pin_stamp(
                     store,
                     keyring,
-                    detector,
                     here,
                     item,
                     pin.pinned,
@@ -306,7 +290,7 @@ fn redo_after_refusals(
                 }
             }
             None => ApplyFlags {
-                content: apply_remote_version(store, keyring, detector, here, item)?,
+                content: apply_remote_version(store, keyring, here, item)?,
                 pin: false,
             },
         };
@@ -320,7 +304,7 @@ mod tests {
     use super::*;
 
     fn apply_page(f: &Fixture, page: &[RemoteVersion<'_>]) -> Vec<bool> {
-        apply_remote_versions(&f.store, &f.keyring, &f.detector, &f.here, page).expect("merge")
+        apply_remote_versions(&f.store, &f.keyring, &f.here, page).expect("merge")
     }
 
     /// Occupy the dedup key `(content_hash, created_at / 60000, origin)` under

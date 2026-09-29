@@ -15,8 +15,6 @@ export { DEFAULT_PREVIEW_LINES, MAX_PREVIEW_LINES, MIN_PREVIEW_LINES };
 export const HISTORY_LAYOUT_METRICS = {
     inspector: {
         visibleAtPx: HISTORY_INSPECTOR_MIN_PX,
-        primaryMinPx: 390,
-        minPx: 278,
         defaultPx: 322,
         widePx: 390,
         maxSize: "50%",
@@ -42,7 +40,6 @@ export const HISTORY_LAYOUT_METRICS = {
             imageCompact: 298,
             file: 124,
             color: 128,
-            secret: 116,
         },
     },
     interaction: {
@@ -116,6 +113,5 @@ export function historyRowEstimate(
         return estimates.file;
     }
     if (kind === "color") return estimates.color;
-    if (kind === "secret") return estimates.secret;
     return rowHeight(previewLines) + rowMetrics.outerChromePx;
 }

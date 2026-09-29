@@ -34,22 +34,11 @@ describe("QuickPastePreview", () => {
     expect(reader.textContent).toContain("fourth line");
   });
 
-  it("never renders sensitive plaintext and keeps findings redacted", () => {
-    const raw = "raw secret fragment";
-    const { rerender } = render(
-      <QuickPastePreview item={item({ content: null, is_sensitive: true })} fullContent={raw} fullContentFailed={false} layout={layout} />,
+  it("renders arbitrary selected text", () => {
+    const raw = "api_key=abc123; password=plain-text";
+    render(
+      <QuickPastePreview item={item({ content: raw })} fullContent={raw} fullContentFailed={false} layout={layout} />,
     );
-    expect(screen.queryByText(raw)).toBeNull();
-
-    rerender(
-      <QuickPastePreview
-        item={item({ content: raw, sensitive_finding: { label: "possible token", spans: [], spans_truncated: false, redacted_preview: "••••• fragment" } })}
-        fullContent={raw}
-        fullContentFailed={false}
-        layout={layout}
-      />,
-    );
-    expect(screen.getByText("••••• fragment")).toBeTruthy();
-    expect(screen.queryByText(raw)).toBeNull();
+    expect(screen.getByText(raw)).toBeTruthy();
   });
 });

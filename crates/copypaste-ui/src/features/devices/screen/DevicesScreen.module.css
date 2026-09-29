@@ -7,7 +7,6 @@
 
 .content {
   display: flex;
-  max-inline-size: calc(var(--s-9) * 23 + var(--s-4));
   padding-block: 0 var(--s-7);
   flex-direction: column;
   gap: 0;

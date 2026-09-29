@@ -61,6 +61,21 @@ class OnboardingPermissionsPlugin(private val activity: android.app.Activity) : 
         invoke.resolve(JSObject())
     }
 
+    @Command
+    fun backgroundActivityFacts(invoke: Invoke) {
+        invoke.resolve(JSObject().put("granted", BackgroundActivity.isAllowed(activity)))
+    }
+
+    @Command
+    fun requestBackgroundActivity(invoke: Invoke) {
+        try {
+            activity.startActivity(BackgroundActivity.settingsIntent(activity))
+            invoke.resolve(JSObject())
+        } catch (_: Exception) {
+            invoke.reject("Battery settings could not be opened on this device.")
+        }
+    }
+
     private fun notificationPayload() = CaptureBridgeJson.objectOf(
         NotificationPermissionFacts.serializer(),
         (activity as MainActivity).notificationPermissionFacts(),

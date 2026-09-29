@@ -91,32 +91,36 @@ function notifyAs(mode: ToastMode, message: ToastMessage, options: NotifyOptions
         sonnerToast.dismiss(id);
         current?.onDismiss?.call(current, current);
       };
-      const actions = (
+      const actions = action != null || cancel != null ? (
         <>
           {renderAction(cancel, id, "cancel", dismissible, options)}
           {renderAction(action, id, "action", dismissible, options)}
+        </>
+      ) : undefined;
+
+      return (
+        <div className="copypaste-toast-layout">
+          <StateView
+            mode={mode}
+            placement="panel"
+            role="group"
+            aria-live="off"
+            title={asRenderable(message)}
+            description={asRenderable(description)}
+            actions={actions}
+          />
           {options.closeButton === false ? null : (
             <Button
+              variant="ghost"
               size="compactIcon"
               icon="close"
+              data-toast-close=""
               aria-label={t("common.close")}
               disabled={!dismissible}
               onClick={close}
             />
           )}
-        </>
-      );
-
-      return (
-        <StateView
-          mode={mode}
-          placement="panel"
-          role="group"
-          aria-live="off"
-          title={asRenderable(message)}
-          description={asRenderable(description)}
-          actions={actions}
-        />
+        </div>
       );
     },
     customOptions,

@@ -57,12 +57,10 @@ export const quickPaste = {
   },
 
   row: {
-    sensitive: "Sensitive content",
     image: "Image",
     file: "File",
     unsupported: "Unsupported clipboard content",
     empty: "Empty item",
-    potentialSensitive: "Potentially sensitive",
     pinned: "Pinned",
     pin: "Pin",
     unpin: "Unpin",

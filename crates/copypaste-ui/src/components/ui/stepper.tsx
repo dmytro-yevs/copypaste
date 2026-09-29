@@ -15,20 +15,28 @@ function Stepper({
     label,
     items,
     className,
+    variant = "list",
 }: {
     label: string;
     items: readonly StepperItem[];
     className?: string;
+    variant?: "list" | "compact";
 }) {
     return (
-        <ol aria-label={label} className={cn(styles.root, className)}>
-            {items.map((item) => {
+        <ol aria-label={label} className={cn(styles.root, variant === "compact" && styles.compact, className)}>
+            {items.map((item, index) => {
                 return (
                     <li
                         key={item.id}
                         data-step={item.id}
+                        aria-current={item.current ? "step" : undefined}
                         className={styles.item}
                     >
+                        {variant === "compact" ? (
+                            <span className={cn(styles.marker, item.done && styles.done)} aria-hidden="true">
+                                {item.done ? <Icon name="check" /> : index + 1}
+                            </span>
+                        ) : (
                         <Icon
                             name={item.icon}
                             size="sm"
@@ -37,6 +45,7 @@ function Stepper({
                                 item.done ? styles.done : styles.pending,
                             )}
                         />
+                        )}
                         <span
                             className={cn(
                                 styles.label,

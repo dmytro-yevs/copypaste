@@ -15,31 +15,17 @@ pub enum ExportError {
     ContentTooLarge,
 }
 
-/// Read history out as plaintext, counting everything it declines to include.
-///
-/// `limit` of 0 means everything. `include_sensitive` is an opt-in the wire
-/// defaults to off: an export is plaintext and leaves the app's control the
-/// moment it is written.
-pub fn export(
-    store: &Store,
-    keyring: &Keyring,
-    limit: u32,
-    include_sensitive: bool,
-) -> Result<ExportData, ExportError> {
+/// Read text history out as plaintext, counting everything it declines to include.
+pub fn export(store: &Store, keyring: &Keyring, limit: u32) -> Result<ExportData, ExportError> {
     let key = keyring.item_key();
     let mut budget = ExportFrameBudget::new();
     let mut data = ExportData {
         items: Vec::new(),
         skipped_non_text: 0,
-        skipped_sensitive: 0,
         skipped_undecryptable: 0,
     };
 
     store.visit_live_items(|row| {
-        if row.is_sensitive && !include_sensitive {
-            data.skipped_sensitive = data.skipped_sensitive.saturating_add(1);
-            return Ok(ControlFlow::Continue(()));
-        }
         if !copypaste_ipc::content_type::is_text(&row.content_type) {
             data.skipped_non_text = data.skipped_non_text.saturating_add(1);
             return Ok(ControlFlow::Continue(()));
@@ -60,7 +46,6 @@ pub fn export(
             content_type: row.content_type,
             created_at: row.created_at,
             pinned: row.pinned,
-            is_sensitive: row.is_sensitive,
         };
         budget
             .try_push(&item)
@@ -80,7 +65,6 @@ fn finish(data: ExportData) -> ExportData {
     // The count only — never content, and never a sample.
     info!(
         items = data.items.len(),
-        skipped_sensitive = data.skipped_sensitive,
         skipped_non_text = data.skipped_non_text,
         skipped_undecryptable = data.skipped_undecryptable,
         "exported history"
@@ -93,7 +77,7 @@ mod tests {
     use super::*;
     use crate::transfer::testkit::{fixture, Fixture};
 
-    fn seed_legacy_text(f: &Fixture, content: &[u8], content_type: &str, sensitive: bool) {
+    fn seed_legacy_text(f: &Fixture, content: &[u8], content_type: &str) {
         let id = format!("legacy-{}", content.len());
         let key = f.keyring.item_key();
         let (nonce, content_ciphertext) = crate::encrypt(content, &key, &id).unwrap();
@@ -104,8 +88,7 @@ mod tests {
                 nonce,
                 content_type: content_type.to_string(),
                 content_hash: crate::compute_content_hash(content),
-                is_sensitive: sensitive,
-                search_text: (!sensitive).then(|| String::from_utf8_lossy(content).into_owned()),
+                search_text: Some(String::from_utf8_lossy(content).into_owned()),
                 created_at: crate::now_ms(),
                 app_bundle_id: None,
                 app_name: None,
@@ -114,8 +97,8 @@ mod tests {
             .unwrap();
     }
 
-    fn export_of(f: &Fixture, include_sensitive: bool) -> ExportData {
-        export(&f.store, &f.keyring, 0, include_sensitive).expect("the store must read")
+    fn export_of(f: &Fixture) -> ExportData {
+        export(&f.store, &f.keyring, 0).expect("the store must read")
     }
 
     #[test]
@@ -126,7 +109,7 @@ mod tests {
         let created_at = f.store.get(&id).unwrap().unwrap().created_at;
         f.add("second");
 
-        let data = export_of(&f, false);
+        let data = export_of(&f);
         assert_eq!(data.items.len(), 2);
         let first = data
             .items
@@ -137,41 +120,27 @@ mod tests {
         assert!(first.pinned);
     }
 
-    /// The property the whole module is shaped around: nothing is dropped
-    /// silently.
     #[test]
-    fn a_sensitive_item_is_withheld_by_default_and_counted() {
+    fn credential_shaped_text_is_exported() {
         let f = fixture();
         f.add("ordinary");
         f.add("AKIAIOSFODNN7EXAMPLE");
 
-        let default = export_of(&f, false);
-        assert_eq!(default.items.len(), 1);
-        assert_eq!(default.skipped_sensitive, 1);
-        let rendered = serde_json::to_string(&default).unwrap();
+        let data = export_of(&f);
+        assert_eq!(data.items.len(), 2);
+        let rendered = serde_json::to_string(&data).unwrap();
         assert!(
-            !rendered.contains("AKIAIOSFODNN7EXAMPLE"),
-            "a withheld item's content reached the export"
+            rendered.contains("AKIAIOSFODNN7EXAMPLE"),
+            "credential-shaped text did not reach the export"
         );
-
-        // ...and it is present only when asked for explicitly.
-        let opted_in = export_of(&f, true);
-        assert_eq!(opted_in.items.len(), 2);
-        assert_eq!(opted_in.skipped_sensitive, 0);
     }
 
-    /// Every count is on the wire even when it is zero: a field that appears
-    /// only when non-zero is one nobody knows to look for.
     #[test]
     fn the_skip_counts_are_always_present() {
         let f = fixture();
         f.add("ordinary");
-        let json = serde_json::to_value(export_of(&f, false)).unwrap();
-        for field in [
-            "skipped_non_text",
-            "skipped_sensitive",
-            "skipped_undecryptable",
-        ] {
+        let json = serde_json::to_value(export_of(&f)).unwrap();
+        for field in ["skipped_non_text", "skipped_undecryptable"] {
             assert_eq!(json[field], 0, "{field} missing or wrong");
         }
     }
@@ -184,7 +153,7 @@ mod tests {
         f.add("ordinary");
         f.add_typed("\u{fffd}PNG", "image/png");
 
-        let data = export_of(&f, false);
+        let data = export_of(&f);
         assert_eq!(data.items.len(), 1);
         assert_eq!(data.skipped_non_text, 1);
     }
@@ -197,7 +166,7 @@ mod tests {
         f.add("readable");
         let stranger = crate::Keyring::from_secret(&[9u8; 32]);
 
-        let data = export(&f.store, &stranger, 0, false).expect("the store still reads");
+        let data = export(&f.store, &stranger, 0).expect("the store still reads");
         assert!(data.items.is_empty());
         assert_eq!(data.skipped_undecryptable, 1);
     }
@@ -210,14 +179,8 @@ mod tests {
         for n in 0..5 {
             f.add(&format!("item-{n}"));
         }
-        assert_eq!(
-            export(&f.store, &f.keyring, 2, false).unwrap().items.len(),
-            2
-        );
-        assert_eq!(
-            export(&f.store, &f.keyring, 0, false).unwrap().items.len(),
-            5
-        );
+        assert_eq!(export(&f.store, &f.keyring, 2).unwrap().items.len(), 2);
+        assert_eq!(export(&f.store, &f.keyring, 0).unwrap().items.len(), 5);
     }
 
     #[test]
@@ -229,12 +192,11 @@ mod tests {
                 .repeat(copypaste_ipc::MAX_CONTENT_BYTES + 1)
                 .as_bytes(),
             copypaste_ipc::content_type::TEXT,
-            false,
         );
         let first = f.add("first");
         f.store.set_pinned(&first, true).unwrap();
 
-        let data = export(&f.store, &f.keyring, 1, false).unwrap();
+        let data = export(&f.store, &f.keyring, 1).unwrap();
         assert_eq!(data.items.len(), 1);
         assert_eq!(data.items[0].content, "first");
     }
@@ -250,7 +212,6 @@ mod tests {
                 .repeat(copypaste_ipc::MAX_CONTENT_BYTES + 1)
                 .as_bytes(),
             copypaste_ipc::content_type::TEXT,
-            false,
         );
         let before = f
             .store
@@ -262,7 +223,7 @@ mod tests {
             .content_ciphertext;
 
         assert!(matches!(
-            export(&f.store, &f.keyring, 0, false),
+            export(&f.store, &f.keyring, 0),
             Err(ExportError::ContentTooLarge)
         ));
         assert_eq!(
@@ -278,25 +239,6 @@ mod tests {
     }
 
     #[test]
-    fn a_sensitive_legacy_body_is_skipped_before_it_is_opened() {
-        let f = fixture();
-        seed_legacy_text(
-            &f,
-            "\u{1}"
-                .repeat(copypaste_ipc::MAX_CONTENT_BYTES + 1)
-                .as_bytes(),
-            copypaste_ipc::content_type::TEXT,
-            true,
-        );
-        let data = export_of(&f, false);
-        assert_eq!(data.skipped_sensitive, 1);
-        assert!(matches!(
-            export(&f.store, &f.keyring, 0, true),
-            Err(ExportError::ContentTooLarge)
-        ));
-    }
-
-    #[test]
     fn an_unreadable_oversized_legacy_row_is_still_counted_not_refused_for_size() {
         let f = fixture();
         seed_legacy_text(
@@ -305,10 +247,9 @@ mod tests {
                 .repeat(copypaste_ipc::MAX_CONTENT_BYTES + 1)
                 .as_bytes(),
             copypaste_ipc::content_type::TEXT,
-            false,
         );
         let stranger = crate::Keyring::from_secret(&[9u8; 32]);
-        let data = export(&f.store, &stranger, 0, false).expect("unreadable rows are skipped");
+        let data = export(&f.store, &stranger, 0).expect("unreadable rows are skipped");
         assert!(data.items.is_empty());
         assert_eq!(data.skipped_undecryptable, 1);
     }
@@ -317,12 +258,7 @@ mod tests {
     fn legal_items_that_overflow_the_aggregate_refuse_without_changing_ciphertext() {
         let f = fixture();
         let content = "\u{1}".repeat(copypaste_ipc::MAX_CONTENT_BYTES);
-        seed_legacy_text(
-            &f,
-            content.as_bytes(),
-            copypaste_ipc::content_type::TEXT,
-            false,
-        );
+        seed_legacy_text(&f, content.as_bytes(), copypaste_ipc::content_type::TEXT);
         let first_id = f.store.list(10, 0).unwrap()[0].id.clone();
         f.store.set_pinned(&first_id, true).unwrap();
         let second_id = format!("aggregate-second-{}", crate::now_ms());
@@ -340,7 +276,6 @@ mod tests {
                 nonce,
                 content_type: copypaste_ipc::content_type::TEXT.to_string(),
                 content_hash: crate::compute_content_hash(second_content.as_bytes()),
-                is_sensitive: false,
                 search_text: Some(second_content),
                 created_at: crate::now_ms(),
                 app_bundle_id: None,
@@ -357,7 +292,7 @@ mod tests {
             .collect();
 
         assert!(matches!(
-            export(&f.store, &f.keyring, 0, false),
+            export(&f.store, &f.keyring, 0),
             Err(ExportError::ContentTooLarge)
         ));
         let after: Vec<_> = f

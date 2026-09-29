@@ -67,36 +67,9 @@ describe("History clip presentation", () => {
     },
   );
 
-  it("keeps sensitive and finding content out of row labels", () => {
-    const raw = "secret clipboard value";
-    const redacted = "secret •••• value";
-    const finding = {
-      label: "secret",
-      spans: [],
-      spans_truncated: false,
-      redacted_preview: redacted,
-    };
-
-    const sensitiveLabel = rowLabel(
-      item({ content: raw, is_sensitive: true, sensitive_finding: finding }),
-      null,
-      undefined,
-      translate,
-    );
-    expect(sensitiveLabel).toBe("history.row.sensitiveName");
-    expect(sensitiveLabel).not.toContain(raw);
-    expect(sensitiveLabel).not.toContain(redacted);
-
-    const findingLabel = rowLabel(
-      item({ content: raw, sensitive_finding: finding }),
-      null,
-      undefined,
-      translate,
-    );
-    expect(findingLabel).toBe(
-      `history.row.potentialSensitiveWarning. ${redacted}`,
-    );
-    expect(findingLabel).not.toContain(raw);
+  it("uses arbitrary clipboard text in the row label", () => {
+    const raw = "api_key=abc123; password=visible";
+    expect(rowLabel(item({ content: raw }), null, undefined, translate)).toBe(raw);
   });
 
   it("keeps an ordinary text item without content empty", () => {
@@ -107,6 +80,6 @@ describe("History clip presentation", () => {
         undefined,
         translate,
       ),
-    ).toBe("history.row.empty");
+    ).toBe("an ordinary clipboard entry");
   });
 });

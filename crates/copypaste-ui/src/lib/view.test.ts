@@ -63,16 +63,6 @@ describe("applyView", () => {
     expect(oldest.map((r) => r.id)).toEqual(["pin-old", "pin-new", "loose"]);
   });
 
-  /** A sensitive item has no content at all, so a kind filter must key off the
-   *  flag rather than off text it will never see (INV-10). */
-  it("finds sensitive items by their flag, not by their content", () => {
-    const secrets = applyView(
-      [...rows, item({ id: "s", is_sensitive: true, created_at: 400 })],
-      { ...DEFAULT_VIEW, kinds: ["secret"] },
-    );
-    expect(secrets.map((r) => r.id)).toEqual(["s"]);
-  });
-
   it("returns an empty list rather than everything when nothing matches", () => {
     expect(applyView(rows, { ...DEFAULT_VIEW, kinds: ["color"] })).toHaveLength(0);
   });
@@ -136,18 +126,17 @@ describe("fuzzy and service search merge", () => {
     ]);
   });
 
-  it("never matches or merges a sensitive row", () => {
-    const secret = item({ id: "secret", is_sensitive: true });
-    expect(fuzzyItems([secret], "sensitive")).toEqual([]);
-    expect(mergeSearchResults([], [secret])).toEqual([]);
+  it("matches and merges arbitrary clipboard text", () => {
+    const content = item({ id: "plain", content: "token=value" });
+    expect(fuzzyItems([content], "token")).toEqual([content]);
+    expect(mergeSearchResults([], [content])).toEqual([content]);
   });
 });
 
 /**
  * F-UI-2. The cache exists because `fuzzysort.single` re-indexes a raw string
  * on every call — 12.65 ms per keystroke at 200 × 2 KB, 0.05 ms prepared. It
- * holds plaintext, so what is asserted here is not only that it is used but
- * that a sensitive row can never enter it and that its contents are droppable.
+ * holds plaintext, so it must be releasable on unmount.
  */
 describe("prepared fuzzy targets", () => {
   it("returns the same result as the un-prepared filter", () => {
@@ -181,25 +170,6 @@ describe("prepared fuzzy targets", () => {
     fuzzyItems([item({ id: "a", content: "second" })], "se", targets);
     expect(prepare).toHaveBeenCalledTimes(2);
     prepare.mockRestore();
-  });
-
-  it("never prepares a sensitive row — the check runs before the write", () => {
-    const prepare = vi.spyOn(fuzzysort, "prepare");
-    const secret = item({ id: "secret", is_sensitive: true });
-    const targets = fuzzyTargets();
-
-    expect(targets.prepare(secret)).toBeNull();
-    expect(fuzzyItems([secret], "secret", targets)).toEqual([]);
-    expect(prepare).not.toHaveBeenCalled();
-    prepare.mockRestore();
-  });
-
-  /** A revealed secret still arrives with `content: null` (INV-10); its
-   *  plaintext lives only in `useReveal`, which INV-11 expires. */
-  it("cannot hold a revealed secret, because a revealed row still has no content", () => {
-    const targets = fuzzyTargets();
-    expect(targets.prepare(item({ id: "s", is_sensitive: true }))).toBeNull();
-    expect(targets.prepare(item({ id: "e", content: null }))).toBeNull();
   });
 
   it("drops a row it no longer holds, and everything on release", () => {

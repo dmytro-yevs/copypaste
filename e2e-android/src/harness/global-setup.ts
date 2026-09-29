@@ -91,7 +91,7 @@ async function seed(secret: string, ordinary: string): Promise<void> {
     const before = new Set((await storedItems(app)).map((item) => item.id));
     await shareAndWait(app, secret, async () =>
       (await storedItems(app)).some(
-        (item) => !before.has(item.id) && item.is_sensitive,
+        (item) => !before.has(item.id) && item.content === secret,
       ),
     );
     await shareAndWait(app, ordinary, async () =>

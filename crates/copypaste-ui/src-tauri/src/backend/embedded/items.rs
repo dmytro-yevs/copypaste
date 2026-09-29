@@ -53,14 +53,11 @@ pub(super) async fn search(backend: &EmbeddedBackend, query: &str, limit: u32) -
     let query = query.to_string();
     backend
         .blocking(move |inner| {
-            let mut rows = inner
+            let rows = inner
                 .state
                 .store
                 .search_bounded(&query, limit, MAX_PAGE_CONTENT_BYTES)
                 .map_err(|_| BackendError::internal("history could not be searched"))?;
-            // This read-time layer protects databases written before sensitive
-            // rows were excluded from FTS at write time (storage invariant I7).
-            rows.retain(|row| !row.is_sensitive);
             let mut page = inner.to_wire_page(rows);
             for item in &mut page.items {
                 bound_item_preview(item);
@@ -77,7 +74,6 @@ pub(super) async fn add(backend: &EmbeddedBackend, content: &str) -> Result<Item
             let settings = inner.settings();
             match copypaste_core::ingest::ingest_with_current_retention(
                 &inner.state.store,
-                &inner.state.detector,
                 &inner.state.keyring,
                 &content,
                 copypaste_ipc::content_type::TEXT,
@@ -88,7 +84,7 @@ pub(super) async fn add(backend: &EmbeddedBackend, content: &str) -> Result<Item
                     let item = inner.to_wire(ingested.into_item())?;
                     inner.note_version_written(item.created_at);
                     inner.note_local_version(item.created_at);
-                    inner.publish_items(false, 0);
+                    inner.publish_items(false);
                     Ok(item)
                 }
                 Err(IngestError::Empty) => Err(BackendError::Invalid(MSG_EMPTY)),
@@ -147,25 +143,16 @@ pub(super) async fn add_captured_with_source_icon(
                 }
             }
 
-            let sensitive_floor = app_bundle_id
-                .as_deref()
-                .is_some_and(copypaste_core::sensitive::is_password_manager_app);
-            let metadata = (!sensitive_floor)
-                .then(|| {
-                    source_icon.map(|source_app_icon| copypaste_core::PayloadMetadata {
-                        file: None,
-                        source_app_icon: Some(source_app_icon),
-                    })
-                })
-                .flatten();
+            let metadata = source_icon.map(|source_app_icon| copypaste_core::PayloadMetadata {
+                file: None,
+                source_app_icon: Some(source_app_icon),
+            });
             match copypaste_core::ingest::ingest_into_with_capture_source_metadata_with_current_retention(
                 &inner.state.store,
-                &inner.state.detector,
                 &inner.state.keyring,
                 &content,
                 copypaste_ipc::content_type::TEXT,
                 copypaste_core::now_ms(),
-                sensitive_floor,
                 app_bundle_id.as_deref(),
                 app_name.as_deref(),
                 metadata.as_ref(),
@@ -180,7 +167,7 @@ pub(super) async fn add_captured_with_source_icon(
                     let item = inner.to_wire(item)?;
                     inner.note_version_written(item.created_at);
                     inner.note_local_version(item.created_at);
-                    inner.publish_items(true, 0);
+                    inner.publish_items(true);
                     Ok(Some(CaptureWrite { item, saved }))
                 }
                 Err(IngestError::Empty) => Err(BackendError::Invalid(MSG_EMPTY)),
@@ -254,9 +241,6 @@ pub(super) async fn add_captured_binary_with_source_icon(
                     return Ok(None);
                 }
             }
-            let sensitive_floor = app_bundle_id
-                .as_deref()
-                .is_some_and(copypaste_core::sensitive::is_password_manager_app);
             // Images keep their concrete MIME so the shared image class and
             // bounded preview decoder handle every image/*. Other local files
             // use the established `file` storage type; their validated MIME
@@ -273,7 +257,7 @@ pub(super) async fn add_captured_binary_with_source_icon(
                     })
                 })
                 .flatten();
-            let source_app_icon = (!sensitive_floor).then_some(source_icon).flatten();
+            let source_app_icon = source_icon;
             let metadata = (file.is_some() || source_app_icon.is_some()).then(|| {
                 copypaste_core::PayloadMetadata {
                     file,
@@ -286,7 +270,6 @@ pub(super) async fn add_captured_binary_with_source_icon(
                 &bytes,
                 storage_content_type,
                 copypaste_core::now_ms(),
-                sensitive_floor,
                 app_bundle_id.as_deref(),
                 app_name.as_deref(),
                 metadata.as_ref(),
@@ -300,7 +283,7 @@ pub(super) async fn add_captured_binary_with_source_icon(
                     let item = inner.to_wire(item)?;
                     inner.note_version_written(item.created_at);
                     inner.note_local_version(item.created_at);
-                    inner.publish_items(true, 0);
+                    inner.publish_items(true);
                     Ok(Some(CaptureWrite { item, saved }))
                 }
                 Err(IngestError::Empty) => Err(BackendError::Invalid(MSG_EMPTY)),
@@ -403,7 +386,7 @@ pub(super) async fn delete(backend: &EmbeddedBackend, id: &str) -> Result<()> {
                 Ok(true) => {
                     inner.note_version_written(mutation_started);
                     inner.note_local_version(mutation_started);
-                    inner.publish_items(false, 0);
+                    inner.publish_items(false);
                     Ok(())
                 }
                 Ok(false) => Err(BackendError::NotFound(MSG_NO_ITEM)),
@@ -423,7 +406,7 @@ pub(super) async fn set_pinned(backend: &EmbeddedBackend, id: &str, pinned: bool
                 Err(_) => return Err(BackendError::internal("that item could not be changed")),
             }
             inner.note_local_version(copypaste_core::now_ms());
-            inner.publish_items(false, 0);
+            inner.publish_items(false);
             inner.fetch_preview(&id)
         })
         .await
@@ -441,7 +424,7 @@ pub(super) async fn reorder_pinned(backend: &EmbeddedBackend, ids: &[String]) ->
                 .reorder_pinned(&ids)
                 .map_err(|_| BackendError::internal("the pinned order could not be changed"))?;
             if renumbered > 0 {
-                inner.publish_items(false, 0);
+                inner.publish_items(false);
             }
             Ok(())
         })
@@ -489,7 +472,6 @@ mod tests {
                 nonce,
                 content_type: copypaste_ipc::content_type::TEXT.to_string(),
                 content_hash: copypaste_core::compute_content_hash(content.as_bytes()),
-                is_sensitive: false,
                 search_text: Some(content.to_string()),
                 created_at: copypaste_core::now_ms(),
                 app_bundle_id: None,
@@ -536,7 +518,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sensitive_file_capture_keeps_file_metadata_and_strips_its_icon() {
+    async fn file_capture_keeps_file_metadata() {
         let (backend, _clipboard, _dir) = backend();
         let captured = backend
             .add_captured_binary_with_source_icon(
@@ -569,7 +551,6 @@ mod tests {
             metadata.file,
             copypaste_core::FileMetadata::new("statement.pdf", "application/pdf")
         );
-        assert!(metadata.source_app_icon.is_none());
         assert!(matches!(
             copypaste_core::ClipboardPayload::open(&row, &backend.inner.state.keyring.item_key()),
             Ok(copypaste_core::ClipboardPayload::File {
@@ -703,7 +684,6 @@ mod tests {
         assert_eq!(page.items.len(), 1);
         assert_eq!(page.items[0].id, ranked[0].id);
         assert!(page.next_cursor.is_none());
-        assert!(page.items.iter().all(|item| !item.is_sensitive));
         assert!(
             serde_json::to_string(&crate::model::UiPage::from(page))
                 .unwrap()

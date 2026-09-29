@@ -8,7 +8,6 @@ interface Confirmation {
 }
 
 type HistoryDialogsProps = {
-  reveal: Confirmation;
   bulkDelete: Confirmation & { count: number };
 };
 
@@ -17,23 +16,11 @@ type HistoryDialogsProps = {
  * own piece of state, held by whichever controller owns the operation, so only
  * one can ever be open (INV-18).
  */
-export function HistoryDialogs({
-  reveal,
-  bulkDelete,
-}: HistoryDialogsProps) {
+export function HistoryDialogs({ bulkDelete }: HistoryDialogsProps) {
   const { t } = useTranslation();
 
   return (
     <>
-      <AlertDialog
-        open={reveal.open}
-        onOpenChange={(open) => !open && reveal.onCancel()}
-        title={t("history.reveal.confirm.title")}
-        description={t("history.reveal.confirm.body")}
-        cancel={{ label: t("common.cancel") }}
-        action={{ label: t("history.reveal.confirm.action"), onClick: reveal.onConfirm }}
-      />
-
       {/* Bulk delete has no undo window, unlike the single-row delete
           (§3.1.9), so this dialog is the only gate in front of it. */}
       <AlertDialog

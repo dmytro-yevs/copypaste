@@ -9,13 +9,11 @@ export function TruncatedValue({
   value,
   touchPopover = true,
   copyable = false,
-  sensitive = false,
   onCopy,
 }: {
   value: string;
   touchPopover?: boolean;
   copyable?: boolean;
-  sensitive?: boolean;
   onCopy?: (value: string) => void;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
@@ -23,7 +21,7 @@ export function TruncatedValue({
   const pointer = usePointerKind();
   const { ref: observedRef, width } = useObservedElementSize<HTMLSpanElement>();
   const coarse = pointer === "coarse";
-  const shown = sensitive ? "••••••••" : value;
+  const shown = value;
   const measure = useCallback(() => {
     const element = ref.current;
     setOverflowed(
@@ -43,7 +41,7 @@ export function TruncatedValue({
       {shown}
     </span>
   );
-  if (sensitive || !overflowed) return text;
+  if (!overflowed) return text;
 
   if (!coarse || !touchPopover) {
     return <Tooltip content={value}>{text}</Tooltip>;

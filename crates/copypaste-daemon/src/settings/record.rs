@@ -169,12 +169,7 @@ mod tests {
     /// not turn on, and the exclusion list is not erased.
     #[test]
     fn corrupting_one_field_leaves_every_other_field_alone() {
-        for field in [
-            "poll_interval_ms",
-            "history_limit",
-            "retention_days",
-            "sensitive_ttl_secs",
-        ] {
+        for field in ["poll_interval_ms", "history_limit", "retention_days"] {
             let mut record: Map<String, Value> =
                 serde_json::from_str(&stored(&private_user())).unwrap();
             record.insert(field.to_string(), Value::String("corrupt".into()));

@@ -217,7 +217,7 @@ export function QuickPasteScreen() {
     [items, selectedId],
   );
   const selectedBody = useItemBody(selectedItem);
-  const previewWanted = holding && selectedItem !== null && !selectedItem.is_sensitive;
+  const previewWanted = holding && selectedItem !== null;
   const releasePreview = useCallback(() => {
     previewRequestEpoch.current += 1;
     if (!previewOpen.current) return;

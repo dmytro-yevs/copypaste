@@ -53,15 +53,6 @@ impl SyncCursor {
 /// What the session needs from the local store. The daemon implements it over
 /// its `Store`.
 ///
-/// # Live sensitive items must never leave the device
-///
-/// [`summaries`](SyncSource::summaries) MUST exclude a live item flagged
-/// sensitive, and [`fetch`](SyncSource::fetch) MUST refuse to return one even if
-/// asked. A sensitive tombstone is the exception: it has no payload and must
-/// travel to delete a stale peer copy. The session serves only ids it advertised
-/// in its own summary, so an item that never appeared there cannot be pulled out
-/// of this device by a request. Three layers for one rule, deliberately.
-///
 /// # Apply must guard itself
 ///
 /// [`apply`](SyncSource::apply) is handed a version the session believes wins,
@@ -78,12 +69,11 @@ pub trait SyncSource {
         DeviceProfile::current()
     }
 
-    /// Summaries of everything eligible to sync. Live sensitive items excluded;
-    /// payload-less sensitive tombstones included.
+    /// Summaries of everything eligible to sync.
     fn summaries(&self, since_ms: i64) -> Result<Vec<ItemSummary>, SyncError>;
 
     /// Full items for the given ids, plaintext. Unknown ids are omitted rather
-    /// than erroring; live sensitive ids are omitted too.
+    /// than erroring.
     fn fetch(&self, ids: &[String]) -> Result<Vec<SyncItem>, SyncError>;
 
     /// Applies a remote item. Returns whether it was stored.
