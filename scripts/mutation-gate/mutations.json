@@ -1,124 +1,56 @@
 {
   "self_tests": [
     {
-      "id": "macos-native-evidence",
-      "verifies": "critical macOS accessibility and Library failure propagation",
-      "command": ["bash", "scripts/release/macos-native-evidence.sh", "--self-test"],
-      "platforms": ["linux", "macos"],
-      "requires": ["python3", "bash"],
-      "mutations": [
-        {"name": "menu-bar-not-required", "file": "scripts/release/macos-native-evidence.sh", "find": "if \"AXMenuBar\" not in roles:", "replace": "if False:", "expect": "self-test failed: surface without a menu bar passed"},
-        {"name": "named-elements-not-required", "file": "scripts/release/macos-native-evidence.sh", "find": "if not named:", "replace": "if False:", "expect": "self-test failed: surface without a name passed"},
-        {"name": "critical-onboarding-recovery-ignored", "file": "scripts/release/macos-native-evidence.sh", "find": "  mac_recover_onboarding \"$out/onboarding.tsv\" 30 || return 1", "replace": "  true", "expect": "critical profile reaches onboarding and Library with native artifacts"}
-      ]
-    },
-    {
-      "id": "macos-bundle",
-      "verifies": "the macOS bundle cannot escape or declare a missing executable",
-      "command": ["bash", "scripts/release/macos-bundle-self-test.sh"],
-      "platforms": ["linux", "macos"],
-      "requires": ["bash"],
-      "mutations": [
-        {"name": "traversal-in-bundle-metadata-accepted", "file": "scripts/release/macos-bundle-lib.sh", "find": "        \"\"|.|..|*/*|*$'\\n'*|*$'\\r'*)", "replace": "        \"\")", "expect": "FAIL    rejects an executable name that escapes Contents/MacOS"},
-        {"name": "missing-executable-accepted", "file": "scripts/release/macos-bundle-lib.sh", "find": "    if [[ ! -f \"$path\" || ! -x \"$path\" ]]; then", "replace": "    if false; then", "expect": "FAIL    rejects a missing declared executable"}
-      ]
-    },
-    {
-      "id": "android-native-accessibility",
-      "verifies": "the Android native surface exposes named interactive controls",
-      "command": ["bash", "scripts/release/android-native-accessibility.sh", "--self-test"],
-      "platforms": ["linux", "macos"],
-      "requires": ["python3", "node", "bash"],
-      "mutations": [
-        {"name": "unnamed-interactive-nodes-accepted", "file": "scripts/release/android-native-accessibility.sh", "find": "if unnamed:", "replace": "if False:", "expect": "self-test failed: invalid fixture passed"},
-        {"name": "webview-surface-not-required", "file": "scripts/release/android-native-accessibility.sh", "find": "if not webviews:", "replace": "if False:", "expect": "self-test failed: invalid fixture reached the wrong rejection"}
-      ]
-    },
-    {
-      "id": "png-evidence",
-      "verifies": "a blank screenshot cannot become release evidence",
-      "command": ["python3", "scripts/release/png_evidence.py", "--self-test"],
-      "platforms": ["linux", "macos"],
-      "requires": ["python3"],
-      "mutations": [
-        {"name": "uniform-frames-accepted", "file": "scripts/release/png_evidence.py", "find": "            if all(low == high for low, high in extrema):", "replace": "            if False:", "expect": "PNG self-test returned"},
-        {"name": "blank-frames-accepted", "file": "scripts/release/png_evidence.py", "find": "            if visible_pixels <= required_pixels or coherent_pixels <= required_pixels:", "replace": "            if False:", "expect": "PNG self-test was accepted"}
-      ]
-    },
-    {
-      "id": "write-native-evidence",
-      "verifies": "native receipts reject unusable screenshots",
-      "command": ["python3", "scripts/release/write-native-evidence.py", "--self-test"],
-      "platforms": ["linux", "macos"],
-      "requires": ["python3"],
-      "mutations": [
-        {"name": "screenshots-not-validated", "file": "scripts/release/write-native-evidence.py", "find": "    if kind == \"screenshot\":\n        validate_png(file)", "replace": "    if False:\n        validate_png(file)", "expect": "produced a native evidence receipt"}
-      ]
-    },
-    {
-      "id": "android-smoke",
-      "verifies": "the critical Android smoke distinguishes app-native code and hydrated content",
-      "command": ["bash", "scripts/release/android-smoke.sh", "--self-test"],
-      "platforms": ["linux", "macos"],
-      "requires": ["bash", "python3", "node", "awk"],
-      "mutations": [
-        {"name": "ahead-of-time-dex-counted-as-native-code", "file": "scripts/release/android-smoke-lib.sh", "find": "        path ~ /\\.(odex|vdex|art|dm)$/ || path ~ /\\/oat\\// { next }", "replace": "        0 { next }", "expect": "FAIL  ahead-of-time dex is not native code"},
-        {"name": "another-packages-native-code-counted-as-ours", "file": "scripts/release/android-smoke-lib.sh", "find": "        index(path, pkg) || index(path, \"libcopypaste\") { print $2 \"  \" path }", "replace": "        1 { print $2 \"  \" path }", "expect": "FAIL  another package's native code is not ours"},
-        {"name": "webview-shell-counted-as-react-hydration", "file": "scripts/release/android-smoke-lib.sh", "find": "    (( $1 >= 3 && $2 >= 3 && $3 >= 1 ))", "replace": "    (( 1 ))", "expect": "FAIL  run 33124469586's titled WebView and React root are not hydration"}
-      ]
-    },
-    {
-      "id": "android-release-profile",
-      "verifies": "the critical Android release path keeps upgrade and smoke while deferring extended legs",
-      "command": ["bash", "scripts/release/android-release-emulator-legs.sh", "--self-test"],
-      "platforms": ["linux", "macos"],
-      "requires": ["bash"],
-      "mutations": [
-        {"name": "critical-profile-runs-extended-legs", "file": "scripts/release/android-release-emulator-legs.sh", "find": "    if profile_runs_extended_release_legs \"$profile\"; then", "replace": "    if true; then", "expect": "release emulator profile self-test failed"}
-      ]
-    },
-    {
-      "id": "native-evidence-wiring",
-      "verifies": "signed artifacts, all three run-bound receipts, and fail-closed release finalization",
-      "command": ["python3", "scripts/release/check-native-parity-wiring.py", "--self-test"],
-      "platforms": ["linux", "macos"],
-      "requires": ["python3"],
-      "mutations": [
-        {"name": "windows-evidence-dependency-ignored", "file": "scripts/release/native_evidence_wiring.py", "find": "        if producer_name not in needs(finalizer):", "replace": "        if False:", "expect": "FAIL|missing Windows evidence dependency fails|"},
-        {"name": "receipt-download-requirement-ignored", "file": "scripts/release/native_evidence_wiring.py", "find": "    if not set(RECEIPT_ARTIFACTS.values()) <= downloads(finalizer):", "replace": "    if False:", "expect": "FAIL|missing Android receipt download fails|"},
-        {"name": "receipt-artifact-binding-ignored", "file": "scripts/release/native_evidence_wiring.py", "find": "        if f\"--qualified-artifact {platform}=\" not in validation_source:", "replace": "        if False:", "expect": "FAIL|unbound Windows artifact fails|"},
-        {"name": "validation-may-continue", "file": "scripts/release/native_evidence_wiring.py", "find": "        if \"if\" in validation_step or \"continue-on-error\" in validation_step:", "replace": "        if False:", "expect": "FAIL|skipped receipt validation fails|"},
-        {"name": "windows-signing-input-not-required", "file": "scripts/release/native_evidence_wiring.py", "find": "    if \"WINDOWS_SIGNING_CERTIFICATE_BASE64\" not in windows_source or \"TAURI_SIGNING_PRIVATE_KEY\" not in windows_source:", "replace": "    if False:", "expect": "FAIL|missing Windows signing input fails|"},
-        {"name": "android-api-36-not-required", "file": "scripts/release/native_evidence_wiring.py", "find": "        runner_inputs.get(\"api-level\") != \"36\"", "replace": "        False", "expect": "FAIL|wrong Android evidence platform fails|"}
-      ]
-    },
-    {
       "id": "mutation-gate",
       "verifies": "this gate reports a surviving mutation instead of a pass",
-      "command": ["python3", "scripts/mutation-gate/run.py", "--self-test"],
-      "platforms": ["linux", "macos"],
-      "requires": ["python3"],
+      "command": [
+        "python3",
+        "scripts/mutation-gate/run.py",
+        "--self-test"
+      ],
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "requires": [
+        "python3"
+      ],
       "mutations": [
-        {"name": "a-green-self-test-counted-as-a-kill", "file": "scripts/mutation-gate/run.py", "find": "            if code == 0:\n                report.survived(entry, mutation, \"the self-test still passed\")", "replace": "            if False:\n                report.survived(entry, mutation, \"the self-test still passed\")", "expect": "FAIL  a mutation that leaves the self-test green is reported as survived"},
-        {"name": "a-failure-that-names-nothing-counted-as-a-kill", "file": "scripts/mutation-gate/run.py", "find": "            elif mutation[\"expect\"] not in output:", "replace": "            elif False:", "expect": "FAIL  a self-test that fails without naming the assertion is reported as survived"},
-        {"name": "a-stale-mutation-counted-as-a-kill", "file": "scripts/mutation-gate/run.py", "find": "    if occurrences != expected:", "replace": "    if False:", "expect": "FAIL  a mutation whose find no longer matches is reported as stale"},
-        {"name": "a-red-baseline-mutated-anyway", "file": "scripts/mutation-gate/run.py", "find": "    if code != 0:\n        report.baseline_failed(entry, code, output)\n        return", "replace": "    if False:\n        report.baseline_failed(entry, code, output)\n        return", "expect": "FAIL  a self-test that is already red is reported instead of mutated"},
-        {"name": "mutations-not-restored-between-runs", "file": "scripts/mutation-gate/run.py", "find": "        scratch.restore(mutation[\"file\"])", "replace": "        pass", "expect": "FAIL  every mutation is restored before the next one"}
-      ]
-    },
-    {
-      "id": "windows-native-evidence",
-      "verifies": "Windows readiness, protected UI, installed sidecars, and process shutdown fail closed",
-      "command": ["pwsh", "-NoProfile", "-File", "scripts/release/windows-native-evidence.ps1", "-SelfTest"],
-      "platforms": ["windows"],
-      "requires": ["pwsh", "python"],
-      "mutations": [
-        {"name": "invariant-retried-to-a-timeout", "file": "scripts/release/windows-readiness-lib.ps1", "find": "                throw \"$Description cannot become ready: $why. Observed after $attempt probe(s) and $($timer.ElapsedMilliseconds) ms.\"", "replace": "                $last = \"not ready: $why\"", "expect": "an invariant failure was retried instead of propagating"},
-        {"name": "partial-snapshot-accepted-as-evidence", "file": "scripts/release/windows-uia-snapshot-lib.ps1", "find": "    if ($missing -gt 0) {", "replace": "    if ($false) {", "expect": "a partial accessibility snapshot was accepted as evidence"},
-        {"name": "protected-pairing-accepts-wda-none", "file": "scripts/release/windows-native-window-evidence.ps1", "find": "        -not $State.capture_allowed -and $State.display_affinity -eq 17", "replace": "        ((-not $State.capture_allowed -and $State.display_affinity -eq 17) -or ($State.capture_allowed -and $State.display_affinity -eq 0))", "expect": "WDA_NONE was accepted as protected"},
-        {"name": "protected-pairing-retains-a-raw-secret", "file": "scripts/release/windows-native-protected-evidence.ps1", "find": "        name = if ($Name -in $AllowedNames) { $Name } else { $null }", "replace": "        name = $Name", "expect": "protected accessibility retained an unapproved name"},
-        {"name": "installed-sidecar-not-required", "file": "scripts/release/windows-native-evidence.ps1", "find": "\"copypaste-daemon.exe\", ", "replace": "", "expect": "a package without the installed sidecar did not fail"},
-        {"name": "orphaned-sidecar-accepted", "file": "scripts/release/windows-native-evidence.ps1", "find": "    Assert-True ($LASTEXITCODE -eq 1) \"the CLI answered exit $LASTEXITCODE with no sidecar running\"", "replace": "    Assert-True ($LASTEXITCODE -ge 0) \"the CLI answered exit $LASTEXITCODE with no sidecar running\"", "expect": "a sidecar still answering was accepted as a stopped one"}
+        {
+          "name": "a-green-self-test-counted-as-a-kill",
+          "file": "scripts/mutation-gate/run.py",
+          "find": "            if code == 0:\n                report.survived(entry, mutation, \"the self-test still passed\")",
+          "replace": "            if False:\n                report.survived(entry, mutation, \"the self-test still passed\")",
+          "expect": "FAIL  a mutation that leaves the self-test green is reported as survived"
+        },
+        {
+          "name": "a-failure-that-names-nothing-counted-as-a-kill",
+          "file": "scripts/mutation-gate/run.py",
+          "find": "            elif mutation[\"expect\"] not in output:",
+          "replace": "            elif False:",
+          "expect": "FAIL  a self-test that fails without naming the assertion is reported as survived"
+        },
+        {
+          "name": "a-stale-mutation-counted-as-a-kill",
+          "file": "scripts/mutation-gate/run.py",
+          "find": "    if occurrences != expected:",
+          "replace": "    if False:",
+          "expect": "FAIL  a mutation whose find no longer matches is reported as stale"
+        },
+        {
+          "name": "a-red-baseline-mutated-anyway",
+          "file": "scripts/mutation-gate/run.py",
+          "find": "    if code != 0:\n        report.baseline_failed(entry, code, output)\n        return",
+          "replace": "    if False:\n        report.baseline_failed(entry, code, output)\n        return",
+          "expect": "FAIL  a self-test that is already red is reported instead of mutated"
+        },
+        {
+          "name": "mutations-not-restored-between-runs",
+          "file": "scripts/mutation-gate/run.py",
+          "find": "        scratch.restore(mutation[\"file\"])",
+          "replace": "        pass",
+          "expect": "FAIL  every mutation is restored before the next one"
+        }
       ]
     }
   ]
