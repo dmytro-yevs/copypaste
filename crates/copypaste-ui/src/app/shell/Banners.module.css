@@ -1,7 +1,0 @@
-.bar {
-  flex: none;
-  border-block-end: var(--stroke-1) solid var(--status-error-border);
-  color: var(--err-strong);
-  background: var(--status-error-bg);
-  font-size: var(--fs-sm);
-}

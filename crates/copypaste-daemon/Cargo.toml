@@ -57,11 +57,10 @@ typed-path = "0.12"
 rustix.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
-# Windows clipboard. `arboard` is the cross-platform crate and is already in the
-# tree behind Tauri, but it exposes no sequence number, no arbitrary registered
-# format and no size-before-read — so polling it means reading the clipboard's
-# content every tick, which I-1 forbids and the do-not-record formats exist to
-# prevent. This is arboard's own Windows layer, one level down.
+# Windows clipboard. Cross-platform clipboard crates do not expose a sequence
+# number, arbitrary registered formats, or size-before-read. Polling one means
+# reading the clipboard's content every tick, which I-1 forbids and the
+# do-not-record formats exist to prevent. This is the Windows layer one level down.
 clipboard-win = { version = "5.4", features = ["std"] }
 # Which process wrote the clipboard: `GetClipboardOwner` gives a window, and
 # these four calls turn it into a process image name. The crates that package
