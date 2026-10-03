@@ -43,7 +43,7 @@ impl Inner {
             .store
             .device_names(std::slice::from_ref(&device_id))
             .unwrap_or_default();
-        self.to_wire_with(row, &names).map(|(item, _)| item)
+        self.to_wire_with(row, &names, false).map(|(item, _)| item)
     }
 
     /// [`Inner::to_wire`] with the page's device names already resolved.
@@ -51,6 +51,7 @@ impl Inner {
         &self,
         row: StoredItem,
         names: &HashMap<String, String>,
+        preview: bool,
     ) -> Result<(Item, ClipboardPayload)> {
         let key = self.state.keyring.item_key();
         let payload = ClipboardPayload::open(&row, &key)
@@ -61,7 +62,11 @@ impl Inner {
         // until a session with that device has told us one.
         let device_id = origin_or(&row.origin_device_id, &self.state.device_id).to_string();
         let origin_device_name = names.get(&device_id).cloned();
-        let content = payload.display_text();
+        let (content, truncated) = if preview {
+            payload.display_preview()
+        } else {
+            (payload.display_text(), false)
+        };
         let too_large_to_sync =
             copypaste_cloud::sync::too_large_to_sync(&row.content_type, payload.byte_len());
         let item = Item {
@@ -75,7 +80,7 @@ impl Inner {
             source_app_bundle_id: row.app_bundle_id,
             source_app_name: row.app_name,
             too_large_to_sync,
-            truncated: false,
+            truncated,
         };
         Ok((item, payload))
     }
@@ -104,7 +109,7 @@ impl Inner {
         let mut page = Page::default();
         for row in rows {
             let id = row.id.clone();
-            match self.to_wire_with(row, &names) {
+            match self.to_wire_with(row, &names, true) {
                 Ok((item, _)) => page.items.push(item),
                 Err(_) => {
                     tracing::warn!(%id, "skipping an item that failed to decrypt");
@@ -145,7 +150,7 @@ impl Inner {
                     .store
                     .device_names(std::slice::from_ref(&device_id))
                     .unwrap_or_default();
-                self.to_wire_with(row, &names)
+                self.to_wire_with(row, &names, false)
             }
             Ok(None) => Err(BackendError::NotFound(MSG_NO_ITEM)),
             Err(_) => Err(BackendError::internal("history could not be read")),
