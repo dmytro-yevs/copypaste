@@ -1,8 +1,6 @@
 //! Stable error codes are the UI contract; clients never branch on error text.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     /// No such item; paired devices use `PeerNotFound` (review finding 4).

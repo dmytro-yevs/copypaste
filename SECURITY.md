@@ -1,5 +1,10 @@
 # Security
 
+> Foundation status: the React/Tauri application and its release artifacts have
+> been removed. Rust security controls and the local Supabase harness remain;
+> no Flutter product, Rust bridge, platform host, updater or release is
+> qualified. The sections below record the retained backend security model.
+
 ## Reporting a vulnerability
 
 **Do not open a public GitHub issue for anything exploitable.** Open a private
@@ -41,7 +46,7 @@ one.
 
 | Platform | Store | State |
 |---|---|---|
-| macOS | Keychain, via `security-framework` | Compiled and lint-clean on `macos-14` in CI; **never executed** |
+| macOS | Keychain, via `security-framework` | CI runs isolated-Keychain Rust tests; execution remains unverified until that job has passed on this foundation |
 | Android | Android Keystore. It holds keys, not blobs, so an AES-GCM key that never leaves it wraps the secret, and the wrapped blob sits in app-private storage | **Never compiled** — no NDK on any host here |
 | Linux | `0600` file under the data directory | Development fallback, **not a shipping posture** |
 
@@ -137,13 +142,11 @@ Every security control on a shipping platform is written, reviewed, and never
 observed working. `README.md`'s Unverified table is the full list; the three
 that decide whether anything above holds:
 
-- The **macOS Keychain** store and the **NSPasteboard** capture path. CI
-  compiles and lints them on `macos-14`. Nothing drives a real pasteboard or a
-  real keychain entry.
-- The **Android Keystore** store and the capture ladder. No host here has an
-  NDK, so neither has been compiled; every claim about what Android permits is
-  read out of AOSP source
-  ([`docs/rewrite/android-spike.md`](docs/rewrite/android-spike.md)).
+- The **macOS Keychain** store and the **NSPasteboard** capture path. CI is
+  configured to execute isolated-Keychain and pasteboard Rust tests; they remain
+  unverified until those jobs have passed on this foundation.
+- The **Android Keystore** store and capture behavior. Their Flutter host and
+  Rust bridge are not implemented yet, so no product claim is qualified.
 - **Cloud sync against a live Supabase project.** No deployment has ever had
   `supabase/`'s schema and RLS policies applied to it, so the second layer under
   the row encryption is unproven.
@@ -178,9 +181,8 @@ build and revoke it on every update. See
 
 ## Known limitations
 
-- Android restricts clipboard reads to foreground apps. The four-rung ladder and
-  what each rung costs a user are in
-  [`docs/rewrite/android-clipboard-access.md`](docs/rewrite/android-clipboard-access.md).
+- Android restricts clipboard reads to foreground apps. The new product must
+  define and qualify its capture behavior before release.
 - Linux desktop is a test surface, not a shipping target.
 
 ## Dependency auditing
@@ -188,11 +190,9 @@ build and revoke it on every update. See
 `cargo deny check` and `cargo audit`, both run in CI by
 `.github/workflows/supply-chain.yml` on every push and weekly on a schedule.
 
-`glib 0.18.5` (RUSTSEC-2024-0429) is accepted only in Tauri's unshipped Linux
-desktop subtree through 2026-11-10. Dependabot remains enabled for `glib`;
-`scripts/check_rustsec_policy.py` fails on a changed, stale or expired
-exception. [ADR-0021](docs/adr/0021-accept-the-glib-advisory-as-unshipped.md)
-records the reachability and upstream constraint.
+Rust advisory exceptions remain versioned and checked by
+`scripts/check_rustsec_policy.py`. Flutter, Gradle and platform-host
+dependency policy is required before an application release.
 
 ## Secret scanning
 

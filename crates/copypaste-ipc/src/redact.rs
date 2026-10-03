@@ -6,7 +6,7 @@
 //!
 //! This lives beside the wire types because every client needs it and none of
 //! them can import it from another: the CLI is a binary with no lib target, and
-//! the Tauri bridge is a separate crate. It was written twice before landing
+//! the application client is a separate crate. It was written twice before landing
 //! here, which is the pattern this rewrite exists to stop. A third client must
 //! call this rather than copy it.
 //!

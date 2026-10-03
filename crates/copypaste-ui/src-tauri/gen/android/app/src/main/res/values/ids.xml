@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <item name="pairing_qr" type="id" />
-    <item name="pairing_code" type="id" />
-    <item name="pairing_sas" type="id" />
-</resources>
