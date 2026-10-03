@@ -382,7 +382,7 @@ impl Backend for EmbeddedBackend {
                 let event = match source.recv().await {
                     Ok(event) => event,
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                        inner.items_event(false, 0)
+                        inner.items_event(false)
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 };
