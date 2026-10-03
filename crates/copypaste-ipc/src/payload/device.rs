@@ -3,8 +3,6 @@ use serde::{Deserialize, Serialize};
 use super::PeerInfo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(rename_all = "snake_case")]
 pub enum DeviceObservationProvenance {
     SelfReported,
@@ -13,8 +11,6 @@ pub enum DeviceObservationProvenance {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(rename_all = "snake_case")]
 pub enum DeviceObservationTrust {
     Local,
@@ -23,8 +19,6 @@ pub enum DeviceObservationTrust {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(rename_all = "snake_case")]
 pub enum DevicePlatform {
     Macos,
@@ -70,8 +64,6 @@ impl DevicePlatform {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(rename_all = "snake_case")]
 pub enum DeviceClass {
     Desktop,
@@ -107,8 +99,6 @@ impl DeviceClass {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct DeviceProfileObservation {
     pub display_name: String,
     pub app_version: Option<String>,
@@ -125,8 +115,6 @@ pub struct DeviceProfileObservation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct DeviceEndpointObservation {
     pub lan_endpoint: String,
     pub provenance: DeviceObservationProvenance,
@@ -136,8 +124,6 @@ pub struct DeviceEndpointObservation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct DeviceLatencyObservation {
     pub connect_latency_ms: u64,
     pub provenance: DeviceObservationProvenance,
@@ -147,8 +133,6 @@ pub struct DeviceLatencyObservation {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(rename_all = "snake_case")]
 pub enum DevicePresence {
     Online,
@@ -158,8 +142,6 @@ pub enum DevicePresence {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct DevicePresenceObservation {
     pub state: DevicePresence,
     pub last_seen_ms: i64,
@@ -245,8 +227,6 @@ fn peer_wire_now_ms() -> i64 {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(tag = "availability", rename_all = "snake_case")]
 pub enum ExternalNetworkObservation {
     #[default]
@@ -261,8 +241,6 @@ pub enum ExternalNetworkObservation {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct DeviceDetails {
     pub profile: Option<DeviceProfileObservation>,
     pub endpoint: Option<DeviceEndpointObservation>,

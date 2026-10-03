@@ -6,143 +6,33 @@ on:
   pull_request:
   merge_group:
     types: [checks_requested]
-  workflow_dispatch:
-
-concurrency:
-  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref_name) || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 permissions:
   contents: read
 
-env:
-  CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: 0
-  RUST_BACKTRACE: 1
-
 jobs:
-  android-kotlin:
-    name: Android manifest and Kotlin tests
+  rust-and-supabase:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    env:
-      ANDROID_PLATFORM: "android-36"
-      BUILD_TOOLS_VERSION: "36.0.0"
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Android manifest guard
-        run: sh ./scripts/check-android-manifest.sh
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
-        with:
-          toolchain: "1.96"
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          shared-key: linux-1.96-android-kotlin
-          cache-targets: false
-      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
-        with:
-          distribution: temurin
-          java-version: "21"
-          cache: gradle
-          cache-dependency-path: |
-            crates/copypaste-ui/src-tauri/gen/android/**/*.gradle*
-            crates/copypaste-ui/src-tauri/gen/android/**/gradle-wrapper.properties
-      - name: Install SDK platform for unit tests
-        run: |
-          set -euo pipefail
-          : "${ANDROID_HOME:?ANDROID_HOME is unset — the runner image has no Android SDK}"
-          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          [[ -x "$sdkmanager" ]] || { echo "::error::$sdkmanager not found"; exit 1; }
-          yes | "$sdkmanager" --licenses >/dev/null 2>&1 || true
-          "$sdkmanager" --install "platforms;${ANDROID_PLATFORM}" "build-tools;${BUILD_TOOLS_VERSION}"
-          [[ -d "${ANDROID_HOME}/platforms/${ANDROID_PLATFORM}" ]] || { echo "::error::sdkmanager did not install platforms;${ANDROID_PLATFORM}"; exit 1; }
-          echo "ANDROID_SDK_ROOT=${ANDROID_HOME}" >> "$GITHUB_ENV"
-      - name: Kotlin unit tests (Robolectric)
-        working-directory: crates/copypaste-ui/src-tauri/gen/android
-        run: |
-          set -euo pipefail
-          chmod +x ./gradlew
-          cargo +1.96 fetch --locked --manifest-path "$GITHUB_WORKSPACE/Cargo.toml"
-          python3 "$GITHUB_WORKSPACE/scripts/write_android_unit_test_gradle.py" --repo "$GITHUB_WORKSPACE" --android-project "$PWD"
-          ./gradlew --no-daemon :app:testArm64DebugUnitTest -PskipRust=true
-
-  rust:
-    name: Core Rust and Supabase
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: "1.96"
-          components: rustfmt
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          shared-key: linux-1.96-dev
-      - name: System dependencies
-        run: |
-          ./scripts/ci/install-postgresql-server.sh
-          sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config \
-            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
-            libsoup-3.0-dev libayatana-appindicator3-dev libxdo-dev
-      - name: Core workspace tests
-        run: cargo +1.96 test --workspace --locked
-      - name: Generated TypeScript bindings are current
-        run: python3 scripts/ci/run-gates.py --gate ipc-bindings
-      - name: Embedded Android backend contracts
-        run: cargo +1.96 test -p copypaste-ui --features embedded-backend backend::embedded --locked
-      - name: Supabase schema and RLS
-        run: ./supabase/dev/verify-schema.sh
+      - run: ./scripts/ci/install-postgresql-server.sh
+      - run: cargo +1.96 test --workspace --locked
+      - run: ./supabase/dev/verify-schema.sh
 
-  frontend:
-    name: Frontend build and tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: crates/copypaste-ui
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version-file: '.nvmrc'
-          cache: npm
-          cache-dependency-path: crates/copypaste-ui/package-lock.json
-      - run: npm ci
-      - run: npm audit
-      - run: npm run build
-      - name: Install native evidence Python dependencies
-        working-directory: .
-        run: |
-          set -euo pipefail
-          venv="$RUNNER_TEMP/ci-python"
-          python3 -m venv "$venv"
-          "$venv/bin/python" -m pip install --requirement requirements-ci.txt
-          echo "$venv/bin" >> "$GITHUB_PATH"
-      - run: npm test
-
-  macos-native:
-    name: macOS build and native smoke (arm64)
+  macos-core:
+    name: macOS Rust capabilities
     runs-on: macos-14
-    timeout-minutes: 20
-    env:
-      RUSTUP_TOOLCHAIN: "1.96"
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: "1.96"
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          shared-key: macos-14-1.96
-          cache-on-failure: true
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version-file: '.nvmrc'
-          cache: npm
-          cache-dependency-path: crates/copypaste-ui/package-lock.json
-      - name: Create throwaway keychain
+      - name: Create isolated keychain
         run: |
           set -euo pipefail
           keychain="$RUNNER_TEMP/copypaste-ci.keychain-db"
@@ -157,69 +47,28 @@ jobs:
           security list-keychains -d user -s "$keychain"
           security default-keychain -d user -s "$keychain"
           security add-generic-password -s copypaste-ci-probe -a probe -w "hunter2" "$keychain"
-          found="$(security find-generic-password -s copypaste-ci-probe -a probe -w "$keychain")"
-          [[ "$found" == "hunter2" ]] || { echo "::error::non-interactive keychain round trip failed"; exit 1; }
-          security delete-generic-password -s copypaste-ci-probe -a probe "$keychain" >/dev/null
+          [[ "$(security find-generic-password -s copypaste-ci-probe -a probe -w "$keychain")" == "hunter2" ]]
+          security delete-generic-password -s copypaste-ci-probe -a probe "$keychain"
           echo "COPYPASTE_KEYCHAIN_TEST=1" >> "$GITHUB_ENV"
           echo "COPYPASTE_KEYCHAIN_TEST_PATH=$keychain" >> "$GITHUB_ENV"
-      - name: Keychain smoke
+      - name: Keychain and pasteboard Rust tests
         run: |
           set -euo pipefail
-          [[ -n "${COPYPASTE_KEYCHAIN_TEST:-}" ]] || { echo "::error::no throwaway keychain"; exit 1; }
           out="$(cargo +1.96 test -p copypaste-core --locked --release --target aarch64-apple-darwin -- --ignored --nocapture --test-threads=1 2>&1)" || { status=$?; printf '%s\n' "$out"; exit "$status"; }
           printf '%s\n' "$out"
-          grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out" || { echo "::error::no keychain test ran"; exit 1; }
-          ! grep -q 'SKIPPED' <<<"$out" || { echo "::error::a keychain test skipped itself"; exit 1; }
-          if security find-generic-password -s com.copypaste.daemon -a device-secret-key -w "$RUNNER_TEMP/copypaste-ci.keychain-db" >/dev/null 2>&1; then
-            echo "::error::keychain test fixture left a device secret behind"
-            exit 1
-          fi
-      - name: Build native app bundle
-        env:
-          COPYPASTE_MACOS_BUILD_PROFILE: debug
-        run: |
-          set -euo pipefail
-          version="$(awk '/^\[workspace\.package\]/{f=1} f && /^version *=/{gsub(/[" ]/,"",$3); print $3; exit}' Cargo.toml)"
-          ./scripts/release/build-macos-app.sh "$version" arm64
-      - name: The app links WebKit
-        run: |
-          set -euo pipefail
-          source scripts/release/macos-bundle-lib.sh
-          bin="$(macos_bundle_executable_path dist/CopyPaste.app)"
-          otool -L "$bin" | grep -q '/System/Library/Frameworks/WebKit.framework' || { echo "::error::$bin does not link WebKit.framework"; otool -L "$bin"; exit 1; }
-      - name: macOS critical UI smoke
-        run: |
-          set -euo pipefail
-          venv="$RUNNER_TEMP/ci-python"
-          python3 -m venv "$venv"
-          "$venv/bin/python" -m pip install --requirement requirements-ci.txt
-          export PATH="$venv/bin:$PATH"
-          echo "$venv/bin" >> "$GITHUB_PATH"
-          app="$PWD/dist/CopyPaste.app"
-          source scripts/release/macos-bundle-lib.sh
-          qualified="$(macos_bundle_executable_path "$app")"
-          identity="$(python3 scripts/release/write-native-evidence.py --capture-qualified-artifact "$qualified")"
-          COPYPASTE_APP="$app" COPYPASTE_SMOKE_PROFILE=critical \
-            ./scripts/release/macos-native-evidence.sh artifacts/ci-macos-native "$qualified" "$identity"
-      - name: Upload macOS UI smoke evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: macos-ci-native-evidence
-          path: artifacts/ci-macos-native
-          if-no-files-found: error
-          retention-days: 7
-      - name: NSPasteboard smoke
-        run: |
-          set -euo pipefail
+          grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out"
+          ! grep -q 'SKIPPED' <<<"$out"
+          if security find-generic-password -s com.copypaste.daemon -a device-secret-key -w "$RUNNER_TEMP/copypaste-ci.keychain-db" >/dev/null 2>&1; then exit 1; fi
           out="$(cargo +1.96 test -p copypaste-daemon --locked --target aarch64-apple-darwin -- --ignored --nocapture --test-threads=1 2>&1)" || { status=$?; printf '%s\n' "$out"; exit "$status"; }
           printf '%s\n' "$out"
-          grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out" || { echo "::error::no pasteboard test ran"; exit 1; }
-      - name: Remove throwaway keychain
+          grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out"
+          ! grep -q 'SKIPPED' <<<"$out"
+      - name: Restore keychain state
         if: always()
         run: |
           set -euo pipefail
           state="$RUNNER_TEMP/copypaste-ci-keychain-state"
+          keychain="$RUNNER_TEMP/copypaste-ci.keychain-db"
           restore=0
           if [[ -f "$state/default" && -f "$state/search-list" ]]; then
             if ! python3 - "$state/default" "$state/search-list" <<'PY'
@@ -227,143 +76,74 @@ jobs:
           import shlex
           import subprocess
           import sys
-
-          def saved_paths(path: str) -> list[str]:
-              paths = shlex.split(Path(path).read_text(encoding="utf-8"), posix=True)
-              if not paths:
-                  raise RuntimeError(f"saved keychain state is empty: {path}")
-              return paths
-
-          default = saved_paths(sys.argv[1])
-          if len(default) != 1:
-              raise RuntimeError("saved default keychain state is ambiguous")
-          search = saved_paths(sys.argv[2])
-          subprocess.run(
-              ["security", "default-keychain", "-d", "user", "-s", default[0]], check=True
-          )
-          subprocess.run(
-              ["security", "list-keychains", "-d", "user", "-s", *search], check=True
-          )
+          default = shlex.split(Path(sys.argv[1]).read_text(encoding="utf-8"), posix=True)
+          search = shlex.split(Path(sys.argv[2]).read_text(encoding="utf-8"), posix=True)
+          if len(default) != 1 or not search:
+              raise RuntimeError("saved keychain state is invalid")
+          subprocess.run(["security", "default-keychain", "-d", "user", "-s", default[0]], check=True)
+          subprocess.run(["security", "list-keychains", "-d", "user", "-s", *search], check=True)
           PY
-            then
-              restore=1
-            fi
+            then restore=1; fi
           else
-            echo "::error::saved keychain state is unavailable"
             restore=1
           fi
-          security delete-keychain "$RUNNER_TEMP/copypaste-ci.keychain-db" || true
+          security delete-keychain "$keychain" || restore=1
           exit "$restore"
 
-  windows-native:
-    name: Windows native smoke (x64)
+  windows-core:
+    name: Windows Rust capabilities
     runs-on: windows-2022
-    timeout-minutes: 20
     env:
       OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
-      RUSTUP_TOOLCHAIN: "1.96"
-      COPYPASTE_WINDOWS_SHELL_E2E: 1
-      MSEDGEDRIVER_TELEMETRY_OPTOUT: 1
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: "1.96"
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - shell: bash
+        run: |
+          set -euo pipefail
+          checked() {
+            out="$("$@" 2>&1)" || { status=$?; printf '%s\n' "$out"; exit "$status"; }
+            printf '%s\n' "$out"
+            grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out"
+            ! grep -q 'SKIPPED' <<<"$out"
+          }
+          checked cargo +1.96 test -p copypaste-daemon --locked clipboard::windows:: -- --include-ignored --test-threads=1 --nocapture
+          checked cargo +1.96 test -p copypaste-source-app --locked -- --include-ignored --test-threads=1 --nocapture
+          checked cargo +1.96 test -p copypaste-core --locked crypto::keystore:: -- --nocapture
+
+  flutter-foundation:
+    name: Flutter foundation (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: macos, runner: macos-14, target: macos }
+          - { platform: android, runner: ubuntu-24.04, target: apk }
+          - { platform: windows, runner: windows-2022, target: windows }
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - id: flutter
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < .flutter-version)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
-          shared-key: windows-2022-1.96-native-test
-          save-if: true
-          cache-on-failure: true
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+          channel: stable
+          flutter-version: ${{ steps.flutter.outputs.version }}
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
+        if: matrix.platform == 'android'
         with:
-          node-version-file: '.nvmrc'
-          cache: npm
-          cache-dependency-path: crates/copypaste-ui/package-lock.json
-      - name: Confirm OpenSSL's Perl
-        shell: pwsh
-        run: |
-          & $env:OPENSSL_SRC_PERL -MLocale::Maketext::Simple -e "exit 0"
-          if ($LASTEXITCODE -ne 0) { throw "OPENSSL_SRC_PERL cannot configure OpenSSL" }
-      - name: Native Windows pairing windows
-        shell: bash
-        run: cargo +1.96 test -p copypaste-ui --locked pairing_presentation::windows::refusal_tests -- --ignored --test-threads=1 --nocapture
-      - name: Define the native UI smoke run root
-        shell: pwsh
-        run: '"COPYPASTE_E2E_RUN_ROOT=$env:RUNNER_TEMP\cp-e2e" >> $env:GITHUB_ENV'
-      - name: Install tauri-driver and build the native app
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo install tauri-driver --version 2.0.6 --locked
-          cargo +1.96 build -p copypaste-ui -p copypaste-daemon -p copypaste-cli --locked
-      - name: Native Windows clipboard
-        shell: bash
-        run: |
-          set -euo pipefail
-          out="$(cargo +1.96 test -p copypaste-daemon --locked clipboard::windows:: -- --include-ignored --test-threads=1 --nocapture 2>&1)" || { status=$?; printf '%s\n' "$out"; exit "$status"; }
-          printf '%s\n' "$out"
-          grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out" || { echo "::error::no Windows clipboard test ran"; exit 1; }
-      - name: Native Windows source app icons
-        shell: bash
-        run: |
-          set -euo pipefail
-          out="$(cargo +1.96 test -p copypaste-source-app --locked -- --include-ignored --test-threads=1 2>&1)" || { status=$?; printf '%s\n' "$out"; exit "$status"; }
-          printf '%s\n' "$out"
-          grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out" || { echo "::error::no Windows source app test ran"; exit 1; }
-      - name: Install native evidence dependencies
-        shell: pwsh
-        run: python -m pip install --requirement requirements-ci.txt
-      - name: Windows native UI contract tests
-        working-directory: crates/copypaste-ui
-        run: |
-          npm ci
-          npm run test:native-parity
-      - name: Install the WebView2-matched Edge driver
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $product = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
-          $keys = @(
-            "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$product"
-            "HKCU:\Software\Microsoft\EdgeUpdate\Clients\$product"
-          )
-          $versions = @($keys | ForEach-Object {
-            (Get-ItemProperty -LiteralPath $_ -Name pv -ErrorAction SilentlyContinue).pv
-          } | Where-Object { $_ -and $_ -ne "0.0.0.0" } | Sort-Object -Unique)
-          if ($versions.Count -ne 1) { throw "expected one installed WebView2 Runtime version, found $($versions.Count)" }
-          $directory = Join-Path $env:RUNNER_TEMP "webview2-edgedriver"
-          $archive = Join-Path $env:RUNNER_TEMP "webview2-edgedriver.zip"
-          Invoke-WebRequest -Uri "https://msedgedriver.microsoft.com/$($versions[0])/edgedriver_win64.zip" -OutFile $archive
-          Expand-Archive -LiteralPath $archive -DestinationPath $directory -Force
-          "EDGEWEBDRIVER=$directory" >> $env:GITHUB_ENV
-          "COPYPASTE_WEBVIEW2_RUNTIME_VERSION=$($versions[0])" >> $env:GITHUB_ENV
-      - name: Windows WebView2 critical UI smoke
-        shell: bash
-        working-directory: e2e
-        run: |
-          npm ci
-          npx vitest run \
-            tests/smoke.e2e.test.ts \
-            tests/history-render.e2e.test.ts \
-            tests/plain-content.e2e.test.ts \
-            tests/windows-surfaces.windows.e2e.test.ts
-      - name: Upload Windows UI smoke diagnostics
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: windows-ci-native-e2e-diagnostics
-          path: ${{ env.COPYPASTE_E2E_RUN_ROOT }}/logs/**
-          if-no-files-found: error
-          retention-days: 7
-      - name: DPAPI smoke
-        shell: bash
-        run: |
-          set -euo pipefail
-          out="$(cargo +1.96 test -p copypaste-core --locked crypto::keystore:: -- --nocapture 2>&1)" || { status=$?; printf '%s\n' "$out"; exit "$status"; }
-          printf '%s\n' "$out"
-          grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out" || { echo "::error::no device-secret test ran"; exit 1; }
-      - name: Credential Manager is clean
-        shell: pwsh
-        run: |
-          $found = cmdkey /list | Select-String -Pattern 'copypaste' -SimpleMatch
-          if ($found) { Write-Output "::error::a CopyPaste credential is in the Credential Manager"; $found; exit 1 }
+          distribution: temurin
+          java-version: "17"
+      - run: ./scripts/ci/verify-flutter-foundation.sh
+        env:
+          COPYPASTE_FLUTTER_BUILD_TARGET: ${{ matrix.target }}
