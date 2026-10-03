@@ -20,9 +20,18 @@ impl SystemDeviceName {
 
     #[cfg(not(target_os = "android"))]
     pub fn current() -> Self {
-        let system = whoami::devicename().ok();
-        let model = model();
-        Self::from_sources(system.as_deref(), model.as_deref())
+        let read = || {
+            let system = whoami::devicename().ok();
+            let model = model();
+            Self::from_sources(system.as_deref(), model.as_deref())
+        };
+        // SystemConfiguration creates autoreleased temporary objects even
+        // though whoami owns its returned CFString. Rust workers have no Cocoa
+        // event loop to drain them between the periodic name lookups.
+        #[cfg(target_os = "macos")]
+        return objc2::rc::autoreleasepool(|_| read());
+        #[cfg(not(target_os = "macos"))]
+        read()
     }
 }
 

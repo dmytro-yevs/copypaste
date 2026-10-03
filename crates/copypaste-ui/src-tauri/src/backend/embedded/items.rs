@@ -11,7 +11,7 @@ use copypaste_ipc::{ImagePreview, Item, MAX_PAGE_CONTENT_BYTES};
 use super::messages::{
     MSG_BAD_CURSOR, MSG_EMPTY, MSG_NOT_STORED, MSG_NO_ITEM, MSG_TOO_LARGE, MSG_UNSUPPORTED_CONTENT,
 };
-use super::rows::{bound_item_preview, clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
+use super::rows::{clamp_page, DEFAULT_LIST_PAGE, DEFAULT_SEARCH_PAGE};
 use super::EmbeddedBackend;
 use crate::backend::{BackendError, CaptureWrite, Page, Result};
 use crate::capture::model::CaptureSource;
@@ -37,9 +37,6 @@ pub(super) async fn list(
                 .map_err(|_| BackendError::internal("history could not be read"))?;
             let next = page.next.map(|cursor| cursor.token());
             let mut wire = inner.to_wire_page(page.items);
-            for item in &mut wire.items {
-                bound_item_preview(item);
-            }
             // The cursor belongs to the store page, not the rows that survived
             // decryption; unreadable rows still occupy their original window.
             wire.next_cursor = next;
@@ -58,11 +55,7 @@ pub(super) async fn search(backend: &EmbeddedBackend, query: &str, limit: u32) -
                 .store
                 .search_bounded(&query, limit, MAX_PAGE_CONTENT_BYTES)
                 .map_err(|_| BackendError::internal("history could not be searched"))?;
-            let mut page = inner.to_wire_page(rows);
-            for item in &mut page.items {
-                bound_item_preview(item);
-            }
-            Ok(page)
+            Ok(inner.to_wire_page(rows))
         })
         .await
 }
@@ -449,7 +442,6 @@ mod tests {
             bytes,
             content_type,
             copypaste_core::now_ms(),
-            false,
             None,
             metadata,
             &backend.inner.settings(),
@@ -568,10 +560,37 @@ mod tests {
         let listed = backend.list(20, None).await.unwrap();
         assert!(listed.items[0].truncated);
         assert_ne!(listed.items[0].content, body);
+        assert_eq!(
+            listed.items[0].content.capacity(),
+            copypaste_ipc::limits::LIST_PREVIEW_BYTES
+        );
 
         backend.copy(&item.id).await.unwrap();
         backend.copy_as_plain_text(&item.id).await.unwrap();
         assert_eq!(clipboard.entries(), vec![body.clone(), body]);
+    }
+
+    #[tokio::test]
+    async fn list_and_search_retain_only_preview_sized_text_buffers() {
+        let (backend, _clipboard, _dir) = backend();
+        let body = format!("needle {}", "x".repeat(1024 * 1024));
+        backend.add(&body).await.unwrap();
+        for page in [
+            backend.list(20, None).await.unwrap(),
+            backend.search("needle", 20).await.unwrap(),
+        ] {
+            assert_eq!(page.items.len(), 1);
+            let item = &page.items[0];
+            assert!(item.truncated);
+            assert_eq!(
+                item.content,
+                body[..copypaste_ipc::limits::LIST_PREVIEW_BYTES]
+            );
+            assert_eq!(
+                item.content.capacity(),
+                copypaste_ipc::limits::LIST_PREVIEW_BYTES
+            );
+        }
     }
 
     #[tokio::test]

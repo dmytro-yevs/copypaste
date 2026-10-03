@@ -36,7 +36,7 @@ pub(super) fn to_wire_and_payload(
         warn!(error = ?e, "could not resolve an item's origin device");
         state.meta.here()
     });
-    to_wire_with(row, &origin, &state.keyring.item_key())
+    to_wire_with(row, &origin, &state.keyring.item_key(), false)
 }
 
 /// Convert with the origin and item key already resolved.
@@ -47,6 +47,7 @@ fn to_wire_with(
     row: StoredItem,
     origin: &crate::meta::Origin,
     key: &copypaste_core::ItemKey,
+    preview: bool,
 ) -> Result<(Item, ClipboardPayload), copypaste_core::CryptoError> {
     // The item id is the AAD: a row decrypted under another row's identity must
     // fail authentication, not fall back to a plaintext read (AGENTS.md rule 4,
@@ -57,7 +58,11 @@ fn to_wire_with(
     // follows is a fixed overhead the cap does not count.
     let too_large_to_sync =
         copypaste_cloud::sync::too_large_to_sync(&row.content_type, payload.byte_len());
-    let content = payload.display_text();
+    let (content, truncated) = if preview {
+        payload.display_preview()
+    } else {
+        (payload.display_text(), false)
+    };
     let item = Item {
         id: row.id,
         content,
@@ -69,7 +74,7 @@ fn to_wire_with(
         source_app_bundle_id: row.app_bundle_id,
         source_app_name: row.app_name,
         too_large_to_sync,
-        truncated: false,
+        truncated,
     };
     Ok((item, payload))
 }
@@ -106,7 +111,7 @@ pub(super) fn decrypt_rows(state: &AppState, rows: Vec<StoredItem>) -> ItemPage 
     for row in rows {
         let row_id = row.id.clone();
         let origin = origins.get(&row_id).unwrap_or(&here);
-        match to_wire_with(row, origin, &key) {
+        match to_wire_with(row, origin, &key, true) {
             Ok((item, _)) => page.items.push(item),
             Err(e) => {
                 warn!(id = %row_id, error = ?e, "skipping an item that failed to decrypt");

@@ -77,30 +77,38 @@ pub fn clamp_page(limit: u32, default: u32) -> u32 {
 
 pub const LIST_PREVIEW_BYTES: usize = 1024;
 
-pub fn bound_preview(content: &mut String) -> bool {
+/// Borrow the preview so callers can copy only the displayed prefix.
+pub fn preview_text(content: &str) -> (&str, bool) {
     if content.len() > MAX_CONTENT_BYTES {
-        let first = unicode_segmentation::UnicodeSegmentation::graphemes(content.as_str(), true)
+        let first = unicode_segmentation::UnicodeSegmentation::graphemes(content, true)
             .next()
             .map_or(0, str::len);
         if first > MAX_CONTENT_BYTES {
-            content.clear();
-            return true;
+            return ("", true);
         }
     }
     if content.len() <= LIST_PREVIEW_BYTES {
-        return false;
+        return (content, false);
     }
     let mut cut = 0;
-    for (at, cluster) in
-        unicode_segmentation::UnicodeSegmentation::grapheme_indices(content.as_str(), true)
+    for (at, cluster) in unicode_segmentation::UnicodeSegmentation::grapheme_indices(content, true)
     {
         if at + cluster.len() > LIST_PREVIEW_BYTES && cut > 0 {
             break;
         }
         cut = at + cluster.len();
     }
-    content.truncate(cut);
-    true
+    (&content[..cut], true)
+}
+
+pub fn bound_preview(content: &mut String) -> bool {
+    let (preview, truncated) = preview_text(content);
+    if preview.len() < content.len() {
+        // Truncation alone keeps the full clipboard body's allocation alive
+        // until the response is sent, even when the wire preview is tiny.
+        *content = preview.to_owned();
+    }
+    truncated
 }
 
 #[cfg(test)]
@@ -120,6 +128,14 @@ mod tests {
         let mut content = "a".repeat(LIST_PREVIEW_BYTES + 1);
         assert!(bound_preview(&mut content));
         assert_eq!(content.len(), LIST_PREVIEW_BYTES);
+    }
+
+    #[test]
+    fn a_short_preview_releases_the_full_body_capacity() {
+        let mut content = "a".repeat(1024 * 1024);
+        assert!(bound_preview(&mut content));
+        assert_eq!(content.len(), LIST_PREVIEW_BYTES);
+        assert_eq!(content.capacity(), LIST_PREVIEW_BYTES);
     }
 
     #[test]

@@ -110,9 +110,6 @@ pub(super) fn list(state: &AppState, id: u64, limit: u32, cursor: Option<&str>) 
 
     let next = page.next.map(|cursor| cursor.token());
     let mut wire = decrypt_rows(state, page.items);
-    for item in &mut wire.items {
-        bound_item_preview(item);
-    }
     wire.next_cursor = next;
     Response::ok(id, ResponseData::Page(wire))
 }
@@ -123,13 +120,7 @@ pub(super) fn search(state: &AppState, id: u64, query: &str, limit: u32) -> Resp
         .store
         .search_bounded(query, limit, MAX_PAGE_CONTENT_BYTES)
     {
-        Ok(rows) => {
-            let mut page = decrypt_rows(state, rows);
-            for item in &mut page.items {
-                bound_item_preview(item);
-            }
-            Response::ok(id, ResponseData::Page(page))
-        }
+        Ok(rows) => Response::ok(id, ResponseData::Page(decrypt_rows(state, rows))),
         Err(e) => storage_error(id, "search", &e),
     }
 }
@@ -466,6 +457,10 @@ mod tests {
         };
         assert_eq!(whole.items.len(), PAGE);
         assert!(whole.items.iter().all(|item| item.truncated));
+        assert!(whole
+            .items
+            .iter()
+            .all(|item| item.content.capacity() <= LIST_PREVIEW_BYTES));
         for item in &mut whole.items {
             item.content = item.content.repeat(BODY / LIST_PREVIEW_BYTES);
             item.truncated = false;
