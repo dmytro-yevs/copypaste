@@ -41,8 +41,6 @@ pub const KNOWN: &[&str] = &[TEXT, RICH_TEXT, HTML, IMAGE_PNG, IMAGE_TIFF, FILE]
 /// payload. Clients receive this closed class beside it and must not infer a
 /// more specific base category from the raw value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(rename_all = "snake_case")]
 pub enum ContentClass {
     Text,

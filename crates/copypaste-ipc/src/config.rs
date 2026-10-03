@@ -53,8 +53,6 @@ const fn default_storage_quota_bytes() -> u64 {
 /// `set_config`, so a UI can tell the user "this one needs a restart" instead
 /// of leaving them to notice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(rename_all = "snake_case")]
 pub enum Liveness {
     /// Applied by the next use — the capture loop reads its interval each tick,
@@ -79,8 +77,6 @@ pub enum Liveness {
 /// `sound_on_copy` and `notify_on_copy` are separate live settings. Platform
 /// feedback never depends on notification permission.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(default)]
 pub struct ConfigData {
     /// Stop recording clipboard changes. Persisted so a restart cannot
@@ -222,8 +218,6 @@ fn range<T: PartialOrd + std::fmt::Display>(
 /// Every field is optional so a client can set one without reading, editing and
 /// writing the whole record; full-record replacement loses concurrent edits.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct ConfigPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub private_mode: Option<bool>,
