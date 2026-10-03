@@ -42,9 +42,7 @@ impl ClipboardPayload {
         match copypaste_ipc::content_type::classify(&row.content_type) {
             ContentClass::Text => {
                 let bytes = decrypt(&row.content_ciphertext, &row.nonce, key, &row.id)?;
-                Ok(Self::Text(Zeroizing::new(
-                    String::from_utf8_lossy(&bytes).into_owned(),
-                )))
+                Ok(Self::Text(text_from_bytes(bytes)))
             }
             ContentClass::Image => Ok(Self::Image {
                 content_type: row.content_type.clone(),
@@ -79,6 +77,18 @@ impl ClipboardPayload {
         }
     }
 
+    /// Build a list/search preview without cloning the full authenticated body.
+    #[must_use]
+    pub fn display_preview(&self) -> (String, bool) {
+        match self {
+            Self::Text(text) => {
+                let (preview, truncated) = copypaste_ipc::limits::preview_text(text);
+                (preview.to_owned(), truncated)
+            }
+            _ => (self.display_text(), false),
+        }
+    }
+
     /// The only variants with a meaningful plain-text representation.
     #[must_use]
     pub fn plain_text(&self) -> Option<&str> {
@@ -95,6 +105,18 @@ impl ClipboardPayload {
             Self::Image { bytes, .. } | Self::File { bytes, .. } | Self::Unsupported { bytes } => {
                 bytes.len()
             }
+        }
+    }
+}
+
+fn text_from_bytes(mut bytes: Zeroizing<Vec<u8>>) -> Zeroizing<String> {
+    // A valid UTF-8 body can keep the decryption buffer. Preserve the existing
+    // lossy behavior for legacy text, and zeroize its original invalid bytes.
+    match String::from_utf8(std::mem::take(&mut *bytes)) {
+        Ok(text) => Zeroizing::new(text),
+        Err(error) => {
+            let bytes = Zeroizing::new(error.into_bytes());
+            Zeroizing::new(String::from_utf8_lossy(&bytes).into_owned())
         }
     }
 }
@@ -164,6 +186,37 @@ mod tests {
     }
 
     #[test]
+    fn valid_text_keeps_the_decryption_allocation() {
+        let bytes = Zeroizing::new(b"authenticated text".to_vec());
+        let allocation = bytes.as_ptr();
+        let text = text_from_bytes(bytes);
+        assert_eq!(text.as_ptr(), allocation);
+        assert_eq!(&*text, "authenticated text");
+    }
+
+    #[test]
+    fn invalid_utf8_keeps_the_existing_lossy_text_behavior() {
+        let text = text_from_bytes(Zeroizing::new(vec![b'a', 0xff, b'b']));
+        assert_eq!(&*text, "a\u{fffd}b");
+    }
+
+    #[test]
+    fn a_preview_does_not_retain_a_full_size_display_copy() {
+        let body = "a".repeat(1024 * 1024);
+        let (row, key) = stored(copypaste_ipc::content_type::TEXT, body.as_bytes(), None);
+        let payload = ClipboardPayload::open(&row, &key).unwrap();
+        let (preview, truncated) = payload.display_preview();
+        assert!(truncated);
+        assert_eq!(preview.len(), copypaste_ipc::limits::LIST_PREVIEW_BYTES);
+        assert_eq!(preview.capacity(), preview.len());
+        assert_eq!(payload.plain_text(), Some(body.as_str()));
+
+        let mut corrupted = row;
+        *corrupted.content_ciphertext.last_mut().unwrap() ^= 1;
+        assert!(ClipboardPayload::open(&corrupted, &key).is_err());
+    }
+
+    #[test]
     fn image_file_and_unknown_keep_bytes_separate_from_display_labels() {
         let file = FileMetadata::new("note.bin", "application/octet-stream").unwrap();
         for (content_type, bytes, metadata, expected) in [
@@ -190,6 +243,7 @@ mod tests {
             let payload = ClipboardPayload::open(&row, &key).unwrap();
             assert_eq!(payload.byte_len(), bytes.len());
             assert_eq!(payload.display_text(), expected);
+            assert_eq!(payload.display_preview(), (expected.to_string(), false));
             assert_eq!(payload.plain_text(), None, "{content_type}");
         }
     }
