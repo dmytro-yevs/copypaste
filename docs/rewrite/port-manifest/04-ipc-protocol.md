@@ -2,7 +2,8 @@
 
 CopyPaste v2 has one typed local IPC contract. `copypaste-ipc` owns request
 methods, response payloads, error codes, limits and protocol metadata. The
-daemon, CLI and Tauri bridge consume those types directly.
+daemon and CLI consume those types directly. A future Flutter bridge must derive
+from this Rust-owned contract.
 
 There are no alias commands, retired envelopes, string-dispatch escape hatches,
 decode-only requests or dual-protocol listeners. A request either decodes as the
@@ -33,10 +34,10 @@ does not reimplement storage, crypto, sync or presentation policy.
    those enums.
 5. Daemon routing is an exhaustive match on `Method`; no `_` arm turns a new
    method into runtime “unknown method”.
-6. CLI and Tauri wrappers deserialize typed payloads. They do not claim an
+6. CLI and future client wrappers deserialize typed payloads. They do not claim an
    arbitrary result type for a string command.
-7. TypeScript output is generated from the Rust owner and is never edited by
-   hand.
+7. A future Flutter bridge is generated or reviewed from the Rust owner and is
+   never hand-edited as a competing protocol definition.
 
 One protocol number represents the current v2 contract. A different number is
 a hard mismatch, not a hint to retry another decoder. The mismatch remains
@@ -283,9 +284,10 @@ Stable rule IDs used by source comments:
 ### 9.1 Type ownership
 
 - Every `Method` variant is routed exactly once by an exhaustive match.
-- Daemon, CLI and Tauri wrappers compile against the same request/result types.
+- Daemon, CLI and future client wrappers compile against the same request/result
+  types.
 - An unknown command literal and a mismatched result association fail typecheck.
-- Generated TypeScript matches the Rust generation snapshot.
+- Any future generated client binding matches the Rust generation snapshot.
 - Long-running and readiness classification are exhaustive; adding a method
   without deciding both fails compilation or a required test.
 

@@ -1,12 +1,9 @@
 # ADR-0005 — Android capture: decisions in Rust, facts from Kotlin
 
 **Status:** accepted · 2026-07-30
-**Scope:** how the four-rung ladder in
-[`docs/rewrite/android-clipboard-access.md`](../rewrite/android-clipboard-access.md)
-is built. That document is the specification and this one is the shape of the
-implementation; where they disagree, it wins.
-**Related:** [ADR-0002](0002-one-cross-platform-app.md) (one Tauri app),
-[ADR-0003](0003-one-command-surface-two-backends.md).
+**Scope:** Android platform capture responsibilities. The former host-specific
+implementation was retired; this decision preserves the platform boundary for a
+future Flutter host.
 
 ## Decision
 
@@ -19,14 +16,9 @@ Sending plaintext to Rust before that decision would itself violate manifest
 I-7. The embedded backend repeats the source-aware gate at the write boundary,
 so a stale or bypassed native bridge cannot persist unknown external capture.
 
-This is ADR-0002's lesson applied to the one place the platform genuinely needs
-native code. That ADR deleted ~2,500 lines of Kotlin because no machine in this
-project could compile them. The line here is not "no Kotlin" — a Quick Settings
-tile and a binder proxy cannot be written in Rust — it is **no decisions in the
-part nothing can compile**. `capture::model` tests the state machine and the
-wording. Kotlin's one contract test serialises its production DTOs into a
-checked fixture that Rust consumes; it tests the bridge shape without moving
-policy into Kotlin.
+The boundary is **no product decisions in platform glue**. `capture::model`
+tests the state machine and wording. A future Android host may serialize
+platform facts into a checked Rust contract without moving policy into Kotlin.
 
 The same reasoning puts the loss notification's *wording* in Rust and its
 *posting* in Kotlin: the text is passed down at arm time so the binder death

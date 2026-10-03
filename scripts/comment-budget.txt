@@ -78,17 +78,3 @@ crates/copypaste-p2p/src/transport/handshake.rs
 crates/copypaste-p2p/src/transport/mod.rs
 crates/copypaste-p2p/src/transport/session.rs
 crates/copypaste-p2p/src/transport/token.rs
-crates/copypaste-ui/src-tauri/src/backend/daemon.rs
-crates/copypaste-ui/src-tauri/src/backend/embedded/peers.rs
-crates/copypaste-ui/src-tauri/src/backend/error.rs
-crates/copypaste-ui/src-tauri/src/backend/mod.rs
-crates/copypaste-ui/src-tauri/src/capture/intake.rs
-crates/copypaste-ui/src-tauri/src/capture/model.rs
-crates/copypaste-ui/src-tauri/src/commands/clipboard.rs
-crates/copypaste-ui/src-tauri/src/commands/config.rs
-crates/copypaste-ui/src-tauri/src/commands/mod.rs
-crates/copypaste-ui/src-tauri/src/commands/transfer.rs
-crates/copypaste-ui/src-tauri/src/lib.rs
-crates/copypaste-ui/src-tauri/src/service/locate.rs
-crates/copypaste-ui/src-tauri/src/service/push.rs
-crates/copypaste-ui/src-tauri/src/shell/hotkey.rs

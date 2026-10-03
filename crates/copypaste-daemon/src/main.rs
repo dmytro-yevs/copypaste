@@ -254,7 +254,7 @@ async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// A daemon is a plain process, unlike the Tauri app. AppKit must be loaded
+/// A daemon is a plain process, unlike the graphical application. AppKit must be loaded
 /// before `NSWorkspace` can report the foreground process for capture source
 /// attribution.
 #[cfg(target_os = "macos")]

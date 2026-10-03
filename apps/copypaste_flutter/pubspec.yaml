@@ -1,0 +1,17 @@
+name: copypaste_flutter
+description: "CopyPaste Flutter application."
+publish_to: 'none'
+version: 2.0.0-alpha.38
+
+environment:
+  sdk: ">=3.11.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  shadcn_ui: 0.57.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0

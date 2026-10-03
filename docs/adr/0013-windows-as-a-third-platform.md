@@ -10,12 +10,9 @@ Windows ships, on the same footing as macOS and Android. Dependencies must
 work on all three or sit behind a platform cfg with **every** other side
 implemented.
 
-**Linux desktop is still not a shipped target.** It stays a test surface —
-`browser-webkitgtk.yml` drives the app through WebKitGTK, and that is the whole
-of its purpose. [ADR-0021](0021-accept-the-glib-advisory-as-unshipped.md) rests
-its acceptance of the `glib 0.18.5` advisory on that distinction: the GTK
-stack is unshipped, so the alert is not a shipped exposure. Windows becoming
-shippable does not promote Linux.
+**Linux desktop is still not a shipped target.** The retired WebKit test host
+does not define a Flutter shipping platform. Windows becoming shippable does not
+promote Linux.
 
 ## Consequences
 

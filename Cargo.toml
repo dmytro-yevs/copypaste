@@ -13,7 +13,6 @@ members = [
     "crates/copypaste-cloud",
     "crates/copypaste-daemon",
     "crates/copypaste-cli",
-    "crates/copypaste-ui/src-tauri",
 ]
 
 [workspace.package]
@@ -47,9 +46,6 @@ r2d2_sqlite = { version = "0.25", default-features = false, features = ["bundled
 # serde
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Checked-in TypeScript bindings are generated explicitly; ordinary builds do
-# not run the generator. Exact because generated output is version-sensitive.
-ts-rs = { version = "=12.0.1", default-features = false, features = ["serde-compat"] }
 # async
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
 tokio-util = { version = "0.7", features = ["codec"] }
@@ -104,8 +100,6 @@ scopeguard = "1.2"
 # and Android.
 rustix = { version = "1", features = ["fs"] }
 tempfile = "3"
-axum = "0.8"
-tower-http = { version = "0.6", features = ["cors"] }
 comfy-table = "7"
 # macOS clipboard (no crate exposes changeCount + org.nspasteboard.* markers)
 objc2 = "0.5"
@@ -143,8 +137,3 @@ debug = "line-tables-only"
 
 [profile.test]
 debug = "line-tables-only"
-
-# GHSA-wrw7-89jp-8q8g / RUSTSEC-2024-0429. Tauri 2.11 still pulls GTK3 glib
-# ^0.18; this path crate is 0.18.5 with the VariantStrIter `&mut p` fix.
-[patch.crates-io]
-glib = { path = "vendor/glib" }

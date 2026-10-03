@@ -16,9 +16,6 @@ from .safety import is_build_active, is_cache_dir, is_contained, is_dirty, unrec
 
 CACHE_SUBPATHS = (
     Path("target"),
-    Path("crates/copypaste-ui/node_modules"),
-    Path("e2e/node_modules"),
-    Path("node_modules"),
 )
 
 

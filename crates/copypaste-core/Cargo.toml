@@ -16,8 +16,7 @@ copypaste-ipc = { path = "../copypaste-ipc" }
 # both transports apply (manifest 05 INV-C2). The edge runs this way because
 # `copypaste-p2p` deliberately knows nothing about a database, and forking the
 # comparator to keep the two crates apart is the defect INV-C2 records. It adds
-# no third-party weight to a shipped binary: every consumer of this crate (the
-# daemon and the Tauri app) already links `copypaste-p2p`.
+# no third-party weight to the daemon: it already links `copypaste-p2p`.
 copypaste-p2p = { path = "../copypaste-p2p" }
 # `block_in_place` only — see `sync::blocking`. Every caller of a `SyncSource`
 # is an async task, and SQLite plus an AEAD on the reactor thread is what that
@@ -98,9 +97,10 @@ sysctl = "0.7"
 # 02 I-20 turns on. It adds no second crypto stack (AGENTS.md rule 1, exemption
 # 3): the AES-GCM is Android's own, reached over JNI.
 #
-# The tradeoff to state: it needs `ndk-context` initialised by the host app,
-# which Tauri does not do — `copypaste-ui` supplies that. ADR-0003 records what
-# was evaluated and what a first device run would falsify.
+# The tradeoff to state: it needs `ndk-context` initialised by the Android host
+# before the store opens. This crate cannot initialise that process-global
+# context itself. ADR-0003 records what was evaluated and what a first device
+# run would falsify.
 #
 # Versions are literal rather than `[workspace.dependencies]` entries only
 # because the root manifest was held by another agent; they belong there.

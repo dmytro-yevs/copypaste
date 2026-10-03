@@ -15,8 +15,6 @@ use serde::{Deserialize, Serialize};
 /// screen say so at the moment of the change rather than leaving the user to
 /// discover it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct ConfigApplied {
     pub config: ConfigData,
     pub restart_required: Vec<String>,
@@ -24,7 +22,6 @@ pub struct ConfigApplied {
 
 /// What changed. Coalesced: a burst of captures may produce one event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum EventKind {
     /// History changed — an item was added, deleted, pinned, imported or

@@ -12,8 +12,6 @@ use serde::{Deserialize, Serialize};
 /// likely to be a fragment of a user's clipboard or a path, so none of it
 /// crosses this boundary (AGENTS.md rule 4).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct SettingsHealth {
     /// The whole record was unreadable, so every field fell back at once.
     pub record_unreadable: bool,

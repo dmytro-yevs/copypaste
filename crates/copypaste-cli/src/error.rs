@@ -145,7 +145,7 @@ impl std::error::Error for CliError {}
 /// is token-based and deliberately blunt: over-redacting a message is harmless,
 /// leaking `/Users/<name>` is not.
 /// Re-exported so existing call sites keep working. The implementation
-/// lives in `copypaste_ipc::redact` because the Tauri bridge needs the same
+/// lives in `copypaste_ipc::redact` because the application client needs the same
 /// guarantee and cannot import it from this crate (bin-only, no lib target).
 pub use copypaste_ipc::redact::scrub_paths;
 

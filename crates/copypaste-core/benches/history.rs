@@ -14,7 +14,8 @@ use copypaste_core::{ItemCursor, Store};
 mod support;
 use support::{decrypt_page, fill, keyring};
 
-/// `copypaste-ui/src/lib/layout.ts`: `PAGE_SIZE`.
+/// Fixed benchmark page size. The new UI must choose and validate its own
+/// pagination contract.
 const PAGE: u32 = 200;
 /// Row size for the fixtures: a URL, a paragraph, a stack frame.
 const ROW_BYTES: usize = 512;

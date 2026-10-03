@@ -99,8 +99,6 @@ pub struct ExportData {
 /// A malformed batch is refused whole, before anything is written. These
 /// counts cover only individually recoverable rows inside an accepted batch.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct ImportData {
     pub inserted: u32,
     pub skipped: u32,
@@ -142,8 +140,6 @@ pub struct DiscoveredData {
 /// resolved locally by comparing advertised pairing ids with this device's
 /// own pairing list.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct DiscoveredDevice {
     /// Opaque mDNS candidate id. This is not a pairing credential or a device
     /// identity; it only de-duplicates announcements in the client.
@@ -154,13 +150,10 @@ pub struct DiscoveredDevice {
     pub last_seen_ms: i64,
     pub paired: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "typescript", ts(optional))]
     pub details: Option<DeviceDetails>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(rename_all = "snake_case")]
 pub enum PairingRole {
     Initiator,
@@ -168,8 +161,6 @@ pub enum PairingRole {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 #[serde(rename_all = "snake_case")]
 pub enum PairingState {
     Idle,
@@ -184,11 +175,9 @@ pub enum PairingState {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct PairingInviteData {
     /// Secret QR payload input. Product adapters must render it without
-    /// returning the text to the WebView (manifest 06, INV-13).
+    /// returning the text to the application UI (manifest 06, INV-13).
     pub code: String,
     pub pairing_id: String,
     pub listen_addr: Option<String>,
@@ -206,8 +195,6 @@ impl std::fmt::Debug for PairingInviteData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct PairingProgressData {
     pub pairing_id: Option<String>,
     pub role: Option<PairingRole>,
@@ -228,8 +215,6 @@ pub struct PairingProgressData {
 }
 
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct PeerInfo {
     pub pairing_id: String,
     pub name: String,
@@ -238,7 +223,6 @@ pub struct PeerInfo {
     /// True when the peer is currently visible on the network. Discovery is a
     /// convenience, so `false` means "not seen", never "unreachable".
     pub online: bool,
-    #[cfg_attr(feature = "typescript", ts(optional))]
     pub details: Option<DeviceDetails>,
 }
 
@@ -285,8 +269,6 @@ pub struct SyncResult {
 /// Cumulative since the process started and never reset, so `uptime_secs` is
 /// the only thing they can honestly be read against.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct DiagnosticCounters {
     /// Clipboard changes dropped for exceeding the read gate.
     pub rejected_too_large: u64,
@@ -297,8 +279,6 @@ pub struct DiagnosticCounters {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct StatusData {
     #[serde(default)]
     pub device_name: String,
@@ -308,7 +288,6 @@ pub struct StatusData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub listen_addr: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(feature = "typescript", ts(optional))]
     pub device_details: Option<DeviceDetails>,
     pub item_count: u64,
     pub capture_running: bool,
@@ -347,8 +326,6 @@ pub struct StatusData {
 
 /// The private capture gate's authoritative value.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "ipc.ts"))]
 pub struct PrivateModeData {
     pub private_mode: bool,
     pub private_mode_epoch: u64,

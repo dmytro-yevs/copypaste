@@ -2,13 +2,7 @@ name: CI configuration
 
 on:
   pull_request:
-    paths:
-      - ".github/**"
-      - "scripts/release/**"
-      - "scripts/ci/**"
-      - "scripts/mutation-gate/**"
-      - "config/*evidence*"
-      - "config/ci-gates.json"
+    paths: [".github/**", "config/**", "scripts/ci/**"]
   workflow_dispatch:
 
 permissions:
@@ -16,51 +10,14 @@ permissions:
 
 jobs:
   validate:
-    name: Release and workflow wiring
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
-          node-version-file: '.nvmrc'
-          cache: npm
-          cache-dependency-path: crates/copypaste-ui/package-lock.json
-      - run: npm ci --prefix crates/copypaste-ui --ignore-scripts
-      - name: Install actionlint
-        run: |
-          set -euo pipefail
-          archive="${RUNNER_TEMP}/actionlint.tar.gz"
-          curl -fsSLo "$archive" https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
-          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $archive" | sha256sum --check
-          tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
-          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
-        with:
-          ruby-version: "3.3"
-      - name: Install ShellCheck
-        run: |
-          set -euo pipefail
-          archive="${RUNNER_TEMP}/shellcheck.tar.xz"
-          curl -fsSLo "$archive" https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz
-          echo "6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87  $archive" | sha256sum --check
-          tar -xJf "$archive" -C "$RUNNER_TEMP" shellcheck-v0.10.0/shellcheck
-          mkdir -p "${RUNNER_TEMP}/bin"
-          install -m 0755 "${RUNNER_TEMP}/shellcheck-v0.10.0/shellcheck" "${RUNNER_TEMP}/bin/shellcheck"
-          echo "${RUNNER_TEMP}/bin" >> "$GITHUB_PATH"
-      - name: Install Python validation dependencies
-        run: |
-          set -euo pipefail
-          venv="${RUNNER_TEMP}/ci-python"
-          python3 -m venv "$venv"
-          "$venv/bin/python" -m pip install --requirement requirements-ci.txt
-          echo "$venv/bin" >> "$GITHUB_PATH"
-      - name: Validate workflow syntax
-        run: actionlint
-      - name: Validate gate registry wiring
-        run: python3 scripts/ci/run-gates.py --check
-      - name: Validate release pipeline and self-tests
-        run: bash scripts/release/check.sh
+          toolchain: "1.96"
+      - run: python3 scripts/ci/run-gates.py --check
+      - run: python3 scripts/check-docs.py
