@@ -85,8 +85,9 @@ void main() {
 
     for (final entity in Directory('lib').listSync(recursive: true)) {
       if (entity is! File || !entity.path.endsWith('.dart')) continue;
-      if (entity.path.endsWith('app/theme/app_motion.dart') ||
-          entity.path.contains('/generated/')) {
+      final path = entity.path.replaceAll('\\', '/');
+      if (path.endsWith('app/theme/app_motion.dart') ||
+          path.contains('/generated/')) {
         continue;
       }
       final source = entity.readAsStringSync();
