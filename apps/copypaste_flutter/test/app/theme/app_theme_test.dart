@@ -413,7 +413,11 @@ void main() {
     final offenders = <String>[];
     for (final entity in Directory('lib').listSync(recursive: true)) {
       if (entity is! File || !entity.path.endsWith('.dart')) continue;
-      if (entity.path.endsWith('/app/theme/app_overlays.dart')) continue;
+      if (entity.path
+          .replaceAll('\\', '/')
+          .endsWith('/app/theme/app_overlays.dart')) {
+        continue;
+      }
       if (localOverlayConstruction.hasMatch(entity.readAsStringSync())) {
         offenders.add(entity.path);
       }
