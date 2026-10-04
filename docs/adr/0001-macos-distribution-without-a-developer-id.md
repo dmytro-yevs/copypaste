@@ -396,7 +396,13 @@ invokes `/opt/homebrew/bin/brew` or `/usr/local/bin/brew` directly (never a
 shell and never an arbitrary PATH executable), runs `update-if-needed` and
 then `outdated --cask --json=v2 dmytro-yevs/copypaste/copypaste`. Installation
 uses `upgrade --cask --no-ask --no-quit --require-sha` for the same cask.
-Homebrew remains the distribution authority; the updater does not introduce a
-second feed, signature format or installer. Windows keeps its existing signed
-Tauri updater. Android uses a separate signed-APK update mechanism and is not
-part of this Homebrew contract.
+Homebrew remains the macOS distribution authority; the updater does not
+introduce a second macOS feed, signature format or installer. The shared
+Flutter update controller checks the GitHub release channel on every platform.
+Windows and Android download the exact release asset and detached updater
+signature, verify the GitHub SHA-256 digest and the pinned Minisign-compatible
+public key, and then hand the verified path to a typed native adapter. Windows
+also requires the installer Authenticode signer to match the running app and
+uses a temporary signed helper to wait for the GUI to exit. Android requires
+the CopyPaste package name and signing certificate to match before opening the
+system package installer; user confirmation remains an Android requirement.

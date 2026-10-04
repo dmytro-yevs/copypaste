@@ -31,9 +31,11 @@ tray is ready; Show CopyPaste reopens it and Quit CopyPaste exits. Desktop
 bounds are restored within an available display. Android uses the same shell
 with system safe areas, keyboard insets, and predictive-back support.
 
-The Rust bridge, clipboard features, updater, and release packaging are still
-pending. `release.yml` remains intentionally blocked until they are implemented
-and qualified. See [the implementation plan](flutter-ui-foundation-plan.md).
+The Flutter client now owns a shared, channel-aware update flow. macOS delegates
+installation to the project Homebrew cask, while Windows and Android consume
+the signed GitHub Release artifacts through typed native adapters. Release
+packaging and exact-artifact qualification remain pending, so `release.yml`
+continues to fail closed. See [the implementation plan](flutter-ui-foundation-plan.md).
 
 The foundation check requires `COPYPASTE_FLUTTER_BUILD_TARGET` set to `macos`,
 `apk`, or `windows`. It verifies the pinned dependency contract, formatting,

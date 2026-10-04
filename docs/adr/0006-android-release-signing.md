@@ -90,6 +90,11 @@ for direct download, which is the channel this ADR is about.
   canonical `latest.json` contains both `windows-x86_64` and
   `android-universal`; missing keys, signatures, URLs, or placeholder values
   fail closed before the GitHub Release is created.
+- The Flutter client preserves that independent updater signature boundary. It
+  requires the APK and `.sig` asset digests from the GitHub Releases API,
+  verifies the detached signature with the public key embedded in the client,
+  and then asks Android to confirm the package name, version code, and signing
+  certificate before showing the system installer.
 
 ## What would change this
 

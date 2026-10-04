@@ -85,6 +85,13 @@ fails unless every certificate, key, endpoint, and release URL input is
 present, and verifies the Authenticode signer, timestamp, and updater signature
 artifact before packaging.
 
+The Flutter replacement consumes the same release contract without retaining a
+Tauri runtime. It verifies the GitHub asset digest and detached updater
+signature before native handoff. The Windows host then validates the embedded
+Authenticode digest and requires the installer signer certificate to match the
+running executable. A temporary copy of that signed executable waits for the
+GUI process to exit, verifies the installer again, and only then launches it.
+
 Release artifacts are named
 `CopyPaste-v<version>-windows-x86_64-setup.exe`. `SHA256SUMS` contains relative
 names only, and signed releases include Tauri's detached signature plus static

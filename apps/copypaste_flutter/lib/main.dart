@@ -28,6 +28,7 @@ import 'features/settings/controller/settings_controller.dart';
 import 'features/settings/repository/file_selector_settings_file_picker.dart';
 import 'features/settings/repository/quick_paste_preferences_store.dart';
 import 'features/settings/repository/runtime_settings_repository.dart';
+import 'features/update/update.dart';
 import 'generated/frb_generated.dart';
 import 'generated/api.dart' as runtime;
 import 'platform/desktop/desktop_window_bootstrap.dart';
@@ -37,6 +38,7 @@ import 'platform/desktop/quick_paste_host.dart';
 import 'platform/android/android_capture_setup_gateway.dart';
 import 'platform/macos/macos_setup_gateway.dart';
 import 'platform/pairing/pairing_presentation.dart';
+import 'platform/update/app_update_platform.dart';
 import 'shared/state_view.dart';
 
 Future<void> main() async {
@@ -45,7 +47,17 @@ Future<void> main() async {
   await RustLib.init();
   _runtimeLifecycleChannel.setMethodCallHandler(_handleNativeTermination);
   final desktopWindow = await initializeDesktopWindow();
-  runApp(CopyPasteRoot(desktopWindow: desktopWindow));
+  runApp(
+    CopyPasteRoot(
+      desktopWindow: desktopWindow,
+      appUpdateController: AppUpdateController(
+        repository: GitHubAppUpdateRepository(
+          temporaryDirectory: getTemporaryDirectory,
+        ),
+        platform: MethodChannelAppUpdatePlatform(),
+      ),
+    ),
+  );
 }
 
 @pragma('vm:entry-point')
@@ -112,12 +124,14 @@ class CopyPasteRoot extends StatefulWidget {
     this.desktopWindow,
     this.macosOnboardingController,
     this.androidOnboardingController,
+    this.appUpdateController,
     this.runtimeEnabled = true,
   });
 
   final DesktopWindowController? desktopWindow;
   final MacosOnboardingController? macosOnboardingController;
   final AndroidOnboardingController? androidOnboardingController;
+  final AppUpdateController? appUpdateController;
   final bool runtimeEnabled;
 
   @override
@@ -127,6 +141,8 @@ class CopyPasteRoot extends StatefulWidget {
 class _CopyPasteRootState extends State<CopyPasteRoot> {
   late final AppNavigationController _navigation = AppNavigationController();
   late final DesktopWindowController? _desktopWindow = widget.desktopWindow;
+  late final AppUpdateController? _appUpdateController =
+      widget.appUpdateController;
   RuntimeHistoryRepository? _historyRepository;
   HistoryController? _historyController;
   FlutterRustDevicesGateway? _devicesGateway;
@@ -157,6 +173,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     });
     _configureMacosOnboarding();
     _configureAndroidOnboarding();
+    unawaited(_appUpdateController?.initialize());
     if (widget.runtimeEnabled) {
       unawaited(_startRuntime());
     } else {
@@ -180,6 +197,10 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
           widget.androidOnboardingController,
       'CopyPasteRoot cannot replace its Android onboarding controller.',
     );
+    assert(
+      oldWidget.appUpdateController == widget.appUpdateController,
+      'CopyPasteRoot cannot replace its process-wide update controller.',
+    );
   }
 
   @override
@@ -193,6 +214,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       _androidOnboarding?.dispose();
     }
     _navigation.dispose();
+    _appUpdateController?.dispose();
     unawaited(_prepareForTermination());
     _disposeDesktopWindow(_desktopWindow);
     super.dispose();
@@ -547,6 +569,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       devicesController: _devicesController,
       quickPasteSettings: _quickPasteSettings,
       settingsController: _settingsController,
+      appUpdateController: _appUpdateController,
       desktopWindow: _desktopWindow,
       onOpenAndroidCaptureSetup: _androidOnboarding == null
           ? null

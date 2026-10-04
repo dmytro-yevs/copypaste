@@ -13,17 +13,23 @@ import '../../../shared/system_date_time.dart';
 import '../controller/quick_paste_settings_controller.dart';
 import '../controller/settings_controller.dart';
 import '../models/settings_models.dart';
+import '../../update/controller/app_update_controller.dart';
+import '../../update/models/app_update_models.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
     super.key,
     required this.controller,
     this.quickPaste,
+    this.appUpdate,
+    this.onQuitForUpdate,
     this.onOpenAndroidCaptureSetup,
   });
 
   final SettingsController controller;
   final QuickPasteSettingsController? quickPaste;
+  final AppUpdateController? appUpdate;
+  final Future<void> Function()? onQuitForUpdate;
   final Future<void> Function()? onOpenAndroidCaptureSetup;
 
   @override
@@ -535,7 +541,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return _SettingsSection(
       key: _feedbackKey,
       title: 'Feedback',
-      description: 'Choose how CopyPaste acknowledges new clipboard captures.',
+      description: 'Manage application updates and clipboard feedback.',
       children: [
         _SettingCard(
           title: 'Notification on copy',
@@ -558,8 +564,95 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 : widget.controller.setSoundOnCopy,
           ),
         ),
+        if (widget.appUpdate case final controller?) ...[
+          const Gap(AppSpacing.md),
+          AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => _SettingCard(
+              title: 'Application updates',
+              description: _updateDescription(controller),
+              trailing: _updateAction(controller),
+            ),
+          ),
+        ],
       ],
     );
+  }
+
+  String _updateDescription(AppUpdateController controller) {
+    final current = controller.currentVersion?.toString();
+    final available = controller.release?.version.toString();
+    return switch (controller.phase) {
+      AppUpdatePhase.idle => 'Check GitHub for a newer CopyPaste release.',
+      AppUpdatePhase.checking => 'Checking GitHub for updates.',
+      AppUpdatePhase.upToDate =>
+        current == null
+            ? 'CopyPaste is up to date.'
+            : 'Version $current is up to date.',
+      AppUpdatePhase.available =>
+        'Version $available is available. This device has version $current.',
+      AppUpdatePhase.downloading =>
+        'Downloading version $available · ${(controller.downloadProgress * 100).round()}%.',
+      AppUpdatePhase.installing =>
+        controller.message ?? 'Installing version $available.',
+      AppUpdatePhase.permissionRequired ||
+      AppUpdatePhase.restartRequired ||
+      AppUpdatePhase.unavailable ||
+      AppUpdatePhase.error =>
+        controller.message ?? 'Application updates need attention.',
+    };
+  }
+
+  Widget _updateAction(AppUpdateController controller) {
+    return switch (controller.phase) {
+      AppUpdatePhase.available => Button.primary(
+        key: const ValueKey<String>('install-app-update'),
+        onPressed: controller.install,
+        leading: const Icon(LucideIcons.download),
+        child: const Text('Update now'),
+      ),
+      AppUpdatePhase.permissionRequired => Button.primary(
+        key: const ValueKey<String>('continue-app-update'),
+        onPressed: controller.install,
+        leading: const Icon(LucideIcons.settings),
+        child: const Text('Continue'),
+      ),
+      AppUpdatePhase.unavailable => Button.secondary(
+        key: const ValueKey<String>('open-update-release'),
+        onPressed: controller.openReleasePage,
+        leading: const Icon(LucideIcons.externalLink),
+        child: const Text('Open release'),
+      ),
+      AppUpdatePhase.checking => const Button.secondary(
+        onPressed: null,
+        leading: Icon(LucideIcons.refreshCw),
+        child: Text('Checking'),
+      ),
+      AppUpdatePhase.downloading => const Button.secondary(
+        onPressed: null,
+        leading: Icon(LucideIcons.download),
+        child: Text('Downloading'),
+      ),
+      AppUpdatePhase.installing => const Button.secondary(
+        onPressed: null,
+        leading: Icon(LucideIcons.loaderCircle),
+        child: Text('Installing'),
+      ),
+      AppUpdatePhase.restartRequired => Button.primary(
+        key: const ValueKey<String>('quit-after-app-update'),
+        onPressed: widget.onQuitForUpdate,
+        leading: const Icon(LucideIcons.logOut),
+        child: const Text('Quit CopyPaste'),
+      ),
+      AppUpdatePhase.idle ||
+      AppUpdatePhase.upToDate ||
+      AppUpdatePhase.error => Button.secondary(
+        key: const ValueKey<String>('check-app-update'),
+        onPressed: controller.check,
+        leading: const Icon(LucideIcons.refreshCw),
+        child: const Text('Check again'),
+      ),
+    };
   }
 
   Widget _valueSelect<T>({

@@ -11,6 +11,6 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - run: |
-          echo "A Flutter foundation exists, but no product UI, Rust bridge, platform host, or release evidence is implemented."
-          echo "Release publication is intentionally unavailable until P4 qualification."
+          echo "Flutter release packaging and same-artifact qualification are not implemented."
+          echo "Release publication remains intentionally unavailable until signed install and update evidence exists on macOS, Windows, and physical Android."
           exit 1

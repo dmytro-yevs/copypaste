@@ -11,6 +11,7 @@ import '../features/settings/controller/quick_paste_settings_controller.dart';
 import '../features/settings/controller/settings_controller.dart';
 import '../features/settings/view/capture_header_action.dart';
 import '../features/settings/view/settings_screen.dart';
+import '../features/update/controller/app_update_controller.dart';
 import '../platform/desktop/desktop_window_controller.dart';
 import '../shared/state_view.dart';
 import 'navigation/navigation.dart';
@@ -26,6 +27,7 @@ class CopyPasteApp extends StatelessWidget {
     this.devicesController,
     this.quickPasteSettings,
     this.settingsController,
+    this.appUpdateController,
     this.desktopWindow,
     this.onOpenAndroidCaptureSetup,
   });
@@ -35,6 +37,7 @@ class CopyPasteApp extends StatelessWidget {
   final DevicesController? devicesController;
   final QuickPasteSettingsController? quickPasteSettings;
   final SettingsController? settingsController;
+  final AppUpdateController? appUpdateController;
   final DesktopWindowController? desktopWindow;
   final Future<void> Function()? onOpenAndroidCaptureSetup;
 
@@ -112,6 +115,8 @@ class CopyPasteApp extends StatelessWidget {
                     : SettingsScreen(
                         controller: settingsController!,
                         quickPaste: quickPasteSettings,
+                        appUpdate: appUpdateController,
+                        onQuitForUpdate: desktopWindow?.quit,
                         onOpenAndroidCaptureSetup: onOpenAndroidCaptureSetup,
                       ),
               },

@@ -6,6 +6,7 @@
 #include <string>
 
 #include "flutter_window.h"
+#include "app_update_helper.h"
 #include "utils.h"
 
 namespace {
@@ -41,14 +42,17 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     CreateAndAttachConsole();
   }
 
+  std::vector<std::string> command_line_arguments =
+      GetCommandLineArguments();
+  const int update_helper_result =
+      RunAppUpdateHelperIfRequested(command_line_arguments);
+  if (update_helper_result >= 0) return update_helper_result;
+
   // Initialize COM, so that it is available for use in the library and/or
   // plugins.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
   flutter::DartProject project(L"data");
-
-  std::vector<std::string> command_line_arguments =
-      GetCommandLineArguments();
 
   RegisterPairingProtocol();
   std::string pending_pairing_uri;
