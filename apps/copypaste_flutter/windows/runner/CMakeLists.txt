@@ -1,11 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(runner LANGUAGES CXX RC)
-
-configure_file(
-  "${CMAKE_CURRENT_SOURCE_DIR}/copypaste_version.h.in"
-  "${CMAKE_CURRENT_BINARY_DIR}/copypaste_version.h"
-  @ONLY
-)
+project(runner LANGUAGES CXX)
 
 # Define the application target. To change its name, change BINARY_NAME in the
 # top-level CMakeLists.txt, not the value here, or `flutter run` will no longer
@@ -49,7 +43,6 @@ target_link_libraries(${BINARY_NAME} PRIVATE "crypt32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "wintrust.lib")
 target_include_directories(${BINARY_NAME} PRIVATE
   "${CMAKE_SOURCE_DIR}"
-  "${CMAKE_CURRENT_BINARY_DIR}"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../../../crates/copypaste-flutter-bridge/include"
 )
 
