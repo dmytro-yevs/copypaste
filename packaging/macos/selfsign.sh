@@ -57,7 +57,7 @@ set -uo pipefail
 CERT_CN="CopyPaste Local Signing"
 BUNDLE_ID="com.copypaste.app"
 CERT_DAYS=3650
-INNER_BINARIES="copypaste copypaste-daemon"
+INNER_BINARIES="copypaste-cli copypaste-daemon"
 
 APP="${1:-}"
 if [ -z "$APP" ]; then
