@@ -14,7 +14,7 @@ grep -Eq '^  shadcn_flutter: 0\.0\.55$' "$APP/pubspec.yaml" || { echo "pubspec.y
 grep -Eq '^  flutter_animate: 4\.5\.2$' "$APP/pubspec.yaml" || { echo "pubspec.yaml must pin flutter_animate: 4.5.2" >&2; exit 1; }
 ! grep -Eq '^  shadcn_ui:' "$APP/pubspec.yaml" || { echo "pubspec.yaml must not retain shadcn_ui" >&2; exit 1; }
 ! grep -Eq '^  bottom_navigator:' "$APP/pubspec.yaml" || { echo "pubspec.yaml must not retain bottom_navigator" >&2; exit 1; }
-actual="$(flutter --version | sed -n '1s/Flutter //p' | awk '{print $1}')"
+actual="$(flutter --version | awk '$1 == "Flutter" { print $2; exit }')"
 [[ "$actual" == "$expected" ]] || { echo "Flutter $expected is required; found ${actual:-unknown}" >&2; exit 1; }
 cd "$APP"
 flutter pub get --enforce-lockfile
