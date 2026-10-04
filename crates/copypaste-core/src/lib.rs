@@ -43,9 +43,9 @@ pub use ingest::{
 pub use semantic::{classify_semantic, SemanticClassification};
 pub use storage::{
     compute_content_hash, origin_or, verify_integrity, verify_schema, DeviceIdentity,
-    HistoryCursor, HistoryFacet, HistoryFacets, HistoryPage, HistoryQuery, HistorySort,
-    IncomingItem, Ingest, ItemCursor, NewItem, Page, RestoreError, Store, StoreError, StoredItem,
-    Version,
+    HistoryCursor, HistoryDeviceFacet, HistoryFacets, HistoryPage, HistoryQuery, HistorySort,
+    HistorySourceAppFacet, IncomingItem, Ingest, ItemCursor, NewItem, Page, RestoreError, Store,
+    StoreError, StoredItem, Version,
 };
 pub use sync::{local_winner_stamp, MergeError, OpenVersionError, RemoteVersion, StoreSource};
 pub use transfer::{export, import, ImportError, MAX_IMPORT_ITEMS};

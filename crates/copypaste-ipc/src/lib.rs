@@ -36,10 +36,10 @@ pub use payload::{
     DeviceEndpointObservation, DeviceLatencyObservation, DeviceObservationProvenance,
     DeviceObservationTrust, DevicePlatform, DevicePresence, DevicePresenceObservation,
     DeviceProfileObservation, DiagnosticCounters, DiscoveredData, DiscoveredDevice, ExportData,
-    ExportItem, ExternalNetworkObservation, FileDetails, HistoryFacet, HistoryFacets, HistoryQuery,
-    HistorySort, ImageDetails, ImagePreview, ImportData, Item, ItemPage, PairingInviteData,
-    PairingProgressData, PairingRole, PairingState, PeerInfo, PrivateModeData, StatusData,
-    SyncResult,
+    ExportItem, ExternalNetworkObservation, FileDetails, HistoryDeviceFacet, HistoryFacets,
+    HistoryQuery, HistorySort, HistorySourceAppFacet, ImageDetails, ImagePreview, ImportData, Item,
+    ItemPage, PairingInviteData, PairingProgressData, PairingRole, PairingState, PeerInfo,
+    PrivateModeData, StatusData, SyncResult,
 };
 pub use response::{ConfigApplied, EventData, EventKind, Response, ResponseData};
 

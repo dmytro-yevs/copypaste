@@ -20,12 +20,6 @@ class FakeSettingsRepository implements SettingsRepository {
     notifyOnCopy: false,
     soundOnCopy: false,
   );
-  CloudSettingsState currentCloud = const CloudSettingsState(
-    configured: true,
-    signedIn: false,
-    keyReady: false,
-    unreadableUploads: 0,
-  );
   int exportCalls = 0;
   int backupCalls = 0;
   int restoreCalls = 0;
@@ -41,55 +35,6 @@ class FakeSettingsRepository implements SettingsRepository {
 
   @override
   Future<CaptureSettingsState> captureState() async => capture;
-
-  @override
-  Future<CloudSettingsState> cloudSignIn({
-    required String email,
-    required String password,
-    required String passphrase,
-  }) async {
-    currentCloud = CloudSettingsState(
-      configured: true,
-      signedIn: true,
-      keyReady: true,
-      email: email,
-      unreadableUploads: 0,
-    );
-    return currentCloud;
-  }
-
-  @override
-  Future<CloudSettingsState> cloudSignOut() async {
-    currentCloud = const CloudSettingsState(
-      configured: true,
-      signedIn: false,
-      keyReady: false,
-      unreadableUploads: 0,
-    );
-    return currentCloud;
-  }
-
-  @override
-  Future<CloudSettingsState> cloudSignUp({
-    required String email,
-    required String password,
-    required String passphrase,
-  }) => cloudSignIn(email: email, password: password, passphrase: passphrase);
-
-  @override
-  Future<CloudSettingsState> cloudStatus() async => currentCloud;
-
-  @override
-  Future<CloudSyncResult> cloudSyncNow() async => const CloudSyncResult(
-    uploaded: 2,
-    tombstoned: 0,
-    downloaded: 1,
-    applied: 1,
-    skippedUndecryptable: 0,
-    skippedForged: 0,
-    skippedFuture: 0,
-    skippedTooLarge: 0,
-  );
 
   @override
   Future<TextExportResult> exportTextHistory(String path) async {

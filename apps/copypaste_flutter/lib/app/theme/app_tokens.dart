@@ -45,6 +45,12 @@ abstract final class AppControlSize {
   static const double touch = 48;
 }
 
+/// Shared dimensions for application layouts.
+abstract final class AppLayoutSize {
+  static const double settingsNavigationWidth = 240;
+  static const double settingsContentMaxWidth = 900;
+}
+
 /// Shared dimensions for application-owned overlays.
 abstract final class AppOverlaySize {
   static const double dialogMaxWidth = 480;

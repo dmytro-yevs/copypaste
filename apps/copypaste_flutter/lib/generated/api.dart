@@ -7,27 +7,27 @@ import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `android_runtime_unavailable`, `ceremony_not_found`, `clip`, `cloud_status_response`, `content_class_to_ipc`, `content_class`, `create_private_file`, `daemon_exited_early`, `daemon_not_ready`, `daemon_spawn_failed`, `daemon_start_failed`, `daemon_unreachable`, `device_class`, `device_details`, `device_endpoint`, `device_latency`, `device_observation_provenance`, `device_observation_trust`, `device_platform`, `device_presence`, `device_profile`, `discovered_response`, `empty_response`, `export_write_failed`, `from_daemon`, `history_query`, `internal`, `item_response`, `not_initialized`, `runtime_settings`, `semantic_kind_to_ipc`, `semantic_kind`, `this_device`, `timeout`, `unsafe_data_directory`, `watch_not_found`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
-/// Starts an app-owned daemon on an explicit, isolated debug data directory.
+/// Starts an app-owned desktop daemon in an explicit application data directory.
 ///
 /// The application packaging layer supplies the bundled daemon executable. The
-/// child receives no production endpoint or cloud configuration and exits when
-/// this bridge releases its parent pipe. Development uses the platform's real
-/// clipboard adapter with only its storage isolated.
-Future<void> startIsolatedDesktopRuntime({
+/// child receives no cloud configuration and exits when this bridge releases
+/// its parent pipe. The data directory is isolated from the standalone CLI
+/// daemon so each process has one unambiguous storage and lifetime owner.
+Future<void> startDesktopRuntime({
   required String daemonExecutable,
   required String dataDir,
-}) => RustLib.instance.api.crateApiStartIsolatedDesktopRuntime(
+}) => RustLib.instance.api.crateApiStartDesktopRuntime(
   daemonExecutable: daemonExecutable,
   dataDir: dataDir,
 );
 
-/// Releases the private app-parent pipe and lets the debug daemon shut down.
-Future<void> stopIsolatedDesktopRuntime() =>
-    RustLib.instance.api.crateApiStopIsolatedDesktopRuntime();
+/// Releases the private app-parent pipe and lets the desktop daemon shut down.
+Future<void> stopDesktopRuntime() =>
+    RustLib.instance.api.crateApiStopDesktopRuntime();
 
-/// Returns an isolated runtime status only; it does not start or discover a
+/// Returns runtime status only; it does not start or discover a
 /// daemon. Startup remains owned by the application lifecycle integration.
 Future<ThisDevice> runtimeStatus() =>
     RustLib.instance.api.crateApiRuntimeStatus();
@@ -852,27 +852,33 @@ class DiscoveredDevice {
           details == other.details;
 }
 
-class HistoryFacet {
+class HistoryDeviceFacet {
   final String id;
   final String label;
+  final DeviceClass deviceClass;
 
-  const HistoryFacet({required this.id, required this.label});
+  const HistoryDeviceFacet({
+    required this.id,
+    required this.label,
+    required this.deviceClass,
+  });
 
   @override
-  int get hashCode => id.hashCode ^ label.hashCode;
+  int get hashCode => id.hashCode ^ label.hashCode ^ deviceClass.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is HistoryFacet &&
+      other is HistoryDeviceFacet &&
           runtimeType == other.runtimeType &&
           id == other.id &&
-          label == other.label;
+          label == other.label &&
+          deviceClass == other.deviceClass;
 }
 
 class HistoryFacets {
-  final List<HistoryFacet> originDevices;
-  final List<HistoryFacet> sourceApps;
+  final List<HistoryDeviceFacet> originDevices;
+  final List<HistorySourceAppFacet> sourceApps;
 
   const HistoryFacets({required this.originDevices, required this.sourceApps});
 
@@ -886,6 +892,30 @@ class HistoryFacets {
           runtimeType == other.runtimeType &&
           originDevices == other.originDevices &&
           sourceApps == other.sourceApps;
+}
+
+class HistorySourceAppFacet {
+  final String id;
+  final String label;
+  final String? iconItemId;
+
+  const HistorySourceAppFacet({
+    required this.id,
+    required this.label,
+    this.iconItemId,
+  });
+
+  @override
+  int get hashCode => id.hashCode ^ label.hashCode ^ iconItemId.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is HistorySourceAppFacet &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          label == other.label &&
+          iconItemId == other.iconItemId;
 }
 
 /// Safe pairing state for ordinary Flutter UI. It deliberately has no invite

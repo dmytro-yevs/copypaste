@@ -21,6 +21,7 @@ use crate::device_name::{sanitise_name, SystemDeviceName};
 const KEY_DEVICE_ID: &str = "device_id";
 /// Key of the persisted device name.
 const KEY_DEVICE_NAME: &str = "device_name";
+const KEY_DEVICE_CLASS_PREFIX: &str = "device_class:";
 
 /// Who this device is, on both sync transports.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -112,6 +113,25 @@ impl Store {
         Ok(())
     }
 
+    /// Remember the authenticated form factor reported by a synced device.
+    pub fn record_device_class(
+        &self,
+        device_id: &str,
+        device_class: copypaste_ipc::DeviceClass,
+    ) -> Result<(), StoreError> {
+        if device_id.is_empty() || device_class == copypaste_ipc::DeviceClass::Unknown {
+            return Ok(());
+        }
+        let key = format!("{KEY_DEVICE_CLASS_PREFIX}{device_id}");
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT INTO sync_device_state (key, value) VALUES (?1, ?2) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, device_class.wire_name()],
+        )?;
+        Ok(())
+    }
+
     /// The name each of `device_ids` reported, for the ones this device knows.
     ///
     /// One query for a whole page rather than one per row: a page is up to
@@ -146,6 +166,40 @@ impl Store {
         for row in rows {
             let (id, name) = row?;
             found.insert(id, name);
+        }
+        Ok(found)
+    }
+
+    pub fn device_classes(
+        &self,
+        device_ids: &[String],
+    ) -> Result<HashMap<String, copypaste_ipc::DeviceClass>, StoreError> {
+        let unique: BTreeSet<&str> = device_ids.iter().map(String::as_str).collect();
+        let mut found = HashMap::with_capacity(unique.len());
+        if unique.is_empty() {
+            return Ok(found);
+        }
+        let keys = unique
+            .iter()
+            .map(|id| format!("{KEY_DEVICE_CLASS_PREFIX}{id}"))
+            .collect::<Vec<_>>();
+        let placeholders = std::iter::repeat_n("?", keys.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!("SELECT key, value FROM sync_device_state WHERE key IN ({placeholders})");
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(keys.iter()), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (key, value) = row?;
+            if let Some(device_id) = key.strip_prefix(KEY_DEVICE_CLASS_PREFIX) {
+                found.insert(
+                    device_id.to_string(),
+                    copypaste_ipc::DeviceClass::from_wire_name(&value),
+                );
+            }
         }
         Ok(found)
     }
@@ -233,6 +287,23 @@ mod tests {
             s.device_names(std::slice::from_ref(&first.device_id))
                 .unwrap()[&first.device_id],
             "Phone after"
+        );
+    }
+
+    #[test]
+    fn authenticated_device_classes_persist_by_stable_device_id() {
+        let s = store();
+        s.record_device_class("phone-id", copypaste_ipc::DeviceClass::Phone)
+            .unwrap();
+        assert_eq!(
+            s.device_classes(&["phone-id".to_string()]).unwrap()["phone-id"],
+            copypaste_ipc::DeviceClass::Phone
+        );
+        s.record_device_class("phone-id", copypaste_ipc::DeviceClass::Tablet)
+            .unwrap();
+        assert_eq!(
+            s.device_classes(&["phone-id".to_string()]).unwrap()["phone-id"],
+            copypaste_ipc::DeviceClass::Tablet
         );
     }
 

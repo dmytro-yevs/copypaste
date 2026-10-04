@@ -221,6 +221,14 @@ pub(crate) fn remember_device(state: &AppState, outcome: &SyncOutcome) {
     {
         warn!(error = ?e, "could not record a peer device name");
     }
+    if let Some(profile) = &outcome.peer_profile {
+        if let Err(e) = state
+            .meta
+            .record_device_class(&outcome.peer_device_id, profile.device_class)
+        {
+            warn!(error = ?e, "could not record a peer device class");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -230,6 +238,34 @@ mod tests {
     use copypaste_ipc::{EventKind, ResponseData};
     use copypaste_p2p::peers::Peer;
     use std::net::SocketAddr;
+
+    #[test]
+    fn remember_device_persists_the_authenticated_device_class() {
+        let (state, _dir) = test_state("server");
+        remember_device(
+            &state,
+            &SyncOutcome {
+                stats: Default::default(),
+                peer_device_id: "phone-id".into(),
+                peer_device_name: "Phone".into(),
+                peer_profile: Some(copypaste_p2p::DeviceProfile {
+                    device_class: copypaste_ipc::DeviceClass::Phone,
+                    ..Default::default()
+                }),
+                peer_listen_addr: None,
+                cursor: Default::default(),
+                applied_floor: None,
+            },
+        );
+
+        assert_eq!(
+            state
+                .store
+                .device_classes(&["phone-id".to_string()])
+                .unwrap()["phone-id"],
+            copypaste_ipc::DeviceClass::Phone
+        );
+    }
 
     /// Pair two states over loopback and hand back the address A listens on.
     ///
