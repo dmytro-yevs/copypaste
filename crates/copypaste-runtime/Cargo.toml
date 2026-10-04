@@ -1,0 +1,19 @@
+[package]
+name = "copypaste-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+base64.workspace = true
+copypaste-core = { path = "../copypaste-core" }
+copypaste-ipc = { path = "../copypaste-ipc" }
+copypaste-p2p = { path = "../copypaste-p2p" }
+serde_json.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

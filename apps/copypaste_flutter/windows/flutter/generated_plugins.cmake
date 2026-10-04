@@ -3,9 +3,16 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  camera_desktop
+  file_selector_windows
+  hotkey_manager_windows
+  screen_retriever_windows
+  window_manager
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST
+  cnativeapi
+  flutter_local_notifications_windows
   jni
 )
 

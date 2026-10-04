@@ -23,8 +23,11 @@ fn expected(method: &Method) -> Expected {
         Method::SetDeviceName { .. } => {
             Expected::Data(|data| matches!(data, ResponseData::Empty { .. }))
         }
-        Method::List { .. } | Method::Search { .. } => {
+        Method::List { .. } | Method::Search { .. } | Method::HistoryQuery { .. } => {
             Expected::Data(|data| matches!(data, ResponseData::Page(_)))
+        }
+        Method::HistoryFacets => {
+            Expected::Data(|data| matches!(data, ResponseData::HistoryFacets(_)))
         }
         Method::Add { .. } => Expected::Data(|data| matches!(data, ResponseData::Item(_))),
         Method::DeleteAll { .. } | Method::ReorderPinned { .. } | Method::HistoryCeiling => {
@@ -60,6 +63,7 @@ fn expected(method: &Method) -> Expected {
         }
         Method::Copy { .. }
         | Method::CopyPlainText { .. }
+        | Method::SaveFile { .. }
         | Method::Get { .. }
         | Method::ImagePreview { .. }
         | Method::Delete { .. }
@@ -89,6 +93,12 @@ fn cases(root: &Path) -> Vec<Method> {
             query: "needle".into(),
             limit: 10,
         },
+        Method::HistoryQuery {
+            query: copypaste_ipc::HistoryQuery::default(),
+            limit: 10,
+            cursor: None,
+        },
+        Method::HistoryFacets,
         Method::Copy {
             id: "missing".into(),
         },
@@ -104,6 +114,10 @@ fn cases(root: &Path) -> Vec<Method> {
         },
         Method::SourceAppIcon {
             id: "missing".into(),
+        },
+        Method::SaveFile {
+            id: "missing".into(),
+            dest_path: root.join("saved-file.bin").display().to_string(),
         },
         Method::Add {
             content: "contract item".into(),
@@ -240,7 +254,7 @@ async fn every_method_crosses_the_platform_transport_with_a_typed_outcome() {
     let methods = cases(dir.path());
     assert_eq!(
         methods.len(),
-        42,
+        45,
         "a Method has no contract case, or this count was not bumped with it"
     );
 

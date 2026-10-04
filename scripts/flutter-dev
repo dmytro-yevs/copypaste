@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Native Assets invokes rustup itself. Flutter's GUI-launch environment often
+# omits Cargo's standard bin directory, so resolve the documented CARGO_HOME
+# location before starting the Flutter process and its hot-reload child tools.
+rust_cargo_home=${CARGO_HOME:-"$HOME/.cargo"}
+rust_bin="$rust_cargo_home/bin"
+
+if [[ ! -x "$rust_bin/rustup" ]]; then
+  echo "rustup was not found in CARGO_HOME; install Rust with rustup or set CARGO_HOME." >&2
+  exit 1
+fi
+
+export PATH="$rust_bin:$PATH"
+
+if [[ "${1:-}" == "run" ]]; then
+  repo_root=$(cd "$(dirname "$0")/.." && pwd)
+  cargo build --manifest-path "$repo_root/Cargo.toml" -p copypaste-daemon
+  target_root=${CARGO_TARGET_DIR:-"$repo_root/target"}
+  daemon_path="$target_root/debug/copypaste-daemon"
+  if [[ ! -x "$daemon_path" ]]; then
+    echo "The debug copypaste-daemon binary was not produced." >&2
+    exit 1
+  fi
+
+  flutter_args=("$@")
+  macos_target=false
+  pid_file=""
+  for ((index = 0; index < ${#flutter_args[@]}; index++)); do
+    argument=${flutter_args[$index]}
+    if [[ "$argument" == "macos" ]]; then
+      macos_target=true
+    elif [[ "$argument" == "--pid-file" ]]; then
+      next_index=$((index + 1))
+      pid_file=${flutter_args[$next_index]:-}
+    elif [[ "$argument" == --pid-file=* ]]; then
+      pid_file=${argument#--pid-file=}
+    fi
+  done
+
+  if [[ "$macos_target" == true ]]; then
+    if [[ -z "$pid_file" ]]; then
+      pid_file="${TMPDIR:-/tmp}/copypaste-flutter-dev-$$.pid"
+      flutter_args+=(--pid-file "$pid_file")
+    fi
+
+    watcher_pid=""
+    cleanup_watcher() {
+      if [[ -n "$watcher_pid" ]] && kill -0 "$watcher_pid" 2>/dev/null; then
+        kill -TERM "$watcher_pid" 2>/dev/null || true
+        wait "$watcher_pid" 2>/dev/null || true
+      fi
+      python3 -c 'from pathlib import Path; import sys; Path(sys.argv[1]).unlink(missing_ok=True)' "$pid_file"
+    }
+    trap cleanup_watcher EXIT
+
+    python3 -u "$repo_root/scripts/flutter-hot-reload.py" --pid-file "$pid_file" &
+    watcher_pid=$!
+    filter_macos_flutter_stderr() {
+      while IFS= read -r line; do
+        case "$line" in
+          *"Failed to foreground app; open returned 1"*) ;;
+          *) printf '%s\n' "$line" >&2 ;;
+        esac
+      done
+    }
+    if flutter "${flutter_args[@]}" --dart-define=COPYPASTE_DEV_DAEMON_PATH="$daemon_path" \
+      2> >(filter_macos_flutter_stderr); then
+      exit 0
+    else
+      exit $?
+    fi
+  fi
+
+  exec flutter "${flutter_args[@]}" --dart-define=COPYPASTE_DEV_DAEMON_PATH="$daemon_path"
+fi
+
+exec flutter "$@"

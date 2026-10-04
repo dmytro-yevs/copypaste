@@ -1,0 +1,3 @@
+rust_input: crate::api
+rust_root: ../../crates/copypaste-flutter-bridge/
+dart_output: lib/generated/

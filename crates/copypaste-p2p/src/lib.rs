@@ -22,17 +22,22 @@ pub mod device_profile;
 pub mod discovery;
 pub mod netif;
 pub mod node;
+pub mod pairing_link;
 pub mod peers;
 pub mod protocol;
 pub mod sync;
 pub mod transport;
 
 pub use copypaste_ipc::{DeviceClass, DevicePlatform};
+#[cfg(target_os = "android")]
+pub use device_profile::AndroidHardwareProfile;
 pub use device_profile::{AuthenticatedDeviceProfile, DeviceProfile};
 pub use node::{
-    Node, NodeError, PairingInvite, PairingPeer, PairingPhase, PairingRole, PairingStatus,
-    PAIRING_CONFIRM_TIMEOUT, PAIRING_INVITE_TTL,
+    AuthenticatedReachability, Node, NodeError, PairingInvite, PairingPeer, PairingPhase,
+    PairingRole, PairingStatus, ProbeState, PAIRING_CONFIRM_TIMEOUT, PAIRING_INVITE_TTL,
+    PROBE_FAILURE_FRESH_MS, PROBE_FRESH_MS,
 };
+pub use pairing_link::{PairingLink, PairingLinkError, PAIRING_URI_HOST, PAIRING_URI_SCHEME};
 pub use peers::{Peer, PeerStore, PeerStoreError, RevokedDevice};
 pub use protocol::{ItemSummary, SyncItem, SyncMessage, PROTOCOL_VERSION};
 pub use sync::{merge_decision, MergeDecision, SyncOutcome, SyncStats};

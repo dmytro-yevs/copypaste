@@ -123,6 +123,8 @@ impl PeerStore {
                 psk: previous.psk,
                 last_addr: current.last_addr,
                 last_seen_ms: current.last_seen_ms,
+                profile: current.profile.clone(),
+                profile_observed_at_ms: current.profile_observed_at_ms,
             }),
             (Some(previous), false) => Some(previous.clone()),
         };
@@ -160,6 +162,8 @@ mod tests {
             psk: PairingToken::generate().psk(),
             last_addr: None,
             last_seen_ms: crate::now_ms(),
+            profile: None,
+            profile_observed_at_ms: 0,
         }
     }
 
@@ -223,6 +227,8 @@ mod tests {
                 psk: touched.psk,
                 last_addr: Some("192.168.1.9:47654".parse().expect("addr")),
                 last_seen_ms: 1_754_000_000_000,
+                profile: None,
+                profile_observed_at_ms: 0,
             })
             .expect("touch");
 
@@ -282,6 +288,8 @@ mod tests {
             psk: PairingToken::generate().psk(),
             last_addr: None,
             last_seen_ms: crate::now_ms(),
+            profile: None,
+            profile_observed_at_ms: 0,
         };
         let tentative_psk = tentative.psk;
         store
