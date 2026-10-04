@@ -1,6 +1,7 @@
-# What cloud sync discloses
+# Retained cloud-sync privacy model
 
-Cloud sync is optional and off until an account is signed in. This page says
+Cloud Sync is not part of the CopyPaste 1.0.0 application. The backend and this
+privacy model remain for development and possible future product work. This page says
 what the backend can see when it is on and what it cannot. Its claims are the
 ones `supabase/tests/01_schema_audit.sql` asserts against the schema.
 

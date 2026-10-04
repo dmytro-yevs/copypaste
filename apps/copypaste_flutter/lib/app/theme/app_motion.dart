@@ -11,6 +11,7 @@ abstract final class AppMotion {
   static const Duration quick = Duration(milliseconds: 100);
   static const Duration standard = Duration(milliseconds: 200);
   static const Duration emphasized = Duration(milliseconds: 300);
+  static const Duration settingsHighlightHold = Duration(milliseconds: 1200);
 
   static const Curve standardCurve = Curves.easeInOutCubic;
   static const Curve enterCurve = Curves.easeOutCubic;

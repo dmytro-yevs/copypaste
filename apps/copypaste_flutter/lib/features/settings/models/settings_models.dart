@@ -58,48 +58,6 @@ class RuntimeSettingsChange {
   final bool? soundOnCopy;
 }
 
-class CloudSettingsState {
-  const CloudSettingsState({
-    required this.configured,
-    required this.signedIn,
-    required this.keyReady,
-    this.email,
-    this.lastSync,
-    this.lastError,
-    required this.unreadableUploads,
-  });
-
-  final bool configured;
-  final bool signedIn;
-  final bool keyReady;
-  final String? email;
-  final DateTime? lastSync;
-  final String? lastError;
-  final int unreadableUploads;
-}
-
-class CloudSyncResult {
-  const CloudSyncResult({
-    required this.uploaded,
-    required this.tombstoned,
-    required this.downloaded,
-    required this.applied,
-    required this.skippedUndecryptable,
-    required this.skippedForged,
-    required this.skippedFuture,
-    required this.skippedTooLarge,
-  });
-
-  final int uploaded;
-  final int tombstoned;
-  final int downloaded;
-  final int applied;
-  final int skippedUndecryptable;
-  final int skippedForged;
-  final int skippedFuture;
-  final int skippedTooLarge;
-}
-
 class TextExportResult {
   const TextExportResult({
     required this.exported,

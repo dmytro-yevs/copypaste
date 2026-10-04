@@ -103,6 +103,14 @@ impl Meta {
         Ok(self.store.record_device_name(device_id, name)?)
     }
 
+    pub fn record_device_class(
+        &self,
+        device_id: &str,
+        device_class: DeviceClass,
+    ) -> Result<(), MetaError> {
+        Ok(self.store.record_device_class(device_id, device_class)?)
+    }
+
     /// This device, as an origin.
     #[must_use]
     pub fn here(&self) -> Origin {
@@ -125,6 +133,7 @@ impl Meta {
             .map(|row| origin_or(&row.origin_device_id, &self.device_id).to_string())
             .collect();
         let names = self.store.device_names(&ids)?;
+        let classes = self.store.device_classes(&ids)?;
         Ok(rows
             .iter()
             .zip(ids)
@@ -136,7 +145,10 @@ impl Meta {
                         device_class: if device_id == self.device_id {
                             self.device_class
                         } else {
-                            DeviceClass::Unknown
+                            classes
+                                .get(&device_id)
+                                .copied()
+                                .unwrap_or(DeviceClass::Unknown)
                         },
                         device_id,
                         device_name,
@@ -150,12 +162,18 @@ impl Meta {
     pub fn origin_of(&self, row: &StoredItem) -> Result<Origin, MetaError> {
         let device_id = origin_or(&row.origin_device_id, &self.device_id).to_string();
         let names = self.store.device_names(std::slice::from_ref(&device_id))?;
+        let classes = self
+            .store
+            .device_classes(std::slice::from_ref(&device_id))?;
         let device_name = names.get(&device_id).cloned();
         Ok(Origin {
             device_class: if device_id == self.device_id {
                 self.device_class
             } else {
-                DeviceClass::Unknown
+                classes
+                    .get(&device_id)
+                    .copied()
+                    .unwrap_or(DeviceClass::Unknown)
             },
             device_id,
             device_name,
@@ -266,9 +284,17 @@ mod tests {
             .meta
             .record_device_name("device-b", "  Phone  ")
             .unwrap();
+        state
+            .meta
+            .record_device_class("device-b", copypaste_ipc::DeviceClass::Phone)
+            .unwrap();
         assert_eq!(
             state.meta.origin_of(&row).unwrap().device_name.as_deref(),
             Some("Phone")
+        );
+        assert_eq!(
+            state.meta.origin_of(&row).unwrap().device_class,
+            copypaste_ipc::DeviceClass::Phone
         );
     }
 

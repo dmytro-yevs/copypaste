@@ -13,8 +13,7 @@ application-specific coordination and platform boundaries the package cannot
 provide: `AppShell` preserves state while selecting an adaptive navigation
 component, the navigation controller, the desktop lifecycle owner, and one
 thin `StateView` mapping library primitives to loading, empty, and error
-states. History, Devices, and Settings remain honest placeholders until their
-product work begins.
+states. History, Devices, and Settings are backed by the Rust runtime.
 
 `ShadcnApp` owns application theming with `ThemeData` and `ThemeData.dark`.
 Each page uses `Scaffold` with `AppBar` in `headers` and page actions in
@@ -31,14 +30,14 @@ tray is ready; Show CopyPaste reopens it and Quit CopyPaste exits. Desktop
 bounds are restored within an available display. Android uses the same shell
 with system safe areas, keyboard insets, and predictive-back support.
 
-The Flutter client now owns a shared, channel-aware update flow. macOS delegates
+The Flutter client owns a shared, channel-aware update flow. macOS delegates
 installation to the project Homebrew cask, while Windows and Android consume
-the signed GitHub Release artifacts through typed native adapters. Release
-packaging and exact-artifact qualification remain pending, so `release.yml`
-continues to fail closed. See [the implementation plan](flutter-ui-foundation-plan.md).
+signed GitHub Release artifacts through typed native adapters. The production
+workflow builds, signs, installs, smokes, and receipt-binds all three platform
+artifacts before its explicitly gated publish job can run.
 
 The foundation check requires `COPYPASTE_FLUTTER_BUILD_TARGET` set to `macos`,
 `apk`, or `windows`. It verifies the pinned dependency contract, formatting,
-analysis, tests, and a debug build. The prior baseline passed macOS and APK
-debug builds. Validation after the `shadcn_flutter` migration remains pending;
-Windows and native interaction evidence are also pending.
+analysis, tests, and a debug build. Production qualification is separate and
+uses Release builds only; portable checks never substitute for physical native
+evidence.

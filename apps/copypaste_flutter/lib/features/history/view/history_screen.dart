@@ -2,12 +2,15 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:copypaste_flutter/app/theme/app_overlays.dart';
+import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
+import 'package:copypaste_flutter/features/devices/device_label.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
 import 'package:copypaste_flutter/features/history/presentation/history_code_highlighter.dart';
-import 'package:copypaste_flutter/features/history/presentation/history_identity_label.dart';
+import 'package:copypaste_flutter/features/history/presentation/history_clip_presentation.dart';
+import 'package:copypaste_flutter/features/history/presentation/source_app_label.dart';
 import 'package:copypaste_flutter/shared/adaptive_breakpoints.dart';
 import 'package:copypaste_flutter/shared/state_view.dart';
 import 'package:copypaste_flutter/shared/system_date_time.dart';
@@ -152,7 +155,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
           height:
               MediaQuery.sizeOf(context).height *
               AppOverlaySize.drawerHeightFactor,
-          child: _HistoryDetail(controller: widget.controller, inDrawer: true),
+          child: AnimatedBuilder(
+            animation: widget.controller,
+            builder: (context, child) =>
+                _HistoryDetail(controller: widget.controller, inDrawer: true),
+          ),
         ),
       ).future;
     } finally {
@@ -214,6 +221,11 @@ class _HistoryList extends StatelessWidget {
         ],
       );
     }
+    final rows = _historyListRows(
+      controller.items,
+      sort: controller.query.sort,
+      now: DateTime.now(),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -229,26 +241,29 @@ class _HistoryList extends StatelessWidget {
         Expanded(
           child: ListView.builder(
             controller: scrollController,
-            itemCount:
-                controller.items.length + (controller.isLoadingMore ? 1 : 0),
+            itemCount: rows.length + (controller.isLoadingMore ? 1 : 0),
             itemBuilder: (context, index) {
-              if (index >= controller.items.length) {
+              if (index >= rows.length) {
                 return const Padding(
                   padding: EdgeInsets.all(AppSpacing.lg),
                   child: Center(child: CircularProgressIndicator()),
                 );
               }
-              final clip = controller.items[index];
-              return Padding(
-                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                child: _HistoryClipCard(
-                  clip: clip,
-                  controller: controller,
-                  selected: controller.selectedId == clip.id,
-                  showKindLabel: showKindLabel,
-                  onPressed: () => onSelected(clip),
+              return switch (rows[index]) {
+                _HistorySectionRow(:final section) => _HistorySectionDivider(
+                  section: section,
                 ),
-              );
+                _HistoryClipRow(:final clip) => Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  child: _HistoryClipCard(
+                    clip: clip,
+                    controller: controller,
+                    selected: controller.selectedId == clip.id,
+                    showKindLabel: showKindLabel,
+                    onPressed: () => onSelected(clip),
+                  ),
+                ),
+              };
             },
           ),
         ),
@@ -265,6 +280,128 @@ class _HistoryList extends StatelessWidget {
       ],
     );
   }
+}
+
+sealed class _HistoryListRow {
+  const _HistoryListRow();
+}
+
+class _HistorySectionRow extends _HistoryListRow {
+  const _HistorySectionRow(this.section);
+
+  final _HistorySection section;
+}
+
+class _HistoryClipRow extends _HistoryListRow {
+  const _HistoryClipRow(this.clip);
+
+  final HistoryClip clip;
+}
+
+enum _HistorySectionKind { pinned, today, yesterday, date }
+
+class _HistorySection {
+  const _HistorySection(this.kind, {this.date});
+
+  final _HistorySectionKind kind;
+  final DateTime? date;
+
+  String get key => switch (kind) {
+    _HistorySectionKind.pinned => 'pinned',
+    _HistorySectionKind.today => 'today',
+    _HistorySectionKind.yesterday => 'yesterday',
+    _HistorySectionKind.date =>
+      'date-${date!.toIso8601String().split('T').first}',
+  };
+
+  String label(BuildContext context) => switch (kind) {
+    _HistorySectionKind.pinned => 'Pinned',
+    _HistorySectionKind.today => 'Today',
+    _HistorySectionKind.yesterday => 'Yesterday',
+    _HistorySectionKind.date => formatSystemDate(context, date!),
+  };
+}
+
+class _HistorySectionDivider extends StatelessWidget {
+  const _HistorySectionDivider({required this.section});
+
+  final _HistorySection section;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+      child: Semantics(
+        header: true,
+        child: Divider(
+          key: ValueKey<String>('history-section-${section.key}'),
+          child: Text(section.label(context)),
+        ),
+      ),
+    );
+  }
+}
+
+List<_HistoryListRow> _historyListRows(
+  List<HistoryClip> items, {
+  required HistorySort sort,
+  required DateTime now,
+}) {
+  final rows = <_HistoryListRow>[];
+  final pinned = items.where((item) => item.pinned);
+  if (pinned.isNotEmpty) {
+    rows.add(
+      const _HistorySectionRow(_HistorySection(_HistorySectionKind.pinned)),
+    );
+    rows.addAll(pinned.map(_HistoryClipRow.new));
+  }
+
+  final unpinned = items.where((item) => !item.pinned).toList();
+  if (sort == HistorySort.relevance) {
+    rows.addAll(unpinned.map(_HistoryClipRow.new));
+    return rows;
+  }
+
+  unpinned.sort((left, right) {
+    final byCreatedAt = left.createdAt.compareTo(right.createdAt);
+    final byId = left.id.compareTo(right.id);
+    return sort == HistorySort.newest
+        ? (byCreatedAt != 0 ? -byCreatedAt : -byId)
+        : (byCreatedAt != 0 ? byCreatedAt : byId);
+  });
+
+  final today = _calendarDate(now);
+  final yesterday = DateTime(today.year, today.month, today.day - 1);
+  String? previousSectionKey;
+  for (final clip in unpinned) {
+    final date = _calendarDate(clip.createdAt);
+    final section = _dateSection(date, today: today, yesterday: yesterday);
+    if (section.key != previousSectionKey) {
+      rows.add(_HistorySectionRow(section));
+      previousSectionKey = section.key;
+    }
+    rows.add(_HistoryClipRow(clip));
+  }
+  return rows;
+}
+
+DateTime _calendarDate(DateTime value) {
+  final local = value.toLocal();
+  return DateTime(local.year, local.month, local.day);
+}
+
+_HistorySection _dateSection(
+  DateTime date, {
+  required DateTime today,
+  required DateTime yesterday,
+}) {
+  if (date == today) {
+    return const _HistorySection(_HistorySectionKind.today);
+  }
+  if (date == yesterday) {
+    return const _HistorySection(_HistorySectionKind.yesterday);
+  }
+  return _HistorySection(_HistorySectionKind.date, date: date);
 }
 
 class _SkippedRowsWarning extends StatelessWidget {
@@ -400,7 +537,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
           id: kind.name,
           label: kind.label,
           value: kind,
-          icon: _clipKindIconData(kind),
+          icon: HistoryClipPresentation.icon(kind),
         ),
     ];
     final pinnedOptions = <_HistoryFilterOption<bool>>[
@@ -429,7 +566,15 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
           id: facet.id,
           label: facet.label,
           value: facet.id,
-          icon: LucideIcons.monitorSmartphone,
+          contentBuilder: (compact) => Semantics(
+            label: facet.label,
+            child: DeviceLabel(
+              name: facet.label,
+              deviceClass: facet.deviceClass,
+              iconSize: compact ? AppIconSize.md : AppIconSize.sm,
+              showName: !compact,
+            ),
+          ),
         ),
     ];
     final sourceOptions = <_HistoryFilterOption<String?>>[
@@ -444,7 +589,17 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
           id: facet.id,
           label: facet.label,
           value: facet.id,
-          icon: LucideIcons.appWindow,
+          contentBuilder: (compact) => Semantics(
+            label: facet.label,
+            child: SourceAppLabel(
+              name: facet.label,
+              icon: facet.iconItemId == null
+                  ? Future<HistorySourceAppIcon?>.value(null)
+                  : widget.controller.requestSourceIcon(facet.iconItemId!),
+              iconSize: compact ? AppIconSize.md : AppIconSize.sm,
+              showName: !compact,
+            ),
+          ),
         ),
     ];
     final sortOptions = <_HistoryFilterOption<HistorySort>>[
@@ -672,14 +827,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
           for (final option in options)
             SelectItemButton<_HistoryFilterOption<T>>(
               value: option,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(option.icon, size: AppIconSize.sm),
-                  const Gap(AppSpacing.sm),
-                  Text(option.label, maxLines: 1, softWrap: false),
-                ],
-              ),
+              child: option.build(compact: false),
             ),
         ],
       ),
@@ -687,20 +835,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
   }
 
   Widget _selectValue<T>(_HistoryFilterOption<T> option, bool compact) {
-    if (compact) {
-      return Semantics(
-        label: option.label,
-        child: Icon(option.icon, size: AppIconSize.md),
-      );
-    }
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(option.icon, size: AppIconSize.sm),
-        const Gap(AppSpacing.sm),
-        Text(option.label, maxLines: 1),
-      ],
-    );
+    return option.build(compact: compact);
   }
 }
 
@@ -709,13 +844,35 @@ class _HistoryFilterOption<T> {
     required this.id,
     required this.label,
     required this.value,
-    required this.icon,
-  });
+    this.icon,
+    this.contentBuilder,
+  }) : assert(icon != null || contentBuilder != null);
 
   final String id;
   final String label;
   final T value;
-  final IconData icon;
+  final IconData? icon;
+  final Widget Function(bool compact)? contentBuilder;
+
+  Widget build({required bool compact}) {
+    final builder = contentBuilder;
+    if (builder != null) return builder(compact);
+    final resolvedIcon = icon!;
+    if (compact) {
+      return Semantics(
+        label: label,
+        child: Icon(resolvedIcon, size: AppIconSize.md),
+      );
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(resolvedIcon, size: AppIconSize.sm),
+        const Gap(AppSpacing.sm),
+        Text(label, maxLines: 1),
+      ],
+    );
+  }
 
   @override
   bool operator ==(Object other) =>
@@ -882,7 +1039,7 @@ class _ClipMeta extends StatelessWidget {
         .merge(theme.typography.xSmall)
         .copyWith(color: theme.colorScheme.mutedForeground);
     final kindIcon = Icon(
-      _clipKindIconData(clip.contentKind),
+      HistoryClipPresentation.icon(clip.contentKind),
       size: AppIconSize.xs,
       color: style.color,
     );
@@ -903,7 +1060,7 @@ class _ClipMeta extends StatelessWidget {
             const TextSpan(text: ' • '),
             WidgetSpan(
               alignment: PlaceholderAlignment.middle,
-              child: HistoryIdentityLabel.application(
+              child: SourceAppLabel(
                 name: clip.sourceApp!,
                 icon: controller.requestSourceIcon(clip.id),
                 style: style,
@@ -974,7 +1131,7 @@ class _HistoryDetail extends StatelessWidget {
                     ),
                     child: Center(
                       child: Icon(
-                        _clipKindIconData(clip.contentKind),
+                        HistoryClipPresentation.icon(clip.contentKind),
                         size: AppIconSize.sm,
                       ),
                     ),
@@ -985,6 +1142,30 @@ class _HistoryDetail extends StatelessWidget {
                 if (highlighted != null) ...[
                   const Gap(AppSpacing.sm),
                   SecondaryBadge(child: Text(highlighted.language)),
+                ],
+                if (!inDrawer) ...[
+                  const Gap(AppSpacing.sm),
+                  Tooltip(
+                    showDuration: AppMotion.resolve(
+                      context,
+                      AppMotion.standard,
+                    ),
+                    tooltip: (context) => const TooltipContainer(
+                      child: Text('Close clip details'),
+                    ),
+                    child: Semantics(
+                      label: 'Close clip details',
+                      button: true,
+                      child: Button.ghost(
+                        key: const ValueKey<String>(
+                          'history-detail-inspector-close',
+                        ),
+                        style: const ButtonStyle.ghostIcon(),
+                        onPressed: controller.clearSelection,
+                        child: const Icon(LucideIcons.x),
+                      ),
+                    ),
+                  ),
                 ],
               ],
             ),
@@ -1032,14 +1213,19 @@ class _HistoryDetail extends StatelessWidget {
                     leading: const Icon(LucideIcons.alignLeft),
                     child: const Text('Copy plain text'),
                   ),
-                Button.secondary(
-                  onPressed: controller.isPinPending(clip.id)
-                      ? null
-                      : () => controller.togglePin(clip),
-                  leading: Icon(
-                    clip.pinned ? LucideIcons.pinOff : LucideIcons.pin,
+                Semantics(
+                  toggled: clip.pinned,
+                  child: Button(
+                    key: ValueKey<String>('history-pin-${clip.id}'),
+                    style: clip.pinned
+                        ? const ButtonStyle.secondary()
+                        : const ButtonStyle.outline(),
+                    onPressed: controller.isPinPending(clip.id)
+                        ? null
+                        : () => controller.togglePin(clip),
+                    leading: const Icon(LucideIcons.pin),
+                    child: Text(clip.pinned ? 'Pinned' : 'Pin'),
                   ),
-                  child: Text(clip.pinned ? 'Unpin' : 'Pin'),
                 ),
                 Button.destructive(
                   onPressed: () => _confirmDelete(context, clip.id),
@@ -1362,13 +1548,13 @@ Widget _historyMetadataIdentityLabel({
   required TextStyle style,
 }) {
   return switch (row.label) {
-    'Source' => HistoryIdentityLabel.application(
+    'Source' => SourceAppLabel(
       key: const ValueKey<String>('history-detail-source-app'),
       name: row.value,
       icon: controller.requestSourceIcon(clip.id),
       style: style,
     ),
-    'Device' => HistoryIdentityLabel.device(
+    'Device' => DeviceLabel(
       key: const ValueKey<String>('history-detail-device'),
       name: row.value,
       deviceClass: clip.originDeviceClass,
@@ -1495,20 +1681,6 @@ class _DetailImagePreview extends StatelessWidget {
     );
   }
 }
-
-IconData _clipKindIconData(HistoryClipKind kind) => switch (kind) {
-  HistoryClipKind.text => LucideIcons.type,
-  HistoryClipKind.link => LucideIcons.link,
-  HistoryClipKind.email => LucideIcons.mail,
-  HistoryClipKind.color => LucideIcons.palette,
-  HistoryClipKind.phone => LucideIcons.phone,
-  HistoryClipKind.code => LucideIcons.code,
-  HistoryClipKind.json => LucideIcons.braces,
-  HistoryClipKind.path => LucideIcons.route,
-  HistoryClipKind.image => LucideIcons.image,
-  HistoryClipKind.file => LucideIcons.file,
-  HistoryClipKind.other => LucideIcons.box,
-};
 
 class _ColorSwatch extends StatelessWidget {
   const _ColorSwatch({required this.rgba, this.size = 32});

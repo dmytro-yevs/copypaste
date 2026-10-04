@@ -83,20 +83,30 @@ impl Default for HistoryQuery {
     }
 }
 
-/// One selectable history filter value. `id` is returned only for a following
-/// typed request; user interfaces present `label` and must not render ids.
+/// One selectable origin-device filter.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HistoryFacet {
+pub struct HistoryDeviceFacet {
     pub id: String,
     pub label: String,
+    #[serde(default)]
+    pub device_class: DeviceClass,
+}
+
+/// One selectable source-application filter.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistorySourceAppFacet {
+    pub id: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_item_id: Option<String>,
 }
 
 /// Filter values derived from the complete retained history, rather than from
 /// whichever lazy pages a client has loaded.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct HistoryFacets {
-    pub origin_devices: Vec<HistoryFacet>,
-    pub source_apps: Vec<HistoryFacet>,
+    pub origin_devices: Vec<HistoryDeviceFacet>,
+    pub source_apps: Vec<HistorySourceAppFacet>,
 }
 
 /// One page of history, and how much of it could not be shown.

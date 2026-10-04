@@ -80,6 +80,14 @@ void main() {
     );
     await tester.pump();
 
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey<String>('settings-section-quick-paste')),
+        matching: find.text('Quick Paste'),
+      ),
+    );
+    await tester.pump();
+
     expect(find.text('Quick Paste'), findsWidgets);
     expect(find.text('Open Quick Paste'), findsOneWidget);
     expect(find.text('Paste automatically'), findsOneWidget);

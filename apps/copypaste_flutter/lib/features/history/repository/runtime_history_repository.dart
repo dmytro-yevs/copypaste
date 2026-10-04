@@ -43,10 +43,22 @@ class RuntimeHistoryRepository implements HistoryRepository {
   static HistoryFacets mapFacets(runtime.HistoryFacets facets) {
     return HistoryFacets(
       originDevices: facets.originDevices
-          .map((facet) => HistoryFilterFacet(id: facet.id, label: facet.label))
+          .map(
+            (facet) => HistoryDeviceFacet(
+              id: facet.id,
+              label: facet.label,
+              deviceClass: mapRuntimeDeviceClass(facet.deviceClass),
+            ),
+          )
           .toList(growable: false),
       sourceApps: facets.sourceApps
-          .map((facet) => HistoryFilterFacet(id: facet.id, label: facet.label))
+          .map(
+            (facet) => HistorySourceAppFacet(
+              id: facet.id,
+              label: facet.label,
+              iconItemId: facet.iconItemId,
+            ),
+          )
           .toList(growable: false),
     );
   }

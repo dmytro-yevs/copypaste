@@ -64,7 +64,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0-beta.5';
 
   @override
-  int get rustContentHash => -669347325;
+  int get rustContentHash => -1832814889;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -201,12 +201,12 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiSetThisDeviceName({required String name});
 
-  Future<void> crateApiStartIsolatedDesktopRuntime({
+  Future<void> crateApiStartDesktopRuntime({
     required String daemonExecutable,
     required String dataDir,
   });
 
-  Future<void> crateApiStopIsolatedDesktopRuntime();
+  Future<void> crateApiStopDesktopRuntime();
 
   Future<List<SyncOutcome>> crateApiSyncDevices({String? pairingId});
 
@@ -1550,7 +1550,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   );
 
   @override
-  Future<void> crateApiStartIsolatedDesktopRuntime({
+  Future<void> crateApiStartDesktopRuntime({
     required String daemonExecutable,
     required String dataDir,
   }) {
@@ -1571,21 +1571,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_unit,
           decodeErrorData: sse_decode_runtime_error,
         ),
-        constMeta: kCrateApiStartIsolatedDesktopRuntimeConstMeta,
+        constMeta: kCrateApiStartDesktopRuntimeConstMeta,
         argValues: [daemonExecutable, dataDir],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStartIsolatedDesktopRuntimeConstMeta =>
+  TaskConstMeta get kCrateApiStartDesktopRuntimeConstMeta =>
       const TaskConstMeta(
-        debugName: "start_isolated_desktop_runtime",
+        debugName: "start_desktop_runtime",
         argNames: ["daemonExecutable", "dataDir"],
       );
 
   @override
-  Future<void> crateApiStopIsolatedDesktopRuntime() {
+  Future<void> crateApiStopDesktopRuntime() {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -1601,18 +1601,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_unit,
           decodeErrorData: null,
         ),
-        constMeta: kCrateApiStopIsolatedDesktopRuntimeConstMeta,
+        constMeta: kCrateApiStopDesktopRuntimeConstMeta,
         argValues: [],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStopIsolatedDesktopRuntimeConstMeta =>
-      const TaskConstMeta(
-        debugName: "stop_isolated_desktop_runtime",
-        argNames: [],
-      );
+  TaskConstMeta get kCrateApiStopDesktopRuntimeConstMeta =>
+      const TaskConstMeta(debugName: "stop_desktop_runtime", argNames: []);
 
   @override
   Future<List<SyncOutcome>> crateApiSyncDevices({String? pairingId}) {
@@ -2186,14 +2183,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  HistoryFacet dco_decode_history_facet(dynamic raw) {
+  HistoryDeviceFacet dco_decode_history_device_facet(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
-    return HistoryFacet(
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return HistoryDeviceFacet(
       id: dco_decode_String(arr[0]),
       label: dco_decode_String(arr[1]),
+      deviceClass: dco_decode_device_class(arr[2]),
     );
   }
 
@@ -2204,8 +2202,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     if (arr.length != 2)
       throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
     return HistoryFacets(
-      originDevices: dco_decode_list_history_facet(arr[0]),
-      sourceApps: dco_decode_list_history_facet(arr[1]),
+      originDevices: dco_decode_list_history_device_facet(arr[0]),
+      sourceApps: dco_decode_list_history_source_app_facet(arr[1]),
+    );
+  }
+
+  @protected
+  HistorySourceAppFacet dco_decode_history_source_app_facet(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return HistorySourceAppFacet(
+      id: dco_decode_String(arr[0]),
+      label: dco_decode_String(arr[1]),
+      iconItemId: dco_decode_opt_String(arr[2]),
     );
   }
 
@@ -2252,9 +2263,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  List<HistoryFacet> dco_decode_list_history_facet(dynamic raw) {
+  List<HistoryDeviceFacet> dco_decode_list_history_device_facet(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
-    return (raw as List<dynamic>).map(dco_decode_history_facet).toList();
+    return (raw as List<dynamic>).map(dco_decode_history_device_facet).toList();
+  }
+
+  @protected
+  List<HistorySourceAppFacet> dco_decode_list_history_source_app_facet(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_history_source_app_facet)
+        .toList();
   }
 
   @protected
@@ -3028,21 +3049,43 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  HistoryFacet sse_decode_history_facet(SseDeserializer deserializer) {
+  HistoryDeviceFacet sse_decode_history_device_facet(
+    SseDeserializer deserializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_id = sse_decode_String(deserializer);
     var var_label = sse_decode_String(deserializer);
-    return HistoryFacet(id: var_id, label: var_label);
+    var var_deviceClass = sse_decode_device_class(deserializer);
+    return HistoryDeviceFacet(
+      id: var_id,
+      label: var_label,
+      deviceClass: var_deviceClass,
+    );
   }
 
   @protected
   HistoryFacets sse_decode_history_facets(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_originDevices = sse_decode_list_history_facet(deserializer);
-    var var_sourceApps = sse_decode_list_history_facet(deserializer);
+    var var_originDevices = sse_decode_list_history_device_facet(deserializer);
+    var var_sourceApps = sse_decode_list_history_source_app_facet(deserializer);
     return HistoryFacets(
       originDevices: var_originDevices,
       sourceApps: var_sourceApps,
+    );
+  }
+
+  @protected
+  HistorySourceAppFacet sse_decode_history_source_app_facet(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_label = sse_decode_String(deserializer);
+    var var_iconItemId = sse_decode_opt_String(deserializer);
+    return HistorySourceAppFacet(
+      id: var_id,
+      label: var_label,
+      iconItemId: var_iconItemId,
     );
   }
 
@@ -3125,15 +3168,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  List<HistoryFacet> sse_decode_list_history_facet(
+  List<HistoryDeviceFacet> sse_decode_list_history_device_facet(
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
     var len_ = sse_decode_i_32(deserializer);
-    var ans_ = <HistoryFacet>[];
+    var ans_ = <HistoryDeviceFacet>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
-      ans_.add(sse_decode_history_facet(deserializer));
+      ans_.add(sse_decode_history_device_facet(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<HistorySourceAppFacet> sse_decode_list_history_source_app_facet(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <HistorySourceAppFacet>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_history_source_app_facet(deserializer));
     }
     return ans_;
   }
@@ -3960,17 +4017,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_history_facet(HistoryFacet self, SseSerializer serializer) {
+  void sse_encode_history_device_facet(
+    HistoryDeviceFacet self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.id, serializer);
     sse_encode_String(self.label, serializer);
+    sse_encode_device_class(self.deviceClass, serializer);
   }
 
   @protected
   void sse_encode_history_facets(HistoryFacets self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_list_history_facet(self.originDevices, serializer);
-    sse_encode_list_history_facet(self.sourceApps, serializer);
+    sse_encode_list_history_device_facet(self.originDevices, serializer);
+    sse_encode_list_history_source_app_facet(self.sourceApps, serializer);
+  }
+
+  @protected
+  void sse_encode_history_source_app_facet(
+    HistorySourceAppFacet self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_String(self.label, serializer);
+    sse_encode_opt_String(self.iconItemId, serializer);
   }
 
   @protected
@@ -4040,14 +4112,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_list_history_facet(
-    List<HistoryFacet> self,
+  void sse_encode_list_history_device_facet(
+    List<HistoryDeviceFacet> self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
-      sse_encode_history_facet(item, serializer);
+      sse_encode_history_device_facet(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_history_source_app_facet(
+    List<HistorySourceAppFacet> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_history_source_app_facet(item, serializer);
     }
   }
 

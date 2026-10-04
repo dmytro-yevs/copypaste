@@ -1,18 +1,23 @@
 # Development
 
-The repository currently contains a Rust core, a local Supabase schema/RLS
-harness, and a Flutter application shell. Product screens and the Rust bridge
-are not implemented yet.
+The repository contains the Rust runtime and a shared Flutter product for
+macOS, Android, and Windows. History, devices, settings, onboarding, native
+capture, Quick Paste, and application updates use typed platform boundaries.
 
 Run retained backend checks with cargo test --workspace --locked and
 ./supabase/dev/verify-schema.sh.
 
-When the Flutter foundation is present, set
+For the development gate, set
 COPYPASTE_FLUTTER_BUILD_TARGET to macos, apk, or windows and run
 scripts/ci/verify-flutter-foundation.sh. It verifies the Flutter SDK and pinned
 shadcn_flutter dependency, resolves dependencies, checks formatting and
 analysis, runs widget and controller tests, and creates a debug build for the
-selected target. A passing build does not qualify a product release.
+selected target. A passing development build does not qualify a product
+release.
+
+Production artifacts are owned by `.github/workflows/release.yml`. A manual
+run qualifies signed Release artifacts without publishing. See
+`docs/release-qualification.md` for the exact-artifact and Keychain rules.
 
 To run a desktop development build, enter `apps/copypaste_flutter` and run
 `flutter run -d macos` or `flutter run -d windows` on the corresponding host.

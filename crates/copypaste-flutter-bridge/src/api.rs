@@ -63,14 +63,14 @@ impl RuntimeError {
     pub(crate) fn unsafe_data_directory() -> Self {
         Self {
             code: "unsafe_data_directory".into(),
-            message: "CopyPaste development data must be isolated.".into(),
+            message: "CopyPaste runtime data directory is invalid.".into(),
         }
     }
 
     pub(crate) fn daemon_start_failed() -> Self {
         Self {
             code: "daemon_start_failed".into(),
-            message: "CopyPaste could not start its development runtime.".into(),
+            message: "CopyPaste could not start its runtime.".into(),
         }
     }
 
@@ -186,14 +186,22 @@ pub struct ClipPage {
     pub skipped_undecryptable: u32,
 }
 #[derive(Debug, Clone)]
-pub struct HistoryFacet {
+pub struct HistoryDeviceFacet {
     pub id: String,
     pub label: String,
+    pub device_class: DeviceClass,
+}
+
+#[derive(Debug, Clone)]
+pub struct HistorySourceAppFacet {
+    pub id: String,
+    pub label: String,
+    pub icon_item_id: Option<String>,
 }
 #[derive(Debug, Clone)]
 pub struct HistoryFacets {
-    pub origin_devices: Vec<HistoryFacet>,
-    pub source_apps: Vec<HistoryFacet>,
+    pub origin_devices: Vec<HistoryDeviceFacet>,
+    pub source_apps: Vec<HistorySourceAppFacet>,
 }
 
 /// Rust-owned query DTO for the generated Flutter API.
@@ -438,25 +446,25 @@ pub struct BackupSummary {
     pub size_bytes: u64,
 }
 
-/// Starts an app-owned daemon on an explicit, isolated debug data directory.
+/// Starts an app-owned desktop daemon in an explicit application data directory.
 ///
 /// The application packaging layer supplies the bundled daemon executable. The
-/// child receives no production endpoint or cloud configuration and exits when
-/// this bridge releases its parent pipe. Development uses the platform's real
-/// clipboard adapter with only its storage isolated.
-pub async fn start_isolated_desktop_runtime(
+/// child receives no cloud configuration and exits when this bridge releases
+/// its parent pipe. The data directory is isolated from the standalone CLI
+/// daemon so each process has one unambiguous storage and lifetime owner.
+pub async fn start_desktop_runtime(
     daemon_executable: String,
     data_dir: String,
 ) -> Result<(), RuntimeError> {
     crate::runtime::start(daemon_executable, data_dir).await
 }
 
-/// Releases the private app-parent pipe and lets the debug daemon shut down.
-pub fn stop_isolated_desktop_runtime() {
+/// Releases the private app-parent pipe and lets the desktop daemon shut down.
+pub fn stop_desktop_runtime() {
     crate::runtime::stop();
 }
 
-/// Returns an isolated runtime status only; it does not start or discover a
+/// Returns runtime status only; it does not start or discover a
 /// daemon. Startup remains owned by the application lifecycle integration.
 pub async fn runtime_status() -> Result<ThisDevice, RuntimeError> {
     let response = client::request(Method::Status).await?;
@@ -657,17 +665,27 @@ pub async fn history_facets() -> Result<HistoryFacets, RuntimeError> {
     let Some(ResponseData::HistoryFacets(facets)) = response.data else {
         return Err(RuntimeError::internal());
     };
-    let map = |rows: Vec<copypaste_ipc::HistoryFacet>| {
-        rows.into_iter()
-            .map(|row| HistoryFacet {
-                id: row.id,
-                label: row.label,
-            })
-            .collect()
-    };
+    let origin_devices = facets
+        .origin_devices
+        .into_iter()
+        .map(|row| HistoryDeviceFacet {
+            id: row.id,
+            label: row.label,
+            device_class: device_class(row.device_class),
+        })
+        .collect();
+    let source_apps = facets
+        .source_apps
+        .into_iter()
+        .map(|row| HistorySourceAppFacet {
+            id: row.id,
+            label: row.label,
+            icon_item_id: row.icon_item_id,
+        })
+        .collect();
     Ok(HistoryFacets {
-        origin_devices: map(facets.origin_devices),
-        source_apps: map(facets.source_apps),
+        origin_devices,
+        source_apps,
     })
 }
 

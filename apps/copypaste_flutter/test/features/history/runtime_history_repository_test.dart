@@ -144,17 +144,27 @@ void main() {
     final facets = RuntimeHistoryRepository.mapFacets(
       const runtime.HistoryFacets(
         originDevices: [
-          runtime.HistoryFacet(id: 'device-1', label: 'Work Mac'),
+          runtime.HistoryDeviceFacet(
+            id: 'device-1',
+            label: 'Work Mac',
+            deviceClass: runtime.DeviceClass.laptop,
+          ),
         ],
         sourceApps: [
-          runtime.HistoryFacet(id: 'com.example.editor', label: 'Editor'),
+          runtime.HistorySourceAppFacet(
+            id: 'com.example.editor',
+            label: 'Editor',
+            iconItemId: 'clip-with-editor-icon',
+          ),
         ],
       ),
     );
 
     expect(facets.originDevices.single.id, 'device-1');
     expect(facets.originDevices.single.label, 'Work Mac');
+    expect(facets.originDevices.single.deviceClass, DeviceClass.laptop);
     expect(facets.sourceApps.single.id, 'com.example.editor');
     expect(facets.sourceApps.single.label, 'Editor');
+    expect(facets.sourceApps.single.iconItemId, 'clip-with-editor-icon');
   });
 }

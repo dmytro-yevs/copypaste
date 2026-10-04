@@ -6,10 +6,9 @@ person installing it, and what has to change to improve it.
 
 ## Context
 
-The release must serve both platforms from one page: a DMG installed through
-`brew`, and an APK a user can download and install directly. There is no Play
-Store listing and no plan for one — the same reasoning as ADR-0001, one step
-sideways.
+The release serves macOS, Android, and Windows from one version stream. Android
+uses an APK a user can download and install directly. There is no Play Store
+listing and no plan for one.
 
 Android leaves less room than macOS. **An unsigned APK cannot be installed at
 all**, so there is no equivalent of "ship it ad-hoc and fix it on the device":
@@ -42,7 +41,10 @@ The four secret names are the release workflow's canonical signing interface:
 
 The public SHA-256 certificate fingerprint lives in
 `Cargo.toml` under `[workspace.metadata.copypaste]`, beside the public Android
-application IDs. The release workflow compares the signed APK's `apksigner`
+application IDs. The same metadata pins version code `300000000`: the reset to
+marketing version 1.0.0 must still install over the retired prerelease line,
+whose last published version code was `200000038`. The release workflow
+compares the signed APK's `apksigner`
 value to that metadata before it uploads the artifact, so a changed or
 accidentally replaced secret cannot create a non-upgradable release.
 
@@ -70,26 +72,20 @@ for direct download, which is the channel this ADR is about.
 ## Consequences
 
 - The Android build and a smoke test of its signed universal artifact are hard
-  dependencies of the publish job. A missing signing secret, a broken APK or an
-  APK that cannot install and run stops the macOS release too. This is
-  deliberate: the alternative is a release page that silently serves one
-  platform, and "one release page for both" is the requirement.
+  dependencies of the publish job. A missing signing secret, a broken APK, or
+  an APK that cannot install and run stops the shared release.
 - The Rust Android targets and the NDK are pinned in the workflow, for the
   reason `rust-toolchain.toml` exists — an unpinned NDK is a build that changes
   under you.
 - A universal APK is built rather than per-ABI splits. It is larger; it is also
   one file that installs on any device, which is what direct download needs.
-- On publishable runs, the workflow downloads the signed universal APK it just
-  produced, verifies its sidecar checksum, and installs/runs that exact file on
-  an x86_64 emulator before publication. The paths in the workflow are written
-  against the Tauri scaffold at `crates/copypaste-ui/src-tauri/gen/android`, and
-  the job fails with an explicit message rather than a stack trace if that
-  scaffold is not where it expects.
-- The publish job also creates a detached Tauri updater signature for the APK
-  with the same `TAURI_SIGNING_PRIVATE_KEY` used for the Windows updater. One
-  canonical `latest.json` contains both `windows-x86_64` and
-  `android-universal`; missing keys, signatures, URLs, or placeholder values
-  fail closed before the GitHub Release is created.
+- The Flutter workflow builds the signed universal APK, verifies its package,
+  version, debuggable flag, ABI libraries, certificate fingerprint, and
+  checksum, then installs and starts that exact artifact on an x86_64 emulator.
+- The workflow creates a detached minisign-compatible updater signature for the
+  APK with the same private updater key used for Windows. The Flutter client
+  discovers the signed artifacts directly from GitHub Releases; missing keys,
+  signatures, digests, or artifacts fail closed before publication.
 - The Flutter client preserves that independent updater signature boundary. It
   requires the APK and `.sig` asset digests from the GitHub Releases API,
   verifies the detached signature with the public key embedded in the client,

@@ -10,7 +10,8 @@ import '../../app/theme/app_tokens.dart';
 import '../../shared/state_view.dart';
 import '../history/controller/history_controller.dart';
 import '../history/models/history_models.dart';
-import '../history/presentation/history_identity_label.dart';
+import '../history/presentation/history_clip_presentation.dart';
+import '../history/presentation/source_app_label.dart';
 import 'quick_paste_controller.dart';
 
 class QuickPasteView extends StatefulWidget {
@@ -336,7 +337,7 @@ class _ClipTitle extends StatelessWidget {
         ),
         if (clip.sourceApp case final sourceApp?) ...[
           const Gap(AppSpacing.xxs),
-          HistoryIdentityLabel.application(
+          SourceAppLabel(
             name: sourceApp,
             icon: controller.history.requestSourceIcon(clip.id),
             style: theme.typography.xSmall.copyWith(
@@ -380,7 +381,10 @@ class _ClipLeading extends StatelessWidget {
         },
       );
     }
-    return Icon(_kindIcon(clip.contentKind), size: AppIconSize.md);
+    return Icon(
+      HistoryClipPresentation.icon(clip.contentKind),
+      size: AppIconSize.md,
+    );
   }
 }
 
@@ -461,17 +465,3 @@ class _Footer extends StatelessWidget {
     );
   }
 }
-
-IconData _kindIcon(HistoryClipKind kind) => switch (kind) {
-  HistoryClipKind.text => LucideIcons.type,
-  HistoryClipKind.link => LucideIcons.link,
-  HistoryClipKind.email => LucideIcons.mail,
-  HistoryClipKind.color => LucideIcons.palette,
-  HistoryClipKind.phone => LucideIcons.phone,
-  HistoryClipKind.code => LucideIcons.code,
-  HistoryClipKind.json => LucideIcons.braces,
-  HistoryClipKind.path => LucideIcons.folder,
-  HistoryClipKind.image => LucideIcons.image,
-  HistoryClipKind.file => LucideIcons.file,
-  HistoryClipKind.other => LucideIcons.clipboard,
-};

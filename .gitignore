@@ -1,5 +1,6 @@
 # Build artifacts
 /target/
+/crates/copypaste-flutter-bridge/target/
 /dist/
 /artifacts/
 **/local.properties

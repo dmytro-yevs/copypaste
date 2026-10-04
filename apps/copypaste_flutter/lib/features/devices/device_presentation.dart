@@ -4,6 +4,8 @@ import 'devices_gateway.dart';
 
 /// The shared visual mapping for typed device metadata.
 abstract final class DevicePresentation {
+  static const IconData collectionIcon = LucideIcons.monitorSmartphone;
+
   static IconData pairingEntryIcon(PairingEntryMode? mode) => switch (mode) {
     PairingEntryMode.invite => LucideIcons.qrCode,
     PairingEntryMode.scanQr => LucideIcons.scanLine,

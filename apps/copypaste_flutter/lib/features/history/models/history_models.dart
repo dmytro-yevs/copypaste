@@ -138,11 +138,31 @@ class HistoryImageDetails {
 }
 
 /// A backend-provided filter choice. [id] is never rendered in the UI.
-class HistoryFilterFacet {
+sealed class HistoryFilterFacet {
   const HistoryFilterFacet({required this.id, required this.label});
 
   final String id;
   final String label;
+}
+
+class HistoryDeviceFacet extends HistoryFilterFacet {
+  const HistoryDeviceFacet({
+    required super.id,
+    required super.label,
+    required this.deviceClass,
+  });
+
+  final DeviceClass deviceClass;
+}
+
+class HistorySourceAppFacet extends HistoryFilterFacet {
+  const HistorySourceAppFacet({
+    required super.id,
+    required super.label,
+    this.iconItemId,
+  });
+
+  final String? iconItemId;
 }
 
 class HistoryFacets {
@@ -151,8 +171,8 @@ class HistoryFacets {
     this.sourceApps = const [],
   });
 
-  final List<HistoryFilterFacet> originDevices;
-  final List<HistoryFilterFacet> sourceApps;
+  final List<HistoryDeviceFacet> originDevices;
+  final List<HistorySourceAppFacet> sourceApps;
 }
 
 /// Compact item data returned by a page query.

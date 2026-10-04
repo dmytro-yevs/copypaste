@@ -236,8 +236,9 @@ anyway, so per-machine identities cost nothing.
   certificate, then signs inner binaries and the bundle.
 - **The certificate** is RSA-2048, self-signed, `codeSigning` EKU, ten years,
   in a dedicated keychain under
-  `~/Library/Application Support/com.copypaste.CopyPaste/signing` — the app's
-  own v2 data directory. No other application-data directory is probed or used.
+  `~/Library/Application Support/com.copypaste.CopyPaste/signing` — the stable
+  pre-Flutter signing identity retained to avoid permission prompts on upgrade.
+  Flutter product data lives separately under `com.copypaste.app`.
 
 ### The open question, and how much of it is now answered
 

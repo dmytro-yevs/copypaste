@@ -16,7 +16,7 @@ The universal APK is the only artifact that links `armv7`, `i686` and
 Android job in this repository is `x86_64`, because that is the emulator's ABI.
 
 So the release path had a stretch that nothing exercised except publishing, and
-v2.0.0-alpha.5 failed on it twice, in public, on two defects that had never been
+A prerelease failed on it twice, in public, on two defects that had never been
 reachable by any check:
 
 1. `sha2-asm`'s 32-bit x86 assembly is not position-independent, and Android

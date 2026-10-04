@@ -34,13 +34,10 @@ trying another connection or guessing a process. The command emits a
 human-readable completion state only; `--json` conflicts with this Windows-only
 flag so it cannot present a fabricated IPC response.
 
-The generated NSIS template is a narrow, hash-checked transform of Tauri
-`tauri-cli-v2.11.4`'s installer template. Its signed CLI helper is a single
-Tauri resource, checked by target name and extracted into the installer and
-uninstaller plugin directory; it is never installed as product payload. The
-release build checks template drift before bundling, then verifies the exact
-staged helper bytes with the non-mutating embedded-signature verifier after
-Tauri has signed resource inputs.
+The checked-in NSIS template installs the Flutter release bundle for the current
+user. The release workflow adds the Rust daemon and CLI beside `CopyPaste.exe`,
+signs every executable and DLL before packaging, then signs and verifies the
+finished installer.
 
 The daemon handoff and payload path have no force-kill, reboot cleanup, retry,
 or legacy uninstaller handoff. They fail closed before later payload, registry,
@@ -57,12 +54,12 @@ exited. The GUI-presence refusal deliberately rejects that race; it does not
 add a guessed wait or retry, and automatic update success remains unqualified
 until an installed Windows flow demonstrates the handoff.
 
-Tauri owns installer generation and updater artifact signing. Its custom
-`signCommand` uses PowerShell 7 and delegates every Authenticode operation to
+NSIS owns installer generation and the Flutter workflow owns updater artifact
+signing. PowerShell delegates every Authenticode operation to
 `scripts/release/windows-sign.ps1`, using the release PFX directly rather than
 importing certificates into Windows stores. The same script prepares and
-validates the PFX, normalises the RFC 3161 timestamp URL for SignTool, performs
-the workflow smoke signature, and signs every file Tauri supplies.
+validates the PFX, normalises the RFC 3161 timestamp URL for SignTool, and signs
+every shipped executable, DLL, and installer.
 
 The timestamp transport is HTTP because SignTool rejects HTTPS timestamp URLs;
 the RFC 3161 response is itself signed. Authenticode uses SHA-256 for both the
@@ -80,10 +77,10 @@ digest algorithm, and RFC 3161 timestamp without parsing localized tool output.
 Embedded PE certificate data is limited to 16 MiB before allocation; installers
 remain streamed from disk.
 
-Updater metadata uses Tauri's separate minisign-compatible key. A signed build
-fails unless every certificate, key, endpoint, and release URL input is
-present, and verifies the Authenticode signer, timestamp, and updater signature
-artifact before packaging.
+Updater metadata uses a separate minisign-compatible key. A signed build fails
+unless every certificate and private signing key is present, and verifies the
+Authenticode signer, timestamp, and updater signature artifact before
+packaging.
 
 The Flutter replacement consumes the same release contract without retaining a
 Tauri runtime. It verifies the GitHub asset digest and detached updater
@@ -93,12 +90,9 @@ running executable. A temporary copy of that signed executable waits for the
 GUI process to exit, verifies the installer again, and only then launches it.
 
 Release artifacts are named
-`CopyPaste-v<version>-windows-x86_64-setup.exe`. `SHA256SUMS` contains relative
-names only, and signed releases include Tauri's detached signature plus static
-`latest.json` metadata. The publish job is the single owner of the official
-feed and combines the Windows entry with the signed `android-universal` APK
-entry; the Windows packaging self-test may still use a Windows-only feed while
-that artifact is exercised in isolation.
+`CopyPaste-v<version>-windows-x86_64-setup.exe`. Signed releases include the
+detached updater signature and GitHub's artifact digest. The Flutter client
+discovers the canonical installer directly from the stable GitHub Release.
 
 ## Rule 1 exemption 1
 

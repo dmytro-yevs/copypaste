@@ -49,55 +49,6 @@ class RuntimeSettingsRepository implements SettingsRepository {
   }
 
   @override
-  Future<CloudSettingsState> cloudStatus() async =>
-      _cloud(await runtime.cloudAccountStatus());
-
-  @override
-  Future<CloudSettingsState> cloudSignIn({
-    required String email,
-    required String password,
-    required String passphrase,
-  }) async => _cloud(
-    await runtime.cloudSignIn(
-      email: email,
-      password: password,
-      passphrase: passphrase,
-    ),
-  );
-
-  @override
-  Future<CloudSettingsState> cloudSignUp({
-    required String email,
-    required String password,
-    required String passphrase,
-  }) async => _cloud(
-    await runtime.cloudSignUp(
-      email: email,
-      password: password,
-      passphrase: passphrase,
-    ),
-  );
-
-  @override
-  Future<CloudSettingsState> cloudSignOut() async =>
-      _cloud(await runtime.cloudSignOut());
-
-  @override
-  Future<CloudSyncResult> cloudSyncNow() async {
-    final result = await runtime.cloudSyncNow();
-    return CloudSyncResult(
-      uploaded: result.uploaded,
-      tombstoned: result.tombstoned,
-      downloaded: result.downloaded,
-      applied: result.applied,
-      skippedUndecryptable: result.skippedUndecryptable,
-      skippedForged: result.skippedForged,
-      skippedFuture: result.skippedFuture,
-      skippedTooLarge: result.skippedTooLarge,
-    );
-  }
-
-  @override
   Future<TextExportResult> exportTextHistory(String path) async {
     final result = await runtime.exportTextHistory(filePath: path);
     return TextExportResult(
@@ -136,21 +87,5 @@ class RuntimeSettingsRepository implements SettingsRepository {
         syncEnabled: settings.syncEnabled,
         notifyOnCopy: settings.notifyOnCopy,
         soundOnCopy: settings.soundOnCopy,
-      );
-
-  CloudSettingsState _cloud(runtime.CloudAccountStatus status) =>
-      CloudSettingsState(
-        configured: status.configured,
-        signedIn: status.signedIn,
-        keyReady: status.keyReady,
-        email: status.email,
-        lastSync: status.lastSyncMs == null
-            ? null
-            : DateTime.fromMillisecondsSinceEpoch(
-                status.lastSyncMs!.toInt(),
-                isUtc: true,
-              ),
-        lastError: status.lastError,
-        unreadableUploads: status.unreadableUploads,
       );
 }

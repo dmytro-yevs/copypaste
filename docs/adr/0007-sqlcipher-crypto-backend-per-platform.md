@@ -130,7 +130,7 @@ contributes no compiler-rt; Rust's `compiler_builtins` carries no `__atomic_*`;
 and the NDK's `libatomic.a` is a comment saying the family moved into
 `libclang_rt.builtins-*.a`, so the `-latomic` the target spec already passes
 resolves nothing. `:app:rustBuildX86Release` failed on undefined
-`__atomic_load_8` and took v2.0.0-alpha.5 with it.
+`__atomic_load_8` and broke a prerelease build.
 
 `crates/copypaste-ui/src-tauri/build.rs` asks the Android compiler for
 `-print-libgcc-file-name` and puts that archive on the link line, for

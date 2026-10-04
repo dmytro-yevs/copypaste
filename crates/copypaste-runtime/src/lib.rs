@@ -159,6 +159,18 @@ impl Runtime {
             }
             Method::List { limit, cursor } => self.list(id, limit, cursor),
             Method::Search { query, limit } => self.search(id, &query, limit),
+            Method::HistoryFacets => match self.store.history_facets(
+                &self.device_id,
+                &self.device_name,
+                self.device_class,
+            ) {
+                Ok(facets) => Response::ok(id, ResponseData::HistoryFacets(facets)),
+                Err(_) => Response::err(
+                    id,
+                    ErrorCode::Internal,
+                    "The history filters are unavailable.",
+                ),
+            },
             Method::HistoryQuery {
                 query,
                 limit,
@@ -1267,6 +1279,20 @@ mod tests {
             }
             other => panic!("expected status response, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn history_facets_include_the_typed_local_device() {
+        let (runtime, _dir) = fixture();
+        seed_text(&runtime, "local-item", "local text");
+
+        let response = runtime.request(2, Method::HistoryFacets).await;
+        let facets = match response.data {
+            Some(ResponseData::HistoryFacets(facets)) => facets,
+            other => panic!("expected history facets, got {other:?}"),
+        };
+        assert_eq!(facets.origin_devices.len(), 1);
+        assert_eq!(facets.origin_devices[0].device_class, runtime.device_class);
     }
 
     #[tokio::test]

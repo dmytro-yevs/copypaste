@@ -154,10 +154,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   DiscoveredDevice dco_decode_discovered_device(dynamic raw);
 
   @protected
-  HistoryFacet dco_decode_history_facet(dynamic raw);
+  HistoryDeviceFacet dco_decode_history_device_facet(dynamic raw);
 
   @protected
   HistoryFacets dco_decode_history_facets(dynamic raw);
+
+  @protected
+  HistorySourceAppFacet dco_decode_history_source_app_facet(dynamic raw);
 
   @protected
   int dco_decode_i_32(dynamic raw);
@@ -181,7 +184,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<DiscoveredDevice> dco_decode_list_discovered_device(dynamic raw);
 
   @protected
-  List<HistoryFacet> dco_decode_list_history_facet(dynamic raw);
+  List<HistoryDeviceFacet> dco_decode_list_history_device_facet(dynamic raw);
+
+  @protected
+  List<HistorySourceAppFacet> dco_decode_list_history_source_app_facet(
+    dynamic raw,
+  );
 
   @protected
   List<Peer> dco_decode_list_peer(dynamic raw);
@@ -436,10 +444,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   DiscoveredDevice sse_decode_discovered_device(SseDeserializer deserializer);
 
   @protected
-  HistoryFacet sse_decode_history_facet(SseDeserializer deserializer);
+  HistoryDeviceFacet sse_decode_history_device_facet(
+    SseDeserializer deserializer,
+  );
 
   @protected
   HistoryFacets sse_decode_history_facets(SseDeserializer deserializer);
+
+  @protected
+  HistorySourceAppFacet sse_decode_history_source_app_facet(
+    SseDeserializer deserializer,
+  );
 
   @protected
   int sse_decode_i_32(SseDeserializer deserializer);
@@ -469,7 +484,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  List<HistoryFacet> sse_decode_list_history_facet(
+  List<HistoryDeviceFacet> sse_decode_list_history_device_facet(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<HistorySourceAppFacet> sse_decode_list_history_source_app_facet(
     SseDeserializer deserializer,
   );
 
@@ -804,10 +824,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_history_facet(HistoryFacet self, SseSerializer serializer);
+  void sse_encode_history_device_facet(
+    HistoryDeviceFacet self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_history_facets(HistoryFacets self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_history_source_app_facet(
+    HistorySourceAppFacet self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_i_32(int self, SseSerializer serializer);
@@ -840,8 +869,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_list_history_facet(
-    List<HistoryFacet> self,
+  void sse_encode_list_history_device_facet(
+    List<HistoryDeviceFacet> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_history_source_app_facet(
+    List<HistorySourceAppFacet> self,
     SseSerializer serializer,
   );
 

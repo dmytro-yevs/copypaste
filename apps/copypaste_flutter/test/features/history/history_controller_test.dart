@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:copypaste_flutter/features/devices/devices_gateway.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
 import 'package:copypaste_flutter/features/history/repository/history_file_downloader.dart';
@@ -213,10 +214,14 @@ void main() {
         final repository = _HistoryRepository()
           ..availableFacets = const HistoryFacets(
             originDevices: [
-              HistoryFilterFacet(id: 'device-1', label: 'Work Mac'),
+              HistoryDeviceFacet(
+                id: 'device-1',
+                label: 'Work Mac',
+                deviceClass: DeviceClass.laptop,
+              ),
             ],
             sourceApps: [
-              HistoryFilterFacet(id: 'com.example.editor', label: 'Editor'),
+              HistorySourceAppFacet(id: 'com.example.editor', label: 'Editor'),
             ],
           );
         repository.pages.addAll([

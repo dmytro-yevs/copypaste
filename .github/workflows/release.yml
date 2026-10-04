@@ -1,16 +1,350 @@
-name: Release unavailable
+name: Production release
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the already-tagged, qualified stable release
+        required: true
+        type: boolean
+        default: false
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: production-release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  unavailable:
+  preflight:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      build_number: ${{ steps.version.outputs.build_number }}
+      android_version_code: ${{ steps.version.outputs.android_version_code }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - id: version
+        env:
+          REQUESTED_PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          cargo_version="$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{gsub(/["[:space:]]/, "", $3); print $3; exit}' Cargo.toml)"
+          pubspec_version="$(awk '/^version:[[:space:]]*/ {print $2; exit}' apps/copypaste_flutter/pubspec.yaml)"
+          version="${pubspec_version%%+*}"
+          build_number="${pubspec_version#*+}"
+          android_version_code="$(awk -F'= *' '/android-release-version-code/{gsub(/[[:space:]]/, "", $2); print $2; exit}' Cargo.toml)"
+          [[ "$version" == "$cargo_version" ]]
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$build_number" =~ ^[1-9][0-9]*$ ]]
+          [[ "$android_version_code" =~ ^[1-9][0-9]*$ ]]
+          (( android_version_code > 200000038 && android_version_code <= 2100000000 ))
+          publish=false
+          if [[ "${GITHUB_REF_TYPE:-}" == tag ]]; then
+            [[ "$GITHUB_REF_NAME" == "v$version" ]]
+            publish=true
+          elif [[ "${REQUESTED_PUBLISH:-false}" == true ]]; then
+            git fetch origin "refs/tags/v$version:refs/tags/v$version"
+            [[ "$(git rev-list -n 1 "v$version")" == "$GITHUB_SHA" ]]
+            publish=true
+          fi
+          {
+            echo "version=$version"
+            echo "build_number=$build_number"
+            echo "android_version_code=$android_version_code"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
+
+  macos:
+    needs: preflight
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@2c7215f132e9f062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+      - id: flutter
+        run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: ${{ steps.flutter.outputs.version }}
+      - name: Create disposable release keychain
+        run: |
+          set -euo pipefail
+          state="$RUNNER_TEMP/copypaste-release-keychain-state"
+          keychain="$RUNNER_TEMP/copypaste-release.keychain-db"
+          password="$(openssl rand -base64 24)"
+          mkdir -p "$state"
+          security default-keychain -d user > "$state/default"
+          security list-keychains -d user > "$state/search-list"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          security default-keychain -d user -s "$keychain"
+          echo "COPYPASTE_KEYCHAIN_TEST=1" >> "$GITHUB_ENV"
+          echo "COPYPASTE_KEYCHAIN_TEST_PATH=$keychain" >> "$GITHUB_ENV"
+      - name: Build production macOS artifacts
+        run: |
+          chmod +x packaging/macos/selfsign.sh scripts/release/*.sh
+          scripts/release/build-macos-flutter.sh "${{ needs.preflight.outputs.version }}" "${{ needs.preflight.outputs.build_number }}"
+          scripts/release/build-cli-tarball.sh "${{ needs.preflight.outputs.version }}" arm64 --reuse-build
+      - name: Install and run exact macOS artifact
+        run: scripts/release/smoke-macos-production.sh "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-macos-arm64.dmg" "${{ needs.preflight.outputs.version }}"
+      - name: Write exact-artifact receipt
+        run: python3 scripts/release/write-artifact-receipt.py --platform macos --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-macos-arm64.dmg" --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --output dist/production-receipt.json
+      - name: Restore keychain state
+        if: always()
+        run: |
+          set -euo pipefail
+          state="$RUNNER_TEMP/copypaste-release-keychain-state"
+          keychain="$RUNNER_TEMP/copypaste-release.keychain-db"
+          python3 - "$state/default" "$state/search-list" <<'PY'
+          from pathlib import Path
+          import shlex
+          import subprocess
+          import sys
+          default = shlex.split(Path(sys.argv[1]).read_text(encoding="utf-8"), posix=True)
+          search = shlex.split(Path(sys.argv[2]).read_text(encoding="utf-8"), posix=True)
+          if len(default) != 1 or not search:
+              raise SystemExit("saved Keychain state is invalid")
+          subprocess.run(["security", "default-keychain", "-d", "user", "-s", default[0]], check=True)
+          subprocess.run(["security", "list-keychains", "-d", "user", "-s", *search], check=True)
+          PY
+          security delete-keychain "$keychain"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: production-macos
+          if-no-files-found: error
+          path: |
+            dist/*.dmg
+            dist/*.dmg.sha256
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+            dist/production-receipt.json
+
+  android:
+    needs: preflight
     runs-on: ubuntu-24.04
     steps:
-      - run: |
-          echo "Flutter release packaging and same-artifact qualification are not implemented."
-          echo "Release publication remains intentionally unavailable until signed install and update evidence exists on macOS, Windows, and physical Android."
-          exit 1
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@2c7215f132e9f062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+      - id: flutter
+        run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: ${{ steps.flutter.outputs.version }}
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - name: Build signed production Android APK
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${ANDROID_KEYSTORE_BASE64:?missing Android keystore}"
+          : "${ANDROID_KEYSTORE_PASSWORD:?missing Android keystore password}"
+          : "${ANDROID_KEY_ALIAS:?missing Android key alias}"
+          : "${ANDROID_KEY_PASSWORD:?missing Android key password}"
+          export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/copypaste-release.jks"
+          trap 'rm -f "$ANDROID_KEYSTORE_PATH"' EXIT
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$ANDROID_KEYSTORE_PATH"
+          cd apps/copypaste_flutter
+          flutter pub get --enforce-lockfile
+          flutter build apk --release --build-name "${{ needs.preflight.outputs.version }}" --build-number "${{ needs.preflight.outputs.android_version_code }}"
+          cd ../..
+          mkdir -p dist
+          cp apps/copypaste_flutter/build/app/outputs/flutter-apk/app-release.apk "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk"
+          tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          expected="$(awk -F'"' '/android-release-certificate-sha256/{print $2; exit}' Cargo.toml)"
+          chmod +x scripts/release/*.sh
+          AAPT2="$tools/aapt2" APKSIGNER="$tools/apksigner" scripts/release/verify-android-release.sh "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk" "${{ needs.preflight.outputs.version }}" "${{ needs.preflight.outputs.android_version_code }}" "$expected"
+          scripts/release/sign-update-artifact.sh "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk"
+          (cd apps/copypaste_flutter && dart run tool/verify_update_signature.dart "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk" "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk.sig")
+      - name: Write exact-artifact receipt
+        run: python3 scripts/release/write-artifact-receipt.py --platform android --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk" --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --output dist/production-receipt.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: production-android
+          if-no-files-found: error
+          path: |
+            dist/*.apk
+            dist/*.apk.sig
+            dist/*.apk.sha256
+            dist/production-receipt.json
+
+  windows:
+    needs: preflight
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@2c7215f132e9f062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+      - id: flutter
+        shell: bash
+        run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: ${{ steps.flutter.outputs.version }}
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis --version=3.11 -y --no-progress
+      - name: Prepare Windows signing
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+        run: ./scripts/release/windows-sign.ps1 -Operation Prepare -OutputPfxPath "$env:RUNNER_TEMP\copypaste-release.pfx" -PersistEnvironment
+      - name: Build signed Windows installer
+        shell: pwsh
+        run: ./scripts/release/build-windows-flutter.ps1 -Version '${{ needs.preflight.outputs.version }}' -BuildNumber ${{ needs.preflight.outputs.build_number }}
+      - name: Install and run exact Windows installer
+        shell: pwsh
+        run: ./scripts/release/smoke-windows-production.ps1 -Installer "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-windows-x86_64-setup.exe" -Version '${{ needs.preflight.outputs.version }}'
+      - name: Sign updater artifact
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          chmod +x scripts/release/sign-update-artifact.sh
+          scripts/release/sign-update-artifact.sh "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-windows-x86_64-setup.exe"
+          (cd apps/copypaste_flutter && dart run tool/verify_update_signature.dart "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-windows-x86_64-setup.exe" "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-windows-x86_64-setup.exe.sig")
+      - name: Write exact-artifact receipt
+        shell: pwsh
+        run: python scripts/release/write-artifact-receipt.py --platform windows --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-windows-x86_64-setup.exe" --version '${{ needs.preflight.outputs.version }}' --commit "$env:GITHUB_SHA" --run-id "$env:GITHUB_RUN_ID" --output dist/production-receipt.json
+      - name: Clean signing key
+        if: always()
+        shell: pwsh
+        run: ./scripts/release/windows-sign.ps1 -Operation Cleanup
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: production-windows
+          if-no-files-found: error
+          path: |
+            dist/*.exe
+            dist/*.exe.sig
+            dist/*.exe.sha256
+            dist/production-receipt.json
+
+  android-smoke:
+    needs: [preflight, android]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: production-android
+          path: dist
+      - uses: reactivecircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed # v2.34.0
+        with:
+          api-level: 36
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: |
+            set -euo pipefail
+            [[ "$(adb shell getprop ro.kernel.qemu | tr -d '\r')" == 1 ]]
+            [[ "$(adb shell getprop ro.build.version.sdk | tr -d '\r')" == 36 ]]
+            [[ "$(adb shell getprop ro.product.cpu.abi | tr -d '\r')" == x86_64 ]]
+            apk="dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk"
+            adb install -r "$apk"
+            adb shell am start -W -n com.copypaste.app/.MainActivity
+            for attempt in $(seq 1 30); do
+              pid="$(adb shell pidof com.copypaste.app | tr -d '\r' || true)"
+              [[ -n "$pid" ]] && break
+              sleep 1
+            done
+            [[ -n "${pid:-}" ]]
+            adb shell dumpsys package com.copypaste.app | grep -q "versionName=${{ needs.preflight.outputs.version }}"
+            adb shell dumpsys activity activities | grep -q 'mResumedActivity.*com.copypaste.app'
+
+  qualify:
+    needs: [preflight, macos, android, android-smoke, windows]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: production-macos
+          path: qualified/macos
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: production-android
+          path: qualified/android
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: production-windows
+          path: qualified/windows
+      - name: Verify exact qualified artifacts
+        run: python3 scripts/release/verify-artifact-receipts.py --root qualified --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: production-qualified
+          if-no-files-found: error
+          path: qualified
+
+  publish:
+    needs: [preflight, qualify]
+    if: needs.preflight.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: production-qualified
+          path: qualified
+      - name: Publish stable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find qualified -type f ! -name production-receipt.json -exec cp {} dist/ \;
+          gh release create "v$VERSION" --verify-tag --title "CopyPaste $VERSION" --notes-file packaging/release-notes.md dist/*
+      - name: Update Homebrew tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          : "${TAP_TOKEN:?missing Homebrew tap token}"
+          dmg="dist/CopyPaste-v${VERSION}-macos-arm64.dmg"
+          tarball="dist/copypaste-cli-v${VERSION}-macos-arm64.tar.gz"
+          chmod +x scripts/release/gen-cask.sh scripts/release/gen-formula.sh
+          scripts/release/gen-cask.sh "$VERSION" "$(sha256sum "$dmg" | cut -d' ' -f1)" --out tap
+          scripts/release/gen-formula.sh "$VERSION" "$(sha256sum "$tarball" | cut -d' ' -f1)" --out tap
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/dmytro-yevs/homebrew-copypaste.git" homebrew-tap
+          mkdir -p homebrew-tap/Casks homebrew-tap/Formula
+          cp tap/Casks/copypaste.rb homebrew-tap/Casks/copypaste.rb
+          cp tap/Formula/copypaste-cli.rb homebrew-tap/Formula/copypaste-cli.rb
+          cd homebrew-tap
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add Casks/copypaste.rb Formula/copypaste-cli.rb
+          git commit -m "Release CopyPaste $VERSION"
+          git push origin HEAD:main

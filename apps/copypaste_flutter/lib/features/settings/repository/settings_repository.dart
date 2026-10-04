@@ -11,24 +11,6 @@ abstract interface class SettingsRepository {
 
   Future<RuntimeSettings> updateSettings(RuntimeSettingsChange change);
 
-  Future<CloudSettingsState> cloudStatus();
-
-  Future<CloudSettingsState> cloudSignIn({
-    required String email,
-    required String password,
-    required String passphrase,
-  });
-
-  Future<CloudSettingsState> cloudSignUp({
-    required String email,
-    required String password,
-    required String passphrase,
-  });
-
-  Future<CloudSettingsState> cloudSignOut();
-
-  Future<CloudSyncResult> cloudSyncNow();
-
   Future<TextExportResult> exportTextHistory(String path);
 
   Future<BackupResult> backupHistory(String path);

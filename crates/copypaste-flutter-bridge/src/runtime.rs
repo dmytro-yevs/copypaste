@@ -1,11 +1,10 @@
-//! Debug daemon ownership for the desktop Flutter application.
+//! App-owned daemon lifecycle for the desktop Flutter application.
 //!
-//! A debug session is always explicit about its data directory. The manager
-//! rejects the normal application directory, removes endpoint/cloud overrides
-//! from the child and makes the daemon observe the app-parent pipe. It therefore
-//! cannot attach to a user's retained history or configured cloud account while
-//! a developer is viewing Flutter screens. Clipboard capture remains the real
-//! platform adapter in normal development builds.
+//! The application is explicit about its data directory. The manager rejects
+//! the standalone CLI directory, removes endpoint and cloud overrides from the
+//! child, and makes the daemon observe the app-parent pipe. Development and
+//! production therefore use real platform adapters without sharing ambiguous
+//! process or storage ownership with the standalone CLI.
 
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
@@ -118,8 +117,8 @@ pub(crate) async fn start(daemon_executable: String, data_dir: String) -> Result
                 "--foreground",
                 "--app-parent",
             ])
-            // Child startup must not inherit any endpoint or cloud configuration
-            // that could redirect an isolated UI session.
+            // Child startup must not inherit endpoint or cloud configuration
+            // that could redirect the app-owned runtime.
             .env_remove("COPYPASTE_SOCKET")
             .env_remove("COPYPASTE_DATA_DIR")
             .env_remove("COPYPASTE_CLOUD_URL")
@@ -158,9 +157,9 @@ pub(crate) async fn start(daemon_executable: String, data_dir: String) -> Result
     Err(RuntimeError::daemon_not_ready())
 }
 
-/// The sandbox container's durable support path can exceed the Unix socket
-/// pathname limit. Keep the endpoint in the app's private temporary directory
-/// while durable history remains in the explicitly isolated support directory.
+/// A macOS application-support path can exceed the Unix socket pathname limit.
+/// Keep the endpoint in the app's private temporary directory while durable
+/// history remains in the explicit application-support directory.
 fn isolated_socket_path(_data_dir: &Path) -> Result<PathBuf, RuntimeError> {
     #[cfg(unix)]
     {

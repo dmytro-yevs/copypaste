@@ -35,19 +35,49 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   final _navigationHostKey = GlobalKey();
   late List<Widget> _destinationChildren;
+  late AppDestination _lastDestination;
   bool? _desktopRailExpanded;
 
   @override
   void initState() {
     super.initState();
     _destinationChildren = _childrenFor(widget.destinations);
+    _lastDestination = widget.controller.selectedDestination;
+    if (_lastDestination == AppDestination.settings) {
+      _desktopRailExpanded = false;
+    }
+    widget.controller.addListener(_handleNavigationChange);
   }
 
   @override
   void didUpdateWidget(covariant AppShell oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_handleNavigationChange);
+      _lastDestination = widget.controller.selectedDestination;
+      if (_lastDestination == AppDestination.settings) {
+        _desktopRailExpanded = false;
+      }
+      widget.controller.addListener(_handleNavigationChange);
+    }
     if (!identical(oldWidget.destinations, widget.destinations)) {
       _destinationChildren = _childrenFor(widget.destinations);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_handleNavigationChange);
+    super.dispose();
+  }
+
+  void _handleNavigationChange() {
+    final destination = widget.controller.selectedDestination;
+    if (destination == _lastDestination) return;
+    _lastDestination = destination;
+    if (destination == AppDestination.settings &&
+        _desktopRailExpanded != false) {
+      setState(() => _desktopRailExpanded = false);
     }
   }
 

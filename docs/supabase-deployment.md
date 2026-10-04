@@ -1,6 +1,7 @@
 # The Supabase deployment
 
-Everything the server side of cloud sync is: one table, its policies, its
+Cloud Sync is not part of the CopyPaste 1.0.0 application. The retained
+development backend consists of one table, its policies, its
 Realtime configuration, and a retention job. It lives in `supabase/` and is
 applied with the Supabase CLI.
 
@@ -54,7 +55,7 @@ payload sizes, timing, delete activity) is a real disclosure on its own.
 | The client's `select=`, `order=`, `created_at=gte.` and keyset query strings are accepted verbatim | **verified** — same run |
 | A row with no `signature` is refused by the deployment, not just by the client | **verified** — same run |
 | The publishable key on its own reaches nothing | **verified** — same run |
-| GoTrue sign-in, Realtime, encrypted convergence | **never verified.** `tests/real-supabase.sh` covers them and blocks publish, but it landed after `v2.0.0-alpha.5` and has not run once. Nothing here has ever spoken to an account service. |
+| GoTrue sign-in, Realtime, encrypted convergence | **Not part of CopyPaste 1.0.0.** The retained harness is development-only and does not gate or configure the production application. |
 | The rows above, end to end through the real platform rather than a harness | **never verified** — same gate. Each has narrower coverage listed above; none of it involves GoTrue or the platform's own PostgREST configuration. |
 | `supabase start` / `supabase db reset` | **never verified** — same gate |
 
