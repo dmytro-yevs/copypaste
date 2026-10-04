@@ -171,13 +171,14 @@ jobs:
             echo "ERROR: Android release keystore certificate mismatch: expected=$expected actual=$actual" >&2
             exit 1
           fi
+          tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
           cd apps/copypaste_flutter
           flutter pub get --enforce-lockfile
           flutter build apk --release --build-name "${{ needs.preflight.outputs.version }}" --build-number "${{ needs.preflight.outputs.android_version_code }}"
+          "$tools/apksigner" sign --ks "$ANDROID_KEYSTORE_PATH" --ks-key-alias "$ANDROID_KEY_ALIAS" --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEY_PASSWORD build/app/outputs/flutter-apk/app-release.apk
           cd ../..
           mkdir -p dist
           cp apps/copypaste_flutter/build/app/outputs/flutter-apk/app-release.apk "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk"
-          tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
           chmod +x scripts/release/*.sh
           AAPT2="$tools/aapt2" APKSIGNER="$tools/apksigner" scripts/release/verify-android-release.sh "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk" "${{ needs.preflight.outputs.version }}" "${{ needs.preflight.outputs.android_version_code }}" "$expected"
           scripts/release/sign-update-artifact.sh "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk"
