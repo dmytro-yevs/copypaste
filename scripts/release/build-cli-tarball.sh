@@ -47,17 +47,19 @@ mkdir -p "$DIST"
 
 if [[ "$REUSE_BUILD" == "--reuse-build" ]]; then
     echo "==> Reusing $TRIPLE binaries from the app build"
+    BUILD_DIR="target/release"
 else
     echo "==> Building for $TRIPLE"
     rustup target add "$TRIPLE" >/dev/null 2>&1 || true
     cargo build --release --locked --target "$TRIPLE" -p copypaste-daemon -p copypaste-cli
+    BUILD_DIR="target/${TRIPLE}/release"
 fi
 
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
 for bin in copypaste copypaste-daemon; do
-    src="target/${TRIPLE}/release/${bin}"
+    src="${BUILD_DIR}/${bin}"
     [[ -f "$src" ]] || { echo "ERROR: $src missing" >&2; exit 1; }
     cp "$src" "$STAGE/"
     # A stable --identifier so the signature is not derived from the filename
