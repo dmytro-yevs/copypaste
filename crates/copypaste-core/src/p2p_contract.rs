@@ -5,15 +5,17 @@
 //! contract both expose.
 
 use copypaste_ipc::{
-    DeviceDetails, DeviceEndpointObservation, DeviceObservationProvenance, DeviceObservationTrust,
-    DevicePresence, DevicePresenceObservation, DeviceProfileObservation, ErrorCode,
-    PairingProgressData, PairingRole, PairingState, PeerInfo, SyncResult,
+    DeviceDetails, DeviceEndpointObservation, DeviceLatencyObservation,
+    DeviceObservationProvenance, DeviceObservationTrust, DevicePresence, DevicePresenceObservation,
+    DeviceProfileObservation, ErrorCode, PairingProgressData, PairingRole, PairingState, PeerInfo,
+    SyncResult,
 };
 use copypaste_p2p::discovery::{DiscoveredPeer, PEER_TTL};
 use copypaste_p2p::peers::Peer;
 use copypaste_p2p::sync::SyncOutcome;
 use copypaste_p2p::{
-    AuthenticatedDeviceProfile, DeviceProfile, NodeError, PairingPhase, PairingStatus,
+    AuthenticatedDeviceProfile, AuthenticatedReachability, DeviceProfile, NodeError, PairingPhase,
+    PairingStatus, ProbeState,
 };
 
 const PRESENCE_FRESH_MS: i64 = 15_000;
@@ -63,9 +65,10 @@ pub fn peer_info(
     peer: &Peer,
     discovered: Option<&DiscoveredPeer>,
     authenticated: Option<&AuthenticatedDeviceProfile>,
+    reachability: Option<&AuthenticatedReachability>,
 ) -> PeerInfo {
     let now = crate::now_ms();
-    let presence = peer_presence(peer, discovered, now);
+    let presence = peer_presence(peer, discovered, reachability, now);
     let online = presence.is_current_online_at(now);
     let (profile, profile_trust, profile_at, profile_fresh) = match authenticated {
         Some(observed) => (
@@ -123,6 +126,18 @@ pub fn peer_info(
                 profile_fresh,
             )),
             endpoint,
+            latency: reachability.and_then(|observation| {
+                (observation.state_at(now) == ProbeState::Online)
+                    .then_some(observation.latency_ms)
+                    .flatten()
+                    .map(|round_trip_latency_ms| DeviceLatencyObservation {
+                        round_trip_latency_ms,
+                        provenance: DeviceObservationProvenance::Measured,
+                        trust: DeviceObservationTrust::Authenticated,
+                        observed_at_ms: observation.observed_at_ms,
+                        fresh_until_ms: observation.fresh_until_ms,
+                    })
+            }),
             presence: Some(presence),
             ..DeviceDetails::default()
         }),
@@ -195,8 +210,25 @@ fn discovery_presence_state(found: &DiscoveredPeer, now_ms: i64) -> DevicePresen
 fn peer_presence(
     peer: &Peer,
     discovered: Option<&DiscoveredPeer>,
+    reachability: Option<&AuthenticatedReachability>,
     now_ms: i64,
 ) -> DevicePresenceObservation {
+    if let Some(observation) =
+        reachability.filter(|observation| observation.state_at(now_ms) != ProbeState::Unknown)
+    {
+        return DevicePresenceObservation {
+            state: match observation.state_at(now_ms) {
+                ProbeState::Online => DevicePresence::Online,
+                ProbeState::Offline => DevicePresence::Offline,
+                ProbeState::Unknown => DevicePresence::Unknown,
+            },
+            last_seen_ms: observation.observed_at_ms,
+            provenance: DeviceObservationProvenance::Measured,
+            trust: DeviceObservationTrust::Authenticated,
+            observed_at_ms: observation.observed_at_ms,
+            fresh_until_ms: observation.fresh_until_ms,
+        };
+    }
     match discovered {
         Some(found) if discovery_presence_state(found, now_ms) == DevicePresence::Online => {
             DevicePresenceObservation {
@@ -327,6 +359,8 @@ mod tests {
             psk: [1; TOKEN_LEN],
             last_addr: None,
             last_seen_ms: 0,
+            profile: None,
+            profile_observed_at_ms: 0,
         }
     }
 
@@ -374,6 +408,8 @@ mod tests {
             psk: [1; TOKEN_LEN],
             last_addr: Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 47_654)),
             last_seen_ms: 10,
+            profile: None,
+            profile_observed_at_ms: 0,
         }
     }
 
@@ -393,7 +429,7 @@ mod tests {
         let now = crate::now_ms();
         let peer = peer();
         let found = discovered(now);
-        let info = peer_info(&peer, Some(&found), None);
+        let info = peer_info(&peer, Some(&found), None, None);
         let presence = info.details.as_ref().unwrap().presence.as_ref().unwrap();
 
         assert_eq!(presence.state, DevicePresence::Online);
@@ -412,7 +448,7 @@ mod tests {
             discovered(now.saturating_sub(i64::try_from(PEER_TTL.as_millis()).unwrap_or(i64::MAX)));
 
         for found in [None, Some(&stale)] {
-            let info = peer_info(&peer, found, None);
+            let info = peer_info(&peer, found, None, None);
             let presence = info.details.as_ref().unwrap().presence.as_ref().unwrap();
 
             assert_eq!(presence.state, DevicePresence::Unknown);
@@ -421,5 +457,66 @@ mod tests {
             assert_eq!(encoded["online"], false);
             assert_eq!(encoded["details"]["presence"]["state"], "unknown");
         }
+    }
+
+    #[test]
+    fn stale_authenticated_profile_remains_identifiable_without_claiming_reachability() {
+        let peer = peer();
+        let authenticated = AuthenticatedDeviceProfile {
+            profile: DeviceProfile {
+                model: Some("Pixel 9".to_string()),
+                ..DeviceProfile::default()
+            },
+            observed_at_ms: 1,
+            fresh_until_ms: 2,
+        };
+        let info = peer_info(&peer, None, Some(&authenticated), None);
+        let details = info.details.expect("device details");
+        let profile = details.profile.expect("authenticated profile");
+        let presence = details.presence.expect("presence");
+
+        assert_eq!(profile.model.as_deref(), Some("Pixel 9"));
+        assert_eq!(profile.trust, DeviceObservationTrust::Authenticated);
+        assert_eq!(profile.observed_at_ms, 1);
+        assert_eq!(profile.fresh_until_ms, Some(2));
+        assert_eq!(presence.state, DevicePresence::Unknown);
+        assert!(!info.online);
+    }
+
+    #[test]
+    fn authenticated_probe_projects_rtt_and_overrides_discovery() {
+        let now = crate::now_ms();
+        let reachability = AuthenticatedReachability::online(Some(24), now);
+        let info = peer_info(&peer(), None, None, Some(&reachability));
+        let details = info.details.unwrap();
+        let presence = details.presence.unwrap();
+        let latency = details.latency.unwrap();
+
+        assert_eq!(presence.state, DevicePresence::Online);
+        assert_eq!(presence.provenance, DeviceObservationProvenance::Measured);
+        assert_eq!(presence.trust, DeviceObservationTrust::Authenticated);
+        assert_eq!(latency.round_trip_latency_ms, 24);
+        assert_eq!(latency.provenance, DeviceObservationProvenance::Measured);
+        assert_eq!(latency.trust, DeviceObservationTrust::Authenticated);
+    }
+
+    #[test]
+    fn failed_probe_is_offline_but_expired_probe_falls_back_to_current_discovery() {
+        let now = crate::now_ms();
+        let offline = AuthenticatedReachability::offline(now);
+        let offline_info = peer_info(&peer(), None, None, Some(&offline));
+        assert_eq!(
+            offline_info.details.unwrap().presence.unwrap().state,
+            DevicePresence::Offline
+        );
+
+        let expired = AuthenticatedReachability::online(Some(24), 0);
+        let found = discovered(now);
+        let info = peer_info(&peer(), Some(&found), None, Some(&expired));
+        let details = info.details.unwrap();
+        let presence = details.presence.unwrap();
+        assert_eq!(presence.state, DevicePresence::Online);
+        assert_eq!(presence.trust, DeviceObservationTrust::Local);
+        assert!(details.latency.is_none());
     }
 }

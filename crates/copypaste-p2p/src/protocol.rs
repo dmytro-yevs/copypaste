@@ -1,4 +1,5 @@
-//! Wire data for one sync session; session orchestration lives in [`crate::sync`].
+//! Wire data for one authenticated peer connection; sync orchestration lives in
+//! [`crate::sync`].
 //!
 //! [`SyncItem::content`] is plaintext inside the Noise channel. The sender's
 //! ciphertext is sealed under a device-local key with the item id in its AEAD,
@@ -11,12 +12,13 @@ use crate::DeviceProfile;
 
 mod codec;
 
+pub(crate) use codec::validate_device_profile;
 pub use codec::ProtocolError;
 
 /// Version of the message set. Bumped whenever two builds would disagree on a
 /// field. No negotiation and no compatibility shim: a mismatch is a clear error
 /// rather than a degraded session.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// Most summaries one [`SyncMessage::Summary`] may carry. Sized for a full
 /// local history at roughly 200 bytes each, about 2 MiB on the wire. A history
@@ -178,6 +180,21 @@ impl SyncItem {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum SyncMessage {
+    /// A bounded application-level liveness probe. It is sent only after the
+    /// Noise handshake authenticated the pairing and never enters sync.
+    Probe {
+        protocol_version: u32,
+        nonce: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        profile: Option<DeviceProfile>,
+    },
+    /// Echoes exactly one authenticated [`Self::Probe`] nonce.
+    ProbeAck {
+        protocol_version: u32,
+        nonce: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        profile: Option<DeviceProfile>,
+    },
     Hello {
         protocol_version: u32,
         device_id: String,
@@ -210,6 +227,8 @@ impl SyncMessage {
     /// includes any field value.
     pub fn kind(&self) -> &'static str {
         match self {
+            Self::Probe { .. } => "probe",
+            Self::ProbeAck { .. } => "probe_ack",
             Self::Hello { .. } => "hello",
             Self::Summary { .. } => "summary",
             Self::Request { .. } => "request",

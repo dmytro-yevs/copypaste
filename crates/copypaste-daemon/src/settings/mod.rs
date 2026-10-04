@@ -19,8 +19,6 @@
 //! [`copypaste_ipc::SettingsHealth`] rather than rendered as if the user had
 //! chosen it.
 
-mod record;
-
 use std::ops::Deref;
 use std::sync::{Mutex, RwLock, RwLockReadGuard};
 
@@ -114,12 +112,12 @@ impl Settings {
     /// the *defaults*, which are the open value for every privacy field.
     pub fn load(meta: &Meta) -> Self {
         let (config, health) = match meta.state(KEY_SETTINGS) {
-            Ok(Some(raw)) => record::read(&raw),
+            Ok(Some(raw)) => copypaste_core::settings_record::read(&raw),
             Ok(None) => (ConfigData::default(), SettingsHealth::default()),
             Err(e) => {
                 warn!(error = ?e, "settings could not be read; failing closed");
                 (
-                    record::all_closed(),
+                    copypaste_core::settings_record::all_closed(),
                     SettingsHealth {
                         record_unreadable: true,
                         unreadable_fields: Vec::new(),

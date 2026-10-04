@@ -104,7 +104,7 @@ pub(super) fn insert_fts_in_tx(
 /// * `*` is appended to *every* token, not just the last: search-as-you-type
 ///   means any token can be mid-word, and last-token-only made `"priv key"`
 ///   match nothing.
-fn sanitize_fts5_query(raw: &str) -> Option<String> {
+pub(super) fn sanitize_fts5_query(raw: &str) -> Option<String> {
     const RESERVED: [&str; 4] = ["NOT", "OR", "AND", "NEAR"];
 
     let mut cleaned = String::with_capacity(raw.len());
