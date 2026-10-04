@@ -281,21 +281,18 @@ jobs:
           arch: x86_64
           target: google_apis
           disable-animations: true
-          script: |
-            set -eu
-            [[ "$(adb shell getprop ro.kernel.qemu | tr -d '\r')" == 1 ]]
-            [[ "$(adb shell getprop ro.build.version.sdk | tr -d '\r')" == 36 ]]
-            [[ "$(adb shell getprop ro.product.cpu.abi | tr -d '\r')" == x86_64 ]]
-            apk="dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk"
-            adb install -r "$apk"
-            adb shell am start -W -n com.copypaste.app/.MainActivity
-            for attempt in $(seq 1 30); do
-              pid="$(adb shell pidof com.copypaste.app | tr -d '\r' || true)"
-              [[ -n "$pid" ]] && break
-              sleep 1
-            done
-            [[ -n "${pid:-}" ]]
-            adb shell dumpsys package com.copypaste.app | grep -q "versionName=${{ needs.preflight.outputs.version }}"
+          script: >-
+            set -eu;
+            test "$(adb shell getprop ro.kernel.qemu | tr -d '\r')" = 1;
+            test "$(adb shell getprop ro.build.version.sdk | tr -d '\r')" = 36;
+            test "$(adb shell getprop ro.product.cpu.abi | tr -d '\r')" = x86_64;
+            adb install -r "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk";
+            adb shell am start -W -n com.copypaste.app/.MainActivity;
+            pid="";
+            attempt=0;
+            while [ "$attempt" -lt 30 ]; do pid="$(adb shell pidof com.copypaste.app | tr -d '\r' || true)"; if [ -n "$pid" ]; then break; fi; attempt=$((attempt + 1)); sleep 1; done;
+            test -n "$pid";
+            adb shell dumpsys package com.copypaste.app | grep -q "versionName=${{ needs.preflight.outputs.version }}";
             adb shell dumpsys activity activities | grep -q 'mResumedActivity.*com.copypaste.app'
 
   qualify:
