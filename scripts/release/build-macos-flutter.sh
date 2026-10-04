@@ -48,7 +48,7 @@ flutter build macos --release \
     exit 1
 }
 install -m 755 "$ROOT/target/release/copypaste" \
-    "$SOURCE_APP/Contents/MacOS/copypaste"
+    "$SOURCE_APP/Contents/MacOS/copypaste-cli"
 
 install -m 755 "$ROOT/packaging/macos/selfsign.sh" \
     "$SOURCE_APP/Contents/Resources/selfsign.sh"
@@ -56,7 +56,7 @@ install -m 755 "$ROOT/packaging/macos/selfsign.sh" \
     --entitlements "$APP_ROOT/macos/Runner/Daemon.entitlements" \
     "$SOURCE_APP/Contents/MacOS/copypaste-daemon"
 /usr/bin/codesign --force --sign - --timestamp=none \
-    "$SOURCE_APP/Contents/MacOS/copypaste"
+    "$SOURCE_APP/Contents/MacOS/copypaste-cli"
 /usr/bin/codesign --force --sign - --timestamp=none \
     --entitlements "$APP_ROOT/macos/Runner/Release.entitlements" \
     "$SOURCE_APP"

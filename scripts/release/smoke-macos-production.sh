@@ -54,7 +54,7 @@ done
 [[ -n "${daemon_pid:-}" ]]
 daemon_path="$(ps -p "$daemon_pid" -o command=)"
 [[ "$daemon_path" == "$installed/Contents/MacOS/copypaste-daemon"* ]]
-cli="$installed/Contents/MacOS/copypaste"
+cli="$installed/Contents/MacOS/copypaste-cli"
 [[ -x "$cli" ]]
 socket="${TMPDIR:-/tmp}/cp-${app_pid}.sock"
 status_file="$root/status.json"
