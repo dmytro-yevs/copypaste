@@ -13,15 +13,15 @@ $installerPath = (Resolve-Path -LiteralPath $Installer).Path
 $installDirectory = Join-Path $env:LOCALAPPDATA "Programs\CopyPaste"
 $app = Join-Path $installDirectory "CopyPaste.exe"
 $uninstaller = Join-Path $installDirectory "Uninstall.exe"
+$uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CopyPaste"
 
 try {
     $install = Start-Process -FilePath $installerPath -ArgumentList "/S" -Wait -PassThru
     if ($install.ExitCode -ne 0) { throw "installer exited with $($install.ExitCode)" }
     if (-not (Test-Path -LiteralPath $app -PathType Leaf)) { throw "installed application is missing" }
-    $versionInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo($app)
-    $productVersion = "$($versionInfo.ProductMajorPart).$($versionInfo.ProductMinorPart).$($versionInfo.ProductBuildPart)"
-    if ($productVersion -cne $Version) {
-        throw "installed application version $productVersion does not match $Version"
+    $installedVersion = (Get-ItemProperty -LiteralPath $uninstallKey -ErrorAction Stop).DisplayVersion
+    if ($installedVersion -cne $Version) {
+        throw "installed application version $installedVersion does not match $Version"
     }
 
     $process = Start-Process -FilePath $app -PassThru
