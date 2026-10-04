@@ -9,11 +9,7 @@ void main() {
 
   test('stable installations ignore prereleases', () {
     final body = jsonEncode([
-      _release(
-        '1.1.0-rc.1',
-        prerelease: true,
-        target: AppUpdateTarget.windows,
-      ),
+      _release('1.1.0-rc.1', prerelease: true, target: AppUpdateTarget.windows),
       _release('1.0.1', prerelease: false, target: AppUpdateTarget.windows),
     ]);
 
@@ -29,16 +25,8 @@ void main() {
 
   test('prerelease installations receive the next prerelease', () {
     final body = jsonEncode([
-      _release(
-        '1.1.0-rc.2',
-        prerelease: true,
-        target: AppUpdateTarget.android,
-      ),
-      _release(
-        '1.1.0-rc.0',
-        prerelease: true,
-        target: AppUpdateTarget.android,
-      ),
+      _release('1.1.0-rc.2', prerelease: true, target: AppUpdateTarget.android),
+      _release('1.1.0-rc.0', prerelease: true, target: AppUpdateTarget.android),
     ]);
 
     final release = parser.latestFor(
@@ -72,11 +60,7 @@ void main() {
   test('macOS accepts the release without a downloadable artifact', () {
     final release = parser.latestFor(
       jsonEncode([
-        _release(
-          '1.0.1',
-          prerelease: false,
-          target: AppUpdateTarget.android,
-        ),
+        _release('1.0.1', prerelease: false, target: AppUpdateTarget.android),
       ]),
       currentVersion: Version.parse('1.0.0'),
       target: AppUpdateTarget.macos,

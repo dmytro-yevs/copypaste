@@ -101,6 +101,20 @@ void main() {
     expect(find.text('Available'), findsNothing);
     expect(find.text('24 ms'), findsNothing);
     expect(find.text('Already paired'), findsOneWidget);
+    final discoveredCard = find.byKey(
+      const ValueKey<String>('discovered-device-card-paired'),
+    );
+    expect(
+      find.descendant(
+        of: discoveredCard,
+        matching: find.byIcon(LucideIcons.tablet),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: discoveredCard, matching: find.byType(Avatar)),
+      findsNothing,
+    );
     expect(find.text('Your devices'), findsNothing);
     expect(find.text('Trusted devices'), findsNothing);
 
@@ -604,6 +618,14 @@ class _ScreenGateway implements DevicesGateway {
               address: '192.0.2.20:47654',
               paired: true,
               lastSeen: DateTime.utc(2026, 10, 3),
+              details: _details(
+                name: 'Tablet',
+                platform: DevicePlatform.android,
+                deviceClass: DeviceClass.tablet,
+                osName: 'Android',
+                osVersion: '16',
+                presence: DevicePresence.online,
+              ),
             ),
           ];
 

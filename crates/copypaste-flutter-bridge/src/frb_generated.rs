@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0-beta.5";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -669347325;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1832814889;
 
 // Section: executor
 
@@ -1640,7 +1640,7 @@ fn wire__crate__api__set_this_device_name_impl(
         },
     )
 }
-fn wire__crate__api__start_isolated_desktop_runtime_impl(
+fn wire__crate__api__start_desktop_runtime_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -1648,7 +1648,7 @@ fn wire__crate__api__start_isolated_desktop_runtime_impl(
 ) {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "start_isolated_desktop_runtime",
+            debug_name: "start_desktop_runtime",
             port: Some(port_),
             mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
         },
@@ -1668,11 +1668,9 @@ fn wire__crate__api__start_isolated_desktop_runtime_impl(
             move |context| async move {
                 transform_result_sse::<_, crate::api::RuntimeError>(
                     (move || async move {
-                        let output_ok = crate::api::start_isolated_desktop_runtime(
-                            api_daemon_executable,
-                            api_data_dir,
-                        )
-                        .await?;
+                        let output_ok =
+                            crate::api::start_desktop_runtime(api_daemon_executable, api_data_dir)
+                                .await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -1681,7 +1679,7 @@ fn wire__crate__api__start_isolated_desktop_runtime_impl(
         },
     )
 }
-fn wire__crate__api__stop_isolated_desktop_runtime_impl(
+fn wire__crate__api__stop_desktop_runtime_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -1689,7 +1687,7 @@ fn wire__crate__api__stop_isolated_desktop_runtime_impl(
 ) {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "stop_isolated_desktop_runtime",
+            debug_name: "stop_desktop_runtime",
             port: Some(port_),
             mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
         },
@@ -1707,7 +1705,7 @@ fn wire__crate__api__stop_isolated_desktop_runtime_impl(
             move |context| {
                 transform_result_sse::<_, ()>((move || {
                     let output_ok = Result::<_, ()>::Ok({
-                        crate::api::stop_isolated_desktop_runtime();
+                        crate::api::stop_desktop_runtime();
                     })?;
                     Ok(output_ok)
                 })())
@@ -2367,14 +2365,16 @@ impl SseDecode for crate::api::DiscoveredDevice {
     }
 }
 
-impl SseDecode for crate::api::HistoryFacet {
+impl SseDecode for crate::api::HistoryDeviceFacet {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_id = <String>::sse_decode(deserializer);
         let mut var_label = <String>::sse_decode(deserializer);
-        return crate::api::HistoryFacet {
+        let mut var_deviceClass = <crate::api::DeviceClass>::sse_decode(deserializer);
+        return crate::api::HistoryDeviceFacet {
             id: var_id,
             label: var_label,
+            device_class: var_deviceClass,
         };
     }
 }
@@ -2382,11 +2382,25 @@ impl SseDecode for crate::api::HistoryFacet {
 impl SseDecode for crate::api::HistoryFacets {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_originDevices = <Vec<crate::api::HistoryFacet>>::sse_decode(deserializer);
-        let mut var_sourceApps = <Vec<crate::api::HistoryFacet>>::sse_decode(deserializer);
+        let mut var_originDevices = <Vec<crate::api::HistoryDeviceFacet>>::sse_decode(deserializer);
+        let mut var_sourceApps = <Vec<crate::api::HistorySourceAppFacet>>::sse_decode(deserializer);
         return crate::api::HistoryFacets {
             origin_devices: var_originDevices,
             source_apps: var_sourceApps,
+        };
+    }
+}
+
+impl SseDecode for crate::api::HistorySourceAppFacet {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <String>::sse_decode(deserializer);
+        let mut var_label = <String>::sse_decode(deserializer);
+        let mut var_iconItemId = <Option<String>>::sse_decode(deserializer);
+        return crate::api::HistorySourceAppFacet {
+            id: var_id,
+            label: var_label,
+            icon_item_id: var_iconItemId,
         };
     }
 }
@@ -2465,13 +2479,27 @@ impl SseDecode for Vec<crate::api::DiscoveredDevice> {
     }
 }
 
-impl SseDecode for Vec<crate::api::HistoryFacet> {
+impl SseDecode for Vec<crate::api::HistoryDeviceFacet> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut len_ = <i32>::sse_decode(deserializer);
         let mut ans_ = Vec::with_capacity(len_ as usize);
         for idx_ in 0..len_ {
-            ans_.push(<crate::api::HistoryFacet>::sse_decode(deserializer));
+            ans_.push(<crate::api::HistoryDeviceFacet>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::HistorySourceAppFacet> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::HistorySourceAppFacet>::sse_decode(
+                deserializer,
+            ));
         }
         return ans_;
     }
@@ -2915,12 +2943,8 @@ fn pde_ffi_dispatcher_primary_impl(
         42 => wire__crate__api__set_capture_paused_impl(port, ptr, rust_vec_len, data_len),
         43 => wire__crate__api__set_clip_pinned_impl(port, ptr, rust_vec_len, data_len),
         44 => wire__crate__api__set_this_device_name_impl(port, ptr, rust_vec_len, data_len),
-        45 => {
-            wire__crate__api__start_isolated_desktop_runtime_impl(port, ptr, rust_vec_len, data_len)
-        }
-        46 => {
-            wire__crate__api__stop_isolated_desktop_runtime_impl(port, ptr, rust_vec_len, data_len)
-        }
+        45 => wire__crate__api__start_desktop_runtime_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__api__stop_desktop_runtime_impl(port, ptr, rust_vec_len, data_len),
         47 => wire__crate__api__sync_devices_impl(port, ptr, rust_vec_len, data_len),
         48 => wire__crate__api__this_device_name_impl(port, ptr, rust_vec_len, data_len),
         49 => wire__crate__api__unpair_device_impl(port, ptr, rust_vec_len, data_len),
@@ -3439,18 +3463,24 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::DiscoveredDevice>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::api::HistoryFacet {
+impl flutter_rust_bridge::IntoDart for crate::api::HistoryDeviceFacet {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.id.into_into_dart().into_dart(),
             self.label.into_into_dart().into_dart(),
+            self.device_class.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
 }
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::HistoryFacet {}
-impl flutter_rust_bridge::IntoIntoDart<crate::api::HistoryFacet> for crate::api::HistoryFacet {
-    fn into_into_dart(self) -> crate::api::HistoryFacet {
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::HistoryDeviceFacet
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::HistoryDeviceFacet>
+    for crate::api::HistoryDeviceFacet
+{
+    fn into_into_dart(self) -> crate::api::HistoryDeviceFacet {
         self
     }
 }
@@ -3467,6 +3497,28 @@ impl flutter_rust_bridge::IntoDart for crate::api::HistoryFacets {
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::HistoryFacets {}
 impl flutter_rust_bridge::IntoIntoDart<crate::api::HistoryFacets> for crate::api::HistoryFacets {
     fn into_into_dart(self) -> crate::api::HistoryFacets {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::HistorySourceAppFacet {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.id.into_into_dart().into_dart(),
+            self.label.into_into_dart().into_dart(),
+            self.icon_item_id.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::HistorySourceAppFacet
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::HistorySourceAppFacet>
+    for crate::api::HistorySourceAppFacet
+{
+    fn into_into_dart(self) -> crate::api::HistorySourceAppFacet {
         self
     }
 }
@@ -4018,19 +4070,29 @@ impl SseEncode for crate::api::DiscoveredDevice {
     }
 }
 
-impl SseEncode for crate::api::HistoryFacet {
+impl SseEncode for crate::api::HistoryDeviceFacet {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.id, serializer);
         <String>::sse_encode(self.label, serializer);
+        <crate::api::DeviceClass>::sse_encode(self.device_class, serializer);
     }
 }
 
 impl SseEncode for crate::api::HistoryFacets {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <Vec<crate::api::HistoryFacet>>::sse_encode(self.origin_devices, serializer);
-        <Vec<crate::api::HistoryFacet>>::sse_encode(self.source_apps, serializer);
+        <Vec<crate::api::HistoryDeviceFacet>>::sse_encode(self.origin_devices, serializer);
+        <Vec<crate::api::HistorySourceAppFacet>>::sse_encode(self.source_apps, serializer);
+    }
+}
+
+impl SseEncode for crate::api::HistorySourceAppFacet {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.id, serializer);
+        <String>::sse_encode(self.label, serializer);
+        <Option<String>>::sse_encode(self.icon_item_id, serializer);
     }
 }
 
@@ -4098,12 +4160,22 @@ impl SseEncode for Vec<crate::api::DiscoveredDevice> {
     }
 }
 
-impl SseEncode for Vec<crate::api::HistoryFacet> {
+impl SseEncode for Vec<crate::api::HistoryDeviceFacet> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
-            <crate::api::HistoryFacet>::sse_encode(item, serializer);
+            <crate::api::HistoryDeviceFacet>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::HistorySourceAppFacet> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::HistorySourceAppFacet>::sse_encode(item, serializer);
         }
     }
 }

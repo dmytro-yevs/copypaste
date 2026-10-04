@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../../devices/device_presentation.dart';
+
 import '../../../app/theme/app_tokens.dart';
 import '../controller/android_onboarding_controller.dart';
 import '../repository/android_onboarding_store.dart';
@@ -566,6 +568,7 @@ class _Footer extends StatelessWidget {
             ),
             Button.primary(
               onPressed: controller.busy ? null : () => _finish(onPairDevice),
+              leading: const Icon(DevicePresentation.collectionIcon),
               child: const Text('Pair a device'),
             ),
           ],

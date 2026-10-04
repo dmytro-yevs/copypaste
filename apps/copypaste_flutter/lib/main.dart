@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -89,27 +90,31 @@ Future<Object?> _handleNativeTermination(MethodCall call) async {
       'Unsupported lifecycle method: ${call.method}',
     );
   }
-  if (Platform.isMacOS) {
-    await runtime.stopIsolatedDesktopRuntime();
+  if (Platform.isMacOS || Platform.isWindows) {
+    await runtime.stopDesktopRuntime();
   }
   return true;
 }
 
-Future<void> _startDebugRuntime() async {
+Future<void> _startRuntimeProcess() async {
   if (Platform.isAndroid) {
     await runtime.runtimeStatus();
     return;
   }
-  if (!Platform.isMacOS) return;
+  if (!Platform.isMacOS && !Platform.isWindows) return;
+  final daemonName = Platform.isWindows
+      ? 'copypaste-daemon.exe'
+      : 'copypaste-daemon';
   final daemon = File(
-    '${File(Platform.resolvedExecutable).parent.path}/copypaste-daemon',
+    '${File(Platform.resolvedExecutable).parent.path}/$daemonName',
   );
   if (!await daemon.exists()) {
     throw StateError('The CopyPaste runtime helper is unavailable.');
   }
   final supportDirectory = await getApplicationSupportDirectory();
-  final dataDir = Directory('${supportDirectory.path}/development-runtime');
-  await runtime.startIsolatedDesktopRuntime(
+  final runtimeDirectory = kDebugMode ? 'development-runtime' : 'runtime';
+  final dataDir = Directory('${supportDirectory.path}/$runtimeDirectory');
+  await runtime.startDesktopRuntime(
     daemonExecutable: daemon.path,
     dataDir: dataDir.path,
   );
@@ -229,9 +234,11 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       _runtimeFailureMessage = null;
     });
     try {
-      await _startDebugRuntime();
+      await _startRuntimeProcess();
       if (!mounted) {
-        await runtime.stopIsolatedDesktopRuntime();
+        if (Platform.isMacOS || Platform.isWindows) {
+          await runtime.stopDesktopRuntime();
+        }
         return;
       }
       setState(() {
@@ -349,8 +356,8 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     unawaited(
       _desktopWindow?.updateCaptureState(available: false, paused: true),
     );
-    if (widget.runtimeEnabled && Platform.isMacOS) {
-      await runtime.stopIsolatedDesktopRuntime();
+    if (widget.runtimeEnabled && (Platform.isMacOS || Platform.isWindows)) {
+      await runtime.stopDesktopRuntime();
     }
     if (historyRepository != null) {
       unawaited(historyRepository.dispose().catchError((Object _) {}));
@@ -384,8 +391,8 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     );
     await historyRepository?.dispose();
     await devicesGateway?.dispose();
-    if (widget.runtimeEnabled && Platform.isMacOS) {
-      await runtime.stopIsolatedDesktopRuntime();
+    if (widget.runtimeEnabled && (Platform.isMacOS || Platform.isWindows)) {
+      await runtime.stopDesktopRuntime();
     }
   }
 

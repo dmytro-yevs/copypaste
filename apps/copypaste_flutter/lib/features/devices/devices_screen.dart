@@ -418,9 +418,10 @@ class _DevicesScreenState extends State<DevicesScreen> {
     DiscoveredDevice device,
   ) {
     return Card(
+      key: ValueKey<String>('discovered-device-card-${device.id}'),
       child: Row(
         children: [
-          Avatar(initials: Avatar.getInitials(device.name)),
+          _deviceIconTile(context, device.details?.profile?.deviceClass),
           const Gap(AppSpacing.md),
           Expanded(
             child: Column(
@@ -473,26 +474,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
         style: style,
         child: Row(
           children: [
-            SizedBox.square(
-              dimension: AppControlSize.touch,
-              child: Card(
-                theme: CardTheme(
-                  padding: EdgeInsets.zero,
-                  filled: true,
-                  fillColor: colors.secondary,
-                  borderRadius: const BorderRadius.all(
-                    Radius.circular(AppRadius.lg),
-                  ),
-                  borderWidth: AppSpacing.zero,
-                ),
-                child: Center(
-                  child: Icon(
-                    DevicePresentation.icon(details?.profile?.deviceClass),
-                    size: AppIconSize.lg,
-                  ),
-                ),
-              ),
-            ),
+            _deviceIconTile(context, details?.profile?.deviceClass),
             const Gap(AppSpacing.md),
             Expanded(
               child: Column(
@@ -514,6 +496,28 @@ class _DevicesScreenState extends State<DevicesScreen> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _deviceIconTile(BuildContext context, DeviceClass? deviceClass) {
+    final colors = Theme.of(context).colorScheme;
+    return SizedBox.square(
+      dimension: AppControlSize.touch,
+      child: Card(
+        theme: CardTheme(
+          padding: EdgeInsets.zero,
+          filled: true,
+          fillColor: colors.secondary,
+          borderRadius: const BorderRadius.all(Radius.circular(AppRadius.lg)),
+          borderWidth: AppSpacing.zero,
+        ),
+        child: Center(
+          child: Icon(
+            DevicePresentation.icon(deviceClass),
+            size: AppIconSize.lg,
+          ),
         ),
       ),
     );

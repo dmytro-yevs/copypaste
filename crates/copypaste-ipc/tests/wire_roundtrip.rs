@@ -3,10 +3,10 @@ mod support;
 use copypaste_ipc::{
     BackupData, CloudStatusData, CloudSyncData, ConfigApplied, ConfigData, ContentClass,
     DiagnosticCounters, DiscoveredData, DiscoveredDevice, ErrorCode, EventData, EventKind,
-    ExportData, ExportItem, FileDetails, HistoryFacet, HistoryFacets, ImageDetails, ImagePreview,
-    ImportData, Item, ItemPage, Method, PairingInviteData, PairingProgressData, PairingRole,
-    PairingState, PrivateModeData, Request, Response, ResponseData, StatusData, SyncResult,
-    PROTOCOL_VERSION,
+    ExportData, ExportItem, FileDetails, HistoryDeviceFacet, HistoryFacets, HistorySourceAppFacet,
+    ImageDetails, ImagePreview, ImportData, Item, ItemPage, Method, PairingInviteData,
+    PairingProgressData, PairingRole, PairingState, PrivateModeData, Request, Response,
+    ResponseData, StatusData, SyncResult, PROTOCOL_VERSION,
 };
 use serde_json::{json, Value};
 
@@ -163,13 +163,15 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             next_cursor: Some("cursor".into()),
         }),
         ResponseData::HistoryFacets(HistoryFacets {
-            origin_devices: vec![HistoryFacet {
+            origin_devices: vec![HistoryDeviceFacet {
                 id: "device-1".into(),
                 label: "Laptop".into(),
+                device_class: copypaste_ipc::DeviceClass::Laptop,
             }],
-            source_apps: vec![HistoryFacet {
+            source_apps: vec![HistorySourceAppFacet {
                 id: "com.example.app".into(),
                 label: "Example".into(),
+                icon_item_id: Some("item-1".into()),
             }],
         }),
         ResponseData::Item(item()),
