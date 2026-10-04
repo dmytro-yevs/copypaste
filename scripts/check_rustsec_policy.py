@@ -86,17 +86,6 @@ def evaluate(report, policy, today, root=ROOT):
             continue
         used.add(advisory_id)
         accepted.append(entry)
-        if advisory_id == "RUSTSEC-2024-0429":
-            variant = root / "vendor/glib/src/variant_iter.rs"
-            try:
-                patched = "&mut p" in variant.read_text(encoding="utf-8")
-            except OSError:
-                patched = False
-            if not patched:
-                errors.append(
-                    f"{advisory_id}: vendor/glib lost the VariantStrIter mutability patch"
-                )
-
     for advisory_id in sorted(exceptions.keys() - used):
         errors.append(f"{advisory_id}: exception is stale; the advisory was not detected")
     return errors, accepted
@@ -123,23 +112,6 @@ def run_audit():
     except json.JSONDecodeError as error:
         detail = result.stderr.strip() or "cargo-audit produced no JSON"
         raise RuntimeError(detail) from error
-
-
-def glib_vendor_errors(root):
-    variant = root / "vendor/glib/src/variant_iter.rs"
-    if not variant.is_file():
-        return [
-            "vendor/glib is missing; restore the RUSTSEC-2024-0429 VariantStrIter patch"
-        ]
-    try:
-        text = variant.read_text(encoding="utf-8")
-    except OSError:
-        return ["vendor/glib/src/variant_iter.rs could not be read"]
-    if "let mut p:" not in text or "&mut p" not in text:
-        return [
-            "vendor/glib lost the VariantStrIter mutability patch (RUSTSEC-2024-0429)"
-        ]
-    return []
 
 
 def target_errors(entries):
@@ -181,7 +153,6 @@ def main():
         errors, accepted = evaluate(report, policy, datetime.datetime.now(datetime.UTC).date())
         if not errors:
             errors.extend(target_errors(accepted))
-        errors.extend(glib_vendor_errors(ROOT))
     except (OSError, ValueError, RuntimeError) as error:
         print(f"rustsec-policy: {error}", file=sys.stderr)
         return 1

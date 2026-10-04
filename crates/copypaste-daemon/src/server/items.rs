@@ -170,10 +170,11 @@ pub(super) fn history_query(
 }
 
 pub(super) fn history_facets(state: &AppState, id: u64) -> Response {
-    match state
-        .store
-        .history_facets(state.meta.device_id(), &state.meta.device_name())
-    {
+    match state.store.history_facets(
+        state.meta.device_id(),
+        &state.meta.device_name(),
+        state.meta.device_class(),
+    ) {
         Ok(facets) => Response::ok(id, ResponseData::HistoryFacets(facets)),
         Err(error) => storage_error(id, "history_facets", &error),
     }

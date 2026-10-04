@@ -14,13 +14,17 @@ use super::model::{item_columns_ci, row_to_item, ItemColumns, StoreError, Stored
 use super::search::sanitize_fts5_query;
 use super::store::Store;
 
-pub use copypaste_ipc::{HistoryFacet, HistoryFacets, HistoryQuery, HistorySort};
+pub use copypaste_ipc::{
+    HistoryDeviceFacet, HistoryFacets, HistoryQuery, HistorySort, HistorySourceAppFacet,
+};
 
 /// Where a filtered history query stopped.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct HistoryCursor {
     fingerprint: String,
     sort: HistorySort,
+    pinned: bool,
+    pin_order: Option<f64>,
     created_at: i64,
     id: String,
     relevance: Option<f64>,
@@ -163,10 +167,46 @@ fn cursor_of(
     HistoryCursor {
         fingerprint,
         sort,
+        pinned: item.pinned,
+        pin_order: item.pin_order,
         created_at: item.created_at,
         id: item.id.clone(),
         relevance,
     }
+}
+
+fn pin_order_value(pin_order: Option<f64>) -> Value {
+    pin_order.map_or(Value::Null, Value::Real)
+}
+
+/// Continue after a row in the pinned run, then include the complete unpinned
+/// run. Pinned order is independent of the selected unpinned sort.
+fn push_after_pinned(
+    sql: &mut String,
+    values: &mut Vec<Value>,
+    cursor: &HistoryCursor,
+    qualifier: &str,
+) {
+    let pinned = format!("{qualifier}pinned");
+    let pin_order = format!("{qualifier}pin_order");
+    let created_at = format!("{qualifier}created_at");
+    let id = format!("{qualifier}id");
+    sql.push_str(&format!(
+        " AND ({pinned} = 0 OR ({pinned} = 1 AND \
+         (({pin_order} IS NOT NULL AND (? IS NULL OR {pin_order} > ?)) \
+          OR ({pin_order} IS ? AND {created_at} < ?) \
+          OR ({pin_order} IS ? AND {created_at} = ? AND {id} < ?))))"
+    ));
+    let pin_order = pin_order_value(cursor.pin_order);
+    values.extend([
+        pin_order.clone(),
+        pin_order.clone(),
+        pin_order.clone(),
+        Value::Integer(cursor.created_at),
+        pin_order,
+        Value::Integer(cursor.created_at),
+        Value::Text(cursor.id.clone()),
+    ]);
 }
 
 impl Store {
@@ -180,21 +220,27 @@ impl Store {
         &self,
         local_device_id: &str,
         local_device_name: &str,
+        local_device_class: copypaste_ipc::DeviceClass,
     ) -> Result<HistoryFacets, StoreError> {
         let conn = self.conn()?;
         let mut origins = Vec::new();
         let mut origin_stmt = conn.prepare(
-            "SELECT ci.origin_device_id, dn.name \
+            "SELECT ci.origin_device_id, dn.name, dc.value \
              FROM clipboard_items ci \
              LEFT JOIN sync_device_name dn ON dn.device_id = ci.origin_device_id \
+             LEFT JOIN sync_device_state dc ON dc.key = 'device_class:' || ci.origin_device_id \
              WHERE ci.deleted = 0 \
-             GROUP BY ci.origin_device_id, dn.name",
+             GROUP BY ci.origin_device_id, dn.name, dc.value",
         )?;
         let origin_rows = origin_stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
         })?;
         for row in origin_rows {
-            let (stored_id, known_label) = row?;
+            let (stored_id, known_label, known_class) = row?;
             let (id, label) = if stored_id.is_empty() {
                 (local_device_id, Some(local_device_name))
             } else {
@@ -202,9 +248,17 @@ impl Store {
             };
             if !id.is_empty() {
                 if let Some(label) = label.filter(|label| !label.trim().is_empty()) {
-                    origins.push(HistoryFacet {
+                    origins.push(HistoryDeviceFacet {
                         id: id.to_owned(),
                         label: label.to_owned(),
+                        device_class: if id == local_device_id {
+                            local_device_class
+                        } else {
+                            known_class.as_deref().map_or(
+                                copypaste_ipc::DeviceClass::Unknown,
+                                copypaste_ipc::DeviceClass::from_wire_name,
+                            )
+                        },
                     });
                 }
             }
@@ -214,22 +268,38 @@ impl Store {
         // the stable bundle/package id remains the selected value.
         let mut apps = BTreeMap::new();
         let mut app_stmt = conn.prepare(
-            "SELECT app_bundle_id, app_name FROM clipboard_items \
+            "SELECT id, app_bundle_id, app_name, payload_metadata FROM clipboard_items \
              WHERE deleted = 0 AND app_bundle_id IS NOT NULL AND app_name IS NOT NULL \
              ORDER BY app_bundle_id ASC, created_at DESC, id DESC",
         )?;
         let app_rows = app_stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
         })?;
         for row in app_rows {
-            let (id, label) = row?;
+            let (item_id, id, label, payload_metadata) = row?;
             if !id.is_empty() && !label.trim().is_empty() {
-                apps.entry(id).or_insert(label);
+                let has_icon = payload_metadata
+                    .as_deref()
+                    .and_then(|value| serde_json::from_str::<crate::PayloadMetadata>(value).ok())
+                    .is_some_and(|metadata| metadata.source_app_icon.is_some());
+                let entry = apps.entry(id).or_insert_with(|| (label, None));
+                if entry.1.is_none() && has_icon {
+                    entry.1 = Some(item_id);
+                }
             }
         }
         let mut source_apps = apps
             .into_iter()
-            .map(|(id, label)| HistoryFacet { id, label })
+            .map(|(id, (label, icon_item_id))| HistorySourceAppFacet {
+                id,
+                label,
+                icon_item_id,
+            })
             .collect::<Vec<_>>();
         origins.sort_by(|left, right| left.label.cmp(&right.label).then(left.id.cmp(&right.id)));
         source_apps
@@ -339,17 +409,25 @@ impl Store {
             sql.push_str(&filters);
             sql.push_str(") ranked WHERE 1 = 1");
             if let Some(cursor) = after {
-                let relevance = cursor.relevance.ok_or(StoreError::InvalidCursor)?;
-                sql.push_str(" AND (relevance > ? OR (relevance = ? AND (created_at < ? OR (created_at = ? AND id < ?))))");
-                values.extend([
-                    Value::Real(relevance),
-                    Value::Real(relevance),
-                    Value::Integer(cursor.created_at),
-                    Value::Integer(cursor.created_at),
-                    Value::Text(cursor.id.clone()),
-                ]);
+                if cursor.pinned {
+                    push_after_pinned(&mut sql, &mut values, cursor, "");
+                } else {
+                    let relevance = cursor.relevance.ok_or(StoreError::InvalidCursor)?;
+                    sql.push_str(" AND pinned = 0 AND (relevance > ? OR (relevance = ? AND (created_at < ? OR (created_at = ? AND id < ?))))");
+                    values.extend([
+                        Value::Real(relevance),
+                        Value::Real(relevance),
+                        Value::Integer(cursor.created_at),
+                        Value::Integer(cursor.created_at),
+                        Value::Text(cursor.id.clone()),
+                    ]);
+                }
             }
-            sql.push_str(" ORDER BY relevance ASC, created_at DESC, id DESC LIMIT ?");
+            sql.push_str(
+                " ORDER BY pinned DESC, pin_order ASC, \
+                 CASE WHEN pinned = 0 THEN relevance END ASC, \
+                 created_at DESC, id DESC LIMIT ?",
+            );
         } else {
             sql.push_str("SELECT ");
             sql.push_str(item_columns_ci!());
@@ -360,32 +438,41 @@ impl Store {
             sql.push_str(" WHERE ");
             sql.push_str(&filters);
             if let Some(cursor) = after {
-                match query.sort {
-                    HistorySort::Newest => {
-                        sql.push_str(
-                            " AND (ci.created_at < ? OR (ci.created_at = ? AND ci.id < ?))",
-                        );
+                if cursor.pinned {
+                    push_after_pinned(&mut sql, &mut values, cursor, "ci.");
+                } else {
+                    match query.sort {
+                        HistorySort::Newest => {
+                            sql.push_str(
+                                " AND ci.pinned = 0 AND (ci.created_at < ? OR (ci.created_at = ? AND ci.id < ?))",
+                            );
+                        }
+                        HistorySort::Oldest => {
+                            sql.push_str(
+                                " AND ci.pinned = 0 AND (ci.created_at > ? OR (ci.created_at = ? AND ci.id > ?))",
+                            );
+                        }
+                        HistorySort::Relevance => unreachable!("handled above"),
                     }
-                    HistorySort::Oldest => {
-                        sql.push_str(
-                            " AND (ci.created_at > ? OR (ci.created_at = ? AND ci.id > ?))",
-                        );
-                    }
-                    HistorySort::Relevance => unreachable!("handled above"),
+                    values.extend([
+                        Value::Integer(cursor.created_at),
+                        Value::Integer(cursor.created_at),
+                        Value::Text(cursor.id.clone()),
+                    ]);
                 }
-                values.extend([
-                    Value::Integer(cursor.created_at),
-                    Value::Integer(cursor.created_at),
-                    Value::Text(cursor.id.clone()),
-                ]);
             }
             match query.sort {
-                HistorySort::Newest => {
-                    sql.push_str(" ORDER BY ci.created_at DESC, ci.id DESC LIMIT ?")
-                }
-                HistorySort::Oldest => {
-                    sql.push_str(" ORDER BY ci.created_at ASC, ci.id ASC LIMIT ?")
-                }
+                HistorySort::Newest => sql.push_str(
+                    " ORDER BY ci.pinned DESC, ci.pin_order ASC, \
+                     ci.created_at DESC, ci.id DESC LIMIT ?",
+                ),
+                HistorySort::Oldest => sql.push_str(
+                    " ORDER BY ci.pinned DESC, ci.pin_order ASC, \
+                     CASE WHEN ci.pinned = 1 THEN ci.created_at END DESC, \
+                     CASE WHEN ci.pinned = 0 THEN ci.created_at END ASC, \
+                     CASE WHEN ci.pinned = 1 THEN ci.id END DESC, \
+                     CASE WHEN ci.pinned = 0 THEN ci.id END ASC LIMIT ?",
+                ),
                 HistorySort::Relevance => unreachable!("handled above"),
             }
         }
@@ -432,6 +519,8 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+
     use super::*;
     use crate::storage::test_support::{item, store, T0};
 
@@ -601,6 +690,38 @@ mod tests {
     }
 
     #[test]
+    fn every_sort_keeps_pins_first_in_pin_order_across_page_boundaries() {
+        let store = store();
+        let oldest = store.insert(item("needle oldest", T0)).unwrap();
+        let first_pin = store.insert(item("needle first pin", T0 + 1)).unwrap();
+        let second_pin = store.insert(item("needle second pin", T0 + 2)).unwrap();
+        let newest = store.insert(item("needle newest", T0 + 3)).unwrap();
+        store.set_pinned(&second_pin.id, true).unwrap();
+        store.set_pinned(&first_pin.id, true).unwrap();
+
+        for sort in [
+            HistorySort::Newest,
+            HistorySort::Oldest,
+            HistorySort::Relevance,
+        ] {
+            let query = HistoryQuery {
+                search: Some("needle".into()),
+                sort,
+                ..HistoryQuery::default()
+            };
+            let ids = walk_with_page_size(&store, &query, 1);
+            assert_eq!(
+                &ids[..2],
+                &[second_pin.id.clone(), first_pin.id.clone()],
+                "sort: {sort:?}"
+            );
+            assert_eq!(ids.len(), 4, "sort: {sort:?}");
+            assert!(ids.contains(&oldest.id), "sort: {sort:?}");
+            assert!(ids.contains(&newest.id), "sort: {sort:?}");
+        }
+    }
+
+    #[test]
     fn relevance_requires_search_and_orders_ranked_results_with_a_cursor() {
         let store = store();
         store.insert(item("needle needle", T0)).unwrap();
@@ -724,36 +845,51 @@ mod tests {
             )
             .unwrap();
         store.record_device_name("remote-device", "Phone").unwrap();
+        store
+            .record_device_class("remote-device", copypaste_ipc::DeviceClass::Phone)
+            .unwrap();
 
         let mut local_new = item("local new", T0 + 2);
         local_new.app_bundle_id = Some("com.example.editor".into());
         local_new.app_name = Some("Editor".into());
-        store.insert(local_new).unwrap();
+        let icon_png = STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=")
+            .unwrap();
+        local_new.payload_metadata =
+            crate::PayloadMetadata::new(None, crate::SourceAppIconMetadata::new(&icon_png, 1, 1))
+                .and_then(|metadata| metadata.to_json(copypaste_ipc::content_type::TEXT));
+        let local_new = store.insert(local_new).unwrap();
 
-        let facets = store.history_facets("local-device", "Laptop").unwrap();
+        let facets = store
+            .history_facets("local-device", "Laptop", copypaste_ipc::DeviceClass::Laptop)
+            .unwrap();
         assert_eq!(
             facets.origin_devices,
             vec![
-                HistoryFacet {
+                HistoryDeviceFacet {
                     id: "local-device".into(),
                     label: "Laptop".into(),
+                    device_class: copypaste_ipc::DeviceClass::Laptop,
                 },
-                HistoryFacet {
+                HistoryDeviceFacet {
                     id: "remote-device".into(),
                     label: "Phone".into(),
+                    device_class: copypaste_ipc::DeviceClass::Phone,
                 },
             ]
         );
         assert_eq!(
             facets.source_apps,
             vec![
-                HistoryFacet {
+                HistorySourceAppFacet {
                     id: "com.example.editor".into(),
                     label: "Editor".into(),
+                    icon_item_id: Some(local_new.id),
                 },
-                HistoryFacet {
+                HistorySourceAppFacet {
                     id: "com.example.viewer".into(),
                     label: "Viewer".into(),
+                    icon_item_id: None,
                 },
             ]
         );

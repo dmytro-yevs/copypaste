@@ -20,6 +20,7 @@ jobs:
           toolchain: "1.96"
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: ./scripts/ci/install-postgresql-server.sh
+      - run: python3 -m unittest scripts/test_release_safety.py
       - run: cargo +1.96 test --workspace --locked
       - run: ./supabase/dev/verify-schema.sh
 
@@ -57,12 +58,12 @@ jobs:
           out="$(cargo +1.96 test -p copypaste-core --locked --release --target aarch64-apple-darwin -- --ignored --nocapture --test-threads=1 2>&1)" || { status=$?; printf '%s\n' "$out"; exit "$status"; }
           printf '%s\n' "$out"
           grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out"
-          ! grep -q 'SKIPPED' <<<"$out"
+          if grep -q 'SKIPPED' <<<"$out"; then exit 1; fi
           if security find-generic-password -s com.copypaste.daemon -a device-secret-key -w "$RUNNER_TEMP/copypaste-ci.keychain-db" >/dev/null 2>&1; then exit 1; fi
           out="$(cargo +1.96 test -p copypaste-daemon --locked --target aarch64-apple-darwin -- --ignored --nocapture --test-threads=1 2>&1)" || { status=$?; printf '%s\n' "$out"; exit "$status"; }
           printf '%s\n' "$out"
           grep -qE 'test result: ok\. [1-9][0-9]* passed' <<<"$out"
-          ! grep -q 'SKIPPED' <<<"$out"
+          if grep -q 'SKIPPED' <<<"$out"; then exit 1; fi
       - name: Restore keychain state
         if: always()
         run: |

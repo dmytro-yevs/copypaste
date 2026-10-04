@@ -1,5 +1,5 @@
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
-import 'package:copypaste_flutter/features/history/presentation/history_identity_label.dart';
+import 'package:copypaste_flutter/features/history/presentation/source_app_label.dart';
 import 'package:copypaste_flutter/features/history/repository/history_repository.dart';
 import 'package:copypaste_flutter/features/quick_paste/quick_paste_app.dart';
 import 'package:copypaste_flutter/features/quick_paste/quick_paste_controller.dart';
@@ -27,12 +27,10 @@ void main() {
     expect(find.text('Type to search…'), findsOneWidget);
     expect(find.text('Pinned clip'), findsOneWidget);
     expect(find.text('Recent clip'), findsOneWidget);
-    final sourceApps = find.byType(HistoryIdentityLabel);
+    final sourceApps = find.byType(SourceAppLabel);
     expect(sourceApps, findsNWidgets(2));
     expect(
-      tester
-          .widgetList<HistoryIdentityLabel>(sourceApps)
-          .map((label) => label.name),
+      tester.widgetList<SourceAppLabel>(sourceApps).map((label) => label.name),
       everyElement('Editor'),
     );
     expect(find.text('Clear unpinned'), findsOneWidget);
