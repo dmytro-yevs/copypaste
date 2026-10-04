@@ -469,6 +469,7 @@ mod tests {
             listener,
             source,
             |_: &str, _: &crate::SyncOutcome| {},
+            |_| {},
             receiver,
         ));
         (addr, shutdown)
@@ -555,6 +556,12 @@ mod tests {
         assert!(initiator_done.peer.is_some());
         assert_eq!(responder.peers().list().len(), 1);
         assert_eq!(initiator.peers().list().len(), 1);
+        let responder_peer = responder.peers().list().pop().expect("responder peer");
+        let initiator_peer = initiator.peers().list().pop().expect("initiator peer");
+        assert!(responder_peer.profile.is_some());
+        assert!(responder_peer.profile_observed_at_ms > 0);
+        assert!(initiator_peer.profile.is_some());
+        assert!(initiator_peer.profile_observed_at_ms > 0);
         let _ = shutdown.send(true);
     }
 

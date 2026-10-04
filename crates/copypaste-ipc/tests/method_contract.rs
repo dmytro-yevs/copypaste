@@ -9,11 +9,14 @@ fn wire_name(method: &Method) -> &'static str {
         Method::SetDeviceName { .. } => "set_device_name",
         Method::List { .. } => "list",
         Method::Search { .. } => "search",
+        Method::HistoryQuery { .. } => "history_query",
+        Method::HistoryFacets => "history_facets",
         Method::Copy { .. } => "copy",
         Method::CopyPlainText { .. } => "copy_plain_text",
         Method::Get { .. } => "get",
         Method::ImagePreview { .. } => "image_preview",
         Method::SourceAppIcon { .. } => "source_app_icon",
+        Method::SaveFile { .. } => "save_file",
         Method::Add { .. } => "add",
         Method::Delete { .. } => "delete",
         Method::DeleteAll { .. } => "delete_all",
@@ -56,11 +59,14 @@ fn catalog() -> Vec<Value> {
         json!({"method":"set_device_name","params":{"name":"Kitchen Mac"}}),
         json!({"method":"list","params":{"limit":10,"cursor":null}}),
         json!({"method":"search","params":{"query":"needle","limit":10}}),
+        json!({"method":"history_query","params":{"query":{"search":"needle","content_classes":["text","image"],"semantic_kinds":["link","color"],"pinned_only":true,"origin_device_id":"device-1","source_app_bundle_id":"com.example.app","sort":"relevance"},"limit":10,"cursor":null}}),
+        json!({"method":"history_facets"}),
         json!({"method":"copy","params":{"id":"item"}}),
         json!({"method":"copy_plain_text","params":{"id":"item"}}),
         json!({"method":"get","params":{"id":"item"}}),
         json!({"method":"image_preview","params":{"id":"item"}}),
         json!({"method":"source_app_icon","params":{"id":"item"}}),
+        json!({"method":"save_file","params":{"id":"item","dest_path":"saved.bin"}}),
         json!({"method":"add","params":{"content":"text"}}),
         json!({"method":"delete","params":{"id":"item"}}),
         json!({"method":"delete_all","params":{"through":null}}),
@@ -111,7 +117,7 @@ fn every_ipc_method_has_one_executable_wire_contract() {
     }
     assert_eq!(
         names.len(),
-        42,
+        45,
         "a Method has no wire fixture, or this count was not bumped with it"
     );
 }

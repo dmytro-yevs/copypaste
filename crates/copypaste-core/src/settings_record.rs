@@ -1,8 +1,8 @@
 //! Decoding the persisted settings record, one field at a time.
 //!
-//! Separate from the live cell in [`super`] because the rule is a different
-//! one. The cell's rule is that a *rejected write* leaves the daemon as it was.
-//! The rule here is that an *unreadable read* leaves the daemon **safe**, and
+//! Separate from a platform runtime's live settings cell because the rule is a
+//! different one. A live cell ensures that a *rejected write* leaves the runtime
+//! as it was. The rule here is that an *unreadable read* leaves it **safe**, and
 //! falling back to [`ConfigData::default`] satisfies neither: the defaults have
 //! private mode off, LAN visibility on and sync on, so one bad byte in the
 //! record switched a user's privacy settings back on and said nothing.
@@ -41,7 +41,7 @@ fn fail_closed(field: &str) -> ConfigPatch {
 }
 
 /// The value a daemon runs on when nothing about the record could be read.
-pub(super) fn all_closed() -> ConfigData {
+pub fn all_closed() -> ConfigData {
     ConfigData {
         private_mode: true,
         lan_visibility: false,
@@ -53,7 +53,7 @@ pub(super) fn all_closed() -> ConfigData {
 
 /// Read a stored record, keeping every field that decodes and failing the rest
 /// closed.
-pub(super) fn read(raw: &str) -> (ConfigData, SettingsHealth) {
+pub fn read(raw: &str) -> (ConfigData, SettingsHealth) {
     let Ok(Value::Object(record)) = serde_json::from_str::<Value>(raw) else {
         warn!("the stored settings are unreadable; every field is failing closed");
         return (

@@ -4,7 +4,8 @@ use tracing::error;
 
 use super::wire::{is_oversized_text, to_wire_and_payload};
 use crate::server::messages::{
-    decrypt_error, storage_error, MSG_CLIPBOARD, MSG_CONTENT_TOO_LARGE, MSG_NOT_FOUND,
+    decrypt_error, storage_error, MSG_BACKUP_EXISTS, MSG_BACKUP_NO_DIR, MSG_BAD_PATH,
+    MSG_CLIPBOARD, MSG_CONTENT_TOO_LARGE, MSG_NOT_FOUND, MSG_SAVE_FILE_FAILED,
     MSG_UNSUPPORTED_CONTENT,
 };
 use crate::AppState;
@@ -33,6 +34,45 @@ pub(crate) fn copy_plain_text(state: &AppState, id: u64, item_id: &str) -> Respo
         return write_error(id, error);
     }
     Response::ok(id, ResponseData::Item(item))
+}
+
+pub(crate) fn save_file(
+    state: &AppState,
+    id: u64,
+    item_id: &str,
+    raw_destination: &str,
+) -> Response {
+    let destination = raw_destination.trim();
+    if destination.is_empty() {
+        return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_PATH);
+    }
+    let path = std::path::Path::new(destination);
+    if path.exists() {
+        return Response::err(id, ErrorCode::InvalidRequest, MSG_BACKUP_EXISTS);
+    }
+    if path.parent().is_none_or(|parent| !parent.is_dir()) {
+        return Response::err(id, ErrorCode::NotFound, MSG_BACKUP_NO_DIR);
+    }
+    let (_, payload) = match fetch(state, id, item_id) {
+        Ok(opened) => opened,
+        Err(response) => return *response,
+    };
+    if !matches!(payload, ClipboardPayload::File { .. }) {
+        return unsupported(id);
+    }
+    match payload.save_file_to(path) {
+        Ok(()) => Response::ok(id, ResponseData::Empty {}),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            Response::err(id, ErrorCode::InvalidRequest, MSG_BACKUP_EXISTS)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Response::err(id, ErrorCode::NotFound, MSG_BACKUP_NO_DIR)
+        }
+        Err(error) => {
+            error!(error = ?error, "file clip save failed");
+            Response::err(id, ErrorCode::Internal, MSG_SAVE_FILE_FAILED)
+        }
+    }
 }
 
 fn fetch(

@@ -30,12 +30,22 @@ hex.workspace = true
 # The wire definition of content identity (protocol::content_hash).
 sha2.workspace = true
 uuid.workspace = true
+url.workspace = true
 # Atomic peer-file writes, not just tests: the file holds PSKs.
 tempfile.workspace = true
 # Local interface addresses: where a pairing tells a peer to dial, and which
 # advertisements on the wire are this device's own. `getifaddrs(3)` behind a
 # maintained crate; covers every shipped platform (AGENTS.md rules 1 and 7).
 if-addrs = "0.15"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Fast native hardware identifier used directly on the runtime path.
+sysctl = "0.7"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# The registry supplies the product model. Chassis class comes from Windows
+# management data, queried without adding a second Rust Windows binding.
+winreg = "0.55"
 
 [dev-dependencies]
 tempfile.workspace = true

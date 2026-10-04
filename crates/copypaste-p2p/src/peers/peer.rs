@@ -9,6 +9,7 @@ use zeroize::Zeroize;
 
 use super::PeerStoreError;
 use crate::transport::TOKEN_LEN;
+use crate::DeviceProfile;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Peer {
@@ -35,6 +36,16 @@ pub struct Peer {
     /// itself is bilateral and records a real timestamp before this reaches the
     /// store.
     pub last_seen_ms: i64,
+
+    /// Last self-reported device metadata received after this pairing's Noise
+    /// handshake. It is durable authenticated metadata, never liveness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<DeviceProfile>,
+
+    /// Local receive time for [`Self::profile`]. A zero timestamp represents
+    /// a peer file written by a build before profiles were persisted.
+    #[serde(default)]
+    pub profile_observed_at_ms: i64,
 }
 
 impl Peer {
@@ -54,6 +65,15 @@ impl Peer {
         // Constant-time: the comparison is against key material.
         if bool::from(self.psk[..].ct_eq(&[0u8; TOKEN_LEN][..])) {
             return Err(PeerStoreError::Invalid("pre-shared key is all zeroes"));
+        }
+        if let Some(profile) = &self.profile {
+            if self.profile_observed_at_ms <= 0 {
+                return Err(PeerStoreError::Invalid(
+                    "device profile is missing its local observation time",
+                ));
+            }
+            crate::protocol::validate_device_profile(profile)
+                .map_err(|_| PeerStoreError::Invalid("device profile is invalid"))?;
         }
         Ok(())
     }
@@ -90,6 +110,8 @@ impl fmt::Debug for Peer {
             .field("name", &self.name)
             .field("last_addr", &self.last_addr)
             .field("last_seen_ms", &self.last_seen_ms)
+            .field("profile", &self.profile)
+            .field("profile_observed_at_ms", &self.profile_observed_at_ms)
             .finish_non_exhaustive()
     }
 }

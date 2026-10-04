@@ -26,11 +26,13 @@ mod error;
 mod listen;
 mod pairing;
 mod pairing_ceremony;
+mod probe;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant};
 
 #[cfg(test)]
 use tokio::sync::oneshot;
@@ -50,6 +52,7 @@ pub use pairing::{
     PairingInvite, PairingPeer, PairingPhase, PairingRole, PairingStatus, PAIRING_CONFIRM_TIMEOUT,
     PAIRING_INVITE_TTL,
 };
+pub use probe::{AuthenticatedReachability, ProbeState, PROBE_FAILURE_FRESH_MS, PROBE_FRESH_MS};
 
 #[derive(Clone)]
 pub struct SyncCycle {
@@ -207,6 +210,34 @@ pub(super) const MAX_CONCURRENT_PEER_SESSIONS: usize = 4;
 
 const DISCOVERY_INTEREST_MS: i64 = 60_000;
 const AUTHENTICATED_PROFILE_TTL_MS: i64 = 5 * 60_000;
+const DISCOVERY_CANDIDATE_COOLDOWN: Duration = Duration::from_secs(60);
+const MAX_DISCOVERY_ATTEMPTS_PER_PAIRING: usize = 1;
+const MAX_UNVERIFIED_DISCOVERY_ATTEMPTS: usize = 4;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DialCandidateSource {
+    Discovery,
+    Persisted,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DialCandidate {
+    pub addr: SocketAddr,
+    pub source: DialCandidateSource,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct DiscoveryCandidateKey {
+    pairing_id: String,
+    addr: SocketAddr,
+}
+
+#[derive(Default)]
+struct DiscoveryCandidateCooldowns {
+    endpoint_failures: HashMap<DiscoveryCandidateKey, Instant>,
+    pairing_attempts: HashMap<String, VecDeque<Instant>>,
+    global_attempts: VecDeque<Instant>,
+}
 
 /// Everything the peer half of a device shares.
 ///
@@ -228,6 +259,10 @@ pub struct Node {
     lan_visible: AtomicBool,
     pairing: pairing::PairingManager,
     profiles: RwLock<HashMap<String, AuthenticatedDeviceProfile>>,
+    reachability: RwLock<HashMap<String, AuthenticatedReachability>>,
+    probe_flights: Mutex<HashSet<String>>,
+    probes: Arc<Semaphore>,
+    discovery_candidate_cooldowns: Mutex<DiscoveryCandidateCooldowns>,
 }
 
 impl std::fmt::Debug for Node {
@@ -272,6 +307,10 @@ impl Node {
             lan_visible: AtomicBool::new(lan_visible),
             pairing: pairing::PairingManager::new(),
             profiles: RwLock::new(HashMap::new()),
+            reachability: RwLock::new(HashMap::new()),
+            probe_flights: Mutex::new(HashSet::new()),
+            probes: Arc::new(Semaphore::new(MAX_CONCURRENT_PEER_SESSIONS)),
+            discovery_candidate_cooldowns: Mutex::new(DiscoveryCandidateCooldowns::default()),
         };
         node.republish();
         node
@@ -358,6 +397,159 @@ impl Node {
         self.discovery.as_ref()?.find(pairing_id)
     }
 
+    /// Candidate endpoints for one trusted pairing, in freshness order.
+    ///
+    /// mDNS is only an address hint: every candidate still has to complete the
+    /// pairing's Noise handshake before it can affect peer state. Retaining the
+    /// previous authenticated address as a fallback handles transient discovery
+    /// loss, while preferring the current record handles DHCP changes.
+    #[must_use]
+    pub fn dial_candidates(&self, peer: &Peer) -> Vec<SocketAddr> {
+        self.dial_candidates_with_sources(peer, false)
+            .into_iter()
+            .map(|candidate| candidate.addr)
+            .collect()
+    }
+
+    pub(crate) fn dial_candidates_with_sources(
+        &self,
+        peer: &Peer,
+        reserve_discovery: bool,
+    ) -> Vec<DialCandidate> {
+        let mut candidates = Vec::with_capacity(2);
+        if let Some(found) = self.find(&peer.pairing_id) {
+            if peer.last_addr == Some(found.addr) {
+                candidates.push(DialCandidate {
+                    addr: found.addr,
+                    source: DialCandidateSource::Persisted,
+                });
+            } else if self.discovery_candidate_allowed(&peer.pairing_id, found.addr)
+                && (!reserve_discovery
+                    || self.reserve_unverified_discovery_candidate(&peer.pairing_id, found.addr))
+            {
+                candidates.push(DialCandidate {
+                    addr: found.addr,
+                    source: DialCandidateSource::Discovery,
+                });
+            }
+        }
+        if let Some(last_addr) = peer.last_addr {
+            if !candidates
+                .iter()
+                .any(|candidate| candidate.addr == last_addr)
+            {
+                candidates.push(DialCandidate {
+                    addr: last_addr,
+                    source: DialCandidateSource::Persisted,
+                });
+            }
+        }
+        candidates
+    }
+
+    /// Lets an explicit user rescan retry a current mDNS address once. It does
+    /// not touch trusted persisted endpoints, pairing credentials, or any other
+    /// liveness observation.
+    pub fn clear_discovery_candidate_cooldowns(&self) {
+        let mut cooldowns = self
+            .discovery_candidate_cooldowns
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        cooldowns.endpoint_failures.clear();
+        cooldowns.pairing_attempts.clear();
+        cooldowns.global_attempts.clear();
+    }
+
+    pub(crate) fn record_discovery_candidate_failure(&self, pairing_id: &str, addr: SocketAddr) {
+        let now = Instant::now();
+        let mut cooldowns = self
+            .discovery_candidate_cooldowns
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Self::prune_discovery_candidate_cooldowns(&mut cooldowns, now);
+        cooldowns.endpoint_failures.insert(
+            DiscoveryCandidateKey {
+                pairing_id: pairing_id.to_string(),
+                addr,
+            },
+            now,
+        );
+    }
+
+    fn discovery_candidate_allowed(&self, pairing_id: &str, addr: SocketAddr) -> bool {
+        let now = Instant::now();
+        let mut cooldowns = self
+            .discovery_candidate_cooldowns
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Self::prune_discovery_candidate_cooldowns(&mut cooldowns, now);
+        let key = DiscoveryCandidateKey {
+            pairing_id: pairing_id.to_string(),
+            addr,
+        };
+        !cooldowns.endpoint_failures.contains_key(&key)
+            && cooldowns
+                .pairing_attempts
+                .get(pairing_id)
+                .is_none_or(|attempts| attempts.len() < MAX_DISCOVERY_ATTEMPTS_PER_PAIRING)
+            && cooldowns.global_attempts.len() < MAX_UNVERIFIED_DISCOVERY_ATTEMPTS
+    }
+
+    fn reserve_unverified_discovery_candidate(&self, pairing_id: &str, addr: SocketAddr) -> bool {
+        let now = Instant::now();
+        let mut cooldowns = self
+            .discovery_candidate_cooldowns
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Self::prune_discovery_candidate_cooldowns(&mut cooldowns, now);
+        let key = DiscoveryCandidateKey {
+            pairing_id: pairing_id.to_string(),
+            addr,
+        };
+        if cooldowns.endpoint_failures.contains_key(&key)
+            || cooldowns
+                .pairing_attempts
+                .get(pairing_id)
+                .is_some_and(|attempts| attempts.len() >= MAX_DISCOVERY_ATTEMPTS_PER_PAIRING)
+            || cooldowns.global_attempts.len() >= MAX_UNVERIFIED_DISCOVERY_ATTEMPTS
+        {
+            return false;
+        }
+        cooldowns
+            .pairing_attempts
+            .entry(pairing_id.to_string())
+            .or_default()
+            .push_back(now);
+        cooldowns.global_attempts.push_back(now);
+        true
+    }
+
+    fn prune_discovery_candidate_cooldowns(
+        cooldowns: &mut DiscoveryCandidateCooldowns,
+        now: Instant,
+    ) {
+        cooldowns.endpoint_failures.retain(|_, failed_at| {
+            now.saturating_duration_since(*failed_at) < DISCOVERY_CANDIDATE_COOLDOWN
+        });
+        cooldowns.pairing_attempts.retain(|_, attempts| {
+            while attempts.front().is_some_and(|attempted_at| {
+                now.saturating_duration_since(*attempted_at) >= DISCOVERY_CANDIDATE_COOLDOWN
+            }) {
+                attempts.pop_front();
+            }
+            !attempts.is_empty()
+        });
+        while cooldowns
+            .global_attempts
+            .front()
+            .is_some_and(|attempted_at| {
+                now.saturating_duration_since(*attempted_at) >= DISCOVERY_CANDIDATE_COOLDOWN
+            })
+        {
+            cooldowns.global_attempts.pop_front();
+        }
+    }
+
     #[must_use]
     pub fn authenticated_profile(&self, pairing_id: &str) -> Option<AuthenticatedDeviceProfile> {
         let now = crate::now_ms();
@@ -366,7 +558,20 @@ impl Node {
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         profiles.retain(|_, observed| now < observed.fresh_until_ms);
-        profiles.get(pairing_id).cloned()
+        if let Some(observed) = profiles.get(pairing_id).cloned() {
+            return Some(observed);
+        }
+        self.peers.get(pairing_id).and_then(|peer| {
+            peer.profile
+                .clone()
+                .map(|profile| AuthenticatedDeviceProfile {
+                    profile,
+                    observed_at_ms: peer.profile_observed_at_ms,
+                    fresh_until_ms: peer
+                        .profile_observed_at_ms
+                        .saturating_add(AUTHENTICATED_PROFILE_TTL_MS),
+                })
+        })
     }
 
     pub(crate) fn record_authenticated_profile(
@@ -389,6 +594,50 @@ impl Node {
                     fresh_until_ms: observed_at_ms.saturating_add(AUTHENTICATED_PROFILE_TTL_MS),
                 },
             );
+        let Some(peer) = self.peers.get(pairing_id) else {
+            return;
+        };
+        let updated = Peer {
+            pairing_id: peer.pairing_id.clone(),
+            name: peer.name.clone(),
+            psk: peer.psk,
+            last_addr: peer.last_addr,
+            last_seen_ms: peer.last_seen_ms,
+            profile: Some(profile.clone()),
+            profile_observed_at_ms: observed_at_ms,
+        };
+        match self.peers.touch(updated) {
+            Ok(true) => {}
+            Ok(false) => debug!(pairing_id, "profile observation outlived its pairing"),
+            Err(error) => warn!(%error, "could not persist an authenticated device profile"),
+        }
+    }
+
+    /// The most recent authenticated probe observation for a pairing.
+    ///
+    /// Expired observations remain available for diagnostics; callers must use
+    /// [`AuthenticatedReachability::state_at`] to fail closed to `Unknown`.
+    #[must_use]
+    pub fn authenticated_reachability(
+        &self,
+        pairing_id: &str,
+    ) -> Option<AuthenticatedReachability> {
+        self.reachability
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(pairing_id)
+            .cloned()
+    }
+
+    pub(crate) fn record_reachability(
+        &self,
+        pairing_id: &str,
+        observation: AuthenticatedReachability,
+    ) {
+        self.reachability
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(pairing_id.to_string(), observation);
     }
 
     /// Re-advertise after the set of pairings changed.
@@ -466,8 +715,47 @@ impl Node {
                 .write()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .remove(pairing_id);
+            self.reachability
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove(pairing_id);
+            self.probe_flights
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove(pairing_id);
+            let mut cooldowns = self
+                .discovery_candidate_cooldowns
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            cooldowns
+                .endpoint_failures
+                .retain(|key, _| key.pairing_id != pairing_id);
+            cooldowns.pairing_attempts.remove(pairing_id);
             self.republish();
         }
+        Ok(removed)
+    }
+
+    /// Permanently cut off a pairing and remove all cached non-secret state.
+    pub fn revoke(&self, pairing_id: &str, now_ms: i64) -> Result<bool, NodeError> {
+        let removed = self.peers.revoke(pairing_id, now_ms).map_err(|error| {
+            warn!(%error, "could not revoke a pairing");
+            NodeError::PeerStore
+        })?;
+        self.cursors.forget(pairing_id);
+        self.profiles
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(pairing_id);
+        self.reachability
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(pairing_id);
+        self.probe_flights
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(pairing_id);
+        self.republish();
         Ok(removed)
     }
 
@@ -476,17 +764,26 @@ impl Node {
     /// The name comes off the wire and is cosmetic — never an identity — so it
     /// is only taken when the peer offered one.
     fn touch_peer(&self, peer: &Peer, addr: Option<SocketAddr>, name: Option<&str>) {
+        // A sync or probe may have refreshed authenticated metadata after its
+        // caller captured `peer`. Re-read the stored record so that a stale
+        // snapshot cannot erase a newer profile observation.
+        let current = self
+            .peers
+            .get(&peer.pairing_id)
+            .unwrap_or_else(|| peer.clone());
         let updated = Peer {
-            pairing_id: peer.pairing_id.clone(),
+            pairing_id: current.pairing_id.clone(),
             name: match name {
                 Some(name) if !name.trim().is_empty() => name.to_string(),
-                _ => peer.name.clone(),
+                _ => current.name.clone(),
             },
             // `[u8; 32]` is `Copy`, so this reads the field rather than moving
             // out of a type that has a `Drop` (see `peers::Peer`).
-            psk: peer.psk,
-            last_addr: addr.or(peer.last_addr),
+            psk: current.psk,
+            last_addr: addr.or(current.last_addr),
             last_seen_ms: crate::now_ms(),
+            profile: current.profile.clone(),
+            profile_observed_at_ms: current.profile_observed_at_ms,
         };
         match self.peers.touch(updated) {
             Ok(true) => {}
@@ -611,6 +908,8 @@ mod tests {
                 psk: token.psk(),
                 last_addr: None,
                 last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
             })
             .unwrap();
         assert_eq!(node.peers().psks().len(), 1);
@@ -618,6 +917,101 @@ mod tests {
         assert!(node.unpair(&pairing_id).unwrap());
         assert!(node.peers().psks().is_empty());
         assert!(!node.unpair(&pairing_id).unwrap());
+    }
+
+    #[test]
+    fn a_stale_session_touch_preserves_a_new_authenticated_profile() {
+        let (node, _dir) = node();
+        let token = crate::transport::PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        node.peers()
+            .upsert(Peer {
+                pairing_id: pairing_id.clone(),
+                name: "phone".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
+            })
+            .expect("peer");
+        let stale = node.peers().get(&pairing_id).expect("peer");
+        let profile = DeviceProfile {
+            model: Some("Pixel 9".to_string()),
+            ..DeviceProfile::default()
+        };
+
+        node.record_authenticated_profile(&pairing_id, Some(&profile));
+        node.touch_peer(&stale, None, Some("renamed phone"));
+
+        let stored = node.peers().get(&pairing_id).expect("peer after touch");
+        assert_eq!(stored.name, "renamed phone");
+        assert_eq!(stored.profile.as_ref(), Some(&profile));
+        assert!(stored.profile_observed_at_ms > 0);
+    }
+
+    #[test]
+    fn revoking_a_peer_removes_its_durable_and_cached_metadata() {
+        let (node, _dir) = node();
+        let token = crate::transport::PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        let profile = DeviceProfile {
+            model: Some("Pixel 9".to_string()),
+            ..DeviceProfile::default()
+        };
+        node.peers()
+            .upsert(Peer {
+                pairing_id: pairing_id.clone(),
+                name: "phone".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 1,
+                profile: Some(profile.clone()),
+                profile_observed_at_ms: 1,
+            })
+            .expect("peer");
+        node.record_authenticated_profile(&pairing_id, Some(&profile));
+        node.record_reachability(
+            &pairing_id,
+            AuthenticatedReachability::online(Some(5), crate::now_ms()),
+        );
+
+        assert!(node.revoke(&pairing_id, crate::now_ms()).expect("revoke"));
+        assert!(node.peers().get(&pairing_id).is_none());
+        assert!(node.authenticated_profile(&pairing_id).is_none());
+        assert!(node.authenticated_reachability(&pairing_id).is_none());
+    }
+
+    #[test]
+    fn durable_profile_is_available_after_a_node_restart_but_is_not_reachability() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+        let token = crate::transport::PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        PeerStore::open(&path)
+            .unwrap()
+            .upsert(Peer {
+                pairing_id: pairing_id.clone(),
+                name: "phone".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 1,
+                profile: Some(DeviceProfile {
+                    model: Some("Pixel 9".to_string()),
+                    ..DeviceProfile::default()
+                }),
+                profile_observed_at_ms: 1,
+            })
+            .unwrap();
+        let restarted = Node::new(PeerStore::open(&path).unwrap(), None, 0, true);
+
+        let profile = restarted
+            .authenticated_profile(&pairing_id)
+            .expect("durable profile");
+        assert_eq!(profile.profile.model.as_deref(), Some("Pixel 9"));
+        assert_eq!(profile.observed_at_ms, 1);
+        assert!(profile.fresh_until_ms < crate::now_ms());
+        assert!(restarted.authenticated_reachability(&pairing_id).is_none());
     }
 
     #[test]
@@ -648,6 +1042,8 @@ mod tests {
                     psk: token.psk(),
                     last_addr: None,
                     last_seen_ms: 1,
+                    profile: None,
+                    profile_observed_at_ms: 0,
                 })
                 .expect("up to the cap");
         }

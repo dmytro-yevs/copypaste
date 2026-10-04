@@ -188,6 +188,12 @@ impl Discovery {
         lock(&self.shared.table).find(pairing_id, now_ms())
     }
 
+    #[cfg(test)]
+    pub(crate) fn observe_for_test(&self, peer: DiscoveredPeer) {
+        let fullname = format!("{}.local.", peer.discovery_id);
+        lock(&self.shared.table).observe(&fullname, peer, now_ms());
+    }
+
     /// Update the advertised pairing ids after a new pairing.
     fn readvertise(
         &self,

@@ -1,15 +1,18 @@
 # ADR-0001 — macOS distribution without an Apple Developer ID
 
-**Status:** accepted · 2026-07-30
+**Status:** accepted · 2026-07-30 · amended 2026-10-04
 **Scope:** how the macOS app is signed, packaged and installed, and what that
 forces the app itself to be.
 
 ## Decision
 
 CopyPaste for macOS ships **ad-hoc signed**, is **re-signed at install time with
-a self-signed certificate generated on the user's own machine**, is distributed
-through **our own Homebrew tap** rather than `homebrew/cask`, and **requires no
-TCC permission of any kind**.
+a self-signed certificate generated on the user's own machine**, and is
+distributed through **our own Homebrew tap** rather than `homebrew/cask`.
+CopyPaste requires Accessibility for auto-paste and future AX-backed features.
+First-run onboarding offers the grant but may complete without it; auto-paste
+then fails closed to copy-only behavior. The macOS application and its bundled
+daemon are not App Sandbox processes.
 
 This Homebrew Cask path is the project's only macOS distribution model. Code,
 CI, and release tooling must not require an Apple Developer Team ID, Developer
@@ -18,9 +21,8 @@ model requires a new explicit owner decision; it is not an implementation
 choice.
 
 The install-time re-signing was added on 2026-07-30 and is described in "The
-third path", below. It changes nothing a user sees today, because the app asks
-for no permission. It exists so that auto-paste — the one feature that would
-need Accessibility — stops being blocked on a $99 subscription.
+third path", below. It gives the Accessibility grant a stable local signing
+identity without changing the Homebrew distribution model.
 
 We do not enrol in the Apple Developer Program, so there is no Developer ID
 certificate and no notarisation. That is a cost decision, and it propagates
@@ -52,8 +54,10 @@ distribution: other machines do not trust the leaf, so Gatekeeper treats the
 app as it treats any unsigned one, and we would carry the key-management burden
 for no user-visible gain.
 
-So the fork was: pay for a Developer ID, or build an app that needs no
-permission. We chose the second.
+The original decision was to build an app that needed no TCC permission. The
+2026-10-04 amendment explicitly replaces that product constraint: Accessibility
+is now supported for auto-paste, while the locally generated signing identity
+remains the mechanism intended to preserve the grant across updates.
 
 **The sentence above about key management turned out to contain the answer.**
 The burden it describes is the burden of shipping a key. If the key is generated
@@ -61,29 +65,30 @@ on the user's machine and never leaves it, there is no key to manage, and the
 stable identity is free. That is "The third path" below, and it is the reason
 this ADR now has two decisions in it rather than one.
 
-## Consequence 1 — the app must require zero TCC permissions
+## Consequence 1 — Accessibility is an optional first-run capability
 
-This is a design constraint on the macOS app, not a packaging detail, and it is
-the reason the previous section matters. Three rules follow, and each has a
-tempting violation:
+Clipboard capture itself remains permission-free, but selecting a Quick Paste
+result may synthesize Cmd+V. Onboarding therefore checks Accessibility through
+`AXIsProcessTrustedWithOptions`, explains the copy-only fallback, and allows the
+user to continue without granting it. Start at login is enabled by default
+through `SMAppService.mainApp` and remains visible to the user in onboarding.
 
-| Capability | What we do | What we must not do |
-|---|---|---|
-| Read the clipboard | Poll `NSPasteboard`, which needs no permission | Install a `CGEvent` tap to notice Cmd+C |
-| Global hotkey | Carbon `RegisterEventHotKey` — the one public global-hotkey API that needs no Accessibility, because the app is told about exactly one combination and never sees other input. **Verified**: `tauri-plugin-global-shortcut` → `global-hotkey` 0.8.0 takes this path for every key with a Carbon scancode. See ADR-0002 for the file and line, and for the five media keys that are the exception. | `NSEvent.addGlobalMonitorForEvents` or `CGEvent.tapCreate`, both of which require Accessibility. `global-hotkey` reaches `CGEventTapCreate` for media keys only, which is why the app refuses to bind them |
-| Paste back | Put the item on the pasteboard; the user presses Cmd+V | Synthesise Cmd+V with `CGEventPost`, which requires Accessibility |
+| Capability | Contract |
+|---|---|
+| Read the clipboard | Poll `NSPasteboard`; do not install a global event tap to notice Cmd+C. |
+| Global hotkey | Continue using Carbon `RegisterEventHotKey`; Accessibility does not broaden keyboard observation. |
+| Paste back | After copying the selected history item, synthesize Cmd+V with `CGEventPost` only while the Accessibility grant is confirmed. |
 
-Two costs we accept in exchange:
+Two boundaries remain:
 
 - `RegisterEventHotKey` cannot bind modifier-only shortcuts, so the shortcut
   recorder does not offer "double-tap Control" and similar.
-- Selecting an item does not paste it. It makes it the clipboard, and the user
-  pastes. This is one keystroke worse than the auto-paste behaviour some
-  competitors have, and it is the direct price of not needing Accessibility.
+- Without a current Accessibility grant, auto-paste must fail closed while
+  ordinary capture, history, pairing, and copy remain available.
 
-The third row is the one to watch. Auto-paste reads like an obvious
-improvement, is a handful of lines, and would forfeit every permission-free
-property on this page.
+Accessibility does not authorize unrelated input monitoring. New AX-backed
+features require their own explicit product decision and must use the existing
+permission owner rather than introduce a parallel prompt.
 
 **Unrelated, and arriving anyway:** macOS 16 introduces a user-facing alert
 when an app reads the general pasteboard programmatically, together with
@@ -309,10 +314,9 @@ codesign -d --requirements - -v /Applications/CopyPaste.app
 #   ad-hoc       -> cdhash H"..."      (the script fell back; read its output)
 security find-identity -v ~/Library/Application\ Support/com.copypaste.CopyPaste/signing/*.keychain-db
 
-# 3. Grant Accessibility by hand:
+# 3. Grant Accessibility during onboarding or later in Settings:
 #    System Settings -> Privacy & Security -> Accessibility -> +CopyPaste.
-#    (The shipped app needs no permission, so add it manually. The grant is
-#     what is under test, not what uses it.)
+#    Onboarding may finish without the grant; auto-paste then stays unavailable.
 
 # 4. Install build B over the top.
 brew upgrade --cask copypaste     # or: brew reinstall --cask copypaste
@@ -369,13 +373,14 @@ more interesting finding.
   quarantine attribute still has to be removed. This buys TCC stability and
   nothing else.
 
-### Why this does not reopen auto-paste yet
+### Accessibility risk accepted by the 2026-10-04 amendment
 
-Consequence 1 stands until the table above has answers in it. The permission-free
-design is not a workaround to be discarded the moment a grant looks survivable —
-it is also what keeps the app usable for anyone who declines the permission. If
-the test passes, auto-paste becomes an *optional* feature that degrades to
-today's behaviour when Accessibility is not granted, and it needs its own ADR.
+The grant-survival table above is still required release evidence, but its
+unanswered state no longer blocks implementing auto-paste. The owner explicitly
+accepted optional Accessibility, removal of App Sandbox for Debug and Release,
+and retention of the Homebrew/self-signed distribution model. A build must still
+fail closed when trust is absent and must not claim that a permission survives
+an update without same-machine evidence.
 
 ## What would change this
 

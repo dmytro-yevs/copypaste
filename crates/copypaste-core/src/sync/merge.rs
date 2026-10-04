@@ -443,6 +443,36 @@ mod tests {
     }
 
     #[test]
+    fn a_remote_file_preserves_its_source_reference() {
+        let f = fixture();
+        let metadata = r#"{"filename":"report.pdf","mime_type":"application/pdf","source_reference":"/Users/person/Documents/report.pdf"}"#;
+        let incoming = RemoteVersion {
+            item_id: "file-with-source",
+            content: "",
+            binary_content: Some(b"file bytes"),
+            payload_metadata: Some(metadata),
+            content_type: copypaste_ipc::content_type::FILE,
+            created_at: 1_000,
+            deleted: false,
+            content_hash: None,
+            origin_device_id: "device-a",
+            app_bundle_id: None,
+            app_name: None,
+        };
+
+        assert!(f.apply(&incoming));
+        assert_eq!(
+            f.store
+                .get("file-with-source")
+                .unwrap()
+                .unwrap()
+                .payload_metadata
+                .as_deref(),
+            Some(metadata)
+        );
+    }
+
+    #[test]
     fn a_non_text_remote_version_is_refused_before_storage() {
         let f = fixture();
         let applied = f.apply(&RemoteVersion {

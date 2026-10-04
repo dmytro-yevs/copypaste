@@ -166,6 +166,8 @@ mod tests {
             psk,
             last_addr: None,
             last_seen_ms: 1,
+            profile: None,
+            profile_observed_at_ms: 0,
         };
         assert!(matches!(
             store.upsert(returning),
@@ -189,6 +191,8 @@ mod tests {
             psk: again.psk,
             last_addr: None,
             last_seen_ms: 1,
+            profile: None,
+            profile_observed_at_ms: 0,
         };
         reopened.upsert(ordinary).expect("upsert");
         reopened.remove(&ordinary_id).expect("remove");

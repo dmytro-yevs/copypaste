@@ -5,6 +5,8 @@
 pub mod config;
 pub mod content_type;
 pub use content_type::ContentClass;
+pub mod semantic_kind;
+pub use semantic_kind::SemanticKind;
 pub mod error;
 pub mod health;
 pub mod limits;
@@ -34,16 +36,17 @@ pub use payload::{
     DeviceEndpointObservation, DeviceLatencyObservation, DeviceObservationProvenance,
     DeviceObservationTrust, DevicePlatform, DevicePresence, DevicePresenceObservation,
     DeviceProfileObservation, DiagnosticCounters, DiscoveredData, DiscoveredDevice, ExportData,
-    ExportItem, ExternalNetworkObservation, ImagePreview, ImportData, Item, ItemPage,
-    PairingInviteData, PairingProgressData, PairingRole, PairingState, PeerInfo, PrivateModeData,
-    StatusData, SyncResult,
+    ExportItem, ExternalNetworkObservation, FileDetails, HistoryFacet, HistoryFacets, HistoryQuery,
+    HistorySort, ImageDetails, ImagePreview, ImportData, Item, ItemPage, PairingInviteData,
+    PairingProgressData, PairingRole, PairingState, PeerInfo, PrivateModeData, StatusData,
+    SyncResult,
 };
 pub use response::{ConfigApplied, EventData, EventKind, Response, ResponseData};
 
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any breaking change to the request or response shape.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// One request. `id` is echoed back so a client can match replies.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,6 +100,16 @@ pub enum Method {
         query: String,
         limit: u32,
     },
+    /// Query the complete retained history with server-side filters and an
+    /// opaque cursor tied to those exact filters.
+    HistoryQuery {
+        query: HistoryQuery,
+        limit: u32,
+        #[serde(default)]
+        cursor: Option<String>,
+    },
+    /// Filter labels available across the complete retained history.
+    HistoryFacets,
     /// Put an item's content back on the system clipboard.
     Copy {
         id: String,
@@ -131,6 +144,12 @@ pub enum Method {
     /// Return one persisted source-application icon by item id.
     SourceAppIcon {
         id: String,
+    },
+    /// Save the authenticated bytes of one file clip to a user-selected path.
+    /// The destination must not already exist.
+    SaveFile {
+        id: String,
+        dest_path: String,
     },
     /// Add an item directly, bypassing clipboard capture. Used by tests, by
     /// `copypaste add`, and by the fake clipboard source.
@@ -362,6 +381,7 @@ impl Method {
             Self::Import { .. }
                 | Self::Backup { .. }
                 | Self::Restore { .. }
+                | Self::SaveFile { .. }
                 | Self::SyncNow { .. }
                 | Self::CloudSyncNow
                 | Self::CloudSignIn { .. }
@@ -403,6 +423,10 @@ mod tests {
             Method::Restore {
                 src_path: "s".into(),
                 confirm: true,
+            },
+            Method::SaveFile {
+                id: "i".into(),
+                dest_path: "d".into(),
             },
             Method::SyncNow { pairing_id: None },
             Method::CloudSyncNow,

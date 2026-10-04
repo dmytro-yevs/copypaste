@@ -1,11 +1,12 @@
 mod support;
 
 use copypaste_ipc::{
-    BackupData, CloudStatusData, CloudSyncData, ConfigApplied, ConfigData, DiagnosticCounters,
-    DiscoveredData, DiscoveredDevice, ErrorCode, EventData, EventKind, ExportData, ExportItem,
-    ImagePreview, ImportData, Item, ItemPage, Method, PairingInviteData, PairingProgressData,
-    PairingRole, PairingState, PrivateModeData, Request, Response, ResponseData, StatusData,
-    SyncResult, PROTOCOL_VERSION,
+    BackupData, CloudStatusData, CloudSyncData, ConfigApplied, ConfigData, ContentClass,
+    DiagnosticCounters, DiscoveredData, DiscoveredDevice, ErrorCode, EventData, EventKind,
+    ExportData, ExportItem, FileDetails, HistoryFacet, HistoryFacets, ImageDetails, ImagePreview,
+    ImportData, Item, ItemPage, Method, PairingInviteData, PairingProgressData, PairingRole,
+    PairingState, PrivateModeData, Request, Response, ResponseData, StatusData, SyncResult,
+    PROTOCOL_VERSION,
 };
 use serde_json::{json, Value};
 
@@ -14,10 +15,27 @@ fn item() -> Item {
         id: "item-1".into(),
         content: "hello".into(),
         content_type: "text/plain".into(),
+        content_class: ContentClass::Text,
+        semantic_kind: Some(copypaste_ipc::SemanticKind::PlainText),
+        color_rgba: None,
         created_at: 1,
         pinned: false,
+        file_details: Some(FileDetails {
+            filename: Some("report.pdf".into()),
+            mime_type: Some("application/pdf".into()),
+            source_reference: Some("/Users/person/Documents/report.pdf".into()),
+            source_available: true,
+            size_bytes: 42,
+            file_count: 1,
+        }),
+        image_details: Some(ImageDetails {
+            width: 1_920,
+            height: 1_080,
+            size_bytes: 4_096,
+        }),
         origin_device_id: "device-1".into(),
         origin_device_name: Some("Laptop".into()),
+        origin_device_class: copypaste_ipc::DeviceClass::Laptop,
         source_app_bundle_id: None,
         source_app_name: None,
         too_large_to_sync: false,
@@ -57,6 +75,7 @@ fn variant_tag(data: &ResponseData) -> &'static str {
         ResponseData::Config(_) => "config",
         ResponseData::Event(_) => "event",
         ResponseData::Page(_) => "page",
+        ResponseData::HistoryFacets(_) => "history_facets",
         ResponseData::Item(_) => "item",
         ResponseData::ImagePreview(_) => "image_preview",
         ResponseData::SourceAppIcon(_) => "source_app_icon",
@@ -92,6 +111,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
     let variants = vec![
         ResponseData::Status(StatusData {
             device_name: "Laptop".into(),
+            device_id: Some("device-1".into()),
             version: "2.0.0".into(),
             protocol_version: PROTOCOL_VERSION,
             listen_addr: Some("192.0.2.1:47654".into()),
@@ -141,6 +161,16 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             items: vec![item()],
             skipped_undecryptable: 1,
             next_cursor: Some("cursor".into()),
+        }),
+        ResponseData::HistoryFacets(HistoryFacets {
+            origin_devices: vec![HistoryFacet {
+                id: "device-1".into(),
+                label: "Laptop".into(),
+            }],
+            source_apps: vec![HistoryFacet {
+                id: "com.example.app".into(),
+                label: "Example".into(),
+            }],
         }),
         ResponseData::Item(item()),
         ResponseData::ImagePreview(ImagePreview {
@@ -201,10 +231,27 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
         ResponseData::Empty {},
     ];
 
-    assert_eq!(variants.len(), 20);
+    assert_eq!(variants.len(), 21);
     for variant in variants {
         assert_tagged_round_trip(variant);
     }
+}
+
+#[test]
+fn status_without_a_device_id_remains_compatible_with_older_backends() {
+    let status: StatusData = serde_json::from_value(json!({
+        "device_name": "Laptop",
+        "version": "2.0.0",
+        "protocol_version": PROTOCOL_VERSION,
+        "item_count": 1,
+        "capture_running": true,
+        "clipboard_backend": "fake",
+        "private_mode": false,
+        "private_mode_epoch": 0
+    }))
+    .expect("older status payload deserialises");
+
+    assert_eq!(status.device_id, None);
 }
 
 #[test]
@@ -357,7 +404,7 @@ fn sync_size_refusal_count_is_additive_and_strict_when_present() {
 fn export_request_fields_default_to_safe_values() {
     let request: Request = serde_json::from_value(json!({
         "id": 1,
-        "protocol_version": 2,
+        "protocol_version": PROTOCOL_VERSION,
         "method": "export",
         "params": {}
     }))
@@ -409,6 +456,11 @@ fn an_item_with_no_truncated_flag_reads_as_a_whole_body() {
     });
     let item: Item = serde_json::from_value(wire).unwrap();
     assert!(!item.truncated);
+    assert!(item.image_details.is_none());
+    assert_eq!(
+        item.origin_device_class,
+        copypaste_ipc::DeviceClass::Unknown
+    );
 }
 
 #[test]

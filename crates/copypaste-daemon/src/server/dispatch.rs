@@ -125,11 +125,14 @@ fn requires_ready(method: &Method) -> bool {
         | Method::Rescan => false,
         Method::List { .. }
         | Method::Search { .. }
+        | Method::HistoryQuery { .. }
+        | Method::HistoryFacets
         | Method::Copy { .. }
         | Method::CopyPlainText { .. }
         | Method::Get { .. }
         | Method::ImagePreview { .. }
         | Method::SourceAppIcon { .. }
+        | Method::SaveFile { .. }
         | Method::Add { .. }
         | Method::Delete { .. }
         | Method::DeleteAll { .. }
@@ -251,6 +254,12 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
         Method::SetDeviceName { name } => items::set_device_name(state, id, &name),
         Method::List { limit, cursor } => items::list(state, id, limit, cursor.as_deref()),
         Method::Search { query, limit } => items::search(state, id, &query, limit),
+        Method::HistoryQuery {
+            query,
+            limit,
+            cursor,
+        } => items::history_query(state, id, &query, limit, cursor.as_deref()),
+        Method::HistoryFacets => items::history_facets(state, id),
         Method::Copy { id: item_id } => items::copy(state, id, &item_id),
         Method::CopyPlainText { id: item_id } => items::copy_plain_text(state, id, &item_id),
         Method::Get { id: item_id } => items::get(state, id, &item_id),
@@ -259,6 +268,10 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
             max_edge,
         } => items::image_preview(state, id, &item_id, max_edge),
         Method::SourceAppIcon { id: item_id } => items::source_app_icon(state, id, &item_id),
+        Method::SaveFile {
+            id: item_id,
+            dest_path,
+        } => items::save_file(state, id, &item_id, &dest_path),
         Method::Add { content } => items::add(state, id, &content),
         Method::Delete { id: item_id } => items::delete(state, id, &item_id),
         Method::DeleteAll { through } => items::delete_all(state, id, through),

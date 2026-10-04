@@ -35,6 +35,7 @@
 mod connection;
 mod creation;
 mod dbfile;
+mod history;
 mod identity;
 mod items;
 mod merge_page;
@@ -54,6 +55,9 @@ mod creation_tests;
 
 pub use dbfile::{
     attach_key_literal, open_validated, verify_integrity, verify_schema, RestoreError,
+};
+pub use history::{
+    HistoryCursor, HistoryFacet, HistoryFacets, HistoryPage, HistoryQuery, HistorySort,
 };
 pub use identity::DeviceIdentity;
 pub(crate) use merge_page::MergePageError;

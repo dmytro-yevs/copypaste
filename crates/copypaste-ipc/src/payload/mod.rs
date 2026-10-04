@@ -24,6 +24,81 @@ pub use device::{
 
 use crate::health::SettingsHealth;
 
+/// The ordering used by a full-history query.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HistorySort {
+    Newest,
+    Oldest,
+    /// FTS relevance. This is meaningful only with a text query.
+    Relevance,
+}
+
+/// Server-side filters and ordering for a lazily loaded history view.
+///
+/// The daemon applies every filter before pagination. A client must pass the
+/// opaque `ItemPage::next_cursor` back unchanged with the same query; applying
+/// filters to already loaded pages would leave matching history undiscovered.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryQuery {
+    /// Text to find through the encrypted store's FTS index. Empty means no
+    /// text constraint. Only text clips are searchable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search: Option<String>,
+    /// Empty means every content class. Multiple classes are combined with OR.
+    #[serde(default)]
+    pub content_classes: Vec<crate::ContentClass>,
+    /// Empty means every semantic kind. Multiple kinds are combined with OR.
+    /// When content classes are also present, both filters must match.
+    #[serde(default)]
+    pub semantic_kinds: Vec<crate::SemanticKind>,
+    #[serde(default)]
+    pub pinned_only: bool,
+    /// Exact origin device id when known. Local captures have no stored origin
+    /// id, so clients use this only for a metadata value returned by a row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_device_id: Option<String>,
+    /// Exact stable bundle/package id of the application that captured a clip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_app_bundle_id: Option<String>,
+    #[serde(default = "default_history_sort")]
+    pub sort: HistorySort,
+}
+
+fn default_history_sort() -> HistorySort {
+    HistorySort::Newest
+}
+
+impl Default for HistoryQuery {
+    fn default() -> Self {
+        Self {
+            search: None,
+            content_classes: Vec::new(),
+            semantic_kinds: Vec::new(),
+            pinned_only: false,
+            origin_device_id: None,
+            source_app_bundle_id: None,
+            sort: HistorySort::Newest,
+        }
+    }
+}
+
+/// One selectable history filter value. `id` is returned only for a following
+/// typed request; user interfaces present `label` and must not render ids.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryFacet {
+    pub id: String,
+    pub label: String,
+}
+
+/// Filter values derived from the complete retained history, rather than from
+/// whichever lazy pages a client has loaded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct HistoryFacets {
+    pub origin_devices: Vec<HistoryFacet>,
+    pub source_apps: Vec<HistoryFacet>,
+}
+
 /// One page of history, and how much of it could not be shown.
 ///
 /// `skipped_undecryptable` is on the wire because the alternative
@@ -46,6 +121,36 @@ pub struct ItemPage {
     /// [`crate::Method::Search`].
     #[serde(default)]
     pub next_cursor: Option<String>,
+}
+
+/// Metadata for one file clip after its authenticated payload was opened.
+///
+/// A file clip represents one native file reference in the current capture
+/// contract. The source reference is synchronized with the file payload so a
+/// receiving device can copy it or offer the stored bytes for download.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileDetails {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_reference: Option<String>,
+    #[serde(default)]
+    pub source_available: bool,
+    pub size_bytes: u64,
+    pub file_count: u32,
+}
+
+/// Original metadata for one authenticated image payload.
+///
+/// This is absent from paged previews and populated only when a client opens
+/// the complete item, avoiding image-header work across the whole history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageDetails {
+    pub width: u32,
+    pub height: u32,
+    pub size_bytes: u64,
 }
 
 /// A bounded PNG thumbnail generated from a stored image on demand.
@@ -282,6 +387,10 @@ pub struct DiagnosticCounters {
 pub struct StatusData {
     #[serde(default)]
     pub device_name: String,
+    /// Stable local device identity. It is unrelated to a peer pairing id and
+    /// omitted by older backends that do not expose it yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_id: Option<String>,
     pub version: String,
     pub protocol_version: u32,
     /// Address of the peer listener that is actually running, when routable.
@@ -333,14 +442,34 @@ pub struct PrivateModeData {
 
 /// An item as seen by clients. Content is plaintext here: it is decrypted by
 /// the daemon on the way out, and the socket is `0600`.
+fn default_content_class() -> crate::ContentClass {
+    crate::ContentClass::Text
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Item {
     pub id: String,
     pub content: String,
     pub content_type: String,
+    /// Closed presentation class for the open `content_type` vocabulary.
+    #[serde(default = "default_content_class")]
+    pub content_class: crate::ContentClass,
+    /// Derived only for textual payloads. Older clients may ignore it and newer
+    /// clients can still fall back to the content class when it is absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_kind: Option<crate::SemanticKind>,
+    /// Packed as `0xRRGGBBAA` when `semantic_kind` is `color`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_rgba: Option<u32>,
     /// Milliseconds since the Unix epoch.
     pub created_at: i64,
     pub pinned: bool,
+    /// Present only for authenticated file payloads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_details: Option<FileDetails>,
+    /// Present only for an authenticated image payload in a full item response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_details: Option<ImageDetails>,
     /// Which device first captured this item.
     ///
     /// Never empty: an item with no recorded origin was captured here, and the
@@ -366,6 +495,10 @@ pub struct Item {
     /// devices may well report the same name.
     #[serde(default)]
     pub origin_device_name: Option<String>,
+
+    /// Typed form factor of the origin when it is known.
+    #[serde(default)]
+    pub origin_device_class: DeviceClass,
 
     /// Application bundle that owned the foreground clipboard when this item
     /// was captured. This is local, cosmetic attribution, so synced items may

@@ -67,10 +67,15 @@ impl ClipboardPayload {
             Self::Image { content_type, .. } => {
                 format!("[{}]", copypaste_ipc::content_type::label(content_type))
             }
-            Self::File { .. } => format!(
-                "[{}]",
-                copypaste_ipc::content_type::label(copypaste_ipc::content_type::FILE)
-            ),
+            Self::File { metadata, .. } => metadata
+                .as_ref()
+                .and_then(|metadata| metadata.source_reference.clone())
+                .unwrap_or_else(|| {
+                    format!(
+                        "[{}]",
+                        copypaste_ipc::content_type::label(copypaste_ipc::content_type::FILE)
+                    )
+                }),
             Self::Unsupported { .. } => {
                 format!("[{}]", copypaste_ipc::content_type::label(""))
             }
@@ -85,6 +90,14 @@ impl ClipboardPayload {
                 let (preview, truncated) = copypaste_ipc::limits::preview_text(text);
                 (preview.to_owned(), truncated)
             }
+            Self::File { metadata, .. } => metadata
+                .as_ref()
+                .and_then(|metadata| metadata.source_reference.as_deref())
+                .map(|reference| {
+                    let (preview, truncated) = copypaste_ipc::limits::preview_text(reference);
+                    (preview.to_owned(), truncated)
+                })
+                .unwrap_or_else(|| (self.display_text(), false)),
             _ => (self.display_text(), false),
         }
     }
@@ -96,6 +109,42 @@ impl ClipboardPayload {
             Self::Text(text) => Some(text.as_str()),
             Self::Image { .. } | Self::File { .. } | Self::Unsupported { .. } => None,
         }
+    }
+
+    #[must_use]
+    pub fn source_reference(&self) -> Option<&str> {
+        match self {
+            Self::File { metadata, .. } => metadata
+                .as_ref()
+                .and_then(|metadata| metadata.source_reference.as_deref()),
+            Self::Text(_) | Self::Image { .. } | Self::Unsupported { .. } => None,
+        }
+    }
+
+    /// Write the authenticated bytes of one file clip to a destination selected
+    /// by the user. The destination must not exist so a stale dialog result can
+    /// never overwrite an unrelated file.
+    pub fn save_file_to(&self, destination: &std::path::Path) -> std::io::Result<()> {
+        let Self::File { bytes, .. } = self else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "the clipboard payload is not a file",
+            ));
+        };
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(destination)?;
+        if let Err(error) = std::io::Write::write_all(&mut file, bytes) {
+            drop(file);
+            let _ = std::fs::remove_file(destination);
+            return Err(error);
+        }
+        Ok(())
     }
 
     #[must_use]
@@ -246,5 +295,36 @@ mod tests {
             assert_eq!(payload.display_preview(), (expected.to_string(), false));
             assert_eq!(payload.plain_text(), None, "{content_type}");
         }
+    }
+
+    #[test]
+    fn a_file_source_reference_is_the_display_value_and_its_bytes_can_be_saved() {
+        let metadata = FileMetadata::with_source_reference(
+            "note.bin",
+            "application/octet-stream",
+            "/Users/person/Documents/note.bin",
+        )
+        .unwrap();
+        let (row, key) = stored(
+            copypaste_ipc::content_type::FILE,
+            b"file bytes",
+            Some(metadata),
+        );
+        let payload = ClipboardPayload::open(&row, &key).unwrap();
+        assert_eq!(payload.display_text(), "/Users/person/Documents/note.bin");
+        assert_eq!(
+            payload.source_reference(),
+            Some("/Users/person/Documents/note.bin")
+        );
+        assert_eq!(payload.plain_text(), None);
+
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("saved.bin");
+        payload.save_file_to(&destination).unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), b"file bytes");
+        assert_eq!(
+            payload.save_file_to(&destination).unwrap_err().kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
     }
 }

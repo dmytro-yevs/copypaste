@@ -10,11 +10,15 @@ read -r expected < "$VERSION_FILE"
 workspace_version=$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{print $3; exit}' "$ROOT/Cargo.toml" | tr -d '"[:space:]')
 pubspec_version=$(awk '/^version:[[:space:]]*/ { print $2; exit }' "$APP/pubspec.yaml")
 [[ -n "$pubspec_version" && "$pubspec_version" == "$workspace_version" ]] || { echo "pubspec.yaml version must match Cargo.toml workspace.package.version" >&2; exit 1; }
-grep -Eq '^  shadcn_ui: 0\.57\.1$' "$APP/pubspec.yaml" || { echo "pubspec.yaml must pin shadcn_ui: 0.57.1" >&2; exit 1; }
+grep -Eq '^  shadcn_flutter: 0\.0\.55$' "$APP/pubspec.yaml" || { echo "pubspec.yaml must pin shadcn_flutter: 0.0.55" >&2; exit 1; }
+grep -Eq '^  flutter_animate: 4\.5\.2$' "$APP/pubspec.yaml" || { echo "pubspec.yaml must pin flutter_animate: 4.5.2" >&2; exit 1; }
+! grep -Eq '^  shadcn_ui:' "$APP/pubspec.yaml" || { echo "pubspec.yaml must not retain shadcn_ui" >&2; exit 1; }
+! grep -Eq '^  bottom_navigator:' "$APP/pubspec.yaml" || { echo "pubspec.yaml must not retain bottom_navigator" >&2; exit 1; }
 actual="$(flutter --version | sed -n '1s/Flutter //p' | awk '{print $1}')"
 [[ "$actual" == "$expected" ]] || { echo "Flutter $expected is required; found ${actual:-unknown}" >&2; exit 1; }
 cd "$APP"
 flutter pub get --enforce-lockfile
-dart format --output=none --set-exit-if-changed lib
+dart format --output=none --set-exit-if-changed lib test
 flutter analyze
+flutter test
 flutter build "${COPYPASTE_FLUTTER_BUILD_TARGET:?missing Flutter build target}" --debug

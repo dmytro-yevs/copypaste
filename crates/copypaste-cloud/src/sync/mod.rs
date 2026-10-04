@@ -123,7 +123,7 @@ mod tests {
     #[tokio::test]
     async fn a_file_payload_keeps_its_signed_metadata_through_cloud() {
         let backend = Arc::new(FakeRest::default());
-        let metadata = r#"{"filename":"report.pdf","mime_type":"application/pdf"}"#;
+        let metadata = r#"{"filename":"report.pdf","mime_type":"application/pdf","source_reference":"/Users/person/Documents/report.pdf"}"#;
         let a_source = FakeSource::with_outgoing(vec![LocalItem {
             item_id: "file-a".into(),
             content: zeroize::Zeroizing::new(b"%PDF-binary".to_vec()),

@@ -40,6 +40,8 @@ tracing.workspace = true
 uuid.workspace = true
 hex.workspace = true
 image.workspace = true
+url.workspace = true
+csscolorparser.workspace = true
 # Owner-only staging files close the restore validation/swap race. This crate
 # already ships through both product backends, so the dependency graph is unchanged.
 tempfile.workspace = true

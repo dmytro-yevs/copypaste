@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 
 use copypaste_core::{origin_or, Store, StoreError, StoredItem};
+use copypaste_ipc::DeviceClass;
 
 /// Where one item came from, as a user reads it.
 ///
@@ -22,6 +23,7 @@ use copypaste_core::{origin_or, Store, StoreError, StoredItem};
 pub struct Origin {
     pub device_id: String,
     pub device_name: Option<String>,
+    pub device_class: DeviceClass,
 }
 
 /// This device's sync identity.
@@ -30,6 +32,7 @@ pub struct Meta {
     store: Store,
     device_id: String,
     device_name: RwLock<String>,
+    device_class: DeviceClass,
 }
 
 impl Meta {
@@ -51,6 +54,7 @@ impl Meta {
             store: store.clone(),
             device_id: identity.device_id,
             device_name: RwLock::new(identity.device_name),
+            device_class: copypaste_p2p::DeviceProfile::current().device_class,
         })
     }
 
@@ -83,6 +87,11 @@ impl Meta {
             .clone()
     }
 
+    #[must_use]
+    pub fn device_class(&self) -> DeviceClass {
+        self.device_class
+    }
+
     /// Replace the stored device name. Cosmetic; takes effect on the next hello.
     pub fn set_device_name(&self, name: &str) -> Result<(), StoreError> {
         let mut current = self.device_name.write().unwrap_or_else(|p| p.into_inner());
@@ -100,6 +109,7 @@ impl Meta {
         Origin {
             device_id: self.device_id.clone(),
             device_name: Some(self.device_name()),
+            device_class: self.device_class,
         }
     }
 
@@ -123,6 +133,11 @@ impl Meta {
                 (
                     row.id.clone(),
                     Origin {
+                        device_class: if device_id == self.device_id {
+                            self.device_class
+                        } else {
+                            DeviceClass::Unknown
+                        },
                         device_id,
                         device_name,
                     },
@@ -137,6 +152,11 @@ impl Meta {
         let names = self.store.device_names(std::slice::from_ref(&device_id))?;
         let device_name = names.get(&device_id).cloned();
         Ok(Origin {
+            device_class: if device_id == self.device_id {
+                self.device_class
+            } else {
+                DeviceClass::Unknown
+            },
             device_id,
             device_name,
         })
@@ -201,6 +221,7 @@ mod tests {
 
         let origin = state.meta.origin_of(&row).unwrap();
         assert_eq!(origin.device_id, state.meta.device_id());
+        assert_eq!(origin.device_class, state.meta.device_class());
         assert_eq!(
             origin.device_name.as_deref(),
             Some(state.meta.device_name().as_str())
@@ -238,6 +259,7 @@ mod tests {
         let origin = state.meta.origin_of(&row).unwrap();
         assert_eq!(origin.device_id, "device-b");
         assert_eq!(origin.device_name, None);
+        assert_eq!(origin.device_class, copypaste_ipc::DeviceClass::Unknown);
         assert_ne!(origin.device_id, state.meta.device_id());
 
         state

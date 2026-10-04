@@ -99,10 +99,19 @@ impl ClipboardSource for FakeClipboard {
         let written = match payload {
             ClipboardPayload::Text(text) => WrittenPayload::Text(text.to_string()),
             ClipboardPayload::Image { bytes, .. } => WrittenPayload::Image(bytes.to_vec()),
-            ClipboardPayload::File { bytes, metadata } => WrittenPayload::File {
-                bytes: bytes.to_vec(),
-                metadata: metadata.clone(),
-            },
+            ClipboardPayload::File { bytes, metadata } => {
+                if let Some(source_reference) = metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.source_reference.as_deref())
+                {
+                    WrittenPayload::Text(source_reference.to_string())
+                } else {
+                    WrittenPayload::File {
+                        bytes: bytes.to_vec(),
+                        metadata: metadata.clone(),
+                    }
+                }
+            }
             ClipboardPayload::Unsupported { .. } => {
                 return Err(ClipboardWriteError::UnsupportedContent);
             }
@@ -249,6 +258,8 @@ pub fn peer_at(state: &Arc<AppState>, name: &str, addr: &str) -> copypaste_p2p::
         psk: token.psk(),
         last_addr: Some(addr.parse().expect("a peer address")),
         last_seen_ms: copypaste_core::now_ms(),
+        profile: None,
+        profile_observed_at_ms: 0,
     };
     state
         .p2p

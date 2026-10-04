@@ -229,12 +229,22 @@ pub trait ClipboardSource: Send {
                 content_type,
                 bytes,
             } => self.set_binary_contents(item_id, content_type, bytes, None),
-            ClipboardPayload::File { bytes, metadata } => self.set_binary_contents(
-                item_id,
-                copypaste_ipc::content_type::FILE,
-                bytes,
-                metadata.as_ref(),
-            ),
+            ClipboardPayload::File { bytes, metadata } => {
+                if let Some(source_reference) = metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.source_reference.as_deref())
+                {
+                    self.set_contents(source_reference)
+                        .map_err(|_| ClipboardWriteError::Failed)
+                } else {
+                    self.set_binary_contents(
+                        item_id,
+                        copypaste_ipc::content_type::FILE,
+                        bytes,
+                        metadata.as_ref(),
+                    )
+                }
+            }
             ClipboardPayload::Unsupported { .. } => Err(ClipboardWriteError::UnsupportedContent),
         }
     }

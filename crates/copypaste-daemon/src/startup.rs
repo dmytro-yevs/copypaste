@@ -102,47 +102,56 @@ pub async fn wait_for_shutdown(mut requested: watch::Receiver<bool>) -> anyhow::
     Ok(())
 }
 
-/// Start observing the stdin pipe the bundled macOS app passes to its daemon.
+/// Start observing the stdin pipe the bundled desktop app passes to its daemon.
 /// A CLI invocation never sets the hidden flag, so it does not acquire this
 /// watcher and its stdin remains untouched.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub fn watch_app_parent(enabled: bool) -> anyhow::Result<()> {
     if !enabled {
         return Ok(());
     }
     std::thread::Builder::new()
         .name("copypaste-parent-liveness".into())
-        .spawn(move || {
-        use std::io::Read as _;
-
-        let mut stdin = std::io::stdin();
-        let mut byte = [0_u8; 1];
-        loop {
-            match stdin.read(&mut byte) {
-                Ok(0) => {
-                    // A SIGKILL can arrive while synchronous startup code is
-                    // opening the store. That call
-                    // cannot observe a Tokio cancellation until they return,
-                    // so waiting for the async shutdown path would still let
-                    // an orphan capture after its app is gone. Ordinary Quit
-                    // reaches the IPC drain before this endpoint is closed;
-                    // EOF is the crash/forced-kill path and must end now.
-                    std::process::exit(0);
-                }
-                Ok(_) => warn!("the app parent-liveness pipe sent data; ignoring it"),
-                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(error) => {
-                    warn!(%error, "could not read the app parent-liveness pipe; stopping the daemon");
-                    std::process::exit(0);
-                }
+        .spawn(move || match wait_for_app_parent(std::io::stdin()) {
+            Ok(()) => {
+                // The app owns the write end of the inherited stdin pipe on
+                // macOS and Windows. EOF means it died or released ownership
+                // before startup completed, so this daemon cannot stay alive.
+                std::process::exit(0);
             }
-        }
+            Err(error) => {
+                warn!(%error, "could not read the app parent-liveness pipe; stopping the daemon");
+                std::process::exit(0);
+            }
         })
         .context("start the app parent-liveness watcher")?;
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(any(unix, windows))]
+fn wait_for_app_parent(mut reader: impl std::io::Read) -> std::io::Result<()> {
+    let mut byte = [0_u8; 1];
+    loop {
+        match reader.read(&mut byte) {
+            Ok(0) => return Ok(()),
+            Ok(_) => warn!("the app parent-liveness pipe sent data; ignoring it"),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn watch_app_parent(_enabled: bool) -> anyhow::Result<()> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn app_parent_eof_is_a_terminal_liveness_signal() {
+        super::wait_for_app_parent(std::io::Cursor::new(Vec::<u8>::new()))
+            .expect("EOF from the app-owned pipe requests daemon exit");
+    }
 }

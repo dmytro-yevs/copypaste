@@ -9,9 +9,9 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 #[cfg(test)]
 use copypaste_core::StoredItem;
-use copypaste_core::{p2p_contract, ItemCursor};
+use copypaste_core::{p2p_contract, HistoryCursor, ItemCursor, StoreError};
 use copypaste_ipc::{
-    clamp_page, ErrorCode, Response, ResponseData, StatusData, DEFAULT_LIST_PAGE,
+    clamp_page, ErrorCode, HistoryQuery, Response, ResponseData, StatusData, DEFAULT_LIST_PAGE,
     DEFAULT_SEARCH_PAGE, MAX_PAGE_CONTENT_BYTES, PROTOCOL_VERSION,
 };
 use tracing::{error, warn};
@@ -19,13 +19,14 @@ use tracing::{error, warn};
 mod copy;
 mod wire;
 
-pub(super) use self::copy::{copy, copy_plain_text};
+pub(super) use self::copy::{copy, copy_plain_text, save_file};
 use self::wire::{
     bound_item_preview, decrypt_rows, is_oversized_text, to_wire, to_wire_and_payload,
 };
 use super::messages::{
-    decrypt_error, storage_error, MSG_BAD_CURSOR, MSG_CONTENT_TOO_LARGE, MSG_EMPTY_CONTENT,
-    MSG_ENCRYPT, MSG_IMAGE_PREVIEW, MSG_NOT_FOUND, MSG_REORDER_TOO_MANY, MSG_TOO_BIG,
+    decrypt_error, storage_error, MSG_BAD_CURSOR, MSG_BAD_HISTORY_QUERY, MSG_CONTENT_TOO_LARGE,
+    MSG_EMPTY_CONTENT, MSG_ENCRYPT, MSG_IMAGE_PREVIEW, MSG_NOT_FOUND, MSG_REORDER_TOO_MANY,
+    MSG_TOO_BIG,
 };
 use crate::capture::{self, IngestError};
 use crate::AppState;
@@ -61,6 +62,7 @@ pub(super) fn status(state: &AppState, id: u64) -> Response {
                 listen_addr.as_deref(),
             )),
             device_name,
+            device_id: Some(state.meta.device_id().to_string()),
             version: crate::DAEMON_VERSION.to_string(),
             protocol_version: PROTOCOL_VERSION,
             listen_addr,
@@ -122,6 +124,58 @@ pub(super) fn search(state: &AppState, id: u64, query: &str, limit: u32) -> Resp
     {
         Ok(rows) => Response::ok(id, ResponseData::Page(decrypt_rows(state, rows))),
         Err(e) => storage_error(id, "search", &e),
+    }
+}
+
+/// Query all retained history before applying the cursor.
+///
+/// The cursor is authenticated to the exact filter/order set by the core
+/// store, so changing a filter cannot silently resume an unrelated list.
+pub(super) fn history_query(
+    state: &AppState,
+    id: u64,
+    query: &HistoryQuery,
+    limit: u32,
+    cursor: Option<&str>,
+) -> Response {
+    let limit = clamp_page(limit, DEFAULT_LIST_PAGE);
+    let after = match cursor
+        .map(|token| HistoryCursor::parse_for(token, query))
+        .transpose()
+    {
+        Ok(after) => after,
+        Err(StoreError::InvalidCursor) => {
+            return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_CURSOR)
+        }
+        Err(_) => return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_HISTORY_QUERY),
+    };
+    let page = match state.store.query_history_bounded(
+        query,
+        after.as_ref(),
+        limit,
+        MAX_PAGE_CONTENT_BYTES,
+    ) {
+        Ok(page) => page,
+        Err(StoreError::InvalidCursor) => {
+            return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_CURSOR)
+        }
+        Err(StoreError::InvalidHistoryQuery) => {
+            return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_HISTORY_QUERY)
+        }
+        Err(error) => return storage_error(id, "history_query", &error),
+    };
+    let mut wire = decrypt_rows(state, page.items);
+    wire.next_cursor = page.next.map(|cursor| cursor.token());
+    Response::ok(id, ResponseData::Page(wire))
+}
+
+pub(super) fn history_facets(state: &AppState, id: u64) -> Response {
+    match state
+        .store
+        .history_facets(state.meta.device_id(), &state.meta.device_name())
+    {
+        Ok(facets) => Response::ok(id, ResponseData::HistoryFacets(facets)),
+        Err(error) => storage_error(id, "history_facets", &error),
     }
 }
 
@@ -389,6 +443,18 @@ mod tests {
     }
 
     #[test]
+    fn text_items_carry_their_semantic_kind_and_color_swatch() {
+        let (state, _dir) = test_state("semantic-wire-item");
+        let item = match add(&state, 1, "#aabbcc").data {
+            Some(ResponseData::Item(item)) => item,
+            other => panic!("{other:?}"),
+        };
+
+        assert_eq!(item.semantic_kind, Some(copypaste_ipc::SemanticKind::Color));
+        assert_eq!(item.color_rgba, Some(0xaabb_ccff));
+    }
+
+    #[test]
     fn an_over_budget_page_resumes_at_the_first_item_it_dropped() {
         const BIG: usize = 1_500_000;
 
@@ -490,7 +556,10 @@ mod tests {
         assert_eq!(reopened.device_id(), state.meta.device_id());
         assert_eq!(reopened.device_name(), "Kitchen Mac");
         match status(&state, 2).data {
-            Some(ResponseData::Status(status)) => assert_eq!(status.device_name, "Kitchen Mac"),
+            Some(ResponseData::Status(status)) => {
+                assert_eq!(status.device_name, "Kitchen Mac");
+                assert_eq!(status.device_id.as_deref(), Some(state.meta.device_id()));
+            }
             other => panic!("{other:?}"),
         }
     }
@@ -962,8 +1031,17 @@ mod tests {
             other => panic!("{other:?}"),
         };
         assert_eq!(listed[0].content, "[image]");
+        assert!(listed[0].image_details.is_none());
 
-        let preview = match image_preview(&state, 2, &image.id, None).data {
+        let detail = match get(&state, 2, &image.id).data {
+            Some(ResponseData::Item(item)) => item,
+            other => panic!("{other:?}"),
+        };
+        let metadata = detail.image_details.expect("selected image metadata");
+        assert_eq!((metadata.width, metadata.height), (1, 1));
+        assert_eq!(metadata.size_bytes, source.len() as u64);
+
+        let preview = match image_preview(&state, 3, &image.id, None).data {
             Some(ResponseData::ImagePreview(preview)) => preview,
             other => panic!("{other:?}"),
         };
@@ -975,7 +1053,7 @@ mod tests {
     }
 
     #[test]
-    fn native_copy_dispatches_bytes_while_plain_text_copy_refuses_display_labels() {
+    fn native_copy_uses_a_file_source_path_while_plain_text_copy_refuses_binary_items() {
         use crate::testutil::WrittenPayload;
 
         let (state, _dir, writes) =
@@ -987,8 +1065,12 @@ mod tests {
             image_bytes,
             None,
         );
-        let metadata =
-            copypaste_core::FileMetadata::new("report.bin", "application/octet-stream").unwrap();
+        let metadata = copypaste_core::FileMetadata::with_source_reference(
+            "report.bin",
+            "application/octet-stream",
+            "/Users/person/Documents/report.bin",
+        )
+        .unwrap();
         let file_bytes = b"native file bytes";
         let file = binary_item(
             &state,
@@ -1004,10 +1086,7 @@ mod tests {
             writes.entries(),
             vec![
                 WrittenPayload::Image(image_bytes.to_vec()),
-                WrittenPayload::File {
-                    bytes: file_bytes.to_vec(),
-                    metadata: Some(metadata),
-                },
+                WrittenPayload::Text("/Users/person/Documents/report.bin".into()),
             ]
         );
 
@@ -1030,12 +1109,41 @@ mod tests {
             Some(ResponseData::Page(page)) => page.items,
             other => panic!("{other:?}"),
         };
-        for expected in ["[image]", "[file]", "[unsupported]"] {
+        for expected in [
+            "[image]",
+            "/Users/person/Documents/report.bin",
+            "[unsupported]",
+        ] {
             assert!(
                 listed.iter().any(|item| item.content == expected),
                 "{expected}"
             );
         }
+    }
+
+    #[test]
+    fn save_file_writes_authenticated_bytes_to_a_new_destination() {
+        let (state, dir) = test_state("save-file-payload");
+        let metadata = copypaste_core::FileMetadata::with_source_reference(
+            "report.bin",
+            "application/octet-stream",
+            "/Users/person/Documents/report.bin",
+        )
+        .unwrap();
+        let stored = binary_item(
+            &state,
+            copypaste_ipc::content_type::FILE,
+            b"downloaded bytes",
+            Some(&metadata),
+        );
+        let destination = dir.path().join("downloaded-report.bin");
+
+        assert!(save_file(&state, 1, &stored.id, &destination.to_string_lossy()).ok);
+        assert_eq!(std::fs::read(&destination).unwrap(), b"downloaded bytes");
+        assert_eq!(
+            save_file(&state, 2, &stored.id, &destination.to_string_lossy()).error_code,
+            Some(ErrorCode::InvalidRequest)
+        );
     }
 
     #[test]

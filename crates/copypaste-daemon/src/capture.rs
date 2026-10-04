@@ -814,13 +814,17 @@ mod tests {
     }
 
     #[test]
-    fn file_capture_reads_one_bounded_local_file_without_persisting_its_path() {
+    fn file_capture_reads_one_bounded_local_file_and_persists_its_path() {
         let (state, dir) = test_state("file-capture");
         let path = dir.path().join("fixture.bin");
         let bytes = b"synthetic file fixture".to_vec();
         std::fs::write(&path, &bytes).unwrap();
-        let metadata =
-            copypaste_core::FileMetadata::new("fixture.bin", "application/octet-stream").unwrap();
+        let metadata = copypaste_core::FileMetadata::with_source_reference(
+            "fixture.bin",
+            "application/octet-stream",
+            path.to_string_lossy(),
+        )
+        .unwrap();
 
         let stored = ingest_capture(
             &state,
@@ -841,8 +845,15 @@ mod tests {
 
         assert_eq!(stored.content_type, copypaste_ipc::content_type::FILE);
         assert_eq!(
-            stored.payload_metadata.as_deref(),
-            Some(r#"{"filename":"fixture.bin","mime_type":"application/octet-stream"}"#)
+            stored
+                .payload_metadata
+                .as_deref()
+                .and_then(|value| copypaste_core::PayloadMetadata::from_json(
+                    value,
+                    copypaste_ipc::content_type::FILE,
+                ))
+                .and_then(|metadata| metadata.file),
+            Some(metadata)
         );
         assert!(state.store.search("fixture", 10).unwrap().is_empty());
         let opened = copypaste_core::open_binary(

@@ -125,7 +125,9 @@ pub struct DeviceEndpointObservation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceLatencyObservation {
-    pub connect_latency_ms: u64,
+    /// Authenticated Probe-to-ProbeAck application round trip. It deliberately
+    /// excludes the Noise handshake and is neither ICMP nor sync duration.
+    pub round_trip_latency_ms: u64,
     pub provenance: DeviceObservationProvenance,
     pub trust: DeviceObservationTrust,
     pub observed_at_ms: i64,

@@ -9,7 +9,7 @@ use tokio::net::lookup_host;
 use tracing::{debug, info, warn};
 
 use super::channel::{NoiseChannel, SESSION_TIMEOUT};
-use super::{Node, NodeError, SyncCycle};
+use super::{DialCandidateSource, Node, NodeError, SyncCycle};
 use crate::peers::Peer;
 use crate::protocol::ProtocolError;
 use crate::sync::{run_initiator, SyncCursor, SyncError, SyncOutcome, SyncSource};
@@ -18,8 +18,9 @@ use crate::transport::Session;
 impl Node {
     /// Sync with one peer, start to finish.
     ///
-    /// The last address that worked, else whatever discovery has seen. Both are
-    /// hints: the handshake is what actually proves who is on the other end.
+    /// Current discovery is preferred over the last authenticated address so a
+    /// DHCP move heals without re-pairing. Both are hints: Noise is what proves
+    /// who is on the other end before any sync data is exchanged.
     pub async fn sync_one<S: SyncSource>(
         &self,
         peer: &Peer,
@@ -36,17 +37,36 @@ impl Node {
         cycle: &SyncCycle,
     ) -> Result<SyncOutcome, NodeError> {
         let cancel = cycle.cancel_token();
-        let addr = peer
-            .last_addr
-            .or_else(|| self.find(&peer.pairing_id).map(|found| found.addr))
-            .ok_or(NodeError::NoAddress)?;
+        let candidates = self.dial_candidates_with_sources(peer, true);
+        if candidates.is_empty() {
+            return Err(NodeError::NoAddress);
+        }
 
-        let session = match Session::connect(addr, &peer.psk).await {
-            Ok(session) => session,
-            Err(e) => {
-                debug!(pairing_id = %peer.pairing_id, error = %e, "could not reach a peer");
-                return Err(NodeError::Handshake);
+        let mut session = None;
+        let mut addr = None;
+        for candidate in candidates {
+            match Session::connect(candidate.addr, &peer.psk).await {
+                Ok(connected) => {
+                    session = Some(connected);
+                    addr = Some(candidate.addr);
+                    break;
+                }
+                Err(error) => {
+                    if candidate.source == DialCandidateSource::Discovery {
+                        self.record_discovery_candidate_failure(&peer.pairing_id, candidate.addr);
+                    }
+                    debug!(
+                        pairing_id = %peer.pairing_id,
+                        addr = %candidate.addr,
+                        error = %error,
+                        "peer candidate did not authenticate"
+                    );
+                }
             }
+        }
+        let (session, addr) = match (session, addr) {
+            (Some(session), Some(addr)) => (session, addr),
+            _ => return Err(NodeError::Handshake),
         };
 
         let cursor = self.cursors().get(&peer.pairing_id);
@@ -142,6 +162,7 @@ pub(super) async fn resolve(addr: &str) -> Option<SocketAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::discovery::{DiscoveredPeer, Discovery};
     use crate::peers::{Peer, PeerStore};
     use crate::sync::testutil::{item, TestSource};
     use crate::transport::PairingToken;
@@ -167,6 +188,8 @@ mod tests {
             psk: [3u8; crate::transport::TOKEN_LEN],
             last_addr: None,
             last_seen_ms: 1,
+            profile: None,
+            profile_observed_at_ms: 0,
         };
 
         let err = node.sync_one(&peer, &source).await.expect_err("no address");
@@ -184,6 +207,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn discovery_heals_a_dhcp_move_before_the_persisted_address() {
+        let server_dir = tempfile::tempdir().unwrap();
+        let client_dir = tempfile::tempdir().unwrap();
+        let token = PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        let stale_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let stale_addr = stale_listener.local_addr().unwrap();
+        drop(stale_listener);
+
+        let server = Arc::new(node(&server_dir));
+        server
+            .peers()
+            .upsert(Peer {
+                pairing_id: pairing_id.clone(),
+                name: "client".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 0,
+                profile: None,
+                profile_observed_at_ms: 0,
+            })
+            .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let current_addr = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let listener_task = tokio::spawn(crate::node::listen(
+            Arc::clone(&server),
+            listener,
+            Arc::new(TestSource::new("server", Vec::new())),
+            |_, _| {},
+            |_| {},
+            shutdown_rx,
+        ));
+
+        let discovery = Discovery::dormant("client", 0).unwrap();
+        let client = Node::new(
+            PeerStore::open(&client_dir.path().join("peers.json")).unwrap(),
+            Some(discovery),
+            0,
+            true,
+        );
+        let peer = Peer {
+            pairing_id: pairing_id.clone(),
+            name: "server".into(),
+            psk: token.psk(),
+            last_addr: Some(stale_addr),
+            last_seen_ms: 0,
+            profile: None,
+            profile_observed_at_ms: 0,
+        };
+        client.peers().upsert(peer.clone()).unwrap();
+        client
+            .discovery()
+            .unwrap()
+            .observe_for_test(DiscoveredPeer {
+                discovery_id: "server-new-address".into(),
+                pairing_ids: vec![pairing_id.clone()],
+                name: "server".into(),
+                profile: None,
+                addr: current_addr,
+                last_seen_ms: crate::now_ms(),
+            });
+
+        assert_eq!(
+            client.dial_candidates(&peer),
+            vec![current_addr, stale_addr]
+        );
+        client
+            .sync_one(&peer, &TestSource::new("client", Vec::new()))
+            .await
+            .expect("the current discovery endpoint authenticates and syncs");
+        assert_eq!(
+            client.peers().get(&pairing_id).unwrap().last_addr,
+            Some(current_addr),
+            "a successful authenticated discovery candidate replaces the stale address"
+        );
+
+        shutdown_tx.send(true).unwrap();
+        listener_task.await.unwrap();
+    }
+
+    #[tokio::test]
     async fn a_cancelled_cycle_never_commits_a_completed_sessions_cursor_or_profile() {
         let a_dir = tempfile::tempdir().unwrap();
         let b_dir = tempfile::tempdir().unwrap();
@@ -197,6 +302,8 @@ mod tests {
                 psk: token.psk(),
                 last_addr: None,
                 last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
             })
             .unwrap();
         let b = node(&b_dir);
@@ -208,6 +315,8 @@ mod tests {
             psk: token.psk(),
             last_addr: Some(addr),
             last_seen_ms: 1,
+            profile: None,
+            profile_observed_at_ms: 0,
         };
         b.peers().upsert(peer.clone()).unwrap();
         let source_a = Arc::new(TestSource::new(
@@ -221,6 +330,7 @@ mod tests {
             listener,
             source_a,
             |_pairing_id, _outcome| {},
+            |_| {},
             shutdown_rx,
         ));
         let cycle = SyncCycle::new();

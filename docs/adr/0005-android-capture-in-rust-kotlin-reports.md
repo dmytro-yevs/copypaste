@@ -1,6 +1,6 @@
 # ADR-0005 — Android capture: decisions in Rust, facts from Kotlin
 
-**Status:** accepted · 2026-07-30
+**Status:** accepted · amended 2026-10-04
 **Scope:** Android platform capture responsibilities. The former host-specific
 implementation was retired; this decision preserves the platform boundary for a
 future Flutter host.
@@ -16,9 +16,12 @@ Sending plaintext to Rust before that decision would itself violate manifest
 I-7. The embedded backend repeats the source-aware gate at the write boundary,
 so a stale or bypassed native bridge cannot persist unknown external capture.
 
-The boundary is **no product decisions in platform glue**. `capture::model`
-tests the state machine and wording. A future Android host may serialize
-platform facts into a checked Rust contract without moving policy into Kotlin.
+The boundary is **no product decisions in platform glue**. The Flutter
+onboarding controller owns the user-visible flow and wording, Rust owns capture
+and privacy policy, and Kotlin reports platform facts and operates Android
+system surfaces. Kotlin does not decide whether an unattributed implicit read
+is allowed: it asks the Rust runtime immediately before accessing
+`ClipboardManager`, and the Rust ingest boundary repeats that decision.
 
 The same reasoning puts the loss notification's *wording* in Rust and its
 *posting* in Kotlin: the text is passed down at arm time so the binder death
@@ -27,19 +30,24 @@ process may be going away.
 
 ## What is built
 
-**Rung 0, complete on the Rust side and written on the Android side.** Three
-doorways — the share sheet (`ACTION_SEND`), the text-selection action
-(`ACTION_PROCESS_TEXT`) and a Quick Settings tile — all reach
-`Backend::add` through `capture::intake`, which is the one ingest path
-(`copypaste_core::ingest`). The tile's tap is what gives `IntakeActivity` focus,
-and focus is the clipboard exemption we can reach with no permission at all.
+**Limited mode requires no privileged setup.** It completes onboarding and
+keeps automatic background capture off. Share and Process Text actions enter
+the explicit Rust intake path; returning to the foreground reads the current
+clipboard under the implicit pre-read policy. None of these paths updates the
+background-verification timestamp.
 
-**Rung 2 uses one-time setup grants.** Shizuku applies the same fixed permission
-commands shown by the manual adb setup. It is not a runtime dependency.
-`CaptureService` owns one app-UID logcat reader and its focused overlay hand-off.
-Only occurrence signals leave the reader; raw logs never enter history or IPC.
-Android may ask for log-access consent when a new reader starts, but reopening
-the activity reuses an existing reader.
+**Full mode uses one-time setup grants.** Shizuku applies the same six fixed
+commands shown by the manual ADB setup: `READ_LOGS`, `SYSTEM_ALERT_WINDOW`, both
+background app-ops, inactive false, and the active standby bucket. Shizuku is
+not a runtime dependency after the grants are applied. The foreground capture
+service owns one app-UID logcat reader and its focused 1×1 overlay hand-off.
+Only occurrence signals leave the reader; raw logs never enter History or IPC.
+Notification permission is required for the foreground service. Battery
+optimization exemption is recommended but does not block completion.
+
+The Full path is complete only after a fresh copy made in another application
+reaches the shared encrypted History. Existing History content, successful
+permission commands, or a foreground-only clipboard read are insufficient.
 
 **Rungs 1 and 3 are not built** and are not represented in the state model. An
 overlay bubble and becoming the default IME are both in the specification's

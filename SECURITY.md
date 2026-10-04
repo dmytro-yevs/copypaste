@@ -71,10 +71,12 @@ pass shared by every client, with tests asserting it.
 
 - The channel is Noise `NNpsk0` (`snow`): mutual authentication and forward
   secrecy from the pairing key alone.
-- The pairing token is 256 bits from the OS CSPRNG, shown as a Crockford base32
-  code. Possession is the authentication — there is no password, so there is no
-  dictionary to attack. Treat a code like a password. It is shown once, stays
-  redeemable for five minutes, and the first session that completes burns it.
+- The pairing token is 256 bits from the OS CSPRNG. Manual entry uses its
+  Crockford base32 code; the automatically displayed QR wraps the same token and
+  LAN address in the versioned `copypaste://pair/v1` URI. Possession is the
+  authentication — there is no password, so there is no dictionary to attack.
+  Treat either form like a password. The invite stays redeemable for two minutes,
+  and the first session that completes burns it.
 - A wrong key fails the handshake on the first message. There is no
   unauthenticated mode to fall back to.
 - A session poisons itself after any authentication failure rather than

@@ -3,9 +3,9 @@
 use crate::config::ConfigData;
 use crate::error::ErrorCode;
 use crate::payload::{
-    BackupData, CloudStatusData, CloudSyncData, DiscoveredData, ExportData, ImagePreview,
-    ImportData, Item, ItemPage, PairingInviteData, PairingProgressData, PeerInfo, PrivateModeData,
-    StatusData, SyncResult,
+    BackupData, CloudStatusData, CloudSyncData, DiscoveredData, ExportData, HistoryFacets,
+    ImagePreview, ImportData, Item, ItemPage, PairingInviteData, PairingProgressData, PeerInfo,
+    PrivateModeData, StatusData, SyncResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -274,6 +274,7 @@ pub enum ResponseData {
     Config(ConfigApplied),
     Event(EventData),
     Page(ItemPage),
+    HistoryFacets(HistoryFacets),
     Item(Item),
     ImagePreview(ImagePreview),
     SourceAppIcon(ImagePreview),

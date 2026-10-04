@@ -69,10 +69,14 @@ pub(super) enum Reading {
     Nothing,
 }
 
-/// The shared precedence is Unicode text, RTF, HTML, PNG, TIFF, then a native
-/// bitmap or file reference. Availability is checked before each read, so an
+/// A native file reference wins over its textual fallback. The remaining
+/// precedence is Unicode text, RTF, HTML, PNG, TIFF, then a native bitmap.
+/// Availability is checked before each read, so an
 /// earlier representation never materialises a later one.
 pub(super) fn representation(policy: CapturePolicy<'_>, registered: &RegisteredFormats) -> Reading {
+    if raw::is_format_avail(formats::CF_HDROP) {
+        return file();
+    }
     if raw::is_format_avail(formats::CF_UNICODETEXT) {
         return text(policy);
     }
@@ -102,9 +106,6 @@ pub(super) fn representation(policy: CapturePolicy<'_>, registered: &RegisteredF
     }
     if raw::is_format_avail(formats::CF_DIB) {
         return dib(policy);
-    }
-    if raw::is_format_avail(formats::CF_HDROP) {
-        return file();
     }
     Reading::Nothing
 }
@@ -309,8 +310,11 @@ fn file() -> Reading {
         debug!("the clipboard file name could not be used; the change was dropped");
         return Reading::Nothing;
     };
-    let Some(metadata) = copypaste_core::FileMetadata::new(filename, "application/octet-stream")
-    else {
+    let Some(metadata) = copypaste_core::FileMetadata::with_source_reference(
+        filename,
+        "application/octet-stream",
+        path.to_string_lossy(),
+    ) else {
         debug!("the clipboard file metadata is invalid; the change was dropped");
         return Reading::Nothing;
     };

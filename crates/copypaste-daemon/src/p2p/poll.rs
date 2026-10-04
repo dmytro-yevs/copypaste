@@ -83,18 +83,16 @@ async fn round(
         return;
     }
 
-    // Only peers this device has actually reached before. The discovery
-    // fallback `sync_one` would otherwise use is an unauthenticated mDNS
-    // record, and acting on hearsay on a timer is a different decision from
-    // acting on it because a human ran `copypaste sync`.
-    //
-    // It is no longer what stops this device dialling its own listener: an
+    // Each candidate is authenticated by Noise before sync starts. A current
+    // discovery record is preferred so DHCP changes heal automatically; the
+    // persisted authenticated address remains its fallback. It is no longer
+    // what stops this device dialling its own listener: an
     // advertisement resolving to our own endpoint is now dropped in
     // `copypaste_p2p::discovery` — the layer that knows which endpoint is ours
     // — rather than worked around here.
     let reachable: Vec<_> = peers
         .iter()
-        .filter(|peer| peer.last_addr.is_some())
+        .filter(|peer| !state.p2p.node().dial_candidates(peer).is_empty())
         .collect();
     if reachable.is_empty() {
         return;

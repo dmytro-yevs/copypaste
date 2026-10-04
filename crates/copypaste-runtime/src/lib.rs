@@ -1,0 +1,1677 @@
+//! In-process composition of CopyPaste storage and peer-sync services.
+//!
+//! Platform hosts own native clipboard capture and lifecycle. This crate owns
+//! no cryptography, merge rules, or handshake protocol; those remain in
+//! `copypaste-core` and `copypaste-p2p`.
+
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use copypaste_core::{
+    now_ms, p2p_contract, ClipboardPayload, ClipboardWriteError, Keyring, Store, StoreSource,
+};
+use copypaste_ipc::{
+    ErrorCode, EventData, EventKind, Item, ItemPage, Method, Response, ResponseData,
+};
+use copypaste_p2p::discovery::Discovery;
+use copypaste_p2p::peers::PeerStore;
+use copypaste_p2p::Node;
+
+mod settings;
+
+use settings::{RuntimeSettings, SettingsError};
+
+/// Storage and direct peer networking shared by daemon and in-process hosts.
+pub struct Runtime {
+    pub store: Store,
+    pub keyring: Arc<Keyring>,
+    pub source: Arc<StoreSource>,
+    pub node: Arc<Node>,
+    pub device_id: String,
+    pub device_name: String,
+    pub device_class: copypaste_ipc::DeviceClass,
+    settings: Arc<RuntimeSettings>,
+    events: tokio::sync::broadcast::Sender<EventData>,
+    shutdown: tokio::sync::watch::Sender<bool>,
+    listener_started: AtomicBool,
+    capture_running: AtomicBool,
+    clipboard: Arc<dyn ClipboardWriter>,
+}
+
+pub trait ClipboardWriter: Send + Sync {
+    fn write(&self, payload: &ClipboardPayload) -> Result<(), ClipboardWriteError>;
+}
+struct UnavailableClipboard;
+impl ClipboardWriter for UnavailableClipboard {
+    fn write(&self, _: &ClipboardPayload) -> Result<(), ClipboardWriteError> {
+        Err(ClipboardWriteError::Failed)
+    }
+}
+
+impl Runtime {
+    /// Opens only application-owned paths. The platform host must initialize
+    /// its keystore before calling this constructor.
+    pub fn open(data_dir: &Path, device_name: &str, port: u16) -> Result<Self, RuntimeError> {
+        Self::open_with_clipboard(data_dir, device_name, port, Arc::new(UnavailableClipboard))
+    }
+    pub fn open_with_clipboard(
+        data_dir: &Path,
+        device_name: &str,
+        port: u16,
+        clipboard: Arc<dyn ClipboardWriter>,
+    ) -> Result<Self, RuntimeError> {
+        std::fs::create_dir_all(data_dir).map_err(|_| RuntimeError::Storage)?;
+        let keyring =
+            Arc::new(Keyring::load_or_create(data_dir).map_err(|_| RuntimeError::Keyring)?);
+        let store = Store::open(&data_dir.join("history.db"), &keyring.db_key())
+            .map_err(|_| RuntimeError::Storage)?;
+        let identity = store
+            .device_identity(device_name)
+            .map_err(|_| RuntimeError::Storage)?;
+        let settings = Arc::new(RuntimeSettings::load(&store));
+        let peers = PeerStore::open(&data_dir.join(copypaste_p2p::peers::DEFAULT_FILE_NAME))
+            .map_err(|_| RuntimeError::PeerStore)?;
+        let discovery = Discovery::dormant(&identity.device_name, port).ok();
+        let node = Arc::new(Node::new(
+            peers,
+            discovery,
+            port,
+            settings.config().lan_visibility,
+        ));
+        let source_settings = Arc::clone(&settings);
+        let source = Arc::new(StoreSource::with_retention_settings(
+            store.clone(),
+            Arc::clone(&keyring),
+            identity.device_id.clone(),
+            identity.device_name.clone(),
+            move || source_settings.config(),
+        ));
+        let (events, _) = tokio::sync::broadcast::channel(64);
+        let (shutdown, _) = tokio::sync::watch::channel(false);
+        let device_class = copypaste_p2p::DeviceProfile::current().device_class;
+        Ok(Self {
+            store,
+            keyring,
+            source,
+            node,
+            device_id: identity.device_id,
+            device_name: identity.device_name,
+            device_class,
+            settings,
+            events,
+            shutdown,
+            listener_started: AtomicBool::new(false),
+            capture_running: AtomicBool::new(false),
+            clipboard,
+        })
+    }
+
+    /// Dispatches the stable desktop IPC contract in-process.
+    ///
+    /// The platform host supplies clipboard writing, but history and P2P never
+    /// take a daemon shortcut: they use the same encrypted store, merge source
+    /// and Noise node as the desktop service.
+    pub async fn request(&self, id: u64, method: Method) -> Response {
+        let item_mutation = matches!(
+            &method,
+            Method::Delete { .. }
+                | Method::DeleteAll { .. }
+                | Method::Pin { .. }
+                | Method::ReorderPinned { .. }
+                | Method::Restore { .. }
+        );
+        let peer_mutation = matches!(
+            &method,
+            Method::SetDeviceName { .. }
+                | Method::PairCreateInvite
+                | Method::PairConfirm { .. }
+                | Method::PairCancel
+                | Method::PairJoin { .. }
+                | Method::Unpair { .. }
+                | Method::Revoke { .. }
+        );
+        let response = match method {
+            Method::Status => {
+                let settings = self.settings.snapshot();
+                Response::ok(
+                    id,
+                    ResponseData::Status(copypaste_ipc::StatusData {
+                        device_details: Some(p2p_contract::local_device_details(
+                            &self.device_name,
+                            self.node.listen_addr().as_deref(),
+                        )),
+                        device_name: self.device_name.clone(),
+                        device_id: Some(self.device_id.clone()),
+                        version: env!("CARGO_PKG_VERSION").to_owned(),
+                        protocol_version: copypaste_ipc::PROTOCOL_VERSION,
+                        listen_addr: self.node.listen_addr(),
+                        item_count: self.store.count().unwrap_or(0),
+                        capture_running: self.capture_running.load(Ordering::Acquire),
+                        clipboard_backend: "android".to_owned(),
+                        private_mode: settings.config.private_mode,
+                        private_mode_epoch: settings.private_mode_epoch,
+                        counters: Default::default(),
+                        settings_health: settings.health,
+                    }),
+                )
+            }
+            Method::List { limit, cursor } => self.list(id, limit, cursor),
+            Method::Search { query, limit } => self.search(id, &query, limit),
+            Method::HistoryQuery {
+                query,
+                limit,
+                cursor,
+            } => {
+                let cursor = match cursor
+                    .map(|token| copypaste_core::HistoryCursor::parse_for(&token, &query))
+                    .transpose()
+                {
+                    Ok(value) => value,
+                    Err(_) => {
+                        return Response::err(
+                            id,
+                            ErrorCode::InvalidRequest,
+                            "The history cursor is invalid.",
+                        )
+                    }
+                };
+                match self.store.query_history_bounded(
+                    &query,
+                    cursor.as_ref(),
+                    limit.clamp(1, 1000),
+                    copypaste_ipc::MAX_CONTENT_BYTES,
+                ) {
+                    Ok(page) => Response::ok(
+                        id,
+                        ResponseData::Page(
+                            self.page(page.items, page.next.map(|cursor| cursor.token())),
+                        ),
+                    ),
+                    Err(_) => Response::err(
+                        id,
+                        ErrorCode::InvalidRequest,
+                        "The history query is invalid.",
+                    ),
+                }
+            }
+            Method::Get { id: item_id } => self.item(id, &item_id),
+            Method::ImagePreview {
+                id: item_id,
+                max_edge,
+            } => self.image_preview(id, &item_id, max_edge),
+            Method::SourceAppIcon { id: item_id } => self.source_icon(id, &item_id),
+            Method::SaveFile {
+                id: item_id,
+                dest_path,
+            } => self.save_file(id, &item_id, &dest_path),
+            Method::Delete { id: item_id } => match self.store.delete(&item_id) {
+                Ok(true) => Response::ok(id, ResponseData::Empty {}),
+                Ok(false) => Response::err(id, ErrorCode::NotFound, "The clip was not found."),
+                Err(_) => {
+                    Response::err(id, ErrorCode::Internal, "The history store is unavailable.")
+                }
+            },
+            Method::Pin {
+                id: item_id,
+                pinned,
+            } => match self.store.set_pinned(&item_id, pinned) {
+                Ok(true) => self.item(id, &item_id),
+                Ok(false) => Response::err(id, ErrorCode::NotFound, "The clip was not found."),
+                Err(_) => {
+                    Response::err(id, ErrorCode::Internal, "The history store is unavailable.")
+                }
+            },
+            Method::DeleteAll { through } => match through {
+                Some(through) => self.store.delete_all_through(through),
+                None => self.store.delete_all(),
+            }
+            .map(|count| Response::ok(id, ResponseData::Count(count)))
+            .unwrap_or_else(|_| {
+                Response::err(id, ErrorCode::Internal, "The history store is unavailable.")
+            }),
+            Method::ReorderPinned { ids } => match self.store.reorder_pinned(&ids) {
+                Ok(count) => Response::ok(id, ResponseData::Count(count)),
+                Err(_) => Response::err(
+                    id,
+                    ErrorCode::InvalidRequest,
+                    "The pinned order is invalid.",
+                ),
+            },
+            Method::SetDeviceName { name } => {
+                match self.store.set_device_name(&self.device_id, &name) {
+                    Ok(name) => {
+                        self.node.set_device_name(&name);
+                        Response::ok(id, ResponseData::Empty {})
+                    }
+                    Err(_) => {
+                        Response::err(id, ErrorCode::InvalidRequest, "The device name is invalid.")
+                    }
+                }
+            }
+            Method::Peers => {
+                let peers = self.node.peers().list();
+                let events = self.events.clone();
+                let store = self.store.clone();
+                self.node
+                    .refresh_reachability(peers.iter().cloned(), move || {
+                        let _ = events.send(EventData {
+                            event: EventKind::Peers,
+                            item_count: store.count().unwrap_or(0),
+                            captured: false,
+                        });
+                    });
+                Response::ok(
+                    id,
+                    ResponseData::Peers(
+                        peers
+                            .iter()
+                            .map(|peer| {
+                                let found = self.node.find(&peer.pairing_id);
+                                let authenticated =
+                                    self.node.authenticated_profile(&peer.pairing_id);
+                                let reachability =
+                                    self.node.authenticated_reachability(&peer.pairing_id);
+                                p2p_contract::peer_info(
+                                    peer,
+                                    found.as_ref(),
+                                    authenticated.as_ref(),
+                                    reachability.as_ref(),
+                                )
+                            })
+                            .collect(),
+                    ),
+                )
+            }
+            Method::Discovered | Method::Rescan => {
+                if matches!(method, Method::Rescan) {
+                    self.node.clear_discovery_candidate_cooldowns();
+                    self.node.republish();
+                }
+                Response::ok(
+                    id,
+                    ResponseData::Discovered(copypaste_ipc::DiscoveredData {
+                        devices: self
+                            .node
+                            .seen()
+                            .into_iter()
+                            .map(|found| {
+                                let paired = found
+                                    .pairing_ids
+                                    .iter()
+                                    .any(|pairing_id| self.node.peers().get(pairing_id).is_some());
+                                p2p_contract::discovered_device(found, paired)
+                            })
+                            .collect(),
+                    }),
+                )
+            }
+            Method::PairCreateInvite => match self.node.pair_create_invite() {
+                Ok(invite) => Response::ok(
+                    id,
+                    ResponseData::PairingInvite(copypaste_ipc::PairingInviteData {
+                        code: invite.code,
+                        pairing_id: invite.pairing_id,
+                        listen_addr: invite.listen_addr,
+                        expires_in_secs: invite.expires_in_secs,
+                    }),
+                ),
+                Err(error) => self.node_error(id, error),
+            },
+            Method::PairProgress => self.pair_progress(id, self.node.pair_progress()),
+            Method::PairConfirm { accept } => match self.node.pair_confirm(accept) {
+                Ok(status) => self.pair_progress(id, status),
+                Err(error) => self.node_error(id, error),
+            },
+            Method::PairCancel => self.pair_progress(id, self.node.pair_cancel()),
+            Method::Unpair { pairing_id } => match self.node.unpair(&pairing_id) {
+                Ok(true) => Response::ok(id, ResponseData::Empty {}),
+                Ok(false) => self.node_error(id, copypaste_p2p::NodeError::NoPeer),
+                Err(error) => self.node_error(id, error),
+            },
+            Method::Revoke { pairing_id } => match self.node.revoke(&pairing_id, now_ms()) {
+                Ok(_) => Response::ok(id, ResponseData::Empty {}),
+                Err(_) => Response::err(
+                    id,
+                    ErrorCode::PeerFailed,
+                    "The paired-device store is unavailable.",
+                ),
+            },
+            Method::SyncNow { pairing_id } => self.sync_now(id, pairing_id).await,
+            Method::PairJoin { code, addr } => match self
+                .node
+                .pair_join(&code, &addr, self.source.as_ref())
+                .await
+            {
+                Ok(status) => self.pair_progress(id, status),
+                Err(error) => self.node_error(id, error),
+            },
+            Method::Copy { id: item_id } => self.copy(id, &item_id, false),
+            Method::CopyPlainText { id: item_id } => self.copy(id, &item_id, true),
+            Method::HistoryCeiling => match self.store.max_rowid() {
+                Ok(value) => Response::ok(id, ResponseData::Count(value.max(0) as u64)),
+                Err(_) => {
+                    Response::err(id, ErrorCode::Internal, "The history store is unavailable.")
+                }
+            },
+            Method::GetConfig => Response::ok(
+                id,
+                ResponseData::Config(copypaste_ipc::ConfigApplied {
+                    config: self.settings.config(),
+                    restart_required: Vec::new(),
+                }),
+            ),
+            Method::SetConfig { patch } => self.apply_config(id, &patch),
+            Method::GetPrivateMode => {
+                let settings = self.settings.snapshot();
+                Response::ok(
+                    id,
+                    ResponseData::PrivateMode(copypaste_ipc::PrivateModeData {
+                        private_mode: settings.config.private_mode,
+                        private_mode_epoch: settings.private_mode_epoch,
+                    }),
+                )
+            }
+            Method::SetPrivateMode { enabled } => self.set_private_mode(id, enabled),
+            Method::Export { limit } => self.export(id, limit),
+            Method::Backup { dest_path } => self.backup(id, &dest_path),
+            Method::Restore { src_path, confirm } => self.restore(id, &src_path, confirm),
+            Method::CloudStatus => Response::ok(
+                id,
+                ResponseData::CloudStatus(copypaste_ipc::CloudStatusData {
+                    configured: false,
+                    signed_in: false,
+                    key_ready: false,
+                    email: None,
+                    last_sync_ms: None,
+                    last_error: None,
+                    poll_interval_secs: 0,
+                    unreadable_uploads: 0,
+                }),
+            ),
+            Method::CloudSignIn { .. }
+            | Method::CloudSignUp { .. }
+            | Method::CloudSetEndpoint { .. }
+            | Method::CloudSignOut
+            | Method::CloudSyncNow => Response::err(
+                id,
+                ErrorCode::InvalidRequest,
+                "Cloud sync is not configured on this device.",
+            ),
+            _ => Response::err(
+                id,
+                ErrorCode::InvalidRequest,
+                "This in-process operation is not wired yet.",
+            ),
+        };
+        if response.ok && item_mutation {
+            self.emit(EventKind::Items);
+        }
+        if response.ok && peer_mutation {
+            self.emit(EventKind::Peers);
+        }
+        response
+    }
+
+    pub async fn start_listener(self: &Arc<Self>) -> Result<(), RuntimeError> {
+        if self.listener_started.swap(true, Ordering::AcqRel) {
+            return Ok(());
+        }
+        let listener = match copypaste_p2p::node::bind(self.node.port()) {
+            Ok(listener) => listener,
+            Err(_) => {
+                self.listener_started.store(false, Ordering::Release);
+                return Err(RuntimeError::Listener);
+            }
+        };
+        let listener = match tokio::net::TcpListener::from_std(listener) {
+            Ok(listener) => listener,
+            Err(_) => {
+                self.listener_started.store(false, Ordering::Release);
+                return Err(RuntimeError::Listener);
+            }
+        };
+        let runtime = Arc::clone(self);
+        let callback_runtime = Arc::clone(self);
+        let probe_callback_runtime = Arc::clone(self);
+        let shutdown = self.shutdown.subscribe();
+        let node = Arc::clone(&self.node);
+        let source = Arc::clone(&self.source);
+        tokio::spawn(async move {
+            copypaste_p2p::node::listen(
+                node,
+                listener,
+                source,
+                move |_, outcome| {
+                    if outcome.stats.received > 0 {
+                        callback_runtime.emit(EventKind::Items);
+                    }
+                    callback_runtime.emit(EventKind::Peers);
+                },
+                move |_| probe_callback_runtime.emit(EventKind::Peers),
+                shutdown,
+            )
+            .await;
+            runtime.listener_started.store(false, Ordering::Release);
+        });
+        let runtime = Arc::clone(self);
+        let mut pairing_changes = self.node.subscribe_pairing_changes();
+        let mut shutdown = self.shutdown.subscribe();
+        tokio::spawn(async move {
+            loop {
+                tokio::select! { _ = shutdown.changed() => return, changed = pairing_changes.changed() => if changed.is_err() { return } else { runtime.emit(EventKind::Peers); } }
+            }
+        });
+        Ok(())
+    }
+
+    pub fn subscribe_events(&self) -> tokio::sync::broadcast::Receiver<EventData> {
+        self.events.subscribe()
+    }
+
+    /// Records text captured by an in-process platform host.
+    ///
+    /// Android owns the permission and clipboard-read mechanics. The shared
+    /// runtime remains the only owner of encryption, deduplication, retention,
+    /// exclusions and History change events.
+    pub fn capture_text(&self, content: &str) -> Result<(), RuntimeError> {
+        self.capture_text_with_policy(content, false)
+    }
+
+    /// Records text from an explicit Android Share or Process Text action.
+    pub fn capture_explicit_text(&self, content: &str) -> Result<(), RuntimeError> {
+        self.capture_text_with_policy(content, true)
+    }
+
+    fn capture_text_with_policy(&self, content: &str, explicit: bool) -> Result<(), RuntimeError> {
+        let settings = self.capture_settings(explicit)?;
+        copypaste_core::ingest_into_with_capture_source_with_current_retention(
+            &self.store,
+            &self.keyring,
+            content,
+            copypaste_ipc::content_type::TEXT,
+            now_ms(),
+            None,
+            None,
+            &settings,
+            || self.settings.config(),
+        )
+        .map_err(|_| RuntimeError::Capture)?;
+        self.emit_capture();
+        Ok(())
+    }
+
+    /// Records an image or file captured by an in-process platform host.
+    pub fn capture_binary(
+        &self,
+        bytes: &[u8],
+        content_type: &str,
+        filename: Option<&str>,
+        source_reference: Option<&str>,
+    ) -> Result<(), RuntimeError> {
+        self.capture_binary_with_policy(bytes, content_type, filename, source_reference, false)
+    }
+
+    /// Records a binary value from an explicit Android Share action.
+    pub fn capture_explicit_binary(
+        &self,
+        bytes: &[u8],
+        content_type: &str,
+        filename: Option<&str>,
+        source_reference: Option<&str>,
+    ) -> Result<(), RuntimeError> {
+        self.capture_binary_with_policy(bytes, content_type, filename, source_reference, true)
+    }
+
+    fn capture_binary_with_policy(
+        &self,
+        bytes: &[u8],
+        content_type: &str,
+        filename: Option<&str>,
+        source_reference: Option<&str>,
+        explicit: bool,
+    ) -> Result<(), RuntimeError> {
+        let settings = self.capture_settings(explicit)?;
+        let (stored_type, metadata) = if content_type.starts_with("image/") {
+            (content_type, None)
+        } else {
+            let filename = filename.ok_or(RuntimeError::Capture)?;
+            let source_reference = source_reference.ok_or(RuntimeError::Capture)?;
+            let metadata = copypaste_core::FileMetadata::with_source_reference(
+                filename,
+                content_type,
+                source_reference,
+            )
+            .ok_or(RuntimeError::Capture)?;
+            (copypaste_ipc::content_type::FILE, Some(metadata))
+        };
+        copypaste_core::ingest_binary_into_with_capture_source(
+            &self.store,
+            &self.keyring,
+            bytes,
+            stored_type,
+            now_ms(),
+            None,
+            None,
+            metadata.as_ref(),
+            &settings,
+        )
+        .map_err(|_| RuntimeError::Capture)?;
+        self.emit_capture();
+        Ok(())
+    }
+
+    pub fn set_capture_running(&self, running: bool) {
+        self.capture_running.store(running, Ordering::Release);
+    }
+
+    /// Returns whether an unattributed Android background read is allowed.
+    ///
+    /// Kotlin checks this before asking ClipboardManager for content. The
+    /// capture methods repeat the same gate at the storage boundary.
+    #[must_use]
+    pub fn implicit_capture_allowed(&self) -> bool {
+        let settings = self.settings.config();
+        !settings.private_mode && settings.excluded_app_bundle_ids.is_empty()
+    }
+
+    fn capture_settings(&self, explicit: bool) -> Result<copypaste_ipc::ConfigData, RuntimeError> {
+        let settings = self.settings.config();
+        if settings.private_mode || (!explicit && !settings.excluded_app_bundle_ids.is_empty()) {
+            Err(RuntimeError::CaptureRefused)
+        } else {
+            Ok(settings)
+        }
+    }
+
+    #[must_use]
+    pub fn notify_on_copy_enabled(&self) -> bool {
+        self.settings.config().notify_on_copy
+    }
+
+    #[must_use]
+    pub fn sound_on_copy_enabled(&self) -> bool {
+        self.settings.config().sound_on_copy
+    }
+
+    pub fn shutdown(&self) {
+        let _ = self.shutdown.send(true);
+    }
+
+    fn emit(&self, event: EventKind) {
+        let _ = self.events.send(EventData {
+            event,
+            item_count: self.store.count().unwrap_or(0),
+            captured: false,
+        });
+    }
+
+    fn emit_capture(&self) {
+        let _ = self.events.send(EventData {
+            event: EventKind::Items,
+            item_count: self.store.count().unwrap_or(0),
+            captured: true,
+        });
+    }
+
+    fn apply_config(&self, request_id: u64, patch: &copypaste_ipc::ConfigPatch) -> Response {
+        match self.settings.apply(patch) {
+            Ok(applied) => {
+                let enforce =
+                    copypaste_core::retention::policy_tightened(&applied.before, &applied.config);
+                let removed = copypaste_core::retention::reconcile_policy(
+                    &self.store,
+                    || self.settings.config(),
+                    enforce,
+                );
+                if applied.before.lan_visibility != applied.config.lan_visibility {
+                    self.node.set_lan_visibility(applied.config.lan_visibility);
+                }
+                if removed > 0 {
+                    self.emit(EventKind::Items);
+                }
+                Response::ok(
+                    request_id,
+                    ResponseData::Config(copypaste_ipc::ConfigApplied {
+                        config: applied.config,
+                        restart_required: Vec::new(),
+                    }),
+                )
+            }
+            Err(SettingsError::Invalid(error)) => {
+                Response::err(request_id, ErrorCode::InvalidRequest, error.to_string())
+            }
+            Err(SettingsError::Store) => Response::err(
+                request_id,
+                ErrorCode::Internal,
+                "The settings could not be saved.",
+            ),
+        }
+    }
+
+    fn set_private_mode(&self, request_id: u64, enabled: bool) -> Response {
+        match self.settings.apply(&copypaste_ipc::ConfigPatch {
+            private_mode: Some(enabled),
+            ..Default::default()
+        }) {
+            Ok(applied) => Response::ok(
+                request_id,
+                ResponseData::PrivateMode(copypaste_ipc::PrivateModeData {
+                    private_mode: applied.config.private_mode,
+                    private_mode_epoch: applied.private_mode_epoch,
+                }),
+            ),
+            Err(SettingsError::Invalid(error)) => {
+                Response::err(request_id, ErrorCode::InvalidRequest, error.to_string())
+            }
+            Err(SettingsError::Store) => Response::err(
+                request_id,
+                ErrorCode::Internal,
+                "The settings could not be saved.",
+            ),
+        }
+    }
+
+    fn export(&self, request_id: u64, limit: u32) -> Response {
+        match copypaste_core::transfer::export(&self.store, &self.keyring, limit) {
+            Ok(export) => Response::ok(request_id, ResponseData::Export(export)),
+            Err(copypaste_core::transfer::ExportError::ContentTooLarge) => Response::err(
+                request_id,
+                ErrorCode::ContentTooLarge,
+                "The text history is too large to export in one file.",
+            ),
+            Err(copypaste_core::transfer::ExportError::Store(_)) => Response::err(
+                request_id,
+                ErrorCode::Internal,
+                "The history store is unavailable.",
+            ),
+        }
+    }
+
+    fn backup(&self, request_id: u64, raw_path: &str) -> Response {
+        let path = std::path::Path::new(raw_path.trim());
+        if raw_path.trim().is_empty()
+            || path.exists()
+            || !path.parent().is_some_and(std::path::Path::is_dir)
+        {
+            return Response::err(
+                request_id,
+                ErrorCode::InvalidRequest,
+                "Choose a new backup file in an existing folder.",
+            );
+        }
+        if self.store.backup_to(path).is_err() {
+            let _ = std::fs::remove_file(path);
+            return Response::err(
+                request_id,
+                ErrorCode::Internal,
+                "The encrypted backup could not be created.",
+            );
+        }
+        restrict_backup(path);
+        let size_bytes = std::fs::metadata(path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        Response::ok(
+            request_id,
+            ResponseData::Backup(copypaste_ipc::BackupData { size_bytes }),
+        )
+    }
+
+    fn restore(&self, request_id: u64, raw_path: &str, confirm: bool) -> Response {
+        if !confirm {
+            return Response::err(
+                request_id,
+                ErrorCode::InvalidRequest,
+                "Restoring history requires confirmation.",
+            );
+        }
+        let path = std::path::Path::new(raw_path.trim());
+        if raw_path.trim().is_empty() || !path.is_file() {
+            return Response::err(
+                request_id,
+                ErrorCode::NotFound,
+                "The backup file was not found.",
+            );
+        }
+        match self.store.restore_from(path, &self.keyring.db_key()) {
+            Ok(()) => {
+                if let Ok(Some(oldest)) = self.store.oldest_version_ms() {
+                    self.node.cursors().note_local(oldest);
+                }
+                Response::ok(request_id, ResponseData::Empty {})
+            }
+            Err(copypaste_core::RestoreError::InvalidBackup(_)) => Response::err(
+                request_id,
+                ErrorCode::InvalidRequest,
+                "That file is not a valid backup for this device.",
+            ),
+            Err(copypaste_core::RestoreError::Failed(_)) => Response::err(
+                request_id,
+                ErrorCode::Internal,
+                "The history could not be restored; the current history is unchanged.",
+            ),
+        }
+    }
+
+    fn list(&self, id: u64, limit: u32, cursor: Option<String>) -> Response {
+        let cursor = match cursor
+            .map(|value| copypaste_core::ItemCursor::parse(&value))
+            .transpose()
+        {
+            Ok(value) => value,
+            Err(_) => {
+                return Response::err(
+                    id,
+                    ErrorCode::InvalidRequest,
+                    "The history cursor is invalid.",
+                )
+            }
+        };
+        match self.store.list_from_bounded(
+            cursor.as_ref(),
+            limit.clamp(1, 1000),
+            copypaste_ipc::MAX_CONTENT_BYTES,
+        ) {
+            Ok(page) => Response::ok(
+                id,
+                ResponseData::Page(self.page(page.items, page.next.map(|value| value.token()))),
+            ),
+            Err(_) => Response::err(id, ErrorCode::Internal, "The history store is unavailable."),
+        }
+    }
+
+    fn search(&self, id: u64, query: &str, limit: u32) -> Response {
+        match self.store.search_bounded(
+            query,
+            limit.clamp(1, 1000),
+            copypaste_ipc::MAX_CONTENT_BYTES,
+        ) {
+            Ok(rows) => Response::ok(id, ResponseData::Page(self.page(rows, None))),
+            Err(_) => Response::err(
+                id,
+                ErrorCode::InvalidRequest,
+                "The history query is invalid.",
+            ),
+        }
+    }
+
+    fn page(&self, rows: Vec<copypaste_core::StoredItem>, next_cursor: Option<String>) -> ItemPage {
+        let mut page = ItemPage {
+            items: Vec::with_capacity(rows.len()),
+            skipped_undecryptable: 0,
+            next_cursor,
+        };
+        for row in rows {
+            match self.item_value(row, true) {
+                Some(item) => page.items.push(item),
+                None => page.skipped_undecryptable += 1,
+            }
+        }
+        page
+    }
+
+    fn image_preview(&self, request_id: u64, item_id: &str, max_edge: Option<u32>) -> Response {
+        let Ok(Some(row)) = self.store.get(item_id) else {
+            return Response::err(request_id, ErrorCode::NotFound, "The clip was not found.");
+        };
+        if !matches!(
+            copypaste_ipc::content_type::classify(&row.content_type),
+            copypaste_ipc::ContentClass::Image
+        ) {
+            return Response::err(
+                request_id,
+                ErrorCode::InvalidRequest,
+                "This clip is not an image.",
+            );
+        }
+        let Ok(payload) = ClipboardPayload::open(&row, &self.keyring.item_key()) else {
+            return Response::err(
+                request_id,
+                ErrorCode::Internal,
+                "The clip could not be decrypted.",
+            );
+        };
+        let ClipboardPayload::Image { bytes, .. } = payload else {
+            unreachable!("content class was checked")
+        };
+        match copypaste_core::thumbnail_png(
+            &bytes,
+            copypaste_ipc::ConfigData::default().max_decoded_image_mb,
+            max_edge,
+        ) {
+            Ok(image) => Response::ok(
+                request_id,
+                ResponseData::ImagePreview(copypaste_ipc::ImagePreview {
+                    png_base64: STANDARD.encode(image.png),
+                    width: image.width,
+                    height: image.height,
+                }),
+            ),
+            Err(_) => Response::err(
+                request_id,
+                ErrorCode::InvalidRequest,
+                "The image preview is unavailable.",
+            ),
+        }
+    }
+
+    fn source_icon(&self, request_id: u64, item_id: &str) -> Response {
+        match self.store.source_app_icon_metadata(item_id) {
+            Ok(Some(icon)) => Response::ok(
+                request_id,
+                ResponseData::SourceAppIcon(copypaste_ipc::ImagePreview {
+                    png_base64: icon.png_base64,
+                    width: icon.width,
+                    height: icon.height,
+                }),
+            ),
+            Ok(None) => Response::ok(request_id, ResponseData::Empty {}),
+            Err(_) => Response::err(
+                request_id,
+                ErrorCode::Internal,
+                "The history store is unavailable.",
+            ),
+        }
+    }
+
+    fn pair_progress(&self, request_id: u64, status: copypaste_p2p::PairingStatus) -> Response {
+        Response::ok(
+            request_id,
+            ResponseData::PairingProgress(p2p_contract::pairing_progress(status, None)),
+        )
+    }
+
+    fn node_error(&self, request_id: u64, error: copypaste_p2p::NodeError) -> Response {
+        Response::err(
+            request_id,
+            p2p_contract::node_error_code(&error),
+            error.to_string(),
+        )
+    }
+
+    async fn sync_now(&self, request_id: u64, pairing_id: Option<String>) -> Response {
+        let peers = match pairing_id {
+            Some(id) => match self.node.peers().get(&id) {
+                Some(peer) => vec![peer],
+                None => return self.node_error(request_id, copypaste_p2p::NodeError::NoPeer),
+            },
+            None => self.node.peers().list(),
+        };
+        let mut results = Vec::with_capacity(peers.len());
+        for peer in &peers {
+            let started = std::time::Instant::now();
+            results.push(p2p_contract::sync_result(
+                peer,
+                self.node.sync_one(peer, self.source.as_ref()).await,
+                started.elapsed(),
+            ));
+        }
+        Response::ok(request_id, ResponseData::Sync(results))
+    }
+
+    fn item(&self, request_id: u64, item_id: &str) -> Response {
+        let row = match self.store.get(item_id) {
+            Ok(Some(row)) => row,
+            Ok(None) => {
+                return Response::err(request_id, ErrorCode::NotFound, "The clip was not found.")
+            }
+            Err(_) => {
+                return Response::err(
+                    request_id,
+                    ErrorCode::Internal,
+                    "The history store is unavailable.",
+                )
+            }
+        };
+        let Some(item) = self.item_value(row, false) else {
+            return Response::err(
+                request_id,
+                ErrorCode::Internal,
+                "The clip could not be decrypted.",
+            );
+        };
+        Response::ok(request_id, ResponseData::Item(item))
+    }
+
+    fn copy(&self, request_id: u64, item_id: &str, plain_text: bool) -> Response {
+        let row = match self.store.get(item_id) {
+            Ok(Some(row)) => row,
+            Ok(None) => {
+                return Response::err(request_id, ErrorCode::NotFound, "The clip was not found.")
+            }
+            Err(_) => {
+                return Response::err(
+                    request_id,
+                    ErrorCode::Internal,
+                    "The history store is unavailable.",
+                )
+            }
+        };
+        let payload = match ClipboardPayload::open(&row, &self.keyring.item_key()) {
+            Ok(value) => value,
+            Err(_) => {
+                return Response::err(
+                    request_id,
+                    ErrorCode::Internal,
+                    "The clip could not be decrypted.",
+                )
+            }
+        };
+        if plain_text && payload.plain_text().is_none() {
+            return Response::err(
+                request_id,
+                ErrorCode::UnsupportedContent,
+                "This clip cannot be pasted as plain text.",
+            );
+        }
+        match self.clipboard.write(&payload) {
+            Ok(()) => self.item(request_id, item_id),
+            Err(ClipboardWriteError::UnsupportedContent) => Response::err(
+                request_id,
+                ErrorCode::UnsupportedContent,
+                "This clipboard cannot write that content type.",
+            ),
+            Err(ClipboardWriteError::Failed) => Response::err(
+                request_id,
+                ErrorCode::Internal,
+                "The system clipboard could not be written.",
+            ),
+        }
+    }
+
+    fn save_file(&self, request_id: u64, item_id: &str, raw_destination: &str) -> Response {
+        let destination = raw_destination.trim();
+        if destination.is_empty() {
+            return Response::err(
+                request_id,
+                ErrorCode::InvalidRequest,
+                "A destination is required.",
+            );
+        }
+        let path = std::path::Path::new(destination);
+        if path.exists() {
+            return Response::err(
+                request_id,
+                ErrorCode::InvalidRequest,
+                "A file already exists at that destination.",
+            );
+        }
+        if path.parent().is_none_or(|parent| !parent.is_dir()) {
+            return Response::err(
+                request_id,
+                ErrorCode::NotFound,
+                "The destination folder was not found.",
+            );
+        }
+        let row = match self.store.get(item_id) {
+            Ok(Some(row)) => row,
+            Ok(None) => {
+                return Response::err(request_id, ErrorCode::NotFound, "The clip was not found.")
+            }
+            Err(_) => {
+                return Response::err(
+                    request_id,
+                    ErrorCode::Internal,
+                    "The history store is unavailable.",
+                )
+            }
+        };
+        let payload = match ClipboardPayload::open(&row, &self.keyring.item_key()) {
+            Ok(payload) if matches!(&payload, ClipboardPayload::File { .. }) => payload,
+            Ok(_) => {
+                return Response::err(
+                    request_id,
+                    ErrorCode::UnsupportedContent,
+                    "This clip is not a file.",
+                )
+            }
+            Err(_) => {
+                return Response::err(
+                    request_id,
+                    ErrorCode::Internal,
+                    "The clip could not be decrypted.",
+                )
+            }
+        };
+        match payload.save_file_to(path) {
+            Ok(()) => Response::ok(request_id, ResponseData::Empty {}),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Response::err(
+                request_id,
+                ErrorCode::InvalidRequest,
+                "A file already exists at that destination.",
+            ),
+            Err(_) => Response::err(
+                request_id,
+                ErrorCode::Internal,
+                "The file could not be saved.",
+            ),
+        }
+    }
+
+    fn item_value(&self, row: copypaste_core::StoredItem, preview: bool) -> Option<Item> {
+        let origin_device_id = if row.origin_device_id.is_empty() {
+            self.device_id.clone()
+        } else {
+            row.origin_device_id.clone()
+        };
+        let origin_device_class = if origin_device_id == self.device_id {
+            self.device_class
+        } else {
+            copypaste_ipc::DeviceClass::Unknown
+        };
+        let payload = match copypaste_core::ClipboardPayload::open(&row, &self.keyring.item_key()) {
+            Ok(payload) => payload,
+            Err(_) => return None,
+        };
+        let (content, truncated) = if preview {
+            payload.display_preview()
+        } else {
+            (payload.display_text(), false)
+        };
+        let semantic = payload
+            .plain_text()
+            .and_then(|text| copypaste_core::classify_semantic(&row.content_type, text));
+        let too_large_to_sync = payload.byte_len() > copypaste_ipc::MAX_CONTENT_BYTES;
+        let file_details = match &payload {
+            ClipboardPayload::File { bytes, metadata } => {
+                let source_reference = metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.source_reference.clone());
+                Some(copypaste_ipc::FileDetails {
+                    filename: metadata.as_ref().map(|metadata| metadata.filename.clone()),
+                    mime_type: metadata.as_ref().map(|metadata| metadata.mime_type.clone()),
+                    source_available: origin_device_id == self.device_id
+                        && source_reference.as_deref().is_some_and(|reference| {
+                            !reference.starts_with("content://")
+                                && std::path::Path::new(reference).is_file()
+                        }),
+                    source_reference,
+                    size_bytes: bytes.len() as u64,
+                    file_count: 1,
+                })
+            }
+            ClipboardPayload::Text(_)
+            | ClipboardPayload::Image { .. }
+            | ClipboardPayload::Unsupported { .. } => None,
+        };
+        let image_details = if preview {
+            None
+        } else {
+            match &payload {
+                ClipboardPayload::Image { bytes, .. } => copypaste_core::image_metadata(bytes)
+                    .ok()
+                    .map(|metadata| copypaste_ipc::ImageDetails {
+                        width: metadata.width,
+                        height: metadata.height,
+                        size_bytes: metadata.size_bytes,
+                    }),
+                ClipboardPayload::Text(_)
+                | ClipboardPayload::File { .. }
+                | ClipboardPayload::Unsupported { .. } => None,
+            }
+        };
+        Some(Item {
+            id: row.id,
+            content,
+            content_type: row.content_type.clone(),
+            content_class: copypaste_ipc::content_type::classify(&row.content_type),
+            semantic_kind: semantic.map(|classification| classification.kind),
+            color_rgba: semantic.and_then(|classification| classification.color_rgba),
+            created_at: row.created_at,
+            pinned: row.pinned,
+            file_details,
+            image_details,
+            origin_device_id,
+            origin_device_name: Some(self.device_name.clone()),
+            origin_device_class,
+            source_app_bundle_id: row.app_bundle_id,
+            source_app_name: row.app_name,
+            too_large_to_sync,
+            truncated,
+        })
+    }
+}
+
+#[cfg(unix)]
+fn restrict_backup(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+}
+
+#[cfg(not(unix))]
+fn restrict_backup(_path: &std::path::Path) {}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RuntimeError {
+    #[error("the platform keyring is unavailable")]
+    Keyring,
+    #[error("the history store is unavailable")]
+    Storage,
+    #[error("the paired-device store is unavailable")]
+    PeerStore,
+    #[error("the peer listener is unavailable")]
+    Listener,
+    #[error("the clipboard capture was refused")]
+    CaptureRefused,
+    #[error("the clipboard capture could not be stored")]
+    Capture,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+    use std::time::Duration;
+
+    fn fixture() -> (Arc<Runtime>, tempfile::TempDir) {
+        fixture_with(Arc::new(UnavailableClipboard))
+    }
+
+    fn fixture_with(clipboard: Arc<dyn ClipboardWriter>) -> (Arc<Runtime>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let keyring = Arc::new(Keyring::from_secret(&[7; 32]));
+        let store = Store::open(&dir.path().join("history.db"), &keyring.db_key()).unwrap();
+        let identity = store.device_identity("fixture phone").unwrap();
+        let settings = Arc::new(RuntimeSettings::load(&store));
+        let node = Arc::new(Node::new(
+            PeerStore::open(&dir.path().join("peers.json")).unwrap(),
+            None,
+            0,
+            true,
+        ));
+        let source_settings = Arc::clone(&settings);
+        let source = Arc::new(StoreSource::with_retention_settings(
+            store.clone(),
+            Arc::clone(&keyring),
+            identity.device_id.clone(),
+            identity.device_name.clone(),
+            move || source_settings.config(),
+        ));
+        let (events, _) = tokio::sync::broadcast::channel(8);
+        let (shutdown, _) = tokio::sync::watch::channel(false);
+        (
+            Arc::new(Runtime {
+                store,
+                keyring,
+                source,
+                node,
+                device_id: identity.device_id,
+                device_name: identity.device_name,
+                device_class: copypaste_p2p::DeviceProfile::current().device_class,
+                settings,
+                events,
+                shutdown,
+                listener_started: AtomicBool::new(false),
+                capture_running: AtomicBool::new(false),
+                clipboard,
+            }),
+            dir,
+        )
+    }
+
+    #[derive(Default)]
+    struct RecordingClipboard(Mutex<Vec<String>>);
+    impl ClipboardWriter for RecordingClipboard {
+        fn write(&self, payload: &ClipboardPayload) -> Result<(), ClipboardWriteError> {
+            self.0.lock().unwrap().push(match payload {
+                ClipboardPayload::Text(value) => format!("text:{}", value.as_str()),
+                ClipboardPayload::Image { content_type, .. } => format!("image:{content_type}"),
+                ClipboardPayload::File { metadata, .. } => format!(
+                    "file:{}",
+                    metadata
+                        .as_ref()
+                        .and_then(|value| value.source_reference.as_deref())
+                        .unwrap_or_default()
+                ),
+                ClipboardPayload::Unsupported { .. } => {
+                    return Err(ClipboardWriteError::UnsupportedContent)
+                }
+            });
+            Ok(())
+        }
+    }
+
+    fn seed_text(runtime: &Runtime, id: &str, value: &str) {
+        let (nonce, content_ciphertext) =
+            copypaste_core::encrypt(value.as_bytes(), &runtime.keyring.item_key(), id).unwrap();
+        runtime
+            .store
+            .insert(copypaste_core::NewItem {
+                id: id.into(),
+                content_ciphertext,
+                nonce,
+                content_type: copypaste_ipc::content_type::TEXT.into(),
+                content_hash: copypaste_core::compute_content_hash(value.as_bytes()),
+                search_text: Some(value.into()),
+                created_at: 1,
+                app_bundle_id: None,
+                app_name: None,
+                payload_metadata: None,
+            })
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn status_exposes_the_stable_local_device_id() {
+        let (runtime, _dir) = fixture();
+        let response = runtime.request(1, Method::Status).await;
+
+        match response.data {
+            Some(ResponseData::Status(status)) => {
+                assert_eq!(
+                    status.device_id.as_deref(),
+                    Some(runtime.device_id.as_str())
+                );
+            }
+            other => panic!("expected status response, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn selected_settings_are_persisted_and_reported_by_status() {
+        let (runtime, _dir) = fixture();
+        let response = runtime
+            .request(
+                2,
+                Method::SetConfig {
+                    patch: copypaste_ipc::ConfigPatch {
+                        retention_days: Some(30),
+                        storage_quota_bytes: Some(5 * 1024 * 1024 * 1024),
+                        lan_visibility: Some(false),
+                        sync_enabled: Some(false),
+                        notify_on_copy: Some(true),
+                        sound_on_copy: Some(true),
+                        ..Default::default()
+                    },
+                },
+            )
+            .await;
+        let config = match response.data {
+            Some(ResponseData::Config(applied)) => applied.config,
+            other => panic!("expected config response, got {other:?}"),
+        };
+        assert_eq!(config.retention_days, 30);
+        assert!(!config.lan_visibility);
+        assert!(!config.sync_enabled);
+        assert!(config.notify_on_copy && config.sound_on_copy);
+        assert!(runtime.notify_on_copy_enabled());
+        assert!(runtime.sound_on_copy_enabled());
+
+        let private = runtime
+            .request(3, Method::SetPrivateMode { enabled: true })
+            .await;
+        assert!(matches!(
+            private.data,
+            Some(ResponseData::PrivateMode(copypaste_ipc::PrivateModeData {
+                private_mode: true,
+                private_mode_epoch: 1
+            }))
+        ));
+        let status = runtime.request(4, Method::Status).await;
+        match status.data {
+            Some(ResponseData::Status(status)) => {
+                assert!(status.private_mode);
+                assert_eq!(status.private_mode_epoch, 1);
+            }
+            other => panic!("expected status response, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn export_backup_and_confirmed_restore_use_the_shared_store() {
+        let (runtime, dir) = fixture();
+        seed_text(&runtime, "first", "first text");
+
+        let exported = runtime.request(5, Method::Export { limit: 0 }).await;
+        match exported.data {
+            Some(ResponseData::Export(data)) => {
+                assert_eq!(data.items.len(), 1);
+                assert_eq!(data.items[0].content, "first text");
+            }
+            other => panic!("expected export response, got {other:?}"),
+        }
+
+        let backup_path = dir.path().join("history.copypaste-backup");
+        assert!(
+            runtime
+                .request(
+                    6,
+                    Method::Backup {
+                        dest_path: backup_path.to_string_lossy().into_owned(),
+                    },
+                )
+                .await
+                .ok
+        );
+        seed_text(&runtime, "second", "second text");
+        assert_eq!(runtime.store.count().unwrap(), 2);
+
+        assert!(
+            runtime
+                .request(
+                    7,
+                    Method::Restore {
+                        src_path: backup_path.to_string_lossy().into_owned(),
+                        confirm: true,
+                    },
+                )
+                .await
+                .ok
+        );
+        assert_eq!(runtime.store.count().unwrap(), 1);
+        assert!(runtime.store.get("first").unwrap().is_some());
+        assert!(runtime.store.get("second").unwrap().is_none());
+    }
+
+    #[test]
+    fn copy_and_plain_copy_use_the_injected_typed_port() {
+        let clipboard = Arc::new(RecordingClipboard::default());
+        let (runtime, _dir) = fixture_with(clipboard.clone());
+        seed_text(&runtime, "text-item", "trusted text");
+        assert!(runtime.copy(1, "text-item", false).ok);
+        assert!(runtime.copy(2, "text-item", true).ok);
+        assert_eq!(
+            *clipboard.0.lock().unwrap(),
+            vec!["text:trusted text", "text:trusted text"]
+        );
+    }
+
+    #[test]
+    fn item_response_carries_semantic_kind_and_color_swatch() {
+        let (runtime, _dir) = fixture();
+        seed_text(&runtime, "color-item", "oklch(50% 0.1 30)");
+
+        let item = match runtime.item(1, "color-item").data {
+            Some(ResponseData::Item(item)) => item,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(item.semantic_kind, Some(copypaste_ipc::SemanticKind::Color));
+        assert!(item.color_rgba.is_some());
+    }
+
+    #[test]
+    fn selected_image_carries_original_metadata_but_list_preview_does_not() {
+        let (runtime, _dir) = fixture();
+        let source = STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=")
+            .unwrap();
+        let row = copypaste_core::ingest_binary_into_with_capture_context(
+            &runtime.store,
+            &runtime.keyring,
+            &source,
+            copypaste_ipc::content_type::IMAGE_PNG,
+            1,
+            None,
+            None,
+            &runtime.settings.config(),
+        )
+        .unwrap()
+        .into_item();
+
+        let listed = runtime.item_value(row.clone(), true).unwrap();
+        assert!(listed.image_details.is_none());
+
+        let detail = runtime.item_value(row, false).unwrap();
+        assert_eq!(detail.origin_device_class, runtime.device_class);
+        let metadata = detail.image_details.expect("selected image metadata");
+        assert_eq!((metadata.width, metadata.height), (1, 1));
+        assert_eq!(metadata.size_bytes, source.len() as u64);
+    }
+
+    #[test]
+    fn platform_capture_writes_history_and_emits_captured_events() {
+        let (runtime, _dir) = fixture();
+        let mut events = runtime.subscribe_events();
+
+        runtime.capture_text("copied on Android").unwrap();
+        let text_event = events.try_recv().unwrap();
+        assert!(text_event.captured);
+        assert_eq!(text_event.item_count, 1);
+
+        runtime
+            .capture_binary(
+                &[1, 2, 3],
+                "application/pdf",
+                Some("paper.pdf"),
+                Some("content://documents/paper.pdf"),
+            )
+            .unwrap();
+        let file_event = events.try_recv().unwrap();
+        assert!(file_event.captured);
+        assert_eq!(file_event.item_count, 2);
+    }
+
+    #[test]
+    fn a_captured_file_keeps_its_uri_and_copy_writes_that_reference() {
+        let clipboard = Arc::new(RecordingClipboard::default());
+        let (runtime, dir) = fixture_with(clipboard.clone());
+        runtime
+            .capture_binary(
+                b"file bytes",
+                "application/pdf",
+                Some("paper.pdf"),
+                Some("content://documents/paper.pdf"),
+            )
+            .unwrap();
+        let row = runtime.store.list(1, 0).unwrap().pop().unwrap();
+        let item = match runtime.item(1, &row.id).data {
+            Some(ResponseData::Item(item)) => item,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(item.content_class, copypaste_ipc::ContentClass::File);
+        assert_eq!(item.content, "content://documents/paper.pdf");
+        assert_eq!(
+            item.file_details
+                .as_ref()
+                .and_then(|details| details.source_reference.as_deref()),
+            Some("content://documents/paper.pdf")
+        );
+        assert!(runtime.copy(2, &row.id, false).ok);
+        assert_eq!(
+            *clipboard.0.lock().unwrap(),
+            vec!["file:content://documents/paper.pdf"]
+        );
+        let destination = dir.path().join("paper.pdf");
+        assert!(
+            runtime
+                .save_file(3, &row.id, &destination.to_string_lossy())
+                .ok
+        );
+        assert_eq!(std::fs::read(destination).unwrap(), b"file bytes");
+    }
+
+    #[test]
+    fn platform_capture_fails_closed_without_source_app_attribution() {
+        let (runtime, _dir) = fixture();
+        runtime
+            .settings
+            .apply(&copypaste_ipc::ConfigPatch {
+                excluded_app_bundle_ids: Some(vec!["com.example.secret".into()]),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert!(!runtime.implicit_capture_allowed());
+        assert!(matches!(
+            runtime.capture_text("must not be captured"),
+            Err(RuntimeError::CaptureRefused)
+        ));
+        assert_eq!(runtime.store.count().unwrap(), 0);
+
+        runtime.capture_explicit_text("shared by the user").unwrap();
+        assert_eq!(runtime.store.count().unwrap(), 1);
+
+        runtime
+            .settings
+            .apply(&copypaste_ipc::ConfigPatch {
+                private_mode: Some(true),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(matches!(
+            runtime.capture_explicit_text("private"),
+            Err(RuntimeError::CaptureRefused)
+        ));
+        assert_eq!(runtime.store.count().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn inbound_loopback_merge_emits_items_and_peers() {
+        let (receiver, _receiver_dir) = fixture();
+        let (sender, _sender_dir) = fixture();
+        seed_text(&sender, "remote-item", "from peer");
+        receiver.start_listener().await.unwrap();
+        sender.start_listener().await.unwrap();
+        let remote_addr = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if let Some(address) = receiver.node.listen_addr() {
+                    break address;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let token = copypaste_p2p::PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        for (runtime, address) in [(&receiver, None), (&sender, remote_addr.parse().ok())] {
+            runtime
+                .node
+                .peers()
+                .upsert(copypaste_p2p::Peer {
+                    pairing_id: pairing_id.clone(),
+                    name: "loopback".into(),
+                    psk: token.psk(),
+                    last_addr: address,
+                    last_seen_ms: 0,
+                    profile: None,
+                    profile_observed_at_ms: 0,
+                })
+                .unwrap();
+        }
+        let mut events = receiver.subscribe_events();
+        let peer = sender.node.peers().get(&pairing_id).unwrap();
+        sender
+            .node
+            .sync_one(&peer, sender.source.as_ref())
+            .await
+            .unwrap();
+        let first = tokio::time::timeout(Duration::from_secs(1), events.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let second = tokio::time::timeout(Duration::from_secs(1), events.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            (first.event, second.event),
+            (EventKind::Items, EventKind::Peers) | (EventKind::Peers, EventKind::Items)
+        ));
+        assert!(receiver.store.get("remote-item").unwrap().is_some());
+        receiver.shutdown();
+        sender.shutdown();
+    }
+
+    #[tokio::test]
+    async fn inbound_probe_emits_one_peers_event() {
+        let (receiver, _receiver_dir) = fixture();
+        let (sender, _sender_dir) = fixture();
+        receiver.start_listener().await.unwrap();
+        let remote_addr = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if let Some(address) = receiver.node.listen_addr() {
+                    break address;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let token = copypaste_p2p::PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        receiver
+            .node
+            .peers()
+            .upsert(copypaste_p2p::Peer {
+                pairing_id: pairing_id.clone(),
+                name: "sender".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 0,
+                profile: None,
+                profile_observed_at_ms: 0,
+            })
+            .unwrap();
+        let peer = copypaste_p2p::Peer {
+            pairing_id,
+            name: "receiver".into(),
+            psk: token.psk(),
+            last_addr: remote_addr.parse().ok(),
+            last_seen_ms: 0,
+            profile: None,
+            profile_observed_at_ms: 0,
+        };
+        let mut events = receiver.subscribe_events();
+        sender.node.probe_one(&peer).await.unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), events.recv())
+                .await
+                .unwrap()
+                .unwrap()
+                .event,
+            EventKind::Peers
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(25), events.recv())
+                .await
+                .is_err()
+        );
+        receiver.shutdown();
+    }
+
+    #[tokio::test]
+    async fn listener_starts_and_shutdown_quiesces_it() {
+        let (runtime, _dir) = fixture();
+        runtime.start_listener().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while runtime.node.listen_addr().is_none() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        runtime.shutdown();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while runtime.listener_started.load(Ordering::Acquire) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn item_and_peer_events_reach_independent_watchers() {
+        let (runtime, _dir) = fixture();
+        let mut first = runtime.subscribe_events();
+        let mut second = runtime.subscribe_events();
+        runtime.emit(EventKind::Items);
+        assert!(matches!(
+            first.recv().await.unwrap().event,
+            EventKind::Items
+        ));
+        assert!(matches!(
+            second.recv().await.unwrap().event,
+            EventKind::Items
+        ));
+        drop(first);
+        runtime.emit(EventKind::Peers);
+        assert!(matches!(
+            second.recv().await.unwrap().event,
+            EventKind::Peers
+        ));
+    }
+}
