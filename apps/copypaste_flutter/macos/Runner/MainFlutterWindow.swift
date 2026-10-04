@@ -17,6 +17,7 @@ class MainFlutterWindow: NSWindow {
   private var pairingLinksMethodChannel: FlutterMethodChannel?
   private var quickPasteHostMethodChannel: FlutterMethodChannel?
   private var macosSetupChannel: MacosSetupChannel?
+  private var appUpdateChannel: MacosAppUpdateChannel?
   private var protectedPresentation: ProtectedPairingPresentationWindow?
   private var quickPastePresentation: QuickPastePresentationWindow?
   private var pendingPairingURI: String?
@@ -33,6 +34,9 @@ class MainFlutterWindow: NSWindow {
     configurePairingLinksChannel(flutterViewController)
     configureQuickPasteHostChannel(flutterViewController)
     macosSetupChannel = MacosSetupChannel(
+      binaryMessenger: flutterViewController.engine.binaryMessenger
+    )
+    appUpdateChannel = MacosAppUpdateChannel(
       binaryMessenger: flutterViewController.engine.binaryMessenger
     )
     super.awakeFromNib()
