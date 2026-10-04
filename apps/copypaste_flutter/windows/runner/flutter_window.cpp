@@ -12,6 +12,7 @@
 
 #include "flutter/generated_plugin_registrant.h"
 #include "copypaste_flutter_protected_pairing.h"
+#include "utils.h"
 
 namespace {
 
@@ -396,8 +397,10 @@ std::string FlutterWindow::OpenProtectedPairingContext(
   if (StringFromGUID2(guid, guid_buffer, 40) == 0) {
     return "";
   }
-  const std::wstring wide_context_id(guid_buffer);
-  const std::string context_id(wide_context_id.begin(), wide_context_id.end());
+  const std::string context_id = Utf8FromUtf16(guid_buffer);
+  if (context_id.empty()) {
+    return "";
+  }
   flutter::DartProject project(L"data");
   project.set_dart_entrypoint_arguments(
       std::vector<std::string>{"--route=" + std::string("/protected-pairing/") + context_id});
