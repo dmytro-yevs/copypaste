@@ -100,6 +100,10 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  if (!is_protected_pairing_context_ && !is_quick_paste_context_) {
+    app_update_channel_ = std::make_unique<AppUpdateChannel>(
+        flutter_controller_->engine()->messenger(), GetHandle());
+  }
   if (is_quick_paste_context_) {
     quick_paste_channel_ =
         std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(

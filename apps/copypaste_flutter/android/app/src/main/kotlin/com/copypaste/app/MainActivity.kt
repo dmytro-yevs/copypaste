@@ -76,6 +76,7 @@ class MainActivity : FlutterActivity() {
     private var clipboardListenerRegistered = false
     private var pairingLinksChannel: MethodChannel? = null
     private var androidCaptureChannel: AndroidCaptureChannel? = null
+    private var appUpdateChannel: AppUpdateChannel? = null
     private var pendingNotificationPermission: ((Boolean) -> Unit)? = null
     private var pendingPairingUri: String? = null
 
@@ -102,6 +103,10 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         androidCaptureChannel = AndroidCaptureChannel(
+            this,
+            flutterEngine.dartExecutor.binaryMessenger,
+        )
+        appUpdateChannel = AppUpdateChannel(
             this,
             flutterEngine.dartExecutor.binaryMessenger,
         )
@@ -314,6 +319,8 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         androidCaptureChannel?.dispose()
         androidCaptureChannel = null
+        appUpdateChannel?.dispose()
+        appUpdateChannel = null
         pendingNotificationPermission?.invoke(false)
         pendingNotificationPermission = null
         pairingLinksChannel?.setMethodCallHandler(null)
