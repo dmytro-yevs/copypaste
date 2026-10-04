@@ -10,6 +10,7 @@
 #include <string>
 
 #include "win32_window.h"
+#include "app_update_channel.h"
 
 // A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
@@ -65,6 +66,7 @@ class FlutterWindow : public Win32Window {
       pairing_links_channel_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       quick_paste_channel_;
+  std::unique_ptr<AppUpdateChannel> app_update_channel_;
   std::unique_ptr<FlutterWindow> protected_pairing_window_;
   std::unique_ptr<FlutterWindow> quick_paste_window_;
 };
