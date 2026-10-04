@@ -236,6 +236,8 @@ jobs:
         run: ./scripts/release/windows-sign.ps1 -Operation Prepare -OutputPfxPath "$env:RUNNER_TEMP\copypaste-release.pfx" -PersistEnvironment
       - name: Build signed Windows installer
         shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
         run: ./scripts/release/build-windows-flutter.ps1 -Version '${{ needs.preflight.outputs.version }}' -BuildNumber ${{ needs.preflight.outputs.build_number }}
       - name: Install and run exact Windows installer
         shell: pwsh
