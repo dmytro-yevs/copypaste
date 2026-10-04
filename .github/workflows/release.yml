@@ -282,7 +282,7 @@ jobs:
           target: google_apis
           disable-animations: true
           script: |
-            set -euo pipefail
+            set -eu
             [[ "$(adb shell getprop ro.kernel.qemu | tr -d '\r')" == 1 ]]
             [[ "$(adb shell getprop ro.build.version.sdk | tr -d '\r')" == 36 ]]
             [[ "$(adb shell getprop ro.product.cpu.abi | tr -d '\r')" == x86_64 ]]
