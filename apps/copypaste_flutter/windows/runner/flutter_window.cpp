@@ -458,10 +458,12 @@ void FlutterWindow::ShowQuickPasteAtCursor() {
   const int width = ::MulDiv(520, dpi, USER_DEFAULT_SCREEN_DPI);
   const int height = ::MulDiv(720, dpi, USER_DEFAULT_SCREEN_DPI);
   const RECT work = monitor_info.rcWork;
-  const int maximum_x = std::max(work.left, work.right - width);
-  const int maximum_y = std::max(work.top, work.bottom - height);
-  const int x = std::clamp(static_cast<int>(cursor.x), work.left, maximum_x);
-  const int y = std::clamp(static_cast<int>(cursor.y) + 8, work.top, maximum_y);
+  const int minimum_x = static_cast<int>(work.left);
+  const int minimum_y = static_cast<int>(work.top);
+  const int maximum_x = std::max(minimum_x, static_cast<int>(work.right) - width);
+  const int maximum_y = std::max(minimum_y, static_cast<int>(work.bottom) - height);
+  const int x = std::clamp(static_cast<int>(cursor.x), minimum_x, maximum_x);
+  const int y = std::clamp(static_cast<int>(cursor.y) + 8, minimum_y, maximum_y);
   ::SetWindowPos(GetHandle(), HWND_TOPMOST, x, y, width, height,
                  SWP_SHOWWINDOW | SWP_FRAMECHANGED);
   ::SetForegroundWindow(GetHandle());
