@@ -57,7 +57,8 @@ pub use dbfile::{
     attach_key_literal, open_validated, verify_integrity, verify_schema, RestoreError,
 };
 pub use history::{
-    HistoryCursor, HistoryFacet, HistoryFacets, HistoryPage, HistoryQuery, HistorySort,
+    HistoryCursor, HistoryDeviceFacet, HistoryFacets, HistoryPage, HistoryQuery, HistorySort,
+    HistorySourceAppFacet,
 };
 pub use identity::DeviceIdentity;
 pub(crate) use merge_page::MergePageError;

@@ -1,16 +1,20 @@
-name: Advanced CodeQL
+name: CodeQL
 
 on:
+  push:
+    branches: [main]
+  pull_request:
   schedule:
     - cron: "37 2 * * 1"
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
   security-events: write
 
 jobs:
-  analyze:
+  analyze-no-build:
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -25,3 +29,55 @@ jobs:
       - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           category: "/language:${{ matrix.language }}"
+
+  analyze-swift:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@2c7215f132e9f062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+      - id: flutter
+        run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: ${{ steps.flutter.outputs.version }}
+      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          languages: swift
+          build-mode: manual
+      - run: |
+          cd apps/copypaste_flutter
+          flutter pub get --enforce-lockfile
+          flutter build macos --release
+      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          category: /language:swift
+
+  analyze-cpp:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@2c7215f132e9f062739d9130488b56d53c060c # master
+        with:
+          toolchain: "1.96"
+      - id: flutter
+        shell: bash
+        run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: ${{ steps.flutter.outputs.version }}
+      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          languages: c-cpp
+          build-mode: manual
+      - shell: pwsh
+        run: |
+          Set-Location apps/copypaste_flutter
+          flutter pub get --enforce-lockfile
+          flutter build windows --release
+      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          category: /language:c-cpp

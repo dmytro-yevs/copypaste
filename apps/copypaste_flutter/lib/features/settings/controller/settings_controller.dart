@@ -30,11 +30,7 @@ class SettingsController extends ChangeNotifier {
   SettingsLoadState _loadState = SettingsLoadState.loading;
   RuntimeSettings? _settings;
   CaptureSettingsState? _capture;
-  CloudSettingsState? _cloud;
-  CloudSyncResult? _lastCloudSync;
   String? _errorMessage;
-  String? _cloudErrorMessage;
-  String? _noticeMessage;
   bool _busy = false;
   bool _disposed = false;
   Timer? _captureTimer;
@@ -43,11 +39,7 @@ class SettingsController extends ChangeNotifier {
   SettingsLoadState get loadState => _loadState;
   RuntimeSettings? get settings => _settings;
   CaptureSettingsState? get capture => _capture;
-  CloudSettingsState? get cloud => _cloud;
-  CloudSyncResult? get lastCloudSync => _lastCloudSync;
   String? get errorMessage => _errorMessage;
-  String? get cloudErrorMessage => _cloudErrorMessage;
-  String? get noticeMessage => _noticeMessage;
   bool get busy => _busy;
 
   Future<void> initialize() async {
@@ -84,22 +76,9 @@ class SettingsController extends ChangeNotifier {
       _errorMessage = _message(error, 'Settings could not be loaded.');
     }
     _notify();
-    if (_loadState == SettingsLoadState.ready) {
-      await refreshCloud();
-    }
   }
 
   Future<void> retry() => initialize();
-
-  Future<void> refreshCloud() async {
-    try {
-      _cloud = await _repository.cloudStatus();
-      _cloudErrorMessage = null;
-    } catch (error) {
-      _cloudErrorMessage = _message(error, 'Cloud sync is unavailable.');
-    }
-    _notify();
-  }
 
   Future<bool> toggleCapture() async {
     final capture = _capture;
@@ -114,9 +93,6 @@ class SettingsController extends ChangeNotifier {
         throw const CaptureServiceUnavailable();
       }
       _capture = await _repository.captureState();
-      _noticeMessage = _capture!.paused
-          ? 'Clipboard capture paused.'
-          : 'Clipboard capture resumed.';
     });
   }
 
@@ -168,65 +144,18 @@ class SettingsController extends ChangeNotifier {
       _settings = await _repository.updateSettings(
         RuntimeSettingsChange(notifyOnCopy: value),
       );
-      _noticeMessage = 'Settings saved.';
     });
   }
 
   Future<bool> setSoundOnCopy(bool value) =>
       _update(RuntimeSettingsChange(soundOnCopy: value));
 
-  Future<bool> cloudSignIn({
-    required String email,
-    required String password,
-    required String passphrase,
-  }) => _cloudAccountAction(
-    () => _repository.cloudSignIn(
-      email: email.trim(),
-      password: password,
-      passphrase: passphrase,
-    ),
-    'Signed in to cloud sync.',
-  );
-
-  Future<bool> cloudSignUp({
-    required String email,
-    required String password,
-    required String passphrase,
-  }) => _cloudAccountAction(
-    () => _repository.cloudSignUp(
-      email: email.trim(),
-      password: password,
-      passphrase: passphrase,
-    ),
-    'Cloud sync account created.',
-  );
-
-  Future<bool> cloudSignOut() => _cloudAccountAction(
-    _repository.cloudSignOut,
-    'Signed out of cloud sync.',
-  );
-
-  Future<bool> cloudSyncNow() {
-    return _run(() async {
-      _lastCloudSync = await _repository.cloudSyncNow();
-      _cloud = await _repository.cloudStatus();
-      _cloudErrorMessage = null;
-      final result = _lastCloudSync!;
-      _noticeMessage =
-          'Cloud sync complete: ${result.uploaded} uploaded, ${result.applied} applied.';
-    }, cloud: true);
-  }
-
   Future<bool> exportTextHistory() async {
     final path = await _filePicker.chooseTextExportPath();
     if (path == null) return false;
     return _run(() async {
-      final result = await _repository.exportTextHistory(path);
+      await _repository.exportTextHistory(path);
       await _filePicker.presentCreatedFile(path, mimeType: 'application/json');
-      _noticeMessage =
-          result.skippedNonText == 0 && result.skippedUndecryptable == 0
-          ? 'Exported ${result.exported} text clips.'
-          : 'Exported ${result.exported}; skipped ${result.skippedNonText} non-text and ${result.skippedUndecryptable} unreadable clips.';
     });
   }
 
@@ -234,13 +163,11 @@ class SettingsController extends ChangeNotifier {
     final path = await _filePicker.chooseBackupPath();
     if (path == null) return false;
     return _run(() async {
-      final result = await _repository.backupHistory(path);
+      await _repository.backupHistory(path);
       await _filePicker.presentCreatedFile(
         path,
         mimeType: 'application/octet-stream',
       );
-      _noticeMessage =
-          'Encrypted backup created (${_formatBytes(result.sizeBytes)}).';
     });
   }
 
@@ -249,43 +176,25 @@ class SettingsController extends ChangeNotifier {
     if (path == null) return false;
     return _run(() async {
       await _repository.restoreHistory(path);
-      _noticeMessage = 'History restored from the encrypted backup.';
     });
   }
 
   void clearMessages() {
-    if (_errorMessage == null && _noticeMessage == null) return;
+    if (_errorMessage == null) return;
     _errorMessage = null;
-    _noticeMessage = null;
     _notify();
   }
 
   Future<bool> _update(RuntimeSettingsChange change) {
     return _run(() async {
       _settings = await _repository.updateSettings(change);
-      _noticeMessage = 'Settings saved.';
     });
   }
 
-  Future<bool> _cloudAccountAction(
-    Future<CloudSettingsState> Function() action,
-    String successMessage,
-  ) {
-    return _run(() async {
-      _cloud = await action();
-      _cloudErrorMessage = null;
-      _noticeMessage = successMessage;
-    }, cloud: true);
-  }
-
-  Future<bool> _run(
-    Future<void> Function() action, {
-    bool cloud = false,
-  }) async {
+  Future<bool> _run(Future<void> Function() action) async {
     if (_busy || _disposed) return false;
     _busy = true;
     _errorMessage = null;
-    _noticeMessage = null;
     _notify();
     try {
       await action();
@@ -295,11 +204,7 @@ class SettingsController extends ChangeNotifier {
         error,
         'The requested change could not be completed.',
       );
-      if (cloud) {
-        _cloudErrorMessage = message;
-      } else {
-        _errorMessage = message;
-      }
+      _errorMessage = message;
       return false;
     } finally {
       _busy = false;
@@ -335,18 +240,6 @@ class SettingsController extends ChangeNotifier {
       : error is NotificationPermissionDenied
       ? 'Notification permission is required to enable capture notifications.'
       : fallback;
-
-  String _formatBytes(int bytes) {
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    var value = bytes.toDouble();
-    var unit = 0;
-    while (value >= 1024 && unit < units.length - 1) {
-      value /= 1024;
-      unit++;
-    }
-    final digits = value >= 10 || unit == 0 ? 0 : 1;
-    return '${value.toStringAsFixed(digits)} ${units[unit]}';
-  }
 
   void _notify() {
     if (!_disposed) notifyListeners();

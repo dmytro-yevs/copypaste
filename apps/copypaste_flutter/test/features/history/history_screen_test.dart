@@ -1,12 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
+import 'package:copypaste_flutter/features/devices/device_label.dart';
 import 'package:copypaste_flutter/features/devices/devices_gateway.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
-import 'package:copypaste_flutter/features/history/presentation/history_identity_label.dart';
+import 'package:copypaste_flutter/features/history/presentation/source_app_label.dart';
 import 'package:copypaste_flutter/features/history/repository/history_file_downloader.dart';
 import 'package:copypaste_flutter/features/history/repository/history_repository.dart';
 import 'package:copypaste_flutter/features/history/view/history_screen.dart';
@@ -58,6 +60,20 @@ void main() {
       findsOneWidget,
     );
     expect(tester.getSize(list).width, lessThan(1400 - AppSpacing.xxxl));
+
+    final close = find.byKey(
+      const ValueKey<String>('history-detail-inspector-close'),
+    );
+    expect(close, findsOneWidget);
+    expect(find.bySemanticsLabel('Close clip details'), findsOneWidget);
+    await tester.tap(close);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey<String>('history-detail-inspector')),
+      findsNothing,
+    );
+    expect(tester.getSize(list).width, closeTo(1400 - AppSpacing.xxxl, 1));
   });
 
   testWidgets('switches from the right inspector below 800 logical pixels', (
@@ -287,7 +303,7 @@ void main() {
         const ValueKey<String>('history-detail-source-app'),
       );
       expect(sourceApp, findsOneWidget);
-      expect(tester.widget<HistoryIdentityLabel>(sourceApp).name, 'Editor');
+      expect(tester.widget<SourceAppLabel>(sourceApp).name, 'Editor');
       expect(
         find.descendant(of: sourceApp, matching: find.byType(Avatar)),
         findsOneWidget,
@@ -314,7 +330,7 @@ void main() {
         theme.typography.xSmall.fontSize,
       );
       expect(
-        tester.widget<HistoryIdentityLabel>(sourceApp).style?.fontSize,
+        tester.widget<SourceAppLabel>(sourceApp).style?.fontSize,
         theme.typography.xSmall.fontSize,
       );
 
@@ -423,7 +439,7 @@ void main() {
       findsOneWidget,
     );
     expect(device, findsOneWidget);
-    expect(tester.widget<HistoryIdentityLabel>(device).name, 'Work Mac');
+    expect(tester.widget<DeviceLabel>(device).name, 'Work Mac');
     expect(
       find.descendant(of: device, matching: find.byIcon(LucideIcons.laptop)),
       findsOneWidget,
@@ -707,7 +723,7 @@ void main() {
       matching: find.byKey(const ValueKey<String>('history-detail-device')),
     );
     expect(device, findsOneWidget);
-    expect(tester.widget<HistoryIdentityLabel>(device).name, 'Work Mac');
+    expect(tester.widget<DeviceLabel>(device).name, 'Work Mac');
     expect(
       find.descendant(of: device, matching: find.byIcon(LucideIcons.laptop)),
       findsOneWidget,
@@ -754,10 +770,25 @@ void main() {
   ) async {
     final repository = _ScreenRepository()
       ..availableFacets = const HistoryFacets(
-        originDevices: [HistoryFilterFacet(id: 'device-1', label: 'Work Mac')],
-        sourceApps: [
-          HistoryFilterFacet(id: 'com.example.editor', label: 'Editor'),
+        originDevices: [
+          HistoryDeviceFacet(
+            id: 'device-1',
+            label: 'Work Mac',
+            deviceClass: DeviceClass.laptop,
+          ),
         ],
+        sourceApps: [
+          HistorySourceAppFacet(
+            id: 'com.example.editor',
+            label: 'Editor',
+            iconItemId: 'editor-icon-item',
+          ),
+        ],
+      )
+      ..sourceIcons['editor-icon-item'] = HistorySourceAppIcon(
+        base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=',
+        ),
       );
     final controller = HistoryController(repository);
     await tester.pumpWidget(
@@ -773,15 +804,28 @@ void main() {
 
     await tester.tap(find.bySemanticsLabel('All devices'));
     await tester.pump(const Duration(milliseconds: 200));
-    expect(find.text('Work Mac'), findsOneWidget);
+    final workMac = find.byWidgetPredicate(
+      (widget) => widget is DeviceLabel && widget.name == 'Work Mac',
+    );
+    expect(workMac, findsOneWidget);
+    expect(find.byIcon(LucideIcons.laptop), findsOneWidget);
     expect(find.text('device-1'), findsNothing);
     expect(find.text('com.example.editor'), findsNothing);
-    await tester.tap(find.text('Work Mac'));
+    await tester.tap(workMac);
     await tester.pumpAndSettle();
 
     await tester.tap(find.bySemanticsLabel('All apps'));
     await tester.pump(const Duration(milliseconds: 200));
-    expect(find.text('Editor'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 1));
+    final editorLabel = find.byWidgetPredicate(
+      (widget) => widget is SourceAppLabel && widget.name == 'Editor',
+    );
+    expect(editorLabel, findsOneWidget);
+    final editorAvatar = tester.widget<Avatar>(
+      find.descendant(of: editorLabel, matching: find.byType(Avatar)),
+    );
+    expect(editorAvatar.provider, isA<MemoryImage>());
+    expect(repository.requestedSourceIconIds, ['editor-icon-item']);
     expect(find.text('com.example.editor'), findsNothing);
     controller.dispose();
   });
@@ -1006,14 +1050,17 @@ void main() {
   });
 
   testWidgets('facet dropdowns use no Radix overflow icons', (tester) async {
-    final originDevices = List<HistoryFilterFacet>.generate(
+    final originDevices = List<HistoryDeviceFacet>.generate(
       40,
-      (index) =>
-          HistoryFilterFacet(id: 'device-$index', label: 'Device $index'),
+      (index) => HistoryDeviceFacet(
+        id: 'device-$index',
+        label: 'Device $index',
+        deviceClass: DeviceClass.unknown,
+      ),
     );
-    final sourceApps = List<HistoryFilterFacet>.generate(
+    final sourceApps = List<HistorySourceAppFacet>.generate(
       40,
-      (index) => HistoryFilterFacet(id: 'app-$index', label: 'App $index'),
+      (index) => HistorySourceAppFacet(id: 'app-$index', label: 'App $index'),
     );
     final repository = _ScreenRepository()
       ..availableFacets = HistoryFacets(
@@ -1036,7 +1083,11 @@ void main() {
     await tester.tap(find.bySemanticsLabel('All devices'));
     await tester.pump(const Duration(milliseconds: 200));
     _expectNoRadixIcons(tester);
-    await tester.tap(find.text('Device 0'));
+    await tester.tap(
+      find.byWidgetPredicate(
+        (widget) => widget is DeviceLabel && widget.name == 'Device 0',
+      ),
+    );
     await tester.pumpAndSettle();
 
     await tester.tap(find.bySemanticsLabel('All apps'));
@@ -1143,6 +1194,8 @@ class _ScreenRepository implements HistoryRepository {
   HistoryClipPage page = const HistoryClipPage(items: []);
   HistoryFacets availableFacets = const HistoryFacets();
   final List<(String, String)> savedFiles = [];
+  final Map<String, HistorySourceAppIcon> sourceIcons = {};
+  final List<String> requestedSourceIconIds = [];
   HistoryImagePreview? availableImagePreview;
   final List<HistoryQuery> queries = [];
 
@@ -1170,7 +1223,10 @@ class _ScreenRepository implements HistoryRepository {
       availableImagePreview;
 
   @override
-  Future<HistorySourceAppIcon?> sourceAppIcon(String id) async => null;
+  Future<HistorySourceAppIcon?> sourceAppIcon(String id) async {
+    requestedSourceIconIds.add(id);
+    return sourceIcons[id];
+  }
 
   @override
   Future<void> copy(String id) async {}
