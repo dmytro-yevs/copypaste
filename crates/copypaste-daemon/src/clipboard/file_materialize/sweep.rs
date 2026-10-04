@@ -419,6 +419,7 @@ mod tests {
         FileMetadata {
             filename: filename.into(),
             mime_type: "application/octet-stream".to_string(),
+            source_reference: None,
         }
     }
 

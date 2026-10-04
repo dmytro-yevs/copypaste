@@ -75,8 +75,23 @@ pub async fn run_responder<C: SyncChannel, S: SyncSource>(
     listen_addr: Option<&str>,
     cursor: SyncCursor,
 ) -> Result<SyncOutcome, SyncError> {
+    let first = chan.recv().await?;
+    run_responder_from_first(chan, source, listen_addr, cursor, first).await
+}
+
+/// Continues a responder session after its authenticated first message was
+/// read by the connection dispatcher. The listener needs that first message to
+/// distinguish sync from a content-free liveness probe without creating a
+/// second, weaker channel parser.
+pub async fn run_responder_from_first<C: SyncChannel, S: SyncSource>(
+    chan: &mut C,
+    source: &S,
+    listen_addr: Option<&str>,
+    cursor: SyncCursor,
+    first: SyncMessage,
+) -> Result<SyncOutcome, SyncError> {
     let peer = {
-        let peer = recv_hello(chan, source).await?;
+        let peer = parse_hello(first, source)?;
         chan.send(local_hello(source, listen_addr, cursor.since_ms))
             .await?;
         peer
@@ -140,6 +155,22 @@ async fn recv_hello<C: SyncChannel, S: SyncSource>(
     SyncError,
 > {
     let msg = chan.recv().await?;
+    parse_hello(msg, source)
+}
+
+fn parse_hello<S: SyncSource>(
+    msg: SyncMessage,
+    source: &S,
+) -> Result<
+    (
+        String,
+        String,
+        Option<crate::DeviceProfile>,
+        Option<std::net::SocketAddr>,
+        i64,
+    ),
+    SyncError,
+> {
     msg.validate()?;
     match msg {
         SyncMessage::Hello {

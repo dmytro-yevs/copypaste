@@ -288,6 +288,7 @@ mod tests {
     use crate::peers::testutil::{peer, store_path, with_last_seen};
     use crate::peers::DEFAULT_FILE_NAME;
     use crate::transport::{PairingToken, TOKEN_LEN};
+    use crate::DeviceProfile;
 
     #[test]
     fn opening_a_missing_file_yields_an_empty_store_and_writes_nothing() {
@@ -298,6 +299,99 @@ mod tests {
         assert!(store.list().is_empty());
         assert!(store.psks().is_empty());
         assert!(!path.exists(), "opening must not create the file");
+    }
+
+    #[test]
+    fn legacy_peer_json_without_profile_opens_with_no_authenticated_metadata() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = store_path(&dir);
+        let psk = hex::encode([7u8; TOKEN_LEN]);
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"peers":[{{"pairing_id":"legacy","name":"old device","psk":"{psk}","last_addr":null,"last_seen_ms":1}}],"revoked":{{}}}}"#
+            ),
+        )
+        .expect("write legacy peer file");
+
+        let peer = PeerStore::open(&path)
+            .expect("legacy peer file")
+            .get("legacy")
+            .expect("legacy peer");
+        assert!(peer.profile.is_none());
+        assert_eq!(peer.profile_observed_at_ms, 0);
+    }
+
+    #[test]
+    fn authenticated_profile_survives_a_disk_restart() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = store_path(&dir);
+        let store = PeerStore::open(&path).expect("open");
+        let mut trusted = peer("Phone");
+        trusted.profile = Some(DeviceProfile {
+            model: Some("Pixel 9".to_string()),
+            ..DeviceProfile::default()
+        });
+        trusted.profile_observed_at_ms = 42;
+        let id = trusted.pairing_id.clone();
+        store.upsert(trusted).expect("persist profile");
+
+        let reopened = PeerStore::open(&path).expect("reopen");
+        let persisted = reopened.get(&id).expect("persisted peer");
+        assert_eq!(
+            persisted
+                .profile
+                .as_ref()
+                .and_then(|profile| profile.model.as_deref()),
+            Some("Pixel 9")
+        );
+        assert_eq!(persisted.profile_observed_at_ms, 42);
+    }
+
+    #[test]
+    fn profile_refresh_is_not_deferred_as_a_last_seen_only_touch() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = store_path(&dir);
+        let store = PeerStore::open(&path).expect("open");
+        let initial = peer("Phone");
+        let id = initial.pairing_id.clone();
+        store.upsert(initial).expect("initial peer");
+
+        let mut refreshed = store.get(&id).expect("peer");
+        refreshed.profile = Some(DeviceProfile {
+            model: Some("Pixel 9".to_string()),
+            ..DeviceProfile::default()
+        });
+        refreshed.profile_observed_at_ms = 42;
+        assert!(store.touch(refreshed).expect("profile refresh"));
+
+        let reopened = PeerStore::open(&path).expect("reopen");
+        assert_eq!(
+            reopened
+                .get(&id)
+                .and_then(|peer| peer.profile.clone())
+                .and_then(|profile| profile.model),
+            Some("Pixel 9".to_string())
+        );
+    }
+
+    #[test]
+    fn malformed_profile_on_disk_is_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = store_path(&dir);
+        let psk = hex::encode([7u8; TOKEN_LEN]);
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"peers":[{{"pairing_id":"bad","name":"bad","psk":"{psk}","last_addr":null,"last_seen_ms":1,"profile":{{"model":"{}","platform":"unknown","device_class":"unknown"}},"profile_observed_at_ms":1}}],"revoked":{{}}}}"#,
+                "x".repeat(129),
+            ),
+        )
+        .expect("write malformed peer file");
+        assert!(matches!(
+            PeerStore::open(&path),
+            Err(PeerStoreError::Corrupt)
+        ));
     }
 
     #[test]
@@ -370,6 +464,8 @@ mod tests {
             psk,
             last_addr: None,
             last_seen_ms: 1_753_900_999_999,
+            profile: None,
+            profile_observed_at_ms: 0,
         };
         store.upsert(renamed).expect("second write");
 
@@ -460,6 +556,8 @@ mod tests {
                 psk,
                 last_addr: addr,
                 last_seen_ms: 1_753_999_999_999,
+                profile: None,
+                profile_observed_at_ms: 0,
             })
             .expect("session");
         assert_eq!(
@@ -478,6 +576,8 @@ mod tests {
                 psk,
                 last_addr: Some("192.168.1.9:47654".parse().expect("addr")),
                 last_seen_ms: 1_754_000_000_000,
+                profile: None,
+                profile_observed_at_ms: 0,
             })
             .expect("moved");
         assert_eq!(
@@ -547,6 +647,8 @@ mod tests {
             psk: [0u8; TOKEN_LEN],
             last_addr: None,
             last_seen_ms: 1,
+            profile: None,
+            profile_observed_at_ms: 0,
         };
         assert!(matches!(store.upsert(bad), Err(PeerStoreError::Invalid(_))));
         assert!(store.is_empty());
@@ -560,6 +662,8 @@ mod tests {
             psk: PairingToken::generate().psk(),
             last_addr: None,
             last_seen_ms: 1,
+            profile: None,
+            profile_observed_at_ms: 0,
         };
         assert!(matches!(
             store.upsert(empty_id),
@@ -630,6 +734,8 @@ mod tests {
                 psk: established.psk,
                 last_addr: None,
                 last_seen_ms: 1_753_900_000_001,
+                profile: None,
+                profile_observed_at_ms: 0,
             })
             .expect("updating a stored pairing must still work at the cap");
         assert_eq!(

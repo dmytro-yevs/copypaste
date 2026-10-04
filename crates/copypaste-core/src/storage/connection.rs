@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::{Connection, Transaction, TransactionBehavior};
+use rusqlite::{functions::FunctionFlags, Connection, Transaction, TransactionBehavior};
 use zeroize::Zeroizing;
 
 use super::model::{is_not_a_database, StoreError};
@@ -86,7 +86,8 @@ pub(super) fn build_pool(
     // later needs it. That is inherent to pooling an encrypted database.
     let manager = manager.with_init(move |conn| {
         apply_key(conn, &db_key)?;
-        apply_connection_pragmas(conn)
+        apply_connection_pragmas(conn)?;
+        register_semantic_functions(conn)
     });
 
     let mut builder = Pool::builder()
@@ -102,6 +103,20 @@ pub(super) fn build_pool(
             .max_lifetime(None);
     }
     Ok(builder.build(manager)?)
+}
+
+fn register_semantic_functions(conn: &Connection) -> rusqlite::Result<()> {
+    conn.create_scalar_function(
+        "copypaste_semantic_kind",
+        2,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |context| {
+            let content_type = context.get::<String>(0)?;
+            let content = context.get::<String>(1)?;
+            Ok(crate::classify_semantic(&content_type, &content)
+                .map(|classification| classification.kind.as_str()))
+        },
+    )
 }
 
 /// `PRAGMA key` in SQLCipher raw-key form. **Must be the first statement on

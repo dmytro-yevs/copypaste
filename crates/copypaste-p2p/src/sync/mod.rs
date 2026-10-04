@@ -23,5 +23,5 @@ pub(crate) mod testutil;
 pub use error::SyncError;
 pub use merge::{merge_decision, merge_decision_by_summary, pin_state_wins, MergeDecision};
 pub use plan::MAX_FUTURE_SKEW_MS;
-pub use session::{run_initiator, run_responder};
+pub use session::{run_initiator, run_responder, run_responder_from_first};
 pub use source::{SyncChannel, SyncCursor, SyncOutcome, SyncSource, SyncStats};

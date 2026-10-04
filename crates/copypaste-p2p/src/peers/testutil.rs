@@ -15,6 +15,8 @@ pub(super) fn peer(name: &str) -> Peer {
         psk: token.psk(),
         last_addr: Some("192.168.1.7:47654".parse().expect("addr")),
         last_seen_ms: 1_753_900_000_000,
+        profile: None,
+        profile_observed_at_ms: 0,
     }
 }
 
@@ -26,6 +28,8 @@ pub(super) fn with_last_seen(peer: &Peer, at_ms: i64) -> Peer {
         psk: peer.psk,
         last_addr: peer.last_addr,
         last_seen_ms: at_ms,
+        profile: peer.profile.clone(),
+        profile_observed_at_ms: peer.profile_observed_at_ms,
     }
 }
 

@@ -46,6 +46,7 @@ pub(super) const MSG_DEVICE_NAME: &str = "device name must contain visible text"
 /// again would repeat the whole history, and a client cannot tell that from a
 /// list that really does.
 pub(super) const MSG_BAD_CURSOR: &str = "that page marker is not one this service issued";
+pub(super) const MSG_BAD_HISTORY_QUERY: &str = "that history filter or ordering is not valid";
 pub(super) const MSG_IMPORT_EMPTY: &str = "there is nothing to import";
 pub(super) const MSG_IMPORT_TOO_MANY: &str =
     "too many items in one import; split the file into smaller batches";
@@ -54,6 +55,7 @@ pub(super) const MSG_BACKUP_EXISTS: &str =
     "a file is already there; choose a name that does not exist yet";
 pub(super) const MSG_BACKUP_NO_DIR: &str = "the folder to write the backup into does not exist";
 pub(super) const MSG_BACKUP_FAILED: &str = "the backup could not be written";
+pub(super) const MSG_SAVE_FILE_FAILED: &str = "the file could not be saved";
 pub(super) const MSG_NEEDS_CONFIRM: &str = "restoring replaces this device's history; confirm it";
 pub(super) const MSG_RESTORE_NOT_FOUND: &str = "there is no backup file there";
 pub(super) const MSG_RESTORE_NOT_A_BACKUP: &str =
@@ -157,12 +159,14 @@ mod tests {
         MSG_IMAGE_PREVIEW,
         MSG_DEVICE_NAME,
         MSG_BAD_CURSOR,
+        MSG_BAD_HISTORY_QUERY,
         MSG_IMPORT_EMPTY,
         MSG_IMPORT_TOO_MANY,
         MSG_BAD_PATH,
         MSG_BACKUP_EXISTS,
         MSG_BACKUP_NO_DIR,
         MSG_BACKUP_FAILED,
+        MSG_SAVE_FILE_FAILED,
         MSG_NEEDS_CONFIRM,
         MSG_RESTORE_NOT_FOUND,
         MSG_RESTORE_NOT_A_BACKUP,
