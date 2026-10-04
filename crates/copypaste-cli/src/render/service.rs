@@ -255,6 +255,7 @@ mod tests {
     fn status(protocol_version: u32, backend: &str) -> StatusData {
         StatusData {
             device_name: "Test device".into(),
+            device_id: None,
             version: "2.0.0-alpha.1".into(),
             protocol_version,
             listen_addr: None,

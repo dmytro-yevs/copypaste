@@ -14,8 +14,10 @@ use tokio::sync::watch;
 use tracing::{debug, info, warn};
 
 use super::channel::{NoiseChannel, SESSION_TIMEOUT};
+use super::probe::{respond as respond_to_probe, AuthenticatedReachability};
 use super::Node;
-use crate::sync::{run_responder, SyncOutcome, SyncSource};
+use crate::protocol::SyncMessage;
+use crate::sync::{run_responder_from_first, SyncChannel, SyncOutcome, SyncSource};
 use crate::transport::Session;
 
 /// Bind the peer port.
@@ -35,15 +37,17 @@ pub fn bind(port: u16) -> std::io::Result<std::net::TcpListener> {
 /// history. It is deliberately not part of [`SyncSource`]: applying an item and
 /// noticing that a round happened are different jobs, and only the second one
 /// needs to reach a UI.
-pub async fn listen<S, F>(
+pub async fn listen<S, F, P>(
     node: Arc<Node>,
     listener: TcpListener,
     source: Arc<S>,
     on_session: F,
+    on_probe: P,
     mut shutdown: watch::Receiver<bool>,
 ) where
     S: SyncSource + Send + Sync + 'static,
     F: Fn(&str, &SyncOutcome) + Send + Sync + Clone + 'static,
+    P: Fn(&str) + Send + Sync + Clone + 'static,
 {
     match listener.local_addr() {
         Ok(addr) => node.set_listen_addr(addr),
@@ -65,9 +69,10 @@ pub async fn listen<S, F>(
                     let node = Arc::clone(&node);
                     let source = Arc::clone(&source);
                     let on_session = on_session.clone();
+                    let on_probe = on_probe.clone();
                     sessions.spawn(async move {
                         let _permit = permit;
-                        serve_peer(&node, stream, addr, source.as_ref(), &on_session).await;
+                        serve_peer(&node, stream, addr, source.as_ref(), &on_session, &on_probe).await;
                     });
                 }
                 Err(e) => warn!(error = %e, "could not accept a peer connection"),
@@ -80,15 +85,17 @@ pub async fn listen<S, F>(
 }
 
 /// One inbound peer, start to finish.
-async fn serve_peer<S, F>(
+async fn serve_peer<S, F, P>(
     node: &Arc<Node>,
     stream: TcpStream,
     addr: SocketAddr,
     source: &S,
     on_session: &F,
+    on_probe: &P,
 ) where
     S: SyncSource,
     F: Fn(&str, &SyncOutcome),
+    P: Fn(&str),
 {
     let mut candidates = node.peers().psks();
     let pending = node.pairing_candidate();
@@ -122,11 +129,43 @@ async fn serve_peer<S, F>(
     }
 
     let mut channel = NoiseChannel::new(session);
+    let first = match channel.recv().await {
+        Ok(message) => message,
+        Err(error) => {
+            debug!(%pairing_id, error = %error, "peer sent no valid application message");
+            channel.close().await;
+            return;
+        }
+    };
+    if let SyncMessage::Probe {
+        protocol_version,
+        nonce,
+        profile,
+    } = first
+    {
+        let result = respond_to_probe(&mut channel, protocol_version, nonce).await;
+        channel.close().await;
+        match result {
+            Ok(()) => {
+                if let Some(peer) = node.peers().get(&pairing_id) {
+                    node.record_reachability(
+                        &pairing_id,
+                        AuthenticatedReachability::online(None, crate::now_ms()),
+                    );
+                    node.record_authenticated_profile(&pairing_id, profile.as_ref());
+                    node.touch_peer(&peer, Some(addr), None);
+                    on_probe(&pairing_id);
+                }
+            }
+            Err(error) => debug!(%pairing_id, %error, "peer liveness probe failed"),
+        }
+        return;
+    }
     let listen_addr = node.listen_addr();
     let cursor = node.cursors().get(&pairing_id);
     let outcome = tokio::time::timeout(
         SESSION_TIMEOUT,
-        run_responder(&mut channel, source, listen_addr.as_deref(), cursor),
+        run_responder_from_first(&mut channel, source, listen_addr.as_deref(), cursor, first),
     )
     .await;
     channel.close().await;
@@ -192,6 +231,8 @@ mod tests {
                 psk: token.psk(),
                 last_addr: None,
                 last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
             })
             .unwrap();
         tokio::spawn(listen(
@@ -199,6 +240,7 @@ mod tests {
             listener,
             source,
             |_: &str, _: &SyncOutcome| {},
+            |_| {},
             shutdown,
         ));
         (addr, token.to_code())
@@ -239,6 +281,7 @@ mod tests {
             listener,
             Arc::new(TestSource::new("empty", Vec::new())),
             |_: &str, _: &SyncOutcome| {},
+            |_| {},
             rx,
         ));
 
@@ -279,6 +322,7 @@ mod tests {
             listener,
             Arc::clone(&a_source),
             |_: &str, _: &SyncOutcome| {},
+            |_| {},
             shutdown_rx,
         ));
 
@@ -291,6 +335,8 @@ mod tests {
                 psk: token.psk(),
                 last_addr: None,
                 last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
             })
             .unwrap();
         let b_peer = Peer {
@@ -299,6 +345,8 @@ mod tests {
             psk: token.psk(),
             last_addr: Some(addr),
             last_seen_ms: 1,
+            profile: None,
+            profile_observed_at_ms: 0,
         };
         b.peers().upsert(b_peer.clone()).unwrap();
         let outcome = b
@@ -347,6 +395,7 @@ mod tests {
             listener,
             Arc::new(TestSource::new("desktop", Vec::new())),
             |_: &str, _: &SyncOutcome| {},
+            |_| {},
             shutdown,
         ));
 
@@ -359,6 +408,8 @@ mod tests {
                 psk: token.psk(),
                 last_addr: None,
                 last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
             })
             .unwrap();
         let b_peer = Peer {
@@ -367,6 +418,8 @@ mod tests {
             psk: token.psk(),
             last_addr: Some(addr),
             last_seen_ms: 1,
+            profile: None,
+            profile_observed_at_ms: 0,
         };
         b.peers().upsert(b_peer.clone()).unwrap();
         (b, b_peer)
@@ -441,6 +494,7 @@ mod tests {
             listener,
             Arc::new(TestSource::new("stopper", Vec::new())),
             |_: &str, _: &SyncOutcome| {},
+            |_| {},
             rx,
         ));
         tx.send(true).unwrap();

@@ -17,6 +17,13 @@ pub struct ImageThumbnail {
     pub height: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImageMetadata {
+    pub width: u32,
+    pub height: u32,
+    pub size_bytes: u64,
+}
+
 #[derive(Debug, Error)]
 pub enum ImagePreviewError {
     #[error("the image could not be decoded")]
@@ -25,6 +32,28 @@ pub enum ImagePreviewError {
     TooLarge,
     #[error("the thumbnail could not be encoded")]
     Encode,
+}
+
+/// Read original image metadata without decoding the pixel buffer.
+///
+/// This is used only for a selected clip's detail response, so history pages
+/// remain cheap while the inspector can report source dimensions and size.
+pub fn image_metadata(source: &[u8]) -> Result<ImageMetadata, ImagePreviewError> {
+    let reader = ImageReader::new(Cursor::new(source))
+        .with_guessed_format()
+        .map_err(|_| ImagePreviewError::Decode)?;
+    let decoder = reader
+        .into_decoder()
+        .map_err(|_| ImagePreviewError::Decode)?;
+    let (width, height) = decoder.dimensions();
+    if width == 0 || height == 0 {
+        return Err(ImagePreviewError::Decode);
+    }
+    Ok(ImageMetadata {
+        width,
+        height,
+        size_bytes: u64::try_from(source.len()).unwrap_or(u64::MAX),
+    })
 }
 
 /// Decode one clipboard image within the user's memory budget and encode a
@@ -108,6 +137,19 @@ mod tests {
         let thumbnail = thumbnail_png(&png(1200, 600), 50, None).unwrap();
         assert_eq!((thumbnail.width, thumbnail.height), (384, 192));
         assert_eq!(&thumbnail.png[..8], b"\x89PNG\r\n\x1a\n");
+    }
+
+    #[test]
+    fn reads_original_metadata_without_thumbnail_scaling() {
+        let source = png(1_200, 600);
+        assert_eq!(
+            image_metadata(&source).unwrap(),
+            ImageMetadata {
+                width: 1_200,
+                height: 600,
+                size_bytes: source.len() as u64,
+            }
+        );
     }
 
     #[test]

@@ -110,6 +110,8 @@ pub(super) fn only_last_seen_moved(state: &State, incoming: &Peer) -> bool {
     stored.name == incoming.name
         && stored.last_addr == incoming.last_addr
         && stored.psk_matches(&incoming.psk)
+        && stored.profile == incoming.profile
+        && stored.profile_observed_at_ms == incoming.profile_observed_at_ms
 }
 
 /// Warn — do not fail — if the file on disk is readable by anyone else. It

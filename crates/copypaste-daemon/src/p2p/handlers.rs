@@ -92,7 +92,16 @@ fn pairing_progress(state: &AppState, id: u64, status: PairingStatus) -> Respons
             .map(|peer| {
                 let discovered = state.p2p.find(&peer.pairing_id);
                 let authenticated = state.p2p.node().authenticated_profile(&peer.pairing_id);
-                p2p_contract::peer_info(&peer, discovered.as_ref(), authenticated.as_ref())
+                let reachability = state
+                    .p2p
+                    .node()
+                    .authenticated_reachability(&peer.pairing_id);
+                p2p_contract::peer_info(
+                    &peer,
+                    discovered.as_ref(),
+                    authenticated.as_ref(),
+                    reachability.as_ref(),
+                )
             })
     } else {
         None
@@ -131,9 +140,8 @@ pub async fn unpair(state: &Arc<AppState>, id: u64, pairing_id: &str) -> Respons
 /// device I lost before it reaches this one" needs. Reporting `not_found` there
 /// would say nothing happened when the bar had in fact been written.
 pub async fn revoke(state: &Arc<AppState>, id: u64, pairing_id: &str) -> Response {
-    match state.p2p.peers().revoke(pairing_id, now_ms()) {
+    match state.p2p.node().revoke(pairing_id, now_ms()) {
         Ok(removed) => {
-            state.p2p.republish();
             state.note_peers_changed();
             info!(%pairing_id, removed, "revoked a pairing");
             Response::ok(id, ResponseData::Empty {})
@@ -145,21 +153,32 @@ pub async fn revoke(state: &Arc<AppState>, id: u64, pairing_id: &str) -> Respons
     }
 }
 
-/// Known peers, with a best-effort liveness flag from discovery.
-///
-/// `online: false` means "not seen on the network", never "unreachable" — a
-/// peer on a network without multicast, or on a different subnet, is reachable
-/// by address and still reads as offline.
+/// Known peers, with current observations and a coalesced authenticated probe
+/// for trusted endpoints that have become stale.
 pub async fn peers(state: &Arc<AppState>, id: u64) -> Response {
-    let infos = state
+    let peers = state.p2p.peers().list();
+    let event_state = Arc::clone(state);
+    state
         .p2p
-        .peers()
-        .list()
+        .node()
+        .refresh_reachability(peers.iter().cloned(), move || {
+            event_state.note_peers_changed();
+        });
+    let infos = peers
         .iter()
         .map(|peer| {
             let discovered = state.p2p.find(&peer.pairing_id);
             let authenticated = state.p2p.node().authenticated_profile(&peer.pairing_id);
-            p2p_contract::peer_info(peer, discovered.as_ref(), authenticated.as_ref())
+            let reachability = state
+                .p2p
+                .node()
+                .authenticated_reachability(&peer.pairing_id);
+            p2p_contract::peer_info(
+                peer,
+                discovered.as_ref(),
+                authenticated.as_ref(),
+                reachability.as_ref(),
+            )
         })
         .collect();
     Response::ok(id, ResponseData::Peers(infos))
@@ -221,6 +240,7 @@ pub async fn discovered(state: &Arc<AppState>, id: u64) -> Response {
 /// is logged and the current table is still returned, because what the user
 /// asked for was "show me what is out there".
 pub async fn rescan(state: &Arc<AppState>, id: u64) -> Response {
+    state.p2p.node().clear_discovery_candidate_cooldowns();
     state.p2p.republish();
     Response::ok(id, ResponseData::Discovered(devices(state)))
 }
@@ -327,6 +347,8 @@ mod tests {
                 psk: token.psk(),
                 last_addr: None,
                 last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
             })
             .unwrap();
         let progress = |phase| {
@@ -449,6 +471,8 @@ mod tests {
                 psk: token.psk(),
                 last_addr: None,
                 last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
             })
             .unwrap();
         assert_eq!(state.p2p.peers().psks().len(), 1);
@@ -476,6 +500,8 @@ mod tests {
                     psk: token.psk(),
                     last_addr: None,
                     last_seen_ms: 1_753_900_000_000,
+                    profile: None,
+                    profile_observed_at_ms: 0,
                 })
                 .expect("upsert");
         }
@@ -494,6 +520,8 @@ mod tests {
                 psk: token.psk(),
                 last_addr: None,
                 last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
             })
         };
         re_add(&unpaired).expect("unpairing must leave the pairing id usable");
@@ -522,6 +550,8 @@ mod tests {
                 psk: token.psk(),
                 last_addr: None,
                 last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
             })
             .is_err());
     }
@@ -539,6 +569,8 @@ mod tests {
                 psk: token.psk(),
                 last_addr: None,
                 last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
             })
             .unwrap();
 
@@ -746,6 +778,8 @@ mod tests {
                 psk: first.psk(),
                 last_addr: None,
                 last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
             })
             .unwrap();
         state
@@ -757,6 +791,8 @@ mod tests {
                 psk: [3u8; TOKEN_LEN],
                 last_addr: None,
                 last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
             })
             .unwrap();
 

@@ -15,6 +15,7 @@ use crate::peers::{Peer, MAX_PAIRINGS};
 use crate::protocol::{MAX_DEVICE_NAME_BYTES, MAX_ID_BYTES, MAX_LISTEN_ADDR_BYTES};
 use crate::sync::SyncSource;
 use crate::transport::{PairingToken, PskCandidate, Session, TOKEN_LEN};
+use crate::DeviceProfile;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -23,6 +24,7 @@ enum PairingMessage {
         protocol_version: u32,
         device_id: String,
         device_name: String,
+        profile: DeviceProfile,
         listen_addr: Option<String>,
     },
     Decision {
@@ -33,7 +35,7 @@ enum PairingMessage {
     },
 }
 
-const PAIRING_PROTOCOL_VERSION: u32 = 1;
+const PAIRING_PROTOCOL_VERSION: u32 = 2;
 
 impl Node {
     pub fn pair_create_invite(&self) -> Result<PairingInvite, NodeError> {
@@ -197,6 +199,7 @@ impl Node {
 struct LocalIdentity {
     device_id: String,
     device_name: String,
+    profile: DeviceProfile,
     listen_addr: Option<String>,
 }
 
@@ -204,6 +207,7 @@ fn local_identity<S: SyncSource>(node: &Node, source: &S) -> LocalIdentity {
     LocalIdentity {
         device_id: source.device_id(),
         device_name: source.device_name(),
+        profile: DeviceProfile::current(),
         listen_addr: node.listen_addr(),
     }
 }
@@ -220,6 +224,7 @@ async fn establish(
             protocol_version: PAIRING_PROTOCOL_VERSION,
             device_id: local.device_id.clone(),
             device_name: local.device_name,
+            profile: local.profile,
             listen_addr: local.listen_addr,
         })
         .await
@@ -233,6 +238,7 @@ async fn establish(
         protocol_version,
         device_id,
         device_name,
+        profile,
         listen_addr,
     } = hello
     else {
@@ -246,6 +252,7 @@ async fn establish(
         || listen_addr
             .as_ref()
             .is_some_and(|addr| addr.len() > MAX_LISTEN_ADDR_BYTES)
+        || crate::protocol::validate_device_profile(&profile).is_err()
     {
         return Err(NodeError::Handshake);
     }
@@ -265,6 +272,8 @@ async fn establish(
         psk,
         last_addr: addr,
         last_seen_ms: crate::now_ms(),
+        profile: Some(profile),
+        profile_observed_at_ms: crate::now_ms(),
     };
     let shown = PairingPeer {
         pairing_id,
@@ -455,6 +464,7 @@ mod tests {
             listener,
             source,
             |_: &str, _: &SyncOutcome| {},
+            |_| {},
             receiver,
         ));
         (addr, shutdown)
@@ -492,12 +502,44 @@ mod tests {
                 protocol_version: PAIRING_PROTOCOL_VERSION,
                 device_id: "silent-device".into(),
                 device_name: "silent".into(),
+                profile: DeviceProfile::current(),
                 listen_addr: None,
             })
             .await
             .unwrap();
         session.recv::<PairingMessage>().await.unwrap();
         session
+    }
+
+    #[tokio::test]
+    async fn pairing_rejects_an_oversized_authenticated_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let responder = node(&dir, "responder");
+        let source = Arc::new(TestSource::new("responder-id", Vec::new()));
+        let (addr, shutdown) = start_listener(Arc::clone(&responder), source).await;
+        let invite = responder.pair_create_invite().unwrap();
+        let token = PairingToken::parse(&invite.code).unwrap();
+        let mut session = Session::connect(addr, &token.psk()).await.unwrap();
+        session
+            .send(&PairingMessage::Hello {
+                protocol_version: PAIRING_PROTOCOL_VERSION,
+                device_id: "oversized-device".into(),
+                device_name: "oversized".into(),
+                profile: DeviceProfile {
+                    model: Some("x".repeat(129)),
+                    ..DeviceProfile::default()
+                },
+                listen_addr: None,
+            })
+            .await
+            .unwrap();
+        let _ = session.recv::<PairingMessage>().await;
+
+        let failed = wait_for(&responder, PairingPhase::Failed).await;
+        assert_eq!(failed.error, Some(NodeError::Handshake));
+        assert!(responder.peers().is_empty());
+        let _ = session.close().await;
+        let _ = shutdown.send(true);
     }
 
     /// Both sides accept, and then this one stops writing before the commit
@@ -654,6 +696,8 @@ mod tests {
             psk: PairingToken::generate().psk(),
             last_addr: None,
             last_seen_ms: crate::now_ms(),
+            profile: None,
+            profile_observed_at_ms: 0,
         };
         let established_psk = established.psk;
         responder.peers().upsert(established).unwrap();

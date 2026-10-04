@@ -199,10 +199,24 @@ fn resolve_desktop(bundle_id: &str) -> Option<AppIcon> {
     const ICON_EDGE: usize = 64;
 
     autoreleasepool(|_| {
-        let bundle_id = NSString::from_str(bundle_id);
+        let requested_bundle_id = bundle_id;
+        let bundle_id = NSString::from_str(requested_bundle_id);
         let workspace = unsafe { NSWorkspace::sharedWorkspace() };
-        let path = unsafe { workspace.URLForApplicationWithBundleIdentifier(&bundle_id) }
-            .and_then(|url| unsafe { url.path() })?;
+        let frontmost_path = unsafe {
+            workspace.frontmostApplication().and_then(|application| {
+                let matches = application
+                    .bundleIdentifier()
+                    .is_some_and(|id| id.to_string() == requested_bundle_id);
+                matches
+                    .then(|| application.bundleURL())
+                    .flatten()
+                    .and_then(|url| url.path())
+            })
+        };
+        let path = frontmost_path.or_else(|| {
+            unsafe { workspace.URLForApplicationWithBundleIdentifier(&bundle_id) }
+                .and_then(|url| unsafe { url.path() })
+        })?;
         let image = unsafe { workspace.iconForFile(&path) };
         let bitmap = unsafe {
             NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(

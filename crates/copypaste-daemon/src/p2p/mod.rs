@@ -168,13 +168,16 @@ impl P2p {
 pub async fn listen(listener: TcpListener, state: Arc<AppState>, shutdown: watch::Receiver<bool>) {
     let node = Arc::clone(state.p2p.node());
     let source = Arc::new(peer_source(&state));
+    let session_state = Arc::clone(&state);
     let on_session = move |_pairing_id: &str, outcome: &SyncOutcome| {
-        remember_device(&state, outcome);
+        remember_device(&session_state, outcome);
         if outcome.stats.received > 0 {
-            state.note_remote_change();
+            session_state.note_remote_change();
         }
     };
-    copypaste_p2p::node::listen(node, listener, source, on_session, shutdown).await;
+    let probe_state = Arc::clone(&state);
+    let on_probe = move |_pairing_id: &str| probe_state.note_peers_changed();
+    copypaste_p2p::node::listen(node, listener, source, on_session, on_probe, shutdown).await;
 }
 
 /// Pairing transitions originate in the shared node, including an inbound
@@ -252,6 +255,8 @@ mod tests {
                 psk: token.psk(),
                 last_addr: None,
                 last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
             })
             .expect("store the pairing on A");
         b.p2p
@@ -262,6 +267,8 @@ mod tests {
                 psk: token.psk(),
                 last_addr: Some(addr),
                 last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
             })
             .expect("store the pairing on B");
         (pairing_id, addr)
@@ -323,6 +330,33 @@ mod tests {
 
         let _ = shutdown_tx.send(true);
         bridge.await.expect("pairing event bridge stopped");
+    }
+
+    #[tokio::test]
+    async fn inbound_probe_publishes_one_peer_event() {
+        let (receiver, _receiver_dir) = test_state("receiver");
+        let (sender, _sender_dir) = test_state("sender");
+        let mut events = receiver.subscribe();
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let (pairing_id, addr) = pair(&receiver, &sender, shutdown_rx).await;
+
+        let peer = sender.p2p.peers().get(&pairing_id).unwrap();
+        sender.p2p.node().probe_one(&peer).await.unwrap();
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), events.recv())
+                .await
+                .unwrap()
+                .unwrap()
+                .event,
+            EventKind::Peers
+        );
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(25), events.recv())
+                .await
+                .is_err()
+        );
+        assert_eq!(receiver.p2p.node().listen_addr(), Some(addr.to_string()));
+        let _ = shutdown_tx.send(true);
     }
 
     /// The whole thing, in process: a listener, a dialler, two databases with
@@ -484,6 +518,8 @@ mod tests {
                 psk: stranger.psk(),
                 last_addr: Some(addr),
                 last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
             })
             .unwrap();
 

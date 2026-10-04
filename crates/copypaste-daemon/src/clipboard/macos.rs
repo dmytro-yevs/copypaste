@@ -201,7 +201,10 @@ impl ClipboardSource for MacOsClipboard {
             }
 
             let (data, content_type) = UTIS.with(|utis| unsafe {
-                if pb.availableTypeFromArray(&utis.text_probe).is_some() {
+                if pb.availableTypeFromArray(&utis.file_url_probe).is_some() {
+                    pb.dataForType(&utis.file_url)
+                        .map(|data| (data, copypaste_ipc::content_type::FILE))
+                } else if pb.availableTypeFromArray(&utis.text_probe).is_some() {
                     pb.dataForType(&utis.text)
                         .map(|data| (data, copypaste_ipc::content_type::TEXT))
                 } else if pb.availableTypeFromArray(&utis.rtf_probe).is_some() {
@@ -216,9 +219,6 @@ impl ClipboardSource for MacOsClipboard {
                 } else if pb.availableTypeFromArray(&utis.tiff_probe).is_some() {
                     pb.dataForType(&utis.tiff)
                         .map(|data| (data, copypaste_ipc::content_type::IMAGE_TIFF))
-                } else if pb.availableTypeFromArray(&utis.file_url_probe).is_some() {
-                    pb.dataForType(&utis.file_url)
-                        .map(|data| (data, copypaste_ipc::content_type::FILE))
                 } else {
                     None
                 }
@@ -268,8 +268,12 @@ impl ClipboardSource for MacOsClipboard {
                 let url = url::Url::parse(&String::from_utf8_lossy(&bytes)).ok()?;
                 let path = url.to_file_path().ok()?;
                 let filename = path.file_name()?.to_string_lossy();
-                let metadata =
-                    copypaste_core::FileMetadata::new(filename, "application/octet-stream")?;
+                let source_reference = path.to_string_lossy();
+                let metadata = copypaste_core::FileMetadata::with_source_reference(
+                    filename,
+                    "application/octet-stream",
+                    source_reference,
+                )?;
                 return Some(Capture {
                     content: String::new(),
                     binary_content: None,
@@ -624,6 +628,25 @@ mod tests {
 
     #[test]
     #[ignore = "drives the real NSPasteboard"]
+    fn a_file_url_wins_over_its_textual_filename_fallback() {
+        let _lock = serialised();
+        let (_data_dir, mut clipboard) = test_clipboard();
+        let fixture_dir = tempfile::tempdir().unwrap();
+        let path = fixture_dir.path().join("fixture.bin");
+        std::fs::write(&path, b"file bytes").unwrap();
+        let url = url::Url::from_file_path(&path).unwrap();
+
+        write_types(&[
+            (UTI_TEXT, b"fixture.bin"),
+            (UTI_FILE_URL, url.as_str().as_bytes()),
+        ]);
+        let capture = clipboard.poll().expect("the file URL must win");
+        assert_eq!(capture.content_type, copypaste_ipc::content_type::FILE);
+        assert_eq!(capture.file_path.as_deref(), Some(path.as_path()));
+    }
+
+    #[test]
+    #[ignore = "drives the real NSPasteboard"]
     fn rich_text_and_html_prefer_a_plain_text_representation_when_cocoa_offers_one() {
         let _lock = serialised();
         let (_data_dir, mut clipboard) = test_clipboard();
@@ -674,7 +697,11 @@ mod tests {
         assert_eq!(capture.file_path.as_deref(), Some(path.as_path()));
         assert_eq!(
             capture.file_metadata,
-            copypaste_core::FileMetadata::new("fixture.bin", "application/octet-stream")
+            copypaste_core::FileMetadata::with_source_reference(
+                "fixture.bin",
+                "application/octet-stream",
+                path.to_string_lossy(),
+            )
         );
         assert!(capture.binary_content.is_none());
 
