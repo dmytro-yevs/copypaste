@@ -260,7 +260,7 @@
 				33CC10EB2044A3C60003C045 /* Resources */,
 				33CC110E2044A8840003C045 /* Bundle Framework */,
 				3399D490228B24CF009A79C7 /* ShellScript */,
-				89D1A1E53CD500B100000001 /* Bundle Debug Daemon */,
+				89D1A1E53CD500B100000001 /* Bundle Runtime Daemon */,
 			);
 			buildRules = (
 			);
@@ -431,7 +431,7 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
-		89D1A1E53CD500B100000001 /* Bundle Debug Daemon */ = {
+		89D1A1E53CD500B100000001 /* Bundle Runtime Daemon */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -441,14 +441,14 @@
 			);
 			inputPaths = (
 			);
-			name = "Bundle Debug Daemon";
+			name = "Bundle Runtime Daemon";
 			outputFileListPaths = (
 			);
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ \"$CONFIGURATION\" != \"Debug\" ]; then\n  exit 0\nfi\nrepo_root=$(cd \"$PROJECT_DIR/../../..\" && pwd)\nrust_cargo_home=${CARGO_HOME:-\"$HOME/.cargo\"}\nrust_bin=\"$rust_cargo_home/bin\"\nexport PATH=\"$rust_bin:$PATH\"\ncargo build --manifest-path \"$repo_root/Cargo.toml\" -p copypaste-daemon\ntarget_root=${CARGO_TARGET_DIR:-\"$repo_root/target\"}\ncase \"$target_root\" in\n  /*) ;;\n  *) target_root=\"$repo_root/$target_root\" ;;\nesac\nsource_helper=\"$target_root/debug/copypaste-daemon\"\ndestination_helper=\"$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/MacOS/copypaste-daemon\"\nif [ ! -x \"$source_helper\" ]; then\n  echo \"CopyPaste daemon build did not produce an executable.\" >&2\n  exit 1\nfi\ninstall -m 755 \"$source_helper\" \"$destination_helper\"\nif [ \"${CODE_SIGNING_ALLOWED:-NO}\" = \"YES\" ] && [ -n \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ]; then\n  /usr/bin/codesign --force --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" --entitlements \"$PROJECT_DIR/Runner/Daemon.entitlements\" \"$destination_helper\"\n  find \"$TARGET_BUILD_DIR/$WRAPPER_NAME/Contents/MacOS\" -type f -name \"*.dylib\" -exec /usr/bin/codesign --force --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" {} \\;\n  /usr/bin/codesign --force --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" --entitlements \"$CODE_SIGN_ENTITLEMENTS\" \"$TARGET_BUILD_DIR/$WRAPPER_NAME\"\nfi\n";
+			shellScript = "profile=debug\ncargo_flags=\"\"\nif [ \"$CONFIGURATION\" = \"Release\" ]; then\n  profile=release\n  cargo_flags=\"--release --locked\"\nfi\nrepo_root=$(cd \"$PROJECT_DIR/../../..\" && pwd)\nrust_cargo_home=${CARGO_HOME:-\"$HOME/.cargo\"}\nrust_bin=\"$rust_cargo_home/bin\"\nexport PATH=\"$rust_bin:$PATH\"\ncargo build --manifest-path \"$repo_root/Cargo.toml\" -p copypaste-daemon $cargo_flags\ntarget_root=${CARGO_TARGET_DIR:-\"$repo_root/target\"}\ncase \"$target_root\" in\n  /*) ;;\n  *) target_root=\"$repo_root/$target_root\" ;;\nesac\nsource_helper=\"$target_root/$profile/copypaste-daemon\"\ndestination_helper=\"$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/MacOS/copypaste-daemon\"\nif [ ! -x \"$source_helper\" ]; then\n  echo \"CopyPaste daemon build did not produce an executable.\" >&2\n  exit 1\nfi\ninstall -m 755 \"$source_helper\" \"$destination_helper\"\nif [ \"${CODE_SIGNING_ALLOWED:-NO}\" = \"YES\" ] && [ -n \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ]; then\n  /usr/bin/codesign --force --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" --entitlements \"$PROJECT_DIR/Runner/Daemon.entitlements\" \"$destination_helper\"\n  find \"$TARGET_BUILD_DIR/$WRAPPER_NAME/Contents/MacOS\" -type f -name \"*.dylib\" -exec /usr/bin/codesign --force --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" {} \\;\n  /usr/bin/codesign --force --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" --entitlements \"$CODE_SIGN_ENTITLEMENTS\" \"$TARGET_BUILD_DIR/$WRAPPER_NAME\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

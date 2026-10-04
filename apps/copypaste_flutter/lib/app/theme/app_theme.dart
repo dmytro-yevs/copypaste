@@ -13,6 +13,17 @@ abstract final class AppTheme {
   static const lightSidebarSurface = Color(0xFFF9F9F9);
   static const darkSidebarSurface = Color(0xFF1B1B1B);
 
+  static CardTheme settingsSearchTargetCardTheme(
+    BuildContext context, {
+    required bool highlighted,
+  }) {
+    return CardTheme(
+      filled: highlighted,
+      fillColor: Theme.of(context).colorScheme.accent,
+      duration: AppMotion.resolve(context, AppMotion.quick),
+    );
+  }
+
   /// The shared ChatGPT application light palette.
   static const _lightColors = ColorScheme(
     brightness: Brightness.light,

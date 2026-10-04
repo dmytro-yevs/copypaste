@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../../devices/device_presentation.dart';
+
 import '../../../app/theme/app_tokens.dart';
 import '../../../app/shell/macos_window_header.dart';
 import '../../../platform/macos/macos_setup_gateway.dart';
@@ -342,7 +344,7 @@ class _OnboardingFooter extends StatelessWidget {
                       onPressed: controller.busy
                           ? null
                           : () => _finish(onPairDevice),
-                      leading: const Icon(LucideIcons.laptop),
+                      leading: const Icon(DevicePresentation.collectionIcon),
                       child: const Text('Pair a device'),
                     ),
                   ],

@@ -2,6 +2,7 @@ import 'package:copypaste_flutter/app/navigation/navigation.dart';
 import 'package:copypaste_flutter/app/shell/shell.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
+import 'package:copypaste_flutter/features/devices/device_presentation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -81,7 +82,7 @@ void main() {
     ]);
     expect(items.map((item) => (item.child as Icon).icon), [
       LucideIcons.history,
-      LucideIcons.laptop,
+      DevicePresentation.collectionIcon,
       LucideIcons.settings,
     ]);
     final selectedItem = find.descendant(
@@ -159,7 +160,7 @@ void main() {
     final railCenter = tester.getCenter(find.byType(NavigationRail)).dx;
     for (final icon in [
       LucideIcons.history,
-      LucideIcons.laptop,
+      DevicePresentation.collectionIcon,
       LucideIcons.settings,
     ]) {
       final iconFinder = find.byIcon(icon);
@@ -177,7 +178,7 @@ void main() {
           .dx,
       closeTo(railCenter, 1),
     );
-    await tester.tap(find.byIcon(LucideIcons.laptop));
+    await tester.tap(find.byIcon(DevicePresentation.collectionIcon));
     await tester.pump();
     expect(find.text('Devices body'), findsOneWidget);
   });
@@ -282,7 +283,7 @@ void main() {
     }
     for (final icon in [
       LucideIcons.history,
-      LucideIcons.laptop,
+      DevicePresentation.collectionIcon,
       LucideIcons.settings,
     ]) {
       expect(tester.widget<Icon>(find.byIcon(icon)).size, AppIconSize.md);
@@ -310,6 +311,10 @@ void main() {
     await tester.tap(find.byIcon(LucideIcons.settings));
     await tester.pump();
     expect(find.text('Settings body'), findsOneWidget);
+    expect(
+      tester.widget<NavigationRail>(find.byType(NavigationRail)).expanded,
+      isFalse,
+    );
   });
 
   testWidgets('collapsing the rail changes only horizontal geometry', (

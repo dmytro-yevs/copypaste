@@ -5,11 +5,11 @@ APP="$ROOT/apps/copypaste_flutter"
 VERSION_FILE="$ROOT/.flutter-version"
 [[ -f "$VERSION_FILE" ]] || { echo "missing .flutter-version" >&2; exit 1; }
 [[ -f "$APP/pubspec.yaml" ]] || { echo "missing apps/copypaste_flutter/pubspec.yaml" >&2; exit 1; }
-read -r expected < "$VERSION_FILE"
+expected="$(tr -d '\r\n[:space:]' < "$VERSION_FILE")"
 [[ "$expected" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo ".flutter-version must be a stable Flutter version" >&2; exit 1; }
 workspace_version=$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{print $3; exit}' "$ROOT/Cargo.toml" | tr -d '"[:space:]')
 pubspec_version=$(awk '/^version:[[:space:]]*/ { print $2; exit }' "$APP/pubspec.yaml")
-[[ -n "$pubspec_version" && "$pubspec_version" == "$workspace_version" ]] || { echo "pubspec.yaml version must match Cargo.toml workspace.package.version" >&2; exit 1; }
+[[ -n "$pubspec_version" && "${pubspec_version%%+*}" == "$workspace_version" ]] || { echo "pubspec.yaml build name must match Cargo.toml workspace.package.version" >&2; exit 1; }
 grep -Eq '^  shadcn_flutter: 0\.0\.55$' "$APP/pubspec.yaml" || { echo "pubspec.yaml must pin shadcn_flutter: 0.0.55" >&2; exit 1; }
 grep -Eq '^  flutter_animate: 4\.5\.2$' "$APP/pubspec.yaml" || { echo "pubspec.yaml must pin flutter_animate: 4.5.2" >&2; exit 1; }
 ! grep -Eq '^  shadcn_ui:' "$APP/pubspec.yaml" || { echo "pubspec.yaml must not retain shadcn_ui" >&2; exit 1; }

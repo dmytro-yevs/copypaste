@@ -1,5 +1,7 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../../features/devices/device_presentation.dart';
+
 /// The destinations available in the application shell.
 enum AppDestination { history, devices, settings }
 
@@ -30,7 +32,7 @@ const List<AppNavigationDestination> appNavigationDestinations =
       AppNavigationDestination(
         destination: AppDestination.devices,
         label: 'Devices',
-        icon: LucideIcons.laptop,
+        icon: DevicePresentation.collectionIcon,
       ),
       AppNavigationDestination(
         destination: AppDestination.settings,
