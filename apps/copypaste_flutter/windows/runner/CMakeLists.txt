@@ -43,7 +43,7 @@ target_link_libraries(${BINARY_NAME} PRIVATE "crypt32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "wintrust.lib")
 target_include_directories(${BINARY_NAME} PRIVATE
   "${CMAKE_SOURCE_DIR}"
-  "${CMAKE_CURRENT_SOURCE_DIR}/../../../crates/copypaste-flutter-bridge/include"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../../../crates/copypaste-flutter-bridge/include"
 )
 
 # Run the Flutter tool portions of the build. This must not be removed.
