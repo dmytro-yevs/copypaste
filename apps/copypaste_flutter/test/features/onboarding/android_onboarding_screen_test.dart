@@ -1,0 +1,179 @@
+import 'package:copypaste_flutter/features/onboarding/controller/android_onboarding_controller.dart';
+import 'package:copypaste_flutter/features/onboarding/repository/android_onboarding_store.dart';
+import 'package:copypaste_flutter/features/onboarding/view/android_onboarding_screen.dart';
+import 'package:copypaste_flutter/platform/android/android_capture_setup_gateway.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shadcn_flutter/shadcn_flutter.dart';
+
+void main() {
+  testWidgets('offers Full and Limited capture modes with six ADB commands', (
+    tester,
+  ) async {
+    final controller = _controller();
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.showCapture();
+
+    await tester.pumpWidget(_app(controller));
+
+    expect(find.text('Full background capture'), findsOneWidget);
+    expect(find.text('Limited mode'), findsOneWidget);
+    expect(find.text('Shizuku'), findsOneWidget);
+    expect(find.text('ADB'), findsOneWidget);
+
+    await controller.selectMethod(AndroidCaptureSetupMethod.adb);
+    await tester.pump();
+
+    for (final command in _commands) {
+      expect(find.text(command), findsOneWidget);
+    }
+    final continueButton = tester.widget<Button>(
+      find.widgetWithText(Button, 'Continue'),
+    );
+    expect(continueButton.onPressed, isNull);
+  });
+
+  testWidgets('Limited mode reaches Sync without privileged setup', (
+    tester,
+  ) async {
+    final controller = _controller();
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.showCapture();
+    await controller.selectMode(AndroidCaptureMode.limited);
+
+    await tester.pumpWidget(_app(controller));
+    await tester.tap(find.widgetWithText(Button, 'Continue'));
+    await tester.pump();
+
+    expect(find.text('CopyPaste is ready'), findsOneWidget);
+  });
+
+  testWidgets('fits a narrow phone with enlarged text', (tester) async {
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await tester.binding.setSurfaceSize(const Size(320, 640));
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    final controller = _controller();
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.showCapture();
+
+    await tester.pumpWidget(_app(controller));
+    expect(tester.takeException(), isNull);
+
+    await controller.selectMode(AndroidCaptureMode.limited);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+
+    await controller.continueFromCapture();
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('stacks the Sync footer actions on a narrow phone', (
+    tester,
+  ) async {
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.binding.setSurfaceSize(const Size(320, 640));
+    final controller = _controller();
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.showCapture();
+    await controller.selectMode(AndroidCaptureMode.limited);
+    await controller.continueFromCapture();
+
+    await tester.pumpWidget(_app(controller));
+
+    final openHistory = find.widgetWithText(Button, 'Open History');
+    final pairDevice = find.widgetWithText(Button, 'Pair a device');
+    final back = find.widgetWithText(Button, 'Back');
+    expect(openHistory, findsOneWidget);
+    expect(pairDevice, findsOneWidget);
+    expect(back, findsOneWidget);
+    expect(
+      tester.getTopLeft(openHistory).dy,
+      lessThan(tester.getTopLeft(pairDevice).dy),
+    );
+    expect(
+      tester.getTopLeft(pairDevice).dy,
+      lessThan(tester.getTopLeft(back).dy),
+    );
+  });
+
+  testWidgets('uses no outline button variants', (tester) async {
+    final controller = _controller();
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.showCapture();
+
+    await tester.pumpWidget(_app(controller));
+
+    expect(find.byType(OutlineButton), findsNothing);
+  });
+}
+
+const _commands = [
+  'adb shell pm grant com.copypaste.app android.permission.READ_LOGS',
+  'adb shell cmd appops set com.copypaste.app SYSTEM_ALERT_WINDOW allow',
+  'adb shell cmd appops set com.copypaste.app RUN_IN_BACKGROUND allow',
+  'adb shell cmd appops set com.copypaste.app RUN_ANY_IN_BACKGROUND allow',
+  'adb shell am set-inactive com.copypaste.app false',
+  'adb shell am set-standby-bucket com.copypaste.app active',
+];
+
+AndroidOnboardingController _controller() => AndroidOnboardingController(
+  store: MemoryAndroidOnboardingStore(),
+  setup: _ScreenAndroidCaptureSetupGateway(),
+);
+
+Widget _app(AndroidOnboardingController controller) => ShadcnApp(
+  home: AndroidOnboardingScreen(
+    controller: controller,
+    onPairDevice: () async {},
+    onOpenHistory: () async {},
+  ),
+);
+
+class _ScreenAndroidCaptureSetupGateway implements AndroidCaptureSetupGateway {
+  AndroidCaptureSetupState get current => const AndroidCaptureSetupState(
+    packageName: 'com.copypaste.app',
+    privilegedGrants: false,
+    notificationGranted: false,
+    batteryExempt: false,
+    captureEnabled: false,
+    serviceRunning: false,
+    lastCaptureAtMs: 0,
+    shizuku: AndroidShizukuState(
+      supported: true,
+      installed: false,
+      running: false,
+      permission: false,
+    ),
+    adbCommands: _commands,
+  );
+
+  @override
+  Future<AndroidCaptureSetupState> applyShizukuGrants() async => current;
+
+  @override
+  Future<bool> openShizuku() async => true;
+
+  @override
+  Future<bool> requestBatteryExemption() async => true;
+
+  @override
+  Future<AndroidCaptureSetupState> requestNotifications() async => current;
+
+  @override
+  Future<bool> setForegroundCaptureEnabled(bool enabled) async => true;
+
+  @override
+  Future<AndroidCaptureSetupState> startCapture() async => current;
+
+  @override
+  Future<AndroidCaptureSetupState> state() async => current;
+
+  @override
+  Future<AndroidCaptureSetupState> stopCapture() async => current;
+}

@@ -122,6 +122,21 @@ impl SyncMessage {
     /// Checks every bound applied by both encode and decode.
     pub fn validate(&self) -> Result<(), ProtocolError> {
         match self {
+            Self::Probe {
+                protocol_version,
+                profile,
+                ..
+            }
+            | Self::ProbeAck {
+                protocol_version,
+                profile,
+                ..
+            } => {
+                check_protocol_version(*protocol_version)?;
+                if let Some(profile) = profile {
+                    validate_device_profile(profile)?;
+                }
+            }
             Self::Hello {
                 protocol_version,
                 device_id,
@@ -132,12 +147,7 @@ impl SyncMessage {
             } => {
                 // The version check precedes all fields because a mismatch
                 // means those fields may not have the semantics assumed here.
-                if *protocol_version != PROTOCOL_VERSION {
-                    return Err(ProtocolError::VersionMismatch {
-                        ours: PROTOCOL_VERSION,
-                        theirs: *protocol_version,
-                    });
-                }
+                check_protocol_version(*protocol_version)?;
                 check_id("device_id", device_id)?;
                 check_len("device_name", device_name, MAX_DEVICE_NAME_BYTES)?;
                 if let Some(profile) = profile {
@@ -222,6 +232,16 @@ impl SyncMessage {
     }
 }
 
+fn check_protocol_version(protocol_version: u32) -> Result<(), ProtocolError> {
+    if protocol_version != PROTOCOL_VERSION {
+        return Err(ProtocolError::VersionMismatch {
+            ours: PROTOCOL_VERSION,
+            theirs: protocol_version,
+        });
+    }
+    Ok(())
+}
+
 /// The protocol crate cannot depend on core (core owns the sync source), so it
 /// checks the strict JSON envelope shape here. Core then decodes the PNG under
 /// allocation limits before any row is stored.
@@ -234,11 +254,15 @@ fn valid_payload_metadata(value: &str, content_type: &str) -> bool {
     let is_file = content_type == copypaste_ipc::content_type::FILE;
     let valid_file = |value: &Value| match value {
         Value::Object(file) => {
-            file.len() == 2
+            (file.len() == 2 || file.len() == 3)
                 && file.contains_key("filename")
                 && file.contains_key("mime_type")
+                && file.keys().all(|key| {
+                    matches!(key.as_str(), "filename" | "mime_type" | "source_reference")
+                })
                 && file.get("filename").is_some_and(Value::is_string)
                 && file.get("mime_type").is_some_and(Value::is_string)
+                && file.get("source_reference").is_none_or(Value::is_string)
         }
         _ => false,
     };
@@ -273,7 +297,7 @@ fn valid_payload_metadata(value: &str, content_type: &str) -> bool {
         && icon.is_none_or(valid_icon)
 }
 
-fn validate_device_profile(profile: &DeviceProfile) -> Result<(), ProtocolError> {
+pub(crate) fn validate_device_profile(profile: &DeviceProfile) -> Result<(), ProtocolError> {
     for (field, value, max) in [
         ("app_version", profile.app_version.as_deref(), 64),
         ("os_name", profile.os_name.as_deref(), 64),
@@ -339,7 +363,7 @@ mod tests {
     };
     use crate::DeviceProfile;
 
-    use super::ProtocolError;
+    use super::{valid_payload_metadata, ProtocolError};
 
     fn summary(id: &str) -> ItemSummary {
         ItemSummary {
@@ -566,6 +590,18 @@ mod tests {
     }
 
     #[test]
+    fn file_metadata_accepts_a_bounded_source_reference_shape() {
+        assert!(valid_payload_metadata(
+            r#"{"filename":"report.pdf","mime_type":"application/pdf","source_reference":"/Users/person/Documents/report.pdf"}"#,
+            copypaste_ipc::content_type::FILE,
+        ));
+        assert!(!valid_payload_metadata(
+            r#"{"filename":"report.pdf","mime_type":"application/pdf","source_reference":42}"#,
+            copypaste_ipc::content_type::FILE,
+        ));
+    }
+
+    #[test]
     fn every_content_shape_has_an_inclusive_payload_boundary() {
         // Test inputs, not a second content-type policy: the IPC owner
         // classifies these shapes for all transports.
@@ -788,6 +824,24 @@ mod tests {
                 field: "device_name",
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn probe_rejects_an_oversized_device_profile() {
+        let err = SyncMessage::Probe {
+            protocol_version: PROTOCOL_VERSION,
+            nonce: 7,
+            profile: Some(DeviceProfile {
+                model: Some("x".repeat(129)),
+                ..DeviceProfile::default()
+            }),
+        }
+        .validate()
+        .expect_err("oversized profile must not enter a probe");
+        assert!(matches!(
+            err,
+            ProtocolError::FieldTooLong { field: "model", .. }
         ));
     }
 

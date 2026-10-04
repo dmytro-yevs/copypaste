@@ -643,6 +643,13 @@ mod tests {
                 .map(|metadata| metadata.filename.as_str()),
             Some("copypaste-fixture.txt")
         );
+        assert_eq!(
+            capture
+                .file_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.source_reference.as_deref()),
+            Some(r"C:\copypaste-fixture.txt")
+        );
         assert!(capture
             .file_path
             .as_ref()

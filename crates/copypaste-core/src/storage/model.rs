@@ -174,6 +174,9 @@ pub enum StoreError {
     #[error("that page marker is not valid")]
     InvalidCursor,
 
+    #[error("that history query is not valid")]
+    InvalidHistoryQuery,
+
     #[error("a device name must contain visible text")]
     InvalidDeviceName,
 }

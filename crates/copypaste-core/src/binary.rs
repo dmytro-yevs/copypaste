@@ -35,29 +35,55 @@ pub struct BinaryMetadata {
     pub content_hash: String,
 }
 
-/// User-facing attributes of an opaque payload.  It never contains a source
-/// path: retaining a path would leak a username through IPC, sync and logs.
+/// User-facing attributes of an opaque file payload.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FileMetadata {
     pub filename: String,
     pub mime_type: String,
+    /// The original platform locator captured with the file. Desktop capture
+    /// stores an absolute path; Android stores the provider's `content://` URI.
+    /// It is optional so file clips written by older versions remain readable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_reference: Option<String>,
 }
 
 impl FileMetadata {
     pub fn new(filename: impl Into<String>, mime_type: impl Into<String>) -> Option<Self> {
-        let filename = filename.into();
-        let mime_type = mime_type.into();
+        Self::build(filename.into(), mime_type.into(), None)
+    }
+
+    pub fn with_source_reference(
+        filename: impl Into<String>,
+        mime_type: impl Into<String>,
+        source_reference: impl Into<String>,
+    ) -> Option<Self> {
+        Self::build(
+            filename.into(),
+            mime_type.into(),
+            Some(source_reference.into()),
+        )
+    }
+
+    fn build(
+        filename: String,
+        mime_type: String,
+        source_reference: Option<String>,
+    ) -> Option<Self> {
         (filename.len() <= 255
             && !filename.is_empty()
             && std::path::Path::new(&filename)
                 .file_name()
                 .is_some_and(|name| name == std::ffi::OsStr::new(&filename))
             && mime_type.len() <= 255
-            && mime_type.contains('/'))
+            && mime_type.contains('/')
+            && source_reference.as_ref().is_none_or(|reference| {
+                !reference.is_empty() && reference.len() <= 4096 && !reference.contains('\0')
+            }))
         .then_some(Self {
             filename,
             mime_type,
+            source_reference,
         })
     }
 
@@ -72,7 +98,12 @@ impl FileMetadata {
 
     #[must_use]
     pub fn is_valid(&self) -> bool {
-        Self::new(self.filename.clone(), self.mime_type.clone()).is_some()
+        Self::build(
+            self.filename.clone(),
+            self.mime_type.clone(),
+            self.source_reference.clone(),
+        )
+        .is_some()
     }
 }
 
@@ -748,11 +779,28 @@ mod tests {
     }
 
     #[test]
-    fn transport_metadata_rejects_a_path_even_after_deserializing() {
+    fn transport_metadata_rejects_a_path_in_the_filename() {
         assert!(FileMetadata::from_json(
             r#"{"filename":"../private.txt","mime_type":"text/plain"}"#
         )
         .is_none());
+    }
+
+    #[test]
+    fn file_metadata_preserves_a_bounded_source_reference() {
+        let metadata = FileMetadata::with_source_reference(
+            "private.txt",
+            "text/plain",
+            "/Users/person/Documents/private.txt",
+        )
+        .unwrap();
+        let json = serde_json::to_string(&metadata).unwrap();
+
+        assert_eq!(FileMetadata::from_json(&json), Some(metadata));
+        assert!(
+            FileMetadata::with_source_reference("private.txt", "text/plain", "x".repeat(4097),)
+                .is_none()
+        );
     }
 
     #[test]

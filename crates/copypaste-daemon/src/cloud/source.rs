@@ -753,7 +753,7 @@ mod tests {
     #[test]
     fn a_file_versions_metadata_round_trips_between_cloud_and_local_storage() {
         let (source, state, _dir) = source("file-metadata");
-        let metadata = r#"{"filename":"report.pdf","mime_type":"application/pdf"}"#;
+        let metadata = r#"{"filename":"report.pdf","mime_type":"application/pdf","source_reference":"/Users/person/Documents/report.pdf"}"#;
         source
             .apply_remote(LocalItem {
                 item_id: "file-from-cloud".into(),
