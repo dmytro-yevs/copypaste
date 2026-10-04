@@ -28,7 +28,7 @@ grep -q '^Verifies$' <<<"$signature" || {
 }
 actual_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' <<<"$signature" | head -n 1 | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')"
 [[ "$actual_cert" == "$(tr '[:upper:]' '[:lower:]' <<<"$EXPECTED_CERT")" ]] || {
-    echo "ERROR: APK signer does not match the pinned production certificate" >&2
+    echo "ERROR: APK signer does not match the pinned production certificate: expected=$EXPECTED_CERT actual=$actual_cert" >&2
     exit 1
 }
 
