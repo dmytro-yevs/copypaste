@@ -28,6 +28,9 @@ pub const MAX_PAGE_SIZE: usize = 100;
 mod query;
 mod reader;
 
+#[cfg(feature = "test-support")]
+pub mod test_support;
+
 pub use query::list;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
