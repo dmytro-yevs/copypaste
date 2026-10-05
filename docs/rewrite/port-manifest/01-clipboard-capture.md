@@ -20,8 +20,8 @@ The capture boundary owns:
 
 - deciding whether the clipboard changed before reading a representation;
 - suppressing app-owned writes exactly once;
-- applying platform opt-outs, private mode and source-app exclusions before a
-  representation is accessed under the platform's available source evidence;
+- applying private mode and source-app exclusions before a representation is
+  accessed under the platform's available source evidence;
 - selecting, materializing and size-gating one text, image or supported File value;
 - handing the value to the shared encrypted ingest path;
 - reporting lost intermediate changes and size rejections without exposing
@@ -46,9 +46,9 @@ but may not restate their formats or decisions.
   the first operation; an idle poll performs no representation read.
 - **I-2:** The initial cursor is outside the valid non-negative sequence domain.
   The first observation is a change, never a burst.
-- **I-3:** Every drop path acknowledges the observed sequence. Opt-outs,
-  self-writes, private mode, exclusions, empty text and unsupported formats must
-  not be re-offered forever.
+- **I-3:** Every drop path acknowledges the observed sequence. Self-writes,
+  private mode, exclusions, empty text and unsupported formats must not be
+  re-offered forever.
 - **I-4:** Burst loss is computed from the cursor value that preceded the
   observation, then the cursor advances.
 
@@ -79,9 +79,7 @@ the same primitive.
 
 ### 3.1 Pre-read privacy gates
 
-- **I-5:** Platform do-not-record markers are probed before any representation
-  is read. macOS checks all three `org.nspasteboard.*` opt-out types; Windows
-  applies its maintained opt-out vocabulary.
+- **I-5:** Third-party sensitivity and opt-out metadata do not independently suppress capture. No sensitivity detector or marker filter is enabled.
 - **I-6:** Private mode acknowledges changes and stores nothing.
 - **I-7:** With exclusions configured, macOS denies incomplete generation
   coverage or a candidate set containing any excluded app before type, data,
@@ -266,8 +264,7 @@ unchanged. The shared SourceAppLabel owns every displayed icon/name pair.
 
 ### 7.2 Privacy and limits
 
-- Each platform opt-out marker independently prevents a content read; mixed
-  markers do the same.
+- Sensitivity or opt-out metadata does not add a capture gate. Private mode, explicit exclusions, generation fences and size limits remain independently enforced.
 - Private mode stores nothing and disabling it does not replay values copied
   while it was active.
 - Incomplete coverage with exclusions skips without type/data/object/file calls;
@@ -315,9 +312,8 @@ unchanged. The shared SourceAppLabel owns every displayed icon/name pair.
 ### 7.4 Platform and lifecycle
 
 - macOS and Windows backends run the shared change-tracker suite.
-- Native platform tests prove the unchanged fast path, opt-out probes,
-  self-write suppression, size boundary and source attribution against the real
-  clipboard API.
+- Native platform tests prove the unchanged fast path, self-write suppression,
+  size boundary and source attribution against the real clipboard API.
 - The fake backend identifies itself in status and cannot be mistaken for a
   shipping backend.
 - A capture storm cannot kill the poll loop or overflow into plaintext-bearing

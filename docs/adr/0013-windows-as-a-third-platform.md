@@ -39,9 +39,8 @@ the sealed blob in the data directory. The file-backed store is limited to
 non-shipped targets. Fail-closed behaviour remains unchanged: no entry may mint
 a secret, while an unusable entry must not.
 
-**Clipboard capture.** `clipboard::ClipboardSource` is the seam. The Windows
-implementation uses the Windows change cursor and Windows opt-out formats;
-native capture evidence remains separately required.
+**Clipboard capture.** `clipboard::ClipboardSource` is the seam.
+The Windows implementation uses the Windows change cursor and clipboard-owner evidence; native capture evidence remains separately required.
 
 **Shell, packaging and updates.** Windows-specific service, hotkey, updater,
 and packaging code is maintained under the Tauri and release owners. The
