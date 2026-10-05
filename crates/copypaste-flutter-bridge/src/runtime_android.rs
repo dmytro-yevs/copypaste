@@ -12,7 +12,7 @@ use std::sync::{Arc, OnceLock};
 
 use jni::{
     objects::{GlobalRef, JByteArray, JClass, JObject, JValue},
-    sys::{jboolean, JNI_FALSE, JNI_TRUE},
+    sys::{jboolean, jlong, JNI_FALSE, JNI_TRUE},
     JNIEnv, JavaVM,
 };
 
@@ -21,12 +21,6 @@ use jni::{
 static APPLICATION_CONTEXT: OnceLock<GlobalRef> = OnceLock::new();
 static JAVA_VM: OnceLock<JavaVM> = OnceLock::new();
 static RUNTIME: OnceLock<Arc<copypaste_runtime::Runtime>> = OnceLock::new();
-
-pub(crate) fn shutdown() {
-    if let Some(runtime) = RUNTIME.get() {
-        runtime.shutdown();
-    }
-}
 
 /// Initializes the context required by `android-native-keyring-store`.
 ///
@@ -130,30 +124,39 @@ pub extern "system" fn Java_com_copypaste_app_MainActivity_initializeRuntime(
     }
 }
 
-/// Releases listener tasks when Android finishes the application activity.
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_copypaste_app_MainActivity_shutdownRuntime(
+pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_openHost(
     _env: JNIEnv,
     _class: JClass,
-) {
-    shutdown();
+    explicit: jboolean,
+) -> jlong {
+    RUNTIME
+        .get()
+        .and_then(|runtime| {
+            runtime
+                .capture_admission()
+                .open_host(if explicit == JNI_TRUE {
+                    copypaste_runtime::capture_admission::CaptureKind::Explicit
+                } else {
+                    copypaste_runtime::capture_admission::CaptureKind::Implicit
+                })
+        })
+        .unwrap_or(0) as jlong
 }
 
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestText(
-    mut env: JNIEnv,
+pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_revokeHost(
+    _env: JNIEnv,
     _class: JClass,
-    text: JObject,
+    host: jlong,
 ) -> jboolean {
-    let Some(runtime) = RUNTIME.get() else {
-        return JNI_FALSE;
-    };
-    let Ok(text) = env.get_string((&text).into()) else {
-        return JNI_FALSE;
-    };
-    if runtime.capture_text(&text.to_string_lossy()).is_ok() {
+    if host > 0
+        && RUNTIME
+            .get()
+            .is_some_and(|runtime| runtime.capture_admission().revoke_host(host as u64).is_ok())
+    {
         JNI_TRUE
     } else {
         JNI_FALSE
@@ -162,21 +165,144 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestText(
 
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestExplicitText(
+pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_drainHost(
+    _env: JNIEnv,
+    _class: JClass,
+    host: jlong,
+) -> jboolean {
+    if host > 0
+        && RUNTIME
+            .get()
+            .is_some_and(|runtime| runtime.capture_admission().drain_host(host as u64).is_ok())
+    {
+        JNI_TRUE
+    } else {
+        JNI_FALSE
+    }
+}
+
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_begin(
     mut env: JNIEnv,
     _class: JClass,
+    host: jlong,
+    cancellation: JObject,
+) -> jlong {
+    if host <= 0 {
+        return 0;
+    }
+    let Some(runtime) = RUNTIME.get() else {
+        return 0;
+    };
+    let Ok(callback) = env.new_global_ref(cancellation) else {
+        return 0;
+    };
+    runtime
+        .capture_admission()
+        .begin(
+            host as u64,
+            Arc::new(move || {
+                if let Some(vm) = JAVA_VM.get() {
+                    if let Ok(mut env) = vm.attach_current_thread() {
+                        if env
+                            .call_method(callback.as_obj(), "run", "()V", &[])
+                            .is_err()
+                        {
+                            let _ = env.exception_clear();
+                        }
+                    }
+                }
+            }),
+        )
+        .unwrap_or(0) as jlong
+}
+
+/// Rust keeps the owned permit through Java execution and every exception path.
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_scoped(
+    mut env: JNIEnv,
+    _class: JClass,
+    token: jlong,
+    completion: jboolean,
+    content_type: JObject,
+    callback: JObject,
+) -> jboolean {
+    if token <= 0 {
+        return JNI_FALSE;
+    }
+    let Some(runtime) = RUNTIME.get() else {
+        return JNI_FALSE;
+    };
+    let scope = if completion == JNI_TRUE {
+        copypaste_runtime::capture_admission::CaptureScope::Completion
+    } else {
+        copypaste_runtime::capture_admission::CaptureScope::Read
+    };
+    let Some(permit) = runtime.capture_admission().acquire(token as u64, scope) else {
+        return JNI_FALSE;
+    };
+    let Ok(content_type) = env.get_string((&content_type).into()) else {
+        return JNI_FALSE;
+    };
+    let limit = permit
+        .config
+        .capture_limit_bytes(&content_type.to_string_lossy());
+    if env
+        .call_method(
+            callback,
+            "run",
+            "(J)V",
+            &[JValue::Long(limit.min(i64::MAX as u64) as jlong)],
+        )
+        .is_ok()
+    {
+        JNI_TRUE
+    } else {
+        let _ = env.exception_clear();
+        JNI_FALSE
+    }
+}
+
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_abandon(
+    _env: JNIEnv,
+    _class: JClass,
+    token: jlong,
+) {
+    if let Some(runtime) = RUNTIME.get() {
+        runtime.capture_admission().abandon(token as u64);
+    }
+}
+
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestText(
+    mut env: JNIEnv,
+    _class: JClass,
+    token: jlong,
     text: JObject,
 ) -> jboolean {
+    if token <= 0 {
+        return JNI_FALSE;
+    }
     let Some(runtime) = RUNTIME.get() else {
+        return JNI_FALSE;
+    };
+    let Some(read) = runtime.capture_admission().acquire(
+        token as u64,
+        copypaste_runtime::capture_admission::CaptureScope::Read,
+    ) else {
         return JNI_FALSE;
     };
     let Ok(text) = env.get_string((&text).into()) else {
         return JNI_FALSE;
     };
-    if runtime
-        .capture_explicit_text(&text.to_string_lossy())
-        .is_ok()
-    {
+    let text = text.to_string_lossy().into_owned();
+    drop(read);
+    if runtime.capture_text_operation(token as u64, &text).is_ok() {
         JNI_TRUE
     } else {
         JNI_FALSE
@@ -188,52 +314,22 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestExplici
 pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestBinary(
     mut env: JNIEnv,
     _class: JClass,
+    token: jlong,
     bytes: JByteArray,
     content_type: JObject,
     filename: JObject,
     source_reference: JObject,
 ) -> jboolean {
-    let Some(runtime) = RUNTIME.get() else {
+    if token <= 0 {
         return JNI_FALSE;
-    };
-    let (Ok(bytes), Ok(content_type), Ok(filename), Ok(source_reference)) = (
-        env.convert_byte_array(bytes),
-        env.get_string((&content_type).into()),
-        env.get_string((&filename).into()),
-        env.get_string((&source_reference).into()),
-    ) else {
-        return JNI_FALSE;
-    };
-    let filename = filename.to_string_lossy();
-    let filename = (!filename.is_empty()).then_some(filename.as_ref());
-    let source_reference = source_reference.to_string_lossy();
-    let source_reference = (!source_reference.is_empty()).then_some(source_reference.as_ref());
-    if runtime
-        .capture_binary(
-            &bytes,
-            &content_type.to_string_lossy(),
-            filename,
-            source_reference,
-        )
-        .is_ok()
-    {
-        JNI_TRUE
-    } else {
-        JNI_FALSE
     }
-}
-
-#[allow(non_snake_case)]
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestExplicitBinary(
-    mut env: JNIEnv,
-    _class: JClass,
-    bytes: JByteArray,
-    content_type: JObject,
-    filename: JObject,
-    source_reference: JObject,
-) -> jboolean {
     let Some(runtime) = RUNTIME.get() else {
+        return JNI_FALSE;
+    };
+    let Some(read) = runtime.capture_admission().acquire(
+        token as u64,
+        copypaste_runtime::capture_admission::CaptureScope::Read,
+    ) else {
         return JNI_FALSE;
     };
     let (Ok(bytes), Ok(content_type), Ok(filename), Ok(source_reference)) = (
@@ -244,16 +340,17 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestExplici
     ) else {
         return JNI_FALSE;
     };
-    let filename = filename.to_string_lossy();
-    let filename = (!filename.is_empty()).then_some(filename.as_ref());
-    let source_reference = source_reference.to_string_lossy();
-    let source_reference = (!source_reference.is_empty()).then_some(source_reference.as_ref());
+    let content_type = content_type.to_string_lossy().into_owned();
+    let filename = filename.to_string_lossy().into_owned();
+    let source_reference = source_reference.to_string_lossy().into_owned();
+    drop(read);
     if runtime
-        .capture_explicit_binary(
+        .capture_binary_operation(
+            token as u64,
             &bytes,
-            &content_type.to_string_lossy(),
-            filename,
-            source_reference,
+            &content_type,
+            (!filename.is_empty()).then_some(filename.as_str()),
+            (!source_reference.is_empty()).then_some(source_reference.as_str()),
         )
         .is_ok()
     {
@@ -272,22 +369,6 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_setCaptureRun
 ) {
     if let Some(runtime) = RUNTIME.get() {
         runtime.set_capture_running(running == JNI_TRUE);
-    }
-}
-
-#[allow(non_snake_case)]
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_isImplicitCaptureAllowed(
-    _env: JNIEnv,
-    _class: JClass,
-) -> jboolean {
-    if RUNTIME
-        .get()
-        .is_some_and(|runtime| runtime.implicit_capture_allowed())
-    {
-        JNI_TRUE
-    } else {
-        JNI_FALSE
     }
 }
 

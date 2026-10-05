@@ -1,12 +1,14 @@
 # Port Manifest 01 — Clipboard Capture
 
 This manifest specifies the current v2 clipboard-capture contract. Native
-capture accepts one representation: plain text, RTF, HTML, PNG, TIFF, or one
-local file URL, in that priority order. A text representation wins over every
-fallback. File capture reads one regular local file only on the blocking worker,
-enforces the live file limit before allocation, and retains no source path. A
-multi-file clipboard change is unsupported until the capture port owns a batch
-rather than silently dropping all but one file.
+capture selects one representation: a native single File first, then plain text,
+RTF, HTML, PNG, TIFF (plus the existing Windows bitmap fallback). A native File
+wins over a textual filename or path; a failed selected File never falls back
+to Text. Without a native File, plain text wins over the remaining fallbacks.
+File capture freezes bytes of one accessible nonempty regular local file on an
+admitted blocking worker, within the live file limit and shared hard cap. It
+retains the resolved absolute locator and existing FileMetadata. Zero-byte
+files and multiple total pasteboard items remain explicitly unsupported.
 
 The implementation has one platform-neutral change tracker, one capture policy
 and one ingest path. Platform backends own only the OS calls needed to observe
@@ -18,9 +20,9 @@ The capture boundary owns:
 
 - deciding whether the clipboard changed before reading a representation;
 - suppressing app-owned writes exactly once;
-- applying platform opt-outs, private mode and source-app exclusions before a
-  value enters process memory;
-- reading and size-gating a plain-text value;
+- applying private mode and source-app exclusions before a representation is
+  accessed under the platform's available source evidence;
+- selecting, materializing and size-gating one text, image or supported File value;
 - handing the value to the shared encrypted ingest path;
 - reporting lost intermediate changes and size rejections without exposing
   content.
@@ -44,9 +46,9 @@ but may not restate their formats or decisions.
   the first operation; an idle poll performs no representation read.
 - **I-2:** The initial cursor is outside the valid non-negative sequence domain.
   The first observation is a change, never a burst.
-- **I-3:** Every drop path acknowledges the observed sequence. Opt-outs,
-  self-writes, private mode, exclusions, empty text and unsupported formats must
-  not be re-offered forever.
+- **I-3:** Every drop path acknowledges the observed sequence. Self-writes,
+  private mode, exclusions, empty text and unsupported formats must not be
+  re-offered forever.
 - **I-4:** Burst loss is computed from the cursor value that preceded the
   observation, then the cursor advances.
 
@@ -77,33 +79,67 @@ the same primitive.
 
 ### 3.1 Pre-read privacy gates
 
-- **I-5:** Platform do-not-record markers are probed before any representation
-  is read. macOS checks all three `org.nspasteboard.*` opt-out types; Windows
-  applies its maintained opt-out vocabulary.
+- **I-5:** Third-party sensitivity and opt-out metadata do not independently suppress capture. No sensitivity detector or marker filter is enabled.
 - **I-6:** Private mode acknowledges changes and stores nothing.
-- **I-7:** When source exclusions are configured and the source application
-  cannot be attributed, capture fails closed for that change. With no exclusion
-  configured, missing attribution alone does not suppress capture.
-- **I-8:** Source attribution still runs when the exclusion set is empty so
-  captured items retain provenance when the platform makes it available.
-- **I-9:** Logs and public errors contain no clipboard content, filename, path or
-  recoverable content fingerprint. Bounded counts, sequence values, item ids and
-  bundle/package identifiers are permitted.
+- **I-7:** With exclusions configured, macOS denies incomplete generation
+  coverage or a candidate set containing any excluded app before type, data,
+  native object or file access. Complete known-allowed coverage may capture
+  with ambiguous display identity. Generic missing owner evidence fails closed;
+  an empty exclusion list permits unavailable identity.
+- **I-8:** macOS source metadata is a foreground-derived estimate. Only complete
+  single-candidate evidence retains a name/bundle; ambiguous or unavailable
+  evidence leaves both fields absent. Windows preserves identified clipboard
+  owner metadata. Android denies implicit capture with configured exclusions
+  because it has no source witness. The shared inspector says Observed app;
+  absent metadata omits the identity component rather than inventing an app.
+- **I-9:** Logs and public errors contain no clipboard content, filename, path,
+  URL or recoverable content fingerprint. File capture emits only fixed stage
+  categories and bounded events, never item ids, digests, source identities,
+  native error descriptions or dynamic I/O errors.
 - **I-10:** A plaintext dedup digest is never logged with correlating metadata.
 
-Explicit user exclusion prevents capture entirely.
+macOS skips observed excluded activity. Arbitrary unobserved background or
+delayed writers may bypass exclusions; foreground/count evidence does not
+authenticate the clipboard writer. Pause remains the way to stop all automatic
+capture. Recorded fences reject an invalidated read result before ingest or
+publication, but cannot undo an OS read already raced by an unobserved writer.
 
 ### 3.2 Current representation contract
 
-- **I-11:** One representation is selected in this order: plain text, RTF,
-  HTML, PNG, TIFF, then one local file URL. If plain text is offered, it is the
-  single captured value.
-- Text, image, and file values use their live limit and the shared hard content
-  cap. The smaller applicable bound wins.
-- The native length is checked before copying bytes into an owned buffer.
-- A file URL is accepted only when it resolves to one local path. The blocking
-  ingest worker checks that it is a regular file and limits the read before
-  allocating its bytes. Network URLs and multi-file changes are unsupported.
+- **I-11:** Select native File before text, RTF, HTML, PNG and TIFF. Without
+  File, offered plain text is the single captured value. A selected
+  representation's failure is terminal for that acknowledged generation.
+- Text, image and File values use min(live content limit, shared hard cap).
+- Native data length is checked before copying representation bytes. For macOS
+  File, require exactly one total pasteboard item before the length preflight;
+  do not copy or parse the raw URL data. Read only NSURL objects with the
+  file-only option, require one NSURL and resolve with filePathURL.
+- macOS accepts only local file URLs with empty/localhost authority and no
+  credentials, port, query or fragment. A bounded filesystem representation
+  becomes an absolute PathBuf with strict UTF-8 locator/basename metadata.
+  File-reference URLs resolve natively; paths are not percent-decoded again or
+  rewritten with guessed synthetic-reference rules.
+- Keep the original NSURL alive through the synchronous read. Temporary
+  security-scope access stops exactly once only when start succeeded. A false
+  start still permits ordinary filesystem access; scope does not bypass TCC.
+- **I-16:** All file I/O runs on the admitted blocking worker. macOS returns
+  owned FILE bytes plus existing metadata and no deferred path after its final
+  generation/coverage fence. Windows keeps its native deferred path output;
+  capture normalizes it once under policy authority before Pending acceptance.
+- Open one read-only descriptor, then check descriptor regularity and nonzero
+  length before allocation. Unix uses CLOEXEC, NONBLOCK and NOCTTY; this avoids
+  FIFO-open waits and controlling-terminal acquisition, not all possible I/O
+  delays. Preserve symlinks to regular files. Read into at most observed length
+  plus one sentinel byte; never use an unbounded growing read_to_end allocation.
+  Reject partial reads or observed length/modification/descriptor changes.
+- Zero-byte, multi-item, directory/nonregular, nonlocal, missing/unreadable,
+  unavailable native object/resolution and invalid metadata inputs are typed
+  terminal rejections. They create no row or Text fallback. No file promise,
+  bookmark, coordination or provider download workflow is implemented.
+- A normal accessible resident provider file may follow the local route. OS
+  reads may implicitly trigger provider work or block indefinitely. No atomic
+  filesystem snapshot or hard read-duration bound is promised; consistency
+  checks can miss concurrent same-size writes with coarse timestamps.
 - Unsupported types may increment bounded telemetry, but their names and
   payloads are not logged repeatedly.
 
@@ -120,15 +156,30 @@ refuses the operation instead of coercing bytes through text.
 - **I-21:** Every helper process is reaped on success, failure and cancellation.
 - **I-36:** A malformed value, platform error, blocking-task failure,
   encryption failure or database failure cannot kill the monitor loop.
-- **I-39:** A size rejection increments a readable diagnostic counter. It is not
-  represented only by a log line.
+- **I-39:** Native adapter size rejections increment the existing readable
+  adapter counter. macOS includes its admitted File descriptor-cap rejections.
+  Shared deferred-file normalization and later live-policy or ingest-size
+  rejections are outside that counter and use the bounded outcome/event path.
+  The adapter counter is not a total of every rejected input.
 
-An accepted capture retries only typed transient storage busy/locked and
-interrupted/would-block/timed-out file failures. It retains its original payload
-and timestamp, rechecks current privacy and exclusion policy before each retry,
-and reads current retention at persistence. Policy cancellation, storage, and
-permanent failure are distinct terminal outcomes; no capture event precedes
-successful persistence.
+An accepted capture retries only the existing typed transient storage failures:
+busy/locked databases and interrupted/would-block/timed-out storage file I/O.
+Input-file failures are distinct from policy cancellation, core Empty and
+storage failure; they are never storage retries. Before Pending acceptance,
+deferred file input is read once into owned bytes. Every retry retains exactly
+those bytes, FileMetadata, source evidence and original timestamp; changing or
+deleting the source cannot change the retry payload.
+
+Desktop settings changes and one complete capture read/ingest/announcement
+attempt share Settings.applying authority. The current-settings RwLock is held
+only for the short snapshot, never across native/file/storage I/O. If settings
+wins first, denied later attempts make no payload/file calls. If capture wins,
+its admitted operation may finish before the settings response. Each retry
+reacquires authority and checks live limits and the captured privacy epoch.
+Private-mode or exclusion transitions revoke Pending even across A to B to A;
+a later clipboard generation alone does not revoke an already frozen payload.
+No announcement occurs until shared core persistence succeeds. Read or storage
+calls may delay the operation and settings response; cancellation is cooperative.
 
 The platform poll interval, live limits, private mode and exclusion policy are
 read from current settings. A change takes effect without restarting the
@@ -159,6 +210,20 @@ It does not construct a storage row or encryption envelope independently.
 
 Capture never inserts into FTS directly.
 
+File bytes use the existing core binary identity, AEAD envelope, dedup and
+SQLCipher persistence. FileMetadata remains in its existing metadata column;
+this repair changes no wire, envelope, database or sync schema. Metadata retains
+basename, generic MIME and optional original source_reference, and existing
+authenticated sync may carry the locator. It is not an ongoing access token or
+promise that the source remains unchanged or available.
+
+Locator-bearing File Copy writes the stored Path/URI as text through the shared
+write_payload/self-write route, even after source deletion. Reference-free
+legacy File Copy retains existing authenticated-byte staging and native
+paste-back. No source rename, rewrite, deletion, permission broadening, bookmark
+store or plaintext metadata cache is part of capture. source_available remains
+the existing local-origin/is_file heuristic, not proof of access or byte freshness.
+
 ## 6. Source-app policy
 
 The installed-application catalogue is the selection source for exclusions.
@@ -166,10 +231,22 @@ Persisted values are stable package/bundle identifiers; display names are
 presentation only. Entries missing from the current launcher catalogue remain
 removable so an uninstalled application cannot strand an exclusion forever.
 
-Attribution work is cached for a short bounded interval, runs off the async
-reactor and is invalidated on focus/application changes as the platform allows.
-Resolution failure follows I-7 and never fabricates a source identity from a
-display string.
+macOS source observation is owned on the original main thread, while typed
+generation coverage and admission run on the blocking poll worker. Coverage
+retains excluded/unknown debt across unchanged samples. Every fresh accepted or
+rejected generation consumes only its sampled interval and retains later real
+events. A consumed Unknown boundary can recover through a same-count,
+service/event-fenced known getter when no later real event or gap is skipped;
+idle duration alone cannot erase debt. A clean later interval must recover.
+
+Only a complete single-candidate interval exposes an observed name/bundle.
+Multiple known allowed candidates may permit capture with null identity.
+Incomplete/unknown/service-reset/evicted coverage denies with exclusions. Public
+foreground/count observations cannot identify arbitrary unobserved background
+writers or prove that several delayed writes belonged to the consumed interval.
+The Settings wording reflects these platform limits; old/synced metadata is not
+migrated or guessed. Windows retains its owner resolver; Android admission is
+unchanged. The shared SourceAppLabel owns every displayed icon/name pair.
 
 ## 7. Acceptance tests
 
@@ -187,26 +264,46 @@ display string.
 
 ### 7.2 Privacy and limits
 
-- Each platform opt-out marker independently prevents a content read; mixed
-  markers do the same.
+- Sensitivity or opt-out metadata does not add a capture gate. Private mode, explicit exclusions, generation fences and size limits remain independently enforced.
 - Private mode stores nothing and disabling it does not replay values copied
   while it was active.
-- Unknown attribution with a non-empty exclusion list skips; the same unknown
-  attribution with an empty list captures.
-- The exact size boundary succeeds, one byte over fails before owned allocation,
-  and the readable rejection counter increases.
+- Incomplete coverage with exclusions skips without type/data/object/file calls;
+  empty exclusions permit unknown source. Complete all-known-allowed ambiguous
+  coverage captures with absent identity. Any excluded candidate denies.
+- Unchanged polls preserve excluded/unknown debt; consumed Unknown recovery
+  permits the first clean later generation without erasing later real events.
+- Generation/service/coverage replacement during decode, resolution or file
+  read prevents publication; newer generations remain available.
+- Both config routes serialize capture and response. Settings first makes no
+  reads; capture first finishes announcement before settings response. Pending
+  private/exclusion A to B to A cancels without read, ingest or announcement.
+- Exact native representation size boundaries succeed; one byte over is
+  rejected before copying into an owned buffer and increments the adapter
+  counter. macOS File descriptor-cap rejections also increment that counter.
+  Deferred-file descriptor and later live-policy/ingest cap rejections assert
+  their bounded outcomes separately, without an adapter-counter increase.
 - Captured content, paths and fingerprints are absent from logs and rendered
   errors on success and failure paths.
 
 ### 7.3 Representation and ingest
 
-- A mixed clipboard offering text plus any binary format captures text without
-  reading the binary representation.
+- A single native File plus textual filename/path captures File once. Without
+  File, plain text wins over rich-text/image representations. A failed selected
+  File creates no Text fallback.
 - A supported non-text fallback captures one RTF, HTML, image, or local file
   representation; unsupported and multi-file changes are acknowledged without
   creating a row.
-- Empty, malformed and invalid-UTF-8 platform values fail without panic or
-  monitor termination.
+- Empty text is skipped; malformed text preserves the established lossy UTF-8
+  behavior. Invalid File URL/path/metadata is explicitly rejected without lossily
+  inventing its locator. Zero-byte and multi-item File inputs are unsupported.
+- NSURL path and asserted file-reference fixtures preserve 32-byte no-extension,
+  87-byte Unicode/spaces and literal percent/hash names. Native fixtures are
+  isolated and require separate execution authorization.
+- Descriptor regularity, exact-cap success, oversize, missing/denied/nonregular,
+  partial-read/mutation, bounded allocation and scope balancing are covered.
+- Busy retries preserve File bytes/evidence/time after source mutation/deletion,
+  with no event before persistence. Locator text Copy and reference-free legacy
+  staging remain compatible; shared encrypted-byte/metadata roundtrip succeeds.
 - Identical captured content creates one row and refreshes it; a dedup-query
   failure still preserves the new capture.
 - Dedup notification ids always resolve to a stored row.
@@ -215,15 +312,15 @@ display string.
 ### 7.4 Platform and lifecycle
 
 - macOS and Windows backends run the shared change-tracker suite.
-- Native platform tests prove the unchanged fast path, opt-out probes,
-  self-write suppression, size boundary and source attribution against the real
-  clipboard API.
+- Native platform tests prove the unchanged fast path, self-write suppression,
+  size boundary and source attribution against the real clipboard API.
 - The fake backend identifies itself in status and cannot be mistaken for a
   shipping backend.
 - A capture storm cannot kill the poll loop or overflow into plaintext-bearing
   events.
-- Long-running blocking work does not stall service status, shutdown or another
-  ready request.
+- Blocking work runs off the reactor. An admitted in-flight native/file/storage
+  operation may delay serialized settings or cooperative shutdown; no arbitrary
+  syscall cancellation or prompt-response bound is claimed.
 - A shutdown keeps its endpoint and refuses new mutations until an accepted
   capture and every admitted request reach an explicit terminal outcome.
 - A transiently busy accepted capture can drain past the cooperative shutdown

@@ -14,6 +14,24 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:window_manager/window_manager.dart';
 
 void main() {
+  testWidgets(
+    'macOS leaves destructive cleanup out of the native Quit request',
+    (tester) async {
+      final desktop = _QuitHookRecordingController();
+      final onboarding = _completedOnboarding();
+      addTearDown(onboarding.dispose);
+      await tester.pumpWidget(
+        CopyPasteRoot(
+          desktopWindow: desktop,
+          macosOnboardingController: onboarding,
+          runtimeEnabled: false,
+        ),
+      );
+      expect(desktop.quitHookRegistrations, Platform.isMacOS ? 0 : 1);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets('shows the injected macOS onboarding before the app shell', (
     tester,
   ) async {
@@ -329,5 +347,21 @@ class _FakeDesktopWindowHost implements DesktopWindowHost {
 
   Future<void> requestSettings() async {
     await settingsHandler?.call();
+  }
+}
+
+class _QuitHookRecordingController extends DesktopWindowController {
+  _QuitHookRecordingController()
+    : super(
+        host: _FakeDesktopWindowHost(),
+        geometryStore: const _NoopGeometryStore(),
+      );
+
+  int quitHookRegistrations = 0;
+
+  @override
+  void setBeforeQuit(Future<void> Function()? callback) {
+    if (callback != null) quitHookRegistrations += 1;
+    super.setBeforeQuit(callback);
   }
 }

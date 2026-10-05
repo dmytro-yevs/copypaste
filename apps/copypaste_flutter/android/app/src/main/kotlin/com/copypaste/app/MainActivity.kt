@@ -44,9 +44,6 @@ class MainActivity : FlutterActivity() {
         )
 
         @JvmStatic
-        private external fun shutdownRuntime()
-
-        @JvmStatic
         fun writeClipboardText(text: String): Boolean = runCatching {
             val context = requireNotNull(instance)
             (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
@@ -74,9 +71,12 @@ class MainActivity : FlutterActivity() {
     private val nativeExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private lateinit var clipboardManager: ClipboardManager
     private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
-        if (hasWindowFocus()) AndroidClipboardReader.captureForeground(this)
+        if (hasWindowFocus()) captureForegroundClipboard()
     }
     private var clipboardListenerRegistered = false
+    private var foregroundCaptureEligible = false
+    private var foregroundCaptureHost: AndroidClipboardReader.Host? = null
+    private val explicitCaptureHosts = mutableSetOf<AndroidClipboardReader.Host>()
     private var pairingLinksChannel: MethodChannel? = null
     private var androidCaptureChannel: AndroidCaptureChannel? = null
     private var pairingScannerChannel: PairingScannerChannel? = null
@@ -285,12 +285,20 @@ class MainActivity : FlutterActivity() {
     private fun handleExplicitIntake(intent: Intent?): Boolean {
         val action = intent?.action
         if (action != Intent.ACTION_SEND && action != Intent.ACTION_PROCESS_TEXT) return false
-        val captured = AndroidClipboardReader.captureExplicit(this, intent)
-        Toast.makeText(
-            this,
-            if (captured) "Saved to CopyPaste" else "CopyPaste could not save this item",
-            Toast.LENGTH_SHORT,
-        ).show()
+        val host = AndroidClipboardReader.openHost(explicit = true)
+        if (host != null) {
+            explicitCaptureHosts.add(host)
+            AndroidClipboardReader.captureExplicit(this, intent, host) { captured ->
+                explicitCaptureHosts.remove(host)
+                if (!isDestroyed) Toast.makeText(
+                    this,
+                    if (captured) "Saved to CopyPaste" else "CopyPaste could not save this item",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+        } else {
+            Toast.makeText(this, "CopyPaste could not save this item", Toast.LENGTH_SHORT).show()
+        }
         setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
         return true
     }
@@ -298,6 +306,8 @@ class MainActivity : FlutterActivity() {
     override fun onResume() {
         super.onResume()
         isForeground = true
+        foregroundCaptureEligible = true
+        refreshForegroundCapture()
         if (!clipboardListenerRegistered) {
             clipboardManager.addPrimaryClipChangedListener(clipboardListener)
             clipboardListenerRegistered = true
@@ -307,17 +317,42 @@ class MainActivity : FlutterActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus && clipboardListenerRegistered) {
-            AndroidClipboardReader.captureForeground(this)
+            captureForegroundClipboard()
         }
     }
 
     override fun onPause() {
         isForeground = false
+        foregroundCaptureEligible = false
+        AndroidClipboardReader.retireForeground(foregroundCaptureHost)
+        foregroundCaptureHost = null
         if (clipboardListenerRegistered) {
             clipboardManager.removePrimaryClipChangedListener(clipboardListener)
             clipboardListenerRegistered = false
         }
         super.onPause()
+    }
+
+    internal fun refreshForegroundCapture(completion: (Boolean) -> Unit = {}) {
+        if (AndroidCaptureState.foregroundCaptureEnabled(this)) {
+            if (foregroundCaptureEligible) {
+                foregroundCaptureHost = AndroidClipboardReader.acquireForeground(foregroundCaptureHost)
+                completion(foregroundCaptureHost != null)
+            } else {
+                AndroidClipboardReader.retireForeground(foregroundCaptureHost)
+                foregroundCaptureHost = null
+                completion(false)
+            }
+        } else {
+            foregroundCaptureHost = null
+            AndroidClipboardReader.disableForeground(completion)
+        }
+    }
+
+    private fun captureForegroundClipboard() {
+        if (!foregroundCaptureEligible || !AndroidCaptureState.foregroundCaptureEnabled(this)) return
+        foregroundCaptureHost = AndroidClipboardReader.acquireForeground(foregroundCaptureHost)
+        AndroidClipboardReader.captureForeground(this, foregroundCaptureHost)
     }
 
     private fun deviceClass(): String = when (resources.configuration.smallestScreenWidthDp) {
@@ -327,6 +362,11 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        foregroundCaptureEligible = false
+        AndroidClipboardReader.retireForeground(foregroundCaptureHost)
+        foregroundCaptureHost = null
+        explicitCaptureHosts.toList().forEach { it.close() }
+        explicitCaptureHosts.clear()
         androidCaptureChannel?.dispose()
         androidCaptureChannel = null
         pairingScannerChannel?.dispose()
@@ -337,9 +377,6 @@ class MainActivity : FlutterActivity() {
         pendingNotificationPermission = null
         pairingLinksChannel?.setMethodCallHandler(null)
         pairingLinksChannel = null
-        if (isFinishing && !AndroidCaptureState.captureEnabled(this)) {
-            shutdownRuntime()
-        }
         nativeExecutor.shutdown()
         super.onDestroy()
     }

@@ -23,6 +23,7 @@ final class HotkeyManagerMacosPluginTests: XCTestCase {
     }
     XCTAssertEqual(error.code, "hotkey_registration_failed")
     XCTAssertEqual(carbon.registerCalls.count, 1)
+    XCTAssertEqual(carbon.registerCalls.first?.options, UInt32(kEventHotKeyExclusive))
     XCTAssertTrue(carbon.unregistered.isEmpty)
     XCTAssertEqual(CarbonHotKeyRegistry.activeRegistrationCountForTesting, 0)
   }
@@ -79,6 +80,65 @@ final class HotkeyManagerMacosPluginTests: XCTestCase {
     XCTAssertEqual(CarbonHotKeyRegistry.activeRegistrationCountForTesting, 0)
   }
 
+  func testReleaseFailureRetainsHandleAndPreventsReplacementUntilExplicitRetry() {
+    let carbon = FakeCarbonHotKeyRegistrar()
+    CarbonHotKeyRegistry.installCarbonRegistrarForTesting(carbon)
+    let plugin = HotkeyManagerMacosPlugin()
+    XCTAssertEqual(invokeRegister(plugin, identifier: "quick-paste") as? Bool, true)
+    carbon.unregisterStatus = OSStatus(paramErr)
+    XCTAssertEqual(invokeUnregister(plugin, identifier: "quick-paste")?.code,
+                   "hotkey_unregistration_failed")
+    XCTAssertEqual((invokeRegister(plugin, identifier: "quick-paste") as? FlutterError)?.code,
+                   "hotkey_unregistration_failed")
+    XCTAssertEqual(carbon.registerCalls.count, 1)
+    XCTAssertEqual(CarbonHotKeyRegistry.activeRegistrationCountForTesting, 1)
+    XCTAssertTrue(carbon.unregistered[0] === carbon.unregistered[1])
+    carbon.unregisterStatus = noErr
+    XCTAssertNil(invokeUnregister(plugin, identifier: "quick-paste"))
+    XCTAssertEqual(CarbonHotKeyRegistry.activeRegistrationCountForTesting, 0)
+    XCTAssertNil(invokeUnregister(plugin, identifier: "quick-paste"))
+    XCTAssertEqual(carbon.unregistered.count, 3)
+  }
+
+  func testTwoOwnersDecodeCarbonEventsAndKeepSurvivingOwner() throws {
+    let carbon = FakeCarbonHotKeyRegistrar()
+    CarbonHotKeyRegistry.installCarbonRegistrarForTesting(carbon)
+    var first: HotkeyManagerMacosPlugin? = HotkeyManagerMacosPlugin()
+    let second = HotkeyManagerMacosPlugin()
+    var firstEvents = 0
+    var secondEvents = 0
+    _ = first!.onListen(withArguments: nil) { _ in firstEvents += 1 }
+    _ = second.onListen(withArguments: nil) { _ in secondEvents += 1 }
+    XCTAssertEqual(invokeRegister(first!, identifier: "shared-string") as? Bool, true)
+    XCTAssertEqual(invokeRegister(second, identifier: "shared-string") as? Bool, true)
+    let firstCall = carbon.registerCalls[0]
+    let secondCall = carbon.registerCalls[1]
+    XCTAssertNotEqual(firstCall.identifier, secondCall.identifier)
+    var event: EventRef?
+    XCTAssertEqual(CreateEvent(nil, OSType(kEventClassKeyboard), UInt32(kEventHotKeyPressed),
+                              0, 0, &event), noErr)
+    let nativeEvent = try XCTUnwrap(event)
+    defer { ReleaseEvent(nativeEvent) }
+    func send(_ id: UInt32, signature: OSType) -> OSStatus {
+      var key = EventHotKeyID(signature: signature, id: id)
+      XCTAssertEqual(SetEventParameter(nativeEvent, UInt32(kEventParamDirectObject),
+                                      UInt32(typeEventHotKeyID), MemoryLayout<EventHotKeyID>.size,
+                                      &key), noErr)
+      return CarbonHotKeyRegistry.handle(nativeEvent)
+    }
+    XCTAssertEqual(send(firstCall.identifier, signature: firstCall.signature), noErr)
+    XCTAssertEqual(firstEvents, 1)
+    XCTAssertEqual(send(secondCall.identifier, signature: 0), OSStatus(eventNotHandledErr))
+    first = nil
+    XCTAssertEqual(CarbonHotKeyRegistry.activeRegistrationCountForTesting, 1)
+    XCTAssertEqual(send(firstCall.identifier, signature: firstCall.signature), OSStatus(eventNotHandledErr))
+    XCTAssertEqual(send(secondCall.identifier, signature: secondCall.signature), noErr)
+    XCTAssertEqual(secondEvents, 1)
+    _ = second.onCancel(withArguments: nil)
+    XCTAssertEqual(send(secondCall.identifier, signature: secondCall.signature), OSStatus(eventNotHandledErr))
+    invokeUnregister(second, identifier: "shared-string")
+  }
+
   private func invokeRegister(
     _ plugin: HotkeyManagerMacosPlugin,
     identifier: String
@@ -99,16 +159,19 @@ final class HotkeyManagerMacosPluginTests: XCTestCase {
     return receivedResult
   }
 
+  @discardableResult
   private func invokeUnregister(
     _ plugin: HotkeyManagerMacosPlugin,
     identifier: String
-  ) {
+  ) -> FlutterError? {
+    var error: FlutterError?
     plugin.unregister(
       FlutterMethodCall(
         methodName: "unregister",
         arguments: ["identifier": identifier]
       )
-    ) { _ in }
+    ) { error = $0 as? FlutterError }
+    return error
   }
 }
 
@@ -118,8 +181,10 @@ private final class FakeCarbonHotKeyRegistrar: CarbonHotKeyRegistrar {
     let modifiers: UInt32
     let signature: OSType
     let identifier: UInt32
+    let options: UInt32
   }
 
+  var unregisterStatus: OSStatus = noErr
   let registerStatus: OSStatus
   var hasEventHandler = false
   var registerCalls: [RegisterCall] = []
@@ -138,13 +203,15 @@ private final class FakeCarbonHotKeyRegistrar: CarbonHotKeyRegistrar {
     keyCode: UInt32,
     modifiers: UInt32,
     signature: OSType,
-    identifier: UInt32
+    identifier: UInt32,
+    options: UInt32
   ) -> CarbonHotKeyRegistrationAttempt {
     registerCalls.append(RegisterCall(
       keyCode: keyCode,
       modifiers: modifiers,
       signature: signature,
-      identifier: identifier
+      identifier: identifier,
+      options: options
     ))
     return CarbonHotKeyRegistrationAttempt(
       status: registerStatus,
@@ -154,6 +221,6 @@ private final class FakeCarbonHotKeyRegistrar: CarbonHotKeyRegistrar {
 
   func unregister(_ registration: CarbonHotKeyRegistration) -> OSStatus {
     unregistered.append(registration)
-    return noErr
+    return unregisterStatus
   }
 }

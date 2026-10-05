@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
@@ -614,9 +615,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       children: [
                         const Text('Excluded applications').medium(),
                         const Gap(AppSpacing.xs),
-                        const Text(
-                          'Clipboard changes from these application identifiers are never captured.',
-                        ).muted().textSmall(),
+                        Text(switch (defaultTargetPlatform) {
+                          TargetPlatform.macOS =>
+                            'Skip automatic capture during activity from these apps. Background copies may bypass exclusions.',
+                          TargetPlatform.windows =>
+                            'Skip automatic capture from identified clipboard owners in this list.',
+                          TargetPlatform.android =>
+                            'Android skips automatic capture while exclusions are set because it cannot identify source apps.',
+                          TargetPlatform.iOS ||
+                          TargetPlatform.linux ||
+                          TargetPlatform.fuchsia =>
+                            'Application exclusions are supported on macOS, Windows, and Android.',
+                        }).muted().textSmall(),
                       ],
                     ),
                   ),

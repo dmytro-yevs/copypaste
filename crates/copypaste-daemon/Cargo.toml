@@ -82,11 +82,12 @@ image = { workspace = true, features = ["bmp"] }
 core-foundation = "0.10.1"
 block2 = "0.5.1"
 objc2.workspace = true
-objc2-foundation = { workspace = true, features = ["NSThread", "NSNotification", "NSOperation", "NSDictionary", "block2"] }
+objc2-foundation = { workspace = true, features = ["NSThread", "NSNotification", "NSOperation", "NSDictionary", "NSURL", "NSValue", "block2"] }
 objc2-app-kit = { workspace = true, features = ["NSResponder"] }
 security-framework.workspace = true
 
 [dev-dependencies]
+copypaste-runtime-log = { path = "../copypaste-runtime-log", features = ["test-support"] }
 tokio = { workspace = true, features = ["test-util"] }
 copypaste-cloud = { path = "../copypaste-cloud", features = ["test-endpoints"] }
 # The paste-file staging diagnostics are the one place a filename, a content id

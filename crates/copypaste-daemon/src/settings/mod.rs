@@ -46,6 +46,7 @@ pub struct Settings {
 struct SettingsState {
     config: ConfigData,
     private_mode_epoch: u64,
+    capture_privacy_epoch: u64,
     health: Option<SettingsHealth>,
 }
 
@@ -129,6 +130,7 @@ impl Settings {
             current: RwLock::new(SettingsState {
                 config,
                 private_mode_epoch: 0,
+                capture_privacy_epoch: 0,
                 health: health.is_degraded().then_some(health),
             }),
             applying: Mutex::new(()),
@@ -141,6 +143,7 @@ impl Settings {
             current: RwLock::new(SettingsState {
                 config: ConfigData::default(),
                 private_mode_epoch: 0,
+                capture_privacy_epoch: 0,
                 health: None,
             }),
             applying: Mutex::new(()),
@@ -158,6 +161,24 @@ impl Settings {
                 .read()
                 .unwrap_or_else(|poisoned| poisoned.into_inner()),
         )
+    }
+
+    /// Blocking capture workers own this authority across read, ingest and
+    /// announcement. Only the owned snapshot crosses into IO; the RwLock never does.
+    /// Poison or exhausted privacy epochs cannot produce a trusted snapshot.
+    pub(crate) fn with_capture_authority<R>(
+        &self,
+        operation: impl FnOnce(ConfigData, u64) -> R,
+    ) -> Option<R> {
+        let _authority = self.applying.lock().ok()?;
+        let (config, epoch) = {
+            let current = self.current.read().ok()?;
+            if current.capture_privacy_epoch == u64::MAX {
+                return None;
+            }
+            (current.config.clone(), current.capture_privacy_epoch)
+        };
+        Some(operation(config, epoch))
     }
 
     /// Validate, store, and make live — in that order.
@@ -199,12 +220,9 @@ impl Settings {
     where
         F: FnOnce(&SettingsTransition),
     {
-        let _serialised = self
-            .applying
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _serialised = self.applying.lock().map_err(|_| SettingsError::Store)?;
 
-        let (before, next, next_epoch) = {
+        let (before, next, next_epoch, capture_privacy_epoch) = {
             let current = self.get();
             let next = patch.apply(&current)?;
             let next_epoch = if patch.private_mode.is_some() {
@@ -215,7 +233,23 @@ impl Settings {
             } else {
                 current.private_mode_epoch()
             };
-            (current.0.config.clone(), next, next_epoch)
+            let capture_privacy_epoch = if next.private_mode != current.private_mode
+                || next.excluded_app_bundle_ids != current.excluded_app_bundle_ids
+            {
+                current
+                    .0
+                    .capture_privacy_epoch
+                    .checked_add(1)
+                    .ok_or(SettingsError::Store)?
+            } else {
+                current.0.capture_privacy_epoch
+            };
+            (
+                current.0.config.clone(),
+                next,
+                next_epoch,
+                capture_privacy_epoch,
+            )
         };
 
         let encoded = serde_json::to_string(&next).map_err(|e| {
@@ -230,6 +264,7 @@ impl Settings {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         current.config = next.clone();
         current.private_mode_epoch = next_epoch;
+        current.capture_privacy_epoch = capture_privacy_epoch;
         // The record on disk has just been rewritten whole, so nothing is
         // degraded any more and the notice has to go — leaving it would outlive
         // the condition and disagree with what the next start reports.
@@ -640,5 +675,70 @@ mod tests {
             assert!(!message.contains('/'), "{message}");
             assert!(!message.contains('\\'), "{message}");
         }
+    }
+    #[test]
+    fn capture_authority_poison_and_epoch_exhaustion_fail_closed() {
+        let settings = std::sync::Arc::new(Settings::defaults());
+        let worker = settings.clone();
+        assert!(std::thread::spawn(
+            move || worker.with_capture_authority(|_, _| panic!("authority poison"))
+        )
+        .join()
+        .is_err());
+        assert!(settings
+            .with_capture_authority(|_, _| panic!("poisoned authority was trusted"))
+            .is_none());
+        let exhausted = Settings::defaults();
+        exhausted.current.write().unwrap().capture_privacy_epoch = u64::MAX;
+        assert!(exhausted
+            .with_capture_authority(|_, _| panic!("exhausted authority was trusted"))
+            .is_none());
+    }
+
+    #[test]
+    fn unrelated_settings_do_not_advance_capture_privacy_epoch() {
+        let (state, _dir) = crate::testutil::test_state("capture-epoch");
+        let before = state
+            .settings
+            .with_capture_authority(|_, epoch| epoch)
+            .unwrap();
+        state
+            .settings
+            .apply(
+                &state.meta,
+                &ConfigPatch {
+                    poll_interval_ms: Some(250),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            state.settings.with_capture_authority(|_, epoch| epoch),
+            Some(before)
+        );
+        state
+            .settings
+            .apply(
+                &state.meta,
+                &ConfigPatch {
+                    excluded_app_bundle_ids: Some(vec!["Safari".into()]),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        state
+            .settings
+            .apply(
+                &state.meta,
+                &ConfigPatch {
+                    excluded_app_bundle_ids: Some(vec![]),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            state.settings.with_capture_authority(|_, epoch| epoch),
+            Some(before + 2)
+        );
     }
 }

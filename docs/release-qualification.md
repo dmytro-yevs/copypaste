@@ -18,11 +18,11 @@ requires an existing stable `v<version>` tag at the exact workflow commit and an
 explicit publish request, or a push of that tag. The publish job creates the
 GitHub Release and updates the Homebrew tap only after all platform jobs pass.
 
-Cloud Sync is not a CopyPaste 1.0.0 product capability. Local encrypted history
+Cloud Sync is not a CopyPaste 1.0.1 product capability. Local encrypted history
 and paired-device synchronization remain fully supported.
 
 CI and emulator smoke are not physical-device evidence. Before publishing
-1.0.0, install the exact qualified DMG and APK on the target macOS host and a
+1.0.1, install the exact qualified DMG and APK on the target macOS host and a
 physical Android device. Android Full capture passes only when a new background
 copy from another application reaches History. Windows requires an installed
 same-artifact validation on Windows.

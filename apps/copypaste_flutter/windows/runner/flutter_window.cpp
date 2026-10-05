@@ -22,6 +22,17 @@ constexpr char kQuickPasteHostChannel[] =
 constexpr char kQuickPasteContextChannel[] =
     "com.copypaste.app/quick_paste_context";
 
+int64_t QuickPastePresentationId(const flutter::EncodableValue* arguments) {
+  if (!arguments) return 0;
+  const auto* map = std::get_if<flutter::EncodableMap>(arguments);
+  if (!map) return 0;
+  const auto found = map->find(flutter::EncodableValue("presentationId"));
+  if (found == map->end()) return 0;
+  if (const auto* id = std::get_if<int64_t>(&found->second)) return *id > 0 ? *id : 0;
+  if (const auto* id = std::get_if<int32_t>(&found->second)) return *id > 0 ? *id : 0;
+  return 0;
+}
+
 template <typename Function>
 Function ResolveProtectedPairingSymbol(const char* symbol) {
   const HMODULE bridge = GetModuleHandleW(L"copypaste_flutter_bridge.dll");
@@ -117,9 +128,10 @@ bool FlutterWindow::OnCreate() {
               call.method_name() == "requestAccessibility") {
             result->Success(flutter::EncodableValue(true));
           } else if (call.method_name() == "paste") {
-            result->Success(flutter::EncodableValue(PasteIntoPreviousWindow()));
+            result->Success(flutter::EncodableValue(
+                PasteIntoPreviousWindow(QuickPastePresentationId(call.arguments()))));
           } else if (call.method_name() == "close") {
-            ::ShowWindow(GetHandle(), SW_HIDE);
+            quick_paste_session_.Close(QuickPastePresentationId(call.arguments()), GetHandle());
             result->Success(flutter::EncodableValue(true));
           } else if (call.method_name() == "openMain") {
             ShowMainWindow(false);
@@ -128,6 +140,7 @@ bool FlutterWindow::OnCreate() {
             ShowMainWindow(true);
             result->Success(flutter::EncodableValue(true));
           } else if (call.method_name() == "quit") {
+            quick_paste_session_.Invalidate();
             result->Success(flutter::EncodableValue(true));
             ::PostQuitMessage(0);
           } else {
@@ -334,6 +347,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  quick_paste_session_.Invalidate();
   CloseProtectedPairingContext(pairing_context_id_);
   CloseQuickPasteContext();
   DetachProtectedPairingContext();
@@ -434,10 +448,9 @@ bool FlutterWindow::PrepareQuickPasteContext() {
 }
 
 bool FlutterWindow::OpenQuickPasteContext() {
+  const HWND sampled_foreground = ::GetForegroundWindow();
   if (!PrepareQuickPasteContext()) return false;
-  quick_paste_window_->previous_foreground_window_ = ::GetForegroundWindow();
-  quick_paste_window_->ShowQuickPasteAtCursor();
-  return true;
+  return quick_paste_window_->ShowQuickPasteAtCursor(sampled_foreground);
 }
 
 void FlutterWindow::CloseQuickPasteContext() {
@@ -446,43 +459,64 @@ void FlutterWindow::CloseQuickPasteContext() {
   quick_paste_window_.reset();
 }
 
-void FlutterWindow::ShowQuickPasteAtCursor() {
-  if (!is_quick_paste_context_) return;
-  POINT cursor{};
-  if (!::GetCursorPos(&cursor)) return;
-  const HMONITOR monitor = ::MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
-  MONITORINFO monitor_info{sizeof(MONITORINFO)};
-  if (!::GetMonitorInfo(monitor, &monitor_info)) return;
-  // Move first so GetDpiForWindow resolves the display under the pointer rather
-  // than the display where this pre-warmed hidden window was created.
-  ::SetWindowPos(GetHandle(), HWND_TOPMOST, cursor.x, cursor.y, 0, 0,
-                 SWP_NOSIZE | SWP_NOACTIVATE);
-  const UINT dpi = ::GetDpiForWindow(GetHandle());
-  const int width = ::MulDiv(520, dpi, USER_DEFAULT_SCREEN_DPI);
-  const int height = ::MulDiv(720, dpi, USER_DEFAULT_SCREEN_DPI);
-  const RECT work = monitor_info.rcWork;
-  const int minimum_x = static_cast<int>(work.left);
-  const int minimum_y = static_cast<int>(work.top);
-  const int maximum_x = std::max(minimum_x, static_cast<int>(work.right) - width);
-  const int maximum_y = std::max(minimum_y, static_cast<int>(work.bottom) - height);
-  const int x = std::clamp(static_cast<int>(cursor.x), minimum_x, maximum_x);
-  const int y = std::clamp(static_cast<int>(cursor.y) + 8, minimum_y, maximum_y);
-  ::SetWindowPos(GetHandle(), HWND_TOPMOST, x, y, width, height,
-                 SWP_SHOWWINDOW | SWP_FRAMECHANGED);
-  ::SetForegroundWindow(GetHandle());
-  if (quick_paste_channel_) {
-    quick_paste_channel_->InvokeMethod(
-        "opened", std::make_unique<flutter::EncodableValue>());
-  }
+std::optional<QuickPasteTargetSession::Target> QuickPasteTargetSession::Capture(HWND window) const {
+  const HWND root = window ? api_.get_ancestor(window, GA_ROOT) : nullptr;
+  if (!root || !api_.is_window(root)) return std::nullopt;
+  DWORD pid = 0;
+  const DWORD tid = api_.get_owner(root, &pid);
+  if (!pid || !tid || pid == api_.get_current_process_id()) return std::nullopt;
+  return Target{root, pid, tid};
 }
 
-bool FlutterWindow::PasteIntoPreviousWindow() {
-  if (!is_quick_paste_context_ || previous_foreground_window_ == nullptr ||
-      !::IsWindow(previous_foreground_window_)) {
+bool QuickPasteTargetSession::Valid(const Target& target) const {
+  const auto current = Capture(target.root);
+  return current && current->root == target.root && current->pid == target.pid && current->tid == target.tid;
+}
+
+int64_t QuickPasteTargetSession::Begin(HWND sampled_foreground, HWND popup) {
+  const HWND sampled_root = sampled_foreground ? api_.get_ancestor(sampled_foreground, GA_ROOT) : nullptr;
+  const bool preserve = id_ > 0 && target_ && Valid(*target_) &&
+      api_.is_window_visible(popup) && sampled_root == popup;
+  const auto next_target = preserve ? target_ : Capture(sampled_foreground);
+  Invalidate();
+  if (counter_ == std::numeric_limits<int64_t>::max()) return 0;
+  id_ = ++counter_;
+  target_ = next_target;
+  return id_;
+}
+
+void QuickPasteTargetSession::Invalidate() {
+  id_ = 0;
+  target_.reset();
+}
+
+void QuickPasteTargetSession::Hide(HWND popup) {
+  const bool was_hiding = internally_hiding_;
+  internally_hiding_ = true;
+  api_.show_window(popup, SW_HIDE);
+  internally_hiding_ = was_hiding;
+}
+
+void QuickPasteTargetSession::Close(int64_t id, HWND popup) {
+  if (id <= 0 || id != id_) return;
+  Invalidate();
+  Hide(popup);
+}
+
+bool QuickPasteTargetSession::Paste(int64_t requested_id, HWND popup) {
+  if (requested_id <= 0 || requested_id != id_ || pasting_ || !target_ || !Valid(*target_)) return false;
+  const Target target = *target_;
+  pasting_ = true;
+  struct ReleaseBusy { bool& busy; ~ReleaseBusy() { busy = false; } } release{pasting_};
+  Hide(popup);
+  const auto current = [&] { return requested_id == id_ && target_ && Valid(target); };
+  const auto fail = [&] {
+    if (requested_id == id_) Invalidate();
     return false;
-  }
-  ::ShowWindow(GetHandle(), SW_HIDE);
-  ::SetForegroundWindow(previous_foreground_window_);
+  };
+  if (!current()) return fail();
+  if (api_.get_ancestor(api_.get_foreground_window(), GA_ROOT) != target.root &&
+      !api_.set_foreground_window(target.root)) return fail();
   INPUT inputs[4]{};
   inputs[0].type = INPUT_KEYBOARD;
   inputs[0].ki.wVk = VK_CONTROL;
@@ -494,11 +528,95 @@ bool FlutterWindow::PasteIntoPreviousWindow() {
   inputs[3].type = INPUT_KEYBOARD;
   inputs[3].ki.wVk = VK_CONTROL;
   inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
-  return ::SendInput(4, inputs, sizeof(INPUT)) == 4;
+  if (!current() || api_.get_ancestor(api_.get_foreground_window(), GA_ROOT) != target.root ||
+      requested_id != id_) return fail();
+  // There is no atomic public compare-foreground-and-SendInput operation.
+  Invalidate();
+  return api_.send_input(4, inputs, sizeof(INPUT)) == 4;
+}
+
+bool PresentQuickPasteAtCursor(
+    HWND window, const QuickPastePresentationApi& api,
+    const std::function<void()>& opened, const std::function<bool()>& owns,
+    const std::function<void()>& cleanup) {
+  const auto fail = [&] {
+    if (owns()) {
+      if (cleanup) cleanup();
+      else api.show_window(window, SW_HIDE);
+    }
+    return false;
+  };
+  if (!owns()) return false;
+  POINT cursor{};
+  if (!api.get_cursor_pos(&cursor) || !owns()) return fail();
+  const HMONITOR monitor = api.monitor_from_point(cursor, MONITOR_DEFAULTTONEAREST);
+  if (!monitor || !owns()) return fail();
+  MONITORINFO monitor_info{sizeof(MONITORINFO)};
+  if (!api.get_monitor_info(monitor, &monitor_info) || !owns()) return fail();
+  // Move first so GetDpiForWindow resolves the display under the pointer rather
+  // than the display where this pre-warmed hidden window was created.
+  if (!api.set_window_pos(window, HWND_TOPMOST, cursor.x, cursor.y, 0, 0,
+                      SWP_NOSIZE | SWP_NOACTIVATE) || !owns()) return fail();
+  const UINT dpi = api.get_dpi_for_window(window);
+  if (dpi == 0 || !owns()) return fail();
+  const int width = ::MulDiv(520, dpi, USER_DEFAULT_SCREEN_DPI);
+  const int height = ::MulDiv(720, dpi, USER_DEFAULT_SCREEN_DPI);
+  const RECT work = monitor_info.rcWork;
+  const int minimum_x = static_cast<int>(work.left);
+  const int minimum_y = static_cast<int>(work.top);
+  const int maximum_x = std::max(minimum_x, static_cast<int>(work.right) - width);
+  const int maximum_y = std::max(minimum_y, static_cast<int>(work.bottom) - height);
+  const int x = std::clamp(static_cast<int>(cursor.x), minimum_x, maximum_x);
+  const int y = std::clamp(static_cast<int>(cursor.y) + 8, minimum_y, maximum_y);
+  if (!api.set_window_pos(window, HWND_TOPMOST, x, y, width, height,
+                      SWP_SHOWWINDOW | SWP_FRAMECHANGED) || !owns()) return fail();
+  if (!api.set_foreground_window(window) || !owns()) return fail();
+  opened();
+  return true;
+}
+
+bool ShowQuickPastePresentationAtCursor(
+    HWND window, QuickPasteTargetSession& session, int64_t id,
+    const QuickPastePresentationApi& api, const std::function<void()>& opened) {
+  const auto owns = [&] { return id > 0 && session.id() == id; };
+  const auto cleanup = [&] {
+    if (!owns()) return;
+    session.Invalidate();
+    api.show_window(window, SW_HIDE);
+  };
+  if (!owns()) return false;
+  const bool shown = PresentQuickPasteAtCursor(window, api, opened, owns, cleanup);
+  if (!shown || !owns()) {
+    cleanup();
+    return false;
+  }
+  return true;
+}
+
+bool FlutterWindow::ShowQuickPasteAtCursor(HWND sampled_foreground) {
+  if (!is_quick_paste_context_) return false;
+  const int64_t id = quick_paste_session_.Begin(sampled_foreground, GetHandle());
+  if (id == 0) {
+    if (quick_paste_session_.id() == 0) ::ShowWindow(GetHandle(), SW_HIDE);
+    return false;
+  }
+  return ShowQuickPastePresentationAtCursor(
+      GetHandle(), quick_paste_session_, id, QuickPastePresentationApi{}, [this, id] {
+        if (quick_paste_channel_ && quick_paste_session_.id() == id) {
+          quick_paste_channel_->InvokeMethod(
+              "opened", std::make_unique<flutter::EncodableValue>(flutter::EncodableMap{
+                  {flutter::EncodableValue("presentationId"), flutter::EncodableValue(id)}}));
+        }
+      });
+}
+
+bool FlutterWindow::PasteIntoPreviousWindow(int64_t presentation_id) {
+  return is_quick_paste_context_ && quick_paste_session_.Paste(presentation_id, GetHandle());
 }
 
 void FlutterWindow::ShowMainWindow(bool open_settings) {
   if (!is_quick_paste_context_ || main_window_handle_ == nullptr) return;
+  quick_paste_session_.Invalidate();
   ::ShowWindow(GetHandle(), SW_HIDE);
   ::ShowWindow(main_window_handle_, SW_SHOW);
   ::SetForegroundWindow(main_window_handle_);
@@ -530,10 +648,13 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
   if (is_quick_paste_context_) {
     if (message == WM_CLOSE) {
+      quick_paste_session_.Invalidate();
       ::ShowWindow(hwnd, SW_HIDE);
       return 0;
     }
     if (message == WM_ACTIVATE && LOWORD(wparam) == WA_INACTIVE) {
+      if (quick_paste_session_.internally_hiding()) return 0;
+      quick_paste_session_.Invalidate();
       ::ShowWindow(hwnd, SW_HIDE);
       return 0;
     }

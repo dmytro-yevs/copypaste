@@ -555,7 +555,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-cli"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "backon",
  "clap",
@@ -572,11 +572,11 @@ dependencies = [
 
 [[package]]
 name = "copypaste-clock"
-version = "1.0.0"
+version = "1.0.1"
 
 [[package]]
 name = "copypaste-cloud"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "argon2",
  "backon",
@@ -608,7 +608,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-core"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "android-native-keyring-store",
  "base64",
@@ -649,7 +649,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-daemon"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "backon",
@@ -698,7 +698,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-feedback"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "tracing",
  "winsafe",
@@ -706,7 +706,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-flutter-bridge"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "copypaste-core",
  "copypaste-ipc",
@@ -730,14 +730,14 @@ dependencies = [
 
 [[package]]
 name = "copypaste-fs"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "copypaste-ipc"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "directories",
  "hex",
@@ -753,7 +753,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-p2p"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "copypaste-clock",
  "copypaste-fs",
@@ -786,14 +786,14 @@ dependencies = [
 
 [[package]]
 name = "copypaste-retry"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "backon",
 ]
 
 [[package]]
 name = "copypaste-runtime"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "base64",
  "copypaste-core",
@@ -808,7 +808,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-runtime-log"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "copypaste-clock",
@@ -823,7 +823,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-source-app"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "base64",
  "image",
