@@ -1,11 +1,8 @@
 import Cocoa
 import FlutterMacOS
 
-private let runtimeLifecycleChannel = "com.copypaste.app/runtime_lifecycle"
-
 @main
 class AppDelegate: FlutterAppDelegate {
-  private var terminationReplyPending = false
   private var pendingPairingURLs: [URL] = []
 
   override func applicationDidFinishLaunching(_ notification: Notification) {
@@ -51,25 +48,6 @@ class AppDelegate: FlutterAppDelegate {
   }
 
   override func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    guard !terminationReplyPending,
-          let controller = mainFlutterWindow?.contentViewController as? FlutterViewController else {
-      return terminationReplyPending ? .terminateLater : .terminateNow
-    }
-
-    terminationReplyPending = true
-    let channel = FlutterMethodChannel(
-      name: runtimeLifecycleChannel,
-      binaryMessenger: controller.engine.binaryMessenger
-    )
-    channel.invokeMethod("prepareForTermination") { [weak self] (_: Any?) in
-      DispatchQueue.main.async {
-        guard self?.terminationReplyPending == true else {
-          return
-        }
-        self?.terminationReplyPending = false
-        sender.reply(toApplicationShouldTerminate: true)
-      }
-    }
-    return .terminateLater
+    return .terminateNow
   }
 }
