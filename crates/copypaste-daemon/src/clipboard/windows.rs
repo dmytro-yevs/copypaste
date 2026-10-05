@@ -250,6 +250,7 @@ impl ClipboardSource for WindowsClipboard {
                 content_type: content_type.to_string(),
                 app_bundle_id,
                 app_name,
+                source_policy: super::SourcePolicyEvidence::Legacy,
             }),
             Representation::Image {
                 bytes,
@@ -262,6 +263,7 @@ impl ClipboardSource for WindowsClipboard {
                 content_type: content_type.to_string(),
                 app_bundle_id,
                 app_name,
+                source_policy: super::SourcePolicyEvidence::Legacy,
             }),
             Representation::File { path, metadata } => Some(Capture {
                 content: String::new(),
@@ -271,6 +273,7 @@ impl ClipboardSource for WindowsClipboard {
                 content_type: copypaste_ipc::content_type::FILE.to_string(),
                 app_bundle_id,
                 app_name,
+                source_policy: super::SourcePolicyEvidence::Legacy,
             }),
         }
     }

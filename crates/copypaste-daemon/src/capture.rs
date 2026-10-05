@@ -152,7 +152,7 @@ enum CaptureOutcome {
 struct PendingCapture {
     capture: crate::clipboard::Capture,
     created_at: i64,
-    settings: copypaste_ipc::ConfigData,
+    privacy_epoch: u64,
 }
 
 fn tick_slot(state: &AppState, slot: &Mutex<Option<PendingCapture>>) -> CaptureOutcome {
@@ -164,33 +164,41 @@ fn drain_pending(state: &AppState, slot: &Mutex<Option<PendingCapture>>) -> Capt
     tick(state, &mut slot)
 }
 fn tick(state: &AppState, slot: &mut Option<PendingCapture>) -> CaptureOutcome {
-    // The guard is taken for the pasteboard read alone and dropped before the
-    // ingest, so an in-flight `copy` waits on one accessor call, not on a
-    // database write.
-    if slot.is_some() {
-        return persist_pending(state, state.settings.get().clone(), slot);
-    }
-    let settings = state.settings.get().clone();
-    let capture = state
-        .clipboard()
-        .poll_with_policy(crate::clipboard::CapturePolicy::new(&settings));
-    let Some(capture) = capture else {
-        return CaptureOutcome::NoCapture;
-    };
-    *slot = Some(PendingCapture {
-        capture,
-        created_at: copypaste_core::now_ms(),
-        settings: settings.clone(),
-    });
-    persist_pending(state, settings, slot)
+    state
+        .settings
+        .with_capture_authority(|settings, privacy_epoch| {
+            if slot.is_none() {
+                // Drop the clipboard guard before storage and publication. The
+                // settings authority remains held for this entire attempt.
+                let capture = state
+                    .clipboard()
+                    .poll_with_policy(crate::clipboard::CapturePolicy::new(&settings));
+                let Some(capture) = capture else {
+                    return CaptureOutcome::NoCapture;
+                };
+                *slot = Some(PendingCapture {
+                    capture,
+                    created_at: copypaste_core::now_ms(),
+                    privacy_epoch,
+                });
+            }
+            persist_pending(state, settings, privacy_epoch, slot)
+        })
+        .unwrap_or_else(|| {
+            *slot = None;
+            CaptureOutcome::PolicyCancelled
+        })
 }
 fn persist_pending(
     state: &AppState,
     settings: copypaste_ipc::ConfigData,
+    privacy_epoch: u64,
     slot: &mut Option<PendingCapture>,
 ) -> CaptureOutcome {
     let pending = slot.as_ref().unwrap();
-    if !crate::clipboard::CapturePolicy::new(&settings).allows_materialized(&pending.capture) {
+    if pending.privacy_epoch != privacy_epoch
+        || !crate::clipboard::CapturePolicy::new(&settings).allows_materialized(&pending.capture)
+    {
         *slot = None;
         return CaptureOutcome::PolicyCancelled;
     }
@@ -198,12 +206,7 @@ fn persist_pending(
     if let Some(outcome) = test_persist_outcome() {
         return outcome;
     }
-    match ingest_capture(
-        state,
-        &pending.settings,
-        &pending.capture,
-        pending.created_at,
-    ) {
+    match ingest_capture(state, &settings, &pending.capture, pending.created_at) {
         Ok(Ingested::Stored(item)) => {
             debug!(id = %item.id, content_type = %item.content_type, "captured clipboard item");
             // Wakes the watchers and pulls both sync loops to their floor, so a
@@ -621,6 +624,7 @@ mod tests {
             content_type: copypaste_ipc::content_type::TEXT.to_string(),
             app_bundle_id: app.as_ref().map(|app| app.id.clone()),
             app_name: app.map(|app| app.name),
+            source_policy: crate::clipboard::SourcePolicyEvidence::Legacy,
         }
     }
 
@@ -647,7 +651,7 @@ mod tests {
             Ok(())
         }
         fn backend_name(&self) -> &'static str {
-            "queued"
+            "fake-queued"
         }
     }
 
@@ -797,6 +801,7 @@ mod tests {
                 content_type: copypaste_ipc::content_type::IMAGE_PNG.to_string(),
                 app_bundle_id: None,
                 app_name: None,
+                source_policy: crate::clipboard::SourcePolicyEvidence::Legacy,
             },
             copypaste_core::now_ms(),
         )
@@ -837,6 +842,7 @@ mod tests {
                 content_type: copypaste_ipc::content_type::FILE.to_string(),
                 app_bundle_id: None,
                 app_name: None,
+                source_policy: crate::clipboard::SourcePolicyEvidence::Legacy,
             },
             copypaste_core::now_ms(),
         )
@@ -892,6 +898,7 @@ mod tests {
                 content_type: copypaste_ipc::content_type::FILE.to_string(),
                 app_bundle_id: None,
                 app_name: None,
+                source_policy: crate::clipboard::SourcePolicyEvidence::Legacy,
             },
             copypaste_core::now_ms(),
         );
@@ -917,6 +924,7 @@ mod tests {
                     content_type: content_type.to_string(),
                     app_bundle_id: None,
                     app_name: None,
+                    source_policy: crate::clipboard::SourcePolicyEvidence::Legacy,
                 },
                 copypaste_core::now_ms(),
             )
@@ -1017,5 +1025,177 @@ mod tests {
             "UI watchers and notify_on_copy stay asleep on recopy"
         );
         assert_eq!(event.item_count, 1);
+    }
+    #[test]
+    fn pending_busy_retains_payload_evidence_and_timestamp_without_repolling() {
+        let polls = Arc::new(AtomicUsize::new(0));
+        let (state, _dir) = crate::testutil::test_state_with_clipboard(
+            "frozen-pending",
+            Box::new(QueuedCapture {
+                values: VecDeque::from([captured("frozen", None), captured("newer", None)]),
+                polls: polls.clone(),
+                polled: None,
+            }),
+        );
+        let guard = TestPersistGuard::set(TestPersistMode::Busy);
+        let mut slot = None;
+        assert!(matches!(tick(&state, &mut slot), CaptureOutcome::Retried));
+        let frozen = slot.as_ref().unwrap().capture.clone();
+        let created_at = slot.as_ref().unwrap().created_at;
+        assert!(matches!(tick(&state, &mut slot), CaptureOutcome::Retried));
+        assert_eq!(slot.as_ref().unwrap().capture, frozen);
+        assert_eq!(slot.as_ref().unwrap().created_at, created_at);
+        assert_eq!(polls.load(Ordering::SeqCst), 1);
+        *TEST_PERSIST_MODE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        assert!(matches!(tick(&state, &mut slot), CaptureOutcome::Stored));
+        assert_eq!(crate::testutil::contents(&state), ["frozen"]);
+        assert_eq!(polls.load(Ordering::SeqCst), 1);
+        drop(guard);
+    }
+
+    #[test]
+    fn both_config_routes_revoke_pending_after_private_mode_round_trip() {
+        for narrow_route in [false, true] {
+            let polls = Arc::new(AtomicUsize::new(0));
+            let (state, _dir) = crate::testutil::test_state_with_clipboard(
+                "epoch-round-trip",
+                Box::new(QueuedCapture {
+                    values: VecDeque::from([captured("frozen", None)]),
+                    polls: polls.clone(),
+                    polled: None,
+                }),
+            );
+            let guard = TestPersistGuard::set(TestPersistMode::Busy);
+            let mut slot = None;
+            assert!(matches!(tick(&state, &mut slot), CaptureOutcome::Retried));
+            for enabled in [true, false] {
+                let method = if narrow_route {
+                    Method::SetPrivateMode { enabled }
+                } else {
+                    Method::SetConfig {
+                        patch: copypaste_ipc::ConfigPatch {
+                            private_mode: Some(enabled),
+                            ..Default::default()
+                        },
+                    }
+                };
+                assert!(crate::server::dispatch::dispatch_store(&state, 1, method).ok);
+            }
+            *TEST_PERSIST_MODE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            assert!(matches!(
+                tick(&state, &mut slot),
+                CaptureOutcome::PolicyCancelled
+            ));
+            assert!(slot.is_none());
+            assert_eq!(state.store.count().unwrap(), 0);
+            assert_eq!(polls.load(Ordering::SeqCst), 1);
+            drop(guard);
+        }
+    }
+
+    #[test]
+    fn exclusion_round_trip_revokes_pending_even_when_current_policy_allows() {
+        let (state, _dir) = crate::testutil::test_state_with_clipboard(
+            "exclusion-round-trip",
+            Box::new(QueuedCapture {
+                values: VecDeque::from([captured("frozen", None)]),
+                polls: Arc::new(AtomicUsize::new(0)),
+                polled: None,
+            }),
+        );
+        let guard = TestPersistGuard::set(TestPersistMode::Busy);
+        let mut slot = None;
+        assert!(matches!(tick(&state, &mut slot), CaptureOutcome::Retried));
+        for excluded in [vec!["Safari".into()], vec![]] {
+            assert!(
+                crate::server::dispatch::dispatch_store(
+                    &state,
+                    1,
+                    Method::SetConfig {
+                        patch: copypaste_ipc::ConfigPatch {
+                            excluded_app_bundle_ids: Some(excluded),
+                            ..Default::default()
+                        }
+                    }
+                )
+                .ok
+            );
+        }
+        *TEST_PERSIST_MODE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        assert!(matches!(
+            tick(&state, &mut slot),
+            CaptureOutcome::PolicyCancelled
+        ));
+        assert_eq!(state.store.count().unwrap(), 0);
+        drop(guard);
+    }
+
+    struct BarrierCapture {
+        entered: std::sync::mpsc::Sender<()>,
+        release: std::sync::mpsc::Receiver<()>,
+    }
+    impl crate::clipboard::ClipboardSource for BarrierCapture {
+        fn poll(&mut self) -> Option<crate::clipboard::Capture> {
+            self.entered.send(()).unwrap();
+            self.release.recv().unwrap();
+            Some(captured("ordered", None))
+        }
+        fn poll_with_policy(
+            &mut self,
+            _: crate::clipboard::CapturePolicy<'_>,
+        ) -> Option<crate::clipboard::Capture> {
+            self.poll()
+        }
+        fn set_contents(&mut self, _: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn backend_name(&self) -> &'static str {
+            "fake-barrier"
+        }
+    }
+    #[test]
+    fn capture_announcement_finishes_before_later_settings_response_on_both_routes() {
+        for narrow_route in [false, true] {
+            let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let (state, _dir) = crate::testutil::test_state_with_clipboard(
+                "capture-authority",
+                Box::new(BarrierCapture {
+                    entered: entered_tx,
+                    release: release_rx,
+                }),
+            );
+            let mut events = state.subscribe();
+            let worker_state = state.clone();
+            let capture = std::thread::spawn(move || tick(&worker_state, &mut None));
+            entered_rx.recv().unwrap();
+            let (started_tx, started_rx) = std::sync::mpsc::channel();
+            let (response_tx, response_rx) = std::sync::mpsc::channel();
+            let settings_state = state.clone();
+            let setter = std::thread::spawn(move || {
+                started_tx.send(()).unwrap();
+                let method = if narrow_route {
+                    Method::SetPrivateMode { enabled: true }
+                } else {
+                    Method::SetConfig {
+                        patch: copypaste_ipc::ConfigPatch {
+                            private_mode: Some(true),
+                            ..Default::default()
+                        },
+                    }
+                };
+                let response = crate::server::dispatch::dispatch_store(&settings_state, 1, method);
+                response_tx.send(response).unwrap();
+            });
+            started_rx.recv().unwrap();
+            assert!(response_rx.try_recv().is_err());
+            assert!(state.settings.transition_is_in_progress());
+            release_tx.send(()).unwrap();
+            assert!(matches!(capture.join().unwrap(), CaptureOutcome::Stored));
+            assert!(response_rx.recv().unwrap().ok);
+            setter.join().unwrap();
+            assert_eq!(crate::testutil::contents(&state), ["ordered"]);
+            assert!(events.try_recv().unwrap().captured);
+        }
     }
 }
