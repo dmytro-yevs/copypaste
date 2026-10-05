@@ -6,6 +6,7 @@ import 'package:copypaste_flutter/features/settings/models/settings_models.dart'
 import 'package:copypaste_flutter/features/settings/view/settings_screen.dart';
 import 'package:copypaste_flutter/features/update/update.dart';
 import 'package:copypaste_flutter/platform/update/app_update_platform.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:pub_semver/pub_semver.dart';
@@ -121,6 +122,50 @@ void main() {
       ]);
     },
   );
+
+  for (final entry in <TargetPlatform, String>{
+    TargetPlatform.macOS:
+        'Skip automatic capture during activity from these apps. Background copies may bypass exclusions.',
+    TargetPlatform.windows:
+        'Skip automatic capture from identified clipboard owners in this list.',
+    TargetPlatform.android:
+        'Android skips automatic capture while exclusions are set because it cannot identify source apps.',
+    TargetPlatform.iOS:
+        'Application exclusions are supported on macOS, Windows, and Android.',
+    TargetPlatform.linux:
+        'Application exclusions are supported on macOS, Windows, and Android.',
+    TargetPlatform.fuchsia:
+        'Application exclusions are supported on macOS, Windows, and Android.',
+  }.entries) {
+    testWidgets('describes exclusions on ${entry.key.name}', (tester) async {
+      debugDefaultTargetPlatformOverride = entry.key;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final controller = SettingsController(
+        repository: FakeSettingsRepository(),
+        filePicker: FakeSettingsFilePicker(),
+        notifications: FakeCaptureNotificationPort(),
+        captureRefreshInterval: Duration.zero,
+      );
+      await controller.initialize();
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        ShadcnApp(
+          home: Scaffold(child: SettingsScreen(controller: controller)),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text(entry.value), findsOneWidget);
+      expect(
+        find.text(
+          'Clipboard changes from these application identifiers are never captured.',
+        ),
+        findsNothing,
+      );
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets('renders desktop settings navigation with separate sections', (
     tester,

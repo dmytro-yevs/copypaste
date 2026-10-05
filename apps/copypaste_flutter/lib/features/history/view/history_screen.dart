@@ -1536,7 +1536,7 @@ class _HistoryMetadataTable extends StatelessWidget {
 typedef _HistoryMetadataRow = ({String label, String value, bool warning});
 
 bool _historyMetadataHasIdentity(_HistoryMetadataRow row) =>
-    row.label == 'Source' || row.label == 'Device';
+    row.label == 'Observed app' || row.label == 'Device';
 
 Widget _historyMetadataIdentityLabel({
   required _HistoryMetadataRow row,
@@ -1545,7 +1545,7 @@ Widget _historyMetadataIdentityLabel({
   required TextStyle style,
 }) {
   return switch (row.label) {
-    'Source' => SourceAppLabel(
+    'Observed app' => SourceAppLabel(
       key: const ValueKey<String>('history-detail-source-app'),
       name: row.value,
       icon: controller.requestSourceIcon(clip.id),
@@ -1574,7 +1574,7 @@ List<_HistoryMetadataRow> _historyMetadataRows(
       warning: false,
     ),
     if (clip.sourceApp != null)
-      (label: 'Source', value: clip.sourceApp!, warning: false),
+      (label: 'Observed app', value: clip.sourceApp!, warning: false),
     if (clip.origin != null)
       (label: 'Device', value: clip.origin!, warning: false),
     (label: 'Clip type', value: clip.contentKind.label, warning: false),

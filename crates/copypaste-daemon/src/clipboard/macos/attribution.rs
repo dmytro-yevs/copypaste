@@ -8,6 +8,7 @@ pub(super) enum Attribution {
     Bundle,
     NameOnly,
     Unavailable,
+    Ambiguous,
 }
 
 impl Attribution {
@@ -23,8 +24,15 @@ impl Attribution {
 }
 
 impl MacOsClipboard {
-    pub(super) fn note_attribution(&mut self, app: Option<&FrontmostApp>) {
-        let attribution = Attribution::from_app(app);
+    pub(super) fn note_attribution(&mut self, decision: &super::super::source_coverage::Decision) {
+        use super::super::source_coverage::SourceConfidence;
+        let attribution = match decision.coverage.confidence() {
+            SourceConfidence::SingleObservedApplication => {
+                Attribution::from_app(decision.identity.as_ref())
+            }
+            SourceConfidence::AmbiguousObservedApplications => Attribution::Ambiguous,
+            SourceConfidence::Unavailable => Attribution::Unavailable,
+        };
         if self.last_attribution == Some(attribution) {
             return;
         }
@@ -34,17 +42,10 @@ impl MacOsClipboard {
             Attribution::NameOnly => {
                 info!("macOS capture source attribution is available without a bundle identifier")
             }
+            Attribution::Ambiguous => info!("macOS capture source attribution is ambiguous"),
             Attribution::Unavailable => {
                 warn!("macOS could not identify the source application for clipboard capture")
             }
         }
-    }
-
-    pub(super) fn frontmost_app(
-        &mut self,
-        generation: i64,
-        excluded: &[String],
-    ) -> Option<FrontmostApp> {
-        crate::macos_workspace::source_identity(self.source_observation, generation, excluded)
     }
 }

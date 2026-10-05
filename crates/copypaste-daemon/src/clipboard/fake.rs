@@ -273,6 +273,7 @@ impl ClipboardSource for FakeClipboard {
             content_type: copypaste_ipc::content_type::TEXT.to_string(),
             app_bundle_id,
             app_name: None,
+            source_policy: crate::clipboard::SourcePolicyEvidence::Legacy,
         })
     }
 
