@@ -1,12 +1,10 @@
 import Cocoa
 import FlutterMacOS
-import HotKey
 import Carbon
 
 public class HotkeyManagerMacosPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     private var _eventSink: FlutterEventSink?
-
-    var hotKeyDict: Dictionary<String, HotKey> = [:]
+    private var hotKeyIdentifiers: [String: UInt32] = [:]
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: "dev.leanflutter.plugins/hotkey_manager", binaryMessenger: registrar.messenger)
@@ -40,52 +38,313 @@ public class HotkeyManagerMacosPlugin: NSObject, FlutterPlugin, FlutterStreamHan
     }
 
     public func register(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-        let args: [String: Any] = call.arguments as! [String: Any]
-
-        let keyCode = args["keyCode"] as! UInt32
-        let modifiers = args["modifiers"] as! Array<String>
-        let identifier = args["identifier"] as! String
-
-        let hotKey: HotKey = HotKey(
-            key: Key(carbonKeyCode: keyCode)!,
-            modifiers: NSEvent.ModifierFlags.init(pluginModifiers: modifiers)
-        )
-        hotKey.keyDownHandler = {
-            guard let eventSink = self._eventSink else {
-                return
-            }
-            let event: NSDictionary = [
-                "type": "onKeyDown",
-                "data": call.arguments as! NSDictionary,
-            ]
-            eventSink(event)
+        guard let args = call.arguments as? [String: Any],
+              let keyCode = args["keyCode"] as? UInt32,
+              let modifiers = args["modifiers"] as? [String],
+              let identifier = args["identifier"] as? String
+        else {
+            result(FlutterError(
+                code: "invalid_hotkey_arguments",
+                message: "The hotkey registration request is missing required arguments.",
+                details: nil
+            ))
+            return
         }
-        hotKey.keyUpHandler = {
-            guard let eventSink = self._eventSink else {
-                return
-            }
-            let event: NSDictionary = [
-                "type": "onKeyUp",
-                "data": call.arguments as! NSDictionary,
-            ]
-            eventSink(event)
+
+        unregister(identifier: identifier)
+
+        let carbonModifiers = NSEvent.ModifierFlags(pluginModifiers: modifiers).carbonFlags
+        switch CarbonHotKeyRegistry.register(
+            owner: self,
+            keyCode: keyCode,
+            modifiers: carbonModifiers,
+            arguments: args as NSDictionary
+        ) {
+        case .success(let carbonIdentifier):
+            hotKeyIdentifiers[identifier] = carbonIdentifier
+            result(true)
+        case .failure(let status):
+            result(FlutterError(
+                code: "hotkey_registration_failed",
+                message: "macOS rejected the global shortcut registration (OSStatus \(status)).",
+                details: ["osStatus": Int(status), "identifier": identifier]
+            ))
         }
-        self.hotKeyDict[identifier] = hotKey
-        result(true)
     }
 
     public func unregister(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-        let args: [String: Any] = call.arguments as! [String: Any]
+        guard let args = call.arguments as? [String: Any],
+              let identifier = args["identifier"] as? String
+        else {
+            result(FlutterError(
+                code: "invalid_hotkey_arguments",
+                message: "The hotkey unregister request is missing an identifier.",
+                details: nil
+            ))
+            return
+        }
 
-        let identifier = args["identifier"] as! String
-
-        self.hotKeyDict[identifier] = nil
-
+        unregister(identifier: identifier)
         result(true)
     }
 
     public func unregisterAll(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-        self.hotKeyDict.removeAll()
+        unregisterAll()
         result(true)
     }
+
+    deinit {
+        unregisterAll()
+    }
+
+    private func unregister(identifier: String) {
+        guard let carbonIdentifier = hotKeyIdentifiers.removeValue(forKey: identifier) else {
+            return
+        }
+        CarbonHotKeyRegistry.unregister(carbonIdentifier)
+    }
+
+    private func unregisterAll() {
+        let carbonIdentifiers = Array(hotKeyIdentifiers.values)
+        hotKeyIdentifiers.removeAll()
+        for carbonIdentifier in carbonIdentifiers {
+            CarbonHotKeyRegistry.unregister(carbonIdentifier)
+        }
+    }
+
+    fileprivate func emit(type: String, arguments: NSDictionary) -> Bool {
+        guard let eventSink = _eventSink else {
+            return false
+        }
+        eventSink([
+            "type": type,
+            "data": arguments,
+        ])
+        return true
+    }
+}
+
+enum CarbonHotKeyRegistry {
+    enum RegistrationResult {
+        case success(UInt32)
+        case failure(OSStatus)
+    }
+
+    private final class Registration {
+        weak var owner: HotkeyManagerMacosPlugin?
+        let eventHotKey: CarbonHotKeyRegistration
+        let arguments: NSDictionary
+
+        init(owner: HotkeyManagerMacosPlugin, eventHotKey: CarbonHotKeyRegistration, arguments: NSDictionary) {
+            self.owner = owner
+            self.eventHotKey = eventHotKey
+            self.arguments = arguments
+        }
+    }
+
+    private static let signature: OSType = 0x4350484B // "CPHK"
+    static let eventSpecs = [
+        EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
+        EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased)),
+    ]
+    private static var nextIdentifier: UInt32 = 0
+    private static var registrations: [UInt32: Registration] = [:]
+    private static var carbon: any CarbonHotKeyRegistrar = SystemCarbonHotKeyRegistrar()
+
+    static func register(
+        owner: HotkeyManagerMacosPlugin,
+        keyCode: UInt32,
+        modifiers: UInt32,
+        arguments: NSDictionary
+    ) -> RegistrationResult {
+        let handlerStatus = carbon.installEventHandler()
+        guard handlerStatus == noErr else {
+            return .failure(handlerStatus)
+        }
+        guard carbon.hasEventHandler else {
+            return .failure(OSStatus(paramErr))
+        }
+
+        let identifier = allocateIdentifier()
+        let attempt = carbon.register(
+            keyCode: keyCode,
+            modifiers: modifiers,
+            signature: signature,
+            identifier: identifier
+        )
+        guard attempt.status == noErr, let eventHotKey = attempt.registration else {
+            return .failure(attempt.status == noErr ? OSStatus(paramErr) : attempt.status)
+        }
+
+        registrations[identifier] = Registration(
+            owner: owner,
+            eventHotKey: eventHotKey,
+            arguments: arguments
+        )
+        return .success(identifier)
+    }
+
+    static func unregister(_ identifier: UInt32) {
+        guard let registration = registrations.removeValue(forKey: identifier) else {
+            return
+        }
+        _ = carbon.unregister(registration.eventHotKey)
+    }
+
+    static func handle(_ event: EventRef?) -> OSStatus {
+        guard let event else {
+            return OSStatus(eventNotHandledErr)
+        }
+
+        var hotKeyID = EventHotKeyID()
+        let parameterStatus = GetEventParameter(
+            event,
+            UInt32(kEventParamDirectObject),
+            UInt32(typeEventHotKeyID),
+            nil,
+            MemoryLayout<EventHotKeyID>.size,
+            nil,
+            &hotKeyID
+        )
+        guard parameterStatus == noErr, hotKeyID.signature == signature
+        else {
+            return OSStatus(eventNotHandledErr)
+        }
+
+        return route(hotKeyID: hotKeyID.id, eventKind: GetEventKind(event))
+    }
+
+    static func installCarbonRegistrarForTesting(_ registrar: any CarbonHotKeyRegistrar) {
+        precondition(registrations.isEmpty)
+        carbon = registrar
+    }
+
+    static func resetCarbonRegistrarForTesting() {
+        precondition(registrations.isEmpty)
+        carbon = SystemCarbonHotKeyRegistrar()
+    }
+
+    static var activeRegistrationCountForTesting: Int {
+        registrations.count
+    }
+
+    static var activeHotKeyIdentifierForTesting: UInt32? {
+        registrations.keys.first
+    }
+
+    static func routeForTesting(hotKeyID: UInt32, eventKind: UInt32) -> OSStatus {
+        route(hotKeyID: hotKeyID, eventKind: eventKind)
+    }
+
+    private static func route(hotKeyID: UInt32, eventKind: UInt32) -> OSStatus {
+        guard let registration = registrations[hotKeyID],
+              let owner = registration.owner
+        else {
+            return OSStatus(eventNotHandledErr)
+        }
+
+        switch eventKind {
+        case UInt32(kEventHotKeyPressed):
+            return owner.emit(type: "onKeyDown", arguments: registration.arguments)
+                ? noErr
+                : OSStatus(eventNotHandledErr)
+        case UInt32(kEventHotKeyReleased):
+            return owner.emit(type: "onKeyUp", arguments: registration.arguments)
+                ? noErr
+                : OSStatus(eventNotHandledErr)
+        default:
+            return OSStatus(eventNotHandledErr)
+        }
+    }
+
+    private static func allocateIdentifier() -> UInt32 {
+        repeat {
+            nextIdentifier &+= 1
+        } while nextIdentifier == 0 || registrations[nextIdentifier] != nil
+        return nextIdentifier
+    }
+}
+
+final class CarbonHotKeyRegistration {
+    fileprivate let eventHotKey: EventHotKeyRef?
+
+    init(eventHotKey: EventHotKeyRef? = nil) {
+        self.eventHotKey = eventHotKey
+    }
+}
+
+struct CarbonHotKeyRegistrationAttempt {
+    let status: OSStatus
+    let registration: CarbonHotKeyRegistration?
+}
+
+protocol CarbonHotKeyRegistrar: AnyObject {
+    var hasEventHandler: Bool { get }
+
+    func installEventHandler() -> OSStatus
+    func register(
+        keyCode: UInt32,
+        modifiers: UInt32,
+        signature: OSType,
+        identifier: UInt32
+    ) -> CarbonHotKeyRegistrationAttempt
+    func unregister(_ registration: CarbonHotKeyRegistration) -> OSStatus
+}
+
+private final class SystemCarbonHotKeyRegistrar: CarbonHotKeyRegistrar {
+    private var eventHandler: EventHandlerRef?
+
+    var hasEventHandler: Bool {
+        eventHandler != nil
+    }
+
+    func installEventHandler() -> OSStatus {
+        guard eventHandler == nil else {
+            return noErr
+        }
+        return InstallEventHandler(
+            GetEventDispatcherTarget(),
+            carbonHotKeyEventHandler,
+            CarbonHotKeyRegistry.eventSpecs.count,
+            CarbonHotKeyRegistry.eventSpecs,
+            nil,
+            &eventHandler
+        )
+    }
+
+    func register(
+        keyCode: UInt32,
+        modifiers: UInt32,
+        signature: OSType,
+        identifier: UInt32
+    ) -> CarbonHotKeyRegistrationAttempt {
+        var eventHotKey: EventHotKeyRef?
+        let status = RegisterEventHotKey(
+            keyCode,
+            modifiers,
+            EventHotKeyID(signature: signature, id: identifier),
+            GetEventDispatcherTarget(),
+            0,
+            &eventHotKey
+        )
+        return CarbonHotKeyRegistrationAttempt(
+            status: status,
+            registration: eventHotKey.map(CarbonHotKeyRegistration.init)
+        )
+    }
+
+    func unregister(_ registration: CarbonHotKeyRegistration) -> OSStatus {
+        guard let eventHotKey = registration.eventHotKey else {
+            return OSStatus(paramErr)
+        }
+        return UnregisterEventHotKey(eventHotKey)
+    }
+}
+
+private func carbonHotKeyEventHandler(
+    eventHandlerCall: EventHandlerCallRef?,
+    event: EventRef?,
+    userData: UnsafeMutableRawPointer?
+) -> OSStatus {
+    CarbonHotKeyRegistry.handle(event)
 }

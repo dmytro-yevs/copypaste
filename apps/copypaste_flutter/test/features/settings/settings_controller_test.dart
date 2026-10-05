@@ -353,9 +353,63 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('shows a toast after a manual update check finds no update', (
+    tester,
+  ) async {
+    final settings = SettingsController(
+      repository: FakeSettingsRepository(),
+      filePicker: FakeSettingsFilePicker(),
+      notifications: FakeCaptureNotificationPort(),
+      captureRefreshInterval: Duration.zero,
+    );
+    final updater = AppUpdateController(
+      repository: _SettingsUpdateRepository(updateAvailable: false),
+      platform: _SettingsUpdatePlatform(),
+    );
+    await Future.wait([settings.initialize(), updater.initialize()]);
+    addTearDown(settings.dispose);
+    addTearDown(updater.dispose);
+
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        darkTheme: AppTheme.dark,
+        themeMode: AppTheme.mode,
+        builder: AppTheme.builder,
+        home: SettingsScreen(controller: settings, appUpdate: updater),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey<String>('settings-section-feedback')),
+        matching: find.text('Feedback'),
+      ),
+    );
+    await tester.pump();
+    await tester.ensureVisible(
+      find.byKey(const ValueKey<String>('check-app-update')),
+    );
+    await tester.pump(const Duration(milliseconds: 500));
+
+    await tester.tap(find.byKey(const ValueKey<String>('check-app-update')));
+    await tester.pump();
+
+    expect(find.text('No updates available'), findsOneWidget);
+    expect(find.text('CopyPaste 1.0.0 is the latest version.'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pump(const Duration(seconds: 1));
+  });
 }
 
 class _SettingsUpdateRepository implements AppUpdateRepository {
+  _SettingsUpdateRepository({this.updateAvailable = true});
+
+  final bool updateAvailable;
+
   late final AppReleaseAsset asset = AppReleaseAsset(
     name: 'CopyPaste-v1.0.1-android.apk',
     downloadUri: Uri.parse(
@@ -383,14 +437,16 @@ class _SettingsUpdateRepository implements AppUpdateRepository {
   Future<AppRelease?> findUpdate({
     required Version currentVersion,
     required AppUpdateTarget target,
-  }) async => AppRelease(
-    version: Version.parse('1.0.1'),
-    releaseUri: Uri.parse(
-      'https://github.com/dmytro-yevs/copypaste/releases/tag/v1.0.1',
-    ),
-    prerelease: false,
-    asset: asset,
-  );
+  }) async => updateAvailable
+      ? AppRelease(
+          version: Version.parse('1.0.1'),
+          releaseUri: Uri.parse(
+            'https://github.com/dmytro-yevs/copypaste/releases/tag/v1.0.1',
+          ),
+          prerelease: false,
+          asset: asset,
+        )
+      : null;
 
   @override
   void dispose() {}

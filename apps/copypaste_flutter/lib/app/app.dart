@@ -29,6 +29,8 @@ class CopyPasteApp extends StatelessWidget {
     this.settingsController,
     this.appUpdateController,
     this.desktopWindow,
+    this.runtimeUnavailableMessage,
+    this.onRetryRuntime,
     this.onOpenAndroidCaptureSetup,
   });
 
@@ -39,6 +41,8 @@ class CopyPasteApp extends StatelessWidget {
   final SettingsController? settingsController;
   final AppUpdateController? appUpdateController;
   final DesktopWindowController? desktopWindow;
+  final String? runtimeUnavailableMessage;
+  final Future<void> Function()? onRetryRuntime;
   final Future<void> Function()? onOpenAndroidCaptureSetup;
 
   @override
@@ -82,10 +86,13 @@ class CopyPasteApp extends StatelessWidget {
               },
               destinations: {
                 AppDestination.history: historyController == null
-                    ? const StateView.error(
+                    ? StateView.error(
                         title: 'History runtime is unavailable',
                         message:
+                            runtimeUnavailableMessage ??
                             'Start the application runtime before opening history.',
+                        actionLabel: onRetryRuntime == null ? null : 'Retry',
+                        onAction: onRetryRuntime,
                       )
                     : HistoryScreen(
                         controller: historyController!,
@@ -93,10 +100,13 @@ class CopyPasteApp extends StatelessWidget {
                             navigation.setBottomOverlayOpen,
                       ),
                 AppDestination.devices: devicesController == null
-                    ? const StateView.error(
+                    ? StateView.error(
                         title: 'Devices runtime is unavailable',
                         message:
+                            runtimeUnavailableMessage ??
                             'Start the application runtime before opening devices.',
+                        actionLabel: onRetryRuntime == null ? null : 'Retry',
+                        onAction: onRetryRuntime,
                       )
                     : DevicesScreen(
                         controller: devicesController!,
@@ -107,10 +117,13 @@ class CopyPasteApp extends StatelessWidget {
                             AppDestination.devices,
                       ),
                 AppDestination.settings: settingsController == null
-                    ? const StateView.error(
+                    ? StateView.error(
                         title: 'Settings runtime is unavailable',
                         message:
+                            runtimeUnavailableMessage ??
                             'Start the application runtime before opening settings.',
+                        actionLabel: onRetryRuntime == null ? null : 'Retry',
+                        onAction: onRetryRuntime,
                       )
                     : SettingsScreen(
                         controller: settingsController!,
