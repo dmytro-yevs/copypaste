@@ -703,37 +703,52 @@ impl Runtime {
     async fn apply_settings(
         &self,
         patch: copypaste_ipc::ConfigPatch,
+        reconcile_retention: bool,
     ) -> Result<settings::SettingsApplied, SettingsError> {
         let settings = Arc::clone(&self.settings);
-        tokio::task::spawn_blocking(move || settings.apply(&patch))
-            .await
-            .map_err(|_| SettingsError::Store)?
+        let node = Arc::clone(&self.node);
+        let store = self.store.clone();
+        let events = self.events.clone();
+        tokio::task::spawn_blocking(move || {
+            settings.apply_with_effects(&patch, |applied| {
+                let removed = if reconcile_retention {
+                    let enforce = copypaste_core::retention::policy_tightened(
+                        &applied.before,
+                        &applied.config,
+                    );
+                    copypaste_core::retention::reconcile_policy(
+                        &store,
+                        || settings.config(),
+                        enforce,
+                    )
+                } else {
+                    0
+                };
+                if applied.before.lan_visibility != applied.config.lan_visibility {
+                    node.set_lan_visibility(applied.config.lan_visibility);
+                }
+                if removed > 0 {
+                    let _ = events.send(EventData {
+                        event: EventKind::Items,
+                        item_count: store.count().unwrap_or(0),
+                        captured: false,
+                    });
+                }
+            })
+        })
+        .await
+        .map_err(|_| SettingsError::Store)?
     }
 
     async fn apply_config(&self, request_id: u64, patch: copypaste_ipc::ConfigPatch) -> Response {
-        match self.apply_settings(patch).await {
-            Ok(applied) => {
-                let enforce =
-                    copypaste_core::retention::policy_tightened(&applied.before, &applied.config);
-                let removed = copypaste_core::retention::reconcile_policy(
-                    &self.store,
-                    || self.settings.config(),
-                    enforce,
-                );
-                if applied.before.lan_visibility != applied.config.lan_visibility {
-                    self.node.set_lan_visibility(applied.config.lan_visibility);
-                }
-                if removed > 0 {
-                    self.emit(EventKind::Items);
-                }
-                Response::ok(
-                    request_id,
-                    ResponseData::Config(copypaste_ipc::ConfigApplied {
-                        config: applied.config,
-                        restart_required: Vec::new(),
-                    }),
-                )
-            }
+        match self.apply_settings(patch, true).await {
+            Ok(applied) => Response::ok(
+                request_id,
+                ResponseData::Config(copypaste_ipc::ConfigApplied {
+                    config: applied.config,
+                    restart_required: Vec::new(),
+                }),
+            ),
             Err(SettingsError::Invalid(error)) => {
                 Response::err(request_id, ErrorCode::InvalidRequest, error.to_string())
             }
@@ -747,10 +762,13 @@ impl Runtime {
 
     async fn set_private_mode(&self, request_id: u64, enabled: bool) -> Response {
         match self
-            .apply_settings(copypaste_ipc::ConfigPatch {
-                private_mode: Some(enabled),
-                ..Default::default()
-            })
+            .apply_settings(
+                copypaste_ipc::ConfigPatch {
+                    private_mode: Some(enabled),
+                    ..Default::default()
+                },
+                false,
+            )
             .await
         {
             Ok(applied) => Response::ok(

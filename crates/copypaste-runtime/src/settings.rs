@@ -114,7 +114,16 @@ impl RuntimeSettings {
         Ok(Applying { settings: self })
     }
 
+    #[cfg(test)]
     pub(crate) fn apply(&self, patch: &ConfigPatch) -> Result<SettingsApplied, SettingsError> {
+        self.apply_with_effects(patch, |_| {})
+    }
+
+    pub(crate) fn apply_with_effects(
+        &self,
+        patch: &ConfigPatch,
+        effects: impl FnOnce(&SettingsApplied),
+    ) -> Result<SettingsApplied, SettingsError> {
         let _serialised = self.enter_apply()?;
         let (before, next, next_epoch) = {
             let current = self.current.read().map_err(|poison| {
@@ -156,11 +165,13 @@ impl RuntimeSettings {
             self.capture.fail_closed();
             SettingsError::Store
         })?;
-        Ok(SettingsApplied {
+        let applied = SettingsApplied {
             before,
             config: next,
             private_mode_epoch: next_epoch,
-        })
+        };
+        effects(&applied);
+        Ok(applied)
     }
 }
 
@@ -259,5 +270,86 @@ mod tests {
                 assert!(settings.snapshot().config.private_mode);
             }
         }
+    }
+    #[test]
+    fn opposite_lan_patches_publish_and_apply_live_effects_in_one_order() {
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            mpsc, Barrier,
+        };
+        let (settings, _directory) = settings();
+        let settings = Arc::new(settings);
+        settings
+            .apply(&ConfigPatch {
+                lan_visibility: Some(false),
+                ..Default::default()
+            })
+            .unwrap();
+        let live = Arc::new(AtomicBool::new(false));
+        let effects = Arc::new(Mutex::new(Vec::new()));
+        let entered = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let first_settings = Arc::clone(&settings);
+        let first_live = Arc::clone(&live);
+        let first_effects = Arc::clone(&effects);
+        let first_entered = Arc::clone(&entered);
+        let first_release = Arc::clone(&release);
+        let first = std::thread::spawn(move || {
+            first_settings
+                .apply_with_effects(
+                    &ConfigPatch {
+                        lan_visibility: Some(true),
+                        ..Default::default()
+                    },
+                    |applied| {
+                        first_live.store(applied.config.lan_visibility, Ordering::SeqCst);
+                        first_effects
+                            .lock()
+                            .unwrap()
+                            .push(applied.config.lan_visibility);
+                        first_entered.wait();
+                        first_release.wait();
+                    },
+                )
+                .unwrap()
+        });
+        entered.wait();
+        assert!(settings.config().lan_visibility);
+        assert!(live.load(Ordering::SeqCst));
+        let second_settings = Arc::clone(&settings);
+        let second_live = Arc::clone(&live);
+        let second_effects = Arc::clone(&effects);
+        let second_entered = Arc::new(Barrier::new(2));
+        let worker_entered = Arc::clone(&second_entered);
+        let (done_tx, done_rx) = mpsc::channel();
+        let second = std::thread::spawn(move || {
+            worker_entered.wait();
+            second_settings
+                .apply_with_effects(
+                    &ConfigPatch {
+                        lan_visibility: Some(false),
+                        ..Default::default()
+                    },
+                    |applied| {
+                        second_live.store(applied.config.lan_visibility, Ordering::SeqCst);
+                        second_effects
+                            .lock()
+                            .unwrap()
+                            .push(applied.config.lan_visibility);
+                    },
+                )
+                .unwrap();
+            done_tx.send(()).unwrap();
+        });
+        second_entered.wait();
+        assert!(done_rx.try_recv().is_err());
+        assert!(settings.config().lan_visibility);
+        release.wait();
+        first.join().unwrap();
+        second.join().unwrap();
+        done_rx.recv().unwrap();
+        assert!(!settings.config().lan_visibility);
+        assert!(!live.load(Ordering::SeqCst));
+        assert_eq!(*effects.lock().unwrap(), vec![true, false]);
     }
 }
