@@ -182,12 +182,12 @@ class MainFlutterWindow: NSWindow {
       case "prepare":
         result(self.prepareQuickPaste())
       case "open":
+        let frontmost = NSWorkspace.shared.frontmostApplication
         guard self.prepareQuickPaste(), let presentation = self.quickPastePresentation else {
           result(FlutterError(code: "window_unavailable", message: nil, details: nil))
           return
         }
-        presentation.show()
-        result(true)
+        result(presentation.show(frontmost: frontmost))
       case "accessibilityGranted":
         result(MacosAccessibility.isTrusted(prompt: false))
       case "requestAccessibility":
@@ -303,27 +303,25 @@ enum MacosAccessibility {
     return AXIsProcessTrustedWithOptions(options)
   }
 
-  static func paste() {
-    let source = CGEventSource(stateID: .combinedSessionState)
-    source?.setLocalEventsFilterDuringSuppressionState(
+  // Construct the entire chord before any event is posted.
+  static func preparePaste(
+    source: () -> CGEventSource? = { CGEventSource(stateID: .combinedSessionState) },
+    event: (CGEventSource, Bool) -> CGEvent? = {
+      CGEvent(keyboardEventSource: $0, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: $1)
+    },
+    post: @escaping (CGEvent) -> Void = { $0.post(tap: .cgSessionEventTap) }
+  ) -> (() -> Void)? {
+    guard let source = source(), let keyDown = event(source, true),
+          let keyUp = event(source, false) else { return nil }
+    source.setLocalEventsFilterDuringSuppressionState(
       [.permitLocalMouseEvents, .permitSystemDefinedEvents],
       state: .eventSuppressionStateSuppressionInterval
     )
-    let keyDown = CGEvent(
-      keyboardEventSource: source,
-      virtualKey: CGKeyCode(kVK_ANSI_V),
-      keyDown: true
-    )
-    let keyUp = CGEvent(
-      keyboardEventSource: source,
-      virtualKey: CGKeyCode(kVK_ANSI_V),
-      keyDown: false
-    )
-    keyDown?.flags = .maskCommand
-    keyUp?.flags = .maskCommand
-    keyDown?.post(tap: .cgSessionEventTap)
-    keyUp?.post(tap: .cgSessionEventTap)
+    keyDown.flags = .maskCommand
+    keyUp.flags = .maskCommand
+    return { post(keyDown); post(keyUp) }
   }
+
 }
 
 final class QuickPastePanel: NSPanel {
@@ -338,6 +336,158 @@ final class QuickPastePanel: NSPanel {
   override var canBecomeMain: Bool { false }
 }
 
+protocol QuickPasteApplicationTarget: AnyObject {
+  var processIdentifier: pid_t { get }
+  var isTerminated: Bool { get }
+  func activateForQuickPaste() -> Bool
+}
+
+extension NSRunningApplication: QuickPasteApplicationTarget {
+  func activateForQuickPaste() -> Bool { activate(options: []) }
+}
+
+// One native presentation owns one external application and at most one handoff.
+final class QuickPastePasteSession {
+  private final class Pending {
+    let id: Int64
+    let target: QuickPasteApplicationTarget
+    let result: (Bool) -> Void
+    var cancel: (() -> Void)?
+
+    init(id: Int64, target: QuickPasteApplicationTarget, result: @escaping (Bool) -> Void) {
+      self.id = id
+      self.target = target
+      self.result = result
+    }
+  }
+
+  private let ownPID: pid_t
+  private let foreground: () -> pid_t?
+  private let trusted: () -> Bool
+  private let prepareInput: () -> (() -> Void)?
+  private let schedule: (@escaping () -> Void) -> (() -> Void)
+  private var counter: Int64 = 0
+  private var pending: Pending?
+  private(set) var id: Int64 = 0
+  private(set) var target: QuickPasteApplicationTarget?
+  var hasPendingPaste: Bool { pending != nil }
+
+  init(
+    ownPID: pid_t = ProcessInfo.processInfo.processIdentifier,
+    foreground: @escaping () -> pid_t? = { NSWorkspace.shared.frontmostApplication?.processIdentifier },
+    trusted: @escaping () -> Bool = { MacosAccessibility.isTrusted(prompt: false) },
+    prepareInput: @escaping () -> (() -> Void)? = { MacosAccessibility.preparePaste() },
+    schedule: @escaping (@escaping () -> Void) -> (() -> Void) = { continuation in
+      let item = DispatchWorkItem(block: continuation)
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: item)
+      return { item.cancel() }
+    }
+  ) {
+    self.ownPID = ownPID
+    self.foreground = foreground
+    self.trusted = trusted
+    self.prepareInput = prepareInput
+    self.schedule = schedule
+  }
+
+  deinit { invalidate() }
+
+  func isValid(_ target: QuickPasteApplicationTarget?) -> Bool {
+    guard let target else { return false }
+    return !target.isTerminated && target.processIdentifier > 0 && target.processIdentifier != ownPID
+  }
+
+  func begin(frontmost: QuickPasteApplicationTarget?, popupActive: Bool) -> Int64? {
+    let retained = target
+    let preserve = popupActive && id > 0 && isValid(retained) &&
+      (frontmost?.processIdentifier == ownPID || frontmost?.processIdentifier == retained?.processIdentifier)
+    invalidate()
+    guard counter < Int64.max else { return nil }
+    counter += 1
+    id = counter
+    target = preserve ? retained : (isValid(frontmost) ? frontmost : nil)
+    return id
+  }
+
+  func invalidate() {
+    id = 0
+    target = nil
+    let action = pending
+    pending = nil
+    action?.cancel?()
+    action?.result(false)
+  }
+
+  func matches(_ requestedID: Int64) -> Bool { requestedID > 0 && requestedID == id }
+
+  func paste(id requestedID: Int64, hide: () -> Void, result: @escaping (Bool) -> Void) {
+    guard matches(requestedID), pending == nil, let target, isValid(target), trusted() else {
+      result(false)
+      return
+    }
+    let action = Pending(id: requestedID, target: target, result: result)
+    pending = action
+    hide()
+    guard pending === action, matches(requestedID), isValid(target) else { finish(action, false); return }
+    if foreground() != target.processIdentifier && !target.activateForQuickPaste() {
+      finish(action, false)
+      return
+    }
+    guard pending === action, matches(requestedID), isValid(target) else { finish(action, false); return }
+    action.cancel = schedule { [weak self, weak action] in
+      guard let self, let action, self.pending === action else { return }
+      guard let submit = self.prepareInput(), self.pending === action,
+            self.matches(action.id), self.isValid(action.target), self.trusted(),
+            self.foreground() == action.target.processIdentifier,
+            self.pending === action, self.matches(action.id) else {
+        self.finish(action, false)
+        return
+      }
+      // Public APIs cannot atomically compare focus and submit input.
+      self.pending = nil
+      self.id = 0
+      self.target = nil
+      action.cancel = nil
+      submit()
+      action.result(true)
+    }
+  }
+
+  private func finish(_ action: Pending, _ success: Bool) {
+    guard pending === action else { return }
+    pending = nil
+    id = 0
+    target = nil
+    action.cancel?()
+    action.cancel = nil
+    action.result(success)
+  }
+}
+
+// Keep rollback and each native presentation stage owned by the captured ID.
+func presentQuickPaste(
+  id: Int64,
+  session: QuickPastePasteSession,
+  position: () -> Bool,
+  show: () -> Bool,
+  hide: () -> Void,
+  opened: () -> Void
+) -> Bool {
+  let owns = { session.matches(id) }
+  func fail() -> Bool {
+    if owns() {
+      session.invalidate()
+      if session.id == 0 { hide() }
+    }
+    return false
+  }
+  guard owns() else { return false }
+  guard position(), owns() else { return fail() }
+  guard show(), owns() else { return fail() }
+  opened()
+  return true
+}
+
 private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
   private let mainWindow: NSWindow
   private let onOpenSettings: () -> Void
@@ -346,7 +496,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
   private let engine: FlutterEngine
   private let controller: FlutterViewController
   private var contextChannel: FlutterMethodChannel?
-  private var previousApplication: NSRunningApplication?
+  private let pasteSession = QuickPastePasteSession()
   private var performingAction = false
   private var closed = false
 
@@ -390,28 +540,45 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     configureContextChannel()
   }
 
-  func show() {
-    let workspace = NSWorkspace.shared
-    let frontmost = workspace.frontmostApplication
-    if frontmost?.bundleIdentifier != Bundle.main.bundleIdentifier {
-      previousApplication = frontmost
+  deinit { pasteSession.invalidate() }
+
+  func show(frontmost: NSRunningApplication?) -> Bool {
+    guard !closed else { return false }
+    guard let id = pasteSession.begin(
+      frontmost: frontmost,
+      popupActive: window.isVisible && window.isKeyWindow
+    ) else {
+      if pasteSession.id == 0 { hide() }
+      return false
     }
-    let cursor = NSEvent.mouseLocation
-    let displays = NSScreen.screens.map {
-      QuickPasteDisplay(frame: $0.frame, visibleFrame: $0.visibleFrame)
-    }
-    let frame = quickPasteFrame(cursor: cursor, size: window.frame.size, displays: displays)
-    window.setFrame(frame, display: true)
-    window.makeKeyAndOrderFront(nil)
-    contextChannel?.invokeMethod("opened", arguments: nil)
+    return presentQuickPaste(
+      id: id,
+      session: pasteSession,
+      position: {
+        let cursor = NSEvent.mouseLocation
+        let displays = NSScreen.screens.map {
+          QuickPasteDisplay(frame: $0.frame, visibleFrame: $0.visibleFrame)
+        }
+        let frame = quickPasteFrame(cursor: cursor, size: self.window.frame.size, displays: displays)
+        self.window.setFrame(frame, display: true)
+        return true
+      },
+      show: { self.window.makeKeyAndOrderFront(nil); return true },
+      hide: { self.hide() },
+      opened: { self.contextChannel?.invokeMethod("opened", arguments: ["presentationId": id]) }
+    )
   }
 
   func shutdown() {
+    pasteSession.invalidate()
     window.close()
   }
 
   func windowDidResignKey(_ notification: Notification) {
-    if !performingAction { window.orderOut(nil) }
+    guard !performingAction else { return }
+    if pasteSession.hasPendingPaste && !window.isVisible { return }
+    pasteSession.invalidate()
+    window.orderOut(nil)
   }
 
   func windowWillClose(_ notification: Notification) {
@@ -421,6 +588,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
   private func close() {
     guard !closed else { return }
     closed = true
+    pasteSession.invalidate()
     contextChannel?.setMethodCallHandler(nil)
     contextChannel = nil
     engine.shutDownEngine()
@@ -428,16 +596,27 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
   }
 
   private func hide() {
+    let wasPerformingAction = performingAction
     performingAction = true
     window.orderOut(nil)
-    performingAction = false
+    performingAction = wasPerformingAction
   }
 
   private func showMainWindow(openSettings: Bool) {
+    pasteSession.invalidate()
     hide()
     mainWindow.makeKeyAndOrderFront(nil)
     NSApplication.shared.activate(ignoringOtherApps: true)
     if openSettings { onOpenSettings() }
+  }
+
+  private static func presentationID(_ arguments: Any?) -> Int64? {
+    guard let arguments = arguments as? [String: Any],
+          let value = arguments["presentationId"] as? NSNumber,
+          CFGetTypeID(value) != CFBooleanGetTypeID(),
+          String(cString: value.objCType) != "d", String(cString: value.objCType) != "f",
+          value.int64Value > 0 else { return nil }
+    return value.int64Value
   }
 
   private func configureContextChannel() {
@@ -457,18 +636,13 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
       case "requestAccessibility":
         result(MacosAccessibility.isTrusted(prompt: true))
       case "paste":
-        guard MacosAccessibility.isTrusted(prompt: false) else {
-          result(false)
-          return
-        }
-        self.hide()
-        self.previousApplication?.activate(options: [])
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-          MacosAccessibility.paste()
-          result(true)
-        }
+        guard let id = Self.presentationID(call.arguments) else { result(false); return }
+        self.pasteSession.paste(id: id, hide: { self.hide() }, result: { result($0) })
       case "close":
-        self.hide()
+        if let id = Self.presentationID(call.arguments), self.pasteSession.matches(id) {
+          self.pasteSession.invalidate()
+          self.hide()
+        }
         result(true)
       case "openMain":
         self.showMainWindow(openSettings: false)
@@ -477,6 +651,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
         self.showMainWindow(openSettings: true)
         result(true)
       case "quit":
+        self.pasteSession.invalidate()
         result(true)
         NSApplication.shared.terminate(nil)
       default:

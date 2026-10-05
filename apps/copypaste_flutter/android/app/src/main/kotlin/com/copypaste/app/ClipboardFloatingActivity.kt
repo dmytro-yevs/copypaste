@@ -30,7 +30,7 @@ class ClipboardFloatingActivity : Activity() {
             handled = true
             floatingView.viewTreeObserver.removeOnWindowFocusChangeListener(focusListener)
             try {
-                AndroidClipboardReader.captureBackground(this)
+                AndroidClipboardReader.captureBackground(this, intent.getLongExtra("capture-host", 0L))
             } finally {
                 finishCapture()
             }
@@ -98,8 +98,9 @@ class ClipboardFloatingActivity : Activity() {
     companion object {
         private const val captureTimeoutMs = 400L
 
-        fun intent(context: Context): Intent =
+        fun intent(context: Context, hostId: Long): Intent =
             Intent(context, ClipboardFloatingActivity::class.java).apply {
+                putExtra("capture-host", hostId)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                     Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS or
                     Intent.FLAG_ACTIVITY_NO_ANIMATION

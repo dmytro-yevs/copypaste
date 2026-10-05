@@ -13,6 +13,7 @@ import androidx.core.content.ContextCompat
 import java.util.concurrent.atomic.AtomicBoolean
 
 class ClipboardCaptureService : Service() {
+    private var captureHostId = 0L
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -26,6 +27,7 @@ class ClipboardCaptureService : Service() {
             !AndroidCaptureState.privilegedGrants(this) ||
             !AndroidCaptureState.notificationGranted(this)
         ) {
+            BackgroundClipboardMonitor.stop()
             stopSelf(startId)
             return START_NOT_STICKY
         }
@@ -39,15 +41,18 @@ class ClipboardCaptureService : Service() {
                 onLost = { stopCapture(this) },
             )
         ) {
+            BackgroundClipboardMonitor.stop()
             stopSelf(startId)
         }
+        captureHostId = BackgroundClipboardMonitor.hostId()
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
-        BackgroundClipboardMonitor.stop()
-        running.set(false)
-        NativeRuntimeCapture.setCaptureRunning(false)
+        BackgroundClipboardMonitor.stop(expectedHost = captureHostId)
+        val listening = BackgroundClipboardMonitor.isListening()
+        running.set(listening)
+        NativeRuntimeCapture.setCaptureRunning(listening)
         super.onDestroy()
     }
 
@@ -111,8 +116,9 @@ class ClipboardCaptureService : Service() {
             if (AndroidCaptureState.captureEnabled(context)) startCapture(context)
         }
 
-        fun stopCapture(context: Context) {
+        fun stopCapture(context: Context, completion: (Boolean) -> Unit = {}) {
             AndroidCaptureState.setCaptureEnabled(context, false)
+            BackgroundClipboardMonitor.stop(completion = completion)
             context.stopService(Intent(context, ClipboardCaptureService::class.java))
             running.set(false)
             NativeRuntimeCapture.setCaptureRunning(false)

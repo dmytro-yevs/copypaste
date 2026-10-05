@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/generated/api.dart' as runtime;
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/features/settings/controller/settings_controller.dart';
@@ -82,6 +83,86 @@ void main() {
     expect(repository.currentSettings.notifyOnCopy, isFalse);
     expect(controller.errorMessage, contains('permission'));
   });
+
+  test(
+    'presents exclusion validation without exposing its backend field',
+    () async {
+      final repository = _RejectedExclusionRepository()
+        ..currentSettings = const RuntimeSettings(
+          retentionDays: 0,
+          storageQuotaBytes: 10 * 1024 * 1024 * 1024,
+          excludedAppIds: ['com.example.existing'],
+          lanVisibility: true,
+          syncEnabled: true,
+          notifyOnCopy: false,
+          soundOnCopy: false,
+        );
+      final controller = SettingsController(
+        repository: repository,
+        filePicker: FakeSettingsFilePicker(),
+        notifications: FakeCaptureNotificationPort(),
+        captureRefreshInterval: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      expect(await controller.addExcludedApp('a' * 257), isFalse);
+      expect(
+        controller.errorMessage,
+        'Application identifiers must be non-empty and 256 bytes or fewer.',
+      );
+      expect(
+        controller.errorMessage,
+        isNot(contains('excluded_app_bundle_ids')),
+      );
+      expect(controller.settings?.excludedAppIds, ['com.example.existing']);
+      expect(repository.currentSettings.excludedAppIds, [
+        'com.example.existing',
+      ]);
+    },
+  );
+
+  for (final entry in <TargetPlatform, String>{
+    TargetPlatform.macOS:
+        'Skip automatic capture during activity from these apps. Background copies may bypass exclusions.',
+    TargetPlatform.windows:
+        'Skip automatic capture from identified clipboard owners in this list.',
+    TargetPlatform.android:
+        'Android skips automatic capture while exclusions are set because it cannot identify source apps.',
+    TargetPlatform.iOS:
+        'Application exclusions are supported on macOS, Windows, and Android.',
+    TargetPlatform.linux:
+        'Application exclusions are supported on macOS, Windows, and Android.',
+    TargetPlatform.fuchsia:
+        'Application exclusions are supported on macOS, Windows, and Android.',
+  }.entries) {
+    testWidgets('describes exclusions on ${entry.key.name}', (tester) async {
+      final controller = SettingsController(
+        repository: FakeSettingsRepository(),
+        filePicker: FakeSettingsFilePicker(),
+        notifications: FakeCaptureNotificationPort(),
+        captureRefreshInterval: Duration.zero,
+      );
+      await controller.initialize();
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        ShadcnApp(
+          home: Scaffold(child: SettingsScreen(controller: controller)),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text(entry.value), findsOneWidget);
+      expect(
+        find.text(
+          'Clipboard changes from these application identifiers are never captured.',
+        ),
+        findsNothing,
+      );
+      expect(tester.takeException(), isNull);
+    }, variant: TargetPlatformVariant.only(entry.key));
+  }
 
   testWidgets('renders desktop settings navigation with separate sections', (
     tester,
@@ -403,6 +484,20 @@ void main() {
     await tester.pump(const Duration(seconds: 5));
     await tester.pump(const Duration(seconds: 1));
   });
+}
+
+class _RejectedExclusionRepository extends FakeSettingsRepository {
+  @override
+  Future<RuntimeSettings> updateSettings(RuntimeSettingsChange change) {
+    if (change.excludedAppIds != null) {
+      throw const runtime.RuntimeError(
+        code: 'invalid_request',
+        message:
+            'excluded_app_bundle_ids contains an entry that is empty or too long',
+      );
+    }
+    return super.updateSettings(change);
+  }
 }
 
 class _SettingsUpdateRepository implements AppUpdateRepository {
