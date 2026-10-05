@@ -46,7 +46,6 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   AppMotion.configureLibrary();
   await RustLib.init();
-  _runtimeLifecycleChannel.setMethodCallHandler(_handleNativeTermination);
   final desktopWindow = await initializeDesktopWindow();
   runApp(
     CopyPasteRoot(
@@ -79,22 +78,7 @@ Future<void> quickPasteMain() async {
   );
 }
 
-const _runtimeLifecycleChannel = MethodChannel(
-  'com.copypaste.app/runtime_lifecycle',
-);
 const _pairingLinksChannel = MethodChannel('com.copypaste.app/pairing_links');
-
-Future<Object?> _handleNativeTermination(MethodCall call) async {
-  if (call.method != 'prepareForTermination') {
-    throw MissingPluginException(
-      'Unsupported lifecycle method: ${call.method}',
-    );
-  }
-  if (Platform.isMacOS || Platform.isWindows) {
-    await runtime.stopDesktopRuntime();
-  }
-  return true;
-}
 
 Future<void> _startRuntimeProcess() async {
   if (Platform.isAndroid) {
@@ -172,7 +156,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     super.initState();
     _pairingLinksChannel.setMethodCallHandler(_handlePairingLinkCall);
     unawaited(_takePendingPairingLink());
-    _desktopWindow?.setBeforeQuit(_prepareForTermination);
+    if (!Platform.isMacOS) {
+      _desktopWindow?.setBeforeQuit(_prepareForTermination);
+    }
     _desktopWindow?.setOpenSettings(() {
       _navigation.selectDestination(AppDestination.settings);
     });
@@ -331,9 +317,8 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     await _startRuntime();
   }
 
-  /// Releases the daemon's app-parent pipe before native window destruction.
-  /// Feature Watch cleanup is best-effort during process termination so it
-  /// cannot delay the native termination reply after the daemon is gone.
+  /// Releases feature state during widget disposal and before Windows Quit.
+  /// macOS committed process exit closes the owned daemon's app-parent pipe.
   Future<void> _prepareForTermination() async {
     final historyController = _historyController;
     final devicesController = _devicesController;

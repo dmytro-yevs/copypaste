@@ -84,8 +84,9 @@ internal class AndroidCaptureChannel(
                 result.success(state() + ("startRequested" to started))
             }
             "stopCapture" -> {
-                ClipboardCaptureService.stopCapture(activity)
-                result.success(state())
+                ClipboardCaptureService.stopCapture(activity) { drained ->
+                    if (drained) result.success(state()) else result.error("capture_drain_failed", null, null)
+                }
             }
             "setForegroundCaptureEnabled" -> {
                 val enabled = call.argument<Boolean>("enabled")
@@ -93,7 +94,11 @@ internal class AndroidCaptureChannel(
                     result.error("invalid_arguments", null, null)
                 } else {
                     AndroidCaptureState.setForegroundCaptureEnabled(activity, enabled)
-                    result.success(true)
+                    activity.refreshForegroundCapture { drained ->
+                        if (drained) result.success(true) else result.error(
+                            if (enabled) "capture_admission_refused" else "capture_drain_failed", null, null,
+                        )
+                    }
                 }
             }
             else -> result.notImplemented()

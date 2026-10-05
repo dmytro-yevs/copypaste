@@ -97,12 +97,20 @@ pub(super) fn insert_fts_in_tx(
 /// * `-` becomes a space *first*: FTS5 reads `-bar` as a column filter and
 ///   errors with "no such column: bar", so `foo-bar` must become
 ///   `foo* AND bar*`.
-/// * Only alphanumerics (Unicode, so Cyrillic/CJK survive), `_`, `"`, `*` and
-///   whitespace are kept.
+/// * Punctuation becomes a space instead of being dropped. FTS5 tokenizes
+///   URLs, email addresses, and paths at punctuation, so dropping it would
+///   join adjacent terms into a token the index does not contain.
+/// * The bundled `unicode61` private-use token ranges and recognized combining
+///   diacritics are retained. They must not become boundaries inside an indexed
+///   word.
+/// * Outside phrases, `_` and `*` separate terms. Raw stars never enter the
+///   MATCH grammar; each surviving term receives one owned prefix marker.
+/// * Balanced quotes preserve phrase adjacency. Stars inside a phrase are
+///   tokenizer content; one star immediately after it enables its final prefix.
 /// * An odd number of quotes is an unclosed phrase — an FTS5 syntax error — so
 ///   all quotes are dropped.
-/// * `*` is appended to *every* token, not just the last: search-as-you-type
-///   means any token can be mid-word, and last-token-only made `"priv key"`
+/// * `*` is appended to every unquoted token, not just the last: search-as-you-type
+///   means any token can be mid-word, and last-token-only made `priv key`
 ///   match nothing.
 pub(super) fn sanitize_fts5_query(raw: &str) -> Option<String> {
     const RESERVED: [&str; 4] = ["NOT", "OR", "AND", "NEAR"];
@@ -111,10 +119,13 @@ pub(super) fn sanitize_fts5_query(raw: &str) -> Option<String> {
     for ch in raw.chars() {
         match ch {
             '-' => cleaned.push(' '),
-            c if c.is_alphanumeric() || matches!(c, '_' | '"' | '*' | ' ' | '\t') => {
+            c if is_unicode61_token_char(c)
+                || is_unicode61_diacritic(c)
+                || matches!(c, '_' | '"' | '*' | ' ' | '\t') =>
+            {
                 cleaned.push(c)
             }
-            _ => {}
+            _ => cleaned.push(' '),
         }
     }
 
@@ -128,28 +139,58 @@ pub(super) fn sanitize_fts5_query(raw: &str) -> Option<String> {
             return None;
         }
     }
-    if (cleaned.len() > 1 && cleaned.starts_with('"') && cleaned.ends_with('"'))
-        || cleaned.ends_with('*')
-    {
-        return Some(cleaned);
-    }
+    let mut tokens = Vec::new();
+    let mut outside_phrase = String::new();
+    let mut chars = cleaned.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '"' {
+            outside_phrase.push(ch);
+            continue;
+        }
 
-    let tokens: Vec<String> = cleaned
-        .split_whitespace()
-        .filter(|t| t.chars().any(|c| c.is_alphanumeric() || c == '_'))
-        .filter(|t| !RESERVED.iter().any(|r| r.eq_ignore_ascii_case(t)))
-        .map(|t| {
-            if t.ends_with('*') {
-                t.to_string()
-            } else {
-                format!("{t}*")
+        push_unquoted_tokens(&mut tokens, &outside_phrase, &RESERVED);
+        outside_phrase.clear();
+
+        let phrase: String = chars.by_ref().take_while(|ch| *ch != '"').collect();
+        let phrase = phrase.trim();
+        if phrase.chars().any(is_unicode61_token_char) {
+            let mut phrase = format!("\"{phrase}\"");
+            if matches!(chars.peek(), Some('*')) {
+                chars.next();
+                phrase.push('*');
             }
-        })
-        .collect();
+            tokens.push(phrase);
+        }
+    }
+    push_unquoted_tokens(&mut tokens, &outside_phrase, &RESERVED);
     if tokens.is_empty() {
         return None;
     }
     Some(tokens.join(" AND "))
+}
+
+fn push_unquoted_tokens(tokens: &mut Vec<String>, raw: &str, reserved: &[&str]) {
+    tokens.extend(
+        raw.split(|ch: char| ch.is_whitespace() || matches!(ch, '_' | '*'))
+            .filter(|token| token.chars().any(is_unicode61_token_char))
+            .filter(|token| !reserved.iter().any(|word| word.eq_ignore_ascii_case(token)))
+            .map(|token| format!("{token}*")),
+    );
+}
+
+fn is_unicode61_token_char(ch: char) -> bool {
+    ch.is_alphanumeric() || matches!(ch as u32, 0xE000..=0xF8FF | 0xF0000..=0xFFFFD)
+}
+
+fn is_unicode61_diacritic(ch: char) -> bool {
+    // Mirrors SQLite's sqlite3FtsUnicodeIsdiacritic for the default unicode61
+    // tokenizer. These marks continue an existing token; they do not start one.
+    let code = ch as u32;
+    match code {
+        0x0300..=0x031F => (0x0802_9FDF_u32 & (1_u32 << (code - 0x0300))) != 0,
+        0x0320..=0x0331 => (0x0003_61F8_u32 & (1_u32 << (code - 0x0320))) != 0,
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -178,6 +219,178 @@ mod tests {
         assert!(s.search("zzzznotpresent", 10).unwrap().is_empty());
         assert!(s.search("   ", 10).unwrap().is_empty());
         assert!(s.search("^:;", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn search_treats_unquoted_stars_as_term_separators() {
+        let s = store();
+        let meeting = s.insert(item("meeting notes", T0)).unwrap();
+        s.insert(item("unrelated payload", T0 + 60_000)).unwrap();
+        let operators = s.insert(item("OR AND NOT NEAR", T0 + 120_000)).unwrap();
+        let meeting_only = s.insert(item("meeting agenda", T0 + 180_000)).unwrap();
+
+        for query in [
+            "*meeting*",
+            "meeting**",
+            "meeting*",
+            "OR* meeting",
+            "*OR**meeting*",
+        ] {
+            let found = s.search(query, 10).unwrap();
+            assert_eq!(found.len(), 2, "query: {query}");
+            assert!(found.iter().any(|item| item.id == meeting.id));
+            assert!(found.iter().any(|item| item.id == meeting_only.id));
+        }
+
+        for query in ["*meet***note**", "meet*note"] {
+            assert_eq!(
+                s.search(query, 10)
+                    .unwrap()
+                    .iter()
+                    .map(|item| item.id.as_str())
+                    .collect::<Vec<_>>(),
+                vec![meeting.id.as_str()],
+                "query: {query}",
+            );
+        }
+
+        for query in ["OR*", "*OR*", "NOT** AND* OR* NEAR*", "***___^:;"] {
+            assert!(s.search(query, 10).unwrap().is_empty(), "query: {query}");
+        }
+        assert_eq!(s.search("\"OR\"", 10).unwrap()[0].id, operators.id);
+    }
+
+    #[test]
+    fn search_applies_each_unquoted_underscore_term_as_a_prefix() {
+        let s = store();
+        let adjacent = s.insert(item("meeting notes", T0)).unwrap();
+        let separated = s
+            .insert(item("meeting intervening notes", T0 + 60_000))
+            .unwrap();
+
+        let found = s.search("meet_notes", 10).unwrap();
+        assert_eq!(found.len(), 2);
+        assert!(found.iter().any(|item| item.id == adjacent.id));
+        assert!(found.iter().any(|item| item.id == separated.id));
+        assert!(s.search("\"meet_notes\"", 10).unwrap().is_empty());
+        assert_eq!(
+            s.search("\"meeting_notes\"", 10)
+                .unwrap()
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![adjacent.id.as_str()],
+        );
+    }
+
+    #[test]
+    fn search_preserves_quoted_stars_and_one_phrase_suffix_prefix() {
+        let s = store();
+        let adjacent = s.insert(item("meeting notes", T0)).unwrap();
+        let extension = s.insert(item("meeting notebook", T0 + 60_000)).unwrap();
+        s.insert(item("meeting intervening notes", T0 + 120_000))
+            .unwrap();
+
+        for query in ["\"meeting not\"*", "\"meeting not\"**"] {
+            let found = s.search(query, 10).unwrap();
+            assert_eq!(found.len(), 2, "query: {query}");
+            assert!(found.iter().any(|item| item.id == adjacent.id));
+            assert!(found.iter().any(|item| item.id == extension.id));
+        }
+        assert!(s.search("\"meeting not*\"", 10).unwrap().is_empty());
+        assert!(s.search("\"meet*notes\"", 10).unwrap().is_empty());
+        assert_eq!(
+            s.search("\"meeting*notes\"", 10)
+                .unwrap()
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![adjacent.id.as_str()],
+        );
+    }
+
+    #[test]
+    fn search_uses_fts_boundaries_for_punctuation_in_copied_prose() {
+        let s = store();
+        let copied = s
+            .insert(item(
+                "See https://example.test/help. Contact person@example.test or /Users/person/notes.",
+                T0,
+            ))
+            .unwrap();
+        s.insert(item("unrelated payload", T0 + 60_000)).unwrap();
+        let quoted_phrase = s
+            .insert(item("first OR second phrase", T0 + 120_000))
+            .unwrap();
+        let decomposed = s.insert(item("cafe\u{301}ine", T0 + 180_000)).unwrap();
+        let plane_16_separator = s.insert(item("foo intervening bar", T0 + 240_000)).unwrap();
+        let private_use = s.insert(item("left\u{E000}right", T0 + 300_000)).unwrap();
+        let supplementary_private_use = s.insert(item("left\u{F0000}right", T0 + 360_000)).unwrap();
+        let unicode = s.insert(item("привіт світ", T0 + 420_000)).unwrap();
+
+        for query in [
+            " See https://example.test/help ",
+            "person",
+            "\"See https://example.test/help\"",
+            "\"person",
+            "exam",
+        ] {
+            assert_eq!(
+                s.search(query, 10)
+                    .unwrap()
+                    .iter()
+                    .map(|item| item.id.as_str())
+                    .collect::<Vec<_>>(),
+                vec![copied.id.as_str()],
+                "query: {query}",
+            );
+        }
+
+        assert!(s.search("^:;", 10).unwrap().is_empty());
+        assert!(s.search("person OR unrelated", 10).unwrap().is_empty());
+        assert!(s
+            .search("\"person\" OR \"unrelated\"", 10)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            s.search("\"first OR second\"", 10)
+                .unwrap()
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![quoted_phrase.id.as_str()]
+        );
+        assert_eq!(
+            s.search("cafe\u{301}ine", 10)
+                .unwrap()
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![decomposed.id.as_str()]
+        );
+        assert_eq!(
+            s.search("foo\u{100000}bar", 10)
+                .unwrap()
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![plane_16_separator.id.as_str()]
+        );
+        for (query, expected_id) in [
+            ("left\u{E000}right", private_use.id.as_str()),
+            ("left\u{F0000}right", supplementary_private_use.id.as_str()),
+            ("прив сві", unicode.id.as_str()),
+        ] {
+            assert_eq!(
+                s.search(query, 10)
+                    .unwrap()
+                    .iter()
+                    .map(|item| item.id.as_str())
+                    .collect::<Vec<_>>(),
+                vec![expected_id],
+                "query: {query}",
+            );
+        }
     }
 
     #[test]
@@ -508,6 +721,18 @@ mod tests {
             sanitize_fts5_query("\"exact phrase\"").as_deref(),
             Some("\"exact phrase\"")
         );
+        assert_eq!(
+            sanitize_fts5_query("\"person\" OR \"unrelated\"").as_deref(),
+            Some("\"person\" AND \"unrelated\"")
+        );
+        assert_eq!(
+            sanitize_fts5_query("\"person OR unrelated\"").as_deref(),
+            Some("\"person OR unrelated\"")
+        );
+        assert_eq!(
+            sanitize_fts5_query("foo\u{100000}bar").as_deref(),
+            Some("foo* AND bar*")
+        );
         // Unbalanced quote: strip rather than hand FTS5 a syntax error.
         assert_eq!(sanitize_fts5_query("\"oops").as_deref(), Some("oops*"));
         assert_eq!(
@@ -516,7 +741,7 @@ mod tests {
         );
         assert_eq!(
             sanitize_fts5_query("col:val;--").as_deref(),
-            Some("colval*")
+            Some("col* AND val*")
         );
         assert_eq!(sanitize_fts5_query("привет").as_deref(), Some("привет*"));
         assert!(sanitize_fts5_query("").is_none());
