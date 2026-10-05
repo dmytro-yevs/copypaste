@@ -38,9 +38,10 @@ use std::path::Path;
 
 use objc2_app_kit::NSPasteboard;
 use objc2_foundation::{NSArray, NSData, NSString};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 mod attribution;
+mod file;
 
 use super::change::{clear_sentinel_on_delta_mismatch, Change, ChangeTracker, SELF_WRITE_DELTA};
 use super::{Capture, CapturePolicy, ClipboardSource, MAX_CAPTURE_BYTES};
@@ -122,7 +123,7 @@ pub struct MacOsClipboard {
     tracker: ChangeTracker,
     rejected_too_large: u64,
     last_attribution: Option<Attribution>,
-    source_observation: Option<(i64, crate::macos_workspace::Observation)>,
+    source_coverage: super::source_coverage::GenerationCoverage,
     staging: super::file_materialize::StagingArea,
 }
 
@@ -132,7 +133,7 @@ impl MacOsClipboard {
             tracker: ChangeTracker::new(),
             rejected_too_large: 0,
             last_attribution: None,
-            source_observation: None,
+            source_coverage: Default::default(),
             staging: super::file_materialize::StagingArea::new(data_dir)?,
         })
     }
@@ -157,14 +158,13 @@ impl ClipboardSource for MacOsClipboard {
             // acknowledged as belonging to this already-observed generation.
             let observation = crate::macos_workspace::source_observation();
             let count = unsafe { pb.changeCount() } as i64;
-            let next_observation = observation.map(|observation| (count, observation));
             match self.tracker.observe(count) {
                 Change::Unchanged => {
-                    self.source_observation = next_observation;
+                    self.source_coverage.unchanged(count, observation);
                     return None;
                 }
                 Change::SelfWrite => {
-                    self.source_observation = next_observation;
+                    self.source_coverage.consume(count, observation, None, true);
                     debug!(change_count = count, "suppressed our own pasteboard write");
                     return None;
                 }
@@ -186,132 +186,198 @@ impl ClipboardSource for MacOsClipboard {
             // Private mode must be a capture gate, not merely an ingest choice:
             // acknowledge the change without reading either attribution or data.
             if policy.settings.private_mode {
-                self.source_observation = next_observation;
+                self.source_coverage.consume(count, observation, None, true);
                 return None;
             }
 
-            // Resolve attribution before choosing a representation. A non-empty
-            // exclusion list fails closed when it cannot be resolved; with an
-            // empty list the same `None` is safe. Each changed capture requests
-            // fresh identity on the main thread; no previous capture is reused.
-            let source_app = self.frontmost_app(count, &policy.settings.excluded_app_bundle_ids);
-            // This acknowledges the observed generation, including a policy
-            // discard, without clearing any activation records after its sample.
-            self.source_observation = next_observation;
-            self.note_attribution(source_app.as_ref());
-            let app_bundle_id = source_app.as_ref().and_then(|app| app.bundle_id.clone());
-            let app_name = source_app.and_then(|app| app.name);
-            if !policy.settings.excluded_app_bundle_ids.is_empty()
-                && app_bundle_id.as_ref().is_none_or(|id| {
-                    policy
-                        .settings
-                        .excluded_app_bundle_ids
-                        .iter()
-                        .any(|excluded| excluded == id)
+            let decision = observation
+                .and_then(|sample| {
+                    crate::macos_workspace::source_decision(
+                        self.source_coverage.boundary(),
+                        count,
+                        sample,
+                    )
                 })
-            {
-                return None;
-            }
-
-            // A newer generation arriving while main answered this request has
-            // not passed its own exclusion guard. Leave it for the next poll.
-            if unsafe { pb.changeCount() } as i64 != count {
-                return None;
-            }
-
-            let (data, content_type) = UTIS.with(|utis| unsafe {
-                if pb.availableTypeFromArray(&utis.file_url_probe).is_some() {
-                    pb.dataForType(&utis.file_url)
-                        .map(|data| (data, copypaste_ipc::content_type::FILE))
-                } else if pb.availableTypeFromArray(&utis.text_probe).is_some() {
-                    pb.dataForType(&utis.text)
-                        .map(|data| (data, copypaste_ipc::content_type::TEXT))
-                } else if pb.availableTypeFromArray(&utis.rtf_probe).is_some() {
-                    pb.dataForType(&utis.rtf)
-                        .map(|data| (data, copypaste_ipc::content_type::RICH_TEXT))
-                } else if pb.availableTypeFromArray(&utis.html_probe).is_some() {
-                    pb.dataForType(&utis.html)
-                        .map(|data| (data, copypaste_ipc::content_type::HTML))
-                } else if pb.availableTypeFromArray(&utis.png_probe).is_some() {
-                    pb.dataForType(&utis.png)
-                        .map(|data| (data, copypaste_ipc::content_type::IMAGE_PNG))
-                } else if pb.availableTypeFromArray(&utis.tiff_probe).is_some() {
-                    pb.dataForType(&utis.tiff)
-                        .map(|data| (data, copypaste_ipc::content_type::IMAGE_TIFF))
-                } else {
-                    None
-                }
-            })?;
-            if content_type == copypaste_ipc::content_type::FILE
-                && unsafe { pb.pasteboardItems() }.is_none_or(|items| items.len() != 1)
-            {
-                return None;
-            }
-
-            // I-18 (CopyPaste-1f5c): `length` is a field read, `to_vec` on a
-            // multi-GiB item is a multi-GiB allocation. Check first.
-            let len = unsafe { data.length() };
-            let cap =
-                usize::try_from(policy.limit_bytes(content_type)).unwrap_or(MAX_CAPTURE_BYTES);
-            if len > cap {
-                self.rejected_too_large += 1;
-                // I-39 / §6.5: counted, not silently dropped.
-                warn!(
-                    bytes = len,
-                    cap, "pasteboard representation exceeds the size cap; dropped"
-                );
-                return None;
-            }
-
-            let bytes = unsafe { data.bytes() }.to_vec();
-            if copypaste_ipc::content_type::is_text(content_type) {
-                // Clipboard text representations can contain malformed UTF-8.
-                // §3.6's precedent is lossy conversion rather than dropping
-                // the user's copy, and I-37 forbids panicking on a malformed
-                // payload.
-                let content = String::from_utf8_lossy(&bytes).into_owned();
-                if content.is_empty() {
-                    return None;
-                }
-                return Some(Capture {
-                    content,
-                    binary_content: None,
-                    file_path: None,
-                    file_metadata: None,
-                    content_type: content_type.to_string(),
-                    app_bundle_id,
-                    app_name,
+                .unwrap_or_else(|| {
+                    super::source_coverage::Decision::unavailable(count, observation)
                 });
-            }
-            if content_type == copypaste_ipc::content_type::FILE {
-                let url = url::Url::parse(&String::from_utf8_lossy(&bytes)).ok()?;
-                let path = url.to_file_path().ok()?;
-                let filename = path.file_name()?.to_string_lossy();
-                let source_reference = path.to_string_lossy();
-                let metadata = copypaste_core::FileMetadata::with_source_reference(
-                    filename,
-                    "application/octet-stream",
-                    source_reference,
-                )?;
-                return Some(Capture {
-                    content: String::new(),
-                    binary_content: None,
-                    file_path: Some(path),
-                    file_metadata: Some(metadata),
-                    content_type: content_type.to_string(),
-                    app_bundle_id,
-                    app_name,
-                });
-            }
-            Some(Capture {
-                content: String::new(),
-                binary_content: Some(bytes),
-                file_path: None,
-                file_metadata: None,
-                content_type: content_type.to_string(),
-                app_bundle_id,
-                app_name,
-            })
+            let current_count = unsafe { pb.changeCount() } as i64;
+            self.source_coverage.consume(
+                count,
+                observation,
+                Some(&decision),
+                current_count == count,
+            );
+            self.note_attribution(&decision);
+            let app_bundle_id = decision
+                .identity
+                .as_ref()
+                .and_then(|app| app.bundle_id.clone());
+            let app_name = decision.identity.as_ref().and_then(|app| app.name.clone());
+            let read_valid = || {
+                decision.fence(crate::macos_workspace::source_observation(), unsafe {
+                    pb.changeCount()
+                }
+                    as i64)
+            };
+            decision.materialize(
+                &policy.settings.excluded_app_bundle_ids,
+                || {
+                    let observation = crate::macos_workspace::source_observation();
+                    (unsafe { pb.changeCount() } as i64, observation)
+                },
+                || {
+                    let (uti, content_type) = UTIS.with(|utis| unsafe {
+                        for (probe, uti, content_type) in [
+                            (
+                                &utis.file_url_probe,
+                                &utis.file_url,
+                                copypaste_ipc::content_type::FILE,
+                            ),
+                            (
+                                &utis.text_probe,
+                                &utis.text,
+                                copypaste_ipc::content_type::TEXT,
+                            ),
+                            (
+                                &utis.rtf_probe,
+                                &utis.rtf,
+                                copypaste_ipc::content_type::RICH_TEXT,
+                            ),
+                            (
+                                &utis.html_probe,
+                                &utis.html,
+                                copypaste_ipc::content_type::HTML,
+                            ),
+                            (
+                                &utis.png_probe,
+                                &utis.png,
+                                copypaste_ipc::content_type::IMAGE_PNG,
+                            ),
+                            (
+                                &utis.tiff_probe,
+                                &utis.tiff,
+                                copypaste_ipc::content_type::IMAGE_TIFF,
+                            ),
+                        ] {
+                            if !read_valid() {
+                                return None;
+                            }
+                            if pb.availableTypeFromArray(probe).is_some() {
+                                if !read_valid() {
+                                    return None;
+                                }
+                                // A selected representation's read failure is
+                                // terminal; never fall through to another type.
+                                return Some((uti.clone(), content_type));
+                            }
+                        }
+                        None
+                    })?;
+                    if !read_valid() {
+                        return None;
+                    }
+                    if content_type == copypaste_ipc::content_type::FILE {
+                        let (bytes, metadata) = match file::read(
+                            &pb,
+                            &uti,
+                            policy.limit_bytes(content_type),
+                            read_valid,
+                        ) {
+                            Ok(result) => result,
+                            Err(reason) => {
+                                if matches!(
+                                    reason,
+                                    file::FileInputError::Read(
+                                        super::file_capture::FileReadError::TooLarge
+                                    )
+                                ) {
+                                    self.rejected_too_large += 1;
+                                }
+                                file::reject(reason);
+                                return None;
+                            }
+                        };
+                        info!("file capture materialized");
+                        let capture = Capture {
+                            content: String::new(),
+                            binary_content: Some(bytes),
+                            file_path: None,
+                            file_metadata: Some(metadata),
+                            content_type: content_type.to_string(),
+                            app_bundle_id,
+                            app_name,
+                            source_policy: super::SourcePolicyEvidence::MacOs(
+                                decision.coverage.clone(),
+                            ),
+                        };
+                        return read_valid().then_some(capture);
+                    }
+                    let data = unsafe { pb.dataForType(&uti) }?;
+                    if !read_valid() {
+                        return None;
+                    }
+
+                    // I-18 (CopyPaste-1f5c): `length` is a field read, `to_vec` on a
+                    // multi-GiB item is a multi-GiB allocation. Check first.
+                    let len = unsafe { data.length() };
+                    let cap = usize::try_from(policy.limit_bytes(content_type))
+                        .unwrap_or(MAX_CAPTURE_BYTES);
+                    if len > cap {
+                        self.rejected_too_large += 1;
+                        // I-39 / §6.5: counted, not silently dropped.
+                        warn!(
+                            bytes = len,
+                            cap, "pasteboard representation exceeds the size cap; dropped"
+                        );
+                        return None;
+                    }
+
+                    if !read_valid() {
+                        return None;
+                    }
+                    let bytes = unsafe { data.bytes() }.to_vec();
+                    if !read_valid() {
+                        return None;
+                    }
+                    if copypaste_ipc::content_type::is_text(content_type) {
+                        // Clipboard text representations can contain malformed UTF-8.
+                        // §3.6's precedent is lossy conversion rather than dropping
+                        // the user's copy, and I-37 forbids panicking on a malformed
+                        // payload.
+                        let content = String::from_utf8_lossy(&bytes).into_owned();
+                        if content.is_empty() {
+                            return None;
+                        }
+                        let capture = Capture {
+                            content,
+                            binary_content: None,
+                            file_path: None,
+                            file_metadata: None,
+                            content_type: content_type.to_string(),
+                            app_bundle_id,
+                            app_name,
+                            source_policy: super::SourcePolicyEvidence::MacOs(
+                                decision.coverage.clone(),
+                            ),
+                        };
+                        return read_valid().then_some(capture);
+                    }
+                    let capture = Capture {
+                        content: String::new(),
+                        binary_content: Some(bytes),
+                        file_path: None,
+                        file_metadata: None,
+                        content_type: content_type.to_string(),
+                        app_bundle_id,
+                        app_name,
+                        source_policy: super::SourcePolicyEvidence::MacOs(
+                            decision.coverage.clone(),
+                        ),
+                    };
+                    read_valid().then_some(capture)
+                },
+            )
         })
     }
 
@@ -322,7 +388,7 @@ impl ClipboardSource for MacOsClipboard {
             let count = unsafe { pb.changeCount() } as i64;
             let changed = !self.tracker.is_current(count);
             if !changed {
-                self.source_observation = observation.map(|observation| (count, observation));
+                self.source_coverage.unchanged(count, observation);
             }
             changed
         })
@@ -667,7 +733,11 @@ mod tests {
         ]);
         let capture = clipboard.poll().expect("the file URL must win");
         assert_eq!(capture.content_type, copypaste_ipc::content_type::FILE);
-        assert_eq!(capture.file_path.as_deref(), Some(path.as_path()));
+        assert!(capture.file_path.is_none());
+        assert_eq!(
+            capture.binary_content.as_deref(),
+            Some(b"file bytes".as_slice())
+        );
     }
 
     #[test]
@@ -704,7 +774,7 @@ mod tests {
 
     #[test]
     #[ignore = "drives the real NSPasteboard"]
-    fn one_local_file_url_is_captured_without_reading_its_bytes() {
+    fn one_local_file_url_freezes_its_bytes_and_metadata() {
         let _lock = serialised();
         let (_data_dir, mut clipboard) = test_clipboard();
         let fixture_dir = tempfile::tempdir().unwrap();
@@ -719,7 +789,7 @@ mod tests {
         );
         let capture = clipboard.poll().expect("a local file URL must be captured");
         assert_eq!(capture.content_type, copypaste_ipc::content_type::FILE);
-        assert_eq!(capture.file_path.as_deref(), Some(path.as_path()));
+        assert!(capture.file_path.is_none());
         assert_eq!(
             capture.file_metadata,
             copypaste_core::FileMetadata::with_source_reference(
@@ -728,7 +798,10 @@ mod tests {
                 path.to_string_lossy(),
             )
         );
-        assert!(capture.binary_content.is_none());
+        assert_eq!(
+            capture.binary_content.as_deref(),
+            Some(b"synthetic file fixture".as_slice())
+        );
 
         write_types(&[(UTI_FILE_URL, b"https://example.invalid/fixture.bin")]);
         assert!(
@@ -743,6 +816,72 @@ mod tests {
             clipboard.poll().is_none(),
             "a multi-file change must not silently capture its first path"
         );
+    }
+
+    #[test]
+    #[ignore = "drives the real NSPasteboard and native NSURL resolution"]
+    fn native_url_path_and_asserted_file_reference_preserve_owned_fixture_bytes() {
+        let _lock = serialised();
+        let fixture_dir = tempfile::tempdir().unwrap();
+        for (filename, len, reference) in [
+            ("noextension", 32, false),
+            ("Résumé space λ %#", 87, false),
+            ("reference-file", 32, true),
+        ] {
+            let path = fixture_dir.path().join(filename);
+            let bytes = vec![if reference { 9 } else { 7 }; len];
+            std::fs::write(&path, &bytes).unwrap();
+            autoreleasepool(|_| unsafe {
+                let mut url = NSURL::fileURLWithPath(&NSString::from_str(path.to_str().unwrap()));
+                if reference {
+                    url = url
+                        .fileReferenceURL()
+                        .expect("native reference URL must exist");
+                    assert!(
+                        url.isFileReferenceURL(),
+                        "path URL cannot qualify reference resolution"
+                    );
+                } else {
+                    assert!(!url.isFileReferenceURL());
+                }
+                let objects: Retained<NSArray<ProtocolObject<dyn NSPasteboardWriting>>> =
+                    NSArray::from_vec(vec![ProtocolObject::from_retained(url)]);
+                let pb = NSPasteboard::generalPasteboard();
+                let _ = pb.clearContents();
+                assert!(pb.writeObjects(&objects));
+                let (captured, metadata) =
+                    file::read(&pb, &NSString::from_str(UTI_FILE_URL), 1024, || true).unwrap();
+                assert_eq!(captured, bytes);
+                assert_eq!(metadata.filename, filename);
+                let locator = std::path::Path::new(metadata.source_reference.as_deref().unwrap());
+                assert!(locator.is_absolute());
+                assert_eq!(std::fs::read(locator).unwrap(), bytes);
+            });
+        }
+    }
+    #[test]
+    #[ignore = "drives the real NSPasteboard"]
+    fn native_file_plus_another_item_is_explicitly_unsupported() {
+        let _lock = serialised();
+        let fixture_dir = tempfile::tempdir().unwrap();
+        let path = fixture_dir.path().join("single-file");
+        std::fs::write(&path, b"bytes").unwrap();
+        autoreleasepool(|_| unsafe {
+            let url = NSURL::fileURLWithPath(&NSString::from_str(path.to_str().unwrap()));
+            let objects: Retained<NSArray<ProtocolObject<dyn NSPasteboardWriting>>> =
+                NSArray::from_vec(vec![
+                    ProtocolObject::from_retained(url),
+                    ProtocolObject::from_retained(NSString::from_str("second item")),
+                ]);
+            let pb = NSPasteboard::generalPasteboard();
+            let _ = pb.clearContents();
+            assert!(pb.writeObjects(&objects));
+            assert_eq!(pb.pasteboardItems().unwrap().len(), 2);
+            assert_eq!(
+                file::read(&pb, &NSString::from_str(UTI_FILE_URL), 1024, || true),
+                Err(file::FileInputError::UnsupportedItemCount)
+            );
+        });
     }
 
     /// T-8, T-9 and the Fix-4 / "DUP-ON-COPY" pair, asserted as behaviour

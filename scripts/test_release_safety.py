@@ -31,9 +31,9 @@ class ReleaseSafetyTest(unittest.TestCase):
         cargo = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
         pubspec = (ROOT / "apps/copypaste_flutter/pubspec.yaml").read_text(encoding="utf-8")
         release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-        self.assertIn('version = "1.0.0"', cargo)
-        self.assertIn("android-release-version-code = 300000000", cargo)
-        self.assertIn("version: 1.0.0+1", pubspec)
+        self.assertIn('version = "1.0.1"', cargo)
+        self.assertIn("android-release-version-code = 300000001", cargo)
+        self.assertIn("version: 1.0.1+2", pubspec)
         self.assertNotIn("COPYPASTE_CLOUD_URL", release)
         self.assertNotIn("SUPABASE_URL", release)
 

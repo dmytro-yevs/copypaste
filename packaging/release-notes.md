@@ -1,11 +1,15 @@
-# CopyPaste 1.0.0
+# CopyPaste 1.0.1
 
-CopyPaste 1.0.0 is the first stable Flutter release for macOS, Android, and Windows.
+This update improves clipboard capture, search, and desktop behavior.
 
-- Encrypted local clipboard history with search, filters, pinning, and previews.
-- Paired-device synchronization over the local network.
-- Native clipboard capture and platform onboarding.
-- Quick Paste on macOS and Windows.
-- Signed in-application updates for Android and Windows, with Homebrew updates on macOS.
+- Preserve word boundaries when searching text containing URLs or punctuation.
+- Improve clipboard source tracking, exclusion handling, and private-mode transitions.
+- Capture supported local files through native macOS file URLs and preserve their contents during storage retries.
+- Improve Android capture ownership across background and foreground lifecycle changes.
+- Correct desktop shortcut registration, popup result handling, and Quick Paste target ownership.
+- Allow macOS shutdown without waiting for a Flutter termination reply.
+- Correct local and remote device labels and improve Settings validation messages.
 
-Cloud Sync is not part of CopyPaste 1.0.0.
+Application exclusions on macOS use observed app activity; background copies can bypass them. Empty files and multiple-file clipboard selections remain unsupported.
+
+Cloud Sync is not part of CopyPaste 1.0.1.

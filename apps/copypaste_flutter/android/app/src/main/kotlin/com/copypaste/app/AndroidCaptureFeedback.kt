@@ -50,16 +50,14 @@ internal object AndroidCaptureFeedback {
     }
 
     private fun playSound() {
-        Thread {
-            val tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 60)
-            try {
-                tone.startTone(ToneGenerator.TONE_PROP_ACK, 100)
-                Thread.sleep(120)
-            } catch (_: InterruptedException) {
-                Thread.currentThread().interrupt()
-            } finally {
-                tone.release()
-            }
-        }.start()
+        // Start audible feedback within the runtime completion scope. Releasing
+        // an already-started tone later cannot publish a new capture success.
+        val tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 60)
+        try {
+            tone.startTone(ToneGenerator.TONE_PROP_ACK, 100)
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ tone.release() }, 120)
+        } catch (_: RuntimeException) {
+            tone.release()
+        }
     }
 }
