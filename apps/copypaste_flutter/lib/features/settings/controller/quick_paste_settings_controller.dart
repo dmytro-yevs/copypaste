@@ -29,6 +29,7 @@ class QuickPasteSettingsController extends ChangeNotifier
   bool _observingLifecycle = false;
   bool _recordingShortcut = false;
   bool _disposed = false;
+  Future<void> _registrationOperation = Future<void>.value();
   String? _errorMessage;
 
   bool get supported => _supported;
@@ -40,26 +41,29 @@ class QuickPasteSettingsController extends ChangeNotifier
   String? get errorMessage => _errorMessage;
 
   Future<void> initialize() async {
-    if (_initialized) return;
+    if (_disposed || _initialized || _busy) return;
     _busy = true;
     notifyListeners();
     try {
       _supported = await _windowHost.isSupported();
+      if (_disposed) return;
       _preferences = await _store.read();
+      if (_disposed) return;
       if (_supported) {
         WidgetsBinding.instance.addObserver(this);
         _observingLifecycle = true;
         await _windowHost.prepare();
-        await _registrar.register(_preferences.shortcut, _openWindow);
+        if (!await _changeRegistration(_preferences.shortcut)) return;
         _accessibilityGranted = await _windowHost.accessibilityGranted();
+        if (_disposed) return;
       }
       _errorMessage = null;
     } catch (_) {
-      _errorMessage = 'Quick Paste could not be prepared.';
+      if (!_disposed) _errorMessage = 'Quick Paste could not be prepared.';
     } finally {
       _initialized = true;
       _busy = false;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -88,7 +92,7 @@ class QuickPasteSettingsController extends ChangeNotifier
   }
 
   Future<bool> setShortcut(DesktopShortcut shortcut) async {
-    if (_busy || !shortcut.isValid) {
+    if (_disposed || _busy || !shortcut.isValid) {
       return false;
     }
     if (shortcut == _preferences.shortcut) {
@@ -102,21 +106,23 @@ class QuickPasteSettingsController extends ChangeNotifier
     final before = _preferences;
     final next = before.copyWith(shortcut: shortcut);
     try {
-      await _registrar.register(shortcut, _openWindow);
+      if (!await _changeRegistration(shortcut)) return false;
       await _store.write(next);
+      if (_disposed) return false;
       _preferences = next;
       return true;
     } catch (_) {
+      if (_disposed) return false;
       try {
-        await _registrar.register(before.shortcut, _openWindow);
+        if (!await _changeRegistration(before.shortcut)) return false;
       } catch (_) {
         // The visible error remains the only safe claim when registration fails.
       }
-      _errorMessage = 'That shortcut could not be registered.';
+      if (!_disposed) _errorMessage = 'That shortcut could not be registered.';
       return false;
     } finally {
       _busy = false;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -125,28 +131,64 @@ class QuickPasteSettingsController extends ChangeNotifier
   }
 
   Future<bool> beginShortcutRecording() async {
-    if (!_supported || _busy || _recordingShortcut) return false;
+    if (_disposed || !_supported || _busy || _recordingShortcut) return false;
+    _busy = true;
+    notifyListeners();
     try {
-      await _registrar.unregister();
+      if (!await _changeRegistration(null)) return false;
       _recordingShortcut = true;
       return true;
     } catch (_) {
-      _errorMessage = 'The current shortcut could not be paused.';
-      notifyListeners();
+      if (!_disposed) {
+        _errorMessage = 'The current shortcut could not be paused.';
+      }
       return false;
+    } finally {
+      _busy = false;
+      if (!_disposed) notifyListeners();
     }
   }
 
   Future<void> cancelShortcutRecording() async {
-    if (!_supported || !_recordingShortcut) return;
+    if (_disposed || !_supported || _busy || !_recordingShortcut) return;
     _recordingShortcut = false;
+    _busy = true;
+    notifyListeners();
     try {
-      await _registrar.register(_preferences.shortcut, _openWindow);
+      if (!await _changeRegistration(_preferences.shortcut)) return;
       _errorMessage = null;
-      notifyListeners();
     } catch (_) {
-      _errorMessage = 'The shortcut could not be restored.';
-      notifyListeners();
+      if (!_disposed) _errorMessage = 'The shortcut could not be restored.';
+    } finally {
+      _busy = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  Future<bool> _changeRegistration(DesktopShortcut? shortcut) {
+    final operation = _registrationOperation.then((_) async {
+      if (_disposed) return false;
+      if (shortcut == null) {
+        await _registrar.unregister();
+      } else {
+        await _registrar.register(shortcut, _openWindow);
+      }
+      return !_disposed;
+    });
+    // Keep cleanup ordered after failed operations; callers handle their errors.
+    _registrationOperation = operation.then<void>(
+      (_) {},
+      onError: (Object error, StackTrace stackTrace) {},
+    );
+    return operation;
+  }
+
+  Future<void> _disposeRegistration() async {
+    try {
+      await _registrationOperation;
+      await _registrar.unregister();
+    } catch (_) {
+      // Teardown cannot report late native registration errors.
     }
   }
 
@@ -198,11 +240,12 @@ class QuickPasteSettingsController extends ChangeNotifier
   @override
   void dispose() {
     _disposed = true;
+    _recordingShortcut = false;
     if (_observingLifecycle) {
       WidgetsBinding.instance.removeObserver(this);
       _observingLifecycle = false;
     }
-    unawaited(_registrar.unregister());
+    unawaited(_disposeRegistration());
     unawaited(_windowHost.dispose());
     super.dispose();
   }

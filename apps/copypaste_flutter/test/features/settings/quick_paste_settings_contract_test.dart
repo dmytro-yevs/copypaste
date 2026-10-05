@@ -170,6 +170,197 @@ void main() {
     },
   );
 
+  test('rapid recording starts issue only one pending pause', () async {
+    registrar.unregisterGate = Completer<void>();
+    registrar.unregisterStarted = Completer<void>();
+    final first = controller.beginShortcutRecording();
+
+    expect(controller.busy, isTrue);
+    expect(await controller.beginShortcutRecording(), isFalse);
+    await registrar.unregisterStarted!.future;
+    expect(registrar.unregisterCalls, 1);
+    registrar.unregisterGate!.complete();
+
+    expect(await first, isTrue);
+    expect(controller.busy, isFalse);
+    expect(registrar.registered, isNull);
+    expect(registrar.maxActiveOperations, 1);
+    await controller.cancelShortcutRecording();
+    expect(registrar.registered, controller.shortcut);
+  });
+
+  for (final replace in [false, true]) {
+    test(
+      'pending cancel blocks a new registration transition (replace: $replace)',
+      () async {
+        await controller.beginShortcutRecording();
+        registrar.registerGate = Completer<void>();
+        registrar.registerStarted = Completer<void>();
+        final restoring = controller.cancelShortcutRecording();
+        await registrar.registerStarted!.future;
+
+        expect(controller.busy, isTrue);
+        expect(await controller.beginShortcutRecording(), isFalse);
+        expect(await controller.setShortcut(replacement), isFalse);
+        expect(registrar.registerCalls, 2);
+        expect(registrar.unregisterCalls, 1);
+        expect(store.writes, 0);
+        registrar.registerGate!.complete();
+        await restoring;
+
+        expect(registrar.registered, controller.shortcut);
+        expect(controller.busy, isFalse);
+        if (replace) {
+          expect(await controller.setShortcut(replacement), isTrue);
+          expect(registrar.registered, replacement);
+          expect(store.writes, 1);
+        } else {
+          expect(await controller.beginShortcutRecording(), isTrue);
+          expect(registrar.registered, isNull);
+          await controller.cancelShortcutRecording();
+          expect(registrar.registered, controller.shortcut);
+          expect(store.writes, 0);
+        }
+        expect(registrar.maxActiveOperations, 1);
+        await registrar.callback!();
+        expect(host.openCalls, 1);
+      },
+    );
+  }
+
+  test('same-value completion blocks a second start while restoring', () async {
+    await controller.beginShortcutRecording();
+    registrar.registerGate = Completer<void>();
+    registrar.registerStarted = Completer<void>();
+    final restoring = controller.setShortcut(controller.shortcut);
+    await registrar.registerStarted!.future;
+
+    expect(controller.busy, isTrue);
+    expect(await controller.beginShortcutRecording(), isFalse);
+    expect(await controller.setShortcut(replacement), isFalse);
+    registrar.registerGate!.complete();
+
+    expect(await restoring, isFalse);
+    expect(registrar.registered, controller.shortcut);
+    expect(store.writes, 0);
+    expect(registrar.maxActiveOperations, 1);
+  });
+
+  test('dispose waits for pending pause before its final unregister', () async {
+    registrar.unregisterGate = Completer<void>();
+    registrar.unregisterStarted = Completer<void>();
+    final pausing = controller.beginShortcutRecording();
+    await registrar.unregisterStarted!.future;
+    registrar.unregisterCompleted = Completer<void>();
+    var notifications = 0;
+    controller.addListener(() => notifications += 1);
+    controller.dispose();
+    disposed = true;
+
+    expect(registrar.unregisterCalls, 1);
+    registrar.unregisterGate!.complete();
+    expect(await pausing, isFalse);
+    await registrar.unregisterCompleted!.future;
+
+    expect(registrar.unregisterCalls, 2);
+    expect(registrar.callback, isNull);
+    expect(registrar.registered, isNull);
+    expect(registrar.maxActiveOperations, 1);
+    expect(notifications, 0);
+  });
+
+  for (final sameValue in [false, true]) {
+    for (final fails in [false, true]) {
+      test(
+        'dispose cleans pending restore (same value: $sameValue, failure: $fails)',
+        () async {
+          await controller.beginShortcutRecording();
+          registrar.registerGate = Completer<void>();
+          registrar.registerStarted = Completer<void>();
+          registrar.failRegistrations = fails ? 1 : 0;
+          final restoring = sameValue
+              ? controller.setShortcut(controller.shortcut)
+              : controller.cancelShortcutRecording();
+          await registrar.registerStarted!.future;
+          registrar.unregisterCompleted = Completer<void>();
+          var notifications = 0;
+          controller.addListener(() => notifications += 1);
+          controller.dispose();
+          disposed = true;
+          expect(registrar.unregisterCalls, 1);
+
+          registrar.registerGate!.complete();
+          await restoring;
+          await registrar.unregisterCompleted!.future;
+
+          expect(registrar.registerCalls, 2);
+          expect(registrar.unregisterCalls, 2);
+          expect(registrar.callback, isNull);
+          expect(registrar.registered, isNull);
+          expect(store.writes, 0);
+          expect(registrar.maxActiveOperations, 1);
+          expect(notifications, 0);
+          expect(await controller.beginShortcutRecording(), isFalse);
+          expect(await controller.setShortcut(replacement), isFalse);
+        },
+      );
+    }
+  }
+
+  test(
+    'dispose cleans pending replacement without persisting or restoring it',
+    () async {
+      registrar.registerGate = Completer<void>();
+      registrar.registerStarted = Completer<void>();
+      final replacing = controller.setShortcut(replacement);
+      await registrar.registerStarted!.future;
+      registrar.unregisterCompleted = Completer<void>();
+      var notifications = 0;
+      controller.addListener(() => notifications += 1);
+      controller.dispose();
+      disposed = true;
+      registrar.registerGate!.complete();
+
+      expect(await replacing, isFalse);
+      await registrar.unregisterCompleted!.future;
+      expect(registrar.registerCalls, 2);
+      expect(registrar.callback, isNull);
+      expect(store.writes, 0);
+      expect(registrar.maxActiveOperations, 1);
+      expect(notifications, 0);
+    },
+  );
+
+  test(
+    'dispose cleans pending initial registration without late notification',
+    () async {
+      controller.dispose();
+      disposed = true;
+      final initialRegistrar = _Registrar()
+        ..registerGate = Completer<void>()
+        ..registerStarted = Completer<void>()
+        ..unregisterCompleted = Completer<void>();
+      final initialController = QuickPasteSettingsController(
+        store: _Store(),
+        registrar: initialRegistrar,
+        windowHost: _WindowHost(),
+      );
+      final initializing = initialController.initialize();
+      await initialRegistrar.registerStarted!.future;
+      var notifications = 0;
+      initialController.addListener(() => notifications += 1);
+      initialController.dispose();
+      initialRegistrar.registerGate!.complete();
+
+      await initializing;
+      await initialRegistrar.unregisterCompleted!.future;
+      expect(initialRegistrar.registerCalls, 1);
+      expect(initialRegistrar.callback, isNull);
+      expect(initialRegistrar.maxActiveOperations, 1);
+      expect(notifications, 0);
+    },
+  );
+
   for (final fails in [false, true]) {
     test('open completion after disposal is safe (failure: $fails)', () async {
       host.openGate = Completer<void>();
@@ -209,6 +400,21 @@ class _Registrar implements DesktopShortcutRegistrar {
   Future<void> Function()? callback;
   int registerCalls = 0;
   int failRegistrations = 0;
+  int unregisterCalls = 0;
+  int activeOperations = 0;
+  int maxActiveOperations = 0;
+  Completer<void>? registerGate;
+  Completer<void>? registerStarted;
+  Completer<void>? unregisterGate;
+  Completer<void>? unregisterStarted;
+  Completer<void>? unregisterCompleted;
+
+  void _startedOperation() {
+    activeOperations += 1;
+    if (activeOperations > maxActiveOperations) {
+      maxActiveOperations = activeOperations;
+    }
+  }
 
   @override
   Future<void> register(
@@ -216,20 +422,37 @@ class _Registrar implements DesktopShortcutRegistrar {
     Future<void> Function() callback,
   ) async {
     registerCalls += 1;
+    _startedOperation();
     registered = null;
     this.callback = null;
-    if (failRegistrations > 0) {
-      failRegistrations -= 1;
-      throw PlatformException(code: 'registration_failed');
+    if (registerStarted?.isCompleted == false) registerStarted!.complete();
+    try {
+      await registerGate?.future;
+      if (failRegistrations > 0) {
+        failRegistrations -= 1;
+        throw PlatformException(code: 'registration_failed');
+      }
+      registered = shortcut;
+      this.callback = callback;
+    } finally {
+      activeOperations -= 1;
     }
-    registered = shortcut;
-    this.callback = callback;
   }
 
   @override
   Future<void> unregister() async {
-    registered = null;
-    callback = null;
+    unregisterCalls += 1;
+    _startedOperation();
+    final completed = unregisterCompleted;
+    if (unregisterStarted?.isCompleted == false) unregisterStarted!.complete();
+    try {
+      await unregisterGate?.future;
+      registered = null;
+      callback = null;
+    } finally {
+      activeOperations -= 1;
+      completed?.complete();
+    }
   }
 }
 
