@@ -7,6 +7,35 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
+  testWidgets(
+    'refreshes cannot restart drawer dismissal or leave a touch barrier',
+    (tester) async {
+      final controller = DevicesController(
+        gateway: _ScreenGateway(),
+        captureProtection: _CaptureProtection(),
+      );
+      addTearDown(controller.dispose);
+      await _pumpDevices(tester, controller, size: const Size(390, 844));
+      await tester.tap(find.byKey(const ValueKey<String>('this-device-card')));
+      await tester.pumpAndSettle();
+      controller.closeDeviceDetails();
+      for (var frame = 0; frame < 10; frame++) {
+        await controller.refresh();
+        await tester.pump(const Duration(milliseconds: 60));
+      }
+      expect(
+        find.byKey(const ValueKey<String>('devices-details-drawer')),
+        findsNothing,
+      );
+      await tester.tap(find.byKey(const ValueKey<String>('this-device-card')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey<String>('devices-details-drawer')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
   testWidgets('switches from the right inspector below 800 logical pixels', (
     tester,
   ) async {

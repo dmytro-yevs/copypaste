@@ -20,6 +20,7 @@ pub enum ErrorCode {
 
     PairingCode,
     PairingAddress,
+    PairingAlreadyExists,
     RateLimited,
     /// The paired device may reappear, so this failure is retryable.
     PeerUnreachable,
@@ -47,6 +48,7 @@ impl ErrorCode {
             Self::ContentTooLarge => "content_too_large",
             Self::PairingCode => "pairing_code",
             Self::PairingAddress => "pairing_address",
+            Self::PairingAlreadyExists => "pairing_already_exists",
             Self::RateLimited => "rate_limited",
             Self::PeerUnreachable => "peer_unreachable",
             Self::PairingLimit => "pairing_limit",
@@ -70,6 +72,7 @@ impl ErrorCode {
             "content_too_large" => Some(Self::ContentTooLarge),
             "pairing_code" => Some(Self::PairingCode),
             "pairing_address" => Some(Self::PairingAddress),
+            "pairing_already_exists" => Some(Self::PairingAlreadyExists),
             "rate_limited" => Some(Self::RateLimited),
             "peer_unreachable" => Some(Self::PeerUnreachable),
             "pairing_limit" => Some(Self::PairingLimit),
@@ -99,6 +102,7 @@ impl ErrorCode {
             | Self::ContentTooLarge
             | Self::PairingCode
             | Self::PairingAddress
+            | Self::PairingAlreadyExists
             | Self::RateLimited
             | Self::PairingLimit
             | Self::PeerVersion
@@ -125,6 +129,10 @@ mod tests {
             (ErrorCode::ContentTooLarge, "\"content_too_large\""),
             (ErrorCode::PairingCode, "\"pairing_code\""),
             (ErrorCode::PairingAddress, "\"pairing_address\""),
+            (
+                ErrorCode::PairingAlreadyExists,
+                "\"pairing_already_exists\"",
+            ),
             (ErrorCode::RateLimited, "\"rate_limited\""),
             (ErrorCode::PeerUnreachable, "\"peer_unreachable\""),
             (ErrorCode::PairingLimit, "\"pairing_limit\""),
@@ -160,6 +168,7 @@ mod tests {
         for code in [
             ErrorCode::PairingCode,
             ErrorCode::PairingAddress,
+            ErrorCode::PairingAlreadyExists,
             ErrorCode::RateLimited,
             ErrorCode::PairingLimit,
             ErrorCode::PeerVersion,

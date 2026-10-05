@@ -21,6 +21,8 @@ pub enum NodeError {
     NoPairing,
     #[error("a device cannot pair with itself")]
     SelfPairing,
+    #[error("Device is already paired.")]
+    AlreadyPaired,
     #[error("no such paired device")]
     NoPeer,
     #[error("this peer has never been reached and is not visible on the network; sync from the other device, or re-pair with an address")]
@@ -57,6 +59,7 @@ impl NodeError {
                 | NodeError::PairingBusy
                 | NodeError::NoPairing
                 | NodeError::SelfPairing
+                | NodeError::AlreadyPaired
                 | NodeError::TooManyPairings
         )
     }
@@ -74,6 +77,7 @@ mod tests {
         NodeError::PairingBusy,
         NodeError::NoPairing,
         NodeError::SelfPairing,
+        NodeError::AlreadyPaired,
         NodeError::NoPeer,
         NodeError::NoAddress,
         NodeError::Session,

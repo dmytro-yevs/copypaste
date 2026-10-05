@@ -39,6 +39,7 @@ pub(crate) async fn create() -> Result<PairingCeremony, RuntimeError> {
         state: "waiting_for_peer".into(),
         expires_in_ms: Some(invitation.expires_in_secs.saturating_mul(1_000)),
         peer_name: None,
+        failure_message: None,
     };
     ceremonies()
         .lock()
@@ -582,6 +583,12 @@ fn sanitize(ceremony_id: &str, progress: PairingProgressData) -> PairingCeremony
         .into(),
         expires_in_ms: progress.expires_in_ms,
         peer_name: progress.peer_name,
+        failure_message: match progress.error_code {
+            Some(copypaste_ipc::ErrorCode::PairingAlreadyExists) => {
+                Some("Device is already paired.".into())
+            }
+            _ => None,
+        },
     }
 }
 
@@ -613,6 +620,33 @@ mod tests {
                 "secret escaped ceremony: {secret}"
             );
         }
+    }
+
+    #[test]
+    fn duplicate_pairing_failure_has_one_safe_user_message() {
+        let ceremony = sanitize(
+            "opaque-ceremony",
+            PairingProgressData {
+                pairing_id: Some("new-pairing-id".into()),
+                role: None,
+                state: copypaste_ipc::PairingState::Failed,
+                expires_in_ms: None,
+                sas: None,
+                peer_device_id: Some("existing-device-id".into()),
+                peer_name: Some("Phone".into()),
+                peer_addr: None,
+                known_device: None,
+                error_code: Some(copypaste_ipc::ErrorCode::PairingAlreadyExists),
+            },
+        );
+
+        assert_eq!(
+            ceremony.failure_message.as_deref(),
+            Some("Device is already paired.")
+        );
+        let rendered = format!("{ceremony:?}");
+        assert!(!rendered.contains("new-pairing-id"));
+        assert!(!rendered.contains("existing-device-id"));
     }
 
     #[tokio::test]

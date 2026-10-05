@@ -599,6 +599,7 @@ impl Node {
         };
         let updated = Peer {
             pairing_id: peer.pairing_id.clone(),
+            device_id: peer.device_id.clone(),
             name: peer.name.clone(),
             psk: peer.psk,
             last_addr: peer.last_addr,
@@ -763,7 +764,13 @@ impl Node {
     ///
     /// The name comes off the wire and is cosmetic — never an identity — so it
     /// is only taken when the peer offered one.
-    fn touch_peer(&self, peer: &Peer, addr: Option<SocketAddr>, name: Option<&str>) {
+    fn touch_peer(
+        &self,
+        peer: &Peer,
+        device_id: Option<&str>,
+        addr: Option<SocketAddr>,
+        name: Option<&str>,
+    ) {
         // A sync or probe may have refreshed authenticated metadata after its
         // caller captured `peer`. Re-read the stored record so that a stale
         // snapshot cannot erase a newer profile observation.
@@ -773,6 +780,9 @@ impl Node {
             .unwrap_or_else(|| peer.clone());
         let updated = Peer {
             pairing_id: current.pairing_id.clone(),
+            device_id: device_id
+                .map(str::to_string)
+                .or_else(|| current.device_id.clone()),
             name: match name {
                 Some(name) if !name.trim().is_empty() => name.to_string(),
                 _ => current.name.clone(),
@@ -904,6 +914,7 @@ mod tests {
         node.peers()
             .upsert(Peer {
                 pairing_id: pairing_id.clone(),
+                device_id: None,
                 name: "laptop".into(),
                 psk: token.psk(),
                 last_addr: None,
@@ -927,6 +938,7 @@ mod tests {
         node.peers()
             .upsert(Peer {
                 pairing_id: pairing_id.clone(),
+                device_id: None,
                 name: "phone".into(),
                 psk: token.psk(),
                 last_addr: None,
@@ -942,7 +954,7 @@ mod tests {
         };
 
         node.record_authenticated_profile(&pairing_id, Some(&profile));
-        node.touch_peer(&stale, None, Some("renamed phone"));
+        node.touch_peer(&stale, None, None, Some("renamed phone"));
 
         let stored = node.peers().get(&pairing_id).expect("peer after touch");
         assert_eq!(stored.name, "renamed phone");
@@ -962,6 +974,7 @@ mod tests {
         node.peers()
             .upsert(Peer {
                 pairing_id: pairing_id.clone(),
+                device_id: None,
                 name: "phone".into(),
                 psk: token.psk(),
                 last_addr: None,
@@ -992,6 +1005,7 @@ mod tests {
             .unwrap()
             .upsert(Peer {
                 pairing_id: pairing_id.clone(),
+                device_id: None,
                 name: "phone".into(),
                 psk: token.psk(),
                 last_addr: None,
@@ -1038,6 +1052,7 @@ mod tests {
             node.peers()
                 .upsert(Peer {
                     pairing_id: token.pairing_id(),
+                    device_id: None,
                     name: format!("device-{i}"),
                     psk: token.psk(),
                     last_addr: None,

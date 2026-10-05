@@ -35,7 +35,6 @@
 
 use objc2::rc::{autoreleasepool, Retained};
 use std::path::Path;
-use std::time::Instant;
 
 use objc2_app_kit::NSPasteboard;
 use objc2_foundation::{NSArray, NSData, NSString};
@@ -45,7 +44,9 @@ mod attribution;
 
 use super::change::{clear_sentinel_on_delta_mismatch, Change, ChangeTracker, SELF_WRITE_DELTA};
 use super::{Capture, CapturePolicy, ClipboardSource, MAX_CAPTURE_BYTES};
-use attribution::{Attribution, FrontmostApp};
+#[cfg(test)]
+use crate::macos_workspace::SourceIdentity as FrontmostApp;
+use attribution::Attribution;
 
 /// UTIs spelled literally rather than pulled from `NSPasteboardType*`
 /// statics: the values are frozen by the OS and by nspasteboard.org, and
@@ -120,8 +121,8 @@ thread_local! {
 pub struct MacOsClipboard {
     tracker: ChangeTracker,
     rejected_too_large: u64,
-    frontmost: Option<(Instant, Option<FrontmostApp>)>,
     last_attribution: Option<Attribution>,
+    source_observation: Option<(i64, crate::macos_workspace::Observation)>,
     staging: super::file_materialize::StagingArea,
 }
 
@@ -130,8 +131,8 @@ impl MacOsClipboard {
         Ok(Self {
             tracker: ChangeTracker::new(),
             rejected_too_large: 0,
-            frontmost: None,
             last_attribution: None,
+            source_observation: None,
             staging: super::file_materialize::StagingArea::new(data_dir)?,
         })
     }
@@ -152,10 +153,18 @@ impl ClipboardSource for MacOsClipboard {
 
             // I-1: the change-count comparison is the first thing we do; an
             // unchanged pasteboard performs zero reads and zero allocations.
+            // Sample history BEFORE changeCount. A later activation cannot be
+            // acknowledged as belonging to this already-observed generation.
+            let observation = crate::macos_workspace::source_observation();
             let count = unsafe { pb.changeCount() } as i64;
+            let next_observation = observation.map(|observation| (count, observation));
             match self.tracker.observe(count) {
-                Change::Unchanged => return None,
+                Change::Unchanged => {
+                    self.source_observation = next_observation;
+                    return None;
+                }
                 Change::SelfWrite => {
+                    self.source_observation = next_observation;
                     debug!(change_count = count, "suppressed our own pasteboard write");
                     return None;
                 }
@@ -177,14 +186,18 @@ impl ClipboardSource for MacOsClipboard {
             // Private mode must be a capture gate, not merely an ingest choice:
             // acknowledge the change without reading either attribution or data.
             if policy.settings.private_mode {
+                self.source_observation = next_observation;
                 return None;
             }
 
             // Resolve attribution before choosing a representation. A non-empty
             // exclusion list fails closed when it cannot be resolved; with an
-            // empty list the same `None` is safe. The 750 ms cache bounds
-            // stale exclusion decisions.
-            let source_app = self.frontmost_app();
+            // empty list the same `None` is safe. Each changed capture requests
+            // fresh identity on the main thread; no previous capture is reused.
+            let source_app = self.frontmost_app(count, &policy.settings.excluded_app_bundle_ids);
+            // This acknowledges the observed generation, including a policy
+            // discard, without clearing any activation records after its sample.
+            self.source_observation = next_observation;
             self.note_attribution(source_app.as_ref());
             let app_bundle_id = source_app.as_ref().and_then(|app| app.bundle_id.clone());
             let app_name = source_app.and_then(|app| app.name);
@@ -197,6 +210,12 @@ impl ClipboardSource for MacOsClipboard {
                         .any(|excluded| excluded == id)
                 })
             {
+                return None;
+            }
+
+            // A newer generation arriving while main answered this request has
+            // not passed its own exclusion guard. Leave it for the next poll.
+            if unsafe { pb.changeCount() } as i64 != count {
                 return None;
             }
 
@@ -299,7 +318,13 @@ impl ClipboardSource for MacOsClipboard {
     fn changed(&mut self) -> bool {
         autoreleasepool(|_pool| {
             let pb = unsafe { NSPasteboard::generalPasteboard() };
-            !self.tracker.is_current(unsafe { pb.changeCount() } as i64)
+            let observation = crate::macos_workspace::source_observation();
+            let count = unsafe { pb.changeCount() } as i64;
+            let changed = !self.tracker.is_current(count);
+            if !changed {
+                self.source_observation = observation.map(|observation| (count, observation));
+            }
+            changed
         })
     }
 

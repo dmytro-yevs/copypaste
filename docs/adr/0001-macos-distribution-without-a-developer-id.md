@@ -72,6 +72,8 @@ result may synthesize Cmd+V. Onboarding therefore checks Accessibility through
 `AXIsProcessTrustedWithOptions`, explains the copy-only fallback, and allows the
 user to continue without granting it. Start at login is enabled by default
 through `SMAppService.mainApp` and remains visible to the user in onboarding.
+Failure or pending approval for this optional Login Item is reported but does
+not block onboarding or the rest of the application.
 
 | Capability | Contract |
 |---|---|

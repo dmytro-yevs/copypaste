@@ -11,6 +11,7 @@ pub(super) fn peer(name: &str) -> Peer {
     let token = PairingToken::generate();
     Peer {
         pairing_id: token.pairing_id(),
+        device_id: None,
         name: name.to_string(),
         psk: token.psk(),
         last_addr: Some("192.168.1.7:47654".parse().expect("addr")),
@@ -24,6 +25,7 @@ pub(super) fn peer(name: &str) -> Peer {
 pub(super) fn with_last_seen(peer: &Peer, at_ms: i64) -> Peer {
     Peer {
         pairing_id: peer.pairing_id.clone(),
+        device_id: peer.device_id.clone(),
         name: peer.name.clone(),
         psk: peer.psk,
         last_addr: peer.last_addr,

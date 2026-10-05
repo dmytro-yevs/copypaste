@@ -92,6 +92,20 @@ class _MacosOnboardingScreenState extends State<MacosOnboardingScreen>
                       ),
                       MacosOnboardingStep.sync => const _SyncStep(),
                     },
+                    if (controller.noticeMessage case final message?) ...[
+                      const Gap(AppSpacing.lg),
+                      Alert(
+                        leading: const Icon(LucideIcons.info),
+                        title: const Text('Optional setup needs attention'),
+                        content: Text(message),
+                        trailing: controller.loginItemNeedsAttention
+                            ? Button.secondary(
+                                onPressed: controller.openLoginItemsSettings,
+                                child: const Text('Open Settings'),
+                              )
+                            : null,
+                      ),
+                    ],
                     if (controller.errorMessage case final message?) ...[
                       const Gap(AppSpacing.lg),
                       Alert.destructive(

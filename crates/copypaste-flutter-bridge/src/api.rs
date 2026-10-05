@@ -88,13 +88,6 @@ impl RuntimeError {
         }
     }
 
-    pub(crate) fn daemon_not_ready() -> Self {
-        Self {
-            code: "daemon_not_ready".into(),
-            message: "CopyPaste runtime helper did not become ready.".into(),
-        }
-    }
-
     pub(crate) fn ceremony_not_found() -> Self {
         Self {
             code: "pairing_ceremony_not_found".into(),
@@ -380,6 +373,7 @@ pub struct PairingCeremony {
     pub state: String,
     pub expires_in_ms: Option<u64>,
     pub peer_name: Option<String>,
+    pub failure_message: Option<String>,
 }
 
 #[derive(Debug, Clone)]

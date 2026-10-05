@@ -2713,11 +2713,13 @@ impl SseDecode for crate::api::PairingCeremony {
         let mut var_state = <String>::sse_decode(deserializer);
         let mut var_expiresInMs = <Option<u64>>::sse_decode(deserializer);
         let mut var_peerName = <Option<String>>::sse_decode(deserializer);
+        let mut var_failureMessage = <Option<String>>::sse_decode(deserializer);
         return crate::api::PairingCeremony {
             ceremony_id: var_ceremonyId,
             state: var_state,
             expires_in_ms: var_expiresInMs,
             peer_name: var_peerName,
+            failure_message: var_failureMessage,
         };
     }
 }
@@ -3530,6 +3532,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::PairingCeremony {
             self.state.into_into_dart().into_dart(),
             self.expires_in_ms.into_into_dart().into_dart(),
             self.peer_name.into_into_dart().into_dart(),
+            self.failure_message.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4367,6 +4370,7 @@ impl SseEncode for crate::api::PairingCeremony {
         <String>::sse_encode(self.state, serializer);
         <Option<u64>>::sse_encode(self.expires_in_ms, serializer);
         <Option<String>>::sse_encode(self.peer_name, serializer);
+        <Option<String>>::sse_encode(self.failure_message, serializer);
     }
 }
 

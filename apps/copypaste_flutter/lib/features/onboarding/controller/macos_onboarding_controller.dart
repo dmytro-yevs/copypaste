@@ -24,6 +24,7 @@ class MacosOnboardingController extends ChangeNotifier {
   bool _launchAtLogin = true;
   bool _disposed = false;
   String? _errorMessage;
+  String? _noticeMessage;
 
   MacosOnboardingStep get step => _step;
   MacosLoginItemStatus get loginItemStatus => _loginItemStatus;
@@ -35,12 +36,14 @@ class MacosOnboardingController extends ChangeNotifier {
   bool get launchAtLoginAvailable =>
       _loginItemStatus != MacosLoginItemStatus.developmentUnavailable &&
       _loginItemStatus != MacosLoginItemStatus.unavailable;
+  bool get loginItemNeedsAttention =>
+      _launchAtLogin &&
+      launchAtLoginAvailable &&
+      _loginItemStatus != MacosLoginItemStatus.enabled;
   String? get errorMessage => _errorMessage;
+  String? get noticeMessage => _noticeMessage;
 
-  bool get canContinueSetup =>
-      !_busy &&
-      (!_launchAtLogin ||
-          _loginItemStatus != MacosLoginItemStatus.requiresApproval);
+  bool get canContinueSetup => !_busy;
 
   Future<void> initialize() async {
     if (_initialized) return;
@@ -80,6 +83,7 @@ class MacosOnboardingController extends ChangeNotifier {
     if (_busy || _launchAtLogin == enabled) return;
     _launchAtLogin = enabled;
     _errorMessage = null;
+    _noticeMessage = null;
     _notify();
   }
 
@@ -117,28 +121,31 @@ class MacosOnboardingController extends ChangeNotifier {
     if (_busy) return false;
     _busy = true;
     _errorMessage = null;
+    _noticeMessage = null;
     _notify();
     try {
       _accessibilityGranted = await _setup.accessibilityGranted();
+    } catch (_) {
+      _addNotice('Accessibility status could not be refreshed.');
+    }
+    try {
       _loginItemStatus = await _setup.setLaunchAtLogin(_launchAtLogin);
       if (_launchAtLogin && _loginItemStatus != MacosLoginItemStatus.enabled) {
-        if (_loginItemStatus == MacosLoginItemStatus.requiresApproval) {
-          _errorMessage =
-              'Approve CopyPaste in Login Items, then return to continue.';
-        } else {
-          _errorMessage = 'Start at login could not be enabled.';
-        }
-        return false;
+        _addNotice(
+          _loginItemStatus == MacosLoginItemStatus.requiresApproval
+              ? 'Start at login requires approval in System Settings.'
+              : 'Start at login could not be enabled. You can continue without it.',
+        );
       }
-      _step = MacosOnboardingStep.sync;
-      return true;
     } catch (_) {
-      _errorMessage = 'The macOS setup could not be completed.';
-      return false;
-    } finally {
-      _busy = false;
-      _notify();
+      _addNotice(
+        'Start at login could not be updated. You can continue without it.',
+      );
     }
+    _step = MacosOnboardingStep.sync;
+    _busy = false;
+    _notify();
+    return true;
   }
 
   Future<void> openLoginItemsSettings() async {
@@ -177,6 +184,13 @@ class MacosOnboardingController extends ChangeNotifier {
     } else if (!launchAtLoginAvailable) {
       _launchAtLogin = false;
     }
+  }
+
+  void _addNotice(String message) {
+    _noticeMessage = switch (_noticeMessage) {
+      null => message,
+      final current => '$current $message',
+    };
   }
 
   void _notify() {

@@ -90,7 +90,7 @@ void main() {
     expect(controller.complete, isTrue);
   });
 
-  test('Login Item approval blocks the requested enabled state', () async {
+  test('Login Item approval is reported without blocking onboarding', () async {
     final setup = _FakeMacosSetupGateway(
       accessibility: true,
       statusAfterUpdate: MacosLoginItemStatus.requiresApproval,
@@ -100,9 +100,26 @@ void main() {
     await controller.initialize();
     controller.showSetup();
 
-    expect(await controller.continueFromSetup(), isFalse);
-    expect(controller.step, MacosOnboardingStep.setup);
-    expect(controller.errorMessage, contains('Login Items'));
+    expect(await controller.continueFromSetup(), isTrue);
+    expect(controller.step, MacosOnboardingStep.sync);
+    expect(controller.errorMessage, isNull);
+    expect(controller.noticeMessage, contains('requires approval'));
+  });
+
+  test('Login Item update errors do not block onboarding', () async {
+    final setup = _FakeMacosSetupGateway(
+      accessibility: true,
+      failLaunchAtLoginUpdate: true,
+    );
+    final controller = _controller(setup: setup);
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.showSetup();
+
+    expect(await controller.continueFromSetup(), isTrue);
+    expect(controller.step, MacosOnboardingStep.sync);
+    expect(controller.errorMessage, isNull);
+    expect(controller.noticeMessage, contains('continue without it'));
   });
 }
 
@@ -121,11 +138,13 @@ class _FakeMacosSetupGateway implements MacosSetupGateway {
     this.accessibility = false,
     this.status = MacosLoginItemStatus.notRegistered,
     this.statusAfterUpdate = MacosLoginItemStatus.enabled,
+    this.failLaunchAtLoginUpdate = false,
   });
 
   bool accessibility;
   MacosLoginItemStatus status;
   MacosLoginItemStatus statusAfterUpdate;
+  bool failLaunchAtLoginUpdate;
   final List<bool> launchAtLoginValues = [];
   int openSettingsCalls = 0;
 
@@ -145,6 +164,9 @@ class _FakeMacosSetupGateway implements MacosSetupGateway {
 
   @override
   Future<MacosLoginItemStatus> setLaunchAtLogin(bool enabled) async {
+    if (failLaunchAtLoginUpdate) {
+      throw StateError('Login Item update failed.');
+    }
     launchAtLoginValues.add(enabled);
     if (status == MacosLoginItemStatus.developmentUnavailable) return status;
     status = enabled ? statusAfterUpdate : MacosLoginItemStatus.notRegistered;
