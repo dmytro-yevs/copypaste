@@ -95,7 +95,9 @@ internal class AndroidCaptureChannel(
                 } else {
                     AndroidCaptureState.setForegroundCaptureEnabled(activity, enabled)
                     activity.refreshForegroundCapture { drained ->
-                        if (drained) result.success(true) else result.error("capture_drain_failed", null, null)
+                        if (drained) result.success(true) else result.error(
+                            if (enabled) "capture_admission_refused" else "capture_drain_failed", null, null,
+                        )
                     }
                 }
             }
