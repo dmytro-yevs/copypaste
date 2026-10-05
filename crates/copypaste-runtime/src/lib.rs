@@ -20,7 +20,9 @@ use copypaste_p2p::discovery::Discovery;
 use copypaste_p2p::peers::PeerStore;
 use copypaste_p2p::Node;
 
+pub mod capture_admission;
 mod settings;
+use capture_admission::{CaptureAdmission, CaptureKind, CaptureScope};
 
 use settings::{RuntimeSettings, SettingsError};
 
@@ -194,7 +196,7 @@ impl Runtime {
                             id,
                             ErrorCode::InvalidRequest,
                             "The history cursor is invalid.",
-                        )
+                        );
                     }
                 };
                 match self.store.query_history_bounded_for_device(
@@ -383,7 +385,7 @@ impl Runtime {
                     restart_required: Vec::new(),
                 }),
             ),
-            Method::SetConfig { patch } => self.apply_config(id, &patch),
+            Method::SetConfig { patch } => self.apply_config(id, patch).await,
             Method::GetPrivateMode => {
                 let settings = self.settings.snapshot();
                 Response::ok(
@@ -394,7 +396,7 @@ impl Runtime {
                     }),
                 )
             }
-            Method::SetPrivateMode { enabled } => self.set_private_mode(id, enabled),
+            Method::SetPrivateMode { enabled } => self.set_private_mode(id, enabled).await,
             Method::Export { limit } => self.export(id, limit),
             Method::Backup { dest_path } => self.backup(id, &dest_path),
             Method::Restore { src_path, confirm } => self.restore(id, &src_path, confirm),
@@ -507,7 +509,33 @@ impl Runtime {
     }
 
     fn capture_text_with_policy(&self, content: &str, explicit: bool) -> Result<(), RuntimeError> {
-        let settings = self.capture_settings(explicit)?;
+        let host = self
+            .capture_admission()
+            .open_host(if explicit {
+                CaptureKind::Explicit
+            } else {
+                CaptureKind::Implicit
+            })
+            .ok_or(RuntimeError::CaptureRefused)?;
+        let result = self
+            .capture_admission()
+            .begin(host, Arc::new(|| {}))
+            .ok_or(RuntimeError::CaptureRefused)
+            .and_then(|token| {
+                let result = self.capture_text_operation(token, content);
+                self.capture_admission().abandon(token);
+                result
+            });
+        let _ = self.capture_admission().revoke_host(host);
+        result
+    }
+
+    pub fn capture_text_operation(&self, token: u64, content: &str) -> Result<(), RuntimeError> {
+        let mut permit = self
+            .capture_admission()
+            .acquire(token, CaptureScope::Commit)
+            .ok_or(RuntimeError::CaptureRefused)?;
+        let settings = &permit.config;
         copypaste_core::ingest_into_with_capture_source_with_current_retention(
             &self.store,
             &self.keyring,
@@ -521,6 +549,7 @@ impl Runtime {
         )
         .map_err(|_| RuntimeError::Capture)?;
         self.emit_capture();
+        permit.committed();
         Ok(())
     }
 
@@ -554,7 +583,46 @@ impl Runtime {
         source_reference: Option<&str>,
         explicit: bool,
     ) -> Result<(), RuntimeError> {
-        let settings = self.capture_settings(explicit)?;
+        let host = self
+            .capture_admission()
+            .open_host(if explicit {
+                CaptureKind::Explicit
+            } else {
+                CaptureKind::Implicit
+            })
+            .ok_or(RuntimeError::CaptureRefused)?;
+        let result = self
+            .capture_admission()
+            .begin(host, Arc::new(|| {}))
+            .ok_or(RuntimeError::CaptureRefused)
+            .and_then(|token| {
+                let result = self.capture_binary_operation(
+                    token,
+                    bytes,
+                    content_type,
+                    filename,
+                    source_reference,
+                );
+                self.capture_admission().abandon(token);
+                result
+            });
+        let _ = self.capture_admission().revoke_host(host);
+        result
+    }
+
+    pub fn capture_binary_operation(
+        &self,
+        token: u64,
+        bytes: &[u8],
+        content_type: &str,
+        filename: Option<&str>,
+        source_reference: Option<&str>,
+    ) -> Result<(), RuntimeError> {
+        let mut permit = self
+            .capture_admission()
+            .acquire(token, CaptureScope::Commit)
+            .ok_or(RuntimeError::CaptureRefused)?;
+        let settings = &permit.config;
         let (stored_type, metadata) = if content_type.starts_with("image/") {
             (content_type, None)
         } else {
@@ -581,6 +649,7 @@ impl Runtime {
         )
         .map_err(|_| RuntimeError::Capture)?;
         self.emit_capture();
+        permit.committed();
         Ok(())
     }
 
@@ -588,23 +657,15 @@ impl Runtime {
         self.capture_running.store(running, Ordering::Release);
     }
 
-    /// Returns whether an unattributed Android background read is allowed.
-    ///
-    /// Kotlin checks this before asking ClipboardManager for content. The
-    /// capture methods repeat the same gate at the storage boundary.
+    /// Returns a policy snapshot for status presentation, never read authority.
     #[must_use]
     pub fn implicit_capture_allowed(&self) -> bool {
         let settings = self.settings.config();
         !settings.private_mode && settings.excluded_app_bundle_ids.is_empty()
     }
 
-    fn capture_settings(&self, explicit: bool) -> Result<copypaste_ipc::ConfigData, RuntimeError> {
-        let settings = self.settings.config();
-        if settings.private_mode || (!explicit && !settings.excluded_app_bundle_ids.is_empty()) {
-            Err(RuntimeError::CaptureRefused)
-        } else {
-            Ok(settings)
-        }
+    pub fn capture_admission(&self) -> &CaptureAdmission {
+        &self.settings.capture
     }
 
     #[must_use]
@@ -617,7 +678,9 @@ impl Runtime {
         self.settings.config().sound_on_copy
     }
 
+    /// Permanently closes capture. Call from a worker when scopes may be active.
     pub fn shutdown(&self) {
+        let _ = self.capture_admission().shutdown();
         let _ = self.shutdown.send(true);
     }
 
@@ -637,8 +700,18 @@ impl Runtime {
         });
     }
 
-    fn apply_config(&self, request_id: u64, patch: &copypaste_ipc::ConfigPatch) -> Response {
-        match self.settings.apply(patch) {
+    async fn apply_settings(
+        &self,
+        patch: copypaste_ipc::ConfigPatch,
+    ) -> Result<settings::SettingsApplied, SettingsError> {
+        let settings = Arc::clone(&self.settings);
+        tokio::task::spawn_blocking(move || settings.apply(&patch))
+            .await
+            .map_err(|_| SettingsError::Store)?
+    }
+
+    async fn apply_config(&self, request_id: u64, patch: copypaste_ipc::ConfigPatch) -> Response {
+        match self.apply_settings(patch).await {
             Ok(applied) => {
                 let enforce =
                     copypaste_core::retention::policy_tightened(&applied.before, &applied.config);
@@ -672,11 +745,14 @@ impl Runtime {
         }
     }
 
-    fn set_private_mode(&self, request_id: u64, enabled: bool) -> Response {
-        match self.settings.apply(&copypaste_ipc::ConfigPatch {
-            private_mode: Some(enabled),
-            ..Default::default()
-        }) {
+    async fn set_private_mode(&self, request_id: u64, enabled: bool) -> Response {
+        match self
+            .apply_settings(copypaste_ipc::ConfigPatch {
+                private_mode: Some(enabled),
+                ..Default::default()
+            })
+            .await
+        {
             Ok(applied) => Response::ok(
                 request_id,
                 ResponseData::PrivateMode(copypaste_ipc::PrivateModeData {
@@ -788,7 +864,7 @@ impl Runtime {
                     id,
                     ErrorCode::InvalidRequest,
                     "The history cursor is invalid.",
-                )
+                );
             }
         };
         match self.store.list_from_bounded(
@@ -963,14 +1039,14 @@ impl Runtime {
         let row = match self.store.get(item_id) {
             Ok(Some(row)) => row,
             Ok(None) => {
-                return Response::err(request_id, ErrorCode::NotFound, "The clip was not found.")
+                return Response::err(request_id, ErrorCode::NotFound, "The clip was not found.");
             }
             Err(_) => {
                 return Response::err(
                     request_id,
                     ErrorCode::Internal,
                     "The history store is unavailable.",
-                )
+                );
             }
         };
         let Some(item) = self.item_value(row, false) else {
@@ -987,14 +1063,14 @@ impl Runtime {
         let row = match self.store.get(item_id) {
             Ok(Some(row)) => row,
             Ok(None) => {
-                return Response::err(request_id, ErrorCode::NotFound, "The clip was not found.")
+                return Response::err(request_id, ErrorCode::NotFound, "The clip was not found.");
             }
             Err(_) => {
                 return Response::err(
                     request_id,
                     ErrorCode::Internal,
                     "The history store is unavailable.",
-                )
+                );
             }
         };
         let payload = match ClipboardPayload::open(&row, &self.keyring.item_key()) {
@@ -1004,7 +1080,7 @@ impl Runtime {
                     request_id,
                     ErrorCode::Internal,
                     "The clip could not be decrypted.",
-                )
+                );
             }
         };
         if plain_text && payload.plain_text().is_none() {
@@ -1056,14 +1132,14 @@ impl Runtime {
         let row = match self.store.get(item_id) {
             Ok(Some(row)) => row,
             Ok(None) => {
-                return Response::err(request_id, ErrorCode::NotFound, "The clip was not found.")
+                return Response::err(request_id, ErrorCode::NotFound, "The clip was not found.");
             }
             Err(_) => {
                 return Response::err(
                     request_id,
                     ErrorCode::Internal,
                     "The history store is unavailable.",
-                )
+                );
             }
         };
         let payload = match ClipboardPayload::open(&row, &self.keyring.item_key()) {
@@ -1073,14 +1149,14 @@ impl Runtime {
                     request_id,
                     ErrorCode::UnsupportedContent,
                     "This clip is not a file.",
-                )
+                );
             }
             Err(_) => {
                 return Response::err(
                     request_id,
                     ErrorCode::Internal,
                     "The clip could not be decrypted.",
-                )
+                );
             }
         };
         match payload.save_file_to(path) {
@@ -1349,7 +1425,7 @@ mod tests {
                         .unwrap_or_default()
                 ),
                 ClipboardPayload::Unsupported { .. } => {
-                    return Err(ClipboardWriteError::UnsupportedContent)
+                    return Err(ClipboardWriteError::UnsupportedContent);
                 }
             });
             Ok(())
@@ -1752,6 +1828,218 @@ mod tests {
                 .ok
         );
         assert_eq!(std::fs::read(destination).unwrap(), b"file bytes");
+    }
+
+    #[test]
+    fn encrypted_commit_wins_before_pause_and_pause_wins_before_new_commit() {
+        use std::sync::{mpsc, Barrier};
+        for kind in [CaptureKind::Implicit, CaptureKind::Explicit] {
+            for binary in [false, true] {
+                for duplicate in [false, true] {
+                    let (runtime, _dir) = fixture();
+                    let mut events = runtime.subscribe_events();
+                    let capture = |runtime: &Runtime, token| {
+                        if binary {
+                            runtime.capture_binary_operation(
+                                token,
+                                b"barrier file",
+                                "application/pdf",
+                                Some("paper.pdf"),
+                                Some("content://documents/paper.pdf"),
+                            )
+                        } else {
+                            runtime.capture_text_operation(token, "barrier text")
+                        }
+                    };
+                    let host = runtime.capture_admission().open_host(kind).unwrap();
+                    if duplicate {
+                        let token = runtime
+                            .capture_admission()
+                            .begin(host, Arc::new(|| {}))
+                            .unwrap();
+                        capture(&runtime, token).unwrap();
+                        runtime.capture_admission().abandon(token);
+                        assert!(events.try_recv().unwrap().captured);
+                    }
+                    let entered = Arc::new(Barrier::new(2));
+                    let release = Arc::new(Barrier::new(2));
+                    let commit_entered = Arc::clone(&entered);
+                    let commit_release = Arc::clone(&release);
+                    runtime.capture_admission().before_next_commit(move || {
+                        commit_entered.wait();
+                        commit_release.wait();
+                    });
+                    let invalidated = Arc::new(Barrier::new(2));
+                    let cancelled = Arc::clone(&invalidated);
+                    let token = runtime
+                        .capture_admission()
+                        .begin(
+                            host,
+                            Arc::new(move || {
+                                cancelled.wait();
+                            }),
+                        )
+                        .unwrap();
+                    let worker_runtime = Arc::clone(&runtime);
+                    let worker = std::thread::spawn(move || {
+                        if binary {
+                            worker_runtime.capture_binary_operation(
+                                token,
+                                b"barrier file",
+                                "application/pdf",
+                                Some("paper.pdf"),
+                                Some("content://documents/paper.pdf"),
+                            )
+                        } else {
+                            worker_runtime.capture_text_operation(token, "barrier text")
+                        }
+                    });
+                    entered.wait();
+                    let pause_runtime = Arc::clone(&runtime);
+                    let (done_tx, done_rx) = mpsc::channel();
+                    let pause = std::thread::spawn(move || {
+                        pause_runtime
+                            .settings
+                            .apply(&copypaste_ipc::ConfigPatch {
+                                private_mode: Some(true),
+                                ..Default::default()
+                            })
+                            .unwrap();
+                        done_tx.send(()).unwrap();
+                    });
+                    invalidated.wait();
+                    assert!(done_rx.try_recv().is_err());
+                    assert_eq!(
+                        runtime.store.count().unwrap(),
+                        usize::from(duplicate) as u64
+                    );
+                    release.wait();
+                    worker.join().unwrap().unwrap();
+                    done_rx.recv().unwrap();
+                    pause.join().unwrap();
+                    assert_eq!(runtime.store.count().unwrap(), 1);
+                    assert!(events.try_recv().unwrap().captured);
+                    let stored = runtime.store.list(1, 0).unwrap().pop().unwrap();
+                    assert!(capture(&runtime, token).is_err());
+                    assert_eq!(
+                        runtime.store.list(1, 0).unwrap()[0].created_at,
+                        stored.created_at
+                    );
+                    assert!(events.try_recv().is_err());
+                    assert!(runtime
+                        .capture_admission()
+                        .acquire(token, CaptureScope::Completion)
+                        .is_none());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn token_failures_and_lowered_live_caps_emit_no_success_or_duplicate_bump() {
+        let (runtime, _dir) = fixture();
+        let mut events = runtime.subscribe_events();
+        let host = runtime
+            .capture_admission()
+            .open_host(CaptureKind::Explicit)
+            .unwrap();
+        let failed = runtime
+            .capture_admission()
+            .begin(host, Arc::new(|| {}))
+            .unwrap();
+        assert!(runtime
+            .capture_binary_operation(failed, b"file", "application/pdf", None, None)
+            .is_err());
+        assert!(runtime
+            .capture_admission()
+            .acquire(failed, CaptureScope::Completion)
+            .is_none());
+        assert!(events.try_recv().is_err());
+        assert_eq!(runtime.store.count().unwrap(), 0);
+        let old = runtime
+            .capture_admission()
+            .begin(host, Arc::new(|| {}))
+            .unwrap();
+        let large = "x".repeat(copypaste_ipc::MIN_TEXT_SIZE_BYTES as usize + 1);
+        runtime
+            .settings
+            .apply(&copypaste_ipc::ConfigPatch {
+                max_text_size_bytes: Some(copypaste_ipc::MIN_TEXT_SIZE_BYTES),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(runtime.capture_text_operation(old, &large).is_err());
+        let new = runtime
+            .capture_admission()
+            .begin(host, Arc::new(|| {}))
+            .unwrap();
+        assert!(runtime.capture_text_operation(new, &large).is_err());
+        assert!(runtime
+            .capture_admission()
+            .acquire(new, CaptureScope::Completion)
+            .is_none());
+        assert!(events.try_recv().is_err());
+        assert_eq!(runtime.store.count().unwrap(), 0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn blocked_read_keeps_settings_pending_without_blocking_the_reactor() {
+        let (runtime, _dir) = fixture();
+        let host = runtime
+            .capture_admission()
+            .open_host(CaptureKind::Explicit)
+            .unwrap();
+        let invalidated = Arc::new(tokio::sync::Notify::new());
+        let cancelled = Arc::clone(&invalidated);
+        let token = runtime
+            .capture_admission()
+            .begin(host, Arc::new(move || cancelled.notify_one()))
+            .unwrap();
+        let read = runtime
+            .capture_admission()
+            .acquire(token, CaptureScope::Read)
+            .unwrap();
+        let worker_runtime = Arc::clone(&runtime);
+        let pause = tokio::spawn(async move {
+            worker_runtime
+                .request(5, Method::SetPrivateMode { enabled: true })
+                .await
+        });
+        invalidated.notified().await;
+        assert!(!pause.is_finished());
+        assert!(!runtime.settings.config().private_mode);
+        let heartbeat = tokio::spawn(async {
+            tokio::task::yield_now().await;
+            true
+        });
+        assert!(heartbeat.await.unwrap());
+        drop(read);
+        assert!(pause.await.unwrap().ok);
+        assert!(runtime.settings.config().private_mode);
+        assert!(runtime.capture_text_operation(token, "stale").is_err());
+    }
+
+    #[test]
+    fn activity_host_replacement_reuses_runtime_without_reviving_old_operations() {
+        let (runtime, _dir) = fixture();
+        let mut events = runtime.subscribe_events();
+        let old_host = runtime
+            .capture_admission()
+            .open_host(CaptureKind::Implicit)
+            .unwrap();
+        let old = runtime
+            .capture_admission()
+            .begin(old_host, Arc::new(|| {}))
+            .unwrap();
+        runtime.capture_admission().revoke_host(old_host).unwrap();
+        runtime.capture_admission().drain_host(old_host).unwrap();
+        assert!(runtime.capture_text_operation(old, "old activity").is_err());
+        runtime.capture_text("reopened activity").unwrap();
+        assert_eq!(runtime.store.count().unwrap(), 1);
+        assert!(events.try_recv().unwrap().captured);
+        runtime.shutdown();
+        assert!(runtime.capture_text("after true shutdown").is_err());
+        assert!(events.try_recv().is_err());
     }
 
     #[test]
