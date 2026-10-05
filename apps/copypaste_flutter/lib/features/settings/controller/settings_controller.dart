@@ -234,12 +234,24 @@ class SettingsController extends ChangeNotifier {
 
   String _message(Object error, String fallback) =>
       error is runtime.RuntimeError
-      ? error.message
+      ? _runtimeMessage(error) ?? error.message
       : error is CaptureServiceUnavailable
       ? 'Clipboard capture permissions must be completed before capture can resume.'
       : error is NotificationPermissionDenied
       ? 'Notification permission is required to enable capture notifications.'
       : fallback;
+
+  String? _runtimeMessage(runtime.RuntimeError error) {
+    if (error.code != 'invalid_request') return null;
+
+    return switch (error.message) {
+      'excluded_app_bundle_ids contains an entry that is empty or too long' =>
+        'Application identifiers must be non-empty and 256 bytes or fewer.',
+      'excluded_app_bundle_ids has too many entries; at most 256 are allowed' =>
+        'You can exclude up to 256 applications.',
+      _ => null,
+    };
+  }
 
   void _notify() {
     if (!_disposed) notifyListeners();
