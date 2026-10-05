@@ -158,7 +158,9 @@ class HotKeyManagerDesktopShortcutRegistrar
   @override
   Future<void> unregister() async {
     final hotKey = _registered;
-    _registered = null;
-    if (hotKey != null) await hotKeyManager.unregister(hotKey);
+    if (hotKey != null) {
+      await hotKeyManager.unregister(hotKey);
+      _registered = null;
+    }
   }
 }

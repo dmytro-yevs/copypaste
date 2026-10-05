@@ -33,6 +33,8 @@ dependencies:
   pub_semver: 2.2.1
 
 dependency_overrides:
+  hotkey_manager_windows:
+    path: third_party/hotkey_manager_windows
   hotkey_manager_macos:
     path: third_party/hotkey_manager_macos
 

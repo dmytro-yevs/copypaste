@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:copypaste_flutter/features/settings/controller/quick_paste_settings_controller.dart';
 import 'package:copypaste_flutter/features/settings/repository/quick_paste_preferences_store.dart';
 import 'package:copypaste_flutter/platform/desktop/global_shortcut.dart';
@@ -65,23 +67,18 @@ void main() {
     });
   }
 
-  test('macOS open retains nullable native success', () async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-    response = null;
-    await host.open();
-  });
-
-  test('Windows open rejects null instead of reporting success', () async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
-    response = null;
-    await expectLater(host.open(), throwsA(isA<PlatformException>()));
-  });
-
-  test('Windows open rejects malformed native success', () async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
-    response = 'success';
-    await expectLater(host.open(), throwsA(isA<TypeError>()));
-  });
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.windows]) {
+    test('$platform open requires native true', () async {
+      debugDefaultTargetPlatformOverride = platform;
+      await host.open();
+      response = null;
+      await expectLater(host.open(), throwsA(isA<PlatformException>()));
+      response = false;
+      await expectLater(host.open(), throwsA(isA<PlatformException>()));
+      response = 'success';
+      await expectLater(host.open(), throwsA(isA<TypeError>()));
+    });
+  }
 
   test('prepare requires confirmed native success', () async {
     response = null;
@@ -126,6 +123,108 @@ void main() {
     await registrar.callback!();
 
     expect(controller.errorMessage, 'Quick Paste could not be opened.');
+  });
+  group('typed presentation context', () {
+    const contextChannel = MethodChannel('test/quick_paste_context');
+    late MethodChannelQuickPasteContextHost context;
+    final calls = <MethodCall>[];
+    setUp(() {
+      calls.clear();
+      context = MethodChannelQuickPasteContextHost(channel: contextChannel);
+      messenger.setMockMethodCallHandler(contextChannel, (call) async {
+        calls.add(call);
+        return response;
+      });
+    });
+    tearDown(() async {
+      await context.dispose();
+      messenger.setMockMethodCallHandler(contextChannel, null);
+    });
+
+    Future<Object?> opened(Object? arguments) async {
+      final completion = Completer<Object?>();
+      await messenger.handlePlatformMessage(
+        contextChannel.name,
+        const StandardMethodCodec().encodeMethodCall(
+          MethodCall('opened', arguments),
+        ),
+        (reply) {
+          completion.complete(reply);
+        },
+      );
+      return completion.future;
+    }
+
+    test(
+      'paste and conditional close send the originating native ID',
+      () async {
+        expect(await context.paste(presentationId: 41), isTrue);
+        await context.close(presentationId: 41);
+        expect(calls.map((call) => call.method), ['paste', 'close']);
+        expect(
+          calls.map((call) => call.arguments),
+          everyElement({'presentationId': 41}),
+        );
+      },
+    );
+
+    for (final value in [
+      false,
+      null,
+      'success',
+      1,
+      {'ok': true},
+    ]) {
+      test('paste rejects malformed or refused result $value', () async {
+        response = value;
+        expect(await context.paste(presentationId: 41), isFalse);
+      });
+    }
+    for (final error in [
+      PlatformException(code: 'closed'),
+      MissingPluginException(),
+    ]) {
+      test('optional paste channel $error returns false', () async {
+        messenger.setMockMethodCallHandler(contextChannel, (call) async {
+          throw error;
+        });
+        expect(await context.paste(presentationId: 41), isFalse);
+      });
+    }
+    test(
+      'opened carries its positive identity before handler awaits',
+      () async {
+        int? received;
+        final gate = Completer<void>();
+        context.setOpenedHandler((id) async {
+          received = id;
+          await gate.future;
+        });
+        final completion = opened({'presentationId': 42});
+        await Future<void>.delayed(Duration.zero);
+        expect(received, 42);
+        gate.complete();
+        await completion;
+      },
+    );
+    for (final value in [
+      null,
+      {},
+      {'presentationId': 0},
+      {'presentationId': -1},
+      {'presentationId': true},
+      {'presentationId': 1.0},
+      {'presentationId': '1'},
+    ]) {
+      test('invalid opened $value cannot invoke the handler', () async {
+        var invoked = false;
+        context.setOpenedHandler((_) async {
+          invoked = true;
+        });
+        await opened(value);
+        expect(invoked, isFalse);
+      });
+    }
   });
 }
 

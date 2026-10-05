@@ -238,8 +238,11 @@ class DesktopWindowController {
       await _beforeQuit?.call();
       await _host.quit();
     } catch (_) {
-      _isQuitting = false;
       _setIssue(DesktopWindowSetupIssue.quitUnavailable);
+    } finally {
+      if (!_disposed) {
+        _isQuitting = false;
+      }
     }
   }
 
