@@ -836,11 +836,6 @@ mod tests {
             std::fs::write(&path, &bytes).unwrap();
             autoreleasepool(|_| unsafe {
                 let mut url = NSURL::fileURLWithPath(&NSString::from_str(path.to_str().unwrap()));
-                let expected_path = std::path::PathBuf::from(OsString::from_vec(
-                    CStr::from_ptr(url.fileSystemRepresentation().as_ptr())
-                        .to_bytes()
-                        .to_vec(),
-                ));
                 if reference {
                     url = url
                         .fileReferenceURL()
@@ -852,6 +847,15 @@ mod tests {
                 } else {
                     assert!(!url.isFileReferenceURL());
                 }
+                let expected_url = url
+                    .filePathURL()
+                    .expect("native URL must resolve to a path URL");
+                assert!(!expected_url.isFileReferenceURL());
+                let expected_path = std::path::PathBuf::from(OsString::from_vec(
+                    CStr::from_ptr(expected_url.fileSystemRepresentation().as_ptr())
+                        .to_bytes()
+                        .to_vec(),
+                ));
                 let objects: Retained<NSArray<ProtocolObject<dyn NSPasteboardWriting>>> =
                     NSArray::from_vec(vec![ProtocolObject::from_retained(url)]);
                 let pb = NSPasteboard::generalPasteboard();
