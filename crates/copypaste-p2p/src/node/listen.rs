@@ -153,7 +153,7 @@ async fn serve_peer<S, F, P>(
                         AuthenticatedReachability::online(None, crate::now_ms()),
                     );
                     node.record_authenticated_profile(&pairing_id, profile.as_ref());
-                    node.touch_peer(&peer, Some(addr), None);
+                    node.touch_peer(&peer, None, Some(addr), None);
                     on_probe(&pairing_id);
                 }
             }
@@ -190,6 +190,7 @@ async fn serve_peer<S, F, P>(
             if let Some(peer) = node.peers().get(&pairing_id) {
                 node.touch_peer(
                     &peer,
+                    Some(&outcome.peer_device_id),
                     outcome.peer_listen_addr,
                     Some(&outcome.peer_device_name),
                 );
@@ -227,6 +228,7 @@ mod tests {
         node.peers()
             .upsert(Peer {
                 pairing_id: pairing_id.clone(),
+                device_id: None,
                 name: "dialler".into(),
                 psk: token.psk(),
                 last_addr: None,
@@ -331,6 +333,7 @@ mod tests {
         a.peers()
             .upsert(Peer {
                 pairing_id: pairing_id.clone(),
+                device_id: None,
                 name: "phone".into(),
                 psk: token.psk(),
                 last_addr: None,
@@ -341,6 +344,7 @@ mod tests {
             .unwrap();
         let b_peer = Peer {
             pairing_id: pairing_id.clone(),
+            device_id: None,
             name: "desktop".into(),
             psk: token.psk(),
             last_addr: Some(addr),
@@ -357,6 +361,22 @@ mod tests {
         assert_eq!(a.peers().len(), 1);
         assert_eq!(b.peers().len(), 1);
         assert_eq!(outcome.peer_device_id, "desktop");
+        assert_eq!(
+            a.peers()
+                .get(&pairing_id)
+                .expect("server peer")
+                .device_id
+                .as_deref(),
+            Some("phone")
+        );
+        assert_eq!(
+            b.peers()
+                .get(&pairing_id)
+                .expect("client peer")
+                .device_id
+                .as_deref(),
+            Some("desktop")
+        );
         assert!(a_source
             .snapshot()
             .iter()
@@ -404,6 +424,7 @@ mod tests {
         a.peers()
             .upsert(Peer {
                 pairing_id: pairing_id.clone(),
+                device_id: None,
                 name: "phone".into(),
                 psk: token.psk(),
                 last_addr: None,
@@ -414,6 +435,7 @@ mod tests {
             .unwrap();
         let b_peer = Peer {
             pairing_id,
+            device_id: None,
             name: "desktop".into(),
             psk: token.psk(),
             last_addr: Some(addr),

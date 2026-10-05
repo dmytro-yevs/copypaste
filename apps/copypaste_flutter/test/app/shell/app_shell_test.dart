@@ -9,6 +9,37 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:window_manager/window_manager.dart';
 
 void main() {
+  testWidgets('mobile header logo keeps the existing app bar height', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        darkTheme: AppTheme.dark,
+        themeMode: AppTheme.mode,
+        builder: AppTheme.builder,
+        home: const Scaffold(
+          headers: [
+            AppBar(title: Text('History')),
+            Divider(),
+          ],
+          child: SizedBox.expand(),
+        ),
+      ),
+    );
+    final originalHeight = tester.getSize(find.byType(AppBar)).height;
+    await tester.pumpWidget(_shell());
+    expect(tester.getSize(find.byType(AppBar)).height, originalHeight);
+    final logo = find.byKey(const ValueKey<String>('header-brand-logo'));
+    final title = find.descendant(
+      of: find.byType(AppBar),
+      matching: find.text('History'),
+    );
+    expect(logo, findsOneWidget);
+    expect(tester.getRect(logo).right, lessThan(tester.getRect(title).left));
+  });
   test('includes the recovered CopyPaste brand asset', () async {
     final asset = await rootBundle.load('assets/brand/copypaste.png');
 
