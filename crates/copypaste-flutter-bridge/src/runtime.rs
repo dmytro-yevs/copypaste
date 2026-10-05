@@ -139,22 +139,27 @@ pub(crate) async fn start(daemon_executable: String, data_dir: String) -> Result
         });
     }
 
-    for _ in 0..40 {
+    // Keychain access on macOS is user-mediated and may legitimately take much
+    // longer than an arbitrary startup deadline. The Flutter shell remains
+    // available while this future waits, so keep observing the owned child until
+    // it either exposes its socket, exits, or the application stops it.
+    loop {
         if copypaste_ipc::transport::connect(&socket_path)
             .await
             .is_ok()
         {
             return Ok(());
         }
-        if let Some(status) = child_exit_status() {
-            append_startup_diagnostic(&data_dir, "child exited", status);
-            stop();
-            return Err(RuntimeError::daemon_exited_early());
+        match owned_child_state() {
+            OwnedChildState::Running => sleep(Duration::from_millis(100)).await,
+            OwnedChildState::Exited(status) => {
+                append_startup_diagnostic(&data_dir, "child exited", status);
+                stop();
+                return Err(RuntimeError::daemon_exited_early());
+            }
+            OwnedChildState::Stopped => return Err(RuntimeError::daemon_start_failed()),
         }
-        sleep(Duration::from_millis(50)).await;
     }
-    stop();
-    Err(RuntimeError::daemon_not_ready())
 }
 
 /// A macOS application-support path can exceed the Unix socket pathname limit.
@@ -177,14 +182,24 @@ fn isolated_socket_path(_data_dir: &Path) -> Result<PathBuf, RuntimeError> {
     }
 }
 
-fn child_exit_status() -> Option<String> {
+enum OwnedChildState {
+    Running,
+    Exited(String),
+    Stopped,
+}
+
+fn owned_child_state() -> OwnedChildState {
     let mut guard = slot()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    guard
-        .as_mut()
-        .and_then(|runtime| runtime.child.try_wait().ok().flatten())
-        .map(|status| status.to_string())
+    let Some(runtime) = guard.as_mut() else {
+        return OwnedChildState::Stopped;
+    };
+    match runtime.child.try_wait() {
+        Ok(None) => OwnedChildState::Running,
+        Ok(Some(status)) => OwnedChildState::Exited(status.to_string()),
+        Err(_) => OwnedChildState::Exited("status unavailable".to_string()),
+    }
 }
 
 fn append_startup_diagnostic(data_dir: &Path, stage: &str, detail: impl std::fmt::Display) {

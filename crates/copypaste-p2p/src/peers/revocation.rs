@@ -162,6 +162,7 @@ mod tests {
         // The device still holds a working code; saving it again must fail.
         let returning = Peer {
             pairing_id: id.clone(),
+            device_id: None,
             name: "stolen phone".to_string(),
             psk,
             last_addr: None,
@@ -187,6 +188,7 @@ mod tests {
         let again = peer("laptop");
         let again = Peer {
             pairing_id: ordinary_id.clone(),
+            device_id: None,
             name: again.name.clone(),
             psk: again.psk,
             last_addr: None,

@@ -108,6 +108,7 @@ pub(super) fn only_last_seen_moved(state: &State, incoming: &Peer) -> bool {
         return false;
     };
     stored.name == incoming.name
+        && stored.device_id == incoming.device_id
         && stored.last_addr == incoming.last_addr
         && stored.psk_matches(&incoming.psk)
         && stored.profile == incoming.profile

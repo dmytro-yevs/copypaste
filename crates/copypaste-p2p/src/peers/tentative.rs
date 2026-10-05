@@ -119,6 +119,10 @@ impl PeerStore {
             // and are kept; its credential is the repudiated one and is not.
             (Some(previous), false) if contended => guard.peers.get(&id).map(|current| Peer {
                 pairing_id: id.clone(),
+                device_id: previous
+                    .device_id
+                    .clone()
+                    .or_else(|| current.device_id.clone()),
                 name: current.name.clone(),
                 psk: previous.psk,
                 last_addr: current.last_addr,
@@ -158,6 +162,7 @@ mod tests {
     fn replacement(pairing_id: &str) -> Peer {
         Peer {
             pairing_id: pairing_id.to_string(),
+            device_id: None,
             name: "the new ceremony".to_string(),
             psk: PairingToken::generate().psk(),
             last_addr: None,
@@ -223,6 +228,7 @@ mod tests {
         store
             .upsert(Peer {
                 pairing_id: id.clone(),
+                device_id: None,
                 name: "the name off the wire".to_string(),
                 psk: touched.psk,
                 last_addr: Some("192.168.1.9:47654".parse().expect("addr")),
@@ -284,6 +290,7 @@ mod tests {
         let mut snapshot = store.snapshot("fresh-pairing");
         let tentative = Peer {
             pairing_id: "fresh-pairing".to_string(),
+            device_id: None,
             name: "the other device".to_string(),
             psk: PairingToken::generate().psk(),
             last_addr: None,

@@ -12,7 +12,6 @@ macOS implementation of the hotkey_manager Flutter plugin.
   spec.source = { :path => '.' }
   spec.source_files = 'hotkey_manager_macos/Classes/**/*'
   spec.dependency 'FlutterMacOS'
-  spec.dependency 'HotKey'
 
   spec.platform = :osx, '10.15'
   spec.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES' }

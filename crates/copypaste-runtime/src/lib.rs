@@ -4,6 +4,7 @@
 //! no cryptography, merge rules, or handshake protocol; those remain in
 //! `copypaste-core` and `copypaste-p2p`.
 
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -42,6 +43,13 @@ pub struct Runtime {
 
 pub trait ClipboardWriter: Send + Sync {
     fn write(&self, payload: &ClipboardPayload) -> Result<(), ClipboardWriteError>;
+}
+
+#[derive(Clone)]
+struct ItemOrigin {
+    device_id: String,
+    device_name: Option<String>,
+    device_class: copypaste_ipc::DeviceClass,
 }
 struct UnavailableClipboard;
 impl ClipboardWriter for UnavailableClipboard {
@@ -189,11 +197,12 @@ impl Runtime {
                         )
                     }
                 };
-                match self.store.query_history_bounded(
+                match self.store.query_history_bounded_for_device(
                     &query,
                     cursor.as_ref(),
                     limit.clamp(1, 1000),
                     copypaste_ipc::MAX_CONTENT_BYTES,
+                    Some(&self.device_id),
                 ) {
                     Ok(page) => Response::ok(
                         id,
@@ -456,6 +465,7 @@ impl Runtime {
                 listener,
                 source,
                 move |_, outcome| {
+                    callback_runtime.remember_device(outcome);
                     if outcome.stats.received > 0 {
                         callback_runtime.emit(EventKind::Items);
                     }
@@ -810,13 +820,17 @@ impl Runtime {
     }
 
     fn page(&self, rows: Vec<copypaste_core::StoredItem>, next_cursor: Option<String>) -> ItemPage {
+        let origins = self.origins_for(&rows);
         let mut page = ItemPage {
             items: Vec::with_capacity(rows.len()),
             skipped_undecryptable: 0,
             next_cursor,
         };
         for row in rows {
-            match self.item_value(row, true) {
+            let origin = origins
+                .get(&row.id)
+                .expect("every row has an origin resolved before decryption");
+            match self.item_value_with_origin(row, true, origin) {
                 Some(item) => page.items.push(item),
                 None => page.skipped_undecryptable += 1,
             }
@@ -914,13 +928,35 @@ impl Runtime {
         let mut results = Vec::with_capacity(peers.len());
         for peer in &peers {
             let started = std::time::Instant::now();
-            results.push(p2p_contract::sync_result(
-                peer,
-                self.node.sync_one(peer, self.source.as_ref()).await,
-                started.elapsed(),
-            ));
+            let outcome = self.node.sync_one(peer, self.source.as_ref()).await;
+            if let Ok(outcome) = &outcome {
+                self.remember_device(outcome);
+            }
+            results.push(p2p_contract::sync_result(peer, outcome, started.elapsed()));
         }
         Response::ok(request_id, ResponseData::Sync(results))
+    }
+
+    /// Persist authenticated peer metadata separately from the item merge.
+    ///
+    /// The item origin remains immutable for merge ordering. Device labels and
+    /// form factors are cosmetic metadata, so a successful session may update
+    /// them without changing any version that arrived through it.
+    fn remember_device(&self, outcome: &copypaste_p2p::sync::SyncOutcome) {
+        if let Err(error) = self
+            .store
+            .record_device_name(&outcome.peer_device_id, &outcome.peer_device_name)
+        {
+            tracing::warn!(?error, "could not record a peer device name");
+        }
+        if let Some(profile) = &outcome.peer_profile {
+            if let Err(error) = self
+                .store
+                .record_device_class(&outcome.peer_device_id, profile.device_class)
+            {
+                tracing::warn!(?error, "could not record a peer device class");
+            }
+        }
     }
 
     fn item(&self, request_id: u64, item_id: &str) -> Response {
@@ -1063,16 +1099,91 @@ impl Runtime {
     }
 
     fn item_value(&self, row: copypaste_core::StoredItem, preview: bool) -> Option<Item> {
-        let origin_device_id = if row.origin_device_id.is_empty() {
-            self.device_id.clone()
+        let origins = self.origins_for(std::slice::from_ref(&row));
+        let origin = origins
+            .get(&row.id)
+            .expect("the single row has an origin resolved before decryption");
+        self.item_value_with_origin(row, preview, origin)
+    }
+
+    /// Resolve one immutable origin per row with two bounded metadata reads.
+    ///
+    /// A history page contains up to 1,000 rows. Looking up every name and
+    /// class while serialising each item would turn a list into an N+1 query.
+    fn origins_for(&self, rows: &[copypaste_core::StoredItem]) -> HashMap<String, ItemOrigin> {
+        let device_ids = rows
+            .iter()
+            .map(|row| {
+                if row.origin_device_id.is_empty() {
+                    self.device_id.clone()
+                } else {
+                    row.origin_device_id.clone()
+                }
+            })
+            .collect::<Vec<_>>();
+        let remote_device_ids = device_ids
+            .iter()
+            .filter(|device_id| device_id.as_str() != self.device_id.as_str())
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let names = if remote_device_ids.is_empty() {
+            HashMap::new()
         } else {
-            row.origin_device_id.clone()
+            match self.store.device_names(&remote_device_ids) {
+                Ok(names) => names,
+                Err(error) => {
+                    tracing::warn!(?error, "could not resolve origin device names");
+                    HashMap::new()
+                }
+            }
         };
-        let origin_device_class = if origin_device_id == self.device_id {
-            self.device_class
+        let classes = if remote_device_ids.is_empty() {
+            HashMap::new()
         } else {
-            copypaste_ipc::DeviceClass::Unknown
+            match self.store.device_classes(&remote_device_ids) {
+                Ok(classes) => classes,
+                Err(error) => {
+                    tracing::warn!(?error, "could not resolve origin device classes");
+                    HashMap::new()
+                }
+            }
         };
+
+        rows.iter()
+            .zip(device_ids)
+            .map(|(row, device_id)| {
+                let origin = if device_id == self.device_id {
+                    ItemOrigin {
+                        device_id,
+                        device_name: Some(self.device_name.clone()),
+                        device_class: self.device_class,
+                    }
+                } else {
+                    ItemOrigin {
+                        device_name: names.get(&device_id).cloned(),
+                        device_class: classes
+                            .get(&device_id)
+                            .copied()
+                            .unwrap_or(copypaste_ipc::DeviceClass::Unknown),
+                        device_id,
+                    }
+                };
+                (row.id.clone(), origin)
+            })
+            .collect()
+    }
+
+    fn item_value_with_origin(
+        &self,
+        row: copypaste_core::StoredItem,
+        preview: bool,
+        origin: &ItemOrigin,
+    ) -> Option<Item> {
+        let origin_device_id = origin.device_id.clone();
+        let origin_device_name = origin.device_name.clone();
+        let origin_device_class = origin.device_class;
         let payload = match copypaste_core::ClipboardPayload::open(&row, &self.keyring.item_key()) {
             Ok(payload) => payload,
             Err(_) => return None,
@@ -1136,7 +1247,7 @@ impl Runtime {
             file_details,
             image_details,
             origin_device_id,
-            origin_device_name: Some(self.device_name.clone()),
+            origin_device_name,
             origin_device_class,
             source_app_bundle_id: row.app_bundle_id,
             source_app_name: row.app_name,
@@ -1293,6 +1404,141 @@ mod tests {
         };
         assert_eq!(facets.origin_devices.len(), 1);
         assert_eq!(facets.origin_devices[0].device_class, runtime.device_class);
+    }
+
+    #[tokio::test]
+    async fn history_query_uses_the_local_facet_identity_for_local_captures() {
+        let (runtime, _dir) = fixture();
+        seed_text(&runtime, "local-item", "local text");
+        runtime
+            .source
+            .apply_version(&copypaste_core::RemoteVersion {
+                item_id: "remote-item",
+                content: "remote text",
+                binary_content: None,
+                payload_metadata: None,
+                content_type: copypaste_ipc::content_type::TEXT,
+                created_at: 2,
+                deleted: false,
+                content_hash: None,
+                origin_device_id: "remote-device",
+                app_bundle_id: None,
+                app_name: None,
+            })
+            .expect("the remote row is stored");
+
+        let local_facet = match runtime.request(1, Method::HistoryFacets).await.data {
+            Some(ResponseData::HistoryFacets(facets)) => facets
+                .origin_devices
+                .into_iter()
+                .find(|facet| facet.id == runtime.device_id)
+                .expect("the local device facet"),
+            other => panic!("{other:?}"),
+        };
+        let page = match runtime
+            .request(
+                2,
+                Method::HistoryQuery {
+                    query: copypaste_ipc::HistoryQuery {
+                        origin_device_id: Some(local_facet.id),
+                        ..Default::default()
+                    },
+                    limit: 10,
+                    cursor: None,
+                },
+            )
+            .await
+            .data
+        {
+            Some(ResponseData::Page(page)) => page,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].id, "local-item");
+        assert_eq!(page.items[0].origin_device_id, runtime.device_id);
+    }
+
+    #[test]
+    fn an_all_local_page_uses_local_origin_metadata() {
+        let (runtime, _dir) = fixture();
+        seed_text(&runtime, "local-item-a", "local text a");
+        seed_text(&runtime, "local-item-b", "local text b");
+
+        let page = runtime.page(runtime.store.list(10, 0).unwrap(), None);
+        assert_eq!(page.items.len(), 2);
+        assert!(page.items.iter().all(|item| {
+            item.origin_device_id == runtime.device_id
+                && item.origin_device_name.as_deref() == Some(runtime.device_name.as_str())
+                && item.origin_device_class == runtime.device_class
+        }));
+    }
+
+    #[test]
+    fn a_remote_item_uses_persisted_peer_metadata_instead_of_local_identity() {
+        let (runtime, _dir) = fixture();
+        seed_text(&runtime, "local-item", "local text");
+        runtime
+            .source
+            .apply_version(&copypaste_core::RemoteVersion {
+                item_id: "remote-item",
+                content: "remote text",
+                binary_content: None,
+                payload_metadata: None,
+                content_type: copypaste_ipc::content_type::TEXT,
+                created_at: 2,
+                deleted: false,
+                content_hash: None,
+                origin_device_id: "remote-device",
+                app_bundle_id: None,
+                app_name: None,
+            })
+            .expect("the remote row is stored");
+
+        runtime.remember_device(&copypaste_p2p::sync::SyncOutcome {
+            stats: copypaste_p2p::sync::SyncStats::default(),
+            peer_device_id: "remote-device".into(),
+            peer_device_name: "Remote phone".into(),
+            peer_profile: Some(copypaste_p2p::DeviceProfile {
+                device_class: copypaste_ipc::DeviceClass::Phone,
+                ..Default::default()
+            }),
+            peer_listen_addr: None,
+            cursor: copypaste_p2p::sync::SyncCursor::default(),
+            applied_floor: None,
+        });
+
+        let item = match runtime.item(1, "remote-item").data {
+            Some(ResponseData::Item(item)) => item,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(item.origin_device_id, "remote-device");
+        assert_eq!(item.origin_device_name.as_deref(), Some("Remote phone"));
+        assert_eq!(item.origin_device_class, copypaste_ipc::DeviceClass::Phone);
+        assert_ne!(
+            item.origin_device_name.as_deref(),
+            Some(runtime.device_name.as_str())
+        );
+
+        let page = runtime.page(runtime.store.list(10, 0).unwrap(), None);
+        let remote = page
+            .items
+            .iter()
+            .find(|candidate| candidate.id == "remote-item")
+            .expect("the remote item is listed");
+        assert_eq!(remote.origin_device_name.as_deref(), Some("Remote phone"));
+        assert_eq!(
+            remote.origin_device_class,
+            copypaste_ipc::DeviceClass::Phone
+        );
+        let local = page
+            .items
+            .iter()
+            .find(|candidate| candidate.id == "local-item")
+            .expect("the local item is listed");
+        assert_eq!(
+            local.origin_device_name.as_deref(),
+            Some(runtime.device_name.as_str())
+        );
     }
 
     #[tokio::test]
@@ -1568,6 +1814,7 @@ mod tests {
                 .peers()
                 .upsert(copypaste_p2p::Peer {
                     pairing_id: pairing_id.clone(),
+                    device_id: None,
                     name: "loopback".into(),
                     psk: token.psk(),
                     last_addr: address,
@@ -1623,6 +1870,7 @@ mod tests {
             .peers()
             .upsert(copypaste_p2p::Peer {
                 pairing_id: pairing_id.clone(),
+                device_id: None,
                 name: "sender".into(),
                 psk: token.psk(),
                 last_addr: None,
@@ -1633,6 +1881,7 @@ mod tests {
             .unwrap();
         let peer = copypaste_p2p::Peer {
             pairing_id,
+            device_id: None,
             name: "receiver".into(),
             psk: token.psk(),
             last_addr: remote_addr.parse().ok(),

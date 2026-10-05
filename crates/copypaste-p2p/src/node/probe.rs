@@ -31,7 +31,10 @@ pub const PROBE_FAILURE_FRESH_MS: i64 = 10_000;
 
 /// A probe includes the Noise handshake and one encrypted request/response.
 /// It must not monopolize a probe slot behind a sleeping device.
-const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+const PROBE_TIMEOUT_SECS: u64 = 5;
+const PROBE_TIMEOUT: Duration = Duration::from_secs(PROBE_TIMEOUT_SECS);
+// At most one discovery address and one persisted address are attempted.
+const PROBE_REFRESH_LEAD_MS: i64 = PROBE_TIMEOUT_SECS as i64 * 2 * 1_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProbeState {
@@ -87,10 +90,24 @@ impl AuthenticatedReachability {
     pub fn is_current_at(&self, now_ms: i64) -> bool {
         self.state_at(now_ms) != ProbeState::Unknown
     }
+
+    fn should_refresh_at(&self, now_ms: i64) -> bool {
+        let refresh_lead_ms = match self.state {
+            ProbeState::Online => PROBE_REFRESH_LEAD_MS,
+            ProbeState::Offline | ProbeState::Unknown => 0,
+        };
+        !self.is_current_at(now_ms)
+            || matches!(
+                self.fresh_until_ms,
+                Some(fresh_until_ms)
+                    if fresh_until_ms.saturating_sub(now_ms) <= refresh_lead_ms
+            )
+    }
 }
 
 impl Node {
-    /// Starts at most one content-free probe for each stale trusted peer.
+    /// Starts at most one content-free probe for each stale or nearly stale
+    /// trusted peer.
     ///
     /// This intentionally returns immediately: a `Peers` read must never wait
     /// behind several sleeping devices. `on_complete` runs once after the
@@ -99,8 +116,8 @@ impl Node {
     /// discovery is preferred over the last authenticated address; discovery
     /// remains only a hint because every candidate must pass Noise.
     ///
-    /// Returns false when every peer was already current or has an in-flight
-    /// probe, in which case `on_complete` is not called.
+    /// Returns false when every peer remains outside the renewal window or has
+    /// an in-flight probe, in which case `on_complete` is not called.
     pub fn refresh_reachability<F>(
         self: &Arc<Self>,
         peers: impl IntoIterator<Item = Peer>,
@@ -157,7 +174,7 @@ impl Node {
     fn claim_probe(&self, pairing_id: &str, now_ms: i64) -> bool {
         if self
             .authenticated_reachability(pairing_id)
-            .is_some_and(|observation| observation.is_current_at(now_ms))
+            .is_some_and(|observation| !observation.should_refresh_at(now_ms))
         {
             return false;
         }
@@ -191,7 +208,7 @@ impl Node {
                     AuthenticatedReachability::online(Some(latency_ms), crate::now_ms());
                 self.record_reachability(&peer.pairing_id, observation.clone());
                 self.record_authenticated_profile(&peer.pairing_id, profile.as_ref());
-                self.touch_peer(peer, Some(candidate.addr), None);
+                self.touch_peer(peer, None, Some(candidate.addr), None);
                 return Ok(observation);
             }
             if candidate.source == DialCandidateSource::Discovery {
@@ -294,6 +311,7 @@ mod tests {
     fn peer(token: &PairingToken, addr: Option<std::net::SocketAddr>) -> Peer {
         Peer {
             pairing_id: token.pairing_id(),
+            device_id: None,
             name: "trusted peer".into(),
             psk: token.psk(),
             last_addr: addr,
@@ -307,6 +325,8 @@ mod tests {
     fn observations_fail_closed_after_their_freshness_window() {
         let online = AuthenticatedReachability::online(Some(12), 100);
         assert_eq!(online.state_at(100), ProbeState::Online);
+        assert!(!online.should_refresh_at(100));
+        assert!(online.should_refresh_at(100 + PROBE_FRESH_MS - PROBE_REFRESH_LEAD_MS));
         assert_eq!(
             online.state_at(100 + PROBE_FRESH_MS + 1),
             ProbeState::Unknown
@@ -314,6 +334,8 @@ mod tests {
 
         let offline = AuthenticatedReachability::offline(100);
         assert_eq!(offline.state_at(100), ProbeState::Offline);
+        assert!(!offline.should_refresh_at(100));
+        assert!(offline.should_refresh_at(100 + PROBE_FAILURE_FRESH_MS));
         assert_eq!(
             offline.state_at(100 + PROBE_FAILURE_FRESH_MS + 1),
             ProbeState::Unknown
@@ -529,6 +551,7 @@ mod tests {
             let pairing_id = format!("peer-{index}");
             let peer = Peer {
                 pairing_id: pairing_id.clone(),
+                device_id: None,
                 name: "spoofed".into(),
                 psk: [(index as u8).saturating_add(1); crate::transport::TOKEN_LEN],
                 last_addr: None,
