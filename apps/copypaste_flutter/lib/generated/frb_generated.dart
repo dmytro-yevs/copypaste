@@ -2390,13 +2390,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PairingCeremony dco_decode_pairing_ceremony(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return PairingCeremony(
       ceremonyId: dco_decode_String(arr[0]),
       state: dco_decode_String(arr[1]),
       expiresInMs: dco_decode_opt_box_autoadd_u_64(arr[2]),
       peerName: dco_decode_opt_String(arr[3]),
+      failureMessage: dco_decode_opt_String(arr[4]),
     );
   }
 
@@ -3416,11 +3417,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_state = sse_decode_String(deserializer);
     var var_expiresInMs = sse_decode_opt_box_autoadd_u_64(deserializer);
     var var_peerName = sse_decode_opt_String(deserializer);
+    var var_failureMessage = sse_decode_opt_String(deserializer);
     return PairingCeremony(
       ceremonyId: var_ceremonyId,
       state: var_state,
       expiresInMs: var_expiresInMs,
       peerName: var_peerName,
+      failureMessage: var_failureMessage,
     );
   }
 
@@ -4359,6 +4362,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.state, serializer);
     sse_encode_opt_box_autoadd_u_64(self.expiresInMs, serializer);
     sse_encode_opt_String(self.peerName, serializer);
+    sse_encode_opt_String(self.failureMessage, serializer);
   }
 
   @protected

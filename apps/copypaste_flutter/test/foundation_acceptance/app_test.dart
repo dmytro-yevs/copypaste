@@ -24,6 +24,39 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('runtime failure keeps the shell usable and retryable', (
+    tester,
+  ) async {
+    final navigation = AppNavigationController();
+    addTearDown(navigation.dispose);
+    var retries = 0;
+
+    await tester.pumpWidget(
+      CopyPasteApp(
+        navigation: navigation,
+        runtimeUnavailableMessage: 'Protected history is unavailable.',
+        onRetryRuntime: () async {
+          retries += 1;
+        },
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('History runtime is unavailable'), findsOneWidget);
+    expect(find.text('Protected history is unavailable.'), findsOneWidget);
+    await tester.tap(find.widgetWithText(Button, 'Retry'));
+    await tester.pump();
+    expect(retries, 1);
+
+    navigation.selectDestination(AppDestination.devices);
+    await tester.pump();
+    expect(find.text('Devices runtime is unavailable'), findsOneWidget);
+
+    navigation.selectDestination(AppDestination.settings);
+    await tester.pump();
+    expect(find.text('Settings runtime is unavailable'), findsOneWidget);
+  });
+
   testWidgets(
     'application handles layout edges and large text in both themes',
     (tester) async {

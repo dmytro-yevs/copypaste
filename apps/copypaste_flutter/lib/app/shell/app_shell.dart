@@ -137,9 +137,20 @@ class _AppShellState extends State<AppShell> {
                   ? const []
                   : [
                       AppBar(
-                        leading: railToggle == null ? const [] : [railToggle],
+                        leading: [
+                          ?railToggle,
+                          if (mode == _ShellNavigationMode.bottom)
+                            const Image(
+                              key: ValueKey<String>('header-brand-logo'),
+                              image: AssetImage('assets/brand/copypaste.png'),
+                              width: AppIconSize.md,
+                              height: AppIconSize.md,
+                            ),
+                        ],
                         title: Text(
                           selectedDestination.navigationDestination.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                         trailing: headerActions,
                       ),

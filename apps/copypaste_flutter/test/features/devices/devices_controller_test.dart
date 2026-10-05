@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:copypaste_flutter/features/devices/devices.dart';
+import 'package:copypaste_flutter/platform/camera/system_pairing_scanner.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -20,6 +21,115 @@ void main() {
   });
 
   tearDown(() => controller.dispose());
+
+  test(
+    'old pairing cleanup cannot unprotect a newly opened inspector',
+    () async {
+      await controller.openInvitation();
+      final cancellation = Completer<void>();
+      gateway.session.cancelPending = cancellation;
+      final closing = controller.closePairing();
+      await Future<void>.delayed(Duration.zero);
+      await controller.openCodeEntry();
+      cancellation.complete();
+      await closing;
+      expect(controller.pairingEntryMode, PairingEntryMode.enterCode);
+      expect(captureProtection.values, [true]);
+      await controller.closePairing();
+      expect(captureProtection.values, [true, false]);
+    },
+  );
+
+  test('late capture protection cannot reopen closed pairing', () async {
+    final enabled = Completer<bool>();
+    captureProtection.pendingEnable = enabled;
+    final opening = controller.openCodeEntry();
+    await Future<void>.delayed(Duration.zero);
+    await controller.closePairing();
+    enabled.complete(true);
+    await opening;
+    expect(controller.pairingInspectorOpen, isFalse);
+    expect(captureProtection.values, [true, false]);
+  });
+
+  test(
+    'system QR scanning protects the surface and submits only its result',
+    () async {
+      controller.dispose();
+      final scanner = _SystemScanner();
+      controller = DevicesController(
+        gateway: gateway,
+        captureProtection: captureProtection,
+        systemScanner: scanner,
+      );
+      final scan = controller.openQrScanner();
+      await Future<void>.delayed(Duration.zero);
+      expect(captureProtection.values, [true]);
+      expect(controller.systemScanInFlight, isTrue);
+      scanner.result.complete('copypaste://pair/v1?test=invitation');
+      await scan;
+      expect(gateway.joinedUris, ['copypaste://pair/v1?test=invitation']);
+      expect(controller.systemScanInFlight, isFalse);
+    },
+  );
+
+  test(
+    'cancelling the system scanner releases pairing and permits details',
+    () async {
+      controller.dispose();
+      final scanner = _SystemScanner();
+      controller = DevicesController(
+        gateway: gateway,
+        captureProtection: captureProtection,
+        systemScanner: scanner,
+      );
+      final scan = controller.openQrScanner();
+      await Future<void>.delayed(Duration.zero);
+      scanner.result.complete(null);
+      await scan;
+      expect(controller.pairingInspectorOpen, isFalse);
+      expect(captureProtection.values, [true, false]);
+      controller.openThisDeviceDetails();
+      expect(controller.deviceDetailsOpen, isTrue);
+    },
+  );
+
+  test('closing pairing discards a late system scanner result', () async {
+    controller.dispose();
+    final scanner = _SystemScanner();
+    controller = DevicesController(
+      gateway: gateway,
+      captureProtection: captureProtection,
+      systemScanner: scanner,
+    );
+    final scan = controller.openQrScanner();
+    await Future<void>.delayed(Duration.zero);
+    await controller.closePairing();
+    scanner.result.complete('copypaste://pair/v1?test=stale');
+    await scan;
+    expect(gateway.joinedUris, isEmpty);
+    expect(controller.pairingInspectorOpen, isFalse);
+  });
+
+  test('unavailable system scanner allows manual code entry', () async {
+    controller.dispose();
+    final scanner = _SystemScanner();
+    controller = DevicesController(
+      gateway: gateway,
+      captureProtection: captureProtection,
+      systemScanner: scanner,
+    );
+    final scan = controller.openQrScanner();
+    await Future<void>.delayed(Duration.zero);
+    scanner.result.completeError(
+      PlatformException(code: 'scanner_unavailable'),
+    );
+    await scan;
+    expect(controller.errorMessage, contains('Enter the pairing code'));
+    await controller.openCodeEntry();
+    expect(controller.pairingEntryMode, PairingEntryMode.enterCode);
+    expect(controller.errorMessage, isNull);
+  });
 
   test('loads real-contract-shaped peers and discovery results', () async {
     gateway.snapshot = _snapshot(peers: [_peer('trusted')]);
@@ -196,6 +306,41 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       expect(gateway.loadCalls, 2);
+    },
+  );
+
+  test(
+    'refreshes latency before expiry without clearing the displayed value',
+    () async {
+      final clock = _TestClock(DateTime.utc(2026, 10, 3, 12));
+      final scheduler = _FreshnessTimerFactory();
+      final deadline = clock.now.add(const Duration(seconds: 30));
+      gateway.snapshot = _snapshot(peers: [_observedPeer(deadline)]);
+      final freshnessController = DevicesController(
+        gateway: gateway,
+        captureProtection: captureProtection,
+        now: () => clock.now,
+        freshnessTimerFactory: scheduler.schedule,
+      );
+      addTearDown(freshnessController.dispose);
+
+      await freshnessController.start();
+
+      expect(scheduler.timers, hasLength(1));
+      expect(scheduler.timers.single.delay, const Duration(seconds: 20));
+
+      clock.now = deadline.subtract(const Duration(seconds: 10));
+      scheduler.timers.single.fire();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        freshnessController.peerLatencyLabel(
+          freshnessController.snapshot!.peers.single,
+        ),
+        '24 ms',
+      );
+      expect(gateway.loadCalls, 2);
+      expect(scheduler.timers.last.delay, const Duration(seconds: 10));
     },
   );
 
@@ -470,6 +615,7 @@ class _FakePairingSession implements DevicesPairingSession {
   int disposeCalls = 0;
   int revealInviteCalls = 0;
   int revealSasCalls = 0;
+  Completer<void>? cancelPending;
 
   @override
   PairingCeremony get ceremony => _ceremony;
@@ -480,6 +626,7 @@ class _FakePairingSession implements DevicesPairingSession {
   @override
   Future<void> cancel() async {
     cancelCalls += 1;
+    await cancelPending?.future;
   }
 
   @override
@@ -519,10 +666,22 @@ class _CaptureProtection implements PairingCaptureProtection {
 
   final bool result;
   final List<bool> values = [];
+  Completer<bool>? pendingEnable;
 
   @override
   Future<bool> setEnabled(bool enabled) async {
     values.add(enabled);
+    if (enabled && pendingEnable != null) return pendingEnable!.future;
     return result;
   }
+}
+
+class _SystemScanner implements SystemPairingScanner {
+  final result = Completer<String?>();
+
+  @override
+  Future<String?> scan() => result.future;
+
+  @override
+  Future<void> cancel() async {}
 }

@@ -552,6 +552,7 @@ class FlutterRustPairingSession implements DevicesPairingSession {
         final state => throw FormatException('Unknown pairing state: $state'),
       },
       peerName: ceremony.peerName,
+      failureMessage: ceremony.failureMessage,
       expiresIn: ceremony.expiresInMs == null
           ? null
           : Duration(milliseconds: ceremony.expiresInMs!.toInt()),

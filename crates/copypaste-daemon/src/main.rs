@@ -8,6 +8,8 @@ mod capture;
 mod cli;
 mod clipboard;
 mod cloud;
+#[cfg(target_os = "macos")]
+mod macos_workspace;
 mod meta;
 mod notify;
 mod p2p;
@@ -37,6 +39,7 @@ use crate::cli::{cloud_config, Args};
 use crate::cloud::Cloud;
 use crate::meta::Meta;
 use crate::p2p::P2p;
+#[cfg(not(target_os = "macos"))]
 use crate::runtime::run_with_bounded_shutdown;
 use crate::settings::Settings;
 use crate::startup::{halt_or_fail, relocate, wait_for_shutdown, watch_app_parent};
@@ -47,8 +50,14 @@ pub use crate::state::AppState;
 pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() -> anyhow::Result<()> {
-    initialize_macos_workspace();
-    run_with_bounded_shutdown(run())
+    #[cfg(target_os = "macos")]
+    {
+        macos_workspace::run(run())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        run_with_bounded_shutdown(run())
+    }
 }
 
 async fn run() -> anyhow::Result<()> {
@@ -253,29 +262,3 @@ async fn run() -> anyhow::Result<()> {
     info!("daemon process stopped pid={}", std::process::id());
     Ok(())
 }
-
-/// A daemon is a plain process, unlike the graphical application. AppKit must be loaded
-/// before `NSWorkspace` can report the foreground process for capture source
-/// attribution.
-#[cfg(target_os = "macos")]
-fn initialize_macos_workspace() {
-    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSApplicationLoad};
-    use objc2_foundation::MainThreadMarker;
-
-    if !unsafe { NSApplicationLoad() }.as_bool() {
-        warn!(
-            "macOS workspace services could not initialize; source application attribution may be unavailable"
-        );
-    }
-    if let Some(main_thread) = MainThreadMarker::new() {
-        // The helper shares the app bundle. AppKit must not register it as a
-        // second foreground CopyPaste or let it take clipboard attribution.
-        let application = NSApplication::sharedApplication(main_thread);
-        if !application.setActivationPolicy(NSApplicationActivationPolicy::Prohibited) {
-            warn!("the clipboard service could not enter background-only mode");
-        }
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn initialize_macos_workspace() {}

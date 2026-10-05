@@ -35,6 +35,8 @@ class DevicesScreen extends StatefulWidget {
 class _DevicesScreenState extends State<DevicesScreen> {
   bool _pairingDrawerOpen = false;
   bool _deviceDrawerOpen = false;
+  OverlayCompleter<void>? _pairingDrawer;
+  OverlayCompleter<void>? _deviceDrawer;
 
   @override
   void initState() {
@@ -48,6 +50,8 @@ class _DevicesScreenState extends State<DevicesScreen> {
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
+    if (_pairingDrawer?.isCompleted == false) _pairingDrawer!.remove();
+    if (_deviceDrawer?.isCompleted == false) _deviceDrawer!.remove();
     widget.controller.dispose();
     super.dispose();
   }
@@ -102,12 +106,15 @@ class _DevicesScreenState extends State<DevicesScreen> {
         final pairingOpen = controller.pairingEntryMode != null;
         final deviceDetailsOpen = controller.deviceDetailsTarget != null;
         final inspectorOpen = pairingOpen || deviceDetailsOpen;
-        if (!wide && pairingOpen && !_pairingDrawerOpen) {
+        if (!wide && pairingOpen && !_pairingDrawerOpen && !_deviceDrawerOpen) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) unawaited(_openPairingDrawer());
           });
         }
-        if (!wide && deviceDetailsOpen && !_deviceDrawerOpen) {
+        if (!wide &&
+            deviceDetailsOpen &&
+            !_deviceDrawerOpen &&
+            !_pairingDrawerOpen) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) unawaited(_openDeviceDrawer());
           });
@@ -245,13 +252,22 @@ class _DevicesScreenState extends State<DevicesScreen> {
   }
 
   Future<void> _openPairingDrawer() async {
-    if (_pairingDrawerOpen || widget.controller.pairingEntryMode == null) {
+    if (_pairingDrawerOpen ||
+        _deviceDrawerOpen ||
+        widget.controller.pairingEntryMode == null) {
       return;
     }
     _pairingDrawerOpen = true;
     widget.onDrawerVisibilityChanged?.call(true);
+    var closing = false;
+    void closeOnce(BuildContext drawerContext) {
+      if (closing || !drawerContext.mounted) return;
+      closing = true;
+      unawaited(closeDrawer(drawerContext));
+    }
+
     try {
-      await showOverlay<void>(
+      final drawer = _pairingDrawer = showOverlay<void>(
         context,
         AppOverlays.bottomDrawerConfiguration,
         builder: (context) => SizedBox(
@@ -267,7 +283,6 @@ class _DevicesScreenState extends State<DevicesScreen> {
                 const SingleActivator(LogicalKeyboardKey.escape): () async {
                   if (widget.controller.canClosePairing) {
                     await widget.controller.closePairing();
-                    if (context.mounted) closeDrawer(context);
                   }
                 },
               },
@@ -276,7 +291,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
                 builder: (context, _) {
                   if (widget.controller.pairingEntryMode == null) {
                     WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (context.mounted) closeDrawer(context);
+                      closeOnce(context);
                     });
                     return const SizedBox.shrink();
                   }
@@ -286,34 +301,46 @@ class _DevicesScreenState extends State<DevicesScreen> {
                     ),
                     controller: widget.controller,
                     inDrawer: true,
-                    onClose: () async {
-                      await widget.controller.closePairing();
-                      if (context.mounted) closeDrawer(context);
-                    },
+                    onClose: widget.controller.closePairing,
                   );
                 },
               ),
             ),
           ),
         ),
-      ).future;
+      );
+      await drawer.future;
     } finally {
+      _pairingDrawer = null;
       _pairingDrawerOpen = false;
-      widget.onDrawerVisibilityChanged?.call(false);
-      if (widget.controller.pairingEntryMode != null) {
-        await widget.controller.closePairing();
+      if (mounted) {
+        widget.onDrawerVisibilityChanged?.call(false);
+        if (!closing && widget.controller.pairingEntryMode != null) {
+          await widget.controller.closePairing();
+        }
+        if (mounted) setState(() {});
       }
     }
   }
 
   Future<void> _openDeviceDrawer() async {
-    if (_deviceDrawerOpen || widget.controller.deviceDetailsTarget == null) {
+    if (_deviceDrawerOpen ||
+        _pairingDrawerOpen ||
+        widget.controller.deviceDetailsTarget == null) {
       return;
     }
     _deviceDrawerOpen = true;
     widget.onDrawerVisibilityChanged?.call(true);
+    final target = widget.controller.deviceDetailsTarget;
+    var closing = false;
+    void closeOnce(BuildContext drawerContext) {
+      if (closing || !drawerContext.mounted) return;
+      closing = true;
+      unawaited(closeDrawer(drawerContext));
+    }
+
     try {
-      await showOverlay<void>(
+      final drawer = _deviceDrawer = showOverlay<void>(
         context,
         AppOverlays.bottomDrawerConfiguration,
         builder: (context) => SizedBox(
@@ -328,7 +355,6 @@ class _DevicesScreenState extends State<DevicesScreen> {
               bindings: <ShortcutActivator, VoidCallback>{
                 const SingleActivator(LogicalKeyboardKey.escape): () {
                   widget.controller.closeDeviceDetails();
-                  if (context.mounted) closeDrawer(context);
                 },
               },
               child: AnimatedBuilder(
@@ -338,7 +364,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
                   if (snapshot == null ||
                       widget.controller.deviceDetailsTarget == null) {
                     WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (context.mounted) closeDrawer(context);
+                      closeOnce(context);
                     });
                     return const SizedBox.shrink();
                   }
@@ -349,10 +375,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
                     controller: widget.controller,
                     snapshot: snapshot,
                     inDrawer: true,
-                    onClose: () async {
-                      widget.controller.closeDeviceDetails();
-                      if (context.mounted) closeDrawer(context);
-                    },
+                    onClose: widget.controller.closeDeviceDetails,
                     onRename: (name) =>
                         _renameThisDevice(context, widget.controller, name),
                     onRemove: (peer, revoke) => _confirmPeerRemoval(
@@ -367,11 +390,18 @@ class _DevicesScreenState extends State<DevicesScreen> {
             ),
           ),
         ),
-      ).future;
+      );
+      await drawer.future;
     } finally {
+      _deviceDrawer = null;
       _deviceDrawerOpen = false;
-      widget.onDrawerVisibilityChanged?.call(false);
-      widget.controller.closeDeviceDetails();
+      if (mounted) {
+        widget.onDrawerVisibilityChanged?.call(false);
+        if (!closing && widget.controller.deviceDetailsTarget == target) {
+          widget.controller.closeDeviceDetails();
+        }
+        setState(() {});
+      }
     }
   }
 
@@ -1175,6 +1205,40 @@ class _PairingInspectorState extends State<_PairingInspector> {
   Widget _scannerContent() {
     final ceremony = widget.controller.pairing;
     if (ceremony != null) return _pairingProgress(ceremony);
+    if (widget.controller.usesSystemScanner) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (widget.controller.systemScanInFlight)
+            const StateView.loading(message: 'Opening Google scanner…')
+          else if (widget.controller.errorMessage case final message?)
+            StateView.error(title: 'Scanner unavailable', message: message)
+          else
+            const StateView.empty(title: 'Scan a pairing QR code'),
+          const Gap(AppSpacing.lg),
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: [
+              Button.primary(
+                key: const ValueKey<String>('start-pairing-scanner'),
+                onPressed: widget.controller.systemScanInFlight
+                    ? null
+                    : widget.controller.openQrScanner,
+                leading: const Icon(LucideIcons.scanLine),
+                child: const Text('Scan QR'),
+              ),
+              Button.secondary(
+                onPressed: widget.controller.systemScanInFlight
+                    ? null
+                    : widget.controller.openCodeEntry,
+                child: const Text('Enter code'),
+              ),
+            ],
+          ),
+        ],
+      );
+    }
     final scanner = _scanner;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

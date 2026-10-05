@@ -9,20 +9,25 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Process
+import android.os.Build
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.OutputStream
+import java.util.concurrent.Executors
 
 internal object AndroidClipboardReader {
     private const val maximumBinaryBytes = 16 * 1024 * 1024
     private const val maximumDecodedImageBytes = 50 * 1024 * 1024L
     private val mimeType = Regex("^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+$")
+    private val ingestion = Executors.newSingleThreadExecutor()
 
-    fun captureBackground(context: Context): Boolean = captureClipboard(context, background = true)
+    fun captureBackground(context: Context) = captureClipboard(context, background = true)
 
-    fun captureForeground(context: Context): Boolean =
-        AndroidCaptureState.foregroundCaptureEnabled(context) &&
+    fun captureForeground(context: Context) {
+        if (AndroidCaptureState.foregroundCaptureEnabled(context)) {
             captureClipboard(context, background = false)
+        }
+    }
 
     @Suppress("DEPRECATION")
     fun captureExplicit(context: Context, intent: Intent): Boolean {
@@ -47,18 +52,29 @@ internal object AndroidClipboardReader {
         return captured
     }
 
-    private fun captureClipboard(context: Context, background: Boolean): Boolean {
-        if (!NativeRuntimeCapture.isImplicitCaptureAllowed()) return false
-        val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return false
-        val primary = clipboard.primaryClip ?: return false
-        if (primary.description.label?.toString() == "CopyPaste") return false
-        val captured = binary(context, primary, explicit = false) ||
-            text(primary)?.let(NativeRuntimeCapture::ingestText) == true
-        if (captured) {
-            if (background) AndroidCaptureState.recordBackgroundCapture(context)
-            AndroidCaptureFeedback.onCaptured(context)
+    private fun captureClipboard(context: Context, background: Boolean) {
+        if (!NativeRuntimeCapture.isImplicitCaptureAllowed()) return
+        val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return
+        // Snapshot while the host owns clipboard access. Release its focus before
+        // decoding images or waiting for encrypted storage on the worker thread.
+        val primary = runCatching { clipboard.primaryClip }.getOrNull() ?: return
+        if (primary.description.label?.toString() == "CopyPaste") return
+        val capturedAt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            primary.description.timestamp
+        } else {
+            System.currentTimeMillis()
         }
-        return captured
+        val app = context.applicationContext
+        ingestion.execute {
+            val captured = runCatching {
+                binary(app, primary, explicit = false) ||
+                    text(primary)?.let(NativeRuntimeCapture::ingestText) == true
+            }.getOrDefault(false)
+            if (captured) {
+                if (background) AndroidCaptureState.recordBackgroundCapture(app, capturedAt)
+                AndroidCaptureFeedback.onCaptured(app)
+            }
+        }
     }
 
     private fun text(clip: ClipData): String? {

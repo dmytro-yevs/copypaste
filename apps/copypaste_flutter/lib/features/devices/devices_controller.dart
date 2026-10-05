@@ -1,6 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+
+import '../../platform/camera/system_pairing_scanner.dart';
 
 import 'devices_gateway.dart';
 
@@ -52,15 +55,20 @@ class DeviceDetailsTarget {
 
 /// Owns devices data and pairing lifecycle outside presentation widgets.
 class DevicesController extends ChangeNotifier {
+  /// Covers the backend's two possible five-second probe attempts.
+  static const _latencyRefreshLead = Duration(seconds: 10);
+
   DevicesController({
     required DevicesGateway gateway,
     required PairingCaptureProtection captureProtection,
     this.disposeGateway = false,
     DateTime Function()? now,
     DevicesFreshnessTimerFactory? freshnessTimerFactory,
+    SystemPairingScanner? systemScanner,
   }) : _gateway = gateway,
        _captureProtection = captureProtection,
        _now = now ?? (() => DateTime.now().toUtc()),
+       _systemScanner = systemScanner ?? SystemPairingScanner.forPlatform(),
        _freshnessTimerFactory =
            freshnessTimerFactory ?? _SystemDevicesFreshnessTimer.new;
 
@@ -68,6 +76,10 @@ class DevicesController extends ChangeNotifier {
   final PairingCaptureProtection _captureProtection;
   final DateTime Function() _now;
   final DevicesFreshnessTimerFactory _freshnessTimerFactory;
+  final SystemPairingScanner? _systemScanner;
+  bool _systemScanInFlight = false;
+  bool get usesSystemScanner => _systemScanner != null;
+  bool get systemScanInFlight => _systemScanInFlight;
 
   /// Set only when this controller owns the app-wide runtime gateway.
   final bool disposeGateway;
@@ -210,10 +222,11 @@ class DevicesController extends ChangeNotifier {
     _freshnessTimer = null;
     final now = _now();
     final deadlines = <DateTime>[
-      ..._freshnessDeadlines(snapshot.thisDevice.details),
-      for (final peer in snapshot.peers) ..._freshnessDeadlines(peer.details),
+      ..._freshnessDeadlines(snapshot.thisDevice.details, now),
+      for (final peer in snapshot.peers)
+        ..._freshnessDeadlines(peer.details, now),
       for (final device in snapshot.discovered)
-        ..._freshnessDeadlines(device.details),
+        ..._freshnessDeadlines(device.details, now),
     ].where((deadline) => deadline.isAfter(now));
     if (deadlines.isEmpty) return;
     final deadline = deadlines.reduce(
@@ -226,11 +239,19 @@ class DevicesController extends ChangeNotifier {
     });
   }
 
-  Iterable<DateTime> _freshnessDeadlines(DeviceDetails? details) sync* {
+  Iterable<DateTime> _freshnessDeadlines(
+    DeviceDetails? details,
+    DateTime now,
+  ) sync* {
     final presenceDeadline = details?.presence?.freshUntil;
     if (presenceDeadline != null) yield presenceDeadline;
     final latencyDeadline = details?.latency?.freshUntil;
-    if (latencyDeadline != null) yield latencyDeadline;
+    if (latencyDeadline != null) {
+      final remaining = latencyDeadline.difference(now);
+      yield remaining.compareTo(_latencyRefreshLead) > 0
+          ? latencyDeadline.subtract(_latencyRefreshLead)
+          : latencyDeadline;
+    }
   }
 
   void _reconcileDeviceDetailsTarget(DevicesSnapshot snapshot) {
@@ -284,10 +305,47 @@ class DevicesController extends ChangeNotifier {
     await _startPairing(_gateway.createInvitation);
   }
 
-  Future<void> openQrScanner() =>
-      _openPairingInspector(PairingEntryMode.scanQr);
+  Future<void> openQrScanner() async {
+    if (_systemScanInFlight ||
+        !await _openPairingInspector(PairingEntryMode.scanQr)) {
+      return;
+    }
+    final scanner = _systemScanner;
+    if (scanner == null) return;
+    final epoch = ++_pairingEpoch;
+    _systemScanInFlight = true;
+    _notify();
+    try {
+      final uri = await scanner.scan();
+      if (_disposed ||
+          epoch != _pairingEpoch ||
+          _pairingEntryMode != PairingEntryMode.scanQr) {
+        return;
+      }
+      if (uri == null) {
+        await closePairing();
+      } else {
+        await _startPairing(() => _gateway.joinPairingUri(uri));
+      }
+    } on PlatformException catch (error) {
+      if (!_disposed && epoch == _pairingEpoch) {
+        _errorMessage = error.code == 'invalid_pairing_qr'
+            ? 'Scan a CopyPaste pairing QR code.'
+            : 'Google scanner is unavailable. Enter the pairing code instead.';
+      }
+    } catch (_) {
+      if (!_disposed && epoch == _pairingEpoch) {
+        _errorMessage =
+            'The scanner could not open. Enter the pairing code instead.';
+      }
+    } finally {
+      _systemScanInFlight = false;
+      _notify();
+    }
+  }
 
   Future<void> openCodeEntry({String? address}) async {
+    _pairingEpoch++;
     _pendingAddress = address;
     await _openPairingInspector(PairingEntryMode.enterCode);
   }
@@ -308,17 +366,25 @@ class DevicesController extends ChangeNotifier {
   }
 
   Future<bool> _openPairingInspector(PairingEntryMode mode) async {
+    if (_disposed) return false;
     if ((_pairingSession != null || _pairingInFlight) &&
         _pairingEntryMode != mode) {
       return false;
     }
     if (!_captureProtectionActive) {
       if (_captureProtectionInFlight) return false;
+      final epoch = _pairingEpoch;
       _captureProtectionInFlight = true;
       try {
         _captureProtectionActive = await _captureProtection.setEnabled(true);
+      } catch (_) {
+        _captureProtectionActive = false;
       } finally {
         _captureProtectionInFlight = false;
+      }
+      if (_disposed || epoch != _pairingEpoch) {
+        if (_pairingEntryMode == null) await _disableCaptureProtection();
+        return false;
       }
       if (!_captureProtectionActive) {
         _pendingAddress = null;
@@ -400,17 +466,21 @@ class DevicesController extends ChangeNotifier {
 
   /// Cancels active Rust pairing and clears the local opaque session.
   Future<void> closePairing() async {
-    _pairingEpoch++;
-    final session = _pairingSession;
     if (_decisionInFlight) return;
+    final closingEpoch = ++_pairingEpoch;
+    _pairingInFlight = false;
+    if (_systemScanInFlight) {
+      unawaited(_systemScanner?.cancel().catchError((Object _) {}));
+    }
+    final session = _pairingSession;
     if (session == null) {
       _pairingCeremony = null;
       _pairingEntryMode = null;
       _pendingAddress = null;
       _inviteQrPng = null;
       _verificationCode = null;
-      await _disableCaptureProtection();
       _notify();
+      await _releaseClosedPairingProtection(closingEpoch);
       return;
     }
     _pairingSession = null;
@@ -428,7 +498,7 @@ class DevicesController extends ChangeNotifier {
       try {
         await session.dispose();
       } finally {
-        await _disableCaptureProtection();
+        await _releaseClosedPairingProtection(closingEpoch);
       }
     }
   }
@@ -437,6 +507,12 @@ class DevicesController extends ChangeNotifier {
     if (!_captureProtectionActive) return;
     _captureProtectionActive = false;
     await _captureProtection.setEnabled(false);
+  }
+
+  Future<void> _releaseClosedPairingProtection(int closingEpoch) async {
+    if (closingEpoch == _pairingEpoch && _pairingEntryMode == null) {
+      await _disableCaptureProtection();
+    }
   }
 
   Future<void> _startPairing(
@@ -461,15 +537,24 @@ class DevicesController extends ChangeNotifier {
       _pairingSubscription = session.updates.listen(_onPairingUpdate);
       if (_pairingEntryMode == PairingEntryMode.invite &&
           _pairingCeremony?.state == PairingState.waitingForPeer) {
-        _inviteQrPng = await session.revealInviteQr();
+        final qr = await session.revealInviteQr();
+        if (!_disposed &&
+            epoch == _pairingEpoch &&
+            identical(_pairingSession, session)) {
+          _inviteQrPng = qr;
+        }
       }
       _notify();
     } catch (error) {
-      _errorMessage = devicesErrorMessage(error);
-      _notify();
+      if (!_disposed && epoch == _pairingEpoch) {
+        _errorMessage = devicesErrorMessage(error);
+        _notify();
+      }
     } finally {
-      _pairingInFlight = false;
-      _notify();
+      if (!_disposed && epoch == _pairingEpoch) {
+        _pairingInFlight = false;
+        _notify();
+      }
     }
   }
 
@@ -532,6 +617,9 @@ class DevicesController extends ChangeNotifier {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    if (_systemScanInFlight) {
+      unawaited(_systemScanner?.cancel().catchError((Object _) {}));
+    }
     _freshnessTimer?.cancel();
     _freshnessTimer = null;
     _refreshQueued = false;

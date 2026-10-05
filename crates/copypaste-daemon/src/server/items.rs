@@ -149,11 +149,12 @@ pub(super) fn history_query(
         }
         Err(_) => return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_HISTORY_QUERY),
     };
-    let page = match state.store.query_history_bounded(
+    let page = match state.store.query_history_bounded_for_device(
         query,
         after.as_ref(),
         limit,
         MAX_PAGE_CONTENT_BYTES,
+        Some(state.meta.device_id()),
     ) {
         Ok(page) => page,
         Err(StoreError::InvalidCursor) => {
@@ -1302,6 +1303,56 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn history_query_uses_the_local_facet_identity_for_local_captures() {
+        let (state, _dir) = test_state("history-device-filter");
+        let local = match add(&state, 1, "captured here").data {
+            Some(ResponseData::Item(item)) => item,
+            other => panic!("{other:?}"),
+        };
+        crate::sync::store_source(&state)
+            .apply_version(&copypaste_core::RemoteVersion {
+                item_id: "from-the-phone",
+                content: "captured remotely",
+                binary_content: None,
+                payload_metadata: None,
+                content_type: copypaste_ipc::content_type::TEXT,
+                created_at: copypaste_core::now_ms(),
+                deleted: false,
+                content_hash: None,
+                origin_device_id: "remote-device",
+                app_bundle_id: None,
+                app_name: None,
+            })
+            .expect("the remote row is stored");
+
+        let local_facet = match history_facets(&state, 2).data {
+            Some(ResponseData::HistoryFacets(facets)) => facets
+                .origin_devices
+                .into_iter()
+                .find(|facet| facet.id == state.meta.device_id())
+                .expect("the local device facet"),
+            other => panic!("{other:?}"),
+        };
+        let response = history_query(
+            &state,
+            3,
+            &HistoryQuery {
+                origin_device_id: Some(local_facet.id),
+                ..HistoryQuery::default()
+            },
+            10,
+            None,
+        );
+        let page = match response.data {
+            Some(ResponseData::Page(page)) => page,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].id, local.id);
+        assert_eq!(page.items[0].origin_device_id, state.meta.device_id());
     }
 
     /// `CopyPaste-f72f` / UI audit finding 9. An ordinary clip is carryable and

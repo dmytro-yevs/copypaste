@@ -20,9 +20,12 @@ void main() {
     expect(find.text('Limited mode'), findsOneWidget);
     expect(find.text('Shizuku'), findsOneWidget);
     expect(find.text('ADB'), findsOneWidget);
+    expect(find.text('Check again'), findsNothing);
 
     await controller.selectMethod(AndroidCaptureSetupMethod.adb);
     await tester.pump();
+    expect(find.text('Check access'), findsNothing);
+    expect(find.text('Check capture'), findsNothing);
 
     for (final command in _commands) {
       expect(find.text(command), findsOneWidget);
@@ -136,6 +139,9 @@ Widget _app(AndroidOnboardingController controller) => ShadcnApp(
 );
 
 class _ScreenAndroidCaptureSetupGateway implements AndroidCaptureSetupGateway {
+  @override
+  Stream<AndroidCaptureSetupState> get changes => const Stream.empty();
+
   AndroidCaptureSetupState get current => const AndroidCaptureSetupState(
     packageName: 'com.copypaste.app',
     privilegedGrants: false,

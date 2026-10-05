@@ -1,9 +1,112 @@
+import 'dart:async';
+
 import 'package:copypaste_flutter/features/onboarding/controller/android_onboarding_controller.dart';
 import 'package:copypaste_flutter/features/onboarding/repository/android_onboarding_store.dart';
 import 'package:copypaste_flutter/platform/android/android_capture_setup_gateway.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test(
+    'a queued older clipboard save cannot verify a new capture attempt',
+    () async {
+      final setup = _FakeAndroidCaptureSetupGateway(
+        current: _state(
+          privilegedGrants: true,
+          notificationGranted: true,
+          lastCaptureAtMs: 10,
+          observedAtMs: 20,
+        ),
+      );
+      final controller = _controller(setup: setup);
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      controller.showCapture();
+      await controller.beginVerification();
+      setup.current = _state(
+        privilegedGrants: true,
+        notificationGranted: true,
+        captureEnabled: true,
+        serviceRunning: true,
+        lastCaptureAtMs: 15,
+      );
+      await controller.refresh();
+      expect(controller.verified, isFalse);
+      setup.current = _state(
+        privilegedGrants: true,
+        notificationGranted: true,
+        captureEnabled: true,
+        serviceRunning: true,
+        lastCaptureAtMs: 21,
+      );
+      await controller.refresh();
+      expect(controller.verified, isTrue);
+    },
+  );
+  test('observes external permission grants and applies setup once', () async {
+    final setup = _FakeAndroidCaptureSetupGateway();
+    final controller = _controller(setup: setup);
+    addTearDown(controller.dispose);
+    addTearDown(setup.events.close);
+    await controller.initialize();
+    controller.showCapture();
+    controller.setMonitoring(true);
+    await Future<void>.delayed(Duration.zero);
+
+    setup.current = _state(shizukuPermission: true);
+    setup.events.add(setup.current);
+    await Future<void>.delayed(Duration.zero);
+    expect(setup.applyCalls, 1);
+    expect(controller.setupState!.shizuku.permission, isTrue);
+    expect(
+      controller.errorMessage,
+      contains('capture grants could not be applied'),
+    );
+
+    setup.events.add(setup.current);
+    await Future<void>.delayed(Duration.zero);
+    expect(setup.applyCalls, 1);
+    controller.setMonitoring(false);
+    expect(setup.events.hasListener, isFalse);
+  });
+
+  test(
+    'new background receipt verifies automatically and revocation blocks it',
+    () async {
+      final setup = _FakeAndroidCaptureSetupGateway(
+        current: _state(
+          privilegedGrants: true,
+          notificationGranted: true,
+          lastCaptureAtMs: 10,
+        ),
+      );
+      final controller = _controller(setup: setup);
+      addTearDown(controller.dispose);
+      addTearDown(setup.events.close);
+      await controller.initialize();
+      controller.showCapture();
+      controller.setMonitoring(true);
+      await Future<void>.delayed(Duration.zero);
+      await controller.beginVerification();
+
+      setup.events.add(
+        _state(
+          privilegedGrants: true,
+          notificationGranted: true,
+          captureEnabled: true,
+          serviceRunning: true,
+          lastCaptureAtMs: 11,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.verified, isTrue);
+      expect(controller.canContinueCapture, isTrue);
+
+      setup.events.add(_state(lastCaptureAtMs: 11));
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.verified, isFalse);
+      expect(controller.canContinueCapture, isFalse);
+    },
+  );
   test(
     'fresh Android onboarding defaults to Full capture with Shizuku',
     () async {
@@ -125,6 +228,8 @@ AndroidCaptureSetupState _state({
   bool captureEnabled = false,
   bool serviceRunning = false,
   int lastCaptureAtMs = 0,
+  int observedAtMs = 0,
+  bool shizukuPermission = false,
 }) => AndroidCaptureSetupState(
   packageName: 'com.copypaste.app',
   privilegedGrants: privilegedGrants,
@@ -133,11 +238,12 @@ AndroidCaptureSetupState _state({
   captureEnabled: captureEnabled,
   serviceRunning: serviceRunning,
   lastCaptureAtMs: lastCaptureAtMs,
-  shizuku: const AndroidShizukuState(
+  observedAtMs: observedAtMs,
+  shizuku: AndroidShizukuState(
     supported: true,
     installed: true,
     running: true,
-    permission: true,
+    permission: shizukuPermission,
   ),
   adbCommands: const [
     'adb shell pm grant com.copypaste.app android.permission.READ_LOGS',
@@ -154,9 +260,17 @@ class _FakeAndroidCaptureSetupGateway implements AndroidCaptureSetupGateway {
     : current = current ?? _state();
 
   AndroidCaptureSetupState current;
+  final events = StreamController<AndroidCaptureSetupState>.broadcast();
+  int applyCalls = 0;
 
   @override
-  Future<AndroidCaptureSetupState> applyShizukuGrants() async => current;
+  Stream<AndroidCaptureSetupState> get changes => events.stream;
+
+  @override
+  Future<AndroidCaptureSetupState> applyShizukuGrants() async {
+    applyCalls++;
+    return current;
+  }
 
   @override
   Future<bool> openShizuku() async => true;

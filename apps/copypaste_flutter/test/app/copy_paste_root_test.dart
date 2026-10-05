@@ -206,6 +206,9 @@ class _GrantedMacosSetupGateway implements MacosSetupGateway {
 }
 
 class _AndroidSetupGateway implements AndroidCaptureSetupGateway {
+  @override
+  Stream<AndroidCaptureSetupState> get changes => const Stream.empty();
+
   static const stateValue = AndroidCaptureSetupState(
     packageName: 'com.copypaste.app',
     privilegedGrants: false,

@@ -82,6 +82,7 @@ impl Node {
             self.record_authenticated_profile(&peer.pairing_id, outcome.peer_profile.as_ref());
             self.touch_peer(
                 peer,
+                Some(&outcome.peer_device_id),
                 outcome.peer_listen_addr.or(Some(addr)),
                 Some(&outcome.peer_device_name),
             );
@@ -184,6 +185,7 @@ mod tests {
         let source = TestSource::new("me", Vec::new());
         let peer = Peer {
             pairing_id: "ffffffffffffffffffffffffffffffff".into(),
+            device_id: None,
             name: "unreachable".into(),
             psk: [3u8; crate::transport::TOKEN_LEN],
             last_addr: None,
@@ -221,6 +223,7 @@ mod tests {
             .peers()
             .upsert(Peer {
                 pairing_id: pairing_id.clone(),
+                device_id: None,
                 name: "client".into(),
                 psk: token.psk(),
                 last_addr: None,
@@ -250,6 +253,7 @@ mod tests {
         );
         let peer = Peer {
             pairing_id: pairing_id.clone(),
+            device_id: None,
             name: "server".into(),
             psk: token.psk(),
             last_addr: Some(stale_addr),
@@ -298,6 +302,7 @@ mod tests {
         a.peers()
             .upsert(Peer {
                 pairing_id: pairing_id.clone(),
+                device_id: None,
                 name: "b".into(),
                 psk: token.psk(),
                 last_addr: None,
@@ -311,6 +316,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let peer = Peer {
             pairing_id: pairing_id.clone(),
+            device_id: None,
             name: "a".into(),
             psk: token.psk(),
             last_addr: Some(addr),

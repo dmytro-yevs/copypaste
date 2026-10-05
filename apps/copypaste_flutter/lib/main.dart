@@ -515,9 +515,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
 
   Widget _buildApplication({required bool windowReady}) {
     final unifiedTitleBar = _usesUnifiedMacosTitleBar(windowReady);
-    if (_runtimeState != _RuntimeState.ready ||
-        !_macosOnboardingReady ||
-        !_androidOnboardingReady) {
+    if (!_macosOnboardingReady || !_androidOnboardingReady) {
       return ShadcnApp(
         title: 'CopyPaste',
         theme: AppTheme.light,
@@ -528,14 +526,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
           headers: unifiedTitleBar
               ? const [MacosWindowHeader(title: Text('CopyPaste'))]
               : const [AppBar(title: Text('CopyPaste')), Divider()],
-          child: _runtimeState == _RuntimeState.failed
-              ? StateView.error(
-                  title: 'Runtime needs attention',
-                  message: _runtimeFailureMessage,
-                  actionLabel: 'Retry',
-                  onAction: _retryRuntime,
-                )
-              : const StateView.loading(message: 'Preparing CopyPaste.'),
+          child: const StateView.loading(message: 'Preparing CopyPaste.'),
         ),
       );
     }
@@ -578,6 +569,15 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       settingsController: _settingsController,
       appUpdateController: _appUpdateController,
       desktopWindow: _desktopWindow,
+      runtimeUnavailableMessage: switch (_runtimeState) {
+        _RuntimeState.starting =>
+          'CopyPaste is waiting for protected history access. The available parts of the app remain usable.',
+        _RuntimeState.failed => _runtimeFailureMessage,
+        _RuntimeState.idle || _RuntimeState.ready => null,
+      },
+      onRetryRuntime: _runtimeState == _RuntimeState.failed
+          ? _retryRuntime
+          : null,
       onOpenAndroidCaptureSetup: _androidOnboarding == null
           ? null
           : _openAndroidCaptureSetup,

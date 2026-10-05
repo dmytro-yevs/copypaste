@@ -26,6 +26,11 @@ pub enum PeerStoreError {
     #[error("that device was revoked and cannot be paired again")]
     Revoked,
 
+    /// A different pairing already names the same stable device identity.
+    /// Replacing it implicitly would rotate trust without an explicit unpair.
+    #[error("device is already paired")]
+    AlreadyPaired,
+
     /// The list is at [`super::MAX_PAIRINGS`]. Refusing the new pairing is the
     /// decision: evicting to make room would cut off a device the user still
     /// owns, and only the user knows which one they are finished with.
@@ -62,6 +67,7 @@ mod tests {
             PeerStoreError::Corrupt,
             PeerStoreError::Invalid("pairing id is empty"),
             PeerStoreError::Revoked,
+            PeerStoreError::AlreadyPaired,
             PeerStoreError::TooManyPairings,
             PeerStoreError::TooManyRevocations,
             PeerStoreError::Contended,
