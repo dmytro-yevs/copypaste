@@ -821,6 +821,9 @@ mod tests {
     #[test]
     #[ignore = "drives the real NSPasteboard and native NSURL resolution"]
     fn native_url_path_and_asserted_file_reference_preserve_owned_fixture_bytes() {
+        use std::ffi::{CStr, OsString};
+        use std::os::unix::{ffi::OsStringExt, fs::MetadataExt};
+
         let _lock = serialised();
         let fixture_dir = tempfile::tempdir().unwrap();
         for (filename, len, reference) in [
@@ -833,6 +836,11 @@ mod tests {
             std::fs::write(&path, &bytes).unwrap();
             autoreleasepool(|_| unsafe {
                 let mut url = NSURL::fileURLWithPath(&NSString::from_str(path.to_str().unwrap()));
+                let expected_path = std::path::PathBuf::from(OsString::from_vec(
+                    CStr::from_ptr(url.fileSystemRepresentation().as_ptr())
+                        .to_bytes()
+                        .to_vec(),
+                ));
                 if reference {
                     url = url
                         .fileReferenceURL()
@@ -852,10 +860,20 @@ mod tests {
                 let (captured, metadata) =
                     file::read(&pb, &NSString::from_str(UTI_FILE_URL), 1024, || true).unwrap();
                 assert_eq!(captured, bytes);
-                assert_eq!(metadata.filename, filename);
+                assert_eq!(
+                    metadata.filename,
+                    expected_path.file_name().unwrap().to_str().unwrap()
+                );
+                assert_eq!(metadata.source_reference.as_deref(), expected_path.to_str());
                 let locator = std::path::Path::new(metadata.source_reference.as_deref().unwrap());
                 assert!(locator.is_absolute());
                 assert_eq!(std::fs::read(locator).unwrap(), bytes);
+                let locator_metadata = std::fs::metadata(locator).unwrap();
+                let fixture_metadata = std::fs::metadata(&path).unwrap();
+                assert_eq!(
+                    (locator_metadata.dev(), locator_metadata.ino()),
+                    (fixture_metadata.dev(), fixture_metadata.ino())
+                );
             });
         }
     }
