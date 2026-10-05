@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../../../platform/android/android_capture_setup_gateway.dart';
@@ -27,6 +29,9 @@ class AndroidOnboardingController extends ChangeNotifier {
   bool _disposed = false;
   int? _verificationBaseline;
   String? _errorMessage;
+  StreamSubscription<AndroidCaptureSetupState>? _stateSubscription;
+  bool _automaticGrantsAttempted = false;
+  bool _grantError = false;
 
   AndroidOnboardingStep get step => _step;
   AndroidCaptureMode get mode => _mode;
@@ -41,6 +46,29 @@ class AndroidOnboardingController extends ChangeNotifier {
 
   bool get canContinueCapture =>
       !_busy && (_mode == AndroidCaptureMode.limited || _verified);
+
+  /// Observe Android only while the setup screen is visible and resumed.
+  void setMonitoring(bool enabled) {
+    if (_disposed) return;
+    if (!enabled) {
+      unawaited(_stateSubscription?.cancel());
+      _stateSubscription = null;
+      return;
+    }
+    if (_stateSubscription != null) return;
+    _stateSubscription = _setup.changes.listen(
+      (state) {
+        _acceptState(state);
+        _notify();
+        _applyAuthorizedSetup();
+      },
+      onError: (Object error) {
+        _errorMessage = 'Android setup monitoring is unavailable.';
+        _notify();
+      },
+    );
+    unawaited(refresh());
+  }
 
   Future<void> initialize() async {
     if (_initialized) return;
@@ -71,6 +99,7 @@ class AndroidOnboardingController extends ChangeNotifier {
     if (_busy || _step != AndroidOnboardingStep.welcome) return;
     _step = AndroidOnboardingStep.capture;
     _notify();
+    _applyAuthorizedSetup();
   }
 
   void showPreviousStep() {
@@ -98,6 +127,7 @@ class AndroidOnboardingController extends ChangeNotifier {
     _errorMessage = null;
     _notify();
     await _saveChoice();
+    _applyAuthorizedSetup();
   }
 
   Future<void> selectMethod(AndroidCaptureSetupMethod method) async {
@@ -106,9 +136,20 @@ class AndroidOnboardingController extends ChangeNotifier {
     _errorMessage = null;
     _notify();
     await _saveChoice();
+    _applyAuthorizedSetup();
   }
 
-  Future<void> refresh() => _runStateAction(_setup.state);
+  Future<void> refresh() async {
+    if (_disposed) return;
+    try {
+      _acceptState(await _setup.state());
+      _notify();
+      _applyAuthorizedSetup();
+    } catch (_) {
+      _errorMessage = 'Android capture state could not be refreshed.';
+      _notify();
+    }
+  }
 
   Future<void> requestNotifications() =>
       _runStateAction(_setup.requestNotifications);
@@ -139,8 +180,69 @@ class AndroidOnboardingController extends ChangeNotifier {
     }
   }
 
-  Future<void> applyShizukuGrants() =>
-      _runStateAction(_setup.applyShizukuGrants);
+  Future<void> applyShizukuGrants() async {
+    if (_busy || _disposed) return;
+    _automaticGrantsAttempted = true;
+    _grantError = false;
+    await _runStateAction(_setup.applyShizukuGrants);
+    if (_setupState?.privilegedGrants != true && _errorMessage == null) {
+      _grantError = true;
+      _errorMessage = _setupState?.shizuku.permission == true
+          ? 'CopyPaste is allowed in Shizuku, but Android capture grants could not be applied.'
+          : 'Allow CopyPaste in Shizuku to apply capture grants.';
+      _notify();
+    }
+  }
+
+  void _applyAuthorizedSetup() {
+    final state = _setupState;
+    if (_disposed ||
+        _busy ||
+        _automaticGrantsAttempted ||
+        _step != AndroidOnboardingStep.capture ||
+        _mode != AndroidCaptureMode.full ||
+        _method != AndroidCaptureSetupMethod.shizuku ||
+        state == null ||
+        state.privilegedGrants ||
+        !state.shizuku.running ||
+        !state.shizuku.permission) {
+      return;
+    }
+    unawaited(applyShizukuGrants());
+  }
+
+  void _acceptState(AndroidCaptureSetupState state) {
+    if (_disposed) return;
+    _setupState = state;
+    if (state.privilegedGrants && _grantError) {
+      _grantError = false;
+      _errorMessage = null;
+    }
+    if (!state.shizuku.running || !state.shizuku.permission) {
+      _automaticGrantsAttempted = false;
+    }
+    if (!state.privilegedGrants ||
+        !state.notificationGranted ||
+        (_verified && !state.serviceRunning)) {
+      _verified = false;
+    }
+    if (!state.privilegedGrants ||
+        !state.notificationGranted ||
+        !state.captureEnabled) {
+      _verifying = false;
+      _verificationBaseline = null;
+    }
+    final baseline = _verificationBaseline;
+    if (_verifying &&
+        baseline != null &&
+        state.privilegedGrants &&
+        state.notificationGranted &&
+        state.serviceRunning &&
+        state.lastCaptureAtMs > baseline) {
+      _verified = true;
+      _verifying = false;
+    }
+  }
 
   Future<void> beginVerification() async {
     if (_busy) return;
@@ -158,7 +260,9 @@ class AndroidOnboardingController extends ChangeNotifier {
             'Allow notifications before starting background capture.';
         return;
       }
-      _verificationBaseline = before.lastCaptureAtMs;
+      _verificationBaseline = before.observedAtMs > before.lastCaptureAtMs
+          ? before.observedAtMs
+          : before.lastCaptureAtMs;
       _setupState = await _setup.startCapture();
       if (!_setupState!.captureEnabled) {
         _errorMessage = 'Background capture could not be started.';
@@ -213,6 +317,7 @@ class AndroidOnboardingController extends ChangeNotifier {
       _setupState = await _setup.state();
       _complete = false;
       _step = AndroidOnboardingStep.capture;
+      _automaticGrantsAttempted = false;
       _verificationBaseline = null;
       _verifying = false;
       _verified = false;
@@ -234,15 +339,7 @@ class AndroidOnboardingController extends ChangeNotifier {
     _errorMessage = null;
     _notify();
     try {
-      _setupState = await action();
-      final baseline = _verificationBaseline;
-      if (_verifying &&
-          baseline != null &&
-          _setupState!.serviceRunning &&
-          _setupState!.lastCaptureAtMs > baseline) {
-        _verified = true;
-        _verifying = false;
-      }
+      _acceptState(await action());
     } catch (_) {
       _errorMessage = 'Android capture state could not be refreshed.';
     } finally {
@@ -267,6 +364,7 @@ class AndroidOnboardingController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    unawaited(_stateSubscription?.cancel());
     super.dispose();
   }
 }

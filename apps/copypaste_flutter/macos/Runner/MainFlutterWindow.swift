@@ -326,7 +326,14 @@ enum MacosAccessibility {
   }
 }
 
-private final class QuickPastePanel: NSPanel {
+final class QuickPastePanel: NSPanel {
+  static let presentationStyleMask: NSWindow.StyleMask = [
+    .borderless,
+    .resizable,
+    .fullSizeContentView,
+    .nonactivatingPanel,
+  ]
+
   override var canBecomeKey: Bool { true }
   override var canBecomeMain: Bool { false }
 }
@@ -362,7 +369,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     controller = FlutterViewController(engine: engine, nibName: nil, bundle: nil)
     window = QuickPastePanel(
       contentRect: NSRect(x: 0, y: 0, width: 520, height: 720),
-      styleMask: [.borderless, .resizable, .fullSizeContentView],
+      styleMask: QuickPastePanel.presentationStyleMask,
       backing: .buffered,
       defer: false
     )
@@ -396,7 +403,6 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     let frame = quickPasteFrame(cursor: cursor, size: window.frame.size, displays: displays)
     window.setFrame(frame, display: true)
     window.makeKeyAndOrderFront(nil)
-    NSApplication.shared.activate(ignoringOtherApps: true)
     contextChannel?.invokeMethod("opened", arguments: nil)
   }
 

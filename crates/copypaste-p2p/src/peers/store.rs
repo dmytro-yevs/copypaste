@@ -74,6 +74,18 @@ impl PeerStore {
         guard.peers.get(pairing_id).cloned()
     }
 
+    /// Whether another pairing already represents this stable device.
+    #[must_use]
+    pub(crate) fn contains_device(&self, device_id: &str, except_pairing_id: &str) -> bool {
+        let Ok(guard) = self.state.read() else {
+            tracing::error!("paired-devices store lock is poisoned");
+            return false;
+        };
+        guard.peers.values().any(|peer| {
+            peer.pairing_id != except_pairing_id && peer.device_id.as_deref() == Some(device_id)
+        })
+    }
+
     /// Insert a peer, or replace the one with the same pairing id. The file is
     /// rewritten atomically before this returns, and a failed write rolls the
     /// in-memory state back to what is on disk, so a caller is never told a
@@ -105,6 +117,13 @@ impl PeerStore {
         let pairing_id = peer.pairing_id.clone();
         if guard.revoked.contains_key(&pairing_id) {
             return Err(PeerStoreError::Revoked);
+        }
+        if let Some(device_id) = peer.device_id.as_deref() {
+            if guard.peers.values().any(|stored| {
+                stored.pairing_id != pairing_id && stored.device_id.as_deref() == Some(device_id)
+            }) {
+                return Err(PeerStoreError::AlreadyPaired);
+            }
         }
         // Only an id that is not here yet is capped: refusing an update would
         // strand every stored device the moment the list filled, because the
@@ -460,6 +479,7 @@ mod tests {
 
         let renamed = Peer {
             pairing_id: id.clone(),
+            device_id: None,
             name: "New name".to_string(),
             psk,
             last_addr: None,
@@ -490,6 +510,42 @@ mod tests {
         assert!(
             leftovers.is_empty(),
             "temp files left behind: {leftovers:?}"
+        );
+    }
+
+    #[test]
+    fn a_stable_device_identity_cannot_occupy_two_pairing_slots() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = store_path(&dir);
+        let store = PeerStore::open(&path).expect("open");
+
+        let mut established = peer("Phone");
+        established.device_id = Some("phone-device-id".to_string());
+        let established_pairing_id = established.pairing_id.clone();
+        store.upsert(established).expect("first pairing");
+
+        let mut duplicate = peer("Phone again");
+        let duplicate_pairing_id = duplicate.pairing_id.clone();
+        duplicate.device_id = Some("phone-device-id".to_string());
+        assert!(matches!(
+            store.upsert(duplicate),
+            Err(PeerStoreError::AlreadyPaired)
+        ));
+
+        assert_eq!(store.len(), 1);
+        assert!(store.get(&established_pairing_id).is_some());
+        assert!(store.get(&duplicate_pairing_id).is_none());
+        assert!(store.contains_device("phone-device-id", "different-pairing"));
+
+        let reopened = PeerStore::open(&path).expect("reopen");
+        assert_eq!(reopened.len(), 1);
+        assert_eq!(
+            reopened
+                .get(&established_pairing_id)
+                .expect("established pairing")
+                .device_id
+                .as_deref(),
+            Some("phone-device-id")
         );
     }
 
@@ -552,6 +608,7 @@ mod tests {
         store
             .upsert(Peer {
                 pairing_id: id.clone(),
+                device_id: None,
                 name: "the name off the wire".to_string(),
                 psk,
                 last_addr: addr,
@@ -572,6 +629,7 @@ mod tests {
         store
             .upsert(Peer {
                 pairing_id: id.clone(),
+                device_id: None,
                 name: "the name off the wire".to_string(),
                 psk,
                 last_addr: Some("192.168.1.9:47654".parse().expect("addr")),
@@ -643,6 +701,7 @@ mod tests {
         let store = PeerStore::open(&store_path(&dir)).expect("open");
         let bad = Peer {
             pairing_id: "id".to_string(),
+            device_id: None,
             name: "Uninitialised".to_string(),
             psk: [0u8; TOKEN_LEN],
             last_addr: None,
@@ -658,6 +717,7 @@ mod tests {
         // point: a PSK should never be moved out of a record by accident.
         let empty_id = Peer {
             pairing_id: String::new(),
+            device_id: None,
             name: "Nameless".to_string(),
             psk: PairingToken::generate().psk(),
             last_addr: None,
@@ -730,6 +790,7 @@ mod tests {
         reopened
             .upsert(Peer {
                 pairing_id: ids[0].clone(),
+                device_id: None,
                 name: "renamed at the cap".to_string(),
                 psk: established.psk,
                 last_addr: None,

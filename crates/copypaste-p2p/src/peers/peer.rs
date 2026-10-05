@@ -17,6 +17,12 @@ pub struct Peer {
     /// this pairing. Safe to log.
     pub pairing_id: String,
 
+    /// Stable identity reported by the authenticated peer. Pairing ids rotate
+    /// with credentials; this value identifies the device across ceremonies.
+    /// Older peer files may not have learned it yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_id: Option<String>,
+
     /// Cosmetic, peer-supplied, never trusted for anything.
     pub name: String,
 
@@ -60,6 +66,11 @@ impl Peer {
 
     pub(super) fn validate(&self) -> Result<(), PeerStoreError> {
         validate_pairing_id(&self.pairing_id)?;
+        if self.device_id.as_ref().is_some_and(|device_id| {
+            device_id.is_empty() || device_id.len() > crate::protocol::MAX_ID_BYTES
+        }) {
+            return Err(PeerStoreError::Invalid("device id is invalid"));
+        }
         // An all-zero PSK is an uninitialised buffer, and storing one would pair
         // this device with anyone who guessed the obvious. Fail closed.
         // Constant-time: the comparison is against key material.
@@ -158,7 +169,8 @@ mod tests {
 
     #[test]
     fn peer_debug_shows_no_key_material() {
-        let p = peer("Laptop");
+        let mut p = peer("Laptop");
+        p.device_id = Some("stable-private-device-id".to_string());
         let rendered = format!("{p:?}");
         assert!(!rendered.contains(&hex::encode(p.psk)), "leaked hex psk");
         assert!(
@@ -176,6 +188,7 @@ mod tests {
         // The non-secret fields are still useful.
         assert!(rendered.contains("Laptop"));
         assert!(rendered.contains(&p.pairing_id));
+        assert!(!rendered.contains("stable-private-device-id"));
 
         // And the store's own Debug prints neither keys nor the path.
         let dir = tempfile::tempdir().expect("tempdir");

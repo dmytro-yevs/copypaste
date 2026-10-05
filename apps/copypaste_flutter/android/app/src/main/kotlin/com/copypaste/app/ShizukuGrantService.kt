@@ -9,11 +9,21 @@ class ShizukuGrantService : IShizukuGrantService.Stub() {
     override fun destroy() = exitProcess(0)
 
     private fun runCommand(command: List<String>): Boolean = try {
-        val process = ProcessBuilder(command).start()
+        val process = ProcessBuilder(command).redirectErrorStream(true).start()
         process.outputStream.close()
-        process.inputStream.close()
-        process.errorStream.close()
-        process.waitFor() == 0
+        try {
+            // Drain command output so the child never blocks or receives a
+            // broken pipe while granting access. Do not retain shell output.
+            process.inputStream.use { input ->
+                val buffer = ByteArray(1024)
+                while (input.read(buffer) != -1) {
+                    // Discard output without closing the child's pipe early.
+                }
+            }
+            process.waitFor() == 0
+        } finally {
+            process.destroy()
+        }
     } catch (error: InterruptedException) {
         Thread.currentThread().interrupt()
         false
