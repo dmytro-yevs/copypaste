@@ -52,6 +52,7 @@
 
 mod change;
 mod fake;
+pub(crate) mod source_coverage;
 // `test` so the module is exercised off macOS, but only where it compiles:
 // every syscall in it is `rustix::fs`, which has no Windows implementation.
 #[cfg(all(
@@ -118,13 +119,10 @@ impl<'a> CapturePolicy<'a> {
         };
 
         !self.settings.private_mode
-            && (self.settings.excluded_app_bundle_ids.is_empty()
-                || capture.app_bundle_id.as_ref().is_some_and(|id| {
-                    self.settings
-                        .excluded_app_bundle_ids
-                        .iter()
-                        .all(|excluded| excluded != id)
-                }))
+            && capture.source_policy.allows(
+                &self.settings.excluded_app_bundle_ids,
+                capture.app_bundle_id.as_deref(),
+            )
             && within_limit
     }
 }
@@ -141,6 +139,24 @@ pub use fake::FakeClipboard;
 /// Current storage and transport hard bound, in bytes.
 #[cfg(any(test, all(target_os = "macos", not(feature = "dev-fake-clipboard"))))]
 const MAX_CAPTURE_BYTES: usize = copypaste_ipc::MAX_CONTENT_BYTES;
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) enum SourcePolicyEvidence {
+    #[default]
+    Legacy,
+    MacOs(source_coverage::Coverage),
+}
+impl SourcePolicyEvidence {
+    fn allows(&self, excluded: &[String], owner: Option<&str>) -> bool {
+        match self {
+            Self::MacOs(coverage) => coverage.allows(excluded),
+            Self::Legacy => {
+                excluded.is_empty()
+                    || owner.is_some_and(|id| !excluded.iter().any(|excluded| excluded == id))
+            }
+        }
+    }
+}
 
 /// One captured clipboard change.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,11 +175,12 @@ pub struct Capture {
     pub file_metadata: Option<copypaste_core::FileMetadata>,
     /// One of `copypaste_ipc::content_type`.
     pub content_type: String,
-    /// The frontmost app at capture time, when the platform could resolve it.
+    /// Platform-observed identity when the adapter has sufficient evidence.
     pub app_bundle_id: Option<String>,
     /// Display name reported by the originating platform. This is metadata,
     /// never a value inferred from a bundle/package identifier.
     pub app_name: Option<String>,
+    pub(crate) source_policy: SourcePolicyEvidence,
 }
 
 impl Capture {
@@ -177,6 +194,7 @@ impl Capture {
             content_type: copypaste_ipc::content_type::TEXT.to_string(),
             app_bundle_id: None,
             app_name: None,
+            source_policy: SourcePolicyEvidence::Legacy,
         }
     }
 }
@@ -366,5 +384,30 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let source = super::new_source(dir.path()).expect("development fake source");
         assert_eq!(source.backend_name(), "fake-memory");
+    }
+    #[test]
+    fn ambiguous_known_allowed_evidence_is_independent_of_null_source_metadata() {
+        let mut history = super::source_coverage::ActivationHistory::new(1);
+        history.record(Some("TextEdit".into()));
+        let previous = history.observation();
+        history.record(Some("CopyPaste".into()));
+        let sample = history.observation();
+        let decision = history.decide(Some((10, previous)), 11, sample, None);
+        let mut capture = super::Capture::text("owned".into());
+        capture.source_policy = super::SourcePolicyEvidence::MacOs(decision.coverage);
+        let mut config = ConfigData {
+            excluded_app_bundle_ids: vec!["Safari".into()],
+            ..Default::default()
+        };
+        assert!(CapturePolicy::new(&config).allows_materialized(&capture));
+        assert!(capture.app_bundle_id.is_none());
+        assert!(capture.app_name.is_none());
+        config.excluded_app_bundle_ids = vec!["TextEdit".into()];
+        assert!(!CapturePolicy::new(&config).allows_materialized(&capture));
+        capture.source_policy = super::SourcePolicyEvidence::Legacy;
+        config.excluded_app_bundle_ids = vec!["Safari".into()];
+        assert!(!CapturePolicy::new(&config).allows_materialized(&capture));
+        capture.app_bundle_id = Some("WindowsOwner".into());
+        assert!(CapturePolicy::new(&config).allows_materialized(&capture));
     }
 }

@@ -404,4 +404,44 @@ mod tests {
         assert!(restarted_mode.private_mode);
         assert_eq!(restarted_mode.private_mode_epoch, 0);
     }
+    #[test]
+    fn settings_winning_authority_blocks_old_snapshot_payload_admission() {
+        let (state, _dir) = test_state("settings-before-capture");
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let settings_state = state.clone();
+        let setter = std::thread::spawn(move || {
+            set_with_effects(
+                &settings_state,
+                1,
+                &ConfigPatch {
+                    private_mode: Some(true),
+                    ..Default::default()
+                },
+                |_| {
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                },
+            )
+        });
+        entered_rx.recv().unwrap();
+        let (started_tx, started_rx) = mpsc::channel();
+        let capture_state = state.clone();
+        let capture = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            capture_state
+                .settings
+                .with_capture_authority(|settings, _| {
+                    // This stands for the provider boundary: the worker receives
+                    // the policy published by the transition that won authority.
+                    usize::from(!settings.private_mode)
+                })
+        });
+        started_rx.recv().unwrap();
+        assert!(state.settings.transition_is_in_progress());
+        release_tx.send(()).unwrap();
+        assert!(setter.join().unwrap().ok);
+        assert_eq!(capture.join().unwrap(), Some(0));
+        assert_eq!(state.store.count().unwrap(), 0);
+    }
 }

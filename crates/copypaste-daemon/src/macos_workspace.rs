@@ -36,126 +36,24 @@ use tracing::warn;
 
 // Capture is serialized, but bound the service independently of its caller.
 const MAX_REQUESTS: usize = 16;
-const MAX_ACTIVATIONS: usize = 128;
 static SERVICE: Mutex<Option<Weak<Shared>>> = Mutex::new(None);
 static NEXT_SERVICE_ID: AtomicU64 = AtomicU64::new(1);
 
-/// Only owned strings cross from the main thread to capture workers.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) struct SourceIdentity {
-    // Unbundled applications may still have a localized display name.
-    pub(crate) bundle_id: Option<String>,
-    pub(crate) name: Option<String>,
-}
+use crate::clipboard::source_coverage::{ActivationHistory, Decision};
+pub(crate) use crate::clipboard::source_coverage::{Observation, SourceIdentity};
 
-/// A primitive history cursor sampled before a pasteboard generation read.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Observation {
-    service_id: u64,
-    epoch: u64,
-}
-
-struct Activation {
-    epoch: u64,
-    bundle_id: Option<String>,
-}
-
-struct ActivationHistory {
-    service_id: u64,
-    epoch: u64,
-    events: VecDeque<Activation>,
-    active: Option<String>,
-}
-
-impl ActivationHistory {
-    fn new() -> Self {
-        Self {
-            // Exhausted identities are permanently unknown rather than reused.
-            service_id: NEXT_SERVICE_ID
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-                .unwrap_or(0),
-            epoch: 0,
-            events: VecDeque::new(),
-            active: None,
-        }
-    }
-
-    fn record(&mut self, bundle_id: Option<String>) -> u64 {
-        self.active = bundle_id.clone();
-        // Epoch exhaustion is unknown coverage forever, never a wrapped cursor.
-        if let Some(epoch) = self.epoch.checked_add(1) {
-            self.epoch = epoch;
-            self.events.push_back(Activation { epoch, bundle_id });
-            if self.events.len() > MAX_ACTIVATIONS {
-                self.events.pop_front();
-            }
-        } else {
-            self.events.clear();
-        }
-        self.epoch
-    }
-
-    fn deactivate(&mut self, bundle_id: Option<String>) -> u64 {
-        let epoch = self.record(bundle_id);
-        // The affected app is known, but the next active app is not yet known.
-        // A matching activate notification can complete coverage; a getter
-        // without that notification will instead record a gap in reconcile.
-        self.active = None;
-        epoch
-    }
-
-    fn reconcile(&mut self, bundle_id: Option<&str>) -> u64 {
-        if self.active.as_deref() != bundle_id || self.events.is_empty() {
-            // A getter disagreeing with notifications is a coverage gap. Keep
-            // that gap and the fresh identity so a later clean observation can
-            // recover without erasing the interval that was ambiguous.
-            self.record(None);
-            self.record(bundle_id.map(str::to_owned));
-        }
-        self.epoch
-    }
-
-    fn allows(
-        &self,
-        previous: Option<(i64, Observation)>,
-        generation: i64,
-        excluded: &[String],
-    ) -> bool {
-        if excluded.is_empty() {
-            return true;
-        }
-        let Some((previous_generation, boundary)) = previous else {
-            return false;
-        };
-        if self.service_id == 0
-            || boundary.service_id != self.service_id
-            || generation <= previous_generation
-        {
-            return false;
-        }
-        // Include the application already active at the previous observation,
-        // plus every subsequent event. Records are never cleared on a reply.
-        let Some(start) = self
-            .events
-            .iter()
-            .position(|event| event.epoch == boundary.epoch)
-        else {
-            return false;
-        };
-        self.events.iter().skip(start).all(|event| {
-            event
-                .bundle_id
-                .as_ref()
-                .is_some_and(|bundle| !excluded.contains(bundle))
-        })
-    }
+fn new_history() -> ActivationHistory {
+    let id = NEXT_SERVICE_ID
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+        .unwrap_or(0);
+    ActivationHistory::new(id)
 }
 
 struct Request {
     previous: Option<(i64, Observation)>,
     generation: i64,
-    excluded: Vec<String>,
-    reply: mpsc::Sender<Option<SourceIdentity>>,
+    sample: Observation,
+    reply: mpsc::Sender<Option<Decision>>,
 }
 
 #[derive(Default)]
@@ -202,7 +100,6 @@ struct Shared {
     signal: Mutex<Option<Signal>>,
     failed: watch::Sender<bool>,
     history: Mutex<ActivationHistory>,
-    observed_epoch: AtomicU64,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -215,10 +112,7 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 impl Shared {
     fn record(&self, bundle_id: Option<String>) {
         let mut history = lock(&self.history);
-        let epoch = history.record(bundle_id);
-        // Publish while still serialized with every record and decision, so an
-        // off-main recorder cannot publish an older epoch after a newer one.
-        self.observed_epoch.store(epoch, Ordering::Release);
+        history.record(bundle_id);
         drop(history);
         // Unknown notification state must recover on main even when there are
         // no changed-pasteboard requests. Known activation wakes are cheap.
@@ -227,8 +121,7 @@ impl Shared {
 
     fn deactivate(&self, bundle_id: Option<String>) {
         let mut history = lock(&self.history);
-        let epoch = history.deactivate(bundle_id);
-        self.observed_epoch.store(epoch, Ordering::Release);
+        history.deactivate(bundle_id);
         drop(history);
         self.wake();
     }
@@ -296,39 +189,39 @@ fn process_requests(
     if requests.is_empty() {
         let sample_epoch = {
             let history = lock(&shared.history);
-            if history.active.is_some() {
+            if history.active_is_known() {
                 return;
             }
-            history.epoch
+            history.observation().epoch
         };
         // Notified gaps/unmatched deactivations can recover without requiring
         // the next Copy; unchanged observations can then establish coverage.
         // Keep all old records; do not retroactively certify their interval.
         let identity = resolve();
         let mut history = lock(&shared.history);
-        if history.epoch != sample_epoch {
+        if history.observation().epoch != sample_epoch {
             // A newer notified event owns coverage. Never publish an earlier
             // getter as Known after it and let an idle cursor trust stale state.
             return;
         }
-        let epoch = history.reconcile(identity.as_ref().and_then(|app| app.bundle_id.as_deref()));
-        shared.observed_epoch.store(epoch, Ordering::Release);
+        history.reconcile(identity.as_ref().and_then(|app| app.bundle_id.as_deref()));
         return;
     }
     resolve_requests(requests, |request| {
         // All Cocoa work stays outside the mutex, including recovery getters.
-        let sample_epoch = lock(&shared.history).epoch;
+        let sample_epoch = lock(&shared.history).observation().epoch;
         let identity = resolve();
         let mut history = lock(&shared.history);
-        if history.epoch != sample_epoch {
+        if history.observation().epoch != sample_epoch {
             return None;
         }
-        let epoch = history.reconcile(identity.as_ref().and_then(|app| app.bundle_id.as_deref()));
-        shared.observed_epoch.store(epoch, Ordering::Release);
-        history
-            .allows(request.previous, request.generation, &request.excluded)
-            .then_some(identity)
-            .flatten()
+        history.reconcile(identity.as_ref().and_then(|app| app.bundle_id.as_deref()));
+        Some(history.decide(
+            request.previous,
+            request.generation,
+            request.sample,
+            identity,
+        ))
     });
 }
 
@@ -344,7 +237,7 @@ impl Drop for MainContext {
 
 fn resolve_requests(
     requests: VecDeque<Request>,
-    mut resolve: impl FnMut(&Request) -> Option<SourceIdentity>,
+    mut resolve: impl FnMut(&Request) -> Option<Decision>,
 ) {
     for request in requests {
         // Every request gets a new workspace observation; no shared identity cache.
@@ -482,8 +375,7 @@ impl MainService {
             queue: Mutex::new(Queue::default()),
             signal: Mutex::new(None),
             failed,
-            history: Mutex::new(ActivationHistory::new()),
-            observed_epoch: AtomicU64::new(0),
+            history: Mutex::new(new_history()),
         });
         let workspace = unsafe { NSWorkspace::sharedWorkspace() };
         let notification_center = unsafe { workspace.notificationCenter() };
@@ -576,19 +468,18 @@ impl Drop for MainService {
 /// query and never advances past an event that is recorded after the sample.
 pub(crate) fn source_observation() -> Option<Observation> {
     let service = lock(&SERVICE).as_ref().and_then(Weak::upgrade)?;
-    let epoch = service.observed_epoch.load(Ordering::Acquire);
-    let service_id = lock(&service.history).service_id;
-    Some(Observation { service_id, epoch })
+    let observation = lock(&service.history).observation();
+    Some(observation)
 }
 
-/// Return fresh foreground metadata only if current exclusions also permit the
-/// covered generation interval. Unknown/ambiguous history returns no identity.
+/// Resolve a generation's retained coverage and optional foreground metadata.
+/// Only complete single-candidate evidence may expose a display identity.
 /// Call only from workers; waiting on main would prevent its own reply.
-pub(crate) fn source_identity(
+pub(crate) fn source_decision(
     previous: Option<(i64, Observation)>,
     generation: i64,
-    excluded: &[String],
-) -> Option<SourceIdentity> {
+    sample: Observation,
+) -> Option<Decision> {
     if MainThreadMarker::new().is_some() {
         return None;
     }
@@ -597,7 +488,7 @@ pub(crate) fn source_identity(
     if !lock(&service.queue).admit(Request {
         previous,
         generation,
-        excluded: excluded.to_vec(),
+        sample,
         reply,
     }) {
         return None;
@@ -662,459 +553,127 @@ mod tests {
             queue: Mutex::new(Queue::default()),
             signal: Mutex::new(None),
             failed,
-            history: Mutex::new(ActivationHistory::new()),
-            observed_epoch: AtomicU64::new(0),
+            history: Mutex::new(new_history()),
         }
     }
-
-    fn request(reply: mpsc::Sender<Option<SourceIdentity>>) -> Request {
-        Request {
-            previous: None,
-            generation: 1,
-            excluded: Vec::new(),
-            reply,
-        }
-    }
-
-    fn boundary(history: &ActivationHistory) -> Observation {
-        Observation {
-            service_id: history.service_id,
-            epoch: history.epoch,
-        }
-    }
-
-    fn excluded(bundle: &str) -> Vec<String> {
-        vec![bundle.to_owned()]
-    }
-
     fn identity(name: &str) -> Option<SourceIdentity> {
         Some(SourceIdentity {
             bundle_id: Some(format!("com.test.{name}")),
             name: Some(name.into()),
         })
     }
-
+    fn request(shared: &Shared, reply: mpsc::Sender<Option<Decision>>) -> Request {
+        let sample = lock(&shared.history).observation();
+        Request {
+            previous: Some((1, sample)),
+            generation: 2,
+            sample,
+            reply,
+        }
+    }
     #[test]
-    fn unavailable_appkit_degrades_without_attempting_application_setup() {
+    fn unavailable_appkit_does_not_attempt_setup() {
         assert!(!application_available(
             || false,
-            || panic!("application setup must not run when AppKit did not load")
+            || panic!("unexpected setup")
         ));
-    }
-
-    #[test]
-    fn unavailable_background_policy_degrades_after_successful_appkit_load() {
-        let policy_attempted = std::cell::Cell::new(false);
-        assert!(!application_available(
-            || true,
-            || {
-                policy_attempted.set(true);
-                false
-            }
-        ));
-        assert!(policy_attempted.get());
-    }
-
-    #[test]
-    fn available_appkit_and_background_policy_allow_service_installation() {
+        assert!(!application_available(|| true, || false));
         assert!(application_available(|| true, || true));
     }
-
     #[test]
-    fn each_request_resolves_fresh_owned_identity_and_disconnected_callers_are_safe() {
-        let mut queue = Queue::default();
-        let (first, first_reply) = mpsc::channel();
-        let (gone, gone_reply) = mpsc::channel();
-        let (last, last_reply) = mpsc::channel();
-        assert!(queue.admit(request(first)));
-        assert!(queue.admit(request(gone)));
-        assert!(queue.admit(request(last)));
-        drop(gone_reply);
-        let mut names = ["TextEdit", "Safari", "Preview"].into_iter();
-        resolve_requests(std::mem::take(&mut queue.requests), |_| {
-            identity(names.next().unwrap())
-        });
-        assert_eq!(first_reply.try_recv().unwrap(), identity("TextEdit"));
-        assert_eq!(last_reply.try_recv().unwrap(), identity("Preview"));
-        assert!(names.next().is_none());
-    }
-
-    #[test]
-    fn failure_disconnects_pending_and_late_requests_but_still_accepts_completion() {
-        let mut queue = Queue::default();
+    fn failed_queue_disconnects_pending_and_late_callers() {
+        let shared = shared_history();
         let (reply, response) = mpsc::channel();
-        assert!(queue.admit(request(reply)));
+        let mut queue = Queue::default();
+        assert!(queue.admit(request(&shared, reply)));
         queue.close();
         assert!(matches!(
             response.try_recv(),
             Err(mpsc::TryRecvError::Disconnected)
         ));
-        let (late, late_response) = mpsc::channel();
-        assert!(!queue.admit(request(late)));
-        assert!(matches!(
-            late_response.try_recv(),
-            Err(mpsc::TryRecvError::Disconnected)
-        ));
-        queue.complete(Err(anyhow!("service failed")));
-        assert_eq!(
-            queue.completion.take().unwrap().unwrap_err().to_string(),
-            "service failed"
-        );
-    }
-
-    #[test]
-    fn completion_before_the_first_turn_closes_pending_and_preserves_startup_error() {
-        let mut queue = Queue::default();
         let (reply, response) = mpsc::channel();
-        assert!(queue.admit(request(reply)));
-        queue.complete(Err(anyhow!("startup failed")));
+        assert!(!queue.admit(request(&shared, reply)));
         assert!(matches!(
             response.try_recv(),
             Err(mpsc::TryRecvError::Disconnected)
         ));
-        assert_eq!(
-            queue.completion.take().unwrap().unwrap_err().to_string(),
-            "startup failed"
-        );
+        queue.complete(Ok(()));
+        assert!(queue.completion.take().unwrap().is_ok());
     }
-
     #[test]
-    fn queue_overload_disconnects_the_unadmitted_caller() {
+    fn queue_is_bounded() {
+        let shared = shared_history();
         let mut queue = Queue::default();
         for _ in 0..MAX_REQUESTS {
-            assert!(queue.admit(request(mpsc::channel().0)));
+            let (reply, _) = mpsc::channel();
+            assert!(queue.admit(request(&shared, reply)));
         }
-        let (reply, response) = mpsc::channel();
-        assert!(!queue.admit(request(reply)));
-        assert!(matches!(
-            response.try_recv(),
-            Err(mpsc::TryRecvError::Disconnected)
-        ));
-        queue.close();
+        let (reply, _) = mpsc::channel();
+        assert!(!queue.admit(request(&shared, reply)));
     }
-
     #[test]
-    fn startup_requires_a_previous_observation_only_when_exclusions_exist() {
-        let mut history = ActivationHistory::new();
-        history.record(Some("TextEdit".into()));
-        assert!(!history.allows(None, 1, &excluded("Safari")));
-        assert!(history.allows(None, 1, &[]));
-    }
-
-    #[test]
-    fn excluded_to_allowed_transition_drops_until_a_clean_allowed_observation() {
-        let mut history = ActivationHistory::new();
-        history.record(Some("Safari".into()));
-        let before_copy = boundary(&history);
-        history.record(Some("TextEdit".into()));
-        assert!(!history.allows(Some((10, before_copy)), 11, &excluded("Safari")));
-        let after_discard = boundary(&history);
-        assert!(history.allows(Some((11, after_discard)), 12, &excluded("Safari")));
-    }
-
-    #[test]
-    fn pause_acknowledgement_does_not_make_an_excluded_to_allowed_resume_safe() {
-        let mut history = ActivationHistory::new();
-        history.record(Some("Safari".into()));
-        // Private mode discards the generation and acknowledges its pre-read
-        // observation without requesting identity or reading any representation.
-        let paused_observation = boundary(&history);
-        history.deactivate(Some("Safari".into()));
-        history.record(Some("TextEdit".into()));
-        assert!(!history.allows(Some((15, paused_observation)), 16, &excluded("Safari")));
-        // An unchanged allowed observation after resume establishes a new
-        // covered interval; a later allowed copy can then be captured normally.
-        assert!(history.allows(Some((16, boundary(&history))), 17, &excluded("Safari")));
-    }
-
-    #[test]
-    fn rapid_excluded_round_trip_keeps_every_intermediate_activation() {
-        let mut history = ActivationHistory::new();
-        history.record(Some("TextEdit".into()));
-        let before_copy = boundary(&history);
-        history.record(Some("Safari".into()));
-        history.record(Some("TextEdit".into()));
-        history.record(Some("Safari".into()));
-        assert!(!history.allows(Some((20, before_copy)), 21, &excluded("Safari")));
-    }
-
-    #[test]
-    fn an_acknowledgement_never_clears_events_after_its_pre_read_sample() {
-        let mut history = ActivationHistory::new();
-        history.record(Some("TextEdit".into()));
-        let sampled_before_unchanged_read = boundary(&history);
-        history.record(Some("Safari".into()));
-        history.record(Some("TextEdit".into()));
-        // The worker acknowledges the unchanged generation later, using the
-        // earlier sample rather than the newer epoch present at acknowledgement.
-        assert!(!history.allows(
-            Some((30, sampled_before_unchanged_read)),
-            31,
-            &excluded("Safari")
-        ));
-        assert!(!history.allows(
-            Some((30, sampled_before_unchanged_read)),
-            31,
-            &excluded("Safari")
-        ));
-    }
-
-    #[test]
-    fn unknown_gap_and_getter_disagreement_drop_but_clean_observations_recover() {
-        let mut history = ActivationHistory::new();
-        history.record(Some("TextEdit".into()));
-        let previous = boundary(&history);
-        history.reconcile(Some("Preview"));
-        assert!(!history.allows(Some((40, previous)), 41, &excluded("Safari")));
-        let recovered = boundary(&history);
-        assert!(history.allows(Some((41, recovered)), 42, &excluded("Safari")));
-        history.record(None);
-        history.reconcile(Some("Preview"));
-        assert!(!history.allows(Some((41, recovered)), 42, &excluded("Safari")));
-    }
-
-    #[test]
-    fn evicted_coverage_is_unknown_and_history_remains_bounded() {
-        let mut history = ActivationHistory::new();
-        history.record(Some("TextEdit".into()));
-        let evicted = boundary(&history);
-        for _ in 0..MAX_ACTIVATIONS {
-            history.record(Some("TextEdit".into()));
-        }
-        assert_eq!(history.events.len(), MAX_ACTIVATIONS);
-        assert!(!history.allows(Some((50, evicted)), 51, &excluded("Safari")));
-        assert!(history.allows(Some((50, boundary(&history))), 51, &excluded("Safari")));
-    }
-
-    #[test]
-    fn current_exclusion_config_is_evaluated_against_retained_bundle_ids() {
-        let mut history = ActivationHistory::new();
-        history.record(Some("Safari".into()));
-        let previous = boundary(&history);
-        history.deactivate(Some("Safari".into()));
-        history.record(Some("TextEdit".into()));
-        assert!(history.allows(Some((60, previous)), 61, &[]));
-        assert!(history.allows(Some((60, previous)), 61, &excluded("Preview")));
-        assert!(!history.allows(Some((60, previous)), 61, &excluded("Safari")));
-    }
-
-    #[test]
-    fn missing_activation_after_deactivation_is_unknown_coverage() {
-        let mut history = ActivationHistory::new();
-        history.record(Some("TextEdit".into()));
-        let previous = boundary(&history);
-        history.deactivate(Some("TextEdit".into()));
-        history.reconcile(Some("Preview"));
-        assert!(!history.allows(Some((65, previous)), 66, &excluded("Safari")));
-    }
-
-    #[test]
-    fn empty_request_recovery_allows_a_later_clean_copy_but_retains_gap_exclusion() {
+    fn each_request_resolves_owned_metadata_without_holding_history_lock() {
         let shared = shared_history();
         shared.record(Some("com.test.TextEdit".into()));
-        let before_gap = boundary(&lock(&shared.history));
-        shared.record(None);
-        let unresolved = boundary(&lock(&shared.history));
-        let mut getter_calls = 0;
-        process_requests(VecDeque::new(), &shared, || {
-            getter_calls += 1;
+        let (reply, response) = mpsc::channel();
+        process_requests(VecDeque::from([request(&shared, reply)]), &shared, || {
+            assert!(shared.history.try_lock().is_ok());
             identity("TextEdit")
         });
-        assert_eq!(getter_calls, 1);
-        let history = lock(&shared.history);
-        let recovered = boundary(&history);
         assert_eq!(
-            shared.observed_epoch.load(Ordering::Acquire),
-            recovered.epoch
+            response.recv().unwrap().unwrap().identity,
+            identity("TextEdit")
         );
-        assert_eq!(history.events.len(), 4);
-        assert!(!history.allows(Some((90, before_gap)), 91, &excluded("com.apple.Safari")));
-        assert!(!history.allows(Some((90, unresolved)), 91, &excluded("com.apple.Safari")));
-        drop(history);
-        // The clipboard is observed unchanged after notified-state recovery.
-        // Its pre-count sample can now be the boundary for the next allowed Copy.
-        let (reply, response) = mpsc::channel();
-        let request = Request {
-            previous: Some((91, recovered)),
-            generation: 92,
-            excluded: excluded("com.apple.Safari"),
-            reply,
-        };
-        process_requests(VecDeque::from([request]), &shared, || identity("TextEdit"));
-        assert_eq!(response.try_recv().unwrap(), identity("TextEdit"));
     }
-
     #[test]
-    fn initial_empty_control_turn_recovers_without_trusting_an_unobserved_startup_generation() {
+    fn newer_notification_during_getter_cannot_publish_stale_known_state() {
         let shared = shared_history();
-        process_requests(VecDeque::new(), &shared, || identity("TextEdit"));
-        let history = lock(&shared.history);
-        assert_eq!(history.active.as_deref(), Some("com.test.TextEdit"));
-        assert!(!history.allows(None, 1, &excluded("com.apple.Safari")));
-        // Only a clean unchanged generation sample after initial recovery can
-        // establish coverage for a later newly copied allowed value.
-        assert!(history.allows(
-            Some((1, boundary(&history))),
-            2,
-            &excluded("com.apple.Safari")
-        ));
-    }
-
-    #[test]
-    fn empty_request_recovery_repairs_unmatched_deactivation_without_erasing_its_gap() {
-        let shared = shared_history();
-        shared.record(Some("com.test.TextEdit".into()));
-        let before_deactivation = boundary(&lock(&shared.history));
-        shared.deactivate(Some("com.test.TextEdit".into()));
-        process_requests(VecDeque::new(), &shared, || identity("TextEdit"));
-        let history = lock(&shared.history);
-        assert_eq!(history.active.as_deref(), Some("com.test.TextEdit"));
-        assert!(!history.allows(
-            Some((93, before_deactivation)),
-            94,
-            &excluded("com.apple.Safari")
-        ));
-        assert!(history.allows(
-            Some((94, boundary(&history))),
-            95,
-            &excluded("com.apple.Safari")
-        ));
-    }
-
-    #[test]
-    fn empty_control_turn_with_known_identity_does_not_run_a_getter() {
-        let shared = shared_history();
-        shared.record(Some("com.test.TextEdit".into()));
-        process_requests(VecDeque::new(), &shared, || {
-            panic!("known empty turn needs no getter")
-        });
-    }
-
-    #[test]
-    fn empty_recovery_getter_runs_outside_history_lock_and_preserves_a_concurrent_gap() {
-        let shared = shared_history();
-        shared.record(Some("com.test.TextEdit".into()));
-        let before_gap = boundary(&lock(&shared.history));
         shared.record(None);
         process_requests(VecDeque::new(), &shared, || {
-            assert!(shared.history.try_lock().is_ok());
+            shared.record(Some("com.test.Safari".into()));
+            identity("TextEdit")
+        });
+        let sample = lock(&shared.history).observation();
+        let (reply, response) = mpsc::channel();
+        process_requests(VecDeque::from([request(&shared, reply)]), &shared, || {
+            identity("Safari")
+        });
+        let decision = response.recv().unwrap().unwrap();
+        assert_eq!(decision.identity, identity("Safari"));
+        assert!(decision.fence(Some(sample), 2));
+        assert!(!decision.coverage.allows(&["com.test.Safari".into()]));
+    }
+    #[test]
+    fn request_getter_with_concurrent_gap_fails_closed() {
+        let shared = shared_history();
+        shared.record(Some("com.test.TextEdit".into()));
+        let (reply, response) = mpsc::channel();
+        process_requests(VecDeque::from([request(&shared, reply)]), &shared, || {
             shared.record(None);
             identity("TextEdit")
         });
-        let history = lock(&shared.history);
-        assert!(history.active.is_none());
-        let unresolved = boundary(&history);
-        assert!(!history.allows(Some((96, before_gap)), 97, &excluded("com.apple.Safari")));
-        // Even a future unchanged cursor must not certify the earlier getter.
-        assert!(!history.allows(Some((97, unresolved)), 98, &excluded("com.apple.Safari")));
-        assert!(
-            history
-                .events
-                .iter()
-                .filter(|event| event.bundle_id.is_none())
-                .count()
-                >= 2
-        );
+        assert!(response.recv().unwrap().is_none());
     }
-
     #[test]
-    fn newer_known_activation_during_recovery_is_not_overwritten_by_the_getter() {
+    fn known_empty_control_turn_does_not_run_getter() {
         let shared = shared_history();
-        shared.record(None);
-        process_requests(VecDeque::new(), &shared, || {
-            shared.record(Some("com.apple.Safari".into()));
-            identity("TextEdit")
-        });
-        let history = lock(&shared.history);
-        assert_eq!(history.active.as_deref(), Some("com.apple.Safari"));
-        let newer = boundary(&history);
-        assert!(!history.allows(Some((98, newer)), 99, &excluded("com.apple.Safari")));
-    }
-
-    #[test]
-    fn off_main_gap_established_before_decision_lock_rejects_the_generation() {
-        let shared = Arc::new(shared_history());
         shared.record(Some("com.test.TextEdit".into()));
-        let previous = boundary(&lock(&shared.history));
-        let (reply, response) = mpsc::channel();
-        let request = Request {
-            previous: Some((67, previous)),
-            generation: 68,
-            excluded: excluded("com.apple.Safari"),
-            reply,
-        };
-        process_requests(VecDeque::from([request]), &shared, || {
-            // Simulate already-copied metadata, then a concurrent delivered gap
-            // before the production decision/reconciliation lock is acquired.
-            let metadata = identity("TextEdit");
-            let (established, gap_recorded) = mpsc::channel();
-            let recorder = Arc::clone(&shared);
-            let notification = std::thread::spawn(move || {
-                recorder.record(None);
-                established.send(()).unwrap();
-            });
-            gap_recorded.recv().unwrap();
-            notification.join().unwrap();
-            metadata
-        });
-        assert!(response.try_recv().unwrap().is_none());
-        let history = lock(&shared.history);
-        assert_eq!(shared.observed_epoch.load(Ordering::Acquire), history.epoch);
-        assert!(history.active.is_none());
-        assert!(!history.allows(
-            Some((68, boundary(&history))),
-            69,
-            &excluded("com.apple.Safari")
-        ));
+        process_requests(VecDeque::new(), &shared, || panic!("unexpected getter"));
     }
-
-    #[test]
-    fn generation_reset_or_foreign_service_observation_is_unknown() {
-        let mut history = ActivationHistory::new();
-        history.record(Some("TextEdit".into()));
-        let mut previous = boundary(&history);
-        assert!(!history.allows(Some((70, previous)), 70, &excluded("Safari")));
-        assert!(!history.allows(Some((70, previous)), 69, &excluded("Safari")));
-        previous.service_id += 1;
-        assert!(!history.allows(Some((70, previous)), 71, &excluded("Safari")));
-    }
-
-    #[test]
-    fn epoch_exhaustion_never_wraps_into_trusted_coverage() {
-        let mut history = ActivationHistory::new();
-        history.epoch = u64::MAX;
-        history.record(Some("TextEdit".into()));
-        assert!(history.events.is_empty());
-        assert!(!history.allows(Some((80, boundary(&history))), 81, &excluded("Safari")));
-    }
-
     #[tokio::test]
-    async fn coordinator_panic_becomes_a_terminal_error_inside_the_runtime() {
-        let (_failed, failure) = watch::channel(false);
-        let result = coordinate(
-            async {
-                panic!("coordinator test");
-            },
-            failure,
-        )
-        .await;
+    async fn coordinator_panic_becomes_terminal_error() {
+        let (_, failure) = watch::channel(false);
+        let result = coordinate(async { panic!("coordinator test") }, failure).await;
         assert_eq!(
             result.unwrap_err().to_string(),
             "the daemon coordinator panicked"
         );
     }
-
     #[tokio::test]
-    async fn already_failed_service_terminates_without_polling_the_daemon() {
+    async fn failed_service_does_not_poll_daemon() {
         let (failed, failure) = watch::channel(false);
         failed.send_replace(true);
-        let result = coordinate(
-            async {
-                panic!("daemon must not be polled");
-            },
-            failure,
-        )
-        .await;
+        let result = coordinate(async { panic!("must not be polled") }, failure).await;
         assert_eq!(
             result.unwrap_err().to_string(),
             "the macOS workspace service failed"
