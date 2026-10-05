@@ -85,6 +85,15 @@ impl Node {
                 return Err(error);
             }
         };
+        if self.peers.contains_device(&shown.device_id, &pairing_id) {
+            self.pairing.finish(
+                &pairing_id,
+                PairingPhase::Failed,
+                Some(NodeError::AlreadyPaired),
+            );
+            let _ = session.close().await;
+            return Err(NodeError::AlreadyPaired);
+        }
         self.pairing
             .awaiting(&pairing_id, session.pairing_sas(), shown);
         let node = Arc::clone(self);
@@ -154,6 +163,16 @@ impl Node {
                 return Err(error);
             }
         };
+        if self.peers.contains_device(&shown.device_id, pairing_id) {
+            self.pairing.finish(
+                pairing_id,
+                PairingPhase::Failed,
+                Some(NodeError::AlreadyPaired),
+            );
+            self.republish();
+            let _ = session.close().await;
+            return Err(NodeError::AlreadyPaired);
+        }
         self.pairing
             .awaiting(pairing_id, session.pairing_sas(), shown);
         self.complete_pairing(session, peer, control).await;
@@ -268,6 +287,7 @@ async fn establish(
     let name = placeholder_name(&device_name);
     let peer = Peer {
         pairing_id: pairing_id.clone(),
+        device_id: Some(device_id.clone()),
         name: name.clone(),
         psk,
         last_addr: addr,
@@ -542,6 +562,66 @@ mod tests {
         let _ = shutdown.send(true);
     }
 
+    #[tokio::test]
+    async fn pairing_the_same_stable_device_twice_is_refused_without_replacing_trust() {
+        let initiator_dir = tempfile::tempdir().unwrap();
+        let responder_dir = tempfile::tempdir().unwrap();
+        let initiator = node(&initiator_dir, "initiator");
+        let responder = node(&responder_dir, "responder");
+        let initiator_source = Arc::new(TestSource::new("initiator-device-id", Vec::new()));
+        let responder_source = Arc::new(TestSource::new("responder-device-id", Vec::new()));
+        let (addr, shutdown) =
+            start_listener(Arc::clone(&responder), Arc::clone(&responder_source)).await;
+
+        let first = responder.pair_create_invite().unwrap();
+        initiator
+            .pair_join(&first.code, &addr.to_string(), initiator_source.as_ref())
+            .await
+            .unwrap();
+        wait_for(&initiator, PairingPhase::AwaitingConfirmation).await;
+        wait_for(&responder, PairingPhase::AwaitingConfirmation).await;
+        initiator.pair_confirm(true).unwrap();
+        responder.pair_confirm(true).unwrap();
+        wait_for(&initiator, PairingPhase::Confirmed).await;
+        wait_for(&responder, PairingPhase::Confirmed).await;
+
+        let initiator_pairing = initiator.peers().list().pop().expect("initiator peer");
+        let responder_pairing = responder.peers().list().pop().expect("responder peer");
+        assert_eq!(
+            initiator_pairing.device_id.as_deref(),
+            Some("responder-device-id")
+        );
+        assert_eq!(
+            responder_pairing.device_id.as_deref(),
+            Some("initiator-device-id")
+        );
+
+        let second = responder.pair_create_invite().unwrap();
+        assert_eq!(
+            initiator
+                .pair_join(&second.code, &addr.to_string(), initiator_source.as_ref())
+                .await,
+            Err(NodeError::AlreadyPaired)
+        );
+        let refused = wait_for(&responder, PairingPhase::Failed).await;
+        assert_eq!(refused.error, Some(NodeError::AlreadyPaired));
+
+        assert_eq!(initiator.peers().len(), 1);
+        assert_eq!(responder.peers().len(), 1);
+        assert!(initiator
+            .peers()
+            .get(&initiator_pairing.pairing_id)
+            .is_some());
+        assert!(responder
+            .peers()
+            .get(&responder_pairing.pairing_id)
+            .is_some());
+        assert!(initiator.peers().get(&second.pairing_id).is_none());
+        assert!(responder.peers().get(&second.pairing_id).is_none());
+
+        let _ = shutdown.send(true);
+    }
+
     /// Both sides accept, and then this one stops writing before the commit
     /// exchange — the shape that left the responder committing for good.
     async fn accept_then_go_silent(responder: &Node, session: &mut Session) {
@@ -692,6 +772,7 @@ mod tests {
         let invite = responder.pair_create_invite().unwrap();
         let established = Peer {
             pairing_id: invite.pairing_id.clone(),
+            device_id: None,
             name: "the device the user already has".to_string(),
             psk: PairingToken::generate().psk(),
             last_addr: None,

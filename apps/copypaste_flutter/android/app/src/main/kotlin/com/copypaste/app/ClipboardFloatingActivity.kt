@@ -17,7 +17,7 @@ class ClipboardFloatingActivity : Activity() {
     private lateinit var floatingView: View
     private var attached = false
     private var handled = false
-    private lateinit var layoutListener: ViewTreeObserver.OnGlobalLayoutListener
+    private lateinit var focusListener: ViewTreeObserver.OnWindowFocusChangeListener
     private val main = Handler(Looper.getMainLooper())
     private val failsafe = Runnable(::finishCapture)
 
@@ -25,20 +25,23 @@ class ClipboardFloatingActivity : Activity() {
         super.onCreate(savedInstanceState)
         shrinkActivityWindow()
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        createFloatingView()
-        focusFloatingView()
-        layoutListener = ViewTreeObserver.OnGlobalLayoutListener {
-            if (handled) return@OnGlobalLayoutListener
+        focusListener = ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
+            if (!hasFocus || handled) return@OnWindowFocusChangeListener
             handled = true
-            floatingView.viewTreeObserver.removeOnGlobalLayoutListener(layoutListener)
+            floatingView.viewTreeObserver.removeOnWindowFocusChangeListener(focusListener)
             try {
                 AndroidClipboardReader.captureBackground(this)
             } finally {
                 finishCapture()
             }
         }
-        floatingView.viewTreeObserver.addOnGlobalLayoutListener(layoutListener)
         main.postDelayed(failsafe, captureTimeoutMs)
+        try {
+            createFloatingView()
+            focusFloatingView()
+        } catch (_: RuntimeException) {
+            finishCapture()
+        }
     }
 
     private fun shrinkActivityWindow() {
@@ -55,6 +58,7 @@ class ClipboardFloatingActivity : Activity() {
 
     private fun createFloatingView() {
         floatingView = View(this)
+        floatingView.viewTreeObserver.addOnWindowFocusChangeListener(focusListener)
         val params = WindowManager.LayoutParams(
             1,
             1,
@@ -79,7 +83,7 @@ class ClipboardFloatingActivity : Activity() {
     private fun finishCapture() {
         main.removeCallbacks(failsafe)
         if (attached) {
-            runCatching { floatingView.viewTreeObserver.removeOnGlobalLayoutListener(layoutListener) }
+            runCatching { floatingView.viewTreeObserver.removeOnWindowFocusChangeListener(focusListener) }
             runCatching { windowManager.removeViewImmediate(floatingView) }
             attached = false
         }

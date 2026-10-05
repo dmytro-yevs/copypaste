@@ -287,6 +287,7 @@ mod tests {
             .peers()
             .upsert(Peer {
                 pairing_id: pairing_id.clone(),
+                device_id: None,
                 name: "b".into(),
                 psk: token.psk(),
                 last_addr: None,
@@ -299,6 +300,7 @@ mod tests {
             .peers()
             .upsert(Peer {
                 pairing_id: pairing_id.clone(),
+                device_id: None,
                 name: "a".into(),
                 psk: token.psk(),
                 last_addr: Some(addr),
@@ -550,6 +552,7 @@ mod tests {
             .peers()
             .upsert(Peer {
                 pairing_id: stranger.pairing_id(),
+                device_id: None,
                 name: "stranger".into(),
                 psk: stranger.psk(),
                 last_addr: Some(addr),

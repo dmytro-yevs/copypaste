@@ -34,20 +34,19 @@ class _AndroidOnboardingScreenState extends State<AndroidOnboardingScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    controller.setMonitoring(true);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    controller.setMonitoring(false);
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed &&
-        controller.step == AndroidOnboardingStep.capture) {
-      unawaited(controller.refresh());
-    }
+    controller.setMonitoring(state == AppLifecycleState.resumed);
   }
 
   @override
@@ -57,7 +56,20 @@ class _AndroidOnboardingScreenState extends State<AndroidOnboardingScreen>
       builder: (context, child) {
         return Scaffold(
           headers: [
-            const AppBar(title: Text('Set up CopyPaste')),
+            const AppBar(
+              leading: [
+                Image(
+                  image: AssetImage('assets/brand/copypaste.png'),
+                  width: AppIconSize.md,
+                  height: AppIconSize.md,
+                ),
+              ],
+              title: Text(
+                'Set up CopyPaste',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
             const Divider(),
           ],
           footers: [
@@ -338,6 +350,8 @@ class _ShizukuSetup extends StatelessWidget {
         ? 'Install Shizuku'
         : !shizuku.running
         ? 'Pair and start Shizuku'
+        : shizuku.permission
+        ? 'Apply capture access'
         : 'Allow CopyPaste';
     final description = ready
         ? 'Shizuku is no longer required for capture.'
@@ -345,7 +359,9 @@ class _ShizukuSetup extends StatelessWidget {
         ? 'Install Shizuku from its official download page.'
         : !shizuku.running
         ? 'Use Wireless debugging pairing in Shizuku, then return here.'
-        : 'Approve CopyPaste once so it can apply the six setup commands.';
+        : shizuku.permission
+        ? 'CopyPaste is allowed in Shizuku. Applying Android capture access.'
+        : 'Approve CopyPaste once so it can apply the setup commands.';
     return Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -358,7 +374,9 @@ class _ShizukuSetup extends StatelessWidget {
             Align(
               alignment: Alignment.centerLeft,
               child: Button.primary(
-                onPressed: !shizuku.installed || !shizuku.running
+                onPressed: controller.busy
+                    ? null
+                    : !shizuku.installed || !shizuku.running
                     ? controller.openShizuku
                     : controller.applyShizukuGrants,
                 leading: Icon(
@@ -371,19 +389,13 @@ class _ShizukuSetup extends StatelessWidget {
                       ? 'Get Shizuku'
                       : !shizuku.running
                       ? 'Open Shizuku'
+                      : shizuku.permission
+                      ? 'Apply capture access'
                       : 'Allow CopyPaste',
                 ),
               ),
             ),
           ],
-          const Gap(AppSpacing.sm),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Button.ghost(
-              onPressed: controller.refresh,
-              child: const Text('Check again'),
-            ),
-          ),
         ],
       ),
     );
@@ -412,14 +424,6 @@ class _AdbSetup extends StatelessWidget {
             _Command(command: commands[index], number: index + 1),
             if (index != commands.length - 1) const Gap(AppSpacing.sm),
           ],
-          const Gap(AppSpacing.md),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Button.primary(
-              onPressed: controller.refresh,
-              child: const Text('Check access'),
-            ),
-          ),
         ],
       ),
     );
@@ -483,22 +487,20 @@ class _Verification extends StatelessWidget {
                 : 'Start capture, copy text in another app, then return. Setup is complete only after the copy reaches History.',
           ).muted().textSmall(),
           const Gap(AppSpacing.md),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Button.primary(
-              onPressed:
-                  state?.privilegedGrants == true &&
-                      state?.notificationGranted == true
-                  ? controller.verifying
-                        ? controller.refresh
-                        : controller.beginVerification
-                  : null,
-              leading: const Icon(LucideIcons.clipboardCheck),
-              child: Text(
-                controller.verifying ? 'Check capture' : 'Start capture',
+          if (!controller.verifying)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Button.primary(
+                onPressed:
+                    !controller.busy &&
+                        state?.privilegedGrants == true &&
+                        state?.notificationGranted == true
+                    ? controller.beginVerification
+                    : null,
+                leading: const Icon(LucideIcons.clipboardCheck),
+                child: const Text('Start capture'),
               ),
             ),
-          ),
         ],
       ),
     );
