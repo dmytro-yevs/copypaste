@@ -103,11 +103,14 @@ pub(super) fn insert_fts_in_tx(
 /// * The bundled `unicode61` private-use token ranges and recognized combining
 ///   diacritics are retained. They must not become boundaries inside an indexed
 ///   word.
-/// * `_`, `"`, `*` and whitespace are otherwise kept.
+/// * Outside phrases, `_` and `*` separate terms. Raw stars never enter the
+///   MATCH grammar; each surviving term receives one owned prefix marker.
+/// * Balanced quotes preserve phrase adjacency. Stars inside a phrase are
+///   tokenizer content; one star immediately after it enables its final prefix.
 /// * An odd number of quotes is an unclosed phrase — an FTS5 syntax error — so
 ///   all quotes are dropped.
-/// * `*` is appended to *every* token, not just the last: search-as-you-type
-///   means any token can be mid-word, and last-token-only made `"priv key"`
+/// * `*` is appended to every unquoted token, not just the last: search-as-you-type
+///   means any token can be mid-word, and last-token-only made `priv key`
 ///   match nothing.
 pub(super) fn sanitize_fts5_query(raw: &str) -> Option<String> {
     const RESERVED: [&str; 4] = ["NOT", "OR", "AND", "NEAR"];
@@ -168,16 +171,10 @@ pub(super) fn sanitize_fts5_query(raw: &str) -> Option<String> {
 
 fn push_unquoted_tokens(tokens: &mut Vec<String>, raw: &str, reserved: &[&str]) {
     tokens.extend(
-        raw.split_whitespace()
+        raw.split(|ch: char| ch.is_whitespace() || matches!(ch, '_' | '*'))
             .filter(|token| token.chars().any(is_unicode61_token_char))
             .filter(|token| !reserved.iter().any(|word| word.eq_ignore_ascii_case(token)))
-            .map(|token| {
-                if token.ends_with('*') {
-                    token.to_string()
-                } else {
-                    format!("{token}*")
-                }
-            }),
+            .map(|token| format!("{token}*")),
     );
 }
 
@@ -225,6 +222,94 @@ mod tests {
     }
 
     #[test]
+    fn search_treats_unquoted_stars_as_term_separators() {
+        let s = store();
+        let meeting = s.insert(item("meeting notes", T0)).unwrap();
+        s.insert(item("unrelated payload", T0 + 60_000)).unwrap();
+        let operators = s.insert(item("OR AND NOT NEAR", T0 + 120_000)).unwrap();
+        let meeting_only = s.insert(item("meeting agenda", T0 + 180_000)).unwrap();
+
+        for query in [
+            "*meeting*",
+            "meeting**",
+            "meeting*",
+            "OR* meeting",
+            "*OR**meeting*",
+        ] {
+            let found = s.search(query, 10).unwrap();
+            assert_eq!(found.len(), 2, "query: {query}");
+            assert!(found.iter().any(|item| item.id == meeting.id));
+            assert!(found.iter().any(|item| item.id == meeting_only.id));
+        }
+
+        for query in ["*meet***note**", "meet*note"] {
+            assert_eq!(
+                s.search(query, 10)
+                    .unwrap()
+                    .iter()
+                    .map(|item| item.id.as_str())
+                    .collect::<Vec<_>>(),
+                vec![meeting.id.as_str()],
+                "query: {query}",
+            );
+        }
+
+        for query in ["OR*", "*OR*", "NOT** AND* OR* NEAR*", "***___^:;"] {
+            assert!(s.search(query, 10).unwrap().is_empty(), "query: {query}");
+        }
+        assert_eq!(s.search("\"OR\"", 10).unwrap()[0].id, operators.id);
+    }
+
+    #[test]
+    fn search_applies_each_unquoted_underscore_term_as_a_prefix() {
+        let s = store();
+        let adjacent = s.insert(item("meeting notes", T0)).unwrap();
+        let separated = s
+            .insert(item("meeting intervening notes", T0 + 60_000))
+            .unwrap();
+
+        let found = s.search("meet_notes", 10).unwrap();
+        assert_eq!(found.len(), 2);
+        assert!(found.iter().any(|item| item.id == adjacent.id));
+        assert!(found.iter().any(|item| item.id == separated.id));
+        assert!(s.search("\"meet_notes\"", 10).unwrap().is_empty());
+        assert_eq!(
+            s.search("\"meeting_notes\"", 10)
+                .unwrap()
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![adjacent.id.as_str()],
+        );
+    }
+
+    #[test]
+    fn search_preserves_quoted_stars_and_one_phrase_suffix_prefix() {
+        let s = store();
+        let adjacent = s.insert(item("meeting notes", T0)).unwrap();
+        let extension = s.insert(item("meeting notebook", T0 + 60_000)).unwrap();
+        s.insert(item("meeting intervening notes", T0 + 120_000))
+            .unwrap();
+
+        for query in ["\"meeting not\"*", "\"meeting not\"**"] {
+            let found = s.search(query, 10).unwrap();
+            assert_eq!(found.len(), 2, "query: {query}");
+            assert!(found.iter().any(|item| item.id == adjacent.id));
+            assert!(found.iter().any(|item| item.id == extension.id));
+        }
+        assert!(s.search("\"meeting not*\"", 10).unwrap().is_empty());
+        assert!(s.search("\"meet*notes\"", 10).unwrap().is_empty());
+        assert_eq!(
+            s.search("\"meeting*notes\"", 10)
+                .unwrap()
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![adjacent.id.as_str()],
+        );
+    }
+
+    #[test]
     fn search_uses_fts_boundaries_for_punctuation_in_copied_prose() {
         let s = store();
         let copied = s
@@ -239,6 +324,9 @@ mod tests {
             .unwrap();
         let decomposed = s.insert(item("cafe\u{301}ine", T0 + 180_000)).unwrap();
         let plane_16_separator = s.insert(item("foo intervening bar", T0 + 240_000)).unwrap();
+        let private_use = s.insert(item("left\u{E000}right", T0 + 300_000)).unwrap();
+        let supplementary_private_use = s.insert(item("left\u{F0000}right", T0 + 360_000)).unwrap();
+        let unicode = s.insert(item("привіт світ", T0 + 420_000)).unwrap();
 
         for query in [
             " See https://example.test/help ",
@@ -288,6 +376,21 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![plane_16_separator.id.as_str()]
         );
+        for (query, expected_id) in [
+            ("left\u{E000}right", private_use.id.as_str()),
+            ("left\u{F0000}right", supplementary_private_use.id.as_str()),
+            ("прив сві", unicode.id.as_str()),
+        ] {
+            assert_eq!(
+                s.search(query, 10)
+                    .unwrap()
+                    .iter()
+                    .map(|item| item.id.as_str())
+                    .collect::<Vec<_>>(),
+                vec![expected_id],
+                "query: {query}",
+            );
+        }
     }
 
     #[test]
