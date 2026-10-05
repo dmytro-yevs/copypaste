@@ -17,3 +17,7 @@ serde.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+
+[features]
+# Explicit test-only formatter access; product builds do not enable this.
+test-support = []
