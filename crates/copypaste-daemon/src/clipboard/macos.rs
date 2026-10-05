@@ -38,9 +38,10 @@ use std::path::Path;
 
 use objc2_app_kit::NSPasteboard;
 use objc2_foundation::{NSArray, NSData, NSString};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 mod attribution;
+mod file;
 
 use super::change::{clear_sentinel_on_delta_mismatch, Change, ChangeTracker, SELF_WRITE_DELTA};
 use super::{Capture, CapturePolicy, ClipboardSource, MAX_CAPTURE_BYTES};
@@ -226,7 +227,7 @@ impl ClipboardSource for MacOsClipboard {
                     (unsafe { pb.changeCount() } as i64, observation)
                 },
                 || {
-                    let (data, content_type) = UTIS.with(|utis| unsafe {
+                    let (uti, content_type) = UTIS.with(|utis| unsafe {
                         for (probe, uti, content_type) in [
                             (
                                 &utis.file_url_probe,
@@ -268,7 +269,7 @@ impl ClipboardSource for MacOsClipboard {
                                 }
                                 // A selected representation's read failure is
                                 // terminal; never fall through to another type.
-                                return pb.dataForType(uti).map(|data| (data, content_type));
+                                return Some((uti.clone(), content_type));
                             }
                         }
                         None
@@ -276,9 +277,44 @@ impl ClipboardSource for MacOsClipboard {
                     if !read_valid() {
                         return None;
                     }
-                    if content_type == copypaste_ipc::content_type::FILE
-                        && unsafe { pb.pasteboardItems() }.is_none_or(|items| items.len() != 1)
-                    {
+                    if content_type == copypaste_ipc::content_type::FILE {
+                        let (bytes, metadata) = match file::read(
+                            &pb,
+                            &uti,
+                            policy.limit_bytes(content_type),
+                            read_valid,
+                        ) {
+                            Ok(result) => result,
+                            Err(reason) => {
+                                if matches!(
+                                    reason,
+                                    file::FileInputError::Read(
+                                        super::file_capture::FileReadError::TooLarge
+                                    )
+                                ) {
+                                    self.rejected_too_large += 1;
+                                }
+                                file::reject(reason);
+                                return None;
+                            }
+                        };
+                        info!("file capture materialized");
+                        let capture = Capture {
+                            content: String::new(),
+                            binary_content: Some(bytes),
+                            file_path: None,
+                            file_metadata: Some(metadata),
+                            content_type: content_type.to_string(),
+                            app_bundle_id,
+                            app_name,
+                            source_policy: super::SourcePolicyEvidence::MacOs(
+                                decision.coverage.clone(),
+                            ),
+                        };
+                        return read_valid().then_some(capture);
+                    }
+                    let data = unsafe { pb.dataForType(&uti) }?;
+                    if !read_valid() {
                         return None;
                     }
 
@@ -318,30 +354,6 @@ impl ClipboardSource for MacOsClipboard {
                             binary_content: None,
                             file_path: None,
                             file_metadata: None,
-                            content_type: content_type.to_string(),
-                            app_bundle_id,
-                            app_name,
-                            source_policy: super::SourcePolicyEvidence::MacOs(
-                                decision.coverage.clone(),
-                            ),
-                        };
-                        return read_valid().then_some(capture);
-                    }
-                    if content_type == copypaste_ipc::content_type::FILE {
-                        let url = url::Url::parse(&String::from_utf8_lossy(&bytes)).ok()?;
-                        let path = url.to_file_path().ok()?;
-                        let filename = path.file_name()?.to_string_lossy();
-                        let source_reference = path.to_string_lossy();
-                        let metadata = copypaste_core::FileMetadata::with_source_reference(
-                            filename,
-                            "application/octet-stream",
-                            source_reference,
-                        )?;
-                        let capture = Capture {
-                            content: String::new(),
-                            binary_content: None,
-                            file_path: Some(path),
-                            file_metadata: Some(metadata),
                             content_type: content_type.to_string(),
                             app_bundle_id,
                             app_name,
@@ -721,7 +733,11 @@ mod tests {
         ]);
         let capture = clipboard.poll().expect("the file URL must win");
         assert_eq!(capture.content_type, copypaste_ipc::content_type::FILE);
-        assert_eq!(capture.file_path.as_deref(), Some(path.as_path()));
+        assert!(capture.file_path.is_none());
+        assert_eq!(
+            capture.binary_content.as_deref(),
+            Some(b"file bytes".as_slice())
+        );
     }
 
     #[test]
@@ -758,7 +774,7 @@ mod tests {
 
     #[test]
     #[ignore = "drives the real NSPasteboard"]
-    fn one_local_file_url_is_captured_without_reading_its_bytes() {
+    fn one_local_file_url_freezes_its_bytes_and_metadata() {
         let _lock = serialised();
         let (_data_dir, mut clipboard) = test_clipboard();
         let fixture_dir = tempfile::tempdir().unwrap();
@@ -773,7 +789,7 @@ mod tests {
         );
         let capture = clipboard.poll().expect("a local file URL must be captured");
         assert_eq!(capture.content_type, copypaste_ipc::content_type::FILE);
-        assert_eq!(capture.file_path.as_deref(), Some(path.as_path()));
+        assert!(capture.file_path.is_none());
         assert_eq!(
             capture.file_metadata,
             copypaste_core::FileMetadata::with_source_reference(
@@ -782,7 +798,10 @@ mod tests {
                 path.to_string_lossy(),
             )
         );
-        assert!(capture.binary_content.is_none());
+        assert_eq!(
+            capture.binary_content.as_deref(),
+            Some(b"synthetic file fixture".as_slice())
+        );
 
         write_types(&[(UTI_FILE_URL, b"https://example.invalid/fixture.bin")]);
         assert!(
@@ -797,6 +816,72 @@ mod tests {
             clipboard.poll().is_none(),
             "a multi-file change must not silently capture its first path"
         );
+    }
+
+    #[test]
+    #[ignore = "drives the real NSPasteboard and native NSURL resolution"]
+    fn native_url_path_and_asserted_file_reference_preserve_owned_fixture_bytes() {
+        let _lock = serialised();
+        let fixture_dir = tempfile::tempdir().unwrap();
+        for (filename, len, reference) in [
+            ("noextension", 32, false),
+            ("Résumé space λ %#", 87, false),
+            ("reference-file", 32, true),
+        ] {
+            let path = fixture_dir.path().join(filename);
+            let bytes = vec![if reference { 9 } else { 7 }; len];
+            std::fs::write(&path, &bytes).unwrap();
+            autoreleasepool(|_| unsafe {
+                let mut url = NSURL::fileURLWithPath(&NSString::from_str(path.to_str().unwrap()));
+                if reference {
+                    url = url
+                        .fileReferenceURL()
+                        .expect("native reference URL must exist");
+                    assert!(
+                        url.isFileReferenceURL(),
+                        "path URL cannot qualify reference resolution"
+                    );
+                } else {
+                    assert!(!url.isFileReferenceURL());
+                }
+                let objects: Retained<NSArray<ProtocolObject<dyn NSPasteboardWriting>>> =
+                    NSArray::from_vec(vec![ProtocolObject::from_retained(url)]);
+                let pb = NSPasteboard::generalPasteboard();
+                let _ = pb.clearContents();
+                assert!(pb.writeObjects(&objects));
+                let (captured, metadata) =
+                    file::read(&pb, &NSString::from_str(UTI_FILE_URL), 1024, || true).unwrap();
+                assert_eq!(captured, bytes);
+                assert_eq!(metadata.filename, filename);
+                let locator = std::path::Path::new(metadata.source_reference.as_deref().unwrap());
+                assert!(locator.is_absolute());
+                assert_eq!(std::fs::read(locator).unwrap(), bytes);
+            });
+        }
+    }
+    #[test]
+    #[ignore = "drives the real NSPasteboard"]
+    fn native_file_plus_another_item_is_explicitly_unsupported() {
+        let _lock = serialised();
+        let fixture_dir = tempfile::tempdir().unwrap();
+        let path = fixture_dir.path().join("single-file");
+        std::fs::write(&path, b"bytes").unwrap();
+        autoreleasepool(|_| unsafe {
+            let url = NSURL::fileURLWithPath(&NSString::from_str(path.to_str().unwrap()));
+            let objects: Retained<NSArray<ProtocolObject<dyn NSPasteboardWriting>>> =
+                NSArray::from_vec(vec![
+                    ProtocolObject::from_retained(url),
+                    ProtocolObject::from_retained(NSString::from_str("second item")),
+                ]);
+            let pb = NSPasteboard::generalPasteboard();
+            let _ = pb.clearContents();
+            assert!(pb.writeObjects(&objects));
+            assert_eq!(pb.pasteboardItems().unwrap().len(), 2);
+            assert_eq!(
+                file::read(&pb, &NSString::from_str(UTI_FILE_URL), 1024, || true),
+                Err(file::FileInputError::UnsupportedItemCount)
+            );
+        });
     }
 
     /// T-8, T-9 and the Fix-4 / "DUP-ON-COPY" pair, asserted as behaviour
