@@ -4,7 +4,8 @@
 //! `ConfigPatch` validation and fail-closed record decoder. Runtime effects stay
 //! with the runtime that owns the affected services.
 
-use std::sync::{Mutex, RwLock};
+use crate::capture_admission::CaptureAdmission;
+use std::sync::{Arc, Condvar, Mutex, RwLock};
 
 use copypaste_core::Store;
 use copypaste_ipc::{ConfigData, ConfigError, ConfigPatch, SettingsHealth};
@@ -15,7 +16,9 @@ const KEY_SETTINGS: &str = "settings";
 pub(crate) struct RuntimeSettings {
     store: Store,
     current: RwLock<SettingsState>,
-    applying: Mutex<()>,
+    applying: Mutex<bool>,
+    applied: Condvar,
+    pub(crate) capture: Arc<CaptureAdmission>,
 }
 
 #[derive(Debug, Clone)]
@@ -54,20 +57,33 @@ impl RuntimeSettings {
         };
         Self {
             store: store.clone(),
+            capture: Arc::new(CaptureAdmission::new(config.clone())),
             current: RwLock::new(SettingsState {
                 config,
                 private_mode_epoch: 0,
                 health: health.is_degraded().then_some(health),
             }),
-            applying: Mutex::new(()),
+            applying: Mutex::new(false),
+            applied: Condvar::new(),
         }
     }
 
     pub(crate) fn snapshot(&self) -> SettingsSnapshot {
-        let current = self
-            .current
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let current = match self.current.read() {
+            Ok(current) => current,
+            Err(poison) => {
+                drop(poison);
+                self.capture.fail_closed();
+                return SettingsSnapshot {
+                    config: copypaste_core::settings_record::all_closed(),
+                    private_mode_epoch: u64::MAX,
+                    health: Some(SettingsHealth {
+                        record_unreadable: true,
+                        unreadable_fields: Vec::new(),
+                    }),
+                };
+            }
+        };
         SettingsSnapshot {
             config: current.config.clone(),
             private_mode_epoch: current.private_mode_epoch,
@@ -79,16 +95,33 @@ impl RuntimeSettings {
         self.snapshot().config
     }
 
+    fn enter_apply(&self) -> Result<Applying<'_>, SettingsError> {
+        let mut applying = self.applying.lock().map_err(|poison| {
+            drop(poison);
+            self.capture.fail_closed();
+            SettingsError::Store
+        })?;
+        while *applying {
+            applying = self.applied.wait(applying).map_err(|poison| {
+                drop(poison);
+                self.capture.fail_closed();
+                SettingsError::Store
+            })?;
+        }
+        *applying = true;
+        // Serial ownership survives, but no mutex crosses native cancellation.
+        drop(applying);
+        Ok(Applying { settings: self })
+    }
+
     pub(crate) fn apply(&self, patch: &ConfigPatch) -> Result<SettingsApplied, SettingsError> {
-        let _serialised = self
-            .applying
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _serialised = self.enter_apply()?;
         let (before, next, next_epoch) = {
-            let current = self
-                .current
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let current = self.current.read().map_err(|poison| {
+                drop(poison);
+                self.capture.fail_closed();
+                SettingsError::Store
+            })?;
             let next = patch.apply(&current.config)?;
             let next_epoch = if patch.private_mode.is_some() {
                 current
@@ -101,23 +134,48 @@ impl RuntimeSettings {
             (current.config.clone(), next, next_epoch)
         };
 
+        let transition = self
+            .capture
+            .transition()
+            .map_err(|_| SettingsError::Store)?;
         let encoded = serde_json::to_string(&next).map_err(|_| SettingsError::Store)?;
         self.store
             .set_state(KEY_SETTINGS, &encoded)
             .map_err(|_| SettingsError::Store)?;
 
-        let mut current = self
-            .current
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut current = self.current.write().map_err(|poison| {
+            drop(poison);
+            self.capture.fail_closed();
+            SettingsError::Store
+        })?;
         current.config = next.clone();
         current.private_mode_epoch = next_epoch;
         current.health = None;
+        drop(current);
+        transition.publish(next.clone()).map_err(|_| {
+            self.capture.fail_closed();
+            SettingsError::Store
+        })?;
         Ok(SettingsApplied {
             before,
             config: next,
             private_mode_epoch: next_epoch,
         })
+    }
+}
+
+struct Applying<'a> {
+    settings: &'a RuntimeSettings,
+}
+impl Drop for Applying<'_> {
+    fn drop(&mut self) {
+        let mut applying = self
+            .settings
+            .applying
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        *applying = false;
+        self.settings.applied.notify_all();
     }
 }
 
@@ -169,5 +227,37 @@ mod tests {
             })
             .is_err());
         assert_eq!(settings.config(), before);
+    }
+    #[test]
+    fn poisoned_settings_close_admission_and_refuse_policy_acknowledgement() {
+        use crate::capture_admission::{CaptureKind, CaptureScope};
+        for applying_lock in [false, true] {
+            let (settings, _directory) = settings();
+            let host = settings.capture.open_host(CaptureKind::Explicit).unwrap();
+            let token = settings.capture.begin(host, Arc::new(|| {})).unwrap();
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                if applying_lock {
+                    let _guard = settings.applying.lock().unwrap();
+                    panic!("poison applying");
+                } else {
+                    let _guard = settings.current.write().unwrap();
+                    panic!("poison snapshot");
+                }
+            }));
+            assert!(settings
+                .apply(&ConfigPatch {
+                    private_mode: Some(true),
+                    ..Default::default()
+                })
+                .is_err());
+            assert!(settings
+                .capture
+                .acquire(token, CaptureScope::Read)
+                .is_none());
+            assert!(settings.capture.open_host(CaptureKind::Explicit).is_none());
+            if !applying_lock {
+                assert!(settings.snapshot().config.private_mode);
+            }
+        }
     }
 }
