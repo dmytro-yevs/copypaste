@@ -7,6 +7,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../../../app/theme/app_motion.dart';
 import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_theme.dart';
+import '../../../app/theme/app_toast.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../platform/desktop/global_shortcut.dart';
 import '../../../shared/adaptive_breakpoints.dart';
@@ -909,11 +910,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
       AppUpdatePhase.upToDate ||
       AppUpdatePhase.error => Button.secondary(
         key: const ValueKey<String>('check-app-update'),
-        onPressed: controller.check,
+        onPressed: () => _checkForUpdates(controller),
         leading: const Icon(LucideIcons.refreshCw),
         child: const Text('Check again'),
       ),
     };
+  }
+
+  Future<void> _checkForUpdates(AppUpdateController controller) async {
+    await controller.check();
+    if (!mounted) return;
+
+    switch (controller.phase) {
+      case AppUpdatePhase.upToDate:
+        final version = controller.currentVersion?.toString();
+        AppToast.show(
+          context,
+          title: 'No updates available',
+          message: version == null
+              ? 'CopyPaste is the latest version.'
+              : 'CopyPaste $version is the latest version.',
+          tone: AppToastTone.success,
+        );
+        break;
+      case AppUpdatePhase.available:
+        final version = controller.release?.version.toString();
+        AppToast.show(
+          context,
+          title: 'Update available',
+          message: version == null
+              ? 'A newer CopyPaste version is ready to install.'
+              : 'CopyPaste $version is ready to install.',
+        );
+        break;
+      case AppUpdatePhase.unavailable:
+        AppToast.show(
+          context,
+          title: 'Update unavailable',
+          message:
+              controller.message ??
+              'This installation cannot update automatically.',
+          tone: AppToastTone.error,
+        );
+        break;
+      case AppUpdatePhase.error:
+        AppToast.show(
+          context,
+          title: 'Update check failed',
+          message:
+              controller.message ?? 'CopyPaste could not check for updates.',
+          tone: AppToastTone.error,
+        );
+        break;
+      case AppUpdatePhase.idle ||
+          AppUpdatePhase.checking ||
+          AppUpdatePhase.downloading ||
+          AppUpdatePhase.installing ||
+          AppUpdatePhase.permissionRequired ||
+          AppUpdatePhase.restartRequired:
+        break;
+    }
   }
 
   Widget _valueSelect<T>({
