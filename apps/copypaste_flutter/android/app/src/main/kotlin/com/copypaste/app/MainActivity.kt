@@ -22,6 +22,9 @@ import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
     companion object {
+        @Volatile
+        internal var isForeground = false
+            private set
         private const val captureNotificationPermissionRequest = 4920
 
         init {
@@ -76,6 +79,7 @@ class MainActivity : FlutterActivity() {
     private var clipboardListenerRegistered = false
     private var pairingLinksChannel: MethodChannel? = null
     private var androidCaptureChannel: AndroidCaptureChannel? = null
+    private var pairingScannerChannel: PairingScannerChannel? = null
     private var appUpdateChannel: AppUpdateChannel? = null
     private var pendingNotificationPermission: ((Boolean) -> Unit)? = null
     private var pendingPairingUri: String? = null
@@ -103,6 +107,10 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         androidCaptureChannel = AndroidCaptureChannel(
+            this,
+            flutterEngine.dartExecutor.binaryMessenger,
+        )
+        pairingScannerChannel = PairingScannerChannel(
             this,
             flutterEngine.dartExecutor.binaryMessenger,
         )
@@ -289,6 +297,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onResume() {
         super.onResume()
+        isForeground = true
         if (!clipboardListenerRegistered) {
             clipboardManager.addPrimaryClipChangedListener(clipboardListener)
             clipboardListenerRegistered = true
@@ -303,6 +312,7 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onPause() {
+        isForeground = false
         if (clipboardListenerRegistered) {
             clipboardManager.removePrimaryClipChangedListener(clipboardListener)
             clipboardListenerRegistered = false
@@ -319,6 +329,8 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         androidCaptureChannel?.dispose()
         androidCaptureChannel = null
+        pairingScannerChannel?.dispose()
+        pairingScannerChannel = null
         appUpdateChannel?.dispose()
         appUpdateChannel = null
         pendingNotificationPermission?.invoke(false)

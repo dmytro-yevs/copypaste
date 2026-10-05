@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:copypaste_flutter/app/theme/app_overlays.dart';
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
+import 'package:copypaste_flutter/app/theme/app_toast.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/features/devices/device_label.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
@@ -1282,26 +1283,22 @@ class _HistoryDetail extends StatelessWidget {
   Future<void> _copy(BuildContext context, {required bool plainText}) async {
     final copied = await controller.copySelected(plainText: plainText);
     if (!copied || !context.mounted) return;
-    showToast(
-      context: context,
-      builder: (context, overlay) => Alert(
-        leading: const Icon(LucideIcons.check),
-        title: const Text('Copied'),
-        content: Text(plainText ? 'Plain text copied.' : 'Clip copied.'),
-      ),
+    AppToast.show(
+      context,
+      title: 'Copied',
+      message: plainText ? 'Plain text copied.' : 'Clip copied.',
+      tone: AppToastTone.success,
     );
   }
 
   Future<void> _download(BuildContext context) async {
     final result = await controller.downloadSelected();
     if (result != HistoryFileDownloadResult.saved || !context.mounted) return;
-    showToast(
-      context: context,
-      builder: (context, overlay) => const Alert(
-        leading: Icon(LucideIcons.check),
-        title: Text('Downloaded'),
-        content: Text('File saved.'),
-      ),
+    AppToast.show(
+      context,
+      title: 'Downloaded',
+      message: 'File saved.',
+      tone: AppToastTone.success,
     );
   }
 

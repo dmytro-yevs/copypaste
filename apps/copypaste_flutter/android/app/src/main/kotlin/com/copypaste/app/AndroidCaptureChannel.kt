@@ -3,24 +3,65 @@ package com.copypaste.app
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.os.Handler
+import android.os.Looper
 import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
 internal class AndroidCaptureChannel(
     private val activity: MainActivity,
     messenger: BinaryMessenger,
-) : MethodChannel.MethodCallHandler {
+) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
     private val channel = MethodChannel(messenger, channelName)
-    private val shizuku = ShizukuCaptureSetup(activity.applicationContext)
+    private val events = EventChannel(messenger, "$channelName/state")
+    private val main = Handler(Looper.getMainLooper())
+    private var sink: EventChannel.EventSink? = null
+    private var lastState: Map<String, Any>? = null
+    private val shizuku = ShizukuCaptureSetup(activity.applicationContext) {
+        main.post(::publishState)
+    }
+    private val sampleState = object : Runnable {
+        override fun run() {
+            if (sink == null) return
+            publishState()
+            main.postDelayed(this, 1_000L)
+        }
+    }
 
     init {
         channel.setMethodCallHandler(this)
+        events.setStreamHandler(this)
     }
 
     fun dispose() {
         channel.setMethodCallHandler(null)
+        events.setStreamHandler(null)
+        onCancel(null)
         shizuku.dispose()
+    }
+
+    override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
+        main.removeCallbacks(sampleState)
+        sink = events
+        lastState = null
+        main.post(sampleState)
+    }
+
+    override fun onCancel(arguments: Any?) {
+        main.removeCallbacks(sampleState)
+        sink = null
+        lastState = null
+    }
+
+    private fun publishState() {
+        val listener = sink ?: return
+        val current = state().minus("observedAtMs")
+        if (current != lastState) {
+            lastState = current
+            listener.success(current + ("observedAtMs" to System.currentTimeMillis()))
+        }
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -68,6 +109,7 @@ internal class AndroidCaptureChannel(
         "foregroundCaptureEnabled" to AndroidCaptureState.foregroundCaptureEnabled(activity),
         "serviceRunning" to ClipboardCaptureService.isRunning(),
         "lastCaptureAtMs" to AndroidCaptureState.lastCaptureAt(activity),
+        "observedAtMs" to System.currentTimeMillis(),
         "shizuku" to shizuku.facts().asMap(),
         "adbCommands" to adbCaptureGrantCommands(activity.packageName),
     )

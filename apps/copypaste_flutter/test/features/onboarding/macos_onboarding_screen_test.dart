@@ -95,6 +95,38 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('shows pending Login Item approval without blocking Sync', (
+    tester,
+  ) async {
+    final setup = _ScreenMacosSetupGateway(
+      accessibility: true,
+      statusAfterUpdate: MacosLoginItemStatus.requiresApproval,
+    );
+    final controller = MacosOnboardingController(
+      store: MemoryMacosOnboardingStore(),
+      setup: setup,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.showSetup();
+
+    await tester.pumpWidget(
+      ShadcnApp(
+        home: MacosOnboardingScreen(
+          controller: controller,
+          onPairDevice: () async {},
+          onOpenHistory: () async {},
+        ),
+      ),
+    );
+    await tester.tap(find.widgetWithText(Button, 'Continue'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('CopyPaste is ready'), findsOneWidget);
+    expect(find.text('Optional setup needs attention'), findsOneWidget);
+    expect(find.widgetWithText(Button, 'Open Settings'), findsOneWidget);
+  });
+
   testWidgets('uses the unified header when macOS owns the title bar', (
     tester,
   ) async {
@@ -123,10 +155,14 @@ void main() {
 }
 
 class _ScreenMacosSetupGateway implements MacosSetupGateway {
-  _ScreenMacosSetupGateway({this.accessibility = false});
+  _ScreenMacosSetupGateway({
+    this.accessibility = false,
+    this.statusAfterUpdate = MacosLoginItemStatus.enabled,
+  });
 
   bool accessibility;
   MacosLoginItemStatus status = MacosLoginItemStatus.notRegistered;
+  MacosLoginItemStatus statusAfterUpdate;
 
   @override
   Future<bool> accessibilityGranted() async => accessibility;
@@ -142,9 +178,7 @@ class _ScreenMacosSetupGateway implements MacosSetupGateway {
 
   @override
   Future<MacosLoginItemStatus> setLaunchAtLogin(bool enabled) async {
-    status = enabled
-        ? MacosLoginItemStatus.enabled
-        : MacosLoginItemStatus.notRegistered;
+    status = enabled ? statusAfterUpdate : MacosLoginItemStatus.notRegistered;
     return status;
   }
 }
