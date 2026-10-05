@@ -97,8 +97,11 @@ pub(super) fn insert_fts_in_tx(
 /// * `-` becomes a space *first*: FTS5 reads `-bar` as a column filter and
 ///   errors with "no such column: bar", so `foo-bar` must become
 ///   `foo* AND bar*`.
+/// * Punctuation becomes a space instead of being dropped. FTS5 tokenizes
+///   URLs, email addresses, and paths at punctuation, so dropping it would
+///   join adjacent terms into a token the index does not contain.
 /// * Only alphanumerics (Unicode, so Cyrillic/CJK survive), `_`, `"`, `*` and
-///   whitespace are kept.
+///   whitespace are otherwise kept.
 /// * An odd number of quotes is an unclosed phrase — an FTS5 syntax error — so
 ///   all quotes are dropped.
 /// * `*` is appended to *every* token, not just the last: search-as-you-type
@@ -114,7 +117,7 @@ pub(super) fn sanitize_fts5_query(raw: &str) -> Option<String> {
             c if c.is_alphanumeric() || matches!(c, '_' | '"' | '*' | ' ' | '\t') => {
                 cleaned.push(c)
             }
-            _ => {}
+            _ => cleaned.push(' '),
         }
     }
 
@@ -178,6 +181,39 @@ mod tests {
         assert!(s.search("zzzznotpresent", 10).unwrap().is_empty());
         assert!(s.search("   ", 10).unwrap().is_empty());
         assert!(s.search("^:;", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn search_uses_fts_boundaries_for_punctuation_in_copied_prose() {
+        let s = store();
+        let copied = s
+            .insert(item(
+                "See https://example.test/help. Contact person@example.test or /Users/person/notes.",
+                T0,
+            ))
+            .unwrap();
+        s.insert(item("unrelated payload", T0 + 60_000)).unwrap();
+
+        for query in [
+            " See https://example.test/help ",
+            "person",
+            "\"See https://example.test/help\"",
+            "\"person",
+            "exam",
+        ] {
+            assert_eq!(
+                s.search(query, 10)
+                    .unwrap()
+                    .iter()
+                    .map(|item| item.id.as_str())
+                    .collect::<Vec<_>>(),
+                vec![copied.id.as_str()],
+                "query: {query}",
+            );
+        }
+
+        assert!(s.search("^:;", 10).unwrap().is_empty());
+        assert!(s.search("person OR unrelated", 10).unwrap().is_empty());
     }
 
     #[test]
@@ -516,7 +552,7 @@ mod tests {
         );
         assert_eq!(
             sanitize_fts5_query("col:val;--").as_deref(),
-            Some("colval*")
+            Some("col* AND val*")
         );
         assert_eq!(sanitize_fts5_query("привет").as_deref(), Some("привет*"));
         assert!(sanitize_fts5_query("").is_none());
