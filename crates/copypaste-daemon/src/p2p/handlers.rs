@@ -343,6 +343,7 @@ mod tests {
             .peers()
             .upsert(Peer {
                 pairing_id: pairing_id.clone(),
+                device_id: None,
                 name: "phone".into(),
                 psk: token.psk(),
                 last_addr: None,
@@ -467,6 +468,7 @@ mod tests {
             .peers()
             .upsert(Peer {
                 pairing_id: pairing_id.clone(),
+                device_id: None,
                 name: "laptop".into(),
                 psk: token.psk(),
                 last_addr: None,
@@ -496,6 +498,7 @@ mod tests {
             peers
                 .upsert(Peer {
                     pairing_id: token.pairing_id(),
+                    device_id: None,
                     name: "phone".into(),
                     psk: token.psk(),
                     last_addr: None,
@@ -516,6 +519,7 @@ mod tests {
         let re_add = |token: &PairingToken| {
             peers.upsert(Peer {
                 pairing_id: token.pairing_id(),
+                device_id: None,
                 name: "phone".into(),
                 psk: token.psk(),
                 last_addr: None,
@@ -546,6 +550,7 @@ mod tests {
             .peers()
             .upsert(Peer {
                 pairing_id: token.pairing_id(),
+                device_id: None,
                 name: "the lost phone".into(),
                 psk: token.psk(),
                 last_addr: None,
@@ -565,6 +570,7 @@ mod tests {
             .peers()
             .upsert(Peer {
                 pairing_id: token.pairing_id(),
+                device_id: None,
                 name: "laptop".into(),
                 psk: token.psk(),
                 last_addr: None,
@@ -774,6 +780,7 @@ mod tests {
             .peers()
             .upsert(Peer {
                 pairing_id: first.pairing_id(),
+                device_id: None,
                 name: "unreachable".into(),
                 psk: first.psk(),
                 last_addr: None,
@@ -787,6 +794,7 @@ mod tests {
             .peers()
             .upsert(Peer {
                 pairing_id: "ffffffffffffffffffffffffffffffff".into(),
+                device_id: None,
                 name: "second".into(),
                 psk: [3u8; TOKEN_LEN],
                 last_addr: None,
@@ -817,6 +825,7 @@ mod tests {
         (NodeError::BadCode, ErrorCode::PairingCode),
         (NodeError::Handshake, ErrorCode::PairingCode),
         (NodeError::SelfPairing, ErrorCode::PairingCode),
+        (NodeError::AlreadyPaired, ErrorCode::PairingAlreadyExists),
         (NodeError::PairingBusy, ErrorCode::RateLimited),
         (NodeError::NoPairing, ErrorCode::NotReady),
         (NodeError::BadAddress, ErrorCode::PairingAddress),

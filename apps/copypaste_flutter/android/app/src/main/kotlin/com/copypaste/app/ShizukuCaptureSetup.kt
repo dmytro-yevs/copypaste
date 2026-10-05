@@ -9,6 +9,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import rikka.shizuku.Shizuku
+import java.util.concurrent.Executors
 
 internal data class ShizukuFacts(
     val supported: Boolean,
@@ -24,13 +25,30 @@ internal data class ShizukuFacts(
     )
 }
 
-internal class ShizukuCaptureSetup(private val context: Context) {
+internal class ShizukuCaptureSetup(
+    private val context: Context,
+    private val onChanged: () -> Unit,
+) {
     private val main = Handler(Looper.getMainLooper())
+    private val worker = Executors.newSingleThreadExecutor()
     private var pending: ((Boolean) -> Unit)? = null
+    private var cancelGrants: (() -> Unit)? = null
+    private var disposed = false
+    private val binderReceived = Shizuku.OnBinderReceivedListener { onChanged() }
+    private val binderDead = Shizuku.OnBinderDeadListener {
+        cancelGrants?.invoke()
+        if (pending != null) {
+            val completion = pending
+            pending = null
+            completion?.invoke(false)
+        }
+        onChanged()
+    }
 
     private val permissionListener =
         Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
             if (requestCode != permissionRequest) return@OnRequestPermissionResultListener
+            onChanged()
             val completion = pending ?: return@OnRequestPermissionResultListener
             if (grantResult != PackageManager.PERMISSION_GRANTED) {
                 pending = null
@@ -42,12 +60,19 @@ internal class ShizukuCaptureSetup(private val context: Context) {
 
     init {
         Shizuku.addRequestPermissionResultListener(permissionListener)
+        Shizuku.addBinderReceivedListenerSticky(binderReceived)
+        Shizuku.addBinderDeadListener(binderDead)
     }
 
     fun dispose() {
+        disposed = true
         Shizuku.removeRequestPermissionResultListener(permissionListener)
+        Shizuku.removeBinderReceivedListener(binderReceived)
+        Shizuku.removeBinderDeadListener(binderDead)
+        cancelGrants?.invoke()
         pending?.invoke(false)
         pending = null
+        worker.shutdownNow()
     }
 
     fun facts(): ShizukuFacts {
@@ -64,7 +89,7 @@ internal class ShizukuCaptureSetup(private val context: Context) {
     }
 
     fun requestAndApply(completion: (Boolean) -> Unit) {
-        if (pending != null) {
+        if (disposed || pending != null) {
             completion(false)
             return
         }
@@ -105,29 +130,36 @@ internal class ShizukuCaptureSetup(private val context: Context) {
         fun finish(success: Boolean) {
             if (finished) return
             finished = true
+            cancelGrants = null
             main.removeCallbacksAndMessages(connection)
             runCatching { Shizuku.unbindUserService(args, connection, true) }
             runCatching { Shizuku.unbindUserService(args, connection, false) }
             pending = null
             completion(success)
+            onChanged()
         }
         connection = object : ServiceConnection {
             override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+                if (finished || disposed) return
                 val service = binder?.let(IShizukuGrantService.Stub::asInterface)
-                val applied = try {
-                    binder?.pingBinder() == true &&
-                        service != null &&
-                        service.applyCaptureGrants(context.packageName)
-                } catch (_: Exception) {
-                    false
+                // Binder waits and shell commands must never block Android's UI thread.
+                worker.execute {
+                    val applied = try {
+                        binder?.pingBinder() == true &&
+                            service != null &&
+                            service.applyCaptureGrants(context.packageName)
+                    } catch (_: Exception) {
+                        false
+                    }
+                    main.post { finish(applied) }
                 }
-                finish(applied)
             }
 
             override fun onServiceDisconnected(name: ComponentName?) = finish(false)
             override fun onNullBinding(name: ComponentName?) = finish(false)
             override fun onBindingDied(name: ComponentName?) = finish(false)
         }
+        cancelGrants = { finish(false) }
         main.postAtTime({ finish(false) }, connection, android.os.SystemClock.uptimeMillis() + timeoutMs)
         try {
             Shizuku.bindUserService(args, connection)

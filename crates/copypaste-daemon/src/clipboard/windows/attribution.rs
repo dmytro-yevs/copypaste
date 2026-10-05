@@ -6,9 +6,10 @@
 //! a second copy of what the user was looking at.
 //!
 //! `GetClipboardOwner` names the window that wrote the data, which is the
-//! question actually asked; the foreground window is the fallback for a writer
-//! that opened the clipboard with no owner window. What is done with the answer
-//! is [`super::super::windows_attribution`], which runs on every host.
+//! question actually asked. A writer without an owner window is unknown, not
+//! the foreground application: a non-empty exclusion list must fail closed
+//! before clipboard data is read. What is done with the answer is
+//! [`super::super::windows_attribution`], which runs on every host.
 
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
@@ -19,7 +20,7 @@ use windows_sys::Win32::Foundation::{
 use windows_sys::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
 
 use super::super::windows_attribution::SourceApp;
 use super::WindowsClipboard;
@@ -37,16 +38,17 @@ impl WindowsClipboard {
 
 fn resolve() -> Option<SourceApp> {
     // Both crates spell a window handle `*mut core::ffi::c_void`.
-    let window = clipboard_win::raw::get_owner()
-        .map(|owner| owner.as_ptr())
-        .or_else(foreground_window)?;
-    let path = image_path(process_id(window)?)?;
-    SourceApp::from_image_path(&path.to_string_lossy())
+    let owner = clipboard_win::raw::get_owner().map(|owner| owner.as_ptr());
+    source_app_for_owner(owner)
 }
 
-fn foreground_window() -> Option<HWND> {
-    let window = unsafe { GetForegroundWindow() };
-    (!window.is_null()).then_some(window)
+fn source_app_for_owner(owner: Option<HWND>) -> Option<SourceApp> {
+    // A missing owner is deliberately not attributed to the foreground
+    // application. Foreground state describes the poll, not the clipboard
+    // writer, and would let an excluded writer bypass the fail-closed gate.
+    let window = owner?;
+    let path = image_path(process_id(window)?)?;
+    SourceApp::from_image_path(&path.to_string_lossy())
 }
 
 fn process_id(window: HWND) -> Option<u32> {
@@ -90,4 +92,14 @@ fn query_image_path(process: HANDLE) -> Option<OsString> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_ownerless_clipboard_has_no_foreground_source_fallback() {
+        assert!(source_app_for_owner(None).is_none());
+    }
 }

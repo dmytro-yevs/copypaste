@@ -254,6 +254,8 @@ pub fn peer_at(state: &Arc<AppState>, name: &str, addr: &str) -> copypaste_p2p::
     let token = copypaste_p2p::PairingToken::generate();
     let peer = copypaste_p2p::peers::Peer {
         pairing_id: token.pairing_id(),
+
+        device_id: None,
         name: name.to_string(),
         psk: token.psk(),
         last_addr: Some(addr.parse().expect("a peer address")),

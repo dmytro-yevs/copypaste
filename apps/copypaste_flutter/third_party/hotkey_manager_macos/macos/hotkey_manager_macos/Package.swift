@@ -11,15 +11,13 @@ let package = Package(
         .library(name: "hotkey-manager-macos", targets: ["hotkey_manager_macos"])
     ],
     dependencies: [
-        .package(name: "FlutterFramework", path: "../FlutterFramework"),
-        .package(url: "https://github.com/soffes/HotKey", exact: "0.2.1")
+        .package(name: "FlutterFramework", path: "../FlutterFramework")
     ],
     targets: [
         .target(
             name: "hotkey_manager_macos",
             dependencies: [
-                .product(name: "FlutterFramework", package: "FlutterFramework"),
-                .product(name: "HotKey", package: "HotKey")
+                .product(name: "FlutterFramework", package: "FlutterFramework")
             ],
             path: "Classes"
         )

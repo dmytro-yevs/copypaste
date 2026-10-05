@@ -837,65 +837,62 @@ mod tests {
         );
     }
 
-    /// The source application survives the poll for explicit exclusion policy.
+    /// A source-less write stays unattributed for explicit exclusion policy.
     ///
-    /// A test write owns no clipboard window, so this exercises the foreground
-    /// fallback and needs an interactive desktop — with no foreground window
-    /// there is nothing to attribute to and it fails rather than passing blind.
+    /// A test write owns no clipboard window. It must not inherit the
+    /// foreground application, because that application did not write the
+    /// clipboard and could otherwise bypass a fail-closed exclusion.
     #[test]
     #[ignore = "drives the real Windows clipboard"]
-    fn a_capture_carries_the_process_that_owns_the_clipboard() {
+    fn an_ownerless_capture_has_no_foreground_source_fallback() {
         let _lock = serialised();
         let mut clipboard = WindowsClipboard::new().unwrap();
         write_text("attributed");
 
         let capture = clipboard.poll().expect("the write must be captured");
-        let id = capture
-            .app_bundle_id
-            .expect("no source application resolved");
-        assert!(!id.is_empty(), "the source identifier must not be empty");
-        assert_eq!(id, id.to_lowercase(), "the identifier must be canonical");
-        assert!(
-            !id.contains('\\') && !id.contains('/'),
-            "I-9: the source identifier must not carry a path"
-        );
+        assert!(capture.app_bundle_id.is_none());
+        assert!(capture.app_name.is_none());
     }
 
-    /// DMY-158, against the real sequence number: two copies inside one 750 ms
-    /// window are two changes, and each is attributed to whoever wrote it. A
-    /// process cannot make another process own the clipboard, so what is
-    /// asserted here is the property that made the misattribution possible —
-    /// that the second change resolves its writer instead of inheriting the
-    /// first one's. `windows_attribution` asserts the consequence.
+    /// DMY-158, against the real sequence number: two ownerless writes inside
+    /// one poll period are two changes. They must each resolve once rather than
+    /// inherit a result from the first change. `two_writers` covers real owners
+    /// and their metadata separately.
     #[test]
     #[ignore = "drives the real Windows clipboard"]
     fn each_change_inside_one_poll_period_resolves_its_own_writer() {
         let _lock = serialised();
         let mut clipboard = WindowsClipboard::new().unwrap();
         write_text("the first copy");
-        let first = clipboard.poll().expect("the first write must be captured");
+        assert!(
+            clipboard.poll().is_some(),
+            "the first write must be captured"
+        );
         write_text("the second copy, a third of a second later");
-        let second = clipboard.poll().expect("the second write must be captured");
+        assert!(
+            clipboard.poll().is_some(),
+            "the second write must be captured"
+        );
 
         assert_eq!(
             clipboard.attribution.resolutions(),
             2,
             "the second change reused the first change's identity"
         );
-        assert_eq!(clipboard.attribution.unattributed_count(), 0);
-        assert!(first.app_bundle_id.is_some() && second.app_bundle_id.is_some());
+        assert_eq!(clipboard.attribution.unattributed_count(), 2);
     }
 
     /// DMY-158 before/after comparison on equal workloads.
     ///
-    /// Both paths resolve the same real foreground/owner process. The
-    /// "base" path reuses one sequence number (the old TTL behavior), so
-    /// every call after the first is a cache hit. The "change" path uses a
-    /// fresh sequence number per call (the fix), so every call resolves.
-    /// Printed side by side so the cost of the fix is visible.
+    /// The same-process helper writes with no clipboard owner, so this measures
+    /// the cache and ownerless-resolution paths only; `two_writers` exercises
+    /// process-image lookup for a real owner. The "base" path reuses one
+    /// sequence number, so every call after the first is a cache hit. The
+    /// "change" path uses a fresh sequence number per call, so every call
+    /// resolves. Printed side by side so the cost is visible.
     #[test]
     #[ignore = "drives the real Windows clipboard"]
-    fn resolving_a_writer_costs_a_bounded_number_of_microseconds() {
+    fn resolving_an_ownerless_source_costs_a_bounded_number_of_microseconds() {
         const ROUNDS: usize = 200;
 
         let _lock = serialised();
@@ -915,12 +912,8 @@ mod tests {
         let mut change = Vec::with_capacity(ROUNDS);
         for round in 0..ROUNDS {
             let started = std::time::Instant::now();
-            let app = clipboard.source_app(1000 + round as i64);
+            let _ = clipboard.source_app(1000 + round as i64);
             change.push(started.elapsed().as_micros());
-            assert!(
-                app.is_some(),
-                "no source application on an interactive desktop"
-            );
         }
 
         base.sort_unstable();
