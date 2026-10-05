@@ -60,6 +60,12 @@ void main() {
       findsOneWidget,
     );
     expect(tester.getSize(list).width, lessThan(1400 - AppSpacing.xxxl));
+    expect(find.text('Observed app'), findsNothing);
+    expect(
+      find.byKey(const ValueKey<String>('history-detail-source-app')),
+      findsNothing,
+    );
+    expect(repository.requestedSourceIconIds, isEmpty);
 
     final close = find.byKey(
       const ValueKey<String>('history-detail-inspector-close'),
@@ -287,7 +293,7 @@ void main() {
       }
       for (final label in [
         'Captured',
-        'Source',
+        'Observed app',
         'Clip type',
         'File',
         'Type',
