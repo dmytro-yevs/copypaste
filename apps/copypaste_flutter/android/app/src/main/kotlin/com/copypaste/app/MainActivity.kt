@@ -71,11 +71,11 @@ class MainActivity : FlutterActivity() {
     private val nativeExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private lateinit var clipboardManager: ClipboardManager
     private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
-        if (hasWindowFocus()) AndroidClipboardReader.captureForeground(this, foregroundCaptureHost)
+        if (hasWindowFocus()) captureForegroundClipboard()
     }
     private var clipboardListenerRegistered = false
+    private var foregroundCaptureEligible = false
     private var foregroundCaptureHost: AndroidClipboardReader.Host? = null
-    private val retiringForegroundHosts = mutableSetOf<AndroidClipboardReader.Host>()
     private val explicitCaptureHosts = mutableSetOf<AndroidClipboardReader.Host>()
     private var pairingLinksChannel: MethodChannel? = null
     private var androidCaptureChannel: AndroidCaptureChannel? = null
@@ -306,6 +306,7 @@ class MainActivity : FlutterActivity() {
     override fun onResume() {
         super.onResume()
         isForeground = true
+        foregroundCaptureEligible = true
         refreshForegroundCapture()
         if (!clipboardListenerRegistered) {
             clipboardManager.addPrimaryClipChangedListener(clipboardListener)
@@ -316,13 +317,15 @@ class MainActivity : FlutterActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus && clipboardListenerRegistered) {
-            AndroidClipboardReader.captureForeground(this, foregroundCaptureHost)
+            captureForegroundClipboard()
         }
     }
 
     override fun onPause() {
         isForeground = false
-        closeForegroundCapture()
+        foregroundCaptureEligible = false
+        AndroidClipboardReader.retireForeground(foregroundCaptureHost)
+        foregroundCaptureHost = null
         if (clipboardListenerRegistered) {
             clipboardManager.removePrimaryClipChangedListener(clipboardListener)
             clipboardListenerRegistered = false
@@ -331,30 +334,25 @@ class MainActivity : FlutterActivity() {
     }
 
     internal fun refreshForegroundCapture(completion: (Boolean) -> Unit = {}) {
-        if (isForeground && AndroidCaptureState.foregroundCaptureEnabled(this)) {
-            if (foregroundCaptureHost == null) foregroundCaptureHost = AndroidClipboardReader.openHost()
-            completion(true)
+        if (AndroidCaptureState.foregroundCaptureEnabled(this)) {
+            if (foregroundCaptureEligible) {
+                foregroundCaptureHost = AndroidClipboardReader.acquireForeground(foregroundCaptureHost)
+                completion(foregroundCaptureHost != null)
+            } else {
+                AndroidClipboardReader.retireForeground(foregroundCaptureHost)
+                foregroundCaptureHost = null
+                completion(false)
+            }
         } else {
-            closeForegroundCapture(completion)
+            foregroundCaptureHost = null
+            AndroidClipboardReader.disableForeground(completion)
         }
     }
 
-    private fun closeForegroundCapture(completion: (Boolean) -> Unit = {}) {
-        foregroundCaptureHost?.let { retiringForegroundHosts.add(it) }
-        foregroundCaptureHost = null
-        val hosts = retiringForegroundHosts.toList()
-        if (hosts.isEmpty()) { completion(true); return }
-        val activity = java.lang.ref.WeakReference(this)
-        var remaining = hosts.size
-        var succeeded = true
-        hosts.forEach { host ->
-            host.close { drained ->
-                if (drained) activity.get()?.retiringForegroundHosts?.remove(host)
-                succeeded = succeeded && drained
-                remaining -= 1
-                if (remaining == 0) completion(succeeded)
-            }
-        }
+    private fun captureForegroundClipboard() {
+        if (!foregroundCaptureEligible || !AndroidCaptureState.foregroundCaptureEnabled(this)) return
+        foregroundCaptureHost = AndroidClipboardReader.acquireForeground(foregroundCaptureHost)
+        AndroidClipboardReader.captureForeground(this, foregroundCaptureHost)
     }
 
     private fun deviceClass(): String = when (resources.configuration.smallestScreenWidthDp) {
@@ -364,7 +362,9 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
-        closeForegroundCapture()
+        foregroundCaptureEligible = false
+        AndroidClipboardReader.retireForeground(foregroundCaptureHost)
+        foregroundCaptureHost = null
         explicitCaptureHosts.toList().forEach { it.close() }
         explicitCaptureHosts.clear()
         androidCaptureChannel?.dispose()

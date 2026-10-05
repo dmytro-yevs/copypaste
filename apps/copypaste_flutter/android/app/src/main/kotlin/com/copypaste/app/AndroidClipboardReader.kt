@@ -21,7 +21,7 @@ internal object AndroidClipboardReader {
     private val mimeType = Regex("^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+$")
     private val ingestion = java.util.concurrent.ThreadPoolExecutor(1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS, java.util.concurrent.ArrayBlockingQueue(32))
 
-    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    private val main by lazy { android.os.Handler(android.os.Looper.getMainLooper()) }
     private val lifecycle = Executors.newCachedThreadPool()
     private val streamCleanup = Executors.newCachedThreadPool()
 
@@ -53,6 +53,14 @@ internal object AndroidClipboardReader {
 
     fun openHost(explicit: Boolean = false): Host? =
         runCatching { NativeRuntimeCapture.openHost(explicit) }.getOrDefault(0L).takeIf { it > 0L }?.let(::Host)
+
+    private val foregroundOwner = ForegroundCaptureOwner<Host>(
+        open = { openHost() },
+        close = { host, completion -> host.close(completion) },
+    )
+    fun acquireForeground(previous: Host?): Host? = foregroundOwner.acquire(previous)
+    fun retireForeground(host: Host?) = foregroundOwner.retire(host)
+    fun disableForeground(completion: (Boolean) -> Unit) = foregroundOwner.disable(completion)
 
     @Volatile private var backgroundHost: Host? = null
     private val retiringBackgroundHosts = mutableSetOf<Host>()
@@ -86,7 +94,36 @@ internal object AndroidClipboardReader {
 
     internal data class Snapshot(val text: String? = null, val uri: Uri? = null, val type: String? = null, val capturedAt: Long = 0)
 
-    internal class Pending(private val host: Host, completion: ((Boolean) -> Unit)? = null) : Runnable {
+    internal interface PendingRuntime {
+        fun enqueue(task: Runnable)
+        fun remove(task: Runnable)
+        fun postMain(action: () -> Unit)
+        fun closeInput(input: java.io.InputStream)
+        fun abandon(token: Long)
+        fun scoped(token: Long, completion: Boolean, contentType: String, callback: CaptureCallback): Boolean
+        fun onCaptured(context: Context?)
+        fun closeHost(host: Host)
+    }
+
+    private object NativePendingRuntime : PendingRuntime {
+        override fun enqueue(task: Runnable) { ingestion.execute(task) }
+        override fun remove(task: Runnable) { ingestion.remove(task) }
+        override fun postMain(action: () -> Unit) { main.post(action) }
+        override fun closeInput(input: java.io.InputStream) {
+            streamCleanup.execute { runCatching { input.close() } }
+        }
+        override fun abandon(token: Long) { NativeRuntimeCapture.abandon(token) }
+        override fun scoped(token: Long, completion: Boolean, contentType: String, callback: CaptureCallback): Boolean =
+            NativeRuntimeCapture.scoped(token, completion, contentType, callback)
+        override fun onCaptured(context: Context?) { AndroidCaptureFeedback.onCaptured(requireNotNull(context)) }
+        override fun closeHost(host: Host) { host.close() }
+    }
+
+    internal class Pending(
+        private val host: Host,
+        completion: ((Boolean) -> Unit)? = null,
+        private val runtime: PendingRuntime = NativePendingRuntime,
+    ) : Runnable {
         private val capability = java.util.concurrent.atomic.AtomicLong(0)
         val token: Long get() = capability.get()
         private val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -103,15 +140,15 @@ internal object AndroidClipboardReader {
             if (!cancelled.compareAndSet(false, true)) return
             payload.set(null)
             action.set(null)
-            ingestion.remove(this)
-            stream.getAndSet(null)?.let { input -> streamCleanup.execute { runCatching { input.close() } } }
+            runCatching { runtime.remove(this) }
+            stream.getAndSet(null)?.let { input -> runCatching { runtime.closeInput(input) } }
             if (result.get() != null) finish(false) else cleanup()
         }
         fun enqueue(snapshot: Snapshot, work: (Snapshot) -> Boolean) {
             payload.set(snapshot)
             action.set(work)
             if (!reading()) { cancel(); cleanup(); return }
-            try { ingestion.execute(this) } catch (_: RuntimeException) { cancel() }
+            try { runtime.enqueue(this) } catch (_: RuntimeException) { cancel() }
         }
         fun input(input: java.io.InputStream) {
             stream.set(input)
@@ -128,25 +165,29 @@ internal object AndroidClipboardReader {
             action.set(null)
             host.pending.remove(this)
             val token = capability.getAndSet(0)
-            if (token > 0) runCatching { NativeRuntimeCapture.abandon(token) }
+            if (token > 0) runCatching { runtime.abandon(token) }
         }
         fun finish(saved: Boolean) {
             if (!completing.compareAndSet(false, true)) return
-            main.post {
+            runtime.postMain {
                 val callback = result.getAndSet(null)
                 try {
                     var published = false
                     if (saved && reading()) {
-                        NativeRuntimeCapture.scoped(token, true, "text/plain") {
-                            AndroidCaptureFeedback.onCaptured(applicationContext!!)
-                            published = true
-                            callback?.invoke(true)
+                        runCatching {
+                            runtime.scoped(token, true, "text/plain") {
+                                runtime.onCaptured(applicationContext)
+                                published = true
+                                callback?.invoke(true)
+                            }
                         }
                     }
                     if (!published) callback?.invoke(false)
-                } finally { cleanup(); host.close() }
+                } finally { cleanup(); runtime.closeHost(host) }
             }
         }
+        fun read(contentType: String, callback: CaptureCallback): Boolean =
+            runtime.scoped(token, false, contentType, callback)
         private var applicationContext: Context? = null
         fun explicitContext(context: Context) { applicationContext = context.applicationContext }
         override fun run() {
@@ -183,7 +224,7 @@ internal object AndroidClipboardReader {
         pending.explicitContext(context)
         if (pending.token <= 0L || !pending.reading()) return
         var snapshot: Snapshot? = null
-        val read = runCatching { NativeRuntimeCapture.scoped(pending.token, false, "text/plain") { limit ->
+        val read = runCatching { pending.read("text/plain") { limit ->
             val uri = if (intent.action == Intent.ACTION_SEND) {
                 intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
                     ?: intent.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri
@@ -201,7 +242,7 @@ internal object AndroidClipboardReader {
         val pending = begin(host) ?: return
         val clipboard = context.getSystemService(ClipboardManager::class.java)
         var snapshot: Snapshot? = null
-        val read = runCatching { NativeRuntimeCapture.scoped(pending.token, false, "text/plain") { limit ->
+        val read = runCatching { pending.read("text/plain") { limit ->
             val primary = clipboard?.primaryClip
             if (primary != null && primary.description.label?.toString() != "CopyPaste") {
                 snapshot = Snapshot(
@@ -244,17 +285,17 @@ internal object AndroidClipboardReader {
     private fun binary(context: Context, pending: Pending, uri: Uri, declaredType: String): Boolean {
         if (uri.scheme != "content" || !mimeType.matches(declaredType) || declaredType.startsWith("text/")) return false
         var bytes: ByteArray? = null
-        val read = NativeRuntimeCapture.scoped(pending.token, false, declaredType) { limit ->
-            if (context.checkUriPermission(uri, Process.myPid(), Process.myUid(), Intent.FLAG_GRANT_READ_URI_PERMISSION) != PackageManager.PERMISSION_GRANTED) return@scoped
+        val read = pending.read(declaredType) { limit ->
+            if (context.checkUriPermission(uri, Process.myPid(), Process.myUid(), Intent.FLAG_GRANT_READ_URI_PERMISSION) != PackageManager.PERMISSION_GRANTED) return@read
             val resolver = context.contentResolver
             val resolvedType = resolver.getType(uri)?.lowercase()
-            if (resolvedType != null && resolvedType != declaredType) return@scoped
+            if (resolvedType != null && resolvedType != declaredType) return@read
             val cap = minOf(maximumBinaryBytes.toLong(), limit).toInt()
             val source = resolver.openInputStream(uri)?.use { input ->
                 pending.input(input)
                 try { readBounded(input, cap, pending) } finally { pending.releaseInput(input) }
-            } ?: return@scoped
-            if (!pending.reading()) return@scoped
+            } ?: return@read
+            if (!pending.reading()) return@read
             bytes = if (declaredType.startsWith("image/")) normaliseImage(source, cap) else source
         }
         val payload = bytes ?: return false
@@ -269,7 +310,7 @@ internal object AndroidClipboardReader {
             ?.takeIf { it.isNotBlank() && it.length <= 255 }
             ?: "attachment"
 
-    private fun readBounded(input: java.io.InputStream, maximum: Int, pending: Pending): ByteArray? {
+    internal fun readBounded(input: java.io.InputStream, maximum: Int, pending: Pending): ByteArray? {
         val output = ByteArrayOutputStream()
         val buffer = ByteArray(8 * 1024)
         while (true) {
