@@ -6,7 +6,6 @@ import 'package:copypaste_flutter/features/settings/models/settings_models.dart'
 import 'package:copypaste_flutter/features/settings/view/settings_screen.dart';
 import 'package:copypaste_flutter/features/update/update.dart';
 import 'package:copypaste_flutter/platform/update/app_update_platform.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:pub_semver/pub_semver.dart';
@@ -138,8 +137,6 @@ void main() {
         'Application exclusions are supported on macOS, Windows, and Android.',
   }.entries) {
     testWidgets('describes exclusions on ${entry.key.name}', (tester) async {
-      debugDefaultTargetPlatformOverride = entry.key;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final controller = SettingsController(
         repository: FakeSettingsRepository(),
         filePicker: FakeSettingsFilePicker(),
@@ -164,7 +161,7 @@ void main() {
         findsNothing,
       );
       expect(tester.takeException(), isNull);
-    });
+    }, variant: TargetPlatformVariant.only(entry.key));
   }
 
   testWidgets('renders desktop settings navigation with separate sections', (
