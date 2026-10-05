@@ -299,6 +299,33 @@ void main() {
       },
     );
 
+    test(
+      'normal cancellation releases the quit latch and resident actions',
+      () async {
+        final gate = Completer<void>();
+        final host = _FakeDesktopWindowHost(quitGate: gate);
+        final controller = DesktopWindowController(
+          host: host,
+          geometryStore: _FakeGeometryStore(),
+        );
+        await controller.initialize();
+        final quitting = controller.quit();
+        await Future<void>.delayed(Duration.zero);
+        await controller.quit();
+        expect(host.quitCalls, 1);
+        gate.complete();
+        await quitting;
+        await controller.handleCloseRequested();
+        await controller.showFromTrayOrDock();
+        await controller.quit();
+        expect(host.hideCalls, 1);
+        expect(host.showAndFocusCalls, 1);
+        expect(host.quitCalls, 2);
+        expect(controller.setupIssue.value, isNull);
+        await controller.dispose();
+      },
+    );
+
     test('disposes host resources and ignores a repeated dispose', () async {
       final host = _FakeDesktopWindowHost();
       final controller = DesktopWindowController(
@@ -455,6 +482,7 @@ class _FakeDesktopWindowHost implements DesktopWindowHost {
     this.windowInitializationGate,
     this.boundsReadStarted,
     this.boundsReadGate,
+    this.quitGate,
     DesktopWorkArea? workArea,
   }) : workArea =
            workArea ??
@@ -470,6 +498,7 @@ class _FakeDesktopWindowHost implements DesktopWindowHost {
   final Completer<void>? windowInitializationGate;
   final Completer<void>? boundsReadStarted;
   final Completer<void>? boundsReadGate;
+  final Completer<void>? quitGate;
   final DesktopWorkArea workArea;
   DesktopWindowBounds bounds = desktopWindowInitialBounds;
   Future<void> Function()? closeHandler;
@@ -555,6 +584,7 @@ class _FakeDesktopWindowHost implements DesktopWindowHost {
   @override
   Future<void> quit() async {
     quitCalls += 1;
+    await quitGate?.future;
     if (failedQuitAttempts > 0) {
       failedQuitAttempts -= 1;
       throw StateError('Quit failed.');

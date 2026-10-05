@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import '../../platform/desktop/quick_paste_host.dart';
 import '../history/controller/history_controller.dart';
@@ -38,6 +39,8 @@ class QuickPasteController extends ChangeNotifier {
   bool _initialized = false;
   bool _activating = false;
   int _presentationGeneration = 0;
+  int? _presentationId;
+  bool _disposed = false;
 
   bool get autoPaste => _preferences.autoPaste;
   bool get accessibilityGranted => _accessibilityGranted;
@@ -46,22 +49,32 @@ class QuickPasteController extends ChangeNotifier {
   HistoryClip? get focusedClip => _focusedClip;
 
   Future<void> initialize() async {
-    if (_initialized) return;
+    if (_disposed || _initialized) return;
     _initialized = true;
     _preferences = await _preferencesStore.read();
+    if (_disposed) return;
     await history.initialize();
+    if (_disposed) return;
     await _refreshAccessibility(prompt: false);
-    notifyListeners();
+    if (!_disposed) notifyListeners();
   }
 
-  Future<void> opened() async {
-    _preferences = await _preferencesStore.read();
+  Future<void> opened(int presentationId) async {
+    if (_disposed || presentationId <= 0) return;
+    _presentationId = presentationId;
     _focusedClip = null;
     _presentationGeneration += 1;
+    final preferences = await _preferencesStore.read();
+    if (!_isCurrent(presentationId)) return;
+    _preferences = preferences;
     await history.updateQuery(const HistoryQuery());
+    if (!_isCurrent(presentationId)) return;
     await _refreshAccessibility(prompt: _preferences.autoPaste);
-    notifyListeners();
+    if (_isCurrent(presentationId)) notifyListeners();
   }
+
+  bool _isCurrent(int presentationId) =>
+      !_disposed && _presentationId == presentationId;
 
   Future<void> search(String query) {
     final sort = query.trim().isEmpty
@@ -82,25 +95,36 @@ class QuickPasteController extends ChangeNotifier {
     bool invertAutoPaste = false,
     bool forcePaste = false,
   }) async {
-    if (_activating) return;
+    final presentationId = _presentationId;
+    if (_disposed || _activating || presentationId == null) return;
     _activating = true;
     notifyListeners();
     try {
       await history.select(clip.id);
+      if (!_isCurrent(presentationId)) return;
       final copied = await history.copySelected(plainText: plainText);
-      if (!copied) return;
+      if (!copied || !_isCurrent(presentationId)) return;
       final shouldPaste = forcePaste
           ? true
           : invertAutoPaste
           ? !_preferences.autoPaste
           : _preferences.autoPaste;
-      if (shouldPaste && _accessibilityGranted && await _host.paste()) {
-        return;
+      if (shouldPaste && _accessibilityGranted) {
+        var pasted = false;
+        try {
+          pasted = await _host.paste(presentationId: presentationId);
+        } on PlatformException {
+          // Copy already completed; an unavailable paste channel is copy-only.
+        } on MissingPluginException {
+          // A disappearing native context cannot undo the completed Copy.
+        }
+        if (!_isCurrent(presentationId) || pasted) return;
       }
-      await _host.close();
+      await _closePresentation(presentationId);
     } finally {
       _activating = false;
-      notifyListeners();
+      if (_disposed) history.dispose();
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -140,22 +164,47 @@ class QuickPasteController extends ChangeNotifier {
 
   Future<bool> clearUnpinned() => history.deleteAll();
 
-  Future<void> openMainWindow() => _host.openMainWindow();
+  Future<void> openMainWindow() {
+    _presentationId = null;
+    return _disposed ? Future.value() : _host.openMainWindow();
+  }
 
-  Future<void> openSettings() => _host.openSettings();
+  Future<void> openSettings() {
+    _presentationId = null;
+    return _disposed ? Future.value() : _host.openSettings();
+  }
 
-  Future<void> close() => _host.close();
+  Future<void> close() async {
+    final id = _presentationId;
+    _presentationId = null;
+    if (!_disposed && id != null) await _closePresentation(id);
+  }
 
-  Future<void> quit() => _host.quit();
+  Future<void> _closePresentation(int presentationId) async {
+    if (_disposed) return;
+    try {
+      await _host.close(presentationId: presentationId);
+    } on PlatformException {
+      // Copy remains complete if the native context has already disappeared.
+    } on MissingPluginException {
+      // Native teardown can race with this conditional close.
+    }
+  }
+
+  Future<void> quit() {
+    _presentationId = null;
+    return _disposed ? Future.value() : _host.quit();
+  }
 
   Future<void> _refreshAccessibility({required bool prompt}) async {
     _accessibilityGranted = await _host.accessibilityGranted();
-    if (prompt && !_accessibilityGranted) {
+    if (!_disposed && prompt && !_accessibilityGranted) {
       _accessibilityGranted = await _host.requestAccessibility();
     }
   }
 
   void _historyChanged() {
+    if (_disposed) return;
     final focusedId = _focusedClip?.id;
     if (focusedId != null) {
       _focusedClip = history.items
@@ -167,8 +216,12 @@ class QuickPasteController extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    _presentationId = null;
+    _host.setOpenedHandler(null);
     history.removeListener(_historyChanged);
-    history.dispose();
+    if (!_activating) history.dispose();
     final disposeRepository = _disposeRepository;
     if (disposeRepository != null) unawaited(disposeRepository());
     unawaited(_host.dispose());
