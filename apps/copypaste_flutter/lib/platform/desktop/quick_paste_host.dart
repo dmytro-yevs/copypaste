@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 abstract interface class QuickPasteWindowHost {
@@ -38,10 +39,21 @@ class MethodChannelQuickPasteWindowHost implements QuickPasteWindowHost {
   }
 
   @override
-  Future<void> prepare() => _channel.invokeMethod<void>('prepare');
+  Future<void> prepare() async {
+    if (await _channel.invokeMethod<bool>('prepare') != true) {
+      throw PlatformException(code: 'window_unavailable');
+    }
+  }
 
   @override
-  Future<void> open() => _channel.invokeMethod<void>('open');
+  Future<void> open() async {
+    final result = await _channel.invokeMethod<bool>('open');
+    final nullableMacosSuccess =
+        result == null && defaultTargetPlatform == TargetPlatform.macOS;
+    if (result != true && !nullableMacosSuccess) {
+      throw PlatformException(code: 'window_unavailable');
+    }
+  }
 
   @override
   Future<bool> accessibilityGranted() async =>
