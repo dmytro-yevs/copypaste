@@ -98,4 +98,10 @@ class RunnerTests: XCTestCase {
     XCTAssertTrue(display.visibleFrame.contains(frame))
   }
 
+  func testQuickPastePanelDoesNotActivateTheMainApplication() {
+    XCTAssertTrue(
+      QuickPastePanel.presentationStyleMask.contains(.nonactivatingPanel)
+    )
+  }
+
 }

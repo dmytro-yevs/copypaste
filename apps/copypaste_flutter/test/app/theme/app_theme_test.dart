@@ -430,6 +430,28 @@ void main() {
           'Application-owned overlays must use AppOverlays instead of local visual configuration.',
     );
   });
+
+  test('production toasts use the single application toast component', () {
+    final directToastCall = RegExp(r'\bshowToast\s*\(');
+    final offenders = <String>[];
+    for (final entity in Directory('lib').listSync(recursive: true)) {
+      if (entity is! File || !entity.path.endsWith('.dart')) continue;
+      if (entity.path
+          .replaceAll('\\', '/')
+          .endsWith('/app/theme/app_toast.dart')) {
+        continue;
+      }
+      if (directToastCall.hasMatch(entity.readAsStringSync())) {
+        offenders.add(entity.path);
+      }
+    }
+
+    expect(
+      offenders,
+      isEmpty,
+      reason: 'Application notifications must use AppToast.',
+    );
+  });
 }
 
 Widget _testTooltip(BuildContext context) {

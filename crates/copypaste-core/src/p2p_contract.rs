@@ -332,6 +332,7 @@ pub fn node_error_code(error: &NodeError) -> ErrorCode {
         NodeError::BadCode | NodeError::Handshake | NodeError::SelfPairing => {
             ErrorCode::PairingCode
         }
+        NodeError::AlreadyPaired => ErrorCode::PairingAlreadyExists,
         NodeError::PairingBusy => ErrorCode::RateLimited,
         NodeError::NoPairing => ErrorCode::NotReady,
         NodeError::BadAddress => ErrorCode::PairingAddress,
@@ -355,6 +356,7 @@ mod tests {
     fn sync_peer() -> Peer {
         Peer {
             pairing_id: "peer-1".into(),
+            device_id: None,
             name: "Phone".into(),
             psk: [1; TOKEN_LEN],
             last_addr: None,
@@ -404,6 +406,7 @@ mod tests {
     fn peer() -> Peer {
         Peer {
             pairing_id: "peer-1".to_string(),
+            device_id: None,
             name: "Phone".to_string(),
             psk: [1; TOKEN_LEN],
             last_addr: Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 47_654)),
