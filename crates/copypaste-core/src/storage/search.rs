@@ -100,8 +100,9 @@ pub(super) fn insert_fts_in_tx(
 /// * Punctuation becomes a space instead of being dropped. FTS5 tokenizes
 ///   URLs, email addresses, and paths at punctuation, so dropping it would
 ///   join adjacent terms into a token the index does not contain.
-/// * Default `unicode61` token characters and recognized combining diacritics
-///   are retained. They must not become boundaries inside an indexed word.
+/// * The bundled `unicode61` private-use token ranges and recognized combining
+///   diacritics are retained. They must not become boundaries inside an indexed
+///   word.
 /// * `_`, `"`, `*` and whitespace are otherwise kept.
 /// * An odd number of quotes is an unclosed phrase — an FTS5 syntax error — so
 ///   all quotes are dropped.
@@ -181,8 +182,7 @@ fn push_unquoted_tokens(tokens: &mut Vec<String>, raw: &str, reserved: &[&str]) 
 }
 
 fn is_unicode61_token_char(ch: char) -> bool {
-    ch.is_alphanumeric()
-        || matches!(ch as u32, 0xE000..=0xF8FF | 0xF0000..=0xFFFFD | 0x100000..=0x10FFFD)
+    ch.is_alphanumeric() || matches!(ch as u32, 0xE000..=0xF8FF | 0xF0000..=0xFFFFD)
 }
 
 fn is_unicode61_diacritic(ch: char) -> bool {
@@ -238,6 +238,7 @@ mod tests {
             .insert(item("first OR second phrase", T0 + 120_000))
             .unwrap();
         let decomposed = s.insert(item("cafe\u{301}ine", T0 + 180_000)).unwrap();
+        let plane_16_separator = s.insert(item("foo intervening bar", T0 + 240_000)).unwrap();
 
         for query in [
             " See https://example.test/help ",
@@ -278,6 +279,14 @@ mod tests {
                 .map(|item| item.id.as_str())
                 .collect::<Vec<_>>(),
             vec![decomposed.id.as_str()]
+        );
+        assert_eq!(
+            s.search("foo\u{100000}bar", 10)
+                .unwrap()
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![plane_16_separator.id.as_str()]
         );
     }
 
@@ -616,6 +625,10 @@ mod tests {
         assert_eq!(
             sanitize_fts5_query("\"person OR unrelated\"").as_deref(),
             Some("\"person OR unrelated\"")
+        );
+        assert_eq!(
+            sanitize_fts5_query("foo\u{100000}bar").as_deref(),
+            Some("foo* AND bar*")
         );
         // Unbalanced quote: strip rather than hand FTS5 a syntax error.
         assert_eq!(sanitize_fts5_query("\"oops").as_deref(), Some("oops*"));
