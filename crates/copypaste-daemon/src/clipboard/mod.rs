@@ -1,7 +1,7 @@
 //! The clipboard source port — platform I/O ends at this seam.
 //!
 //! Port manifest 01 (`docs/rewrite/port-manifest/01-clipboard-capture.md`) is
-//! binding for v2's text-capture scope. Its image and file rules are reference.
+//! binding for the current text, image and single-file capture contract.
 //!
 //! The platform adapters do not own change state, so the invariants in §2 stay
 //! testable without a real pasteboard — which is precisely why several
@@ -52,6 +52,7 @@
 
 mod change;
 mod fake;
+pub(crate) mod file_capture;
 pub(crate) mod source_coverage;
 // `test` so the module is exercised off macOS, but only where it compiles:
 // every syscall in it is `rustix::fs`, which has no Windows implementation.
@@ -110,6 +111,11 @@ impl<'a> CapturePolicy<'a> {
             {
                 bytes.len() as u64 <= self.limit_bytes(content_type)
             }
+            (copypaste_ipc::content_type::FILE, Some(bytes), None, Some(metadata))
+                if capture.content.is_empty() && !bytes.is_empty() && metadata.is_valid() =>
+            {
+                bytes.len() as u64 <= self.limit_bytes(copypaste_ipc::content_type::FILE)
+            }
             (copypaste_ipc::content_type::FILE, None, Some(_), Some(metadata))
                 if capture.content.is_empty() && metadata.is_valid() =>
             {
@@ -163,14 +169,14 @@ impl SourcePolicyEvidence {
 pub struct Capture {
     /// UTF-8 text captured from the system pasteboard.
     pub content: String,
-    /// Raw bytes for image capture. Text stays in `content`; the fields
+    /// Owned bytes for image or materialized file capture. Text stays in `content`; the fields
     /// are mutually exclusive so no caller can accidentally feed binary to a
     /// string-only consumer.
     pub binary_content: Option<Vec<u8>>,
-    /// One absolute local file reference. The tick opens it on the blocking
-    /// worker; polling itself must never read a file's bytes (manifest 01 I-16).
-    /// Multi-file clipboard changes are unsupported until this port carries a
-    /// batch rather than silently dropping all but one file.
+    /// Deferred desktop local file reference. The admitted blocking tick
+    /// normalizes it once before Pending acceptance; retries retain owned bytes.
+    /// macOS materializes inside its admitted poll and leaves this field empty.
+    /// Multi-file clipboard changes remain unsupported.
     pub file_path: Option<std::path::PathBuf>,
     pub file_metadata: Option<copypaste_core::FileMetadata>,
     /// One of `copypaste_ipc::content_type`.
@@ -284,13 +290,15 @@ pub trait ClipboardSource: Send {
     /// mistaken for the real thing.
     fn backend_name(&self) -> &'static str;
 
-    /// How many changes were dropped for exceeding the size cap.
+    /// Native adapter size rejections, including macOS File descriptor caps.
+    /// Shared deferred-file and later policy/ingest rejections are not counted.
     ///
     /// I-39 and §6.5: the rejection counter is user-visible; otherwise an
     /// oversized clipboard item is
     /// dropped in complete silence — indistinguishable from the daemon being
     /// broken. The counter is on the port so a status response can surface it.
-    /// Defaulted so a backend may omit it, never so it can be forgotten.
+    /// This is the adapter's counter, not a total of every rejected input.
+    /// Defaults to zero for a backend without this adapter counter.
     ///
     /// Read by `AppState::counters` onto [`copypaste_ipc::DiagnosticCounters`].
     fn rejected_too_large_count(&self) -> u64 {
@@ -409,5 +417,100 @@ mod tests {
         assert!(!CapturePolicy::new(&config).allows_materialized(&capture));
         capture.app_bundle_id = Some("WindowsOwner".into());
         assert!(CapturePolicy::new(&config).allows_materialized(&capture));
+    }
+    #[test]
+    fn materialized_file_shape_is_exclusive_nonempty_valid_and_size_bounded() {
+        let config = ConfigData {
+            max_file_size_bytes: copypaste_ipc::MIN_FILE_SIZE_BYTES,
+            ..Default::default()
+        };
+        let policy = CapturePolicy::new(&config);
+        let mut file = super::Capture::text(String::new());
+        file.content_type = copypaste_ipc::content_type::FILE.into();
+        file.binary_content = Some(vec![1]);
+        file.file_metadata = copypaste_core::FileMetadata::new("file", "application/octet-stream");
+        assert!(policy.allows_materialized(&file));
+        let valid = file.clone();
+        file.file_path = Some("/local/file".into());
+        assert!(!policy.allows_materialized(&file));
+        file = valid.clone();
+        file.file_metadata = None;
+        assert!(!policy.allows_materialized(&file));
+        file = valid.clone();
+        file.content = "text".into();
+        assert!(!policy.allows_materialized(&file));
+        file = valid.clone();
+        file.binary_content = Some(vec![]);
+        assert!(!policy.allows_materialized(&file));
+        file = valid.clone();
+        file.content_type = copypaste_ipc::content_type::IMAGE_PNG.into();
+        assert!(!policy.allows_materialized(&file));
+        file = valid.clone();
+        file.file_metadata.as_mut().unwrap().filename = "../bad".into();
+        assert!(!policy.allows_materialized(&file));
+        file = valid;
+        file.binary_content = Some(vec![1; copypaste_ipc::MIN_FILE_SIZE_BYTES as usize + 1]);
+        assert!(!policy.allows_materialized(&file));
+    }
+
+    #[test]
+    fn locator_file_copy_and_reference_free_native_copy_keep_the_existing_dispatch() {
+        #[derive(Default)]
+        struct Writes {
+            text: Option<String>,
+            binary: Option<Vec<u8>>,
+        }
+        impl super::ClipboardSource for Writes {
+            fn poll(&mut self) -> Option<super::Capture> {
+                None
+            }
+            fn poll_with_policy(&mut self, _: CapturePolicy<'_>) -> Option<super::Capture> {
+                None
+            }
+            fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
+                self.text = Some(text.into());
+                Ok(())
+            }
+            fn set_binary_contents(
+                &mut self,
+                _: &str,
+                _: &str,
+                bytes: &[u8],
+                _: Option<&copypaste_core::FileMetadata>,
+            ) -> Result<(), copypaste_core::ClipboardWriteError> {
+                self.binary = Some(bytes.to_vec());
+                Ok(())
+            }
+            fn backend_name(&self) -> &'static str {
+                "fake-copy"
+            }
+        }
+        use super::ClipboardSource;
+        let mut writes = Writes::default();
+        writes
+            .write_payload(
+                "id",
+                &copypaste_core::ClipboardPayload::File {
+                    bytes: vec![7].into(),
+                    metadata: copypaste_core::FileMetadata::with_source_reference(
+                        "file",
+                        "application/octet-stream",
+                        "/old/deleted/file",
+                    ),
+                },
+            )
+            .unwrap();
+        assert_eq!(writes.text.as_deref(), Some("/old/deleted/file"));
+        assert!(writes.binary.is_none());
+        writes
+            .write_payload(
+                "id",
+                &copypaste_core::ClipboardPayload::File {
+                    bytes: vec![8].into(),
+                    metadata: copypaste_core::FileMetadata::new("file", "application/octet-stream"),
+                },
+            )
+            .unwrap();
+        assert_eq!(writes.binary, Some(vec![8]));
     }
 }
