@@ -495,7 +495,8 @@ class _RejectedExclusionRepository extends FakeSettingsRepository {
     if (change.excludedAppIds != null) {
       throw const runtime.RuntimeError(
         code: 'invalid_request',
-        message: 'excluded_app_bundle_ids contains an entry that is empty or too long',
+        message:
+            'excluded_app_bundle_ids contains an entry that is empty or too long',
       );
     }
     return super.updateSettings(change);

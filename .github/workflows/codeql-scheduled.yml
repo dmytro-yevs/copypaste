@@ -43,14 +43,32 @@ jobs:
         with:
           channel: stable
           flutter-version: ${{ steps.flutter.outputs.version }}
+      - name: Prepare macOS project
+        working-directory: apps/copypaste_flutter
+        run: |
+          flutter pub get --enforce-lockfile
+          flutter build macos --release --config-only
       - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           languages: swift
           build-mode: manual
-      - run: |
-          cd apps/copypaste_flutter
-          flutter pub get --enforce-lockfile
-          flutter build macos --release
+      - name: Build Swift sources for CodeQL
+        working-directory: apps/copypaste_flutter
+        run: |
+          xcodebuild build \
+            -workspace macos/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/codeql-macos" \
+            -clonedSourcePackagesDirPath "$PWD/build/macos/SourcePackages" \
+            "OBJROOT=$RUNNER_TEMP/codeql-macos/Build/Intermediates.noindex" \
+            "SYMROOT=$RUNNER_TEMP/codeql-macos/Build/Products" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILATION_CACHE_ENABLE_CACHING=NO \
+            SWIFT_ENABLE_COMPILE_CACHE=NO \
+            SWIFT_USE_INTEGRATED_DRIVER=NO
       - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           category: /language:swift
