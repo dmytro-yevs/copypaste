@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/copypaste-module-sdk",
+    "crates/copypaste-modules",
+    "examples/modules/text-tools",
     "crates/copypaste-clock",
     "crates/copypaste-feedback",
     "crates/copypaste-retry",

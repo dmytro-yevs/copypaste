@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/features/devices/device_label.dart';
@@ -14,8 +15,142 @@ import 'package:copypaste_flutter/features/history/repository/history_repository
 import 'package:copypaste_flutter/features/history/view/history_screen.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as raster;
 
 void main() {
+  for (final scenario in [
+    (platform: TargetPlatform.android, width: 480.0, pixelRatio: 1.0),
+    (platform: TargetPlatform.windows, width: 900.0, pixelRatio: 2.0),
+    (platform: TargetPlatform.macOS, width: 1400.0, pixelRatio: 2.0),
+  ]) {
+    for (final dimensions in [
+      (1200, 200),
+      (200, 1200),
+      (1200, 1200),
+      (60, 30),
+    ]) {
+      testWidgets(
+        'fits ${dimensions.$1}x${dimensions.$2} list previews on ${scenario.platform.name}',
+        (tester) async {
+          await tester.binding.setSurfaceSize(Size(scenario.width, 900));
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+          final repository = _ScreenRepository()
+            ..fitImagePreviewBounds = true
+            ..availableImagePreview = HistoryImagePreview(
+              raster.encodePng(
+                raster.Image(width: dimensions.$1, height: dimensions.$2),
+              ),
+              width: dimensions.$1,
+              height: dimensions.$2,
+            )
+            ..page = HistoryClipPage(
+              items: [
+                HistoryClip(
+                  id: 'proportional',
+                  contentType: 'image/png',
+                  preview: '[image]',
+                  createdAt: DateTime.utc(2026),
+                  pinned: false,
+                  kind: HistoryClipKind.image,
+                ),
+              ],
+            );
+          final controller = HistoryController(repository);
+          addTearDown(controller.dispose);
+          await tester.pumpWidget(
+            ShadcnApp(
+              theme: AppTheme.light.copyWith(platform: () => scenario.platform),
+              home: MediaQuery(
+                data: MediaQueryData(devicePixelRatio: scenario.pixelRatio),
+                child: Scaffold(child: HistoryScreen(controller: controller)),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+
+          final image = find.byKey(
+            const ValueKey<String>('history-card-image-proportional'),
+          );
+          final viewport = find
+              .ancestor(of: image, matching: find.byType(LayoutBuilder))
+              .first;
+          final imageSize = tester.getSize(image);
+          final availableWidth = tester.getSize(viewport).width;
+          final imageContext = tester.element(image);
+          final linePainter = TextPainter(
+            text: TextSpan(
+              text: 'Ag',
+              style: DefaultTextStyle.of(imageContext).style,
+            ),
+            maxLines: 1,
+            textDirection: Directionality.of(imageContext),
+            textScaler: MediaQuery.textScalerOf(imageContext),
+          )..layout();
+          final maxHeight = linePainter.height * 8;
+
+          expect(
+            imageSize.width / imageSize.height,
+            closeTo(dimensions.$1 / dimensions.$2, 0.05),
+          );
+          expect(imageSize.width, lessThanOrEqualTo(availableWidth));
+          expect(imageSize.height, lessThanOrEqualTo(maxHeight));
+          final expectedSize = applyBoxFit(
+            BoxFit.scaleDown,
+            Size(dimensions.$1.toDouble(), dimensions.$2.toDouble()),
+            Size(availableWidth, maxHeight),
+          ).destination;
+          expect(imageSize.width, closeTo(expectedSize.width, 1));
+          expect(imageSize.height, closeTo(expectedSize.height, 1));
+          final expectedWidth = (availableWidth * scenario.pixelRatio)
+              .ceil()
+              .clamp(1, 2048);
+          final expectedHeight = (maxHeight * scenario.pixelRatio).ceil().clamp(
+            1,
+            2048,
+          );
+          expect(repository.requestedImageEdges, [null]);
+          expect(repository.requestedImageBounds.single?.width, expectedWidth);
+          expect(
+            repository.requestedImageBounds.single?.height,
+            expectedHeight,
+          );
+          final provider = tester.widget<Image>(image).image as ResizeImage;
+          expect(provider.width, lessThanOrEqualTo(expectedWidth));
+          expect(provider.height, lessThanOrEqualTo(expectedHeight));
+          expect(
+            provider.width,
+            lessThanOrEqualTo((imageSize.width * scenario.pixelRatio).ceil()),
+          );
+          expect(
+            provider.height,
+            lessThanOrEqualTo((imageSize.height * scenario.pixelRatio).ceil()),
+          );
+          expect(tester.takeException(), isNull);
+
+          if (scenario.platform == TargetPlatform.macOS &&
+              dimensions == (1200, 200)) {
+            await tester.binding.setSurfaceSize(const Size(700, 900));
+            await tester.pumpAndSettle();
+            final resizedWidth = tester.getSize(viewport).width;
+            final resizedImage = tester.getSize(image);
+            expect(resizedImage.width, closeTo(resizedWidth, 0.01));
+            expect(resizedImage.width / resizedImage.height, closeTo(6, 0.05));
+            expect(repository.requestedImageBounds.length, 2);
+            expect(
+              repository.requestedImageBounds.last?.width,
+              (resizedWidth * scenario.pixelRatio).ceil(),
+            );
+            expect(
+              repository.requestedImageBounds.last?.height,
+              expectedHeight,
+            );
+            expect(tester.takeException(), isNull);
+          }
+        },
+      );
+    }
+  }
+
   testWidgets('shows the wide inspector only after a clip is selected', (
     tester,
   ) async {
@@ -1264,65 +1399,97 @@ void main() {
     }
   });
 
-  for (final size in [const Size(1400, 900), const Size(320, 568)]) {
-    testWidgets('copies from the split button and its dropdown at $size', (
-      tester,
-    ) async {
-      await tester.binding.setSurfaceSize(size);
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      final repository = _ScreenRepository()
-        ..page = HistoryClipPage(
-          items: [
-            HistoryClip(
-              id: 'copy-clip',
-              contentType: 'text/html',
-              preview: 'Copy menu clip',
-              createdAt: DateTime.utc(2026),
-              pinned: false,
-            ),
-          ],
+  for (final (platform, size) in [
+    (TargetPlatform.macOS, const Size(1400, 900)),
+    (TargetPlatform.windows, const Size(1400, 900)),
+    (TargetPlatform.android, const Size(320, 568)),
+    (TargetPlatform.android, const Size(700, 360)),
+  ]) {
+    testWidgets(
+      'copies from the split button and its select on $platform at $size',
+      (tester) async {
+        await tester.binding.setSurfaceSize(size);
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final repository = _ScreenRepository()
+          ..page = HistoryClipPage(
+            items: [
+              HistoryClip(
+                id: 'copy-clip',
+                contentType: 'text/html',
+                preview: 'Copy menu clip',
+                createdAt: DateTime.utc(2026),
+                pinned: false,
+              ),
+            ],
+          );
+        final controller = HistoryController(repository);
+        addTearDown(controller.dispose);
+        await tester.pumpWidget(
+          ShadcnApp(
+            theme: AppTheme.light.copyWith(platform: () => platform),
+            builder: AppTheme.builder,
+            home: Scaffold(child: HistoryScreen(controller: controller)),
+          ),
         );
-      final controller = HistoryController(repository);
-      addTearDown(controller.dispose);
-      await tester.pumpWidget(
-        ShadcnApp(
-          theme: AppTheme.light,
-          builder: AppTheme.builder,
-          home: Scaffold(child: HistoryScreen(controller: controller)),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Copy menu clip'));
-      await tester.pumpAndSettle();
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Copy menu clip'));
+        await tester.pumpAndSettle();
 
-      final copy = find.widgetWithText(Button, 'Copy');
-      final options = find.byKey(
-        const ValueKey<String>('history-copy-options'),
-      );
-      expect(find.text('Copy plain text'), findsNothing);
-      expect(tester.getRect(copy).right, tester.getRect(options).left);
-      expect(tester.getSize(copy).height, tester.getSize(options).height);
+        final copy = find.widgetWithText(Button, 'Copy');
+        final options = find.byKey(
+          const ValueKey<String>('history-copy-options'),
+        );
+        expect(find.text('Copy plain text'), findsNothing);
+        expect(tester.getRect(copy).right, tester.getRect(options).left);
+        expect(tester.getSize(copy).height, tester.getSize(options).height);
 
-      await tester.tap(copy);
-      await tester.pumpAndSettle();
-      expect(repository.copiedIds, ['copy-clip']);
-      expect(repository.plainTextCopiedIds, isEmpty);
-      await tester.pump(const Duration(seconds: 6));
-      await tester.pumpAndSettle();
+        await tester.tap(copy);
+        await tester.pumpAndSettle();
+        expect(repository.copiedIds, ['copy-clip']);
+        expect(repository.plainTextCopiedIds, isEmpty);
+        await tester.pump(const Duration(seconds: 6));
+        await tester.pumpAndSettle();
 
-      await tester.tap(options);
-      await tester.pumpAndSettle();
-      expect(find.byType(DropdownMenu), findsOneWidget);
-      expect(repository.copiedIds, ['copy-clip']);
-      await tester.tap(find.text('Copy plain text'));
-      await tester.pumpAndSettle();
-      expect(repository.plainTextCopiedIds, ['copy-clip']);
-      expect(repository.copiedIds, ['copy-clip']);
-      expect(find.byType(DropdownMenu), findsNothing);
-      expect(tester.takeException(), isNull);
-      await tester.pump(const Duration(seconds: 6));
-      await tester.pumpAndSettle();
-    });
+        final drawerCount = tester
+            .widgetList(find.byType(DrawerWrapper))
+            .length;
+        await tester.tap(options);
+        // The select's ContextAnchor polls every frame while the popup is open.
+        await tester.pump();
+        await tester.pump(AppMotion.standard);
+        final popup = find.byType(SelectPopup<bool>);
+        expect(popup, findsOneWidget);
+        expect(
+          OverlayConfiguration.maybeOf(tester.element(popup)),
+          isA<PopoverConfiguration>(),
+        );
+        expect(find.byType(DrawerWrapper), findsNWidgets(drawerCount));
+        final popupRect = tester.getRect(popup);
+        expect(popupRect.left, greaterThanOrEqualTo(0));
+        expect(popupRect.top, greaterThanOrEqualTo(0));
+        expect(popupRect.right, lessThanOrEqualTo(size.width));
+        expect(popupRect.bottom, lessThanOrEqualTo(size.height));
+        expect(popupRect.height, lessThan(AppControlSize.large * 2));
+        final plainTextIcon = find.descendant(
+          of: popup,
+          matching: find.byIcon(LucideIcons.alignLeft),
+        );
+        expect(
+          tester.getRect(find.text('Copy plain text')).left -
+              tester.getRect(plainTextIcon).right,
+          AppSpacing.sm,
+        );
+        expect(repository.copiedIds, ['copy-clip']);
+        await tester.tap(find.text('Copy plain text'));
+        await tester.pumpAndSettle();
+        expect(repository.plainTextCopiedIds, ['copy-clip']);
+        expect(repository.copiedIds, ['copy-clip']);
+        expect(popup, findsNothing);
+        expect(tester.takeException(), isNull);
+        await tester.pump(const Duration(seconds: 6));
+        await tester.pumpAndSettle();
+      },
+    );
   }
 
   testWidgets('offers Download for a file whose source is unavailable', (
@@ -1393,6 +1560,9 @@ class _ScreenRepository implements HistoryRepository {
   final List<String> copiedIds = [];
   final List<String> plainTextCopiedIds = [];
   HistoryImagePreview? availableImagePreview;
+  bool fitImagePreviewBounds = false;
+  final List<int?> requestedImageEdges = [];
+  final List<HistoryImagePreviewBounds?> requestedImageBounds = [];
   final List<HistoryQuery> queries = [];
 
   @override
@@ -1415,8 +1585,30 @@ class _ScreenRepository implements HistoryRepository {
   Future<HistoryClip> get(String id) async => page.items.single;
 
   @override
-  Future<HistoryImagePreview?> imagePreview(String id, {int? maxEdge}) async =>
-      availableImagePreview;
+  Future<HistoryImagePreview?> imagePreview(
+    String id, {
+    int? maxEdge,
+    HistoryImagePreviewBounds? bounds,
+  }) async {
+    requestedImageEdges.add(maxEdge);
+    requestedImageBounds.add(bounds);
+    final preview = availableImagePreview;
+    if (!fitImagePreviewBounds || preview == null || bounds == null) {
+      return preview;
+    }
+    final size = applyBoxFit(
+      BoxFit.scaleDown,
+      Size(preview.width.toDouble(), preview.height.toDouble()),
+      Size(bounds.width.toDouble(), bounds.height.toDouble()),
+    ).destination;
+    final width = size.width.round().clamp(1, bounds.width);
+    final height = size.height.round().clamp(1, bounds.height);
+    return HistoryImagePreview(
+      raster.encodePng(raster.Image(width: width, height: height)),
+      width: width,
+      height: height,
+    );
+  }
 
   @override
   Future<HistorySourceAppIcon?> sourceAppIcon(String id) async {

@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "api_version": 1,
+  "id": "copypaste.text-tools",
+  "title": "Text Tools",
+  "description": "Trim text or convert it to uppercase.",
+  "version": "1.0.0",
+  "app_versions": ">=1.0.0, <2.0.0",
+  "commands": [
+    {
+      "id": "transform",
+      "title": "Transform text",
+      "description": "Transform the supplied text.",
+      "arguments": [
+        { "id": "text", "title": "Text", "kind": "text", "default": "", "required": true }
+      ]
+    }
+  ],
+  "preferences": [
+    { "id": "uppercase", "title": "Uppercase", "kind": "boolean", "default": false }
+  ]
+}

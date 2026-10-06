@@ -10,6 +10,7 @@ license.workspace = true
 # CLI. Both the daemon and the CLI depend on this crate and on nothing else for
 # wire types.
 [dependencies]
+copypaste-module-sdk = { path = "../copypaste-module-sdk" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

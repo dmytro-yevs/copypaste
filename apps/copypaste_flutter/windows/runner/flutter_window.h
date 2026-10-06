@@ -7,6 +7,7 @@
 
 #include <functional>
 #include <memory>
+#include <map>
 #include <optional>
 #include <cstdint>
 #include <string>
@@ -105,6 +106,9 @@ class FlutterWindow : public Win32Window {
   bool ShowQuickPasteAtCursor(HWND sampled_foreground);
   bool SetQuickPasteInspectorVisible(int64_t presentation_id, bool visible);
   bool PasteIntoPreviousWindow(int64_t presentation_id);
+  void NotifyQuickPasteOpened();
+  void ScheduleQuickPasteRetirement();
+  void BeginQuickPasteShutdown();
   void ShowMainWindow(bool open_settings);
 
   // The project to run.
@@ -115,6 +119,9 @@ class FlutterWindow : public Win32Window {
   std::string pending_pairing_uri_;
   bool is_quick_paste_context_;
   bool quick_paste_inspector_visible_ = false;
+  bool quick_paste_ready_ = false;
+  bool quick_paste_retiring_ = false;
+  uint64_t quick_paste_generation_ = 0;
   int quick_paste_rounded_width_ = 0;
   int quick_paste_rounded_height_ = 0;
   void UpdateQuickPasteWindowCorners();
@@ -134,6 +141,7 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<AppUpdateChannel> app_update_channel_;
   std::unique_ptr<FlutterWindow> protected_pairing_window_;
   std::unique_ptr<FlutterWindow> quick_paste_window_;
+  std::map<uint64_t, std::unique_ptr<FlutterWindow>> retiring_quick_paste_windows_;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

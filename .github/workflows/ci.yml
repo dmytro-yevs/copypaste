@@ -115,6 +115,34 @@ jobs:
           checked cargo +1.96 test -p copypaste-source-app --locked -- --include-ignored --test-threads=1 --nocapture
           checked cargo +1.96 test -p copypaste-core --locked crypto::keystore:: -- --nocapture
 
+  optional-modules:
+    name: Optional modules (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: macos, runner: macos-14 }
+          - { platform: windows, runner: windows-2022 }
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: "1.96"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: |
+            .
+            modules/ocr
+      - name: Module lifecycle and OCR contracts
+        run: |
+          cargo test -p copypaste-modules --locked
+          cargo test --manifest-path modules/ocr/Cargo.toml --locked
+          cargo clippy --manifest-path modules/ocr/Cargo.toml --locked --all-targets -- -D warnings
+
   flutter-foundation:
     name: Flutter foundation (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}

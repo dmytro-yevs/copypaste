@@ -269,6 +269,10 @@ fn is_safe_raw_error_code(code: &str) -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResponseData {
+    /// SDK JSON contracts carried without exposing a module's native ABI.
+    Modules {
+        json: String,
+    },
     Status(StatusData),
     Export(ExportData),
     Import(ImportData),
