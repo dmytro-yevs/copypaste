@@ -55,19 +55,18 @@ class ReleaseSafetyTest(unittest.TestCase):
                     f"CopyPaste-v{version}-macos-arm64.dmg",
                     f"CopyPaste-v{version}-android.apk",
                     f"CopyPaste-v{version}-windows-x86_64-setup.exe",
-                    f"copypaste-cli-v{version}-macos-arm64.tar.gz",
                 ):
                     (artifacts / name).touch()
-                    (artifacts / (name + ".sha256")).touch()
-                    if name.endswith((".apk", ".exe")):
-                        (artifacts / (name + ".sig")).touch()
                 notes = render(version, "dmytro-yevs/copypaste", artifacts)
                 links = re.findall(r"https://github.com/[^\s)]+", notes)
-                self.assertEqual(len(links), 10)
+                self.assertEqual(len(links), 3)
                 self.assertTrue(all(f"/download/v{version}/" in link for link in links))
                 self.assertNotIn("{{", notes)
-                for platform in ("macOS", "Android", "Windows"):
-                    self.assertIn(f"| {platform} |", notes)
+                rows = [line for line in notes.splitlines() if line.startswith("|")]
+                self.assertEqual(len(rows), 3)
+                self.assertEqual(rows[0], "| macOS / arm64 | Android / Universal | Windows / x86_64 |")
+                self.assertEqual(rows[2].count("[Download]("), 3)
+                self.assertTrue(all(link.endswith((".dmg", ".apk", ".exe")) for link in links))
                 (artifacts / f"CopyPaste-v{version}-android.apk").unlink()
                 with self.assertRaisesRegex(ValueError, "artifact is missing"):
                     render(version, "dmytro-yevs/copypaste", artifacts)
