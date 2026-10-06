@@ -94,6 +94,11 @@ abstract interface class QuickPasteContextHost {
 
   Future<bool> requestAccessibility();
 
+  Future<void> setInspectorVisible({
+    required int presentationId,
+    required bool visible,
+  });
+
   Future<bool> paste({required int presentationId});
 
   Future<void> close({required int presentationId});
@@ -127,6 +132,20 @@ class MethodChannelQuickPasteContextHost implements QuickPasteContextHost {
   @override
   Future<bool> requestAccessibility() async =>
       await _channel.invokeMethod<bool>('requestAccessibility') ?? false;
+
+  @override
+  Future<void> setInspectorVisible({
+    required int presentationId,
+    required bool visible,
+  }) async {
+    if (await _channel.invokeMethod<bool>('setInspectorVisible', {
+          'presentationId': presentationId,
+          'visible': visible,
+        }) !=
+        true) {
+      throw PlatformException(code: 'window_unavailable');
+    }
+  }
 
   @override
   Future<bool> paste({required int presentationId}) async {

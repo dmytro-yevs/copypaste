@@ -29,7 +29,7 @@ bool PresentQuickPasteAtCursor(
     HWND window, const QuickPastePresentationApi& api,
     const std::function<void()>& opened,
     const std::function<bool()>& owns = [] { return true; },
-    const std::function<void()>& cleanup = {});
+    const std::function<void()>& cleanup = {}, bool inspector_visible = false);
 
 // Public Win32 calls used by the presentation-scoped target decision flow.
 struct QuickPasteTargetApi {
@@ -69,7 +69,8 @@ class QuickPasteTargetSession {
 
 bool ShowQuickPastePresentationAtCursor(
     HWND window, QuickPasteTargetSession& session, int64_t id,
-    const QuickPastePresentationApi& api, const std::function<void()>& opened);
+    const QuickPastePresentationApi& api, const std::function<void()>& opened,
+    bool inspector_visible = false);
 
 // A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
@@ -102,6 +103,7 @@ class FlutterWindow : public Win32Window {
   bool OpenQuickPasteContext();
   void CloseQuickPasteContext();
   bool ShowQuickPasteAtCursor(HWND sampled_foreground);
+  bool SetQuickPasteInspectorVisible(int64_t presentation_id, bool visible);
   bool PasteIntoPreviousWindow(int64_t presentation_id);
   void ShowMainWindow(bool open_settings);
 
@@ -112,6 +114,10 @@ class FlutterWindow : public Win32Window {
   std::string pairing_ceremony_id_;
   std::string pending_pairing_uri_;
   bool is_quick_paste_context_;
+  bool quick_paste_inspector_visible_ = false;
+  int quick_paste_rounded_width_ = 0;
+  int quick_paste_rounded_height_ = 0;
+  void UpdateQuickPasteWindowCorners();
   HWND main_window_handle_ = nullptr;
   QuickPasteTargetSession quick_paste_session_;
   uint64_t pairing_generation_ = 0;
