@@ -713,10 +713,7 @@ class _Repository implements HistoryRepository {
   }
 
   @override
-  Future<HistoryImagePreview?> imagePreview(
-    String id, {
-    int? maxEdge,
-  }) async {
+  Future<HistoryImagePreview?> imagePreview(String id, {int? maxEdge}) async {
     imagePreviewEdges.add(maxEdge);
     if (id != 'image') return null;
     final preview = image.Image(width: 240, height: 180);

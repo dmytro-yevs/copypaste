@@ -170,45 +170,32 @@ class HistoryInspector extends StatelessWidget {
                         child: const Text('Copy'),
                       ),
                       if (clip.contentKind.isTextual)
-                        Semantics(
-                          label: 'Copy options',
-                          button: true,
-                          child: Select<bool>(
-                            key: const ValueKey<String>('history-copy-options'),
-                            value: false,
-                            expandIcon: null,
-                            theme: AppTheme.primarySelectTheme(context),
-                            itemBuilder: (context, _) => Icon(
-                              LucideIcons.chevronDown,
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.primaryForeground,
-                            ),
-                            onChanged: (plainText) {
-                              if (plainText == true) {
-                                unawaited(_copy(context, plainText: true));
-                              }
-                            },
-                            popup: const SelectPopup<bool>.noVirtualization(
-                              items: SelectItemList(
-                                children: [
-                                  SelectItemButton<bool>(
-                                    value: true,
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          LucideIcons.alignLeft,
-                                          size: AppIconSize.sm,
-                                        ),
-                                        Gap(AppSpacing.sm),
-                                        Text('Copy plain text'),
-                                      ],
-                                    ),
-                                  ),
-                                ],
+                        Builder(
+                          builder: (buttonContext) => Semantics(
+                            label: 'Copy options',
+                            button: true,
+                            child: Button.primary(
+                              key: const ValueKey<String>(
+                                'history-copy-options',
                               ),
-                            ).call,
+                              style: const ButtonStyle.primaryIcon(),
+                              onPressed: () => showDropdown<void>(
+                                context: buttonContext,
+                                builder: (_) => DropdownMenu(
+                                  children: [
+                                    MenuButton(
+                                      onPressed: (_) =>
+                                          _copy(context, plainText: true),
+                                      leading: const Icon(
+                                        LucideIcons.alignLeft,
+                                      ),
+                                      child: const Text('Copy plain text'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              child: const Icon(LucideIcons.chevronDown),
+                            ),
                           ),
                         ),
                     ],
