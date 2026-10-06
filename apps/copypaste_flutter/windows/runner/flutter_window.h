@@ -91,7 +91,7 @@ class FlutterWindow : public Win32Window {
                          LPARAM const lparam) noexcept override;
 
  private:
-  bool SetCaptureProtection(bool enabled);
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> security_channel_;
   bool BeginProtectedPairingContext();
   bool IsProtectedPairingContextActive() const;
   bool DetachProtectedPairingContext();

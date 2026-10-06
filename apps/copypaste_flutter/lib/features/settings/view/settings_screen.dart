@@ -50,6 +50,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   ];
 
   final _captureSectionKey = GlobalKey();
+  final _securitySectionKey = GlobalKey();
+  final _blockScreenshotsKey = GlobalKey();
   final _storageSectionKey = GlobalKey();
   final _syncSectionKey = GlobalKey();
   final _feedbackSectionKey = GlobalKey();
@@ -240,6 +242,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
               switch (selectedSection) {
                 _SettingsSectionId.capture => _captureSection(settings),
+                _SettingsSectionId.security => _securitySection(),
                 _SettingsSectionId.storageData => _storageSection(settings),
                 _SettingsSectionId.sync => _syncSection(settings),
                 _SettingsSectionId.feedback => _feedbackSection(settings),
@@ -439,6 +442,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         targetKey: _notificationOnCopyKey,
       ),
       _SettingsNavigationTarget(
+        id: _SettingsTargetId.blockScreenshots,
+        section: _SettingsSectionId.security,
+        label: 'Block screenshots',
+        description: 'Prevent screenshots and screen recording of CopyPaste.',
+        keywords: 'privacy screen capture protection pairing qr security code',
+        targetKey: _blockScreenshotsKey,
+      ),
+      _SettingsNavigationTarget(
         id: _SettingsTargetId.soundOnCopy,
         section: _SettingsSectionId.feedback,
         label: 'Sound on copy',
@@ -477,6 +488,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   GlobalKey _sectionKey(_SettingsSectionId section) => switch (section) {
     _SettingsSectionId.capture => _captureSectionKey,
+    _SettingsSectionId.security => _securitySectionKey,
     _SettingsSectionId.storageData => _storageSectionKey,
     _SettingsSectionId.sync => _syncSectionKey,
     _SettingsSectionId.feedback => _feedbackSectionKey,
@@ -797,6 +809,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: widget.controller.busy
                 ? null
                 : widget.controller.setLanVisibility,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _securitySection() {
+    return _SettingsSection(
+      key: _securitySectionKey,
+      title: 'Security',
+      description: 'Control screen capture of CopyPaste.',
+      children: [
+        _SettingCard(
+          key: _blockScreenshotsKey,
+          highlighted: _isHighlighted(_SettingsTargetId.blockScreenshots),
+          title: 'Block screenshots',
+          description: 'Prevent screenshots and screen recording of CopyPaste.',
+          trailing: Switch(
+            value: widget.controller.blockScreenshots,
+            enabled: !widget.controller.busy,
+            onChanged: widget.controller.busy
+                ? null
+                : widget.controller.setBlockScreenshots,
           ),
         ),
       ],
@@ -1368,6 +1403,12 @@ enum _SettingsSectionId {
     description: 'Retention, storage limits, export, and backup.',
     icon: LucideIcons.database,
   ),
+  security(
+    label: 'Security',
+    slug: 'security',
+    description: 'Screenshot and screen recording protection.',
+    icon: LucideIcons.shield,
+  ),
   sync(
     label: 'Sync',
     slug: 'sync',
@@ -1435,6 +1476,7 @@ class _SettingsNavigationTarget {
 }
 
 abstract final class _SettingsTargetId {
+  static const String blockScreenshots = 'result-block-screenshots';
   static const String androidBackgroundCapture =
       'result-android-background-capture';
   static const String clipboardCapture = 'result-clipboard-capture';
