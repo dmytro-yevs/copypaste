@@ -4,13 +4,10 @@
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
 import 'api.dart';
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi' as ffi;
-
 import 'frb_generated.dart';
-
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_io.dart';
 
 abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
@@ -49,6 +46,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ClipImagePreview dco_decode_box_autoadd_clip_image_preview(dynamic raw);
+
+  @protected
+  ClipImagePreviewBounds dco_decode_box_autoadd_clip_image_preview_bounds(
+    dynamic raw,
+  );
 
   @protected
   ClipQuery dco_decode_box_autoadd_clip_query(dynamic raw);
@@ -102,6 +104,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ClipImagePreview dco_decode_clip_image_preview(dynamic raw);
+
+  @protected
+  ClipImagePreviewBounds dco_decode_clip_image_preview_bounds(dynamic raw);
 
   @protected
   ClipPage dco_decode_clip_page(dynamic raw);
@@ -219,6 +224,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ClipImagePreview? dco_decode_opt_box_autoadd_clip_image_preview(dynamic raw);
 
   @protected
+  ClipImagePreviewBounds? dco_decode_opt_box_autoadd_clip_image_preview_bounds(
+    dynamic raw,
+  );
+
+  @protected
   ClipSemanticKind? dco_decode_opt_box_autoadd_clip_semantic_kind(dynamic raw);
 
   @protected
@@ -323,6 +333,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  ClipImagePreviewBounds sse_decode_box_autoadd_clip_image_preview_bounds(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   ClipQuery sse_decode_box_autoadd_clip_query(SseDeserializer deserializer);
 
   @protected
@@ -386,6 +401,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ClipImagePreview sse_decode_clip_image_preview(SseDeserializer deserializer);
+
+  @protected
+  ClipImagePreviewBounds sse_decode_clip_image_preview_bounds(
+    SseDeserializer deserializer,
+  );
 
   @protected
   ClipPage sse_decode_clip_page(SseDeserializer deserializer);
@@ -527,6 +547,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  ClipImagePreviewBounds? sse_decode_opt_box_autoadd_clip_image_preview_bounds(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   ClipSemanticKind? sse_decode_opt_box_autoadd_clip_semantic_kind(
     SseDeserializer deserializer,
   );
@@ -656,6 +681,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_clip_image_preview_bounds(
+    ClipImagePreviewBounds self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_clip_query(
     ClipQuery self,
     SseSerializer serializer,
@@ -742,6 +773,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_clip_image_preview(
     ClipImagePreview self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_clip_image_preview_bounds(
+    ClipImagePreviewBounds self,
     SseSerializer serializer,
   );
 
@@ -919,6 +956,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_clip_image_preview(
     ClipImagePreview? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_clip_image_preview_bounds(
+    ClipImagePreviewBounds? self,
     SseSerializer serializer,
   );
 

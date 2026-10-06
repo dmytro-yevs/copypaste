@@ -27,6 +27,7 @@ class QuickPasteController extends ChangeNotifier {
        _preferences = QuickPastePreferences.defaults() {
     history.addListener(_historyChanged);
     _host.setOpenedHandler(opened);
+    _host.setShutdownHandler(shutdown);
   }
 
   final Future<void> Function()? _disposeRepository;
@@ -45,6 +46,7 @@ class QuickPasteController extends ChangeNotifier {
   bool _inspectorOpen = false;
   Map<String, String> _pinnedShortcuts = {};
   Future<void> _shortcutSync = Future<void>.value();
+  Future<void>? _repositoryDisposal;
 
   bool get autoPaste => _preferences.autoPaste;
   bool get accessibilityGranted => _accessibilityGranted;
@@ -84,12 +86,18 @@ class QuickPasteController extends ChangeNotifier {
     await _reconcilePinnedShortcuts();
     if (_disposed) return;
     await _refreshAccessibility();
+    if (_disposed) return;
+    await _host.signalReady();
     if (!_disposed) notifyListeners();
   }
 
-  Future<void> opened(int presentationId) async {
+  Future<void> opened(
+    int presentationId, {
+    bool inspectorVisible = false,
+  }) async {
     if (_disposed || presentationId <= 0) return;
     _presentationId = presentationId;
+    _inspectorOpen = inspectorVisible;
     _focusedClip = null;
     _presentationGeneration += 1;
     final preferences = await _preferencesStore.read();
@@ -321,16 +329,25 @@ class QuickPasteController extends ChangeNotifier {
     return operation;
   }
 
+  Future<void> shutdown() {
+    dispose();
+    return _repositoryDisposal ?? Future<void>.value();
+  }
+
   @override
   void dispose() {
     if (_disposed) return;
     _disposed = true;
     _presentationId = null;
     _host.setOpenedHandler(null);
+    _host.setShutdownHandler(null);
     history.removeListener(_historyChanged);
     if (!_activating) history.dispose();
     final disposeRepository = _disposeRepository;
-    if (disposeRepository != null) unawaited(disposeRepository());
+    if (disposeRepository != null) {
+      _repositoryDisposal = disposeRepository();
+      unawaited(_repositoryDisposal!.catchError((Object _) {}));
+    }
     unawaited(_host.dispose());
     super.dispose();
   }

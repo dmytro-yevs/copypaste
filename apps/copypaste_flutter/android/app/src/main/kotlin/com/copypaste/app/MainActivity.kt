@@ -15,6 +15,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import com.jakewharton.processphoenix.ProcessPhoenix
 import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -104,6 +105,17 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.copypaste.app/lifecycle")
+            .setMethodCallHandler { call, result ->
+                if (call.method == "restart") {
+                    val launch = packageManager.getLaunchIntentForPackage(packageName)
+                    if (launch == null) result.error("restart_failed", "CopyPaste could not restart.", null)
+                    else {
+                        result.success(null)
+                        ProcessPhoenix.triggerRebirth(this, launch)
+                    }
+                } else result.notImplemented()
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.copypaste.app/security")
             .setMethodCallHandler { call, result ->
                 when (call.method) {

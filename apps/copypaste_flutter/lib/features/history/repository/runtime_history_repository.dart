@@ -97,10 +97,23 @@ class RuntimeHistoryRepository implements HistoryRepository {
   }
 
   @override
-  Future<HistoryImagePreview?> imagePreview(String id, {int? maxEdge}) async {
+  Future<HistoryImagePreview?> imagePreview(
+    String id, {
+    int? maxEdge,
+    HistoryImagePreviewBounds? bounds,
+  }) async {
     _ensureActive();
     return _fromRuntimeImagePreview(
-      await runtime.clipImagePreview(id: id, maxEdge: maxEdge),
+      await runtime.clipImagePreview(
+        id: id,
+        maxEdge: maxEdge,
+        bounds: bounds == null
+            ? null
+            : runtime.ClipImagePreviewBounds(
+                width: bounds.width,
+                height: bounds.height,
+              ),
+      ),
     );
   }
 

@@ -24,6 +24,7 @@ pub use config::{
     MIN_DECODED_IMAGE_MB, MIN_FILE_SIZE_BYTES, MIN_IMAGE_SIZE_BYTES, MIN_STORAGE_QUOTA_BYTES,
     MIN_TEXT_SIZE_BYTES, POLL_INTERVAL_MAX_MS, POLL_INTERVAL_MIN_MS,
 };
+pub use copypaste_module_sdk::ModuleOperation;
 pub use error::ErrorCode;
 pub use health::SettingsHealth;
 pub use limits::{
@@ -37,9 +38,9 @@ pub use payload::{
     DeviceObservationTrust, DevicePlatform, DevicePresence, DevicePresenceObservation,
     DeviceProfileObservation, DiagnosticCounters, DiscoveredData, DiscoveredDevice, ExportData,
     ExportItem, ExternalNetworkObservation, FileDetails, HistoryDeviceFacet, HistoryFacets,
-    HistoryQuery, HistorySort, HistorySourceAppFacet, ImageDetails, ImagePreview, ImportData, Item,
-    ItemPage, PairingInviteData, PairingProgressData, PairingRole, PairingState, PeerInfo,
-    PrivateModeData, StatusData, SyncResult,
+    HistoryQuery, HistorySort, HistorySourceAppFacet, ImageDetails, ImagePreview,
+    ImagePreviewBounds, ImportData, Item, ItemPage, PairingInviteData, PairingProgressData,
+    PairingRole, PairingState, PeerInfo, PrivateModeData, StatusData, SyncResult,
 };
 pub use response::{ConfigApplied, EventData, EventKind, Response, ResponseData};
 
@@ -61,6 +62,10 @@ pub struct Request {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method", content = "params", rename_all = "snake_case")]
 pub enum Method {
+    /// Optional module management and command execution.
+    Modules {
+        operation: ModuleOperation,
+    },
     /// Liveness plus daemon state.
     Status,
     /// Persist this device's peer-visible display name.
@@ -140,6 +145,8 @@ pub enum Method {
         id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         max_edge: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bounds: Option<ImagePreviewBounds>,
     },
     /// Return one persisted source-application icon by item id.
     SourceAppIcon {
@@ -378,7 +385,13 @@ impl Method {
     pub fn is_long_running(&self) -> bool {
         matches!(
             self,
-            Self::Import { .. }
+            Self::Modules {
+                operation: ModuleOperation::Install { .. }
+                    | ModuleOperation::Invoke { .. }
+                    | ModuleOperation::Remove { .. }
+                    | ModuleOperation::SetEnabled { .. }
+                    | ModuleOperation::SetPreferences { .. }
+            } | Self::Import { .. }
                 | Self::Backup { .. }
                 | Self::Restore { .. }
                 | Self::SaveFile { .. }
