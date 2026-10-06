@@ -93,6 +93,7 @@ class DevicesController extends ChangeNotifier {
   DevicesSnapshot? _snapshot;
   PairingCeremony? _pairingCeremony;
   PairingEntryMode? _pairingEntryMode;
+  bool _pairingInspectorVisible = false;
   DeviceDetailsTarget? _deviceDetailsTarget;
   DevicesLoadState _loadState = DevicesLoadState.loading;
   String? _errorMessage;
@@ -103,16 +104,21 @@ class DevicesController extends ChangeNotifier {
   bool _captureProtectionActive = false;
   bool _captureProtectionInFlight = false;
   bool _decisionInFlight = false;
+  bool _pairingModeChangeInFlight = false;
   int _pairingEpoch = 0;
   Uint8List? _inviteQrPng;
   String? _verificationCode;
+  Object? _verificationCodeRequest;
   bool _disposed = false;
 
   DevicesLoadState get loadState => _loadState;
   DevicesSnapshot? get snapshot => _snapshot;
   String? get errorMessage => _systemScanError ?? _errorMessage;
-  String get errorTitle =>
-      _lastErrorWasAction ? 'Action failed' : 'Device refresh failed';
+  String get errorTitle => _systemScanError != null
+      ? 'Scanner unavailable'
+      : _lastErrorWasAction
+      ? 'Action failed'
+      : 'Device refresh failed';
   PairingCeremony? get pairing => _pairingCeremony;
   PairingEntryMode? get pairingEntryMode => _pairingEntryMode;
   DeviceDetailsTarget? get deviceDetailsTarget => _deviceDetailsTarget;
@@ -120,9 +126,17 @@ class DevicesController extends ChangeNotifier {
   bool get actionInFlight => _actionInFlight;
   bool get rescanInFlight => _rescanInFlight;
   bool get pairingInFlight => _pairingInFlight;
-  bool get pairingInspectorOpen => _pairingEntryMode != null;
+  bool get pairingInspectorOpen =>
+      _pairingEntryMode != null && _pairingInspectorVisible;
   bool get deviceDetailsOpen => _deviceDetailsTarget != null;
-  bool get canClosePairing => !_decisionInFlight;
+  bool get canClosePairing => !_decisionInFlight && !_pairingModeChangeInFlight;
+  bool get canChangePairingMode =>
+      !_disposed &&
+      !_decisionInFlight &&
+      !_pairingInFlight &&
+      !_captureProtectionInFlight &&
+      !_pairingModeChangeInFlight &&
+      !_systemScanInFlight;
   Uint8List? get inviteQrPng => _inviteQrPng;
   String? get verificationCode => _verificationCode;
   bool get canConfirmPairing => _verificationCode != null;
@@ -307,15 +321,19 @@ class DevicesController extends ChangeNotifier {
   }
 
   Future<void> openQrScanner() async {
+    final scanner = _systemScanner;
     if (_systemScanInFlight ||
-        !await _openPairingInspector(PairingEntryMode.scanQr)) {
+        !await _openPairingInspector(
+          PairingEntryMode.scanQr,
+          showInspector: scanner == null,
+        )) {
       return;
     }
-    final scanner = _systemScanner;
     if (scanner == null) return;
     final epoch = ++_pairingEpoch;
     _systemScanInFlight = true;
     _notify();
+    String? scanError;
     try {
       final uri = await scanner.scan();
       if (_disposed ||
@@ -326,29 +344,34 @@ class DevicesController extends ChangeNotifier {
       if (uri == null) {
         await closePairing();
       } else {
+        _pairingInspectorVisible = true;
         await _startPairing(() => _gateway.joinPairingUri(uri));
       }
     } on PlatformException catch (error) {
       if (!_disposed && epoch == _pairingEpoch) {
-        _systemScanError = error.code == 'invalid_pairing_qr'
+        scanError = error.code == 'invalid_pairing_qr'
             ? 'Scan a CopyPaste pairing QR code.'
             : 'Google scanner is unavailable. Enter the pairing code instead.';
       }
     } catch (_) {
       if (!_disposed && epoch == _pairingEpoch) {
-        _systemScanError =
+        scanError =
             'The scanner could not open. Enter the pairing code instead.';
       }
     } finally {
       _systemScanInFlight = false;
+      if (scanError != null && !_disposed && epoch == _pairingEpoch) {
+        await closePairing();
+        if (!_disposed && _pairingEpoch == epoch + 1) {
+          _systemScanError = scanError;
+        }
+      }
       _notify();
     }
   }
 
   Future<void> openCodeEntry({String? address}) async {
-    _pairingEpoch++;
-    _pendingAddress = address;
-    await _openPairingInspector(PairingEntryMode.enterCode);
+    await _openPairingInspector(PairingEntryMode.enterCode, address: address);
   }
 
   String? _pendingAddress;
@@ -366,12 +389,12 @@ class DevicesController extends ChangeNotifier {
     await _startPairing(() => _gateway.joinPairingUri(uri));
   }
 
-  Future<bool> _openPairingInspector(PairingEntryMode mode) async {
-    if (_disposed) return false;
-    if ((_pairingSession != null || _pairingInFlight) &&
-        _pairingEntryMode != mode) {
-      return false;
-    }
+  Future<bool> _openPairingInspector(
+    PairingEntryMode mode, {
+    String? address,
+    bool showInspector = true,
+  }) async {
+    if (!canChangePairingMode) return false;
     if (!_captureProtectionActive) {
       if (_captureProtectionInFlight) return false;
       final epoch = _pairingEpoch;
@@ -394,8 +417,39 @@ class DevicesController extends ChangeNotifier {
         return false;
       }
     }
+    if (_pairingEntryMode != mode) {
+      _pairingEpoch++;
+      final session = _pairingSession;
+      final subscription = _pairingSubscription;
+      _pairingSession = null;
+      _pairingSubscription = null;
+      _pairingCeremony = null;
+      _inviteQrPng = null;
+      _clearVerificationCode();
+      if (session != null) {
+        _pairingModeChangeInFlight = true;
+        _notify();
+        try {
+          await subscription?.cancel();
+          try {
+            if (!session.ceremony.state.isTerminal) await session.cancel();
+          } finally {
+            await session.dispose();
+          }
+        } catch (error) {
+          _setError(error);
+          return false;
+        } finally {
+          _pairingModeChangeInFlight = false;
+          _notify();
+        }
+        if (_disposed) return false;
+      }
+    }
     _deviceDetailsTarget = null;
     _pairingEntryMode = mode;
+    _pairingInspectorVisible = showInspector;
+    _pendingAddress = address;
     _systemScanError = null;
     _errorMessage = null;
     _notify();
@@ -424,26 +478,50 @@ class DevicesController extends ChangeNotifier {
     final session = _pairingSession;
     if (session == null || (_pairingCeremony?.state.isTerminal ?? true)) return;
     try {
-      _inviteQrPng = await session.revealInviteQr();
+      final qr = await session.revealInviteQr();
+      if (_disposed || !identical(_pairingSession, session)) return;
+      _inviteQrPng = qr;
       _errorMessage = null;
       _notify();
     } catch (error) {
+      if (_disposed || !identical(_pairingSession, session)) return;
       _errorMessage = devicesErrorMessage(error);
       _notify();
     }
   }
 
-  Future<void> revealSas() async {
+  Future<void> _revealVerificationCode() async {
     final session = _pairingSession;
-    if (session == null || (_pairingCeremony?.state.isTerminal ?? true)) return;
+    if (session == null ||
+        _pairingCeremony?.state != PairingState.awaitingConfirmation ||
+        _verificationCodeRequest != null) {
+      return;
+    }
+    final request = _verificationCodeRequest = Object();
     try {
-      _verificationCode = await session.revealSas();
+      final code = await session.revealSas();
+      if (_disposed ||
+          !identical(_pairingSession, session) ||
+          !identical(_verificationCodeRequest, request)) {
+        return;
+      }
+      _verificationCode = code;
       _errorMessage = null;
       _notify();
     } catch (error) {
+      if (_disposed ||
+          !identical(_pairingSession, session) ||
+          !identical(_verificationCodeRequest, request)) {
+        return;
+      }
       _errorMessage = devicesErrorMessage(error);
       _notify();
     }
+  }
+
+  void _clearVerificationCode() {
+    _verificationCode = null;
+    _verificationCodeRequest = null;
   }
 
   Future<void> confirmPairing({required bool accept}) async {
@@ -468,9 +546,10 @@ class DevicesController extends ChangeNotifier {
 
   /// Cancels active Rust pairing and clears the local opaque session.
   Future<void> closePairing() async {
-    if (_decisionInFlight) return;
+    if (!canClosePairing) return;
     _systemScanError = null;
     final closingEpoch = ++_pairingEpoch;
+    _pairingInspectorVisible = false;
     _pairingInFlight = false;
     if (_systemScanInFlight) {
       unawaited(_systemScanner?.cancel().catchError((Object _) {}));
@@ -481,7 +560,7 @@ class DevicesController extends ChangeNotifier {
       _pairingEntryMode = null;
       _pendingAddress = null;
       _inviteQrPng = null;
-      _verificationCode = null;
+      _clearVerificationCode();
       _notify();
       await _releaseClosedPairingProtection(closingEpoch);
       return;
@@ -491,7 +570,7 @@ class DevicesController extends ChangeNotifier {
     _pairingEntryMode = null;
     _pendingAddress = null;
     _inviteQrPng = null;
-    _verificationCode = null;
+    _clearVerificationCode();
     await _pairingSubscription?.cancel();
     _pairingSubscription = null;
     _notify();
@@ -536,14 +615,18 @@ class DevicesController extends ChangeNotifier {
       _pairingSession = session;
       _pairingCeremony = session.ceremony;
       _inviteQrPng = null;
-      _verificationCode = null;
+      _clearVerificationCode();
       _pairingSubscription = session.updates.listen(_onPairingUpdate);
+      if (_pairingCeremony?.state == PairingState.awaitingConfirmation) {
+        unawaited(_revealVerificationCode());
+      }
       if (_pairingEntryMode == PairingEntryMode.invite &&
           _pairingCeremony?.state == PairingState.waitingForPeer) {
         final qr = await session.revealInviteQr();
         if (!_disposed &&
             epoch == _pairingEpoch &&
-            identical(_pairingSession, session)) {
+            identical(_pairingSession, session) &&
+            _pairingCeremony?.state == PairingState.waitingForPeer) {
           _inviteQrPng = qr;
         }
       }
@@ -568,7 +651,9 @@ class DevicesController extends ChangeNotifier {
       _inviteQrPng = null;
     }
     if (ceremony.state != PairingState.awaitingConfirmation) {
-      _verificationCode = null;
+      _clearVerificationCode();
+    } else {
+      unawaited(_revealVerificationCode());
     }
     if (ceremony.state.isTerminal) {
       unawaited(_disposeTerminalPairing());

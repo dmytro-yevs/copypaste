@@ -4,11 +4,39 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import 'frb_generated.dart';
-
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `android_runtime_unavailable`, `ceremony_not_found`, `clip`, `cloud_status_response`, `content_class_to_ipc`, `content_class`, `create_private_file`, `daemon_exited_early`, `daemon_spawn_failed`, `daemon_start_failed`, `daemon_unreachable`, `device_class`, `device_details`, `device_endpoint`, `device_latency`, `device_observation_provenance`, `device_observation_trust`, `device_platform`, `device_presence`, `device_profile`, `discovered_response`, `empty_response`, `export_write_failed`, `from_daemon`, `history_query`, `internal`, `item_response`, `not_initialized`, `runtime_settings`, `semantic_kind_to_ipc`, `semantic_kind`, `this_device`, `timeout`, `unsafe_data_directory`, `watch_not_found`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `android_runtime_unavailable`, `ceremony_not_found`, `clip`, `cloud_status_response`, `content_class_to_ipc`, `content_class`, `create_private_file`, `daemon_exited_early`, `daemon_spawn_failed`, `daemon_start_failed`, `daemon_unreachable`, `device_class`, `device_details`, `device_endpoint`, `device_latency`, `device_observation_provenance`, `device_observation_trust`, `device_platform`, `device_presence`, `device_profile`, `discovered_response`, `empty_response`, `export_write_failed`, `from_daemon`, `history_query`, `internal`, `item_response`, `module_request`, `not_initialized`, `runtime_settings`, `semantic_kind_to_ipc`, `semantic_kind`, `this_device`, `timeout`, `unsafe_data_directory`, `watch_not_found`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+
+Future<String> modulesList() => RustLib.instance.api.crateApiModulesList();
+
+Future<String> moduleInstall({required String packagePath}) =>
+    RustLib.instance.api.crateApiModuleInstall(packagePath: packagePath);
+
+Future<void> moduleSetEnabled({required String id, required bool enabled}) =>
+    RustLib.instance.api.crateApiModuleSetEnabled(id: id, enabled: enabled);
+
+Future<void> moduleSetPreferences({
+  required String id,
+  required String valuesJson,
+}) => RustLib.instance.api.crateApiModuleSetPreferences(
+  id: id,
+  valuesJson: valuesJson,
+);
+
+Future<void> moduleRemove({required String id}) =>
+    RustLib.instance.api.crateApiModuleRemove(id: id);
+
+Future<String> moduleInvoke({
+  required String id,
+  required String command,
+  required String argumentsJson,
+}) => RustLib.instance.api.crateApiModuleInvoke(
+  id: id,
+  command: command,
+  argumentsJson: argumentsJson,
+);
 
 /// Starts an app-owned desktop daemon in an explicit application data directory.
 ///
@@ -194,8 +222,15 @@ Future<Clip> setClipPinned({required String id, required bool pinned}) =>
 Future<BigInt> reorderPinnedClips({required List<String> ids}) =>
     RustLib.instance.api.crateApiReorderPinnedClips(ids: ids);
 
-Future<ClipImagePreview> clipImagePreview({required String id, int? maxEdge}) =>
-    RustLib.instance.api.crateApiClipImagePreview(id: id, maxEdge: maxEdge);
+Future<ClipImagePreview> clipImagePreview({
+  required String id,
+  int? maxEdge,
+  ClipImagePreviewBounds? bounds,
+}) => RustLib.instance.api.crateApiClipImagePreview(
+  id: id,
+  maxEdge: maxEdge,
+  bounds: bounds,
+);
 
 /// Lazily returns the persisted source-application icon when the backend has
 /// authenticated icon metadata for this clip.
@@ -428,6 +463,24 @@ class ClipImagePreview {
       other is ClipImagePreview &&
           runtimeType == other.runtimeType &&
           pngBase64 == other.pngBase64 &&
+          width == other.width &&
+          height == other.height;
+}
+
+class ClipImagePreviewBounds {
+  final int width;
+  final int height;
+
+  const ClipImagePreviewBounds({required this.width, required this.height});
+
+  @override
+  int get hashCode => width.hashCode ^ height.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ClipImagePreviewBounds &&
+          runtimeType == other.runtimeType &&
           width == other.width &&
           height == other.height;
 }

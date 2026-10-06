@@ -190,6 +190,7 @@ pub(super) fn image_preview(
     id: u64,
     item_id: &str,
     max_edge: Option<u32>,
+    bounds: Option<copypaste_ipc::ImagePreviewBounds>,
 ) -> Response {
     let row = match state.store.get(item_id) {
         Ok(Some(row)) => row,
@@ -211,7 +212,12 @@ pub(super) fn image_preview(
         Err(error) => return decrypt_error(id, &error),
     };
     let budget = state.settings.get().max_decoded_image_mb;
-    let thumbnail = match copypaste_core::thumbnail_png(&bytes, budget, max_edge) {
+    let thumbnail = match copypaste_core::thumbnail_png(
+        &bytes,
+        budget,
+        max_edge,
+        bounds.map(|bounds| (bounds.width, bounds.height)),
+    ) {
         Ok(thumbnail) => thumbnail,
         Err(error) => {
             warn!(id = %row.id, error = ?error, "image preview unavailable");
@@ -1043,7 +1049,7 @@ mod tests {
         assert_eq!((metadata.width, metadata.height), (1, 1));
         assert_eq!(metadata.size_bytes, source.len() as u64);
 
-        let preview = match image_preview(&state, 3, &image.id, None).data {
+        let preview = match image_preview(&state, 3, &image.id, None, None).data {
             Some(ResponseData::ImagePreview(preview)) => preview,
             other => panic!("{other:?}"),
         };
@@ -1124,6 +1130,59 @@ mod tests {
     }
 
     #[test]
+    fn image_preview_bounds_leave_the_stored_and_copied_original_unchanged() {
+        let (state, _dir, writes) =
+            crate::testutil::test_state_watching_clipboard("bounded-preview-original");
+        let mut source = Vec::new();
+        image::DynamicImage::new_rgba8(1200, 1200)
+            .write_to(
+                &mut std::io::Cursor::new(&mut source),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+        let item = binary_item(
+            &state,
+            copypaste_ipc::content_type::IMAGE_PNG,
+            &source,
+            None,
+        );
+        let original = state.store.get(&item.id).unwrap().unwrap();
+        let preview = match image_preview(
+            &state,
+            1,
+            &item.id,
+            None,
+            Some(copypaste_ipc::ImagePreviewBounds {
+                width: 1400,
+                height: 320,
+            }),
+        )
+        .data
+        {
+            Some(ResponseData::ImagePreview(preview)) => preview,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!((preview.width, preview.height), (320, 320));
+        let stored = state.store.get(&item.id).unwrap().unwrap();
+        assert_eq!(stored.content_ciphertext, original.content_ciphertext);
+        assert_eq!(
+            copypaste_core::open_binary(
+                &stored.content_ciphertext,
+                &state.keyring.item_key(),
+                &stored.id,
+            )
+            .unwrap()
+            .as_slice(),
+            source.as_slice(),
+        );
+        assert!(copy(&state, 2, &item.id).ok);
+        assert_eq!(
+            writes.entries(),
+            vec![crate::testutil::WrittenPayload::Image(source)]
+        );
+    }
+
+    #[test]
     fn save_file_writes_authenticated_bytes_to_a_new_destination() {
         let (state, dir) = test_state("save-file-payload");
         let metadata = copypaste_core::FileMetadata::with_source_reference(
@@ -1164,7 +1223,7 @@ mod tests {
         .unwrap()
         .into_item();
 
-        let response = image_preview(&state, 1, &image.id, None);
+        let response = image_preview(&state, 1, &image.id, None, None);
         assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
         assert_eq!(response.error.as_deref(), Some(MSG_IMAGE_PREVIEW));
     }
@@ -1174,7 +1233,7 @@ mod tests {
         let (state, _dir) = test_state("image-preview-unknown");
         let unknown = binary_item(&state, "application/x-future", b"future bytes", None);
 
-        let response = image_preview(&state, 1, &unknown.id, None);
+        let response = image_preview(&state, 1, &unknown.id, None, None);
         assert_eq!(response.error_code, Some(ErrorCode::InvalidRequest));
         assert_eq!(response.error.as_deref(), Some(MSG_IMAGE_PREVIEW));
     }

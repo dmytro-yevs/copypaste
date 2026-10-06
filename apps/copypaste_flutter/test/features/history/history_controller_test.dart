@@ -162,6 +162,28 @@ void main() {
       controller.dispose();
     });
 
+    test('keys bounded previews by both dimensions', () async {
+      final repository = _HistoryRepository();
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      const firstBounds = HistoryImagePreviewBounds(width: 1400, height: 320);
+      await controller.requestImagePreview('one', bounds: firstBounds);
+      await controller.requestImagePreview('one', bounds: firstBounds);
+      await controller.requestImagePreview(
+        'one',
+        bounds: const HistoryImagePreviewBounds(width: 1400, height: 640),
+      );
+      await controller.requestImagePreview('one', maxEdge: 1024);
+
+      expect(
+        repository.imagePreviewBounds.map(
+          (bounds) => (bounds?.width, bounds?.height),
+        ),
+        [(1400, 320), (1400, 640), (null, null)],
+      );
+      expect(repository.imagePreviewEdges, [null, null, 1024]);
+    });
+
     test(
       'deduplicates pending media requests and keeps detail previews distinct',
       () async {
@@ -394,6 +416,7 @@ class _HistoryRepository implements HistoryRepository {
   HistoryFacets availableFacets = const HistoryFacets();
   final List<Future<HistoryImagePreview?>> imagePreviewFutures = [];
   final List<int?> imagePreviewEdges = [];
+  final List<HistoryImagePreviewBounds?> imagePreviewBounds = [];
   Future<HistorySourceAppIcon?>? sourceIconFuture;
   int sourceIconCalls = 0;
   HistoryClip? detailClip;
@@ -419,8 +442,13 @@ class _HistoryRepository implements HistoryRepository {
   Future<HistoryClip> get(String id) async => detailClip ?? _clip(id);
 
   @override
-  Future<HistoryImagePreview?> imagePreview(String id, {int? maxEdge}) {
+  Future<HistoryImagePreview?> imagePreview(
+    String id, {
+    int? maxEdge,
+    HistoryImagePreviewBounds? bounds,
+  }) {
     imagePreviewEdges.add(maxEdge);
+    imagePreviewBounds.add(bounds);
     if (imagePreviewFutures.isEmpty) return Future.value(null);
     return imagePreviewFutures.removeAt(0);
   }

@@ -37,22 +37,11 @@ class DevicesHeaderActions extends StatelessWidget {
 
   List<Widget> _labeledActions() {
     return [
-      Button.secondary(
-        key: const ValueKey<String>('rescan-devices'),
-        onPressed: controller.rescanInFlight ? null : controller.rescan,
-        leading: controller.rescanInFlight
-            ? const SizedBox.square(
-                dimension: AppIconSize.sm,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : const Icon(LucideIcons.scanSearch),
-        child: Text(controller.rescanInFlight ? 'Scanning…' : 'Rescan'),
-      ),
       Button.primary(
         key: const ValueKey<String>('pair-device'),
-        onPressed: controller.pairingInspectorOpen
-            ? null
-            : controller.openInvitation,
+        onPressed: controller.canChangePairingMode
+            ? controller.openInvitation
+            : null,
         leading: Icon(
           DevicePresentation.pairingEntryIcon(PairingEntryMode.invite),
         ),
@@ -60,9 +49,9 @@ class DevicesHeaderActions extends StatelessWidget {
       ),
       Button.secondary(
         key: const ValueKey<String>('scan-pairing-qr'),
-        onPressed: controller.pairingInspectorOpen
-            ? null
-            : controller.openQrScanner,
+        onPressed: controller.canChangePairingMode
+            ? controller.openQrScanner
+            : null,
         leading: Icon(
           DevicePresentation.pairingEntryIcon(PairingEntryMode.scanQr),
         ),
@@ -70,9 +59,9 @@ class DevicesHeaderActions extends StatelessWidget {
       ),
       Button.secondary(
         key: const ValueKey<String>('enter-pairing-code'),
-        onPressed: controller.pairingInspectorOpen
-            ? null
-            : controller.openCodeEntry,
+        onPressed: controller.canChangePairingMode
+            ? controller.openCodeEntry
+            : null,
         leading: Icon(
           DevicePresentation.pairingEntryIcon(PairingEntryMode.enterCode),
         ),
@@ -85,38 +74,31 @@ class DevicesHeaderActions extends StatelessWidget {
     return [
       _compactAction(
         context: context,
-        key: const ValueKey<String>('rescan-devices'),
-        label: 'Rescan',
-        icon: LucideIcons.scanSearch,
-        onPressed: controller.rescanInFlight ? null : controller.rescan,
-      ),
-      _compactAction(
-        context: context,
         key: const ValueKey<String>('pair-device'),
         label: 'Pair device',
         icon: DevicePresentation.pairingEntryIcon(PairingEntryMode.invite),
         primary: true,
-        onPressed: controller.pairingInspectorOpen
-            ? null
-            : controller.openInvitation,
+        onPressed: controller.canChangePairingMode
+            ? controller.openInvitation
+            : null,
       ),
       _compactAction(
         context: context,
         key: const ValueKey<String>('scan-pairing-qr'),
         label: 'Scan QR',
         icon: DevicePresentation.pairingEntryIcon(PairingEntryMode.scanQr),
-        onPressed: controller.pairingInspectorOpen
-            ? null
-            : controller.openQrScanner,
+        onPressed: controller.canChangePairingMode
+            ? controller.openQrScanner
+            : null,
       ),
       _compactAction(
         context: context,
         key: const ValueKey<String>('enter-pairing-code'),
         label: 'Enter code',
         icon: DevicePresentation.pairingEntryIcon(PairingEntryMode.enterCode),
-        onPressed: controller.pairingInspectorOpen
-            ? null
-            : controller.openCodeEntry,
+        onPressed: controller.canChangePairingMode
+            ? controller.openCodeEntry
+            : null,
       ),
     ];
   }

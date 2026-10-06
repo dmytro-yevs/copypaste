@@ -22,6 +22,7 @@ class MainFlutterWindow: NSWindow {
   private var trayMenuChannel: MacosTrayMenuChannel?
   private var protectedPresentation: ProtectedPairingPresentationWindow?
   private var quickPastePresentation: QuickPastePresentationWindow?
+  private var quickPasteInspectorVisible = false
   private var pendingPairingURI: String?
   private var trafficLightLayoutObservers: [NSObjectProtocol] = []
   private var trafficLightLayoutScheduled = false
@@ -225,10 +226,14 @@ class MainFlutterWindow: NSWindow {
     if quickPastePresentation != nil { return true }
     guard let presentation = QuickPastePresentationWindow(
       mainWindow: self,
+      inspectorVisible: quickPasteInspectorVisible,
       onOpenSettings: { [weak self] in
         self?.quickPasteHostMethodChannel?.invokeMethod("openSettings", arguments: nil)
       },
-      onClose: { [weak self] in self?.quickPastePresentation = nil }
+      onClose: { [weak self] inspectorVisible in
+        self?.quickPasteInspectorVisible = inspectorVisible
+        self?.quickPastePresentation = nil
+      }
     ) else {
       return false
     }
@@ -515,10 +520,32 @@ func presentQuickPaste(
   return true
 }
 
+// Retire on the next main-loop turn, after a platform-channel reply or paste.
+// A new presentation cancels retirement before it can release a reopened view.
+final class QuickPasteRetirement {
+  private var generation: UInt64 = 0
+  private let enqueue: (@escaping () -> Void) -> Void
+
+  init(enqueue: @escaping (@escaping () -> Void) -> Void = {
+    DispatchQueue.main.async(execute: $0)
+  }) { self.enqueue = enqueue }
+
+  func cancel() { generation &+= 1 }
+
+  func schedule(canRetire: @escaping () -> Bool, retire: @escaping () -> Void) {
+    cancel()
+    let scheduled = generation
+    enqueue { [weak self] in
+      guard let self, self.generation == scheduled, canRetire() else { return }
+      retire()
+    }
+  }
+}
+
 private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
   private let mainWindow: NSWindow
   private let onOpenSettings: () -> Void
-  private let onClose: () -> Void
+  private let onClose: (Bool) -> Void
   private let window: QuickPastePanel
   private let engine: FlutterEngine
   private let controller: FlutterViewController
@@ -527,13 +554,18 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
   private var performingAction = false
   private var closed = false
   private var inspectorVisible = false
+  private var contextReady = false
+  private var engineStopped = false
+  private let retirement = QuickPasteRetirement()
 
   init?(
     mainWindow: NSWindow,
+    inspectorVisible: Bool,
     onOpenSettings: @escaping () -> Void,
-    onClose: @escaping () -> Void
+    onClose: @escaping (Bool) -> Void
   ) {
     self.mainWindow = mainWindow
+    self.inspectorVisible = inspectorVisible
     self.onOpenSettings = onOpenSettings
     self.onClose = onClose
     let project = FlutterDartProject()
@@ -542,7 +574,10 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
       project: project,
       allowHeadlessExecution: true
     )
-    guard engine.run(withEntrypoint: "quickPasteMain") else { return nil }
+    guard engine.run(withEntrypoint: "quickPasteMain") else {
+      engine.shutDownEngine()
+      return nil
+    }
     self.engine = engine
     controller = FlutterViewController(engine: engine, nibName: nil, bundle: nil)
     window = QuickPastePanel(
@@ -574,6 +609,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
 
   func show(frontmost: NSRunningApplication?) -> Bool {
     guard !closed else { return false }
+    retirement.cancel()
     NSLog("QuickPaste open: appActive=%d", NSApplication.shared.isActive ? 1 : 0)
     guard let id = pasteSession.begin(
       frontmost: frontmost,
@@ -603,34 +639,49 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
         return self.window.isVisible && self.window.isKeyWindow
       },
       hide: { self.hide() },
-      opened: { self.contextChannel?.invokeMethod("opened", arguments: ["presentationId": id]) }
+      opened: { self.notifyOpened(id) }
     )
   }
 
   func shutdown() {
-    pasteSession.invalidate()
+    close()
+  }
+
+  private func stopEngine() {
+    guard !engineStopped else { return }
+    engineStopped = true
+    window.delegate = nil
     window.close()
+    contextChannel?.setMethodCallHandler(nil)
+    contextChannel = nil
+    window.contentViewController = nil
+    engine.viewController = nil
+    engine.shutDownEngine()
+  }
+
+  private func close() {
+    guard !closed else { return }
+    closed = true
+    retirement.cancel()
+    pasteSession.invalidate()
+    onClose(inspectorVisible)
+    // Drop the Dart/Rust watch lease before terminating its isolate. The
+    // deadline also retires a context that failed during Dart startup.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.stopEngine() }
+    contextChannel?.invokeMethod("shutdown", arguments: nil) { [self] _ in
+      DispatchQueue.main.async { [self] in stopEngine() }
+    }
   }
 
   func windowDidResignKey(_ notification: Notification) {
     guard !performingAction else { return }
     if pasteSession.hasPendingPaste && !window.isVisible { return }
     pasteSession.invalidate()
-    window.orderOut(nil)
+    hide()
   }
 
   func windowWillClose(_ notification: Notification) {
     close()
-  }
-
-  private func close() {
-    guard !closed else { return }
-    closed = true
-    pasteSession.invalidate()
-    contextChannel?.setMethodCallHandler(nil)
-    contextChannel = nil
-    engine.shutDownEngine()
-    onClose()
   }
 
   private func hide() {
@@ -638,6 +689,19 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     performingAction = true
     window.orderOut(nil)
     performingAction = wasPerformingAction
+    retireWhenHidden()
+  }
+
+  private func retireWhenHidden() {
+    retirement.schedule(canRetire: { [weak self] in
+      guard let self else { return false }
+      return !self.closed && !self.window.isVisible && !self.pasteSession.hasPendingPaste
+    }, retire: { [weak self] in self?.shutdown() })
+  }
+
+  private func notifyOpened(_ id: Int64) {
+    guard contextReady, pasteSession.matches(id) else { return }
+    contextChannel?.invokeMethod("opened", arguments: ["presentationId": id, "inspectorVisible": inspectorVisible])
   }
 
   private func showMainWindow(openSettings: Bool) {
@@ -669,6 +733,10 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
         return
       }
       switch call.method {
+      case "ready":
+        self.contextReady = true
+        result(true)
+        self.notifyOpened(self.pasteSession.id)
       case "accessibilityGranted":
         result(MacosAccessibility.isTrusted(prompt: false))
       case "requestAccessibility":
@@ -686,7 +754,10 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
         result(true)
       case "paste":
         guard let id = Self.presentationID(call.arguments) else { result(false); return }
-        self.pasteSession.paste(id: id, hide: { self.hide() }, result: { result($0) })
+        self.pasteSession.paste(id: id, hide: { self.hide() }, result: { [weak self] pasted in
+          result(pasted)
+          self?.retireWhenHidden()
+        })
       case "close":
         if let id = Self.presentationID(call.arguments), self.pasteSession.matches(id) {
           self.pasteSession.invalidate()

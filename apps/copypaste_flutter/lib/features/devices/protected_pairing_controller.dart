@@ -19,6 +19,8 @@ class ProtectedPairingController extends ChangeNotifier {
   late PairingCeremony _ceremony;
   StreamSubscription<PairingCeremony>? _updates;
   ProtectedPairingArtifact? _artifact;
+  Object? _artifactRequest;
+  bool _verificationCodeReady = false;
   ProtectedCameraPreview? _cameraPreview;
   bool _decisionInFlight = false;
   String? _errorMessage;
@@ -31,6 +33,9 @@ class ProtectedPairingController extends ChangeNotifier {
   ProtectedCameraPreview? get cameraPreview => _cameraPreview;
   bool get isProtectedHostActive => _host.isActive;
   bool get decisionInFlight => _decisionInFlight;
+  bool get canConfirm =>
+      _verificationCodeReady &&
+      _ceremony.state == PairingState.awaitingConfirmation;
   String? get errorMessage => _errorMessage;
 
   void start() {
@@ -38,8 +43,12 @@ class ProtectedPairingController extends ChangeNotifier {
     _started = true;
     _updates = _session.updates.listen(
       (ceremony) {
+        if (ceremony.state != _ceremony.state) _clearMaterial();
         _ceremony = ceremony;
         if (ceremony.state.isTerminal) _clearMaterial();
+        if (ceremony.state == PairingState.awaitingConfirmation) {
+          _revealVerificationCode();
+        }
         _notify();
       },
       onError: (Object error, StackTrace _) {
@@ -49,12 +58,18 @@ class ProtectedPairingController extends ChangeNotifier {
     );
     if (_host.isActive && _ceremony.state == PairingState.waitingForPeer) {
       unawaited(revealInvitationQr());
+    } else if (_ceremony.state == PairingState.awaitingConfirmation) {
+      _revealVerificationCode();
     }
   }
 
   Future<void> revealInvitationQr() =>
       _reveal((session) => session.revealInvitationQr());
-  Future<void> revealSas() => _reveal((session) => session.revealSas());
+  void _revealVerificationCode() {
+    if (_artifactRequest == null) {
+      unawaited(_reveal((session) => session.revealSas()));
+    }
+  }
 
   Future<void> openCameraScanner() async {
     if (!_host.isActive || _ceremony.state.isTerminal) return;
@@ -81,8 +96,7 @@ class ProtectedPairingController extends ChangeNotifier {
   }
 
   Future<void> confirm({required bool accept}) async {
-    if (_ceremony.state != PairingState.awaitingConfirmation ||
-        _decisionInFlight) {
+    if (!canConfirm || _decisionInFlight) {
       return;
     }
     _decisionInFlight = true;
@@ -115,19 +129,36 @@ class ProtectedPairingController extends ChangeNotifier {
     Future<ProtectedPairingArtifact> Function(ProtectedPairingSession session)
     operation,
   ) async {
-    if (!_host.isActive || _ceremony.state.isTerminal) return;
+    if (!_host.isActive || _ceremony.state.isTerminal || _closed || _disposed) {
+      return;
+    }
+    final state = _ceremony.state;
+    final request = _artifactRequest = Object();
     try {
       _cameraPreview = null;
-      _artifact = await operation(_session);
+      final artifact = await operation(_session);
+      if (!_canApplyArtifact(request, state)) return;
+      _artifact = artifact;
+      _verificationCodeReady = state == PairingState.awaitingConfirmation;
       _errorMessage = null;
     } catch (error) {
+      if (!_canApplyArtifact(request, state)) return;
       _errorMessage = devicesErrorMessage(error);
     }
     _notify();
   }
 
+  bool _canApplyArtifact(Object request, PairingState state) =>
+      !_disposed &&
+      !_closed &&
+      _host.isActive &&
+      _ceremony.state == state &&
+      identical(_artifactRequest, request);
+
   void _clearMaterial() {
     _artifact = null;
+    _artifactRequest = null;
+    _verificationCodeReady = false;
     _cameraPreview = null;
   }
 

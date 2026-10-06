@@ -8,6 +8,40 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
+  for (final accept in [true, false]) {
+    testWidgets(
+      'shows protected SAS immediately with Accept and Reject: $accept',
+      (tester) async {
+        final session = _ViewSession(
+          ceremony: const PairingCeremony(
+            state: PairingState.awaitingConfirmation,
+          ),
+        );
+        final controller = ProtectedPairingController(
+          host: const _ViewHost(active: true),
+          session: session,
+        );
+        addTearDown(controller.dispose);
+        await tester.pumpWidget(
+          ShadcnApp(
+            home: ProtectedPairingView(controller: controller, onClosed: () {}),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(session.revealSasCalls, 1);
+        expect(find.text('123456'), findsOneWidget);
+        expect(find.text('Reveal verification code'), findsNothing);
+        expect(find.text('Accept'), findsOneWidget);
+        expect(find.text('Reject'), findsOneWidget);
+        expect(find.byType(Button), findsNWidgets(2));
+        expect(session.confirmations, isEmpty);
+        await tester.tap(find.text(accept ? 'Accept' : 'Reject'));
+        await tester.pumpAndSettle();
+        expect(session.confirmations, [accept]);
+      },
+    );
+  }
+
   testWidgets('renders protected invitation material immediately', (
     tester,
   ) async {
@@ -63,11 +97,16 @@ class _ViewHost implements ProtectedPairingHost {
 }
 
 class _ViewSession implements ProtectedPairingSession {
+  _ViewSession({
+    this.ceremony = const PairingCeremony(state: PairingState.waitingForPeer),
+  });
+
   @override
-  PairingCeremony get ceremony =>
-      const PairingCeremony(state: PairingState.waitingForPeer);
+  final PairingCeremony ceremony;
 
   int revealCalls = 0;
+  int revealSasCalls = 0;
+  final List<bool> confirmations = [];
 
   @override
   Stream<PairingCeremony> get updates => const Stream<PairingCeremony>.empty();
@@ -76,7 +115,9 @@ class _ViewSession implements ProtectedPairingSession {
   Future<void> cancel() async {}
 
   @override
-  Future<void> confirm({required bool accept}) async {}
+  Future<void> confirm({required bool accept}) async {
+    confirmations.add(accept);
+  }
 
   @override
   Future<void> dispose() async {}
@@ -92,18 +133,22 @@ class _ViewSession implements ProtectedPairingSession {
   }
 
   @override
-  Future<ProtectedPairingArtifact> revealSas() async => const _ViewArtifact();
+  Future<ProtectedPairingArtifact> revealSas() async {
+    revealSasCalls += 1;
+    return const _ViewArtifact(text: '123456');
+  }
 
   @override
   Future<void> submitManualJoinCode(String code) async {}
 }
 
 class _ViewArtifact implements ProtectedPairingArtifact {
-  const _ViewArtifact();
+  const _ViewArtifact({this.text = 'Protected test artifact'});
+
+  final String text;
 
   @override
-  Widget buildProtectedContent(BuildContext context) =>
-      const Text('Protected test artifact');
+  Widget buildProtectedContent(BuildContext context) => Text(text);
 }
 
 class _ViewPreview implements ProtectedCameraPreview {
