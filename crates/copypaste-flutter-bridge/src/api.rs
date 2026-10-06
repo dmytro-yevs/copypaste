@@ -363,6 +363,7 @@ pub struct RuntimeEvent {
     pub kind: String,
     pub item_count: u64,
     pub captured: bool,
+    pub captured_item_id: Option<String>,
 }
 
 /// Safe pairing state for ordinary Flutter UI. It deliberately has no invite
@@ -391,6 +392,7 @@ pub struct RuntimeSettingsData {
     pub lan_visibility: bool,
     pub sync_enabled: bool,
     pub notify_on_copy: bool,
+    pub notification_preview: bool,
     pub sound_on_copy: bool,
 }
 
@@ -402,6 +404,7 @@ pub struct RuntimeSettingsPatch {
     pub lan_visibility: Option<bool>,
     pub sync_enabled: Option<bool>,
     pub notify_on_copy: Option<bool>,
+    pub notification_preview: Option<bool>,
     pub sound_on_copy: Option<bool>,
 }
 
@@ -507,6 +510,7 @@ pub async fn update_runtime_settings(
             lan_visibility: patch.lan_visibility,
             sync_enabled: patch.sync_enabled,
             notify_on_copy: patch.notify_on_copy,
+            notification_preview: patch.notification_preview,
             sound_on_copy: patch.sound_on_copy,
             ..Default::default()
         },
@@ -952,6 +956,7 @@ fn runtime_settings(config: copypaste_ipc::ConfigData) -> RuntimeSettingsData {
         lan_visibility: config.lan_visibility,
         sync_enabled: config.sync_enabled,
         notify_on_copy: config.notify_on_copy,
+        notification_preview: config.notification_preview,
         sound_on_copy: config.sound_on_copy,
     }
 }

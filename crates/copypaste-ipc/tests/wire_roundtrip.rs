@@ -156,6 +156,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             event: EventKind::Items,
             item_count: 1,
             captured: true,
+            captured_item_id: Some("captured-item".into()),
         }),
         ResponseData::Page(ItemPage {
             items: vec![item()],

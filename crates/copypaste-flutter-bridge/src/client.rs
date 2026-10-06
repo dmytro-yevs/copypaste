@@ -158,6 +158,7 @@ fn runtime_event(event: copypaste_ipc::EventData) -> RuntimeEvent {
         },
         item_count: event.item_count,
         captured: event.captured,
+        captured_item_id: event.captured_item_id,
     }
 }
 
@@ -191,10 +192,12 @@ mod tests {
                 event,
                 item_count: 3,
                 captured: true,
+                captured_item_id: Some("captured-item".into()),
             });
             assert_eq!(mapped.kind, kind);
             assert_eq!(mapped.item_count, 3);
             assert!(mapped.captured);
+            assert_eq!(mapped.captured_item_id.as_deref(), Some("captured-item"));
         }
     }
 }

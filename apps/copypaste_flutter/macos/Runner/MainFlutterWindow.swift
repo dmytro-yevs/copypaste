@@ -19,6 +19,7 @@ class MainFlutterWindow: NSWindow {
   private var macosSetupChannel: MacosSetupChannel?
   private var securityChannel: FlutterMethodChannel?
   private var appUpdateChannel: MacosAppUpdateChannel?
+  private var trayMenuChannel: MacosTrayMenuChannel?
   private var protectedPresentation: ProtectedPairingPresentationWindow?
   private var quickPastePresentation: QuickPastePresentationWindow?
   private var pendingPairingURI: String?
@@ -53,6 +54,9 @@ class MainFlutterWindow: NSWindow {
       }
     }
     appUpdateChannel = MacosAppUpdateChannel(
+      binaryMessenger: flutterViewController.engine.binaryMessenger
+    )
+    trayMenuChannel = MacosTrayMenuChannel(
       binaryMessenger: flutterViewController.engine.binaryMessenger
     )
     super.awakeFromNib()

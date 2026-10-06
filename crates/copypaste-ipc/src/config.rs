@@ -135,9 +135,12 @@ pub struct ConfigData {
     /// whichever surface is listening.
     pub notify_on_copy: bool,
 
+    /// Include clipboard content in capture notifications. **Live.**
+    pub notification_preview: bool,
+
     /// Play a short sound when something is captured. **Live.**
     ///
-    /// Off by default, for the reason above. Unlike the notification, the
+    /// On by default. Unlike the notification, the
     /// daemon *can* do this itself and does — see `daemon/src/notify.rs`. It is
     /// suppressed whenever the clipboard backend is the fake one, which is what
     /// runs in tests and on every non-macOS host (manifest 01 §3.23: sound must
@@ -163,7 +166,8 @@ impl Default for ConfigData {
             lan_visibility: true,
             sync_enabled: true,
             notify_on_copy: false,
-            sound_on_copy: false,
+            notification_preview: true,
+            sound_on_copy: true,
         }
     }
 }
@@ -248,6 +252,8 @@ pub struct ConfigPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notify_on_copy: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notification_preview: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sound_on_copy: Option<bool>,
 }
 
@@ -315,6 +321,9 @@ impl ConfigPatch {
         if let Some(v) = self.notify_on_copy {
             next.notify_on_copy = v;
         }
+        if let Some(v) = self.notification_preview {
+            next.notification_preview = v;
+        }
         if let Some(v) = self.sound_on_copy {
             next.sound_on_copy = v;
         }
@@ -339,6 +348,7 @@ impl From<&ConfigData> for ConfigPatch {
             lan_visibility: Some(c.lan_visibility),
             sync_enabled: Some(c.sync_enabled),
             notify_on_copy: Some(c.notify_on_copy),
+            notification_preview: Some(c.notification_preview),
             sound_on_copy: Some(c.sound_on_copy),
         }
     }
@@ -378,6 +388,7 @@ impl ConfigData {
             // Both are read at the moment a capture lands, so a change takes
             // effect on the next copy.
             ("notify_on_copy", Liveness::Live),
+            ("notification_preview", Liveness::Live),
             ("sound_on_copy", Liveness::Live),
         ]
     }
@@ -625,23 +636,23 @@ mod tests {
         assert_eq!(next.storage_quota_bytes, MIN_STORAGE_QUOTA_BYTES);
     }
 
-    /// Parity finding 18. Both are off out of the box: a clipboard manager
-    /// captures every copy, and a notification or a sound per copy is the
-    /// behaviour an app gets uninstalled for. The switch is what matters — a
-    /// background capture with neither is invisible.
+    /// Notification opt-in, content previews, and capture sound are independent.
     #[test]
-    fn the_two_copy_feedback_switches_default_off_and_are_settable_apart() {
+    fn copy_feedback_defaults_and_independent_switches() {
         let base = ConfigData::default();
         assert!(!base.notify_on_copy);
-        assert!(!base.sound_on_copy);
+        assert!(base.sound_on_copy);
+        assert!(base.notification_preview);
 
         let next = ConfigPatch {
-            sound_on_copy: Some(true),
+            sound_on_copy: Some(false),
+            notification_preview: Some(false),
             ..Default::default()
         }
         .apply(&base)
         .unwrap();
-        assert!(next.sound_on_copy);
+        assert!(!next.sound_on_copy);
+        assert!(!next.notification_preview);
         assert!(
             !next.notify_on_copy,
             "one switch turned the other one on too"

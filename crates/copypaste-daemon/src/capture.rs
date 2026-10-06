@@ -316,7 +316,7 @@ fn persist_pending(
             // `note_local_change` because this is the one caller that knows the
             // change was a *copy*, which is what a client needs to decide
             // whether to notify (parity finding 18).
-            announce_capture(state, item.created_at, true);
+            announce_capture(state, item.created_at, &item.id, true);
             *slot = None;
             CaptureOutcome::Stored
         }
@@ -326,7 +326,7 @@ fn persist_pending(
             } else {
                 debug!(id = %item.id, "capture deduplicated against a recent item");
             }
-            announce_capture(state, item.created_at, false);
+            announce_capture(state, item.created_at, &item.id, false);
             *slot = None;
             CaptureOutcome::Stored
         }
@@ -381,8 +381,8 @@ fn test_persist_outcome() -> Option<CaptureOutcome> {
     }
 }
 
-fn announce_capture(state: &AppState, created_at: i64, saved: bool) {
-    state.note_capture(created_at);
+fn announce_capture(state: &AppState, created_at: i64, item_id: &str, saved: bool) {
+    state.note_capture(created_at, item_id);
     crate::notify::on_capture(state, saved);
 }
 

@@ -101,7 +101,7 @@ internal object AndroidClipboardReader {
         fun closeInput(input: java.io.InputStream)
         fun abandon(token: Long)
         fun scoped(token: Long, completion: Boolean, contentType: String, callback: CaptureCallback): Boolean
-        fun onCaptured(context: Context?)
+        fun onCaptured(context: Context?, preview: CaptureFeedbackPreview?)
         fun closeHost(host: Host)
     }
 
@@ -115,7 +115,9 @@ internal object AndroidClipboardReader {
         override fun abandon(token: Long) { NativeRuntimeCapture.abandon(token) }
         override fun scoped(token: Long, completion: Boolean, contentType: String, callback: CaptureCallback): Boolean =
             NativeRuntimeCapture.scoped(token, completion, contentType, callback)
-        override fun onCaptured(context: Context?) { AndroidCaptureFeedback.onCaptured(requireNotNull(context)) }
+        override fun onCaptured(context: Context?, preview: CaptureFeedbackPreview?) {
+            AndroidCaptureFeedback.onCaptured(requireNotNull(context), preview)
+        }
         override fun closeHost(host: Host) { host.close() }
     }
 
@@ -130,6 +132,9 @@ internal object AndroidClipboardReader {
         private val completing = java.util.concurrent.atomic.AtomicBoolean(false)
         private val result = java.util.concurrent.atomic.AtomicReference(completion)
         private val payload = java.util.concurrent.atomic.AtomicReference<Snapshot?>(null)
+        private val feedback = java.util.concurrent.atomic.AtomicReference<CaptureFeedbackPreview?>(null)
+        fun feedbackPreview(): CaptureFeedbackPreview? = feedback.get()
+        fun feedbackPreview(preview: CaptureFeedbackPreview) { feedback.set(preview) }
         private val stream = java.util.concurrent.atomic.AtomicReference<java.io.InputStream?>(null)
         private val action = java.util.concurrent.atomic.AtomicReference<((Snapshot) -> Boolean)?>(null)
         fun attach(token: Long) {
@@ -162,6 +167,7 @@ internal object AndroidClipboardReader {
         fun reading(): Boolean = !cancelled.get() && !host.closed.get()
         fun cleanup() {
             payload.set(null)
+            feedback.set(null)
             action.set(null)
             host.pending.remove(this)
             val token = capability.getAndSet(0)
@@ -176,7 +182,7 @@ internal object AndroidClipboardReader {
                     if (saved && reading()) {
                         runCatching {
                             runtime.scoped(token, true, "text/plain") {
-                                runtime.onCaptured(applicationContext)
+                                runtime.onCaptured(applicationContext, feedbackPreview())
                                 published = true
                                 callback?.invoke(true)
                             }
@@ -261,7 +267,7 @@ internal object AndroidClipboardReader {
             if (saved) {
                 NativeRuntimeCapture.scoped(pending.token, true, "text/plain") {
                     if (background) AndroidCaptureState.recordBackgroundCapture(app, data.capturedAt)
-                    AndroidCaptureFeedback.onCaptured(app)
+                    AndroidCaptureFeedback.onCaptured(app, pending.feedbackPreview())
                 }
             }
             saved
@@ -271,7 +277,11 @@ internal object AndroidClipboardReader {
     private fun materialize(context: Context, pending: Pending, snapshot: Snapshot): Boolean {
         // A binary payload never falls back to textual/base64 capture.
         return if (snapshot.uri != null) binary(context, pending, snapshot.uri, snapshot.type ?: return false)
-        else snapshot.text?.takeIf(String::isNotBlank)?.let { NativeRuntimeCapture.ingestText(pending.token, it) } == true
+        else snapshot.text?.takeIf(String::isNotBlank)?.let {
+            val saved = NativeRuntimeCapture.ingestText(pending.token, it)
+            if (saved) pending.feedbackPreview(CaptureFeedbackPreview(AndroidCaptureFeedback.textPreview(it)))
+            saved
+        } == true
     }
 
     private fun text(clip: ClipData, limit: Long): String? {
@@ -296,11 +306,13 @@ internal object AndroidClipboardReader {
                 try { readBounded(input, cap, pending) } finally { pending.releaseInput(input) }
             } ?: return@read
             if (!pending.reading()) return@read
-            bytes = if (declaredType.startsWith("image/")) normaliseImage(source, cap) else source
+            bytes = if (declaredType.startsWith("image/")) normaliseImage(source, cap, pending) else source
         }
         val payload = bytes ?: return false
         if (!read) return false
-        return NativeRuntimeCapture.ingestBinary(pending.token, payload, if (declaredType.startsWith("image/")) "image/png" else declaredType, if (declaredType.startsWith("image/")) "" else filename(uri), uri.toString())
+        val saved = NativeRuntimeCapture.ingestBinary(pending.token, payload, if (declaredType.startsWith("image/")) "image/png" else declaredType, if (declaredType.startsWith("image/")) "" else filename(uri), uri.toString())
+        if (saved && !declaredType.startsWith("image/")) pending.feedbackPreview(CaptureFeedbackPreview(filename(uri)))
+        return saved
     }
 
     private fun filename(uri: Uri): String =
@@ -323,7 +335,7 @@ internal object AndroidClipboardReader {
         return output.toByteArray().takeIf(ByteArray::isNotEmpty)
     }
 
-    private fun normaliseImage(source: ByteArray, maximum: Int): ByteArray? {
+    private fun normaliseImage(source: ByteArray, maximum: Int, pending: Pending): ByteArray? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         runCatching { BitmapFactory.decodeByteArray(source, 0, source.size, bounds) }
             .getOrNull()
@@ -340,6 +352,8 @@ internal object AndroidClipboardReader {
             )
         }.getOrNull() ?: return null
         return try {
+            runCatching { AndroidCaptureFeedback.imagePreview(bitmap) }
+                .getOrNull()?.let(pending::feedbackPreview)
             BoundedOutputStream(maximum).use { output ->
                 if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) return null
                 output.bytes()

@@ -147,7 +147,7 @@ impl AppState {
     /// back.
     pub fn note_local_change(&self) {
         self.p2p.node().note_local_version(copypaste_core::now_ms());
-        self.publish(EventKind::Items, false);
+        self.publish(EventKind::Items, None);
         self.p2p.wake();
         self.cloud.wake();
     }
@@ -158,23 +158,23 @@ impl AppState {
     /// read `notify_on_copy` — the event says what happened, the setting says
     /// what to do about it, and the surface that owns the notification reads
     /// it.
-    pub fn note_capture(&self, floor_ms: i64) {
+    pub fn note_capture(&self, floor_ms: i64, item_id: &str) {
         self.p2p.node().note_local_version(floor_ms);
-        self.publish(EventKind::Items, true);
+        self.publish(EventKind::Items, Some(item_id));
         self.p2p.wake();
         self.cloud.wake();
     }
 
     /// History changed because a peer or the cloud delivered something.
     pub fn note_remote_change(&self) {
-        self.publish(EventKind::Items, false);
+        self.publish(EventKind::Items, None);
     }
 
     pub fn note_peers_changed(&self) {
-        self.publish(EventKind::Peers, false);
+        self.publish(EventKind::Peers, None);
     }
 
-    fn publish(&self, event: EventKind, captured: bool) {
+    fn publish(&self, event: EventKind, captured_item_id: Option<&str>) {
         // Having no subscriber is the ordinary case: the CLI does not subscribe
         // and the app may not be running. `item_count` costs a `SELECT COUNT(*)`
         // over the live set, so it is not built for nobody. Safe against the
@@ -186,7 +186,8 @@ impl AppState {
         let _ = self.events.send(EventData {
             event,
             item_count: self.store.count().unwrap_or(0),
-            captured,
+            captured: captured_item_id.is_some(),
+            captured_item_id: captured_item_id.map(str::to_owned),
         });
     }
 

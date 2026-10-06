@@ -65,6 +65,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _syncEnabledKey = GlobalKey();
   final _lanVisibilityKey = GlobalKey();
   final _notificationOnCopyKey = GlobalKey();
+  final _notificationPreviewKey = GlobalKey();
   final _soundOnCopyKey = GlobalKey();
   final _applicationUpdatesKey = GlobalKey();
   final _quickPasteShortcutKey = GlobalKey();
@@ -440,6 +441,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         label: 'Notification on copy',
         description: 'Show a notification after a background capture.',
         targetKey: _notificationOnCopyKey,
+      ),
+      _SettingsNavigationTarget(
+        id: _SettingsTargetId.notificationPreview,
+        section: _SettingsSectionId.feedback,
+        label: 'Show clipboard content',
+        description: 'Include a clip preview in copy notifications.',
+        keywords: 'notification preview text image privacy',
+        targetKey: _notificationPreviewKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.blockScreenshots,
@@ -854,6 +863,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: widget.controller.busy
                 ? null
                 : widget.controller.setNotifyOnCopy,
+          ),
+        ),
+        const Gap(AppSpacing.md),
+        _SettingCard(
+          key: _notificationPreviewKey,
+          highlighted: _isHighlighted(_SettingsTargetId.notificationPreview),
+          title: 'Show clipboard content',
+          description: 'Include a clip preview in copy notifications.',
+          trailing: Switch(
+            value: settings.notificationPreview,
+            enabled: settings.notifyOnCopy && !widget.controller.busy,
+            onChanged: !settings.notifyOnCopy || widget.controller.busy
+                ? null
+                : widget.controller.setNotificationPreview,
           ),
         ),
         const Gap(AppSpacing.md),
@@ -1487,6 +1510,7 @@ abstract final class _SettingsTargetId {
   static const String sync = 'result-sync';
   static const String lanVisibility = 'result-lan-visibility';
   static const String notificationOnCopy = 'result-notification-on-copy';
+  static const String notificationPreview = 'result-notification-preview';
   static const String soundOnCopy = 'result-sound-on-copy';
   static const String applicationUpdates = 'result-application-updates';
   static const String quickPasteShortcut = 'result-quick-paste-shortcut';

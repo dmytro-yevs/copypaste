@@ -36,6 +36,10 @@ fn fail_closed(field: &str) -> ConfigPatch {
             lan_visibility: Some(false),
             ..Default::default()
         },
+        "notification_preview" => ConfigPatch {
+            notification_preview: Some(false),
+            ..Default::default()
+        },
         _ => ConfigPatch::default(),
     }
 }
@@ -46,6 +50,7 @@ pub fn all_closed() -> ConfigData {
         private_mode: true,
         lan_visibility: false,
         sync_enabled: false,
+        notification_preview: false,
         excluded_app_bundle_ids: Vec::new(),
         ..ConfigData::default()
     }
@@ -125,6 +130,24 @@ fn decode_field(field: &str, value: &Value) -> Option<ConfigPatch> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn feedback_defaults_preserve_explicit_existing_choices() {
+        let (fresh, _) = read("{}");
+        assert!(fresh.sound_on_copy);
+        assert!(fresh.notification_preview);
+        assert!(!fresh.notify_on_copy);
+
+        let (existing, _) =
+            read(r#"{"sound_on_copy":false,"notification_preview":false,"notify_on_copy":true}"#);
+        assert!(!existing.sound_on_copy);
+        assert!(!existing.notification_preview);
+        assert!(existing.notify_on_copy);
+
+        let (corrupt, health) = read(r#"{"notification_preview":"invalid"}"#);
+        assert!(!corrupt.notification_preview);
+        assert_eq!(health.unreadable_fields, ["notification_preview"]);
+    }
 
     fn stored(config: &ConfigData) -> String {
         serde_json::to_string(config).expect("a config encodes")

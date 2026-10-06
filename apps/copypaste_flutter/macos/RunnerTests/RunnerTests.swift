@@ -5,6 +5,22 @@ import XCTest
 
 class RunnerTests: XCTestCase {
 
+  func testTrayMenuOptsIntoAppKitImageVisibility() {
+    let menu = NSMenu()
+    let item = NSMenuItem(title: "Open", action: nil, keyEquivalent: "")
+    item.image = NSImage(size: NSSize(width: 16, height: 16))
+    menu.addItem(item)
+    let separator = NSMenuItem.separator()
+    menu.addItem(separator)
+
+    MacosTrayMenuChannel.showImages(in: menu)
+
+    if item.responds(to: NSSelectorFromString("setPreferredImageVisibility:")) {
+      XCTAssertEqual(item.value(forKey: "preferredImageVisibility") as? Int, 1)
+      XCTAssertEqual(separator.value(forKey: "preferredImageVisibility") as? Int, 0)
+    }
+  }
+
   func testTerminationDoesNotRequireAFlutterWindowOrReply() {
     let delegate = AppDelegate()
     delegate.mainFlutterWindow = nil

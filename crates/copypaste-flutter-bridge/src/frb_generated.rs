@@ -2760,10 +2760,12 @@ impl SseDecode for crate::api::RuntimeEvent {
         let mut var_kind = <String>::sse_decode(deserializer);
         let mut var_itemCount = <u64>::sse_decode(deserializer);
         let mut var_captured = <bool>::sse_decode(deserializer);
+        let mut var_capturedItemId = <Option<String>>::sse_decode(deserializer);
         return crate::api::RuntimeEvent {
             kind: var_kind,
             item_count: var_itemCount,
             captured: var_captured,
+            captured_item_id: var_capturedItemId,
         };
     }
 }
@@ -2777,6 +2779,7 @@ impl SseDecode for crate::api::RuntimeSettingsData {
         let mut var_lanVisibility = <bool>::sse_decode(deserializer);
         let mut var_syncEnabled = <bool>::sse_decode(deserializer);
         let mut var_notifyOnCopy = <bool>::sse_decode(deserializer);
+        let mut var_notificationPreview = <bool>::sse_decode(deserializer);
         let mut var_soundOnCopy = <bool>::sse_decode(deserializer);
         return crate::api::RuntimeSettingsData {
             retention_days: var_retentionDays,
@@ -2785,6 +2788,7 @@ impl SseDecode for crate::api::RuntimeSettingsData {
             lan_visibility: var_lanVisibility,
             sync_enabled: var_syncEnabled,
             notify_on_copy: var_notifyOnCopy,
+            notification_preview: var_notificationPreview,
             sound_on_copy: var_soundOnCopy,
         };
     }
@@ -2799,6 +2803,7 @@ impl SseDecode for crate::api::RuntimeSettingsPatch {
         let mut var_lanVisibility = <Option<bool>>::sse_decode(deserializer);
         let mut var_syncEnabled = <Option<bool>>::sse_decode(deserializer);
         let mut var_notifyOnCopy = <Option<bool>>::sse_decode(deserializer);
+        let mut var_notificationPreview = <Option<bool>>::sse_decode(deserializer);
         let mut var_soundOnCopy = <Option<bool>>::sse_decode(deserializer);
         return crate::api::RuntimeSettingsPatch {
             retention_days: var_retentionDays,
@@ -2807,6 +2812,7 @@ impl SseDecode for crate::api::RuntimeSettingsPatch {
             lan_visibility: var_lanVisibility,
             sync_enabled: var_syncEnabled,
             notify_on_copy: var_notifyOnCopy,
+            notification_preview: var_notificationPreview,
             sound_on_copy: var_soundOnCopy,
         };
     }
@@ -3587,6 +3593,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::RuntimeEvent {
             self.kind.into_into_dart().into_dart(),
             self.item_count.into_into_dart().into_dart(),
             self.captured.into_into_dart().into_dart(),
+            self.captured_item_id.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -3607,6 +3614,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::RuntimeSettingsData {
             self.lan_visibility.into_into_dart().into_dart(),
             self.sync_enabled.into_into_dart().into_dart(),
             self.notify_on_copy.into_into_dart().into_dart(),
+            self.notification_preview.into_into_dart().into_dart(),
             self.sound_on_copy.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -3633,6 +3641,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::RuntimeSettingsPatch {
             self.lan_visibility.into_into_dart().into_dart(),
             self.sync_enabled.into_into_dart().into_dart(),
             self.notify_on_copy.into_into_dart().into_dart(),
+            self.notification_preview.into_into_dart().into_dart(),
             self.sound_on_copy.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -4399,6 +4408,7 @@ impl SseEncode for crate::api::RuntimeEvent {
         <String>::sse_encode(self.kind, serializer);
         <u64>::sse_encode(self.item_count, serializer);
         <bool>::sse_encode(self.captured, serializer);
+        <Option<String>>::sse_encode(self.captured_item_id, serializer);
     }
 }
 
@@ -4411,6 +4421,7 @@ impl SseEncode for crate::api::RuntimeSettingsData {
         <bool>::sse_encode(self.lan_visibility, serializer);
         <bool>::sse_encode(self.sync_enabled, serializer);
         <bool>::sse_encode(self.notify_on_copy, serializer);
+        <bool>::sse_encode(self.notification_preview, serializer);
         <bool>::sse_encode(self.sound_on_copy, serializer);
     }
 }
@@ -4424,6 +4435,7 @@ impl SseEncode for crate::api::RuntimeSettingsPatch {
         <Option<bool>>::sse_encode(self.lan_visibility, serializer);
         <Option<bool>>::sse_encode(self.sync_enabled, serializer);
         <Option<bool>>::sse_encode(self.notify_on_copy, serializer);
+        <Option<bool>>::sse_encode(self.notification_preview, serializer);
         <Option<bool>>::sse_encode(self.sound_on_copy, serializer);
     }
 }

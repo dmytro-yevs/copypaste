@@ -4,6 +4,7 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import 'frb_generated.dart';
+
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `android_runtime_unavailable`, `ceremony_not_found`, `clip`, `cloud_status_response`, `content_class_to_ipc`, `content_class`, `create_private_file`, `daemon_exited_early`, `daemon_spawn_failed`, `daemon_start_failed`, `daemon_unreachable`, `device_class`, `device_details`, `device_endpoint`, `device_latency`, `device_observation_provenance`, `device_observation_trust`, `device_platform`, `device_presence`, `device_profile`, `discovered_response`, `empty_response`, `export_write_failed`, `from_daemon`, `history_query`, `internal`, `item_response`, `not_initialized`, `runtime_settings`, `semantic_kind_to_ipc`, `semantic_kind`, `this_device`, `timeout`, `unsafe_data_directory`, `watch_not_found`
@@ -1012,15 +1013,21 @@ class RuntimeEvent {
   final String kind;
   final BigInt itemCount;
   final bool captured;
+  final String? capturedItemId;
 
   const RuntimeEvent({
     required this.kind,
     required this.itemCount,
     required this.captured,
+    this.capturedItemId,
   });
 
   @override
-  int get hashCode => kind.hashCode ^ itemCount.hashCode ^ captured.hashCode;
+  int get hashCode =>
+      kind.hashCode ^
+      itemCount.hashCode ^
+      captured.hashCode ^
+      capturedItemId.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1029,7 +1036,8 @@ class RuntimeEvent {
           runtimeType == other.runtimeType &&
           kind == other.kind &&
           itemCount == other.itemCount &&
-          captured == other.captured;
+          captured == other.captured &&
+          capturedItemId == other.capturedItemId;
 }
 
 class RuntimeSettingsData {
@@ -1039,6 +1047,7 @@ class RuntimeSettingsData {
   final bool lanVisibility;
   final bool syncEnabled;
   final bool notifyOnCopy;
+  final bool notificationPreview;
   final bool soundOnCopy;
 
   const RuntimeSettingsData({
@@ -1048,6 +1057,7 @@ class RuntimeSettingsData {
     required this.lanVisibility,
     required this.syncEnabled,
     required this.notifyOnCopy,
+    required this.notificationPreview,
     required this.soundOnCopy,
   });
 
@@ -1059,6 +1069,7 @@ class RuntimeSettingsData {
       lanVisibility.hashCode ^
       syncEnabled.hashCode ^
       notifyOnCopy.hashCode ^
+      notificationPreview.hashCode ^
       soundOnCopy.hashCode;
 
   @override
@@ -1072,6 +1083,7 @@ class RuntimeSettingsData {
           lanVisibility == other.lanVisibility &&
           syncEnabled == other.syncEnabled &&
           notifyOnCopy == other.notifyOnCopy &&
+          notificationPreview == other.notificationPreview &&
           soundOnCopy == other.soundOnCopy;
 }
 
@@ -1082,6 +1094,7 @@ class RuntimeSettingsPatch {
   final bool? lanVisibility;
   final bool? syncEnabled;
   final bool? notifyOnCopy;
+  final bool? notificationPreview;
   final bool? soundOnCopy;
 
   const RuntimeSettingsPatch({
@@ -1091,6 +1104,7 @@ class RuntimeSettingsPatch {
     this.lanVisibility,
     this.syncEnabled,
     this.notifyOnCopy,
+    this.notificationPreview,
     this.soundOnCopy,
   });
 
@@ -1105,6 +1119,7 @@ class RuntimeSettingsPatch {
       lanVisibility.hashCode ^
       syncEnabled.hashCode ^
       notifyOnCopy.hashCode ^
+      notificationPreview.hashCode ^
       soundOnCopy.hashCode;
 
   @override
@@ -1118,6 +1133,7 @@ class RuntimeSettingsPatch {
           lanVisibility == other.lanVisibility &&
           syncEnabled == other.syncEnabled &&
           notifyOnCopy == other.notifyOnCopy &&
+          notificationPreview == other.notificationPreview &&
           soundOnCopy == other.soundOnCopy;
 }
 

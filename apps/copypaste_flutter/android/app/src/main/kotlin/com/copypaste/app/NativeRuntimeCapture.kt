@@ -27,5 +27,6 @@ internal object NativeRuntimeCapture {
     ): Boolean
     @JvmStatic external fun setCaptureRunning(running: Boolean)
     @JvmStatic external fun notifyOnCopyEnabled(): Boolean
+    @JvmStatic external fun notificationPreviewEnabled(): Boolean
     @JvmStatic external fun soundOnCopyEnabled(): Boolean
 }

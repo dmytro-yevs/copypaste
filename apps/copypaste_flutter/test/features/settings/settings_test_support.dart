@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:copypaste_flutter/features/settings/models/settings_models.dart';
 import 'package:copypaste_flutter/features/settings/repository/settings_repository.dart';
 import 'package:copypaste_flutter/platform/notifications/capture_notification_port.dart';
+import 'package:copypaste_flutter/platform/notifications/capture_notification_preview.dart';
 import 'package:copypaste_flutter/platform/security/screenshot_protection.dart';
 
 class FakeScreenshotProtection implements ScreenshotProtection {
@@ -16,7 +17,11 @@ class FakeScreenshotProtection implements ScreenshotProtection {
 }
 
 class FakeSettingsRepository implements SettingsRepository {
-  final StreamController<void> captures = StreamController<void>.broadcast();
+  final StreamController<String?> captures =
+      StreamController<String?>.broadcast();
+  CaptureNotificationPreview? preview;
+  int previewReads = 0;
+  Future<CaptureNotificationPreview?> Function(String)? readPreview;
   CaptureSettingsState capture = const CaptureSettingsState(
     running: true,
     paused: false,
@@ -36,7 +41,13 @@ class FakeSettingsRepository implements SettingsRepository {
   int restoreCalls = 0;
 
   @override
-  Stream<void> capturedEvents() => captures.stream;
+  Stream<String?> capturedEvents() => captures.stream;
+
+  @override
+  Future<CaptureNotificationPreview?> capturePreview(String id) async {
+    previewReads += 1;
+    return readPreview == null ? preview : await readPreview!(id);
+  }
 
   @override
   Future<BackupResult> backupHistory(String path) async {
@@ -88,6 +99,8 @@ class FakeSettingsRepository implements SettingsRepository {
       lanVisibility: change.lanVisibility ?? currentSettings.lanVisibility,
       syncEnabled: change.syncEnabled ?? currentSettings.syncEnabled,
       notifyOnCopy: change.notifyOnCopy ?? currentSettings.notifyOnCopy,
+      notificationPreview:
+          change.notificationPreview ?? currentSettings.notificationPreview,
       soundOnCopy: change.soundOnCopy ?? currentSettings.soundOnCopy,
     );
     return currentSettings;
@@ -121,6 +134,7 @@ class FakeSettingsFilePicker implements SettingsFilePicker {
 class FakeCaptureNotificationPort implements CaptureNotificationPort {
   bool permissionGranted = true;
   int notifications = 0;
+  final List<CaptureNotificationPreview?> previews = [];
 
   @override
   Future<void> initialize() async {}
@@ -129,7 +143,8 @@ class FakeCaptureNotificationPort implements CaptureNotificationPort {
   Future<bool> requestPermission() async => permissionGranted;
 
   @override
-  Future<void> showCaptured() async {
+  Future<void> showCaptured({CaptureNotificationPreview? preview}) async {
     notifications += 1;
+    previews.add(preview);
   }
 }
