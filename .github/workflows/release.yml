@@ -248,6 +248,9 @@ jobs:
           chmod +x scripts/release/sign-update-artifact.sh
           scripts/release/sign-update-artifact.sh "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-windows-x86_64-setup.exe"
           (cd apps/copypaste_flutter && dart run tool/verify_update_signature.dart "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-windows-x86_64-setup.exe" "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-windows-x86_64-setup.exe.sig")
+      - name: Install and run exact Windows artifact
+        shell: pwsh
+        run: ./scripts/release/smoke-windows-production.ps1 -Installer "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-windows-x86_64-setup.exe" -Version '${{ needs.preflight.outputs.version }}'
       - name: Write exact-artifact receipt
         shell: pwsh
         run: python scripts/release/write-artifact-receipt.py --platform windows --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-windows-x86_64-setup.exe" --version '${{ needs.preflight.outputs.version }}' --commit "$env:GITHUB_SHA" --run-id "$env:GITHUB_RUN_ID" --output dist/production-receipt.json
