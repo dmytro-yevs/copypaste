@@ -2,6 +2,7 @@ package com.copypaste.app
 
 import android.app.Activity
 import android.net.Uri
+import android.util.Log
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
 import com.google.android.gms.common.moduleinstall.InstallStatusListener
@@ -45,13 +46,14 @@ internal class PairingScannerChannel(
     }
 
     private fun scan(result: MethodChannel.Result) {
+        Log.i(logTag, "Starting pairing scanner")
         if (pending != null) {
             result.error("scan_in_progress", "A scanner is already open.", null)
             return
         }
-        if (GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(activity) !=
-            ConnectionResult.SUCCESS
-        ) {
+        val availability = GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(activity)
+        if (availability != ConnectionResult.SUCCESS) {
+            Log.w(logTag, "Google Play services availability=$availability")
             result.error("scanner_unavailable", "Google Play services is unavailable. Enter the pairing code instead.", null)
             return
         }
@@ -65,6 +67,7 @@ internal class PairingScannerChannel(
             val scanner = GmsBarcodeScanning.getClient(activity, options)
             val listener = InstallStatusListener { update ->
                 if (pending !== result) return@InstallStatusListener
+                Log.i(logTag, "Scanner module state=${update.installState} error=${update.errorCode}")
                 when (update.installState) {
                     InstallState.STATE_COMPLETED -> startScanner(scanner, result)
                     InstallState.STATE_CANCELED -> takeResult()?.success(null)
@@ -75,12 +78,15 @@ internal class PairingScannerChannel(
             modules.installModules(ModuleInstallRequest.newBuilder()
                 .addApi(scanner).setListener(listener).build())
                 .addOnSuccessListener { response ->
+                    Log.i(logTag, "Scanner module request session=${response.sessionId} installed=${response.areModulesAlreadyInstalled()}")
                     if (response.areModulesAlreadyInstalled()) startScanner(scanner, result)
                 }
-                .addOnFailureListener { if (pending === result) unavailable() }
+                .addOnFailureListener { error ->
+                    if (pending === result) unavailable("module_install", error)
+                }
                 .addOnCanceledListener { if (pending === result) takeResult()?.success(null) }
-        } catch (_: RuntimeException) {
-            unavailable()
+        } catch (error: RuntimeException) {
+            unavailable("scanner_setup", error)
         }
     }
 
@@ -104,15 +110,16 @@ internal class PairingScannerChannel(
                     }
                 }
                 .addOnCanceledListener { if (pending === result) takeResult()?.success(null) }
-                .addOnFailureListener {
-                    if (pending === result) unavailable()
+                .addOnFailureListener { error ->
+                    if (pending === result) unavailable("scanner_launch", error)
                 }
-        } catch (_: RuntimeException) {
-            unavailable()
+        } catch (error: RuntimeException) {
+            unavailable("scanner_launch", error)
         }
     }
 
-    private fun unavailable() {
+    private fun unavailable(stage: String = "module_install", error: Exception? = null) {
+        Log.e(logTag, "Pairing scanner failed at $stage", error)
         takeResult()?.error("scanner_unavailable", "Google scanner could not open. Enter the pairing code instead.", null)
     }
 
@@ -124,5 +131,9 @@ internal class PairingScannerChannel(
     private fun takeResult(): MethodChannel.Result? {
         clearInstallListener()
         return pending.also { pending = null }
+    }
+
+    companion object {
+        private const val logTag = "CopyPasteScanner"
     }
 }
