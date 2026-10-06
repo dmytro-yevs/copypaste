@@ -5,6 +5,7 @@ This update improves History, Quick Paste, and local module management.
 - Add installation and management of signed optional modules in Settings.
 - Improve device pairing and capture notifications.
 - Improve clipboard image previews and Android release verification.
+- Fix Windows HTML capture when clipboard allocations contain trailing padding.
 
 Optional modules are installed separately from local signed packages. OCR engines and models are not bundled with the application.
 
