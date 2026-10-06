@@ -32,7 +32,7 @@ pub enum EventKind {
 }
 
 /// One push frame on a [`crate::Method::Watch`] connection.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventData {
     pub event: EventKind,
     /// Live item count at the time of the event, so a client can render a badge
@@ -43,10 +43,13 @@ pub struct EventData {
     /// does not apply those client-owned settings.
     ///
     /// A defaulted flag, not a new [`EventKind`], keeps older watchers decoding:
-    /// an unknown enum variant would reject the frame. It carries no content or
-    /// id; subscribers re-read through ordinary methods.
+    /// an unknown enum variant would reject the frame. It carries no clipboard
+    /// content; subscribers re-read through ordinary methods.
     #[serde(default)]
     pub captured: bool,
+    /// Identifies the captured clip without including its content in events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captured_item_id: Option<String>,
 }
 
 /// One reply. `ok` distinguishes success from failure without inspecting the

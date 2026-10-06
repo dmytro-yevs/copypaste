@@ -1,4 +1,9 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:copypaste_flutter/generated/api.dart' as runtime;
+
+import '../../../platform/notifications/capture_notification_preview.dart';
 
 import '../models/settings_models.dart';
 import 'settings_repository.dart';
@@ -7,14 +12,44 @@ class RuntimeSettingsRepository implements SettingsRepository {
   RuntimeSettingsRepository();
 
   @override
-  Stream<void> capturedEvents() async* {
+  Stream<String?> capturedEvents() async* {
+    // Android feedback belongs to its capture service, including while Dart sleeps.
+    if (Platform.isAndroid) return;
     final watchId = await runtime.allocateRuntimeWatch();
     try {
       await for (final event in runtime.watchRuntime(watchId: watchId)) {
-        if (event.captured) yield null;
+        if (event.captured) yield event.capturedItemId;
       }
     } finally {
       await runtime.cancelRuntimeWatch(watchId: watchId);
+    }
+  }
+
+  @override
+  Future<CaptureNotificationPreview?> capturePreview(String id) async {
+    final clip = await runtime.getClip(id: id);
+    switch (clip.contentClass) {
+      case runtime.ClipContentClass.image:
+        final image = await runtime.clipImagePreview(id: id, maxEdge: 256);
+        final details = clip.imageDetails;
+        return CaptureNotificationPreview(
+          text: details == null
+              ? 'Image'
+              : 'Image · ${details.width} × ${details.height}',
+          imagePng: base64Decode(image.pngBase64),
+        );
+      case runtime.ClipContentClass.file:
+        final details = clip.fileDetails;
+        return CaptureNotificationPreview(
+          text: CaptureNotificationPreview.textPreview(
+            details?.filename ?? details?.sourceReference ?? 'File',
+          ),
+        );
+      case runtime.ClipContentClass.text:
+      case runtime.ClipContentClass.other:
+        return CaptureNotificationPreview(
+          text: CaptureNotificationPreview.textPreview(clip.content),
+        );
     }
   }
 
@@ -42,6 +77,7 @@ class RuntimeSettingsRepository implements SettingsRepository {
         lanVisibility: change.lanVisibility,
         syncEnabled: change.syncEnabled,
         notifyOnCopy: change.notifyOnCopy,
+        notificationPreview: change.notificationPreview,
         soundOnCopy: change.soundOnCopy,
       ),
     );
@@ -86,6 +122,7 @@ class RuntimeSettingsRepository implements SettingsRepository {
         lanVisibility: settings.lanVisibility,
         syncEnabled: settings.syncEnabled,
         notifyOnCopy: settings.notifyOnCopy,
+        notificationPreview: settings.notificationPreview,
         soundOnCopy: settings.soundOnCopy,
       );
 }

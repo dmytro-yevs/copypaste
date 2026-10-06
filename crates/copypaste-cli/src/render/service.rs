@@ -72,6 +72,7 @@ pub fn config_text(applied: &ConfigApplied) -> String {
         setting("lan visibility", yes_no(config.lan_visibility)),
         setting("sync", yes_no(config.sync_enabled)),
         setting("notify on copy", yes_no(config.notify_on_copy)),
+        setting("content preview", yes_no(config.notification_preview)),
         setting("sound on copy", yes_no(config.sound_on_copy)),
     ];
 
@@ -319,7 +320,8 @@ mod tests {
         assert!(text.contains("max file size    104857600 bytes"), "{text}");
         assert!(text.contains("decoded image cap 50 MiB"), "{text}");
         assert!(text.contains("notify on copy   on"), "{text}");
-        assert!(text.contains("sound on copy    off"), "{text}");
+        assert!(text.contains("sound on copy    on"), "{text}");
+        assert!(text.contains("content preview  on"), "{text}");
     }
 
     fn stats() -> CloudSyncData {
@@ -373,6 +375,7 @@ mod tests {
             event: EventKind::Items,
             item_count: 3,
             captured: true,
+            captured_item_id: Some("captured-item".into()),
         });
         assert!(captured.contains("captured"), "{captured}");
 
@@ -380,6 +383,7 @@ mod tests {
             event: EventKind::Items,
             item_count: 3,
             captured: false,
+            captured_item_id: None,
         });
         assert!(!other.contains("captured"), "{other}");
     }

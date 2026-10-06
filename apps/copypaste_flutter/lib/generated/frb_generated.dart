@@ -4,11 +4,14 @@
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
 import 'api.dart';
+
 import 'dart:async';
 import 'dart:convert';
+
 import 'frb_generated.dart';
 import 'frb_generated.io.dart'
     if (dart.library.js_interop) 'frb_generated.web.dart';
+
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 /// Main entrypoint of the Rust API
@@ -2432,12 +2435,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   RuntimeEvent dco_decode_runtime_event(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return RuntimeEvent(
       kind: dco_decode_String(arr[0]),
       itemCount: dco_decode_u_64(arr[1]),
       captured: dco_decode_bool(arr[2]),
+      capturedItemId: dco_decode_opt_String(arr[3]),
     );
   }
 
@@ -2445,8 +2449,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   RuntimeSettingsData dco_decode_runtime_settings_data(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
     return RuntimeSettingsData(
       retentionDays: dco_decode_u_32(arr[0]),
       storageQuotaBytes: dco_decode_u_64(arr[1]),
@@ -2454,7 +2458,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       lanVisibility: dco_decode_bool(arr[3]),
       syncEnabled: dco_decode_bool(arr[4]),
       notifyOnCopy: dco_decode_bool(arr[5]),
-      soundOnCopy: dco_decode_bool(arr[6]),
+      notificationPreview: dco_decode_bool(arr[6]),
+      soundOnCopy: dco_decode_bool(arr[7]),
     );
   }
 
@@ -2462,8 +2467,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   RuntimeSettingsPatch dco_decode_runtime_settings_patch(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
     return RuntimeSettingsPatch(
       retentionDays: dco_decode_opt_box_autoadd_u_32(arr[0]),
       storageQuotaBytes: dco_decode_opt_box_autoadd_u_64(arr[1]),
@@ -2471,7 +2476,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       lanVisibility: dco_decode_opt_box_autoadd_bool(arr[3]),
       syncEnabled: dco_decode_opt_box_autoadd_bool(arr[4]),
       notifyOnCopy: dco_decode_opt_box_autoadd_bool(arr[5]),
-      soundOnCopy: dco_decode_opt_box_autoadd_bool(arr[6]),
+      notificationPreview: dco_decode_opt_box_autoadd_bool(arr[6]),
+      soundOnCopy: dco_decode_opt_box_autoadd_bool(arr[7]),
     );
   }
 
@@ -3458,10 +3464,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_kind = sse_decode_String(deserializer);
     var var_itemCount = sse_decode_u_64(deserializer);
     var var_captured = sse_decode_bool(deserializer);
+    var var_capturedItemId = sse_decode_opt_String(deserializer);
     return RuntimeEvent(
       kind: var_kind,
       itemCount: var_itemCount,
       captured: var_captured,
+      capturedItemId: var_capturedItemId,
     );
   }
 
@@ -3476,6 +3484,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_lanVisibility = sse_decode_bool(deserializer);
     var var_syncEnabled = sse_decode_bool(deserializer);
     var var_notifyOnCopy = sse_decode_bool(deserializer);
+    var var_notificationPreview = sse_decode_bool(deserializer);
     var var_soundOnCopy = sse_decode_bool(deserializer);
     return RuntimeSettingsData(
       retentionDays: var_retentionDays,
@@ -3484,6 +3493,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       lanVisibility: var_lanVisibility,
       syncEnabled: var_syncEnabled,
       notifyOnCopy: var_notifyOnCopy,
+      notificationPreview: var_notificationPreview,
       soundOnCopy: var_soundOnCopy,
     );
   }
@@ -3499,6 +3509,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_lanVisibility = sse_decode_opt_box_autoadd_bool(deserializer);
     var var_syncEnabled = sse_decode_opt_box_autoadd_bool(deserializer);
     var var_notifyOnCopy = sse_decode_opt_box_autoadd_bool(deserializer);
+    var var_notificationPreview = sse_decode_opt_box_autoadd_bool(deserializer);
     var var_soundOnCopy = sse_decode_opt_box_autoadd_bool(deserializer);
     return RuntimeSettingsPatch(
       retentionDays: var_retentionDays,
@@ -3507,6 +3518,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       lanVisibility: var_lanVisibility,
       syncEnabled: var_syncEnabled,
       notifyOnCopy: var_notifyOnCopy,
+      notificationPreview: var_notificationPreview,
       soundOnCopy: var_soundOnCopy,
     );
   }
@@ -4388,6 +4400,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.kind, serializer);
     sse_encode_u_64(self.itemCount, serializer);
     sse_encode_bool(self.captured, serializer);
+    sse_encode_opt_String(self.capturedItemId, serializer);
   }
 
   @protected
@@ -4402,6 +4415,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.lanVisibility, serializer);
     sse_encode_bool(self.syncEnabled, serializer);
     sse_encode_bool(self.notifyOnCopy, serializer);
+    sse_encode_bool(self.notificationPreview, serializer);
     sse_encode_bool(self.soundOnCopy, serializer);
   }
 
@@ -4417,6 +4431,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_bool(self.lanVisibility, serializer);
     sse_encode_opt_box_autoadd_bool(self.syncEnabled, serializer);
     sse_encode_opt_box_autoadd_bool(self.notifyOnCopy, serializer);
+    sse_encode_opt_box_autoadd_bool(self.notificationPreview, serializer);
     sse_encode_opt_box_autoadd_bool(self.soundOnCopy, serializer);
   }
 

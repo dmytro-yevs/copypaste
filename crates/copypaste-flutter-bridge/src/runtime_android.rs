@@ -390,6 +390,22 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_notifyOnCopyE
 
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_notificationPreviewEnabled(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jboolean {
+    if RUNTIME
+        .get()
+        .is_some_and(|runtime| runtime.notification_preview_enabled())
+    {
+        JNI_TRUE
+    } else {
+        JNI_FALSE
+    }
+}
+
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_soundOnCopyEnabled(
     _env: JNIEnv,
     _class: JClass,
@@ -535,6 +551,7 @@ pub(crate) async fn watch(
                 },
                 item_count: event.item_count,
                 captured: event.captured,
+                captured_item_id: event.captured_item_id,
             })
             .is_err()
         {

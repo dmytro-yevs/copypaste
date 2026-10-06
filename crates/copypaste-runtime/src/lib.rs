@@ -283,6 +283,7 @@ impl Runtime {
                             event: EventKind::Peers,
                             item_count: store.count().unwrap_or(0),
                             captured: false,
+                            captured_item_id: None,
                         });
                     });
                 Response::ok(
@@ -536,7 +537,7 @@ impl Runtime {
             .acquire(token, CaptureScope::Commit)
             .ok_or(RuntimeError::CaptureRefused)?;
         let settings = &permit.config;
-        copypaste_core::ingest_into_with_capture_source_with_current_retention(
+        let ingested = copypaste_core::ingest_into_with_capture_source_with_current_retention(
             &self.store,
             &self.keyring,
             content,
@@ -548,7 +549,7 @@ impl Runtime {
             || self.settings.config(),
         )
         .map_err(|_| RuntimeError::Capture)?;
-        self.emit_capture();
+        self.emit_capture(ingested.into_item().id);
         permit.committed();
         Ok(())
     }
@@ -636,7 +637,7 @@ impl Runtime {
             .ok_or(RuntimeError::Capture)?;
             (copypaste_ipc::content_type::FILE, Some(metadata))
         };
-        copypaste_core::ingest_binary_into_with_capture_source(
+        let ingested = copypaste_core::ingest_binary_into_with_capture_source(
             &self.store,
             &self.keyring,
             bytes,
@@ -648,7 +649,7 @@ impl Runtime {
             &settings,
         )
         .map_err(|_| RuntimeError::Capture)?;
-        self.emit_capture();
+        self.emit_capture(ingested.into_item().id);
         permit.committed();
         Ok(())
     }
@@ -674,6 +675,11 @@ impl Runtime {
     }
 
     #[must_use]
+    pub fn notification_preview_enabled(&self) -> bool {
+        self.settings.config().notification_preview
+    }
+
+    #[must_use]
     pub fn sound_on_copy_enabled(&self) -> bool {
         self.settings.config().sound_on_copy
     }
@@ -689,14 +695,16 @@ impl Runtime {
             event,
             item_count: self.store.count().unwrap_or(0),
             captured: false,
+            captured_item_id: None,
         });
     }
 
-    fn emit_capture(&self) {
+    fn emit_capture(&self, item_id: String) {
         let _ = self.events.send(EventData {
             event: EventKind::Items,
             item_count: self.store.count().unwrap_or(0),
             captured: true,
+            captured_item_id: Some(item_id),
         });
     }
 
@@ -732,6 +740,7 @@ impl Runtime {
                         event: EventKind::Items,
                         item_count: store.count().unwrap_or(0),
                         captured: false,
+                        captured_item_id: None,
                     });
                 }
             })
@@ -1794,6 +1803,11 @@ mod tests {
         runtime.capture_text("copied on Android").unwrap();
         let text_event = events.try_recv().unwrap();
         assert!(text_event.captured);
+        let text_id = text_event.captured_item_id.expect("captured text ID");
+        assert_eq!(
+            runtime.store.get(&text_id).unwrap().unwrap().content_type,
+            copypaste_ipc::content_type::TEXT
+        );
         assert_eq!(text_event.item_count, 1);
 
         runtime
@@ -1805,6 +1819,11 @@ mod tests {
             )
             .unwrap();
         let file_event = events.try_recv().unwrap();
+        let file_id = file_event
+            .captured_item_id
+            .as_ref()
+            .expect("captured file ID");
+        assert_ne!(file_id, &text_id);
         assert!(file_event.captured);
         assert_eq!(file_event.item_count, 2);
     }
