@@ -7,6 +7,7 @@ EXPECTED_VERSION_CODE="${3:-}"
 EXPECTED_CERT="${4:-}"
 AAPT2="${AAPT2:-}"
 APKSIGNER="${APKSIGNER:-}"
+APK_ANALYZER="${APK_ANALYZER:-$(dirname "$(dirname "$(dirname "$AAPT2")")")/cmdline-tools/latest/bin/apkanalyzer}"
 
 [[ -f "$APK" && "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$EXPECTED_VERSION_CODE" =~ ^[1-9][0-9]*$ ]] || {
     echo "ERROR: usage: $0 <apk> <stable-version> <version-code> <certificate-sha256>" >&2
@@ -16,8 +17,8 @@ APKSIGNER="${APKSIGNER:-}"
     echo "ERROR: expected certificate fingerprint must be 64 hexadecimal characters" >&2
     exit 1
 }
-[[ -x "$AAPT2" && -x "$APKSIGNER" ]] || {
-    echo "ERROR: AAPT2 and APKSIGNER must name executable Android build tools" >&2
+[[ -x "$AAPT2" && -x "$APKSIGNER" && -x "$APK_ANALYZER" ]] || {
+    echo "ERROR: AAPT2, APKSIGNER, and APK_ANALYZER must name executable Android SDK tools" >&2
     exit 1
 }
 
@@ -56,8 +57,18 @@ if grep -q '^application-debuggable' <<<"$badging"; then
 fi
 
 for abi in armeabi-v7a arm64-v8a x86_64; do
-    unzip -Z1 "$APK" | grep -q "^lib/$abi/.*\.so$" || {
+    unzip -Z1 "$APK" | grep "^lib/$abi/.*\.so$" > /dev/null || {
         echo "ERROR: production APK is missing $abi native libraries" >&2
+        exit 1
+    }
+done
+
+for registrar in \
+    com.google.mlkit.common.internal.CommonComponentRegistrar \
+    com.google.mlkit.vision.common.internal.VisionCommonRegistrar; do
+    bytecode="$("$APK_ANALYZER" dex code --class "$registrar" "$APK")"
+    grep -Eq '^\.method public .*<init>\(\)V$' <<<"$bytecode" || {
+        echo "ERROR: APK is missing the public constructor for $registrar" >&2
         exit 1
     }
 done

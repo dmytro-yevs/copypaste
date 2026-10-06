@@ -126,6 +126,8 @@ void main() {
     );
     await scan;
     expect(controller.errorMessage, contains('Enter the pairing code'));
+    await controller.refresh();
+    expect(controller.errorMessage, contains('Enter the pairing code'));
     await controller.openCodeEntry();
     expect(controller.pairingEntryMode, PairingEntryMode.enterCode);
     expect(controller.errorMessage, isNull);
