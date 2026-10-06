@@ -1,11 +1,12 @@
-This update improves capture, privacy, and installation.
+This update improves History, Quick Paste, and local module management.
 
-- Fix Android QR scanner startup.
-- Preserve the Windows application when bundling command-line tools in the installer.
-- Add screenshot protection across macOS, Android, and Windows, including pairing surfaces.
-- Install verified Android updates through the system installer and retain installation status across process recreation.
-- Improve macOS Accessibility setup and permission refresh.
-- Improve History selection and clipboard source application attribution on macOS.
+- Add a shared History inspector with full content and metadata.
+- Improve Quick Paste layout, pinned shortcuts, inspector, and desktop window lifecycle.
+- Add installation and management of signed optional modules in Settings.
+- Improve device pairing and capture notifications.
+- Improve clipboard image previews and Android release verification.
+
+Optional modules are installed separately from local signed packages. OCR engines and models are not bundled with the application.
 
 Application exclusions on macOS use observed app activity; background copies can bypass them. Empty files and multiple-file clipboard selections remain unsupported.
 
