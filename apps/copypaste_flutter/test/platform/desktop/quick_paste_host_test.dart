@@ -85,26 +85,29 @@ void main() {
     await expectLater(host.prepare(), throwsA(isA<PlatformException>()));
   });
 
-  test('false prepare stops shortcut registration', () async {
-    messenger.setMockMethodCallHandler(
-      channel,
-      (call) async => call.method != 'prepare',
-    );
-    final registrar = _Registrar();
-    final controller = QuickPasteSettingsController(
-      store: MemoryQuickPastePreferencesStore(),
-      registrar: registrar,
-      windowHost: host,
-    );
-    addTearDown(controller.dispose);
+  test(
+    'initialization registers the shortcut without preparing an engine',
+    () async {
+      messenger.setMockMethodCallHandler(
+        channel,
+        (call) async => call.method != 'prepare',
+      );
+      final registrar = _Registrar();
+      final controller = QuickPasteSettingsController(
+        store: MemoryQuickPastePreferencesStore(),
+        registrar: registrar,
+        windowHost: host,
+      );
+      addTearDown(controller.dispose);
 
-    await controller.initialize();
+      await controller.initialize();
 
-    expect(registrar.callback, isNull);
-    expect(controller.initialized, isTrue);
-    expect(controller.busy, isFalse);
-    expect(controller.errorMessage, 'Quick Paste could not be prepared.');
-  });
+      expect(registrar.callback, isNotNull);
+      expect(controller.initialized, isTrue);
+      expect(controller.busy, isFalse);
+      expect(controller.errorMessage, isNull);
+    },
+  );
 
   test('false open reaches the owning controller error state', () async {
     messenger.setMockMethodCallHandler(
@@ -141,12 +144,12 @@ void main() {
       messenger.setMockMethodCallHandler(contextChannel, null);
     });
 
-    Future<Object?> opened(Object? arguments) async {
+    Future<Object?> invokeContext(String method, Object? arguments) async {
       final completion = Completer<Object?>();
       await messenger.handlePlatformMessage(
         contextChannel.name,
         const StandardMethodCodec().encodeMethodCall(
-          MethodCall('opened', arguments),
+          MethodCall(method, arguments),
         ),
         (reply) {
           completion.complete(reply);
@@ -154,6 +157,34 @@ void main() {
       );
       return completion.future;
     }
+
+    Future<Object?> opened(Object? arguments) =>
+        invokeContext('opened', arguments);
+
+    test('ready requires a native acknowledgement', () async {
+      await context.signalReady();
+      expect(calls.single.method, 'ready');
+      response = false;
+      await expectLater(
+        context.signalReady(),
+        throwsA(isA<PlatformException>()),
+      );
+    });
+
+    test('shutdown acknowledges only after its cleanup completes', () async {
+      final cleanup = Completer<void>();
+      context.setShutdownHandler(() => cleanup.future);
+      var acknowledged = false;
+      final pending = invokeContext(
+        'shutdown',
+        null,
+      ).then((_) => acknowledged = true);
+      await Future<void>.delayed(Duration.zero);
+      expect(acknowledged, isFalse);
+      cleanup.complete();
+      await pending;
+      expect(acknowledged, isTrue);
+    });
 
     test(
       'paste and conditional close send the originating native ID',
@@ -196,7 +227,7 @@ void main() {
       () async {
         int? received;
         final gate = Completer<void>();
-        context.setOpenedHandler((id) async {
+        context.setOpenedHandler((id, {required bool inspectorVisible}) async {
           received = id;
           await gate.future;
         });
@@ -218,7 +249,7 @@ void main() {
     ]) {
       test('invalid opened $value cannot invoke the handler', () async {
         var invoked = false;
-        context.setOpenedHandler((_) async {
+        context.setOpenedHandler((_, {required bool inspectorVisible}) async {
           invoked = true;
         });
         await opened(value);

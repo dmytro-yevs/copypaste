@@ -27,12 +27,15 @@ abstract final class AppOverlays {
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
       );
 
-  static PopoverConfiguration selectPopoverConfiguration(BuildContext context) {
+  static PopoverConfiguration selectPopoverConfiguration(
+    BuildContext context, {
+    PopoverConstraint widthConstraint = PopoverConstraint.anchorMinSize,
+  }) {
     return PopoverConfiguration(
       alignment: Alignment.topLeft,
       anchorAlignment: Alignment.bottomLeft,
       offset: const Offset(0, AppSpacing.xs),
-      widthConstraint: PopoverConstraint.anchorMinSize,
+      widthConstraint: widthConstraint,
       showDuration: AppMotion.resolve(context, AppMotion.standard),
       dismissDuration: AppMotion.resolve(context, AppMotion.quick),
       overlayBarrier: const OverlayBarrier(

@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+copypaste-modules = { path = "../copypaste-modules" }
 copypaste-clock = { path = "../copypaste-clock" }
 copypaste-feedback = { path = "../copypaste-feedback" }
 copypaste-retry = { path = "../copypaste-retry" }
@@ -87,6 +88,7 @@ objc2-app-kit = { workspace = true, features = ["NSResponder"] }
 security-framework.workspace = true
 
 [dev-dependencies]
+image.workspace = true
 copypaste-runtime-log = { path = "../copypaste-runtime-log", features = ["test-support"] }
 tokio = { workspace = true, features = ["test-util"] }
 copypaste-cloud = { path = "../copypaste-cloud", features = ["test-endpoints"] }

@@ -15,7 +15,11 @@ abstract interface class HistoryRepository {
   });
 
   Future<HistoryClip> get(String id);
-  Future<HistoryImagePreview?> imagePreview(String id, {int? maxEdge});
+  Future<HistoryImagePreview?> imagePreview(
+    String id, {
+    int? maxEdge,
+    HistoryImagePreviewBounds? bounds,
+  });
   Future<HistorySourceAppIcon?> sourceAppIcon(String id);
   Future<void> copy(String id);
   Future<void> copyPlainText(String id);

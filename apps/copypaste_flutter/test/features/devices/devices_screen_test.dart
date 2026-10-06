@@ -7,6 +7,256 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
+  for (final accept in [true, false]) {
+    testWidgets(
+      'shows the joined SAS immediately with Accept and Reject: $accept',
+      (tester) async {
+        final gateway = _ScreenGateway();
+        gateway.session.ceremony = const PairingCeremony(
+          state: PairingState.awaitingConfirmation,
+        );
+        final controller = DevicesController(
+          gateway: gateway,
+          captureProtection: _CaptureProtection(),
+        );
+        addTearDown(controller.dispose);
+        await _pumpDevices(tester, controller);
+        await tester.runAsync(
+          () =>
+              controller.joinPairingUri('copypaste://pair/v1?test=invitation'),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('123456'), findsOneWidget);
+        expect(find.text('Show verification code'), findsNothing);
+        expect(find.text('Accept'), findsOneWidget);
+        expect(find.text('Reject'), findsOneWidget);
+        expect(gateway.session.confirmations, isEmpty);
+        await tester.tap(find.text(accept ? 'Accept' : 'Reject'));
+        await tester.pumpAndSettle();
+        expect(gateway.session.confirmations, [accept]);
+        await tester.runAsync(controller.closePairing);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      },
+      variant: TargetPlatformVariant({
+        TargetPlatform.android,
+        TargetPlatform.macOS,
+        TargetPlatform.windows,
+      }),
+    );
+  }
+
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.windows]) {
+    for (final size in [const Size(390, 844), const Size(1400, 900)]) {
+      testWidgets('keeps the embedded QR scanner on $platform at $size', (
+        tester,
+      ) async {
+        final controller = DevicesController(
+          gateway: _ScreenGateway(),
+          captureProtection: _CaptureProtection(),
+        );
+        addTearDown(controller.dispose);
+        await _pumpDevices(tester, controller, size: size);
+        await tester.tap(find.byKey(const ValueKey('scan-pairing-qr')));
+        await tester.pumpAndSettle();
+        expect(controller.usesSystemScanner, isFalse);
+        expect(controller.pairingInspectorOpen, isTrue);
+        expect(
+          find.byKey(
+            ValueKey(
+              size.width < 800
+                  ? 'devices-pairing-drawer'
+                  : 'devices-pairing-inspector',
+            ),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('start-pairing-scanner')),
+          findsOneWidget,
+        );
+        await controller.closePairing();
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      }, variant: TargetPlatformVariant({platform}));
+    }
+  }
+
+  for (final size in [const Size(390, 844), const Size(1000, 900)]) {
+    for (final outcome in [
+      'cancel',
+      'success',
+      'unavailable',
+      'invalid',
+      'join failure',
+    ]) {
+      testWidgets('system QR scanner $outcome at $size', (tester) async {
+        const channel = MethodChannel('com.copypaste.app/qr_scanner');
+        final result = Completer<String?>();
+        var scanCalls = 0;
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          (call) async {
+            if (call.method == 'scan') {
+              scanCalls++;
+              return result.future;
+            }
+            return null;
+          },
+        );
+        addTearDown(
+          () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            channel,
+            null,
+          ),
+        );
+        final gateway = _ScreenGateway();
+        if (outcome == 'join failure') {
+          gateway.joinError = StateError('Join failed');
+        }
+        final controller = DevicesController(
+          gateway: gateway,
+          captureProtection: _CaptureProtection(),
+        );
+        addTearDown(controller.dispose);
+        await _pumpDevices(tester, controller, size: size);
+        await tester.tap(find.byKey(const ValueKey('scan-pairing-qr')));
+        await tester.pumpAndSettle();
+
+        expect(scanCalls, 1);
+        expect(controller.systemScanInFlight, isTrue);
+        expect(
+          find.byKey(const ValueKey('devices-pairing-drawer')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const ValueKey('devices-pairing-inspector')),
+          findsNothing,
+        );
+        expect(find.text('Opening Google scanner…'), findsNothing);
+
+        switch (outcome) {
+          case 'success':
+          case 'join failure':
+            result.complete('copypaste://pair/v1?test=invitation');
+          case 'unavailable':
+            result.completeError(
+              PlatformException(code: 'scanner_unavailable'),
+            );
+          case 'invalid':
+            result.completeError(PlatformException(code: 'invalid_pairing_qr'));
+          default:
+            result.complete(null);
+        }
+        await tester.pumpAndSettle();
+
+        expect(controller.systemScanInFlight, isFalse);
+        if (outcome == 'success' || outcome == 'join failure') {
+          expect(
+            find.byKey(
+              ValueKey(
+                size.width < 800
+                    ? 'devices-pairing-drawer'
+                    : 'devices-pairing-inspector',
+              ),
+            ),
+            findsOneWidget,
+          );
+          if (outcome == 'join failure') {
+            expect(find.text('Pairing action failed'), findsOneWidget);
+            expect(find.text('Connecting device…'), findsNothing);
+          }
+          await tester.runAsync(controller.closePairing);
+          await tester.pumpAndSettle();
+        } else {
+          expect(controller.pairingEntryMode, isNull);
+          expect(
+            find.byKey(const ValueKey('devices-pairing-drawer')),
+            findsNothing,
+          );
+          expect(
+            find.byKey(const ValueKey('devices-pairing-inspector')),
+            findsNothing,
+          );
+          if (outcome == 'cancel') {
+            expect(controller.errorMessage, isNull);
+            expect(find.byType(Alert), findsNothing);
+            await tester.tap(find.byKey(const ValueKey('this-device-card')));
+            await tester.pumpAndSettle();
+            expect(controller.deviceDetailsOpen, isTrue);
+            controller.closeDeviceDetails();
+            await tester.pumpAndSettle();
+          } else {
+            expect(find.text('Scanner unavailable'), findsOneWidget);
+            expect(controller.canChangePairingMode, isTrue);
+          }
+        }
+        expect(tester.takeException(), isNull);
+      }, variant: TargetPlatformVariant({TargetPlatform.android}));
+    }
+  }
+
+  for (final (platform, size) in [
+    (TargetPlatform.macOS, const Size(1000, 900)),
+    (TargetPlatform.windows, const Size(1400, 900)),
+  ]) {
+    testWidgets(
+      'switches header actions within the open inspector on $platform',
+      (tester) async {
+        final gateway = _ScreenGateway(peers: const [], discovered: const []);
+        final controller = DevicesController(
+          gateway: gateway,
+          captureProtection: _CaptureProtection(),
+        );
+        expect(controller.usesSystemScanner, isFalse);
+        addTearDown(controller.dispose);
+        await _pumpDevices(tester, controller, size: size);
+
+        for (final (action, content) in [
+          ('enter-pairing-code', 'pairing-code-input'),
+          ('scan-pairing-qr', 'start-pairing-scanner'),
+          ('pair-device', 'pairing-invite-qr'),
+          ('enter-pairing-code', 'pairing-code-input'),
+        ]) {
+          final command = tester
+              .widget<Button>(find.byKey(ValueKey<String>(action)))
+              .onPressed;
+          expect(command, isNotNull);
+          await tester.runAsync(command as Future<void> Function());
+          await tester.pumpAndSettle();
+          expect(
+            find.byKey(ValueKey<String>(content)),
+            findsOneWidget,
+            reason:
+                '$action: mode=${controller.pairingEntryMode}, '
+                'enabled=${controller.canChangePairingMode}, '
+                'error=${controller.errorMessage}',
+          );
+          expect(
+            find.byKey(const ValueKey<String>('devices-pairing-inspector')),
+            findsOneWidget,
+          );
+          for (final key in [
+            'pair-device',
+            'scan-pairing-qr',
+            'enter-pairing-code',
+          ]) {
+            expect(
+              tester
+                  .widget<Button>(find.byKey(ValueKey<String>(key)))
+                  .onPressed,
+              isNotNull,
+              reason: '$key after $action',
+            );
+          }
+          expect(tester.takeException(), isNull);
+        }
+        expect(gateway.session.cancelCalls, 1);
+      },
+      variant: TargetPlatformVariant({platform}),
+    );
+  }
+
   testWidgets(
     'refreshes cannot restart drawer dismissal or leave a touch barrier',
     (tester) async {
@@ -92,7 +342,6 @@ void main() {
     await _pumpDevices(tester, controller);
 
     for (final key in [
-      'rescan-devices',
       'pair-device',
       'scan-pairing-qr',
       'enter-pairing-code',
@@ -170,7 +419,8 @@ void main() {
     await tester.tap(find.byKey(const ValueKey<String>('pair-device')));
     await tester.pump();
 
-    expect(find.text('Ready to pair'), findsOneWidget);
+    expect(find.byKey(const ValueKey<String>('rescan-devices')), findsNothing);
+    expect(find.text('Ready to pair'), findsNothing);
     expect(
       find.byKey(const ValueKey<String>('pairing-invite-qr')),
       findsOneWidget,
@@ -476,7 +726,6 @@ void main() {
     await _pumpDevices(tester, controller, size: const Size(320, 640));
 
     for (final key in [
-      'rescan-devices',
       'pair-device',
       'scan-pairing-qr',
       'enter-pairing-code',
@@ -564,6 +813,10 @@ void main() {
         findsNothing,
       );
     },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
   );
 
   testWidgets('hidden devices do not intercept escape', (tester) async {
@@ -662,6 +915,7 @@ class _ScreenGateway implements DevicesGateway {
   final List<DevicePeer> peers;
   final List<DiscoveredDevice> discovered;
   Object? syncError;
+  Object? joinError;
 
   @override
   Stream<void> get changes => const Stream<void>.empty();
@@ -676,7 +930,10 @@ class _ScreenGateway implements DevicesGateway {
   }) async => session;
 
   @override
-  Future<DevicesPairingSession> joinPairingUri(String uri) async => session;
+  Future<DevicesPairingSession> joinPairingUri(String uri) async {
+    if (joinError case final error?) throw error;
+    return session;
+  }
 
   @override
   Future<DevicesSnapshot> load() async => DevicesSnapshot(
@@ -771,20 +1028,27 @@ DeviceDetails _details({
 }
 
 class _ScreenSession implements DevicesPairingSession {
+  final List<bool> confirmations = [];
   int revealInviteCalls = 0;
+  int cancelCalls = 0;
 
   @override
-  PairingCeremony get ceremony =>
-      const PairingCeremony(state: PairingState.waitingForPeer);
+  PairingCeremony ceremony = const PairingCeremony(
+    state: PairingState.waitingForPeer,
+  );
 
   @override
   Stream<PairingCeremony> get updates => const Stream<PairingCeremony>.empty();
 
   @override
-  Future<void> cancel() async {}
+  Future<void> cancel() async {
+    cancelCalls += 1;
+  }
 
   @override
-  Future<void> confirm({required bool accept}) async {}
+  Future<void> confirm({required bool accept}) async {
+    confirmations.add(accept);
+  }
 
   @override
   Future<void> dispose() async {}

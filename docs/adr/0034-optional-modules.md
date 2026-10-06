@@ -1,0 +1,119 @@
+# ADR-0034: Optional first-party modules
+
+## Contract
+
+CopyPaste owns the shared interface, module registry, package installation,
+preferences, and command dispatch. Modules provide separately installed native
+code and assets. They are not dependencies of the application build. OCR will
+be a later module; this foundation includes no OCR engine or models.
+
+The first implementation accepts only packages signed by CopyPaste's pinned
+release identity. Modules execute locally on macOS, Android, and Windows. A
+package is specific to one OS and architecture; module behavior and manifest
+contributions must have parity across all three platforms.
+
+Raycast's [extension architecture](https://www.raycast.com/blog/how-raycast-api-extensions-work),
+[manifest](https://developers.raycast.com/information/manifest), and
+[lifecycle](https://developers.raycast.com/information/lifecycle) inform the
+separation between commands, host-rendered interface, and runtime ownership.
+CopyPaste retains Flutter, shadcn_flutter, and its Rust runtime. It does not
+introduce a JavaScript runtime or compatibility with Raycast extensions.
+
+## Ownership
+
+- `copypaste-module-sdk`: versioned manifest, field, invocation, result, and C
+  ABI contracts; the authoring trait and export helper.
+- `copypaste-modules`: authenticated package extraction, registry, lifecycle,
+  and native command execution. `ModuleHost` composes this owner lazily and
+  runs blocking work outside reactor/UI threads.
+- Desktop `AppState` and Android `Runtime`: compose the same `ModuleHost` below
+  their existing transport boundary.
+- Flutter `ModulesController` and repository: shared management state and typed
+  adapters. Settings renders module descriptions, commands, and forms through
+  existing components and theme tokens.
+
+## Packages and compatibility
+
+A `.cpmodule` is a ZIP containing `manifest.json`, `manifest.json.sig`, and
+exactly the regular files inventoried by the signed manifest. Each file has a
+SHA-256 digest and an expanded size. Symlinks, duplicate/escaping paths,
+unlisted entries, excessive size, unsupported API versions, incompatible app
+versions, and a different OS/architecture are rejected before activation.
+
+The release signer produces a Minisign signature of the manifest. The
+manifest authenticates every code/asset file, including the entrypoint.
+Installed metadata is authenticated on reads; code and assets are reverified
+before loading after startup or re-enabling. Large models are streamed during
+verification and are not hashed again on every command or settings refresh.
+
+Schema version and native ABI version are separate. The exported symbol is
+`copypaste_module_v1`; only C-compatible buffers and opaque instance pointers
+cross the native boundary. Each allocator releases its own buffers. No Rust
+trait object, `String`, or `Vec` crosses libraries. App compatibility uses a
+SemVer requirement in `app_versions`.
+
+## Lifecycle and persistence
+
+Fresh CopyPaste installs contain the lightweight host only. Native modules
+load on first command and release their instances when disabled, updated,
+removed, or evicted. A module must finish its owned workers before destruction.
+The manifest's `unload_policy` defaults to `instance`. A `process` policy pins
+native code until OS process exit for runtimes with process-global environments
+or callbacks, including ONNX Runtime. Sessions and model instances still drop.
+Removing a loaded process-scoped module disables it and clears its data and
+preferences immediately; package deletion finishes after restart. Shared
+Settings exposes `Restart CopyPaste`: desktop restarts the owned daemon and
+Android restarts the application process through ProcessPhoenix. A module that
+was never loaded can be removed immediately without restart.
+
+One manager serializes lifecycle mutations. Each module has its own execution
+lock, so long commands do not block commands in other modules. Disable, update,
+and removal stop new admission and wait for existing work before deleting code.
+The host retains at most four idle instances, evicting the least recently used.
+Active invocation leases are never unloaded by cache eviction. Commands and
+preferences are validated against the manifest. Packages live beneath
+`<application data>/modules/packages/<id>/<version>`; module-owned data has a
+separate `<application data>/modules/data/<id>` directory.
+
+Installing a newer signed package updates the active registry atomically and
+retains valid preferences and the enabled state. Failed validation leaves the
+previous version active. Equal versions and downgrades are rejected. Removal
+first persists a disabled removal state, then releases code and removes all
+versions and module-owned data. An interrupted removal remains visible and
+can be retried. Corrupt registry data fails closed and is never reset silently.
+
+## Deliberate limits of this stage
+
+Installation/update uses a user-selected local signed package. There is no
+public catalog, automatic download, marketplace, or third-party trust UI.
+Native first-party code runs inside the owning runtime process: this is not a
+sandbox, and manifest declarations cannot restrict native OS access. A native
+crash can terminate that process. Third-party execution requires an explicit
+isolation design before it can be enabled.
+
+The initial host-rendered primitives are text/boolean/file forms and text/message
+results. File arguments use native pickers; the host keeps an invocation-owned,
+bounded private snapshot until native execution ends. Internal paths are not
+shown as form fields. Background schedules, capture event handlers, content-processing
+contracts, dependency resolution, rich result views, and secure secret
+preferences require concrete module use cases and versioned additions; they
+are not placeholder implementations in this foundation.
+
+## Authoring and validation
+
+`examples/modules/text-tools` is built separately and exports the SDK entrypoint.
+It is never installed or bundled in CopyPaste by default. The native lifecycle
+test builds the dynamic library, signs test packages with an ephemeral key,
+loads the real entrypoint, executes Unicode text, restarts, updates, disables,
+and removes the module. The test key is not trusted by production hosts.
+
+Build a module with `cargo build -p copypaste-module-text-tools`. Package it with
+`scripts/modules/package.py --module-dir examples/modules/text-tools --library
+<built library> --platform <platform> --architecture <architecture> --output
+<package.cpmodule>`. Signing uses the existing release signer environment;
+private keys must never be committed. Install or update the signed package
+through Settings > Modules.
+
+Native lifecycle tests establish behavior on their executing host. Android
+cross-compilation and Flutter tests establish source/build compatibility, not
+physical Android or installed Windows acceptance evidence.

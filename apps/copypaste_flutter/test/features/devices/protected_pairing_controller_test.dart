@@ -63,6 +63,49 @@ void main() {
     expect(session.manualJoinCalls, ['protected route value']);
   });
 
+  test(
+    'automatically reveals SAS once and waits for its result before decisions',
+    () async {
+      controller.start();
+      final code = Completer<ProtectedPairingArtifact>();
+      session.sasPending = code;
+      for (var update = 0; update < 3; update++) {
+        session.emit(
+          const PairingCeremony(state: PairingState.awaitingConfirmation),
+        );
+      }
+      await Future<void>.delayed(Duration.zero);
+      expect(session.revealSasCalls, 1);
+      expect(controller.artifact, isNull);
+      expect(controller.canConfirm, isFalse);
+      await controller.confirm(accept: true);
+      expect(session.confirmations, isEmpty);
+
+      code.complete(const _TestArtifact());
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.artifact, isA<_TestArtifact>());
+      expect(controller.canConfirm, isTrue);
+      expect(session.confirmations, isEmpty);
+      await controller.confirm(accept: false);
+      expect(session.confirmations, [false]);
+    },
+  );
+
+  test('discards a SAS artifact returned after cancellation', () async {
+    controller.start();
+    final code = Completer<ProtectedPairingArtifact>();
+    session.sasPending = code;
+    session.emit(
+      const PairingCeremony(state: PairingState.awaitingConfirmation),
+    );
+    await Future<void>.delayed(Duration.zero);
+    await controller.close();
+    code.complete(const _TestArtifact());
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.artifact, isNull);
+    expect(controller.canConfirm, isFalse);
+  });
+
   test('prevents concurrent confirmation decisions', () async {
     final pending = Completer<void>();
     session.confirmation = pending;
@@ -119,6 +162,8 @@ class _FakeProtectedSession implements ProtectedPairingSession {
   int disposeCalls = 0;
   int openCameraCalls = 0;
   int revealInviteCalls = 0;
+  int revealSasCalls = 0;
+  Completer<ProtectedPairingArtifact>? sasPending;
 
   @override
   Stream<PairingCeremony> get updates => _updates.stream;
@@ -157,7 +202,10 @@ class _FakeProtectedSession implements ProtectedPairingSession {
   }
 
   @override
-  Future<ProtectedPairingArtifact> revealSas() async => const _TestArtifact();
+  Future<ProtectedPairingArtifact> revealSas() async {
+    revealSasCalls += 1;
+    return sasPending?.future ?? const _TestArtifact();
+  }
 
   @override
   Future<void> submitManualJoinCode(String code) async {

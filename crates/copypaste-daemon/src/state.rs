@@ -21,6 +21,7 @@ use crate::settings::Settings;
 
 /// Everything the daemon shares between the capture loop and the IPC server.
 pub struct AppState {
+    pub modules: Arc<copypaste_modules::ModuleHost>,
     pub store: Store,
     /// `Arc` because `copypaste_core::StoreSource` holds one for as long as the
     /// peer listener runs, and the device secret is not `Clone` on purpose.
@@ -72,6 +73,9 @@ impl AppState {
     ) -> Self {
         let backend_name = clipboard.backend_name();
         Self {
+            modules: Arc::new(copypaste_modules::ModuleHost::new(
+                db_path.parent().unwrap_or(std::path::Path::new(".")),
+            )),
             store,
             keyring,
             clipboard: Mutex::new(clipboard),

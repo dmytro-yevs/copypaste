@@ -9,6 +9,7 @@ import com.google.android.gms.common.moduleinstall.InstallStatusListener
 import com.google.android.gms.common.moduleinstall.ModuleInstall
 import com.google.android.gms.common.moduleinstall.ModuleInstallRequest
 import com.google.android.gms.common.moduleinstall.ModuleInstallStatusUpdate.InstallState
+import com.google.mlkit.common.MlKitException
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanner
@@ -111,9 +112,17 @@ internal class PairingScannerChannel(
                 }
                 .addOnCanceledListener { if (pending === result) takeResult()?.success(null) }
                 .addOnFailureListener { error ->
-                    if (pending === result) unavailable("scanner_launch", error)
+                    if (pending === result) scannerFailed(error)
                 }
         } catch (error: RuntimeException) {
+            scannerFailed(error)
+        }
+    }
+
+    private fun scannerFailed(error: Exception) {
+        if (error is MlKitException && error.errorCode == MlKitException.CODE_SCANNER_CANCELLED) {
+            takeResult()?.success(null)
+        } else {
             unavailable("scanner_launch", error)
         }
     }

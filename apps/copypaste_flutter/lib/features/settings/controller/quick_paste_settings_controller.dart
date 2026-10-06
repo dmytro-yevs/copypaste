@@ -52,7 +52,6 @@ class QuickPasteSettingsController extends ChangeNotifier
       if (_supported) {
         WidgetsBinding.instance.addObserver(this);
         _observingLifecycle = true;
-        await _windowHost.prepare();
         if (!await _changeRegistration(_preferences.shortcut)) return;
         _accessibilityGranted = await _windowHost.accessibilityGranted();
         if (_disposed) return;

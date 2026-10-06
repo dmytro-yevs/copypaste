@@ -28,6 +28,7 @@ use settings::{RuntimeSettings, SettingsError};
 
 /// Storage and direct peer networking shared by daemon and in-process hosts.
 pub struct Runtime {
+    modules: Arc<copypaste_modules::ModuleHost>,
     pub store: Store,
     pub keyring: Arc<Keyring>,
     pub source: Arc<StoreSource>,
@@ -102,6 +103,7 @@ impl Runtime {
         let (shutdown, _) = tokio::sync::watch::channel(false);
         let device_class = copypaste_p2p::DeviceProfile::current().device_class;
         Ok(Self {
+            modules: Arc::new(copypaste_modules::ModuleHost::new(data_dir)),
             store,
             keyring,
             source,
@@ -143,6 +145,10 @@ impl Runtime {
                 | Method::Revoke { .. }
         );
         let response = match method {
+            Method::Modules { operation } => match self.modules.request(operation).await {
+                Ok(json) => Response::ok(id, ResponseData::Modules { json }),
+                Err(error) => Response::err(id, ErrorCode::InvalidRequest, error.to_string()),
+            },
             Method::Status => {
                 let settings = self.settings.snapshot();
                 Response::ok(
@@ -223,7 +229,8 @@ impl Runtime {
             Method::ImagePreview {
                 id: item_id,
                 max_edge,
-            } => self.image_preview(id, &item_id, max_edge),
+                bounds,
+            } => self.image_preview(id, &item_id, max_edge, bounds),
             Method::SourceAppIcon { id: item_id } => self.source_icon(id, &item_id),
             Method::SaveFile {
                 id: item_id,
@@ -941,7 +948,13 @@ impl Runtime {
         page
     }
 
-    fn image_preview(&self, request_id: u64, item_id: &str, max_edge: Option<u32>) -> Response {
+    fn image_preview(
+        &self,
+        request_id: u64,
+        item_id: &str,
+        max_edge: Option<u32>,
+        bounds: Option<copypaste_ipc::ImagePreviewBounds>,
+    ) -> Response {
         let Ok(Some(row)) = self.store.get(item_id) else {
             return Response::err(request_id, ErrorCode::NotFound, "The clip was not found.");
         };
@@ -969,6 +982,7 @@ impl Runtime {
             &bytes,
             copypaste_ipc::ConfigData::default().max_decoded_image_mb,
             max_edge,
+            bounds.map(|bounds| (bounds.width, bounds.height)),
         ) {
             Ok(image) => Response::ok(
                 request_id,
@@ -1419,6 +1433,7 @@ mod tests {
         let (shutdown, _) = tokio::sync::watch::channel(false);
         (
             Arc::new(Runtime {
+                modules: Arc::new(copypaste_modules::ModuleHost::new(dir.path())),
                 store,
                 keyring,
                 source,

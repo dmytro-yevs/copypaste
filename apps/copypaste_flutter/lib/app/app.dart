@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import '../features/modules/controller/modules_controller.dart';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -27,6 +29,7 @@ class CopyPasteApp extends StatelessWidget {
     this.devicesController,
     this.quickPasteSettings,
     this.settingsController,
+    this.modulesController,
     this.appUpdateController,
     this.desktopWindow,
     this.runtimeUnavailableMessage,
@@ -39,6 +42,7 @@ class CopyPasteApp extends StatelessWidget {
   final DevicesController? devicesController;
   final QuickPasteSettingsController? quickPasteSettings;
   final SettingsController? settingsController;
+  final ModulesController? modulesController;
   final AppUpdateController? appUpdateController;
   final DesktopWindowController? desktopWindow;
   final String? runtimeUnavailableMessage;
@@ -129,6 +133,7 @@ class CopyPasteApp extends StatelessWidget {
                         controller: settingsController!,
                         quickPaste: quickPasteSettings,
                         appUpdate: appUpdateController,
+                        modules: modulesController,
                         onQuitForUpdate: desktopWindow?.quit,
                         onOpenAndroidCaptureSetup: onOpenAndroidCaptureSetup,
                       ),

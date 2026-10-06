@@ -14,6 +14,65 @@ import 'package:image/image.dart' as image;
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
+  test('cold engine restores the native inspector state', () async {
+    final host = _ContextHost()
+      ..openWhenReady = true
+      ..initialInspectorVisible = true;
+    final controller = QuickPasteController(
+      repository: _Repository(),
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: host,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    expect(controller.inspectorOpen, isTrue);
+    expect(controller.history.selectedClip?.id, 'recent');
+  });
+
+  test('cold engine opening waits until its controller is ready', () async {
+    final host = _ContextHost()..openWhenReady = true;
+    final controller = QuickPasteController(
+      repository: _Repository(),
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: host,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    expect(host.readyCalls, 1);
+    expect(controller.presentationGeneration, 1);
+    await controller.activateIndex(0);
+    expect(host.closeIds, [1]);
+  });
+
+  test(
+    'shutdown waits for the owned repository before releasing its engine',
+    () async {
+      final disposed = Completer<void>();
+      var disposals = 0;
+      final host = _ContextHost();
+      final controller = QuickPasteController(
+        repository: _Repository(),
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: host,
+        disposeRepository: () {
+          disposals += 1;
+          return disposed.future;
+        },
+      );
+      await controller.initialize();
+      var completed = false;
+      final shutdown = host.shutdownHandler!().then((_) => completed = true);
+      await Future<void>.delayed(Duration.zero);
+      expect(completed, isFalse);
+      expect(host.openedHandler, isNull);
+      disposed.complete();
+      await shutdown;
+      await controller.shutdown();
+      expect(completed, isTrue);
+      expect(disposals, 1);
+    },
+  );
+
   testWidgets('renders the keyboard-first popup and footer actions', (
     tester,
   ) async {
@@ -713,7 +772,11 @@ class _Repository implements HistoryRepository {
   }
 
   @override
-  Future<HistoryImagePreview?> imagePreview(String id, {int? maxEdge}) async {
+  Future<HistoryImagePreview?> imagePreview(
+    String id, {
+    int? maxEdge,
+    HistoryImagePreviewBounds? bounds,
+  }) async {
     imagePreviewEdges.add(maxEdge);
     if (id != 'image') return null;
     final preview = image.Image(width: 240, height: 180);
@@ -745,6 +808,23 @@ class _Repository implements HistoryRepository {
 }
 
 class _ContextHost implements QuickPasteContextHost {
+  @override
+  void setShutdownHandler(Future<void> Function()? handler) {
+    shutdownHandler = handler;
+  }
+
+  @override
+  Future<void> signalReady() async {
+    readyCalls += 1;
+    if (openWhenReady) {
+      await openedHandler?.call(1, inspectorVisible: initialInspectorVisible);
+    }
+  }
+
+  Future<void> Function()? shutdownHandler;
+  int readyCalls = 0;
+  bool openWhenReady = false;
+  bool initialInspectorVisible = false;
   final inspectorChanges = <bool>[];
 
   @override
@@ -759,7 +839,7 @@ class _ContextHost implements QuickPasteContextHost {
   int permissionRequests = 0;
   int pasteCalls = 0;
   int closeCalls = 0;
-  Future<void> Function(int presentationId)? openedHandler;
+  QuickPasteOpenedHandler? openedHandler;
   final pasteIds = <int>[];
   final closeIds = <int>[];
   final actualCloseIds = <int>[];
@@ -810,7 +890,7 @@ class _ContextHost implements QuickPasteContextHost {
   }
 
   @override
-  void setOpenedHandler(Future<void> Function(int presentationId)? handler) {
+  void setOpenedHandler(QuickPasteOpenedHandler? handler) {
     openedHandler = handler;
   }
 }

@@ -67,6 +67,7 @@ fn sync_result() -> SyncResult {
 
 fn variant_tag(data: &ResponseData) -> &'static str {
     match data {
+        ResponseData::Modules { .. } => "modules",
         ResponseData::Status(_) => "status",
         ResponseData::Export(_) => "export",
         ResponseData::Import(_) => "import",
@@ -109,6 +110,7 @@ fn assert_tagged_round_trip(data: ResponseData) {
 #[test]
 fn every_response_data_variant_has_a_distinct_round_trip() {
     let variants = vec![
+        ResponseData::Modules { json: "[]".into() },
         ResponseData::Status(StatusData {
             device_name: "Laptop".into(),
             device_id: Some("device-1".into()),
@@ -234,7 +236,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
         ResponseData::Empty {},
     ];
 
-    assert_eq!(variants.len(), 21);
+    assert_eq!(variants.len(), 22);
     for variant in variants {
         assert_tagged_round_trip(variant);
     }

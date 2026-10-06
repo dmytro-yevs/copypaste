@@ -89,7 +89,12 @@ class MethodChannelQuickPasteWindowHost implements QuickPasteWindowHost {
   }
 }
 
+typedef QuickPasteOpenedHandler =
+    Future<void> Function(int presentationId, {required bool inspectorVisible});
+
 abstract interface class QuickPasteContextHost {
+  Future<void> signalReady();
+
   Future<bool> accessibilityGranted();
 
   Future<bool> requestAccessibility();
@@ -109,7 +114,9 @@ abstract interface class QuickPasteContextHost {
 
   Future<void> quit();
 
-  void setOpenedHandler(Future<void> Function(int presentationId)? handler);
+  void setOpenedHandler(QuickPasteOpenedHandler? handler);
+
+  void setShutdownHandler(Future<void> Function()? handler);
 
   Future<void> dispose();
 }
@@ -123,7 +130,15 @@ class MethodChannelQuickPasteContextHost implements QuickPasteContextHost {
   }
 
   final MethodChannel _channel;
-  Future<void> Function(int presentationId)? _opened;
+  QuickPasteOpenedHandler? _opened;
+  Future<void> Function()? _shutdown;
+
+  @override
+  Future<void> signalReady() async {
+    if (await _channel.invokeMethod<bool>('ready') != true) {
+      throw PlatformException(code: 'context_unavailable');
+    }
+  }
 
   @override
   Future<bool> accessibilityGranted() async =>
@@ -175,18 +190,31 @@ class MethodChannelQuickPasteContextHost implements QuickPasteContextHost {
   Future<void> quit() => _channel.invokeMethod<void>('quit');
 
   @override
-  void setOpenedHandler(Future<void> Function(int presentationId)? handler) {
+  void setOpenedHandler(QuickPasteOpenedHandler? handler) {
     _opened = handler;
   }
 
+  @override
+  void setShutdownHandler(Future<void> Function()? handler) {
+    _shutdown = handler;
+  }
+
   Future<Object?> _handleMethodCall(MethodCall call) async {
+    if (call.method == 'shutdown') {
+      await _shutdown?.call();
+      return true;
+    }
     if (call.method == 'opened') {
       final arguments = call.arguments;
       final id = arguments is Map ? arguments['presentationId'] : null;
       if (id is! int || id <= 0 || id > 0x7fffffffffffffff) {
         throw PlatformException(code: 'invalid_presentation');
       }
-      await _opened?.call(id);
+      final inspectorVisible = arguments['inspectorVisible'] ?? false;
+      if (inspectorVisible is! bool) {
+        throw PlatformException(code: 'invalid_presentation');
+      }
+      await _opened?.call(id, inspectorVisible: inspectorVisible);
       return true;
     }
     throw MissingPluginException(
@@ -197,6 +225,7 @@ class MethodChannelQuickPasteContextHost implements QuickPasteContextHost {
   @override
   Future<void> dispose() async {
     _opened = null;
+    _shutdown = null;
     _channel.setMethodCallHandler(null);
   }
 }

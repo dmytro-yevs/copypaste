@@ -1,5 +1,10 @@
 import 'dart:async';
 import 'dart:io';
+import 'platform/lifecycle/application_restarter.dart';
+
+import 'features/modules/controller/modules_controller.dart';
+import 'features/modules/repository/runtime_modules_repository.dart';
+import 'features/modules/repository/file_selector_module_package_picker.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -138,6 +143,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   DevicesController? _devicesController;
   QuickPasteSettingsController? _quickPasteSettings;
   SettingsController? _settingsController;
+  ModulesController? _modulesController;
   MacosOnboardingController? _macosOnboarding;
   AndroidOnboardingController? _androidOnboarding;
   bool _ownsMacosOnboarding = false;
@@ -238,6 +244,20 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
           gateway: _devicesGateway!,
           captureProtection: MethodChannelPairingCaptureProtection(),
         );
+        _modulesController = ModulesController(
+          repository: RuntimeModulesRepository(),
+          picker: const FileSelectorModulePackagePicker(),
+          inputPicker: const FileSelectorModuleInputPicker(),
+          restart: () async {
+            if (Platform.isAndroid) {
+              await _prepareForTermination();
+              await const ApplicationRestarter().restart();
+            } else {
+              await _stopRuntime();
+              await _startRuntime();
+            }
+          },
+        );
         _settingsController = SettingsController(
           repository: RuntimeSettingsRepository(),
           filePicker: const FileSelectorSettingsFilePicker(),
@@ -251,6 +271,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       await Future.wait([
         _initializeQuickPaste(),
         settingsController.initialize(),
+        _modulesController!.initialize(),
       ]);
       _syncCaptureControls();
       if (!mounted) return;
@@ -332,6 +353,8 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     _devicesGateway = null;
     _quickPasteSettings = null;
     _settingsController = null;
+    _modulesController?.dispose();
+    _modulesController = null;
     historyController?.dispose();
     devicesController?.dispose();
     quickPasteSettings?.dispose();
@@ -365,6 +388,8 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     _devicesGateway = null;
     _quickPasteSettings = null;
     _settingsController = null;
+    _modulesController?.dispose();
+    _modulesController = null;
     historyController?.dispose();
     devicesController?.dispose();
     quickPasteSettings?.dispose();
@@ -552,6 +577,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       devicesController: _devicesController,
       quickPasteSettings: _quickPasteSettings,
       settingsController: _settingsController,
+      modulesController: _modulesController,
       appUpdateController: _appUpdateController,
       desktopWindow: _desktopWindow,
       runtimeUnavailableMessage: switch (_runtimeState) {

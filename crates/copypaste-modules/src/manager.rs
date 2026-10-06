@@ -1,0 +1,535 @@
+use crate::{native::ModuleInstance, package::PackageVerifier, ModuleError};
+use copypaste_module_sdk::{
+    resolve_fields, valid_id, ModuleInvocation, ModuleManifest, ModuleOutput, ModuleTarget,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstalledModule {
+    pub restart_required: bool,
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub version: String,
+    pub enabled: bool,
+    pub size_bytes: u64,
+    pub commands: Vec<copypaste_module_sdk::ModuleCommand>,
+    pub preference_fields: Vec<copypaste_module_sdk::ModuleField>,
+    pub preferences: BTreeMap<String, Value>,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Record {
+    version: String,
+    enabled: bool,
+    preferences: BTreeMap<String, Value>,
+    #[serde(default)]
+    removing: bool,
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Registry {
+    schema_version: u32,
+    modules: BTreeMap<String, Record>,
+}
+
+struct Loaded {
+    instance: Arc<ModuleInstance>,
+    last_used: u64,
+}
+struct State {
+    registry: Registry,
+    loaded: BTreeMap<String, Loaded>,
+    sequence: u64,
+}
+
+/// One owner per application data directory. Registry mutations are serialized;
+/// native execution uses a separate lock per module, outside the registry lock.
+pub struct ModuleManager {
+    root: PathBuf,
+    verifier: PackageVerifier,
+    state: Mutex<State>,
+    mutation: Mutex<()>,
+}
+
+impl ModuleManager {
+    pub fn open(
+        root: &Path,
+        app_version: &str,
+        target: ModuleTarget,
+        public_key: &str,
+    ) -> Result<Self, ModuleError> {
+        fs::create_dir_all(root.join("packages"))?;
+        fs::create_dir_all(root.join("data"))?;
+        let root = fs::canonicalize(root)?;
+        let registry = match fs::read(root.join("registry.json")) {
+            Ok(bytes) if bytes.len() <= 1024 * 1024 => {
+                serde_json::from_slice::<Registry>(&bytes).map_err(|_| ModuleError::State)?
+            }
+            Ok(_) => return Err(ModuleError::State),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Registry {
+                schema_version: 1,
+                ..Registry::default()
+            },
+            Err(error) => return Err(error.into()),
+        };
+        if registry.schema_version != 1
+            || registry.modules.len() > 128
+            || registry.modules.iter().any(|(id, record)| {
+                !valid_id(id) || semver::Version::parse(&record.version).is_err()
+            })
+        {
+            return Err(ModuleError::State);
+        }
+        Ok(Self {
+            root,
+            verifier: PackageVerifier::new(public_key, app_version, target)?,
+            state: Mutex::new(State {
+                registry,
+                loaded: BTreeMap::new(),
+                sequence: 0,
+            }),
+            mutation: Mutex::new(()),
+        })
+    }
+
+    fn directory(&self, id: &str, version: &str) -> PathBuf {
+        self.root.join("packages").join(id).join(version)
+    }
+
+    fn manifest(&self, id: &str, record: &Record) -> Result<ModuleManifest, ModuleError> {
+        let manifest = self
+            .verifier
+            .installed(&self.directory(id, &record.version), false)?;
+        if manifest.id != id || manifest.version != record.version {
+            return Err(ModuleError::State);
+        }
+        Ok(manifest)
+    }
+
+    fn persist(&self, registry: &Registry) -> Result<(), ModuleError> {
+        let bytes = serde_json::to_vec(registry).map_err(|_| ModuleError::State)?;
+        if bytes.len() > 1024 * 1024 {
+            return Err(ModuleError::Invalid(
+                "The module registry exceeds its size limit.".into(),
+            ));
+        }
+        let summaries =
+            serde_json::to_vec(&self.summaries(registry)).map_err(|_| ModuleError::State)?;
+        if summaries.len() > copypaste_module_sdk::MAX_INVOCATION_BYTES {
+            return Err(ModuleError::Invalid(
+                "The installed module metadata exceeds its size limit.".into(),
+            ));
+        }
+        copypaste_fs::write_atomically(
+            &self.root.join("registry.json"),
+            &bytes,
+            copypaste_fs::Visibility::OwnerOnly,
+        )?;
+        Ok(())
+    }
+
+    pub fn list(&self) -> Result<Vec<InstalledModule>, ModuleError> {
+        let _mutation = self.mutation.lock().map_err(|_| ModuleError::State)?;
+        self.finish_pending_removals()?;
+        let state = self.state.lock().map_err(|_| ModuleError::State)?;
+        Ok(self.summaries(&state.registry))
+    }
+
+    fn summaries(&self, registry: &Registry) -> Vec<InstalledModule> {
+        registry
+            .modules
+            .iter()
+            .map(|(id, record)| {
+                if record.removing {
+                    let restart_required =
+                        crate::native::pinned_under(&self.root.join("packages").join(id));
+                    let mut module = failed_summary(
+                        id,
+                        record,
+                        if restart_required {
+                            "Restart CopyPaste to finish removing this module."
+                        } else {
+                            "Module removal is incomplete. Remove it again to finish."
+                        }
+                        .into(),
+                    );
+                    module.restart_required = restart_required;
+                    return module;
+                }
+                match self.manifest(id, record) {
+                    Ok(manifest) => {
+                        match validate_stored_preferences(&manifest, &record.preferences) {
+                            Ok(_) => summary(manifest, record),
+                            Err(error) => failed_summary(id, record, error),
+                        }
+                    }
+                    Err(error) => failed_summary(id, record, error.to_string()),
+                }
+            })
+            .collect()
+    }
+
+    /// Installing a newer package performs an atomic version switch. Existing
+    /// settings and enabled state survive updates; incompatible preferences reset.
+    pub fn install(&self, package: &Path) -> Result<InstalledModule, ModuleError> {
+        let _mutation = self.mutation.lock().map_err(|_| ModuleError::State)?;
+        let stage = tempfile::tempdir_in(self.root.join("packages"))?;
+        let manifest = self.verifier.extract(package, stage.path())?;
+        let mut state = self.state.lock().map_err(|_| ModuleError::State)?;
+        let old = state.registry.modules.get(&manifest.id).cloned();
+        if old.as_ref().is_some_and(|record| record.removing) {
+            return Err(ModuleError::Invalid(
+                "Finish removing this module before installing it again.".into(),
+            ));
+        }
+        if let Some(old) = &old {
+            let current = semver::Version::parse(&old.version).map_err(|_| ModuleError::State)?;
+            let incoming =
+                semver::Version::parse(&manifest.version).map_err(|_| ModuleError::State)?;
+            if incoming <= current {
+                return Err(ModuleError::Invalid(
+                    "Install a newer version of this module.".into(),
+                ));
+            }
+        } else if state.registry.modules.len() >= 128 {
+            return Err(ModuleError::Invalid(
+                "Too many modules are installed.".into(),
+            ));
+        }
+        let preferences = manifest
+            .preferences
+            .iter()
+            .map(|field| {
+                let value = old
+                    .as_ref()
+                    .and_then(|r| r.preferences.get(&field.id))
+                    .filter(|value| field.accepts_stored(value))
+                    .cloned()
+                    .unwrap_or_else(|| field.default_value());
+                (field.id.clone(), value)
+            })
+            .collect();
+        let record = Record {
+            version: manifest.version.clone(),
+            enabled: old.as_ref().is_none_or(|old| old.enabled),
+            preferences,
+            removing: false,
+        };
+        let destination = self.directory(&manifest.id, &manifest.version);
+        fs::create_dir_all(destination.parent().ok_or(ModuleError::State)?)?;
+        // A previous interrupted activation may have left this unreferenced version.
+        if destination.exists() {
+            if self.verifier.installed(&destination, true)? != manifest {
+                return Err(ModuleError::Invalid(
+                    "The staged module version conflicts with an existing package.".into(),
+                ));
+            }
+        } else {
+            fs::rename(stage.path(), &destination)?;
+        }
+        let mut registry = state.registry.clone();
+        registry.modules.insert(manifest.id.clone(), record.clone());
+        if let Err(error) = self.persist(&registry) {
+            let _ = fs::remove_dir_all(&destination);
+            return Err(error);
+        }
+        let previous = state.loaded.remove(&manifest.id);
+        state.registry = registry;
+        drop(state);
+        if let Some(previous) = previous {
+            previous.instance.stop();
+        }
+        if let Some(old) = old {
+            let _ = fs::remove_dir_all(self.directory(&manifest.id, &old.version));
+        }
+        Ok(summary(manifest, &record))
+    }
+
+    pub fn set_enabled(&self, id: &str, enabled: bool) -> Result<(), ModuleError> {
+        let _mutation = self.mutation.lock().map_err(|_| ModuleError::State)?;
+        let mut state = self.state.lock().map_err(|_| ModuleError::State)?;
+        let mut registry = state.registry.clone();
+        let record = registry
+            .modules
+            .get_mut(id)
+            .ok_or(ModuleError::NotInstalled)?;
+        if record.removing {
+            return Err(ModuleError::Invalid(
+                "Finish removing this module first.".into(),
+            ));
+        }
+        if enabled {
+            self.manifest(id, record)?;
+        }
+        record.enabled = enabled;
+        self.persist(&registry)?;
+        state.registry = registry;
+        let previous = if !enabled {
+            state.loaded.remove(id)
+        } else {
+            None
+        };
+        drop(state);
+        if let Some(previous) = previous {
+            previous.instance.stop();
+        }
+        Ok(())
+    }
+
+    pub fn set_preferences(
+        &self,
+        id: &str,
+        values: BTreeMap<String, Value>,
+    ) -> Result<(), ModuleError> {
+        let _mutation = self.mutation.lock().map_err(|_| ModuleError::State)?;
+        let mut state = self.state.lock().map_err(|_| ModuleError::State)?;
+        let mut registry = state.registry.clone();
+        let record = registry
+            .modules
+            .get_mut(id)
+            .ok_or(ModuleError::NotInstalled)?;
+        let manifest = self.manifest(id, record)?;
+        record.preferences = resolve_fields(&manifest.preferences, &values)?;
+        self.persist(&registry)?;
+        state.registry = registry;
+        Ok(())
+    }
+
+    pub fn remove(&self, id: &str) -> Result<(), ModuleError> {
+        let _mutation = self.mutation.lock().map_err(|_| ModuleError::State)?;
+        let mut state = self.state.lock().map_err(|_| ModuleError::State)?;
+        if !state.registry.modules.contains_key(id) {
+            return Err(ModuleError::NotInstalled);
+        }
+        let mut registry = state.registry.clone();
+        let record = registry
+            .modules
+            .get_mut(id)
+            .ok_or(ModuleError::NotInstalled)?;
+        record.removing = true;
+        record.enabled = false;
+        record.preferences.clear();
+        // Persist removal before releasing code and deleting package/data. A crash
+        // can leave unused files, but can never reactivate a removed module.
+        self.persist(&registry)?;
+        let previous = state.loaded.remove(id);
+        state.registry = registry;
+        drop(state);
+        if let Some(previous) = previous {
+            previous.instance.stop();
+        }
+        if crate::native::pinned_under(&self.root.join("packages").join(id)) {
+            let data = self.root.join("data").join(id);
+            if data.exists() {
+                fs::remove_dir_all(data)?;
+            }
+            return Ok(());
+        }
+        for directory in [
+            self.root.join("packages").join(id),
+            self.root.join("data").join(id),
+        ] {
+            if directory.exists() {
+                fs::remove_dir_all(directory)?;
+            }
+        }
+        let mut state = self.state.lock().map_err(|_| ModuleError::State)?;
+        let mut registry = state.registry.clone();
+        registry.modules.remove(id);
+        self.persist(&registry)?;
+        state.registry = registry;
+        Ok(())
+    }
+
+    fn finish_pending_removals(&self) -> Result<(), ModuleError> {
+        let mut state = self.state.lock().map_err(|_| ModuleError::State)?;
+        let pending: Vec<_> = state
+            .registry
+            .modules
+            .iter()
+            .filter(|(_, record)| record.removing)
+            .map(|(id, _)| id.clone())
+            .collect();
+        let mut registry = state.registry.clone();
+        for id in pending {
+            let packages = self.root.join("packages").join(&id);
+            if crate::native::pinned_under(&packages) {
+                continue;
+            }
+            let cleanup = [packages, self.root.join("data").join(&id)]
+                .iter()
+                .try_for_each(|path| {
+                    if path.exists() {
+                        fs::remove_dir_all(path)
+                    } else {
+                        Ok(())
+                    }
+                });
+            if cleanup.is_ok() {
+                registry.modules.remove(&id);
+            }
+        }
+        // Once process-scoped code is gone, reclaim inactive package versions
+        // retained by earlier updates. Only manager-owned version directories qualify.
+        for (id, record) in &registry.modules {
+            let parent = self.root.join("packages").join(id);
+            if let Ok(entries) = fs::read_dir(&parent) {
+                for entry in entries.flatten() {
+                    let version = entry.file_name().to_string_lossy().into_owned();
+                    if version != record.version
+                        && semver::Version::parse(&version).is_ok()
+                        && entry.file_type().is_ok_and(|kind| kind.is_dir())
+                        && !crate::native::pinned_under(&entry.path())
+                    {
+                        let _ = fs::remove_dir_all(entry.path());
+                    }
+                }
+            }
+        }
+        if registry.modules.len() != state.registry.modules.len() {
+            self.persist(&registry)?;
+            state.registry = registry;
+        }
+        Ok(())
+    }
+
+    pub fn invoke(
+        &self,
+        id: &str,
+        command: &str,
+        arguments: BTreeMap<String, Value>,
+    ) -> Result<ModuleOutput, ModuleError> {
+        let mut state = self.state.lock().map_err(|_| ModuleError::State)?;
+        let record = state
+            .registry
+            .modules
+            .get(id)
+            .cloned()
+            .ok_or(ModuleError::NotInstalled)?;
+        if !record.enabled || record.removing {
+            return Err(ModuleError::Disabled);
+        }
+        let manifest = self.manifest(id, &record)?;
+        let command = manifest
+            .commands
+            .iter()
+            .find(|entry| entry.id == command)
+            .ok_or_else(|| ModuleError::Invalid("The module command is not registered.".into()))?;
+        let mut invocation = ModuleInvocation {
+            command: command.id.clone(),
+            arguments: resolve_fields(&command.arguments, &arguments)?,
+            preferences: resolve_fields(&manifest.preferences, &record.preferences)?,
+        };
+        state.sequence = state.sequence.saturating_add(1);
+        let last_used = state.sequence;
+        let loaded = state.loaded.entry(id.into()).or_insert_with(|| Loaded {
+            instance: Arc::new(ModuleInstance::new()),
+            last_used,
+        });
+        loaded.last_used = last_used;
+        let instance = Arc::clone(&loaded.instance);
+        let evicted = trim_idle_instances(&mut state);
+        drop(state);
+        drop(evicted);
+        let result = (|| {
+            let _inputs =
+                crate::input::snapshot(&self.root, &command.arguments, &mut invocation.arguments)?;
+            instance.invoke(
+                &self.verifier,
+                &self.directory(id, &record.version),
+                &self.root.join("data").join(id),
+                &invocation,
+            )
+        })();
+        drop(instance);
+        let mut state = self.state.lock().map_err(|_| ModuleError::State)?;
+        let evicted = trim_idle_instances(&mut state);
+        drop(state);
+        drop(evicted);
+        result
+    }
+}
+
+fn summary(manifest: ModuleManifest, record: &Record) -> InstalledModule {
+    InstalledModule {
+        restart_required: false,
+        id: manifest.id,
+        title: manifest.title,
+        description: manifest.description,
+        version: manifest.version,
+        enabled: record.enabled,
+        size_bytes: manifest.files.iter().map(|file| file.size_bytes).sum(),
+        commands: manifest.commands,
+        preference_fields: manifest.preferences,
+        preferences: record.preferences.clone(),
+        error: None,
+    }
+}
+
+fn failed_summary(id: &str, record: &Record, error: String) -> InstalledModule {
+    InstalledModule {
+        restart_required: false,
+        id: id.into(),
+        title: id.into(),
+        description: String::new(),
+        version: record.version.clone(),
+        enabled: false,
+        size_bytes: 0,
+        commands: Vec::new(),
+        preference_fields: Vec::new(),
+        preferences: BTreeMap::new(),
+        error: Some(error),
+    }
+}
+
+// Four idle instances bound the cost of a growing module collection. Active
+// invocations retain their own lease and can never be unloaded by eviction.
+fn trim_idle_instances(state: &mut State) -> Vec<Arc<ModuleInstance>> {
+    let mut evicted = Vec::new();
+    while state.loaded.len() > 4 {
+        let oldest = state
+            .loaded
+            .iter()
+            .filter(|(_, loaded)| Arc::strong_count(&loaded.instance) == 1)
+            .min_by_key(|(_, loaded)| loaded.last_used)
+            .map(|(id, _)| id.clone());
+        let Some(id) = oldest else {
+            break;
+        };
+        if let Some(loaded) = state.loaded.remove(&id) {
+            evicted.push(loaded.instance);
+        }
+    }
+    evicted
+}
+
+fn validate_stored_preferences(
+    manifest: &ModuleManifest,
+    values: &BTreeMap<String, Value>,
+) -> Result<(), String> {
+    if values
+        .keys()
+        .any(|id| !manifest.preferences.iter().any(|field| &field.id == id))
+    {
+        return Err("The stored module preferences contain an unknown field.".into());
+    }
+    for field in &manifest.preferences {
+        if let Some(value) = values.get(&field.id) {
+            if !field.accepts_stored(value) {
+                return Err(format!("{} has an invalid stored value.", field.title));
+            }
+        }
+    }
+    Ok(())
+}

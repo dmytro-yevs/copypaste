@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:io';
 
+import '../../modules/controller/modules_controller.dart';
+import '../../modules/view/modules_settings_view.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -25,6 +28,7 @@ class SettingsScreen extends StatefulWidget {
     required this.controller,
     this.quickPaste,
     this.appUpdate,
+    this.modules,
     this.onQuitForUpdate,
     this.onOpenAndroidCaptureSetup,
   });
@@ -32,6 +36,7 @@ class SettingsScreen extends StatefulWidget {
   final SettingsController controller;
   final QuickPasteSettingsController? quickPaste;
   final AppUpdateController? appUpdate;
+  final ModulesController? modules;
   final Future<void> Function()? onQuitForUpdate;
   final Future<void> Function()? onOpenAndroidCaptureSetup;
 
@@ -50,6 +55,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   ];
 
   final _captureSectionKey = GlobalKey();
+  final _modulesSectionKey = GlobalKey();
   final _securitySectionKey = GlobalKey();
   final _blockScreenshotsKey = GlobalKey();
   final _storageSectionKey = GlobalKey();
@@ -242,6 +248,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const Gap(AppSpacing.xxxl),
               ],
               switch (selectedSection) {
+                _SettingsSectionId.modules => _SettingsSection(
+                  key: _modulesSectionKey,
+                  title: 'Modules',
+                  description: 'Optional features for CopyPaste.',
+                  children: [ModulesSettingsView(controller: widget.modules!)],
+                ),
                 _SettingsSectionId.capture => _captureSection(settings),
                 _SettingsSectionId.security => _securitySection(),
                 _SettingsSectionId.storageData => _storageSection(settings),
@@ -342,8 +354,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   _SettingsSectionId get _effectiveSelectedSection {
-    if (_selectedSection == _SettingsSectionId.quickPaste &&
-        widget.quickPaste == null) {
+    if ((_selectedSection == _SettingsSectionId.quickPaste &&
+            widget.quickPaste == null) ||
+        (_selectedSection == _SettingsSectionId.modules &&
+            widget.modules == null)) {
       return _SettingsSectionId.capture;
     }
     return _selectedSection;
@@ -359,8 +373,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   List<_SettingsNavigationTarget> _sectionTargets() {
     return [
       for (final section in _SettingsSectionId.values)
-        if (section != _SettingsSectionId.quickPaste ||
-            widget.quickPaste != null)
+        if ((section != _SettingsSectionId.quickPaste ||
+                widget.quickPaste != null) &&
+            (section != _SettingsSectionId.modules || widget.modules != null))
           _SettingsNavigationTarget(
             id: 'section-${section.slug}',
             section: section,
@@ -373,6 +388,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   List<_SettingsNavigationTarget> _searchTargets() {
     return [
+      if (widget.modules != null)
+        _SettingsNavigationTarget(
+          id: 'result-modules',
+          section: _SettingsSectionId.modules,
+          label: 'Modules',
+          description: 'Install, update, and remove optional modules.',
+          keywords: 'features commands extensions',
+          targetKey: _modulesSectionKey,
+        ),
       if (widget.onOpenAndroidCaptureSetup != null)
         _SettingsNavigationTarget(
           id: _SettingsTargetId.androidBackgroundCapture,
@@ -497,6 +521,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   GlobalKey _sectionKey(_SettingsSectionId section) => switch (section) {
     _SettingsSectionId.capture => _captureSectionKey,
+    _SettingsSectionId.modules => _modulesSectionKey,
     _SettingsSectionId.security => _securitySectionKey,
     _SettingsSectionId.storageData => _storageSectionKey,
     _SettingsSectionId.sync => _syncSectionKey,
@@ -1414,6 +1439,12 @@ class _ShortcutRecorderState extends State<_ShortcutRecorder> {
 }
 
 enum _SettingsSectionId {
+  modules(
+    label: 'Modules',
+    slug: 'modules',
+    description: 'Install and manage optional modules.',
+    icon: LucideIcons.puzzle,
+  ),
   capture(
     label: 'Capture',
     slug: 'capture',

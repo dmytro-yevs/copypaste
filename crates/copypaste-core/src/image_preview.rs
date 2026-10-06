@@ -58,14 +58,23 @@ pub fn image_metadata(source: &[u8]) -> Result<ImageMetadata, ImagePreviewError>
 
 /// Decode one clipboard image within the user's memory budget and encode a
 /// PNG thumbnail. No source image bytes leave this function.
+/// Optional physical-pixel bounds preserve aspect ratio without changing the source.
 pub fn thumbnail_png(
     source: &[u8],
     decoded_memory_mb: u32,
     max_edge: Option<u32>,
+    bounds: Option<(u32, u32)>,
 ) -> Result<ImageThumbnail, ImagePreviewError> {
     let edge = max_edge
-        .unwrap_or(DEFAULT_THUMBNAIL_EDGE)
+        .unwrap_or(if bounds.is_some() {
+            MAX_THUMBNAIL_EDGE
+        } else {
+            DEFAULT_THUMBNAIL_EDGE
+        })
         .clamp(1, MAX_THUMBNAIL_EDGE);
+    let (max_width, max_height) = bounds.unwrap_or((edge, edge));
+    let max_width = max_width.clamp(1, edge);
+    let max_height = max_height.clamp(1, edge);
     let budget = u64::from(decoded_memory_mb).saturating_mul(1024 * 1024);
     let mut limits = Limits::default();
     limits.max_alloc = Some(budget);
@@ -80,14 +89,20 @@ pub fn thumbnail_png(
     if source_width == 0 || source_height == 0 {
         return Err(ImagePreviewError::Decode);
     }
-    let longest = source_width.max(source_height);
+    let (numerator, denominator) = if u64::from(source_width) * u64::from(max_height)
+        > u64::from(source_height) * u64::from(max_width)
+    {
+        (max_width, source_width)
+    } else {
+        (max_height, source_height)
+    };
     let target_width = u64::from(source_width)
-        .saturating_mul(u64::from(edge))
-        .div_ceil(u64::from(longest))
+        .saturating_mul(u64::from(numerator))
+        .div_ceil(u64::from(denominator))
         .min(u64::from(source_width));
     let target_height = u64::from(source_height)
-        .saturating_mul(u64::from(edge))
-        .div_ceil(u64::from(longest))
+        .saturating_mul(u64::from(numerator))
+        .div_ceil(u64::from(denominator))
         .min(u64::from(source_height));
     let thumbnail_bytes = target_width
         .saturating_mul(target_height)
@@ -108,7 +123,7 @@ pub fn thumbnail_png(
             ImagePreviewError::Decode
         }
     })?;
-    let thumbnail = image.thumbnail(image.width().min(edge), image.height().min(edge));
+    let thumbnail = image.thumbnail(image.width().min(max_width), image.height().min(max_height));
     let (width, height) = (thumbnail.width(), thumbnail.height());
     let mut png = Vec::new();
     thumbnail
@@ -134,7 +149,7 @@ mod tests {
 
     #[test]
     fn creates_a_png_thumbnail() {
-        let thumbnail = thumbnail_png(&png(1200, 600), 50, None).unwrap();
+        let thumbnail = thumbnail_png(&png(1200, 600), 50, None, None).unwrap();
         assert_eq!((thumbnail.width, thumbnail.height), (384, 192));
         assert_eq!(&thumbnail.png[..8], b"\x89PNG\r\n\x1a\n");
     }
@@ -153,9 +168,35 @@ mod tests {
     }
 
     #[test]
+    fn fits_preview_bounds_for_square_wide_and_tall_images() {
+        for (source_size, expected) in [
+            ((1_200, 1_200), (320, 320)),
+            ((1_800, 300), (1_400, 233)),
+            ((300, 1_800), (53, 320)),
+            ((60, 30), (60, 30)),
+        ] {
+            let source = png(source_size.0, source_size.1);
+            let thumbnail = thumbnail_png(&source, 50, None, Some((1_400, 320))).unwrap();
+            assert_eq!((thumbnail.width, thumbnail.height), expected);
+            let decoded = image::load_from_memory(&thumbnail.png).unwrap();
+            assert_eq!((decoded.width(), decoded.height()), expected);
+            assert_eq!(image_metadata(&source).unwrap().width, source_size.0);
+            assert_eq!(image_metadata(&source).unwrap().height, source_size.1);
+        }
+    }
+
+    #[test]
+    fn clamps_preview_bounds_to_the_global_resolution_limit() {
+        let thumbnail = thumbnail_png(&png(2_400, 600), 50, None, Some((u32::MAX, 320))).unwrap();
+        assert_eq!((thumbnail.width, thumbnail.height), (1_280, 320));
+        let thumbnail = thumbnail_png(&png(2_400, 600), 50, Some(512), Some((1_400, 320))).unwrap();
+        assert_eq!((thumbnail.width, thumbnail.height), (512, 128));
+    }
+
+    #[test]
     fn refuses_a_decode_over_the_budget() {
         assert!(matches!(
-            thumbnail_png(&png(1200, 1200), 1, None),
+            thumbnail_png(&png(1200, 1200), 1, None, None),
             Err(ImagePreviewError::TooLarge)
         ));
     }
@@ -163,7 +204,7 @@ mod tests {
     #[test]
     fn refuses_non_images() {
         assert!(matches!(
-            thumbnail_png(b"not an image", 50, None),
+            thumbnail_png(b"not an image", 50, None, None),
             Err(ImagePreviewError::Decode)
         ));
     }
@@ -171,20 +212,22 @@ mod tests {
     #[test]
     fn high_dpi_edge_does_not_upscale_small_images() {
         assert_eq!(
-            thumbnail_png(&png(1600, 800), 50, Some(1024))
+            thumbnail_png(&png(1600, 800), 50, Some(1024), None)
                 .unwrap()
                 .width,
             1024
         );
         assert_eq!(
-            thumbnail_png(&png(120, 60), 50, Some(1024)).unwrap().width,
+            thumbnail_png(&png(120, 60), 50, Some(1024), None)
+                .unwrap()
+                .width,
             120
         );
     }
 
     #[test]
     fn tiny_image_with_high_dpi_request_fits_a_small_budget() {
-        let thumbnail = thumbnail_png(&png(2, 2), 1, Some(2048)).unwrap();
+        let thumbnail = thumbnail_png(&png(2, 2), 1, Some(2048), None).unwrap();
         assert_eq!((thumbnail.width, thumbnail.height), (2, 2));
     }
 }

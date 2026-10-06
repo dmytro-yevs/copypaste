@@ -112,6 +112,7 @@ java {
 }
 
 dependencies {
+    implementation("com.jakewharton:process-phoenix:3.0.0")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")

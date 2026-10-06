@@ -176,33 +176,22 @@ class _ProtectedPairingViewState extends State<ProtectedPairingView> {
   }
 
   Widget _confirmationActions(ProtectedPairingController controller) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Wrap(
+      alignment: WrapAlignment.end,
+      spacing: AppSpacing.sm,
+      runSpacing: AppSpacing.sm,
       children: [
-        Button.secondary(
-          onPressed: controller.revealSas,
-          leading: const Icon(LucideIcons.shieldCheck),
-          child: const Text('Reveal verification code'),
+        Button.destructive(
+          onPressed: controller.decisionInFlight || !controller.canConfirm
+              ? null
+              : () => controller.confirm(accept: false),
+          child: const Text('Reject'),
         ),
-        const Gap(AppSpacing.md),
-        Wrap(
-          alignment: WrapAlignment.end,
-          spacing: AppSpacing.sm,
-          runSpacing: AppSpacing.sm,
-          children: [
-            Button.destructive(
-              onPressed: controller.decisionInFlight
-                  ? null
-                  : () => controller.confirm(accept: false),
-              child: const Text('Reject'),
-            ),
-            Button.primary(
-              onPressed: controller.decisionInFlight
-                  ? null
-                  : () => controller.confirm(accept: true),
-              child: const Text('Confirm both devices'),
-            ),
-          ],
+        Button.primary(
+          onPressed: controller.decisionInFlight || !controller.canConfirm
+              ? null
+              : () => controller.confirm(accept: true),
+          child: const Text('Accept'),
         ),
       ],
     );
@@ -241,7 +230,7 @@ class _ProtectedPairingViewState extends State<ProtectedPairingView> {
     PairingState.handshaking =>
       'The devices are establishing a secure channel.',
     PairingState.awaitingConfirmation =>
-      'Reveal the verification code and compare it on both devices.',
+      'Compare the verification code on both devices.',
     PairingState.confirmed => 'The device is now trusted.',
     PairingState.rejected ||
     PairingState.cancelled ||

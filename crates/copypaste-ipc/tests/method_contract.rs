@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 
 fn wire_name(method: &Method) -> &'static str {
     match method {
+        Method::Modules { .. } => "modules",
         Method::Status => "status",
         Method::SetDeviceName { .. } => "set_device_name",
         Method::List { .. } => "list",
@@ -55,6 +56,7 @@ fn wire_name(method: &Method) -> &'static str {
 
 fn catalog() -> Vec<Value> {
     vec![
+        json!({"method":"modules","params":{"operation":{"operation":"list"}}}),
         json!({"method":"status"}),
         json!({"method":"set_device_name","params":{"name":"Kitchen Mac"}}),
         json!({"method":"list","params":{"limit":10,"cursor":null}}),
@@ -117,7 +119,7 @@ fn every_ipc_method_has_one_executable_wire_contract() {
     }
     assert_eq!(
         names.len(),
-        45,
+        46,
         "a Method has no wire fixture, or this count was not bumped with it"
     );
 }
@@ -167,4 +169,15 @@ fn image_preview_resolution_is_an_optional_wire_argument() {
         }
     ));
     assert_eq!(serde_json::to_value(method).unwrap(), value);
+}
+
+#[test]
+fn image_preview_bounds_roundtrip_without_changing_legacy_requests() {
+    for value in [
+        json!({"method":"image_preview","params":{"id":"item"}}),
+        json!({"method":"image_preview","params":{"id":"item","bounds":{"width":1400,"height":320}}}),
+    ] {
+        let method: Method = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(method).unwrap(), value);
+    }
 }

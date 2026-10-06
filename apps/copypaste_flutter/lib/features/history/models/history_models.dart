@@ -249,6 +249,14 @@ class HistoryClipPage {
   final int skippedUndecryptable;
 }
 
+/// Physical-pixel limits for an aspect-preserving preview of the stored image.
+class HistoryImagePreviewBounds {
+  const HistoryImagePreviewBounds({required this.width, required this.height});
+
+  final int width;
+  final int height;
+}
+
 class HistoryImagePreview {
   const HistoryImagePreview(
     this.bytes, {

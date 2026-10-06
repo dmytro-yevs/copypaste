@@ -10,6 +10,53 @@ use copypaste_ipc::{Method, ResponseData};
 
 use crate::client;
 
+async fn module_request(operation: copypaste_ipc::ModuleOperation) -> Result<String, RuntimeError> {
+    let response = client::request(Method::Modules { operation }).await?;
+    match response.data {
+        Some(ResponseData::Modules { json }) => Ok(json),
+        _ => Err(RuntimeError::internal()),
+    }
+}
+
+pub async fn modules_list() -> Result<String, RuntimeError> {
+    module_request(copypaste_ipc::ModuleOperation::List).await
+}
+
+pub async fn module_install(package_path: String) -> Result<String, RuntimeError> {
+    module_request(copypaste_ipc::ModuleOperation::Install { package_path }).await
+}
+
+pub async fn module_set_enabled(id: String, enabled: bool) -> Result<(), RuntimeError> {
+    module_request(copypaste_ipc::ModuleOperation::SetEnabled { id, enabled })
+        .await
+        .map(|_| ())
+}
+
+pub async fn module_set_preferences(id: String, values_json: String) -> Result<(), RuntimeError> {
+    module_request(copypaste_ipc::ModuleOperation::SetPreferences { id, values_json })
+        .await
+        .map(|_| ())
+}
+
+pub async fn module_remove(id: String) -> Result<(), RuntimeError> {
+    module_request(copypaste_ipc::ModuleOperation::Remove { id })
+        .await
+        .map(|_| ())
+}
+
+pub async fn module_invoke(
+    id: String,
+    command: String,
+    arguments_json: String,
+) -> Result<String, RuntimeError> {
+    module_request(copypaste_ipc::ModuleOperation::Invoke {
+        id,
+        command,
+        arguments_json,
+    })
+    .await
+}
+
 #[derive(Debug, Clone)]
 pub struct RuntimeError {
     pub code: String,
@@ -222,6 +269,12 @@ pub enum ClipSort {
 #[derive(Debug, Clone)]
 pub struct ClipImagePreview {
     pub png_base64: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClipImagePreviewBounds {
     pub width: u32,
     pub height: u32,
 }
@@ -812,8 +865,17 @@ pub async fn reorder_pinned_clips(ids: Vec<String>) -> Result<u64, RuntimeError>
 pub async fn clip_image_preview(
     id: String,
     max_edge: Option<u32>,
+    bounds: Option<ClipImagePreviewBounds>,
 ) -> Result<ClipImagePreview, RuntimeError> {
-    let response = client::request(Method::ImagePreview { id, max_edge }).await?;
+    let response = client::request(Method::ImagePreview {
+        id,
+        max_edge,
+        bounds: bounds.map(|bounds| copypaste_ipc::ImagePreviewBounds {
+            width: bounds.width,
+            height: bounds.height,
+        }),
+    })
+    .await?;
     match response.data {
         Some(ResponseData::ImagePreview(preview)) => Ok(ClipImagePreview {
             png_base64: preview.png_base64,

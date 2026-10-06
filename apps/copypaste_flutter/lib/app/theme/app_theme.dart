@@ -68,6 +68,19 @@ abstract final class AppTheme {
     );
   }
 
+  static SelectTheme primarySelectTheme(BuildContext context) {
+    const style = ButtonStyle.primaryIcon();
+    return SelectTheme(
+      adaptiveOverlay: false,
+      overlayConfiguration: AppOverlays.selectPopoverConfiguration(
+        context,
+        widthConstraint: PopoverConstraint.intrinsic,
+      ),
+      padding: style.padding(context, const {}),
+      decoration: (context, states, value) => style.decoration(context, states),
+    );
+  }
+
   static CardTheme settingsSearchTargetCardTheme(
     BuildContext context, {
     required bool highlighted,
@@ -441,6 +454,7 @@ abstract final class AppTheme {
       fontSize: shared.fontSize,
       fontWeight: shared.fontWeight,
       height: shared.height,
+      leadingDistribution: TextLeadingDistribution.even,
     );
   }
 

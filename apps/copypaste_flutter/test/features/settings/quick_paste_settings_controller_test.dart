@@ -24,7 +24,7 @@ void main() {
     await controller.initialize();
     expect(controller.autoPaste, isTrue);
     expect(registrar.registered, DesktopShortcut.defaultForPlatform());
-    expect(host.prepareCalls, 1);
+    expect(host.prepareCalls, 0);
 
     await controller.setAutoPaste(false);
     expect(store.value.autoPaste, isFalse);

@@ -84,6 +84,34 @@ class RunnerTests: XCTestCase {
     )
   }
 
+  func testQuickPasteReopeningCancelsDeferredRetirement() {
+    var queued: [() -> Void] = []
+    let retirement = QuickPasteRetirement(enqueue: { queued.append($0) })
+    var releases = 0
+    retirement.schedule(canRetire: { true }, retire: { releases += 1 })
+    XCTAssertEqual(releases, 0)
+    retirement.cancel()
+    queued.removeFirst()()
+    XCTAssertEqual(releases, 0)
+    retirement.schedule(canRetire: { true }, retire: { releases += 1 })
+    queued.removeFirst()()
+    XCTAssertEqual(releases, 1)
+  }
+
+  func testQuickPasteWaitsForPasteCompletionBeforeRetirement() {
+    var queued: [() -> Void] = []
+    let retirement = QuickPasteRetirement(enqueue: { queued.append($0) })
+    var pending = true
+    var released = false
+    retirement.schedule(canRetire: { !pending }, retire: { released = true })
+    queued.removeFirst()()
+    XCTAssertFalse(released)
+    pending = false
+    retirement.schedule(canRetire: { !pending }, retire: { released = true })
+    queued.removeFirst()()
+    XCTAssertTrue(released)
+  }
+
   func testQuickPasteUsesTheDisplayContainingTheCursor() {
     let left = QuickPasteDisplay(
       frame: NSRect(x: -1920, y: 0, width: 1920, height: 1080),

@@ -1,0 +1,24 @@
+[package]
+name = "copypaste-modules"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+copypaste-module-sdk = { path = "../copypaste-module-sdk" }
+copypaste-fs = { path = "../copypaste-fs" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tempfile.workspace = true
+semver = "1"
+libloading = "0.9"
+minisign-verify = "0.3"
+zip = { version = "8", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+minisign = "0.9"

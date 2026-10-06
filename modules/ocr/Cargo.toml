@@ -1,0 +1,21 @@
+[package]
+name = "copypaste-module-ocr"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+license = "Apache-2.0"
+publish = false
+description = "Offline multilingual OCR module for CopyPaste."
+
+[workspace]
+members = []
+resolver = "2"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+copypaste-module-sdk = { path = "../../crates/copypaste-module-sdk" }
+paddle-ocr-rs = { path = "vendor/paddle-ocr-rs", default-features = false }
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["ndarray", "load-dynamic"] }
+image = { version = "0.25", default-features = false, features = ["bmp", "jpeg", "png", "tiff", "webp"] }

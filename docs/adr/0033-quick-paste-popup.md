@@ -26,6 +26,22 @@ If trust is lost at runtime, denied, or the native paste operation fails,
 selection still succeeds as copy-only and the popup closes. Auto-paste must not
 make a history item unusable after it has already been copied successfully.
 
+## Engine lifetime
+
+The main engine registers the global shortcut without starting the Quick Paste
+engine. A popup engine is created on demand. Its initialized Dart controller
+signals readiness before the native host delivers the current presentation ID.
+Closing, deactivation, and completed paste retire the hidden engine on the next
+native event-loop turn. A reopened presentation cancels pending retirement.
+
+Before shutdown, Dart disposes its owned History repository and awaits the Rust
+watch lease cancellation. Native shutdown waits for that acknowledgement, with
+a one-second deadline for a context that failed during startup. macOS explicitly
+shuts down FlutterEngine and detaches its view; Windows destroys the retired
+FlutterViewController outside its own window/message callbacks. A generation
+keeps a delayed Windows reply from destroying a newer popup. Android has no
+separate Quick Paste engine.
+
 ## Window placement
 
 The popup uses a compact menu layout: title and search share the top row,
