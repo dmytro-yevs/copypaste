@@ -272,6 +272,9 @@ pub(crate) enum ConfigAction {
         /// an unbundled background process cannot.
         #[arg(long)]
         notify_on_copy: Option<bool>,
+        /// Include clipboard content in capture notifications.
+        #[arg(long)]
+        notification_preview: Option<bool>,
         /// Play platform feedback after a successful capture or app-owned copy.
         #[arg(long)]
         sound_on_copy: Option<bool>,
@@ -357,6 +360,7 @@ pub(crate) fn config_patch(action: &ConfigAction) -> ConfigPatch {
         lan_visibility,
         sync_enabled,
         notify_on_copy,
+        notification_preview,
         sound_on_copy,
     } = action
     else {
@@ -383,6 +387,7 @@ pub(crate) fn config_patch(action: &ConfigAction) -> ConfigPatch {
         lan_visibility: *lan_visibility,
         sync_enabled: *sync_enabled,
         notify_on_copy: *notify_on_copy,
+        notification_preview: *notification_preview,
         sound_on_copy: *sound_on_copy,
     }
 }
@@ -527,6 +532,8 @@ mod tests {
             "true",
             "--sound-on-copy",
             "false",
+            "--notification-preview",
+            "false",
         ])
         .expect("config flags should parse");
         let Command::Config { action } = cli.command else {
@@ -553,6 +560,7 @@ mod tests {
                 lan_visibility: Some(true),
                 sync_enabled: Some(false),
                 notify_on_copy: Some(true),
+                notification_preview: Some(false),
                 sound_on_copy: Some(false),
             }
         );

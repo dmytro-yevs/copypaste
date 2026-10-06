@@ -48,7 +48,7 @@ class AndroidClipboardPendingTest {
                 if (hostCloses > 0 && scopes.get() == 0) drainAcknowledgements = 1
             }
         }
-        override fun onCaptured(context: Context?) {
+        override fun onCaptured(context: Context?, preview: CaptureFeedbackPreview?) {
             if (throwFeedback) throw IllegalStateException("JNI feedback failure")
             feedback += 1
         }
