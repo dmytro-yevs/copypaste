@@ -50,6 +50,8 @@
 //! The shared content-type vocabulary keeps captured, imported, and remote rows
 //! on the same dispatch without routing a path or base64 string through text ingest.
 
+#[cfg(any(target_os = "windows", test))]
+mod cf_html;
 mod change;
 mod fake;
 pub(crate) mod file_capture;

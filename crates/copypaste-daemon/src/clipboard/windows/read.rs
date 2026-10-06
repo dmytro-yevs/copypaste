@@ -184,18 +184,29 @@ fn html(policy: CapturePolicy<'_>, format: u32) -> Reading {
     if bytes > cap {
         return Reading::TooLarge { bytes, cap };
     }
-    let mut fragment = Vec::new();
-    if raw::get_html(format, &mut fragment).is_err() {
+    let mut payload = Vec::new();
+    if raw::get_vec(format, &mut payload).is_err() {
         debug!("the clipboard HTML could not be read; the change was dropped");
         return Reading::Nothing;
     }
+    if payload.len() as u64 > cap {
+        return Reading::TooLarge {
+            bytes: payload.len() as u64,
+            cap,
+        };
+    }
+    // GlobalSize can include non-UTF-8 allocation padding beyond EndFragment.
+    let Some(fragment) = crate::clipboard::cf_html::fragment(&payload) else {
+        debug!("the clipboard HTML fragment is invalid; the change was dropped");
+        return Reading::Nothing;
+    };
     if fragment.len() as u64 > cap {
         return Reading::TooLarge {
             bytes: fragment.len() as u64,
             cap,
         };
     }
-    normalized_text(fragment, copypaste_ipc::content_type::HTML, cap)
+    normalized_text(fragment.to_vec(), copypaste_ipc::content_type::HTML, cap)
 }
 
 fn normalized_text(bytes: Vec<u8>, content_type: &'static str, cap: u64) -> Reading {
