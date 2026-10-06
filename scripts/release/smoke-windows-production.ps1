@@ -12,6 +12,7 @@ if ($env:OS -ne "Windows_NT") { throw "Windows smoke requires Windows" }
 $installerPath = (Resolve-Path -LiteralPath $Installer).Path
 $installDirectory = Join-Path $env:LOCALAPPDATA "Programs\CopyPaste"
 $app = Join-Path $installDirectory "CopyPaste.exe"
+$cli = Join-Path $installDirectory "copypaste-cli.exe"
 $uninstaller = Join-Path $installDirectory "Uninstall.exe"
 $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CopyPaste"
 
@@ -19,6 +20,11 @@ try {
     $install = Start-Process -FilePath $installerPath -ArgumentList "/S" -Wait -PassThru
     if ($install.ExitCode -ne 0) { throw "installer exited with $($install.ExitCode)" }
     if (-not (Test-Path -LiteralPath $app -PathType Leaf)) { throw "installed application is missing" }
+    if (-not (Test-Path -LiteralPath $cli -PathType Leaf)) { throw "installed CLI is missing" }
+    $cliVersion = & $cli --version
+    if ($LASTEXITCODE -ne 0 -or $cliVersion -cne "copypaste $Version") {
+        throw "installed CLI did not report the release version"
+    }
     $installedVersion = (Get-ItemProperty -LiteralPath $uninstallKey -ErrorAction Stop).DisplayVersion
     if ($installedVersion -cne $Version) {
         throw "installed application version $installedVersion does not match $Version"
@@ -28,7 +34,7 @@ try {
     $daemon = $null
     for ($attempt = 0; $attempt -lt 60 -and $null -eq $daemon; $attempt++) {
         Start-Sleep -Milliseconds 500
-        if ($process.HasExited) { throw "installed application exited during startup" }
+        if ($process.HasExited) { throw "installed application exited during startup: $($process.ExitCode)" }
         $daemon = Get-CimInstance Win32_Process -Filter "Name = 'copypaste-daemon.exe'" |
             Where-Object { $_.ParentProcessId -eq $process.Id } |
             Select-Object -First 1

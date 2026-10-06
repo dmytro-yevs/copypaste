@@ -45,10 +45,14 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $releaseDirectory "CopyPaste.exe") -PathType Leaf)) {
         throw "Flutter did not produce CopyPaste.exe"
     }
+    $applicationHash = (Get-FileHash -LiteralPath (Join-Path $releaseDirectory "CopyPaste.exe") -Algorithm SHA256).Hash
     Copy-Item -LiteralPath (Join-Path $root "target\release\copypaste-daemon.exe") `
         -Destination (Join-Path $releaseDirectory "copypaste-daemon.exe") -Force
     Copy-Item -LiteralPath (Join-Path $root "target\release\copypaste.exe") `
-        -Destination (Join-Path $releaseDirectory "copypaste.exe") -Force
+        -Destination (Join-Path $releaseDirectory "copypaste-cli.exe") -Force
+    if ((Get-FileHash -LiteralPath (Join-Path $releaseDirectory "CopyPaste.exe") -Algorithm SHA256).Hash -cne $applicationHash) {
+        throw "Bundling runtime helpers changed the Flutter application"
+    }
 
     & (Join-Path $PSScriptRoot "windows-sign.ps1") -Operation Validate
     if ($LASTEXITCODE -ne 0) { throw "Windows signing state is invalid" }
