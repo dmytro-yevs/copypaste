@@ -5,6 +5,14 @@ struct QuickPasteDisplay {
   let visibleFrame: NSRect
 }
 
+func quickPasteInspectorFrame(current: NSRect, visible: NSRect, expanded: Bool) -> NSRect {
+  let width = min(expanded ? 816 : 448, visible.width)
+  let height = min(CGFloat(800), visible.height)
+  let x = min(max(current.minX, visible.minX), max(visible.minX, visible.maxX - width))
+  let y = min(max(current.maxY - height, visible.minY), max(visible.minY, visible.maxY - height))
+  return NSRect(x: x, y: y, width: width, height: height)
+}
+
 func quickPasteFrame(
   cursor: NSPoint,
   size: NSSize,
