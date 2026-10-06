@@ -133,10 +133,12 @@ impl PackageVerifier {
             }
             target.sync_all()?;
         }
-        fs::write(destination.join(MANIFEST), bytes)?;
-        fs::write(destination.join(SIGNATURE), signature)?;
-        File::open(destination.join(MANIFEST))?.sync_all()?;
-        File::open(destination.join(SIGNATURE))?.sync_all()?;
+        for (name, content) in [(MANIFEST, bytes), (SIGNATURE, signature)] {
+            let mut target = File::create(destination.join(name))?;
+            target.write_all(&content)?;
+            // Windows requires a writable handle for FlushFileBuffers.
+            target.sync_all()?;
+        }
         Ok(manifest)
     }
 
