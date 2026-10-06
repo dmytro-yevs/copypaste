@@ -148,6 +148,10 @@ bool FlutterWindow::OnCreate() {
           if (call.method_name() == "accessibilityGranted" ||
               call.method_name() == "requestAccessibility") {
             result->Success(flutter::EncodableValue(true));
+          } else if (call.method_name() == "setInspectorVisible") {
+            const auto* visible = BoolArgument(call, "visible");
+            result->Success(flutter::EncodableValue(visible != nullptr &&
+                SetQuickPasteInspectorVisible(QuickPastePresentationId(call.arguments()), *visible)));
           } else if (call.method_name() == "paste") {
             result->Success(flutter::EncodableValue(
                 PasteIntoPreviousWindow(QuickPastePresentationId(call.arguments()))));
@@ -353,6 +357,7 @@ bool FlutterWindow::OnCreate() {
     ::SetWindowLongPtr(handle, GWL_STYLE, style);
     ::SetWindowPos(handle, HWND_TOPMOST, 0, 0, 0, 0,
                    SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+    UpdateQuickPasteWindowCorners();
   }
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -455,7 +460,7 @@ bool FlutterWindow::PrepareQuickPasteContext() {
       project, false, "", "", "", true);
   if (!quick_window->Create(L"CopyPaste Quick Paste",
                             Win32Window::Point(0, 0),
-                            Win32Window::Size(520, 720))) {
+                            Win32Window::Size(448, 800))) {
     return false;
   }
   quick_window->SetQuitOnClose(false);
@@ -555,7 +560,7 @@ bool QuickPasteTargetSession::Paste(int64_t requested_id, HWND popup) {
 bool PresentQuickPasteAtCursor(
     HWND window, const QuickPastePresentationApi& api,
     const std::function<void()>& opened, const std::function<bool()>& owns,
-    const std::function<void()>& cleanup) {
+    const std::function<void()>& cleanup, bool inspector_visible) {
   const auto fail = [&] {
     if (owns()) {
       if (cleanup) cleanup();
@@ -576,9 +581,11 @@ bool PresentQuickPasteAtCursor(
                       SWP_NOSIZE | SWP_NOACTIVATE) || !owns()) return fail();
   const UINT dpi = api.get_dpi_for_window(window);
   if (dpi == 0 || !owns()) return fail();
-  const int width = ::MulDiv(520, dpi, USER_DEFAULT_SCREEN_DPI);
-  const int height = ::MulDiv(720, dpi, USER_DEFAULT_SCREEN_DPI);
   const RECT work = monitor_info.rcWork;
+  const int width = std::min(::MulDiv(inspector_visible ? 816 : 448, dpi, USER_DEFAULT_SCREEN_DPI),
+                             static_cast<int>(work.right - work.left));
+  const int height = std::min(::MulDiv(800, dpi, USER_DEFAULT_SCREEN_DPI),
+                              static_cast<int>(work.bottom - work.top));
   const int minimum_x = static_cast<int>(work.left);
   const int minimum_y = static_cast<int>(work.top);
   const int maximum_x = std::max(minimum_x, static_cast<int>(work.right) - width);
@@ -594,7 +601,8 @@ bool PresentQuickPasteAtCursor(
 
 bool ShowQuickPastePresentationAtCursor(
     HWND window, QuickPasteTargetSession& session, int64_t id,
-    const QuickPastePresentationApi& api, const std::function<void()>& opened) {
+    const QuickPastePresentationApi& api, const std::function<void()>& opened,
+    bool inspector_visible) {
   const auto owns = [&] { return id > 0 && session.id() == id; };
   const auto cleanup = [&] {
     if (!owns()) return;
@@ -602,7 +610,7 @@ bool ShowQuickPastePresentationAtCursor(
     api.show_window(window, SW_HIDE);
   };
   if (!owns()) return false;
-  const bool shown = PresentQuickPasteAtCursor(window, api, opened, owns, cleanup);
+  const bool shown = PresentQuickPasteAtCursor(window, api, opened, owns, cleanup, inspector_visible);
   if (!shown || !owns()) {
     cleanup();
     return false;
@@ -624,7 +632,47 @@ bool FlutterWindow::ShowQuickPasteAtCursor(HWND sampled_foreground) {
               "opened", std::make_unique<flutter::EncodableValue>(flutter::EncodableMap{
                   {flutter::EncodableValue("presentationId"), flutter::EncodableValue(id)}}));
         }
-      });
+      }, quick_paste_inspector_visible_);
+}
+
+bool FlutterWindow::SetQuickPasteInspectorVisible(int64_t presentation_id, bool visible) {
+  if (!is_quick_paste_context_ || presentation_id <= 0 ||
+      quick_paste_session_.id() != presentation_id) return false;
+  RECT current{};
+  MONITORINFO monitor{sizeof(MONITORINFO)};
+  if (!::GetWindowRect(GetHandle(), &current) ||
+      !::GetMonitorInfoW(::MonitorFromWindow(GetHandle(), MONITOR_DEFAULTTONEAREST), &monitor)) return false;
+  const UINT dpi = ::GetDpiForWindow(GetHandle());
+  if (dpi == 0) return false;
+  const RECT work = monitor.rcWork;
+  const int width = std::min(::MulDiv(visible ? 816 : 448, dpi, USER_DEFAULT_SCREEN_DPI),
+                             static_cast<int>(work.right - work.left));
+  const int height = std::min(::MulDiv(800, dpi, USER_DEFAULT_SCREEN_DPI),
+                              static_cast<int>(work.bottom - work.top));
+  const int x = std::clamp(static_cast<int>(current.left), static_cast<int>(work.left),
+                           std::max(static_cast<int>(work.left), static_cast<int>(work.right) - width));
+  const int y = std::clamp(static_cast<int>(current.top), static_cast<int>(work.top),
+                           std::max(static_cast<int>(work.top), static_cast<int>(work.bottom) - height));
+  if (!::SetWindowPos(GetHandle(), nullptr, x, y, width, height,
+      SWP_NOACTIVATE | SWP_NOZORDER | SWP_FRAMECHANGED)) return false;
+  if (quick_paste_session_.id() != presentation_id) return false;
+  quick_paste_inspector_visible_ = visible;
+  return true;
+}
+
+void FlutterWindow::UpdateQuickPasteWindowCorners() {
+  if (!is_quick_paste_context_) return;
+  RECT frame{};
+  if (!::GetWindowRect(GetHandle(), &frame)) return;
+  const int width = static_cast<int>(frame.right - frame.left);
+  const int height = static_cast<int>(frame.bottom - frame.top);
+  if (width <= 0 || height <= 0 ||
+      (width == quick_paste_rounded_width_ && height == quick_paste_rounded_height_)) return;
+  quick_paste_rounded_width_ = width;
+  quick_paste_rounded_height_ = height;
+  const int diameter = ::MulDiv(24, ::GetDpiForWindow(GetHandle()), USER_DEFAULT_SCREEN_DPI);
+  HRGN region = ::CreateRoundRectRgn(0, 0, width + 1, height + 1, diameter, diameter);
+  if (region != nullptr && !::SetWindowRgn(GetHandle(), region, TRUE)) ::DeleteObject(region);
 }
 
 bool FlutterWindow::PasteIntoPreviousWindow(int64_t presentation_id) {
@@ -664,6 +712,7 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     if (!pairing_cancellation_approved_) return 0;
   }
   if (is_quick_paste_context_) {
+    if (message == WM_SIZE) UpdateQuickPasteWindowCorners();
     if (message == WM_CLOSE) {
       quick_paste_session_.Invalidate();
       ::ShowWindow(hwnd, SW_HIDE);

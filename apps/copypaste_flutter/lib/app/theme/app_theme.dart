@@ -13,6 +13,61 @@ abstract final class AppTheme {
   static const lightSidebarSurface = Color(0xFFF9F9F9);
   static const darkSidebarSurface = Color(0xFF1B1B1B);
 
+  static TextStyle clipboardMenuTextStyle(BuildContext context) =>
+      Theme.of(context).typography.small.copyWith(
+        fontSize: AppTypographySize.menu,
+        fontWeight: FontWeight.normal,
+        leadingDistribution: TextLeadingDistribution.even,
+      );
+
+  static TextStyle clipboardMetadataTextStyle(BuildContext context) =>
+      clipboardMenuTextStyle(
+        context,
+      ).copyWith(fontSize: AppTypographySize.menuMetadata);
+
+  static const clipboardSearchFieldTheme = TextFieldTheme(
+    filled: true,
+    border: Border.fromBorderSide(BorderSide.none),
+    borderRadius: BorderRadius.all(Radius.circular(AppRadius.sm)),
+    padding: EdgeInsets.symmetric(
+      horizontal: AppSpacing.xs,
+      vertical: AppSpacing.xs,
+    ),
+  );
+
+  static const clipboardInspectorCardTheme = CardTheme(
+    borderRadius: BorderRadius.all(Radius.circular(AppRadius.lg)),
+  );
+
+  static ThemeData clipboardSearchTheme(BuildContext context) {
+    final theme = Theme.of(context);
+    return theme.copyWith(
+      colorScheme: () =>
+          theme.colorScheme.copyWith(input: () => theme.colorScheme.accent),
+    );
+  }
+
+  static AbstractButtonStyle clipboardMenuButtonStyle({bool selected = false}) {
+    return const ButtonStyle.ghost().copyWith(
+      padding: (context, states, value) => const EdgeInsets.symmetric(
+        horizontal: AppSpacing.xs,
+        vertical: AppSpacing.xs,
+      ),
+      textStyle: (context, states, value) =>
+          clipboardMenuTextStyle(context).copyWith(
+            color: value.color,
+            leadingDistribution: TextLeadingDistribution.even,
+          ),
+      decoration: (context, states, value) {
+        if (value is! BoxDecoration) return value;
+        return value.copyWith(
+          color: selected ? Theme.of(context).colorScheme.accent : value.color,
+          borderRadius: const BorderRadius.all(Radius.circular(AppRadius.sm)),
+        );
+      },
+    );
+  }
+
   static CardTheme settingsSearchTargetCardTheme(
     BuildContext context, {
     required bool highlighted,

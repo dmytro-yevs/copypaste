@@ -4,12 +4,13 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
-import '../../app/theme/app_motion.dart';
 import '../../app/theme/app_overlays.dart';
+import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_tokens.dart';
 import '../../shared/state_view.dart';
 import '../history/controller/history_controller.dart';
 import '../history/models/history_models.dart';
+import '../history/view/history_inspector.dart';
 import '../history/presentation/history_clip_presentation.dart';
 import '../history/presentation/source_app_label.dart';
 import 'quick_paste_controller.dart';
@@ -23,217 +24,269 @@ class QuickPasteView extends StatefulWidget {
   State<QuickPasteView> createState() => _QuickPasteViewState();
 }
 
+class _FocusClipIntent extends Intent {
+  const _FocusClipIntent();
+}
+
 class _QuickPasteViewState extends State<QuickPasteView> {
+  final _search = TextEditingController();
+  final _searchFocus = FocusNode();
+  final _scroll = ScrollController();
+  int _generation = 0;
+
   QuickPasteController get controller => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _generation = controller.presentationGeneration;
+    controller.addListener(_presentationChanged);
+  }
+
+  void _presentationChanged() {
+    if (_generation == controller.presentationGeneration) return;
+    _generation = controller.presentationGeneration;
+    _search.clear();
+    _searchFocus.requestFocus();
+    if (_scroll.hasClients) _scroll.jumpTo(0);
+  }
+
+  @override
+  void dispose() {
+    controller.removeListener(_presentationChanged);
+    _search.dispose();
+    _searchFocus.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: controller,
-      builder: (context, child) {
-        return CallbackShortcuts(
-          bindings: _shortcutBindings(context),
-          child: Focus(
-            autofocus: true,
+      builder: (context, child) => SubFocusScope(
+        key: ValueKey(controller.presentationGeneration),
+        builder: (context, scope) => CallbackShortcuts(
+          bindings: _shortcutBindings(context, scope),
+          child: ClipRRect(
+            borderRadius: const BorderRadius.all(Radius.circular(AppRadius.lg)),
             child: Scaffold(
+              backgroundColor: Theme.of(context).colorScheme.popover,
               child: Padding(
                 padding: const EdgeInsets.all(AppSpacing.sm),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _Header(controller: controller),
-                    const Gap(AppSpacing.sm),
-                    Expanded(
-                      child: Command(
-                        key: ValueKey<int>(controller.presentationGeneration),
-                        autofocus: true,
-                        debounceDuration: const Duration(milliseconds: 120),
-                        searchPlaceholder: const Text('Type to search…'),
-                        builder: _buildCommands,
-                        loadingBuilder: (context) => const StateView.loading(
-                          message: 'Loading clipboard history.',
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final menu = _menu(context);
+                    if (!controller.inspectorOpen) return menu;
+                    final menuWidth =
+                        (AppLayoutSize.quickPasteMenuWidth - AppSpacing.sm * 2)
+                            .clamp(0.0, constraints.maxWidth * 0.55)
+                            .toDouble();
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        SizedBox(width: menuWidth, child: menu),
+                        const Gap(AppSpacing.sm),
+                        Expanded(
+                          child: HistoryInspector(
+                            controller: controller.history,
+                            inDrawer: false,
+                            showActions: false,
+                            compact: true,
+                            onClose: () =>
+                                unawaited(controller.toggleInspector()),
+                          ),
                         ),
-                        emptyBuilder: (context) => const StateView.empty(
-                          title: 'No clips found',
-                          message: 'Try a different search.',
-                        ),
-                        errorBuilder: (context, error, stackTrace) =>
-                            StateView.error(
-                              title: 'History is unavailable',
-                              message: controller.history.errorMessage,
-                            ),
-                      ),
-                    ),
-                    if (Platform.isMacOS &&
-                        controller.autoPaste &&
-                        !controller.accessibilityGranted) ...[
-                      const Gap(AppSpacing.sm),
-                      const Alert(
-                        leading: Icon(LucideIcons.accessibility),
-                        title: Text('Auto-paste needs Accessibility'),
-                        content: Text(
-                          'Selection will copy until permission is enabled in System Settings.',
-                        ),
-                      ),
-                    ],
-                    const Gap(AppSpacing.sm),
-                    const Divider(),
-                    const Gap(AppSpacing.sm),
-                    _Footer(controller: controller),
-                  ],
+                      ],
+                    );
+                  },
                 ),
               ),
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
-  Map<ShortcutActivator, VoidCallback> _shortcutBindings(BuildContext context) {
+  Widget _menu(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Row(
+        key: const ValueKey('quick-paste-header'),
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          const Image(
+            key: ValueKey('quick-paste-logo'),
+            image: AssetImage('assets/brand/copypaste.png'),
+            width: AppIconSize.sm,
+            height: AppIconSize.sm,
+            semanticLabel: 'CopyPaste',
+          ),
+          const Gap(AppSpacing.xs),
+          Expanded(
+            child: Theme(
+              data: AppTheme.clipboardSearchTheme(context),
+              child: SizedBox(
+                height: AppControlSize.compact,
+                child: TextField(
+                  theme: AppTheme.clipboardSearchFieldTheme,
+                  textAlignVertical: TextAlignVertical.center,
+                  key: const ValueKey('quick-paste-search'),
+                  controller: _search,
+                  focusNode: _searchFocus,
+                  autofocus: true,
+                  style: AppTheme.clipboardMenuTextStyle(context),
+                  placeholder: Text(
+                    'Type to search…',
+                    style: AppTheme.clipboardMenuTextStyle(context),
+                  ),
+                  features: const [
+                    InputFeature.leading(
+                      Icon(LucideIcons.search, size: AppIconSize.sm),
+                    ),
+                  ],
+                  onChanged: (value) => unawaited(controller.search(value)),
+                ),
+              ),
+            ),
+          ),
+          const Gap(AppSpacing.xs),
+          Button.ghost(
+            style: const ButtonStyle.ghostIcon(),
+            key: const ValueKey('quick-paste-inspector-toggle'),
+            onPressed: controller.toggleInspector,
+            child: const Icon(LucideIcons.panelsLeftBottom),
+          ),
+        ],
+      ),
+      const Gap(AppSpacing.xs),
+      Expanded(child: _history(context)),
+      const Gap(AppSpacing.xs),
+      const Divider(),
+      const Gap(AppSpacing.xs),
+      _Footer(controller: controller),
+    ],
+  );
+
+  Widget _history(BuildContext context) {
+    final history = controller.history;
+    if (history.state == HistoryLoadState.loading && controller.items.isEmpty) {
+      return const StateView.loading(message: 'Loading clipboard history.');
+    }
+    if (history.state == HistoryLoadState.error) {
+      return StateView.error(
+        title: 'History is unavailable',
+        message: history.errorMessage,
+      );
+    }
+    final items = controller.items;
+    if (items.isEmpty) {
+      return const StateView.empty(title: 'No clips found');
+    }
+    return Scrollbar(
+      controller: _scroll,
+      child: SingleChildScrollView(
+        controller: _scroll,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final (index, clip) in items.indexed) ...[
+              if (index > 0 && clip.pinned && !items[index - 1].pinned) ...[
+                const Gap(AppSpacing.xs),
+                const Divider(),
+                const Gap(AppSpacing.xs),
+              ],
+              _item(clip),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Map<ShortcutActivator, VoidCallback> _shortcutBindings(
+    BuildContext context,
+    SubFocusScopeState scope,
+  ) {
+    void move(TraversalDirection direction, [int count = 1]) {
+      for (var step = 0; step < count; step++) {
+        scope.nextFocus(direction);
+      }
+      scope.invokeActionOnFocused(const _FocusClipIntent());
+    }
+
     final bindings = <ShortcutActivator, VoidCallback>{
-      const SingleActivator(LogicalKeyboardKey.escape): () {
-        unawaited(controller.close());
-      },
-      const SingleActivator(LogicalKeyboardKey.enter, shift: true): () {
-        unawaited(controller.activateFocused(plainText: true));
-      },
-      const SingleActivator(LogicalKeyboardKey.enter, alt: true): () {
-        unawaited(controller.activateFocused(invertAutoPaste: true));
-      },
+      const SingleActivator(LogicalKeyboardKey.escape): () =>
+          unawaited(controller.close()),
+      const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
+          move(TraversalDirection.down),
+      const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
+          move(TraversalDirection.up),
+      const SingleActivator(LogicalKeyboardKey.pageDown): () =>
+          move(TraversalDirection.down, 5),
+      const SingleActivator(LogicalKeyboardKey.pageUp): () =>
+          move(TraversalDirection.up, 5),
+      const SingleActivator(LogicalKeyboardKey.enter): () =>
+          unawaited(controller.activateFocused()),
+      const SingleActivator(LogicalKeyboardKey.enter, shift: true): () =>
+          unawaited(controller.activateFocused(plainText: true)),
+      const SingleActivator(LogicalKeyboardKey.enter, alt: true): () =>
+          unawaited(controller.activateFocused(invertAutoPaste: true)),
       const SingleActivator(
         LogicalKeyboardKey.enter,
         alt: true,
         shift: true,
-      ): () {
-        unawaited(
-          controller.activateFocused(plainText: true, forcePaste: true),
-        );
-      },
-      const SingleActivator(LogicalKeyboardKey.keyP, alt: true): () {
-        unawaited(controller.toggleFocusedPin());
-      },
-      const SingleActivator(LogicalKeyboardKey.backspace, alt: true): () {
-        unawaited(controller.deleteFocused());
-      },
-      const SingleActivator(LogicalKeyboardKey.delete, alt: true): () {
-        unawaited(controller.deleteFocused());
-      },
-      const SingleActivator(LogicalKeyboardKey.pageDown): () {
-        _moveFocus(context, forward: true);
-      },
-      const SingleActivator(LogicalKeyboardKey.pageUp): () {
-        _moveFocus(context, forward: false);
-      },
+      ): () => unawaited(
+        controller.activateFocused(plainText: true, forcePaste: true),
+      ),
+      const SingleActivator(LogicalKeyboardKey.keyP, alt: true): () =>
+          unawaited(controller.toggleFocusedPin()),
+      const SingleActivator(LogicalKeyboardKey.backspace, alt: true): () =>
+          unawaited(controller.deleteFocused()),
+      const SingleActivator(LogicalKeyboardKey.delete, alt: true): () =>
+          unawaited(controller.deleteFocused()),
+      _desktopShortcut(LogicalKeyboardKey.comma): () =>
+          unawaited(controller.openSettings()),
+      _desktopShortcut(LogicalKeyboardKey.keyQ): () =>
+          unawaited(controller.quit()),
     };
-    final digits = <LogicalKeyboardKey>[
-      LogicalKeyboardKey.digit1,
-      LogicalKeyboardKey.digit2,
-      LogicalKeyboardKey.digit3,
-      LogicalKeyboardKey.digit4,
-      LogicalKeyboardKey.digit5,
-      LogicalKeyboardKey.digit6,
-      LogicalKeyboardKey.digit7,
-      LogicalKeyboardKey.digit8,
-      LogicalKeyboardKey.digit9,
-    ];
-    for (var index = 0; index < digits.length; index += 1) {
-      bindings[SingleActivator(
-        digits[index],
-        meta: Platform.isMacOS,
-        control: Platform.isWindows,
-      )] = () =>
-          unawaited(controller.activateIndex(index));
+    for (final entry in controller.shortcuts.entries) {
+      bindings[_desktopShortcut(entry.key)] = () =>
+          unawaited(controller.activate(entry.value));
     }
     return bindings;
   }
 
-  void _moveFocus(BuildContext context, {required bool forward}) {
-    final scope = FocusScope.of(context);
-    for (var step = 0; step < 5; step += 1) {
-      if (forward) {
-        scope.nextFocus();
-      } else {
-        scope.previousFocus();
-      }
-    }
-  }
-
-  Stream<List<Widget>> _buildCommands(
-    BuildContext context,
-    String? query,
-  ) async* {
-    await controller.search(query ?? '');
-    if (controller.history.state == HistoryLoadState.error) {
-      throw StateError(
-        controller.history.errorMessage ?? 'Clipboard history is unavailable.',
-      );
-    }
-    final indexed = controller.history.items.indexed.toList(growable: false);
-    final pinned = indexed.where((entry) => entry.$2.pinned).toList();
-    final recent = indexed.where((entry) => !entry.$2.pinned).toList();
-    yield [
-      if (pinned.isNotEmpty)
-        CommandCategory(
-          title: const Text('Pinned'),
-          children: [for (final entry in pinned) _item(entry.$2, entry.$1)],
+  Widget _item(HistoryClip clip) {
+    final shortcut = controller.shortcutFor(clip);
+    return Actions(
+      actions: {
+        _FocusClipIntent: CallbackAction<_FocusClipIntent>(
+          onInvoke: (_) {
+            controller.focus(clip);
+            return null;
+          },
         ),
-      if (recent.isNotEmpty)
-        CommandCategory(
-          title: pinned.isEmpty ? null : const Text('History'),
-          children: [for (final entry in recent) _item(entry.$2, entry.$1)],
-        ),
-    ];
-  }
-
-  Widget _item(HistoryClip clip, int index) {
-    final shortcut = index < 9
-        ? SingleActivator(
-            <LogicalKeyboardKey>[
-              LogicalKeyboardKey.digit1,
-              LogicalKeyboardKey.digit2,
-              LogicalKeyboardKey.digit3,
-              LogicalKeyboardKey.digit4,
-              LogicalKeyboardKey.digit5,
-              LogicalKeyboardKey.digit6,
-              LogicalKeyboardKey.digit7,
-              LogicalKeyboardKey.digit8,
-              LogicalKeyboardKey.digit9,
-            ][index],
-            meta: Platform.isMacOS,
-            control: Platform.isWindows,
-          )
-        : null;
-    return Focus(
-      onFocusChange: (focused) {
-        if (focused) controller.focus(clip);
       },
-      child: Tooltip(
-        showDuration: AppMotion.resolve(context, AppMotion.standard),
-        tooltip: (context) => TooltipContainer(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 460),
-            child: Text(
-              clip.preview.isEmpty ? clip.contentKind.label : clip.preview,
-            ),
-          ),
-        ),
-        child: CommandItem(
-          key: ValueKey<String>('quick-paste-${clip.id}'),
-          leading: _ClipLeading(clip: clip, controller: controller),
-          title: _ClipTitle(clip: clip, controller: controller),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (clip.pinned)
-                const Icon(LucideIcons.pin, size: AppIconSize.sm),
-              if (shortcut != null) ...[
-                if (clip.pinned) const Gap(AppSpacing.sm),
-                KeyboardDisplay.fromActivator(activator: shortcut),
-              ],
-            ],
-          ),
-          onTap: controller.activating
+      child: SubFocus(
+        key: ValueKey('quick-paste-${clip.id}'),
+        builder: (context, focus) => Button.ghost(
+          style: AppTheme.clipboardMenuButtonStyle(selected: focus.isFocused),
+          alignment: Alignment.centerLeft,
+          onHover: (hovered) {
+            if (hovered) {
+              focus.requestFocus();
+              controller.focus(clip);
+            }
+          },
+          onFocus: (focused) {
+            if (focused) {
+              focus.requestFocus();
+              controller.focus(clip);
+            }
+          },
+          onPressed: controller.activating
               ? null
               : () {
                   final keyboard = HardwareKeyboard.instance;
@@ -248,142 +301,84 @@ class _QuickPasteViewState extends State<QuickPasteView> {
                     ),
                   );
                 },
+          child: Row(
+            children: [
+              SizedBox(
+                width: AppIconSize.sm,
+                child: clip.sourceApp != null
+                    ? SourceAppLabel(
+                        name: clip.sourceApp!,
+                        icon: controller.history.requestSourceIcon(clip.id),
+                        showName: false,
+                      )
+                    : Icon(
+                        HistoryClipPresentation.icon(clip.contentKind),
+                        size: AppIconSize.sm,
+                      ),
+              ),
+              const Gap(AppSpacing.sm),
+              Expanded(
+                child: _ClipContent(clip: clip, controller: controller),
+              ),
+              const Gap(AppSpacing.sm),
+              if (shortcut != null)
+                MenuShortcut(
+                  activator: _desktopShortcut(shortcut),
+                  combiner: const SizedBox.shrink(),
+                ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _Header extends StatelessWidget {
-  const _Header({required this.controller});
+SingleActivator _desktopShortcut(LogicalKeyboardKey key) =>
+    SingleActivator(key, meta: Platform.isMacOS, control: Platform.isWindows);
 
-  final QuickPasteController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        const Image(
-          image: AssetImage('assets/brand/copypaste.png'),
-          width: 24,
-          height: 24,
-        ),
-        const Gap(AppSpacing.sm),
-        Text('CopyPaste', style: Theme.of(context).typography.h4),
-        const Spacer(),
-        Tooltip(
-          showDuration: AppMotion.resolve(context, AppMotion.standard),
-          tooltip: (context) => TooltipContainer(
-            child: Text(
-              controller.focusedClip?.pinned == true
-                  ? 'Unpin clip'
-                  : 'Pin clip',
-            ),
-          ),
-          child: Button.ghost(
-            style: const ButtonStyle.ghostIcon(),
-            onPressed: controller.focusedClip == null || controller.activating
-                ? null
-                : controller.toggleFocusedPin,
-            child: Icon(
-              controller.focusedClip?.pinned == true
-                  ? LucideIcons.pinOff
-                  : LucideIcons.pin,
-            ),
-          ),
-        ),
-        Tooltip(
-          showDuration: AppMotion.resolve(context, AppMotion.standard),
-          tooltip: (context) =>
-              const TooltipContainer(child: Text('Delete clip')),
-          child: Button.ghost(
-            style: const ButtonStyle.ghostIcon(),
-            onPressed: controller.focusedClip == null || controller.activating
-                ? null
-                : controller.deleteFocused,
-            child: const Icon(LucideIcons.trash2),
-          ),
-        ),
-        Tooltip(
-          showDuration: AppMotion.resolve(context, AppMotion.standard),
-          tooltip: (context) => const TooltipContainer(child: Text('Close')),
-          child: Button.ghost(
-            style: const ButtonStyle.ghostIcon(),
-            onPressed: controller.close,
-            child: const Icon(LucideIcons.x),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _ClipTitle extends StatelessWidget {
-  const _ClipTitle({required this.clip, required this.controller});
+class _ClipContent extends StatelessWidget {
+  const _ClipContent({required this.clip, required this.controller});
 
   final HistoryClip clip;
   final QuickPasteController controller;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          clip.preview.isEmpty ? clip.contentKind.label : clip.preview,
-          maxLines: clip.contentKind == HistoryClipKind.image ? 1 : 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-        if (clip.sourceApp case final sourceApp?) ...[
-          const Gap(AppSpacing.xxs),
-          SourceAppLabel(
-            name: sourceApp,
-            icon: controller.history.requestSourceIcon(clip.id),
-            style: theme.typography.xSmall.copyWith(
-              color: theme.colorScheme.mutedForeground,
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _ClipLeading extends StatelessWidget {
-  const _ClipLeading({required this.clip, required this.controller});
-
-  final HistoryClip clip;
-  final QuickPasteController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    if (clip.contentKind == HistoryClipKind.image) {
-      return FutureBuilder<HistoryImagePreview?>(
-        future: controller.history.requestImagePreview(clip.id, maxEdge: 96),
-        builder: (context, snapshot) {
-          final preview = snapshot.data;
-          return SizedBox(
-            width: 56,
-            height: 44,
-            child: preview == null
-                ? const Icon(LucideIcons.image)
-                : ClipRRect(
-                    borderRadius: BorderRadius.circular(AppRadius.sm),
-                    child: Image.memory(
-                      preview.bytes,
-                      fit: BoxFit.contain,
-                      errorBuilder: (context, error, stackTrace) =>
-                          const Icon(LucideIcons.imageOff),
-                    ),
-                  ),
-          );
-        },
+    if (clip.contentKind != HistoryClipKind.image) {
+      return Text(
+        clip.preview.isEmpty ? clip.contentKind.label : clip.preview,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       );
     }
-    return Icon(
-      HistoryClipPresentation.icon(clip.contentKind),
-      size: AppIconSize.md,
+    return FutureBuilder<HistoryImagePreview?>(
+      future: controller.history.requestImagePreview(clip.id, maxEdge: 480),
+      builder: (context, snapshot) {
+        final preview = snapshot.data;
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 240, maxHeight: 120),
+            child: preview == null
+                ? const SizedBox(height: 120, child: Icon(LucideIcons.image))
+                : ClipRRect(
+                    borderRadius: const BorderRadius.all(
+                      Radius.circular(AppRadius.sm),
+                    ),
+                    child: AspectRatio(
+                      aspectRatio: preview.width / preview.height,
+                      child: Image.memory(
+                        preview.bytes,
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) =>
+                            const Icon(LucideIcons.imageOff),
+                      ),
+                    ),
+                  ),
+          ),
+        );
+      },
     );
   }
 }
@@ -395,37 +390,63 @@ class _Footer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      alignment: WrapAlignment.spaceBetween,
-      runSpacing: AppSpacing.xs,
+    final style = AppTheme.clipboardMenuButtonStyle();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Button.ghost(
-          onPressed: controller.openMainWindow,
-          child: const Text('Open CopyPaste'),
+          style: style,
+          alignment: Alignment.centerLeft,
+          onPressed: () => confirmClear(context, controller),
+          child: const Text('Clear'),
         ),
         Button.ghost(
-          onPressed: () => _confirmClear(context),
-          child: const Text('Clear unpinned'),
-        ),
-        Button.ghost(
+          style: style,
+          alignment: Alignment.centerLeft,
           onPressed: controller.openSettings,
-          child: const Text('Settings'),
+          child: Row(
+            children: [
+              const Expanded(child: Text('Preferences…')),
+              MenuShortcut(
+                activator: _desktopShortcut(LogicalKeyboardKey.comma),
+                combiner: const SizedBox.shrink(),
+              ),
+            ],
+          ),
         ),
         Button.ghost(
-          onPressed: () => _showAbout(context),
+          style: style,
+          alignment: Alignment.centerLeft,
+          onPressed: () => showAbout(context),
           child: const Text('About'),
         ),
-        Button.ghost(onPressed: controller.quit, child: const Text('Quit')),
+        Button.ghost(
+          style: style,
+          alignment: Alignment.centerLeft,
+          onPressed: controller.quit,
+          child: Row(
+            children: [
+              const Expanded(child: Text('Quit')),
+              MenuShortcut(
+                activator: _desktopShortcut(LogicalKeyboardKey.keyQ),
+                combiner: const SizedBox.shrink(),
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }
 
-  Future<void> _confirmClear(BuildContext context) {
+  static Future<void> confirmClear(
+    BuildContext context,
+    QuickPasteController controller,
+  ) {
     return AppOverlays.showDialog<void>(
       context,
       builder: (dialogContext) => AppOverlays.alertDialog(
         icon: LucideIcons.trash2,
-        title: const Text('Clear unpinned clips?'),
+        title: const Text('Clear history?'),
         content: const Text('Pinned clips will stay in your history.'),
         actions: [
           Button.secondary(
@@ -446,7 +467,7 @@ class _Footer extends StatelessWidget {
     );
   }
 
-  Future<void> _showAbout(BuildContext context) {
+  static Future<void> showAbout(BuildContext context) {
     return AppOverlays.showDialog<void>(
       context,
       builder: (dialogContext) => AppOverlays.alertDialog(

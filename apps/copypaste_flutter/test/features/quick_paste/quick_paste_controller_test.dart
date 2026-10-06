@@ -10,6 +10,8 @@ import 'package:copypaste_flutter/features/settings/repository/quick_paste_prefe
 import 'package:copypaste_flutter/platform/desktop/global_shortcut.dart';
 import 'package:copypaste_flutter/platform/desktop/quick_paste_host.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as image;
+import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
   testWidgets('renders the keyboard-first popup and footer actions', (
@@ -21,7 +23,7 @@ void main() {
       host: _ContextHost()..permissionGranted = true,
     );
 
-    await tester.binding.setSurfaceSize(const Size(520, 720));
+    await tester.binding.setSurfaceSize(const Size(448, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(QuickPasteApp(controller: controller));
     await tester.pumpAndSettle(const Duration(milliseconds: 150));
@@ -35,11 +37,299 @@ void main() {
       tester.widgetList<SourceAppLabel>(sourceApps).map((label) => label.name),
       everyElement('Editor'),
     );
-    expect(find.text('Clear unpinned'), findsOneWidget);
-    expect(find.text('Settings'), findsOneWidget);
+    expect(find.text('Clear'), findsOneWidget);
+    expect(find.text('Preferences…'), findsOneWidget);
     expect(find.text('About'), findsOneWidget);
     expect(find.text('Quit'), findsOneWidget);
+    expect(find.byType(Command), findsNothing);
+    expect(find.byType(Alert), findsNothing);
+    expect(find.text('CopyPaste'), findsNothing);
+    expect(
+      tester.getSize(find.byKey(const ValueKey('quick-paste-logo'))),
+      const Size(16, 16),
+    );
+    final logo = tester.getRect(find.byKey(const ValueKey('quick-paste-logo')));
+    final search = tester.getRect(
+      find.byKey(const ValueKey('quick-paste-search')),
+    );
+    final inspectorToggle = tester.getRect(
+      find.byKey(const ValueKey('quick-paste-inspector-toggle')),
+    );
+    expect(logo.center.dy, closeTo(search.center.dy, 0.1));
+    expect(logo.center.dy, closeTo(inspectorToggle.center.dy, 0.1));
+    expect(search.left - logo.right, 4);
+    expect(
+      tester.getTopLeft(find.text('Pinned clip')).dy,
+      greaterThan(tester.getTopLeft(find.text('Recent clip')).dy),
+    );
+    expect(
+      tester.getTopLeft(find.text('Preferences…')).dy,
+      greaterThan(tester.getTopLeft(find.text('Clear')).dy),
+    );
+    expect(
+      tester
+          .widgetList<SourceAppLabel>(sourceApps)
+          .map((label) => label.showName),
+      everyElement(false),
+    );
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('image rows show large content previews without image labels', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    repository.clips.insert(
+      0,
+      HistoryClip(
+        id: 'image',
+        contentType: 'image/png',
+        preview: '[image]',
+        createdAt: DateTime.utc(2026),
+        pinned: false,
+        sourceApp: 'Editor',
+      ),
+    );
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: _ContextHost()..permissionGranted = true,
+    );
+    await tester.binding.setSurfaceSize(const Size(448, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(QuickPasteApp(controller: controller));
+    await tester.pumpAndSettle();
+    final preview = find.descendant(
+      of: find.byKey(const ValueKey('quick-paste-image')),
+      matching: find.byType(Image),
+    );
+    expect(find.text('[image]'), findsNothing);
+    expect(tester.getSize(preview).height, 120);
+    expect(repository.imagePreviewEdges, contains(480));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('arrows select the visible menu order while search keeps focus', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: _ContextHost()..permissionGranted = true,
+    );
+    await tester.binding.setSurfaceSize(const Size(448, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(QuickPasteApp(controller: controller));
+    await tester.pumpAndSettle();
+    await controller.opened(1);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(controller.focusedClip?.id, 'recent');
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(controller.focusedClip?.id, 'pinned');
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('quick-paste-search')))
+          .focusNode
+          ?.hasFocus,
+      isTrue,
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(repository.copied, ['pinned']);
+    expect(tester.takeException(), isNull);
+  });
+
+  test('number shortcuts activate the visible menu order', () async {
+    final repository = _Repository();
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: _ContextHost()..permissionGranted = true,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.opened(1);
+    await controller.activateIndex(0);
+    expect(repository.copied, ['recent']);
+    await controller.opened(2);
+    await controller.activateIndex(1);
+    expect(repository.copied, ['recent']);
+  });
+
+  testWidgets('inspector shares History content and follows the focused clip', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    final host = _ContextHost()..permissionGranted = true;
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: host,
+    );
+    await tester.binding.setSurfaceSize(const Size(816, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(QuickPasteApp(controller: controller));
+    await tester.pumpAndSettle();
+    await controller.opened(1);
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('quick-paste-inspector-toggle')),
+    );
+    await tester.pumpAndSettle();
+    expect(host.inspectorChanges, [true]);
+    expect(controller.history.selectedClip?.id, 'recent');
+    expect(
+      find.byKey(const ValueKey('history-detail-inspector')),
+      findsOneWidget,
+    );
+    controller.focus(repository.clips.first);
+    await tester.pumpAndSettle();
+    expect(controller.history.selectedClip?.id, 'pinned');
+    await tester.tap(
+      find.byKey(const ValueKey('history-detail-inspector-close')),
+    );
+    await tester.pumpAndSettle();
+    expect(host.inspectorChanges, [true, false]);
+    expect(
+      find.byKey(const ValueKey('history-detail-inspector')),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  test(
+    'pinned letter shortcuts remain stable across filtering and restart',
+    () async {
+      final repository = _Repository();
+      final store = MemoryQuickPastePreferencesStore();
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: store,
+        host: _ContextHost()..permissionGranted = true,
+      );
+      await controller.initialize();
+      final pin = repository.clips.first;
+      final key = controller.shortcutFor(pin);
+      expect(key, isNotNull);
+      expect(key, isNot(LogicalKeyboardKey.digit2));
+      expect(controller.shortcuts[LogicalKeyboardKey.digit1]?.id, 'recent');
+      expect(controller.shortcuts[key]?.id, 'pinned');
+      await controller.opened(1);
+      await controller.activate(controller.shortcuts[key]!);
+      expect(repository.copied, ['pinned']);
+      repository.clips.remove(pin);
+      await controller.search('recent');
+      repository.clips.add(pin);
+      await controller.opened(2);
+      expect(controller.shortcutFor(pin), key);
+      controller.dispose();
+      final restarted = QuickPasteController(
+        repository: repository,
+        preferencesStore: store,
+        host: _ContextHost()..permissionGranted = true,
+      );
+      addTearDown(restarted.dispose);
+      await restarted.initialize();
+      expect(restarted.shortcutFor(pin), key);
+    },
+  );
+
+  test(
+    'pinned shortcuts are unique and exclude system and menu actions',
+    () async {
+      final repository = _Repository();
+      repository.clips.add(
+        HistoryClip(
+          id: 'second-pin',
+          contentType: 'text/plain',
+          preview: 'Second pin',
+          createdAt: DateTime.utc(2026),
+          pinned: true,
+        ),
+      );
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: _ContextHost()..permissionGranted = true,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      final pinned = repository.clips.where((clip) => clip.pinned).toList();
+      final keys = pinned.map(controller.shortcutFor).toSet();
+      expect(keys.length, 2);
+      expect(keys, isNot(contains(null)));
+      for (final reserved in [
+        LogicalKeyboardKey.keyA,
+        LogicalKeyboardKey.keyV,
+        LogicalKeyboardKey.keyQ,
+        LogicalKeyboardKey.keyW,
+        LogicalKeyboardKey.keyZ,
+        LogicalKeyboardKey.keyP,
+      ]) {
+        expect(keys, isNot(contains(reserved)));
+      }
+    },
+  );
+
+  test(
+    'Accessibility is requested only for paste and a denial survives reopen',
+    () async {
+      final store = MemoryQuickPastePreferencesStore();
+      final repository = _Repository();
+      final host = _ContextHost();
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: store,
+        host: host,
+      );
+      await controller.initialize();
+      await controller.opened(1);
+      await controller.opened(2);
+      expect(host.permissionRequests, 0);
+      await controller.activateIndex(0);
+      expect(host.permissionRequests, 1);
+      await controller.opened(3);
+      await controller.activateIndex(0);
+      expect(host.permissionRequests, 1);
+      controller.dispose();
+
+      final restarted = QuickPasteController(
+        repository: repository,
+        preferencesStore: store,
+        host: host,
+      );
+      addTearDown(restarted.dispose);
+      await restarted.initialize();
+      await restarted.opened(4);
+      await restarted.activateIndex(0);
+      expect(host.permissionRequests, 1);
+      expect(repository.copied, ['recent', 'recent', 'recent']);
+      expect(host.pasteCalls, 0);
+    },
+  );
+
+  test('copy-only selection never requests Accessibility', () async {
+    final host = _ContextHost();
+    final controller = QuickPasteController(
+      repository: _Repository(),
+      preferencesStore: MemoryQuickPastePreferencesStore(
+        QuickPastePreferences(
+          autoPaste: false,
+          shortcut: DesktopShortcut.defaultForPlatform(),
+        ),
+      ),
+      host: host,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.opened(1);
+    await controller.activateIndex(0);
+    expect(host.permissionRequests, 0);
+    expect(host.closeCalls, 1);
   });
 
   test('auto-pastes the copied clip when permission is available', () async {
@@ -381,6 +671,7 @@ class _Repository implements HistoryRepository {
     ),
   ];
   final copied = <String>[];
+  final imagePreviewEdges = <int?>[];
   int deleteAllCalls = 0;
   Completer<void>? copyGate;
   Completer<void> copyStarted = Completer<void>();
@@ -422,8 +713,19 @@ class _Repository implements HistoryRepository {
   }
 
   @override
-  Future<HistoryImagePreview?> imagePreview(String id, {int? maxEdge}) async =>
-      null;
+  Future<HistoryImagePreview?> imagePreview(
+    String id, {
+    int? maxEdge,
+  }) async {
+    imagePreviewEdges.add(maxEdge);
+    if (id != 'image') return null;
+    final preview = image.Image(width: 240, height: 180);
+    return HistoryImagePreview(
+      Uint8List.fromList(image.encodePng(preview)),
+      width: 240,
+      height: 180,
+    );
+  }
 
   @override
   Future<HistoryClipPage> query({
@@ -446,6 +748,16 @@ class _Repository implements HistoryRepository {
 }
 
 class _ContextHost implements QuickPasteContextHost {
+  final inspectorChanges = <bool>[];
+
+  @override
+  Future<void> setInspectorVisible({
+    required int presentationId,
+    required bool visible,
+  }) async {
+    inspectorChanges.add(visible);
+  }
+
   bool permissionGranted = false;
   int permissionRequests = 0;
   int pasteCalls = 0;

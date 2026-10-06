@@ -348,6 +348,15 @@ final class QuickPastePanel: NSPanel {
 
   override var canBecomeKey: Bool { true }
   override var canBecomeMain: Bool { false }
+
+  override var contentViewController: NSViewController? {
+    get { super.contentViewController }
+    set {
+      // AppKit sizes the window from its controller; Flutter starts at zero.
+      newValue?.view.setFrameSize(contentLayoutRect.size)
+      super.contentViewController = newValue
+    }
+  }
 }
 
 protocol QuickPasteApplicationTarget: AnyObject {
@@ -513,6 +522,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
   private let pasteSession = QuickPastePasteSession()
   private var performingAction = false
   private var closed = false
+  private var inspectorVisible = false
 
   init?(
     mainWindow: NSWindow,
@@ -532,7 +542,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     self.engine = engine
     controller = FlutterViewController(engine: engine, nibName: nil, bundle: nil)
     window = QuickPastePanel(
-      contentRect: NSRect(x: 0, y: 0, width: 520, height: 720),
+      contentRect: NSRect(x: 0, y: 0, width: 448, height: 800),
       styleMask: QuickPastePanel.presentationStyleMask,
       backing: .buffered,
       defer: false
@@ -541,9 +551,10 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     window.title = "CopyPaste Quick Paste"
     window.level = .floating
     window.hasShadow = true
-    window.isOpaque = true
+    window.isOpaque = false
+    window.backgroundColor = .clear
     window.isReleasedWhenClosed = false
-    window.hidesOnDeactivate = true
+    window.hidesOnDeactivate = false
     window.collectionBehavior = [.transient, .moveToActiveSpace, .fullScreenAuxiliary]
     window.delegate = self
     window.contentViewController = controller
@@ -559,6 +570,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
 
   func show(frontmost: NSRunningApplication?) -> Bool {
     guard !closed else { return false }
+    NSLog("QuickPaste open: appActive=%d", NSApplication.shared.isActive ? 1 : 0)
     guard let id = pasteSession.begin(
       frontmost: frontmost,
       popupActive: window.isVisible && window.isKeyWindow
@@ -574,11 +586,18 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
         let displays = NSScreen.screens.map {
           QuickPasteDisplay(frame: $0.frame, visibleFrame: $0.visibleFrame)
         }
-        let frame = quickPasteFrame(cursor: cursor, size: self.window.frame.size, displays: displays)
+        let size = NSSize(width: self.inspectorVisible ? 816 : 448, height: 800)
+        let frame = quickPasteFrame(cursor: cursor, size: size, displays: displays)
         self.window.setFrame(frame, display: true)
         return true
       },
-      show: { self.window.makeKeyAndOrderFront(nil); return true },
+      show: {
+        // A global shortcut must order the panel while another app is active.
+        self.window.orderFrontRegardless()
+        self.window.makeKey()
+        NSLog("QuickPaste shown: visible=%d key=%d", self.window.isVisible ? 1 : 0, self.window.isKeyWindow ? 1 : 0)
+        return self.window.isVisible && self.window.isKeyWindow
+      },
       hide: { self.hide() },
       opened: { self.contextChannel?.invokeMethod("opened", arguments: ["presentationId": id]) }
     )
@@ -650,6 +669,17 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
         result(MacosAccessibility.isTrusted(prompt: false))
       case "requestAccessibility":
         result(MacosAccessibility.isTrusted(prompt: true))
+      case "setInspectorVisible":
+        guard let id = Self.presentationID(call.arguments), self.pasteSession.matches(id),
+              let arguments = call.arguments as? [String: Any],
+              let visible = arguments["visible"] as? Bool,
+              let screen = self.window.screen ?? NSScreen.main else { result(false); return }
+        self.window.setFrame(quickPasteInspectorFrame(
+          current: self.window.frame, visible: screen.visibleFrame, expanded: visible
+        ), display: true)
+        guard self.pasteSession.matches(id) else { result(false); return }
+        self.inspectorVisible = visible
+        result(true)
       case "paste":
         guard let id = Self.presentationID(call.arguments) else { result(false); return }
         self.pasteSession.paste(id: id, hide: { self.hide() }, result: { result($0) })

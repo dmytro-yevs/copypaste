@@ -112,6 +112,38 @@ class RunnerTests: XCTestCase {
     )
   }
 
+  func testQuickPasteRetainsItsSizeWhenInstallingAZeroSizedFlutterView() {
+    let size = NSSize(width: 520, height: 720)
+    let panel = QuickPastePanel(
+      contentRect: NSRect(origin: .zero, size: size),
+      styleMask: QuickPastePanel.presentationStyleMask,
+      backing: .buffered,
+      defer: false
+    )
+    panel.isReleasedWhenClosed = false
+    defer { panel.close() }
+    let controller = NSViewController()
+    controller.view = NSView(frame: .zero)
+
+    panel.contentViewController = controller
+
+    XCTAssertEqual(panel.frame.size, size)
+    XCTAssertEqual(controller.view.frame.size, size)
+  }
+
+  func testQuickPasteInspectorClampsToTheDisplayWorkArea() {
+    let visible = NSRect(x: -1920, y: 24, width: 1920, height: 1032)
+    let current = NSRect(x: -300, y: 200, width: 448, height: 800)
+    let expanded = quickPasteInspectorFrame(current: current, visible: visible, expanded: true)
+    XCTAssertEqual(expanded.width, 816)
+    XCTAssertEqual(expanded.maxY, current.maxY)
+    XCTAssertTrue(visible.contains(expanded))
+    let small = NSRect(x: 0, y: 24, width: 640, height: 456)
+    let fitted = quickPasteInspectorFrame(current: current, visible: small, expanded: true)
+    XCTAssertEqual(fitted.size, small.size)
+    XCTAssertTrue(small.contains(fitted))
+  }
+
 }
 
 private final class FakeQuickPasteTarget: QuickPasteApplicationTarget {

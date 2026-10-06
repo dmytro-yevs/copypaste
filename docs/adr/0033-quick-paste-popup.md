@@ -14,9 +14,11 @@ item always asks the existing History repository to place it on the system
 clipboard first. The native adapter may then paste into the previously focused
 application:
 
-- macOS posts Command-V only while Accessibility trust is confirmed. When
-  Quick Paste opens with auto-paste enabled and trust absent, it automatically
-  requests Accessibility.
+- macOS posts Command-V only while Accessibility trust is confirmed. Opening
+  Quick Paste never prompts for permission. The first actual paste attempt may
+  request Accessibility once; the request is recorded independently of the
+  auto-paste setting and survives restarts. Later attempts remain copy-only
+  until trust is granted. Users can request permission explicitly in Settings.
 - Windows restores the previously focused window and sends Control-V through
   `SendInput`.
 
@@ -25,6 +27,22 @@ selection still succeeds as copy-only and the popup closes. Auto-paste must not
 make a history item unusable after it has already been copied successfully.
 
 ## Window placement
+
+The popup uses a compact menu layout: title and search share the top row,
+source icons and content previews align with shortcuts, pinned clips follow
+recent clips after a divider, and footer actions form a vertical list. The
+header uses a small brand logo. The menu uses shared 13-point typography.
+Recent clips use numeric shortcuts; pinned clips get unique, persisted letter
+shortcuts that remain stable across search and restart. Reserved system and
+menu keys are excluded. macOS uses Command and Windows uses Control.
+The initial desktop size is 448 by 800 logical
+pixels, clamped to the display work area.
+
+The header inspector control expands the same native window to 816 logical
+pixels and reuses the History inspector. The inspector follows the focused
+clip, loads its full content through the History repository, and uses
+11-point metadata text. Expanding, collapsing, and reopening clamp the window
+to its current monitor's work area without changing the paste target.
 
 Each invocation reads the current pointer position, selects the monitor that
 contains that point, and places the popup's top-left corner immediately below
