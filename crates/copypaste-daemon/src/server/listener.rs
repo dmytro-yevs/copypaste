@@ -984,6 +984,7 @@ mod tests {
                 event: copypaste_ipc::EventKind::Items,
                 item_count: 1,
                 captured: false,
+                captured_item_id: None,
             })
             .unwrap();
         events_tx
@@ -991,6 +992,7 @@ mod tests {
                 event: copypaste_ipc::EventKind::Items,
                 item_count: 2,
                 captured: true,
+                captured_item_id: Some("captured-item".into()),
             })
             .unwrap();
 

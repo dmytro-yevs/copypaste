@@ -1,7 +1,10 @@
 import '../models/settings_models.dart';
+import '../../../platform/notifications/capture_notification_preview.dart';
 
 abstract interface class SettingsRepository {
-  Stream<void> capturedEvents();
+  Stream<String?> capturedEvents();
+
+  Future<CaptureNotificationPreview?> capturePreview(String id);
 
   Future<CaptureSettingsState> captureState();
 

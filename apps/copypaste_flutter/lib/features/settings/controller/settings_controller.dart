@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../../platform/capture/capture_service_control.dart';
 import '../../../platform/notifications/capture_notification_port.dart';
+import '../../../platform/notifications/capture_notification_preview.dart';
 import '../../../platform/security/screenshot_protection.dart';
 import '../models/settings_models.dart';
 import '../repository/settings_repository.dart';
@@ -40,7 +41,8 @@ class SettingsController extends ChangeNotifier {
   bool _blockScreenshots = false;
   bool _disposed = false;
   Timer? _captureTimer;
-  StreamSubscription<void>? _captureSubscription;
+  StreamSubscription<String?>? _captureSubscription;
+  Future<void> _notificationQueue = Future<void>.value();
 
   SettingsLoadState get loadState => _loadState;
   RuntimeSettings? get settings => _settings;
@@ -71,10 +73,10 @@ class SettingsController extends ChangeNotifier {
       _errorMessage = null;
       _startCaptureRefresh();
       _captureSubscription ??= _repository.capturedEvents().listen(
-        (_) {
-          if (_settings?.notifyOnCopy ?? false) {
-            unawaited(_notifications.showCaptured());
-          }
+        (id) {
+          _notificationQueue = _notificationQueue.then(
+            (_) => _showCaptureNotification(id),
+          );
         },
         onError: (Object _, StackTrace _) {
           // History remains usable when the optional feedback stream ends.
@@ -158,6 +160,29 @@ class SettingsController extends ChangeNotifier {
 
   Future<bool> setSoundOnCopy(bool value) =>
       _update(RuntimeSettingsChange(soundOnCopy: value));
+
+  Future<bool> setNotificationPreview(bool value) =>
+      _update(RuntimeSettingsChange(notificationPreview: value));
+
+  Future<void> _showCaptureNotification(String? id) async {
+    if (_disposed || !(_settings?.notifyOnCopy ?? false)) return;
+    CaptureNotificationPreview? preview;
+    try {
+      if ((_settings?.notificationPreview ?? false) && id != null) {
+        preview = await _repository.capturePreview(id);
+      }
+    } catch (_) {
+      // Deleted clips and unavailable previews still allow generic feedback.
+    }
+    if (_disposed || !(_settings?.notifyOnCopy ?? false)) return;
+    try {
+      await _notifications.showCaptured(
+        preview: (_settings?.notificationPreview ?? false) ? preview : null,
+      );
+    } catch (_) {
+      // Optional system feedback must not interrupt clipboard capture.
+    }
+  }
 
   Future<bool> setBlockScreenshots(bool value) => _run(() async {
     await _screenshotProtection.setBlocked(value);
