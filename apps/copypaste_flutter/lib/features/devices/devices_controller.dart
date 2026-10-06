@@ -78,6 +78,7 @@ class DevicesController extends ChangeNotifier {
   final DevicesFreshnessTimerFactory _freshnessTimerFactory;
   final SystemPairingScanner? _systemScanner;
   bool _systemScanInFlight = false;
+  String? _systemScanError;
   bool get usesSystemScanner => _systemScanner != null;
   bool get systemScanInFlight => _systemScanInFlight;
 
@@ -109,7 +110,7 @@ class DevicesController extends ChangeNotifier {
 
   DevicesLoadState get loadState => _loadState;
   DevicesSnapshot? get snapshot => _snapshot;
-  String? get errorMessage => _errorMessage;
+  String? get errorMessage => _systemScanError ?? _errorMessage;
   String get errorTitle =>
       _lastErrorWasAction ? 'Action failed' : 'Device refresh failed';
   PairingCeremony? get pairing => _pairingCeremony;
@@ -329,13 +330,13 @@ class DevicesController extends ChangeNotifier {
       }
     } on PlatformException catch (error) {
       if (!_disposed && epoch == _pairingEpoch) {
-        _errorMessage = error.code == 'invalid_pairing_qr'
+        _systemScanError = error.code == 'invalid_pairing_qr'
             ? 'Scan a CopyPaste pairing QR code.'
             : 'Google scanner is unavailable. Enter the pairing code instead.';
       }
     } catch (_) {
       if (!_disposed && epoch == _pairingEpoch) {
-        _errorMessage =
+        _systemScanError =
             'The scanner could not open. Enter the pairing code instead.';
       }
     } finally {
@@ -395,6 +396,7 @@ class DevicesController extends ChangeNotifier {
     }
     _deviceDetailsTarget = null;
     _pairingEntryMode = mode;
+    _systemScanError = null;
     _errorMessage = null;
     _notify();
     return true;
@@ -467,6 +469,7 @@ class DevicesController extends ChangeNotifier {
   /// Cancels active Rust pairing and clears the local opaque session.
   Future<void> closePairing() async {
     if (_decisionInFlight) return;
+    _systemScanError = null;
     final closingEpoch = ++_pairingEpoch;
     _pairingInFlight = false;
     if (_systemScanInFlight) {
