@@ -619,6 +619,20 @@ mod tests {
         assert_eq!(capture.content, "<strong>formatted</strong>");
         assert_eq!(capture.content_type, copypaste_ipc::content_type::HTML);
 
+        {
+            let _clipboard = Clipboard::new_attempts(OPEN_ATTEMPTS).expect("open the clipboard");
+            let mut payload = Vec::new();
+            raw::get_vec(html_format(), &mut payload).expect("read test HTML allocation");
+            payload.extend_from_slice(&[0, 0xff, 0xfe]);
+            raw::empty().expect("empty the clipboard");
+            raw::set_without_clear(html_format(), &payload).expect("set padded test HTML");
+        }
+        let capture = clipboard
+            .poll()
+            .expect("HTML allocation padding must be ignored");
+        assert_eq!(capture.content, "<strong>formatted</strong>");
+        assert_eq!(capture.content_type, copypaste_ipc::content_type::HTML);
+
         let text = utf16("plain fallback");
         write_formats(&[(formats::CF_UNICODETEXT, &text), (rtf_format(), rtf)]);
         let capture = clipboard.poll().expect("Unicode text must win");
