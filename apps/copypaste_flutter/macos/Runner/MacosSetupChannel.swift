@@ -80,10 +80,10 @@ final class MacosSetupChannel {
     let service = SMAppService.mainApp
     do {
       if enabled {
-        if service.status == .notRegistered {
+        if service.status == .notRegistered || service.status == .notFound {
           try service.register()
         }
-      } else if service.status != .notRegistered {
+      } else if service.status == .enabled || service.status == .requiresApproval {
         try service.unregister()
       }
       result(statusName(service.status))

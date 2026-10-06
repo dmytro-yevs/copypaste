@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 
 enum MacosLoginItemStatus {
   notRegistered,
+  notFound,
   enabled,
   requiresApproval,
   developmentUnavailable,
@@ -61,7 +62,8 @@ class MethodChannelMacosSetupGateway implements MacosSetupGateway {
     'enabled' => MacosLoginItemStatus.enabled,
     'requires_approval' => MacosLoginItemStatus.requiresApproval,
     'development_unavailable' => MacosLoginItemStatus.developmentUnavailable,
-    'unavailable' || 'not_found' => MacosLoginItemStatus.unavailable,
+    'not_found' => MacosLoginItemStatus.notFound,
+    'unavailable' => MacosLoginItemStatus.unavailable,
     _ => MacosLoginItemStatus.notRegistered,
   };
 }

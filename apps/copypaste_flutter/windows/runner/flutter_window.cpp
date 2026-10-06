@@ -13,6 +13,7 @@
 #include "flutter/generated_plugin_registrant.h"
 #include "copypaste_flutter_protected_pairing.h"
 #include "utils.h"
+#include "screenshot_protection.h"
 
 namespace {
 
@@ -88,16 +89,17 @@ FlutterWindow::FlutterWindow(const flutter::DartProject& project,
       pending_pairing_uri_(std::move(pending_pairing_uri)),
       is_quick_paste_context_(is_quick_paste_context) {}
 
-FlutterWindow::~FlutterWindow() {}
+FlutterWindow::~FlutterWindow() {
+  ScreenshotProtection::Unregister(GetHandle());
+}
 
 bool FlutterWindow::OnCreate() {
   if (!Win32Window::OnCreate()) {
     return false;
   }
 
-  if ((!pending_pairing_uri_.empty() && !SetCaptureProtection(true)) ||
-      (is_protected_pairing_context_ &&
-       (!SetCaptureProtection(true) || !BeginProtectedPairingContext()))) {
+  if (!ScreenshotProtection::Register(GetHandle()) ||
+      (is_protected_pairing_context_ && !BeginProtectedPairingContext())) {
     return false;
   }
 
@@ -112,6 +114,25 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  if (!is_protected_pairing_context_ && !is_quick_paste_context_) {
+    security_channel_ =
+        std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+            flutter_controller_->engine()->messenger(),
+            "com.copypaste.app/security",
+            &flutter::StandardMethodCodec::GetInstance());
+    security_channel_->SetMethodCallHandler(
+        [](const auto& call, auto result) {
+          if (call.method_name() == "getBlockScreenshots") {
+            result->Success(flutter::EncodableValue(ScreenshotProtection::Blocked()));
+          } else if (call.method_name() == "setBlockScreenshots") {
+            const auto* enabled = BoolArgument(call, "enabled");
+            if (enabled == nullptr) result->Error("invalid_arguments");
+            else result->Success(flutter::EncodableValue(ScreenshotProtection::SetBlocked(*enabled)));
+          } else {
+            result->NotImplemented();
+          }
+        });
+  }
   if (!is_protected_pairing_context_ && !is_quick_paste_context_) {
     app_update_channel_ = std::make_unique<AppUpdateChannel>(
         flutter_controller_->engine()->messenger(), GetHandle());
@@ -281,7 +302,7 @@ bool FlutterWindow::OnCreate() {
           if (enabled == nullptr) {
             result->Error("invalid_arguments");
           } else {
-            result->Success(flutter::EncodableValue(SetCaptureProtection(*enabled)));
+            result->Success(flutter::EncodableValue(ScreenshotProtection::Apply(GetHandle())));
           }
           return;
         }
@@ -351,7 +372,8 @@ void FlutterWindow::OnDestroy() {
   CloseProtectedPairingContext(pairing_context_id_);
   CloseQuickPasteContext();
   DetachProtectedPairingContext();
-  SetCaptureProtection(false);
+  ScreenshotProtection::Unregister(GetHandle());
+  security_channel_.reset();
   pairing_presentation_channel_.reset();
   pairing_links_channel_.reset();
   quick_paste_channel_.reset();
@@ -360,11 +382,6 @@ void FlutterWindow::OnDestroy() {
   }
 
   Win32Window::OnDestroy();
-}
-
-bool FlutterWindow::SetCaptureProtection(bool enabled) {
-  const DWORD affinity = enabled ? WDA_EXCLUDEFROMCAPTURE : WDA_NONE;
-  return SetWindowDisplayAffinity(GetHandle(), affinity) != FALSE;
 }
 
 bool FlutterWindow::BeginProtectedPairingContext() {

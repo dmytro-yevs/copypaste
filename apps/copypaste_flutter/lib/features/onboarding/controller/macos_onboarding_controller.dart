@@ -22,6 +22,7 @@ class MacosOnboardingController extends ChangeNotifier {
   bool _busy = false;
   bool _accessibilityGranted = false;
   bool _launchAtLogin = true;
+  bool _loginDefaultPending = false;
   bool _disposed = false;
   String? _errorMessage;
   String? _noticeMessage;
@@ -51,6 +52,7 @@ class MacosOnboardingController extends ChangeNotifier {
     _notify();
     try {
       final wasComplete = await _store.isComplete();
+      _loginDefaultPending = !wasComplete;
       await _refreshSystemState();
       _complete = wasComplete;
       _errorMessage = null;
@@ -79,12 +81,18 @@ class MacosOnboardingController extends ChangeNotifier {
     _notify();
   }
 
-  void setLaunchAtLogin(bool enabled) {
-    if (_busy || _launchAtLogin == enabled) return;
-    _launchAtLogin = enabled;
+  Future<void> setLaunchAtLogin(bool enabled) async {
+    if (_busy || !launchAtLoginAvailable || _launchAtLogin == enabled) return;
+    _busy = true;
     _errorMessage = null;
     _noticeMessage = null;
     _notify();
+    try {
+      await _updateLaunchAtLogin(enabled);
+    } finally {
+      _busy = false;
+      _notify();
+    }
   }
 
   Future<void> requestAccessibility() async {
@@ -128,20 +136,7 @@ class MacosOnboardingController extends ChangeNotifier {
     } catch (_) {
       _addNotice('Accessibility status could not be refreshed.');
     }
-    try {
-      _loginItemStatus = await _setup.setLaunchAtLogin(_launchAtLogin);
-      if (_launchAtLogin && _loginItemStatus != MacosLoginItemStatus.enabled) {
-        _addNotice(
-          _loginItemStatus == MacosLoginItemStatus.requiresApproval
-              ? 'Start at login requires approval in System Settings.'
-              : 'Start at login could not be enabled. You can continue without it.',
-        );
-      }
-    } catch (_) {
-      _addNotice(
-        'Start at login could not be updated. You can continue without it.',
-      );
-    }
+    await _updateLaunchAtLogin(_launchAtLogin);
     _step = MacosOnboardingStep.sync;
     _busy = false;
     _notify();
@@ -175,14 +170,39 @@ class MacosOnboardingController extends ChangeNotifier {
     }
   }
 
+  bool get _loginItemRegistered =>
+      _loginItemStatus == MacosLoginItemStatus.enabled ||
+      _loginItemStatus == MacosLoginItemStatus.requiresApproval;
+
   Future<void> _refreshSystemState() async {
     _accessibilityGranted = await _setup.accessibilityGranted();
     _loginItemStatus = await _setup.loginItemStatus();
-    if (_loginItemStatus == MacosLoginItemStatus.enabled ||
-        _loginItemStatus == MacosLoginItemStatus.requiresApproval) {
-      _launchAtLogin = true;
-    } else if (!launchAtLoginAvailable) {
-      _launchAtLogin = false;
+    if (_loginItemRegistered) _loginDefaultPending = false;
+    _launchAtLogin =
+        _loginItemRegistered ||
+        (_loginDefaultPending && launchAtLoginAvailable);
+  }
+
+  Future<void> _updateLaunchAtLogin(bool enabled) async {
+    _loginDefaultPending = false;
+    try {
+      _loginItemStatus = await _setup.setLaunchAtLogin(enabled);
+      _launchAtLogin = _loginItemRegistered;
+      if (enabled && _loginItemStatus != MacosLoginItemStatus.enabled) {
+        _addNotice(
+          _loginItemStatus == MacosLoginItemStatus.requiresApproval
+              ? 'Start at login requires approval in System Settings.'
+              : 'Start at login could not be enabled. You can continue without it.',
+        );
+      } else if (!enabled && _loginItemRegistered) {
+        _addNotice('Start at login could not be disabled.');
+      }
+    } catch (_) {
+      // Restore the last confirmed system state after a failed update.
+      _launchAtLogin = _loginItemRegistered;
+      _addNotice(
+        'Start at login could not be updated. You can continue without it.',
+      );
     }
   }
 

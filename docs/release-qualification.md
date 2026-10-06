@@ -18,11 +18,16 @@ requires an existing stable `v<version>` tag at the exact workflow commit and an
 explicit publish request, or a push of that tag. The publish job creates the
 GitHub Release and updates the Homebrew tap only after all platform jobs pass.
 
-Cloud Sync is not a CopyPaste 1.0.1 product capability. Local encrypted history
+Every release uses `packaging/release-template.md` for platform download tables.
+Update `packaging/release-notes.md` with the release's changes. The publish job
+renders the versioned links and rejects missing table artifacts before creating
+the GitHub Release.
+
+Cloud Sync is not a CopyPaste 1.0.2 product capability. Local encrypted history
 and paired-device synchronization remain fully supported.
 
 CI and emulator smoke are not physical-device evidence. Before publishing
-1.0.1, install the exact qualified DMG and APK on the target macOS host and a
+1.0.2, install the exact qualified DMG and APK on the target macOS host and a
 physical Android device. Android Full capture passes only when a new background
 copy from another application reaches History. Windows requires an installed
 same-artifact validation on Windows.
@@ -30,3 +35,15 @@ same-artifact validation on Windows.
 Automated macOS release smoke refuses to start unless the default Keychain and
 the complete user search list contain only a disposable test Keychain. Local
 unit and Flutter tests never read or create the user's production device key.
+
+Android in-app updates stage the verified APK in a `PackageInstaller.Session`,
+require system user confirmation, and receive the terminal installation status.
+The update path does not share APKs through a `FileProvider`. The explicit,
+non-exported result receiver retains session state across process recreation;
+confirmation is opened only while CopyPaste is in the foreground.
+
+Qualify this flow on a physical device with two APKs signed by the same release
+key and increasing version codes. Exercise unknown-source permission, successful
+self-update, cancellation, and returning to CopyPaste after backgrounding it
+while confirmation is pending. JVM session tests and APK builds do not establish
+that physical-device acceptance.

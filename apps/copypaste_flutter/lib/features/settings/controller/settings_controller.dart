@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../../platform/capture/capture_service_control.dart';
 import '../../../platform/notifications/capture_notification_port.dart';
+import '../../../platform/security/screenshot_protection.dart';
 import '../models/settings_models.dart';
 import '../repository/settings_repository.dart';
 
@@ -15,16 +16,20 @@ class SettingsController extends ChangeNotifier {
     CaptureServiceControl captureControl =
         const PlatformCaptureServiceControl(),
     CaptureNotificationPort? notifications,
+    ScreenshotProtection screenshotProtection =
+        const MethodChannelScreenshotProtection(),
     this.captureRefreshInterval = const Duration(seconds: 3),
   }) : _repository = repository,
        _filePicker = filePicker,
        _captureControl = captureControl,
-       _notifications = notifications ?? PlatformCaptureNotificationPort();
+       _notifications = notifications ?? PlatformCaptureNotificationPort(),
+       _screenshotProtection = screenshotProtection;
 
   final SettingsRepository _repository;
   final SettingsFilePicker _filePicker;
   final CaptureServiceControl _captureControl;
   final CaptureNotificationPort _notifications;
+  final ScreenshotProtection _screenshotProtection;
   final Duration captureRefreshInterval;
 
   SettingsLoadState _loadState = SettingsLoadState.loading;
@@ -32,6 +37,7 @@ class SettingsController extends ChangeNotifier {
   CaptureSettingsState? _capture;
   String? _errorMessage;
   bool _busy = false;
+  bool _blockScreenshots = false;
   bool _disposed = false;
   Timer? _captureTimer;
   StreamSubscription<void>? _captureSubscription;
@@ -41,6 +47,7 @@ class SettingsController extends ChangeNotifier {
   CaptureSettingsState? get capture => _capture;
   String? get errorMessage => _errorMessage;
   bool get busy => _busy;
+  bool get blockScreenshots => _blockScreenshots;
 
   Future<void> initialize() async {
     if (_disposed) return;
@@ -55,9 +62,11 @@ class SettingsController extends ChangeNotifier {
       final values = await Future.wait<Object>([
         _repository.settings(),
         _repository.captureState(),
+        _screenshotProtection.blocked(),
       ]);
       _settings = values[0] as RuntimeSettings;
       _capture = values[1] as CaptureSettingsState;
+      _blockScreenshots = values[2] as bool;
       _loadState = SettingsLoadState.ready;
       _errorMessage = null;
       _startCaptureRefresh();
@@ -149,6 +158,11 @@ class SettingsController extends ChangeNotifier {
 
   Future<bool> setSoundOnCopy(bool value) =>
       _update(RuntimeSettingsChange(soundOnCopy: value));
+
+  Future<bool> setBlockScreenshots(bool value) => _run(() async {
+    await _screenshotProtection.setBlocked(value);
+    _blockScreenshots = await _screenshotProtection.blocked();
+  });
 
   Future<bool> exportTextHistory() async {
     final path = await _filePicker.chooseTextExportPath();

@@ -35,6 +35,8 @@
 		C0DE0C112610050000000002 /* MacosAppUpdateChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE0C112610050000000001 /* MacosAppUpdateChannel.swift */; };
 		C0DE0D112610060000000002 /* HotkeyManagerMacosPluginTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE0D112610060000000001 /* HotkeyManagerMacosPluginTests.swift */; };
 		C922558FEA48D196BDBA66CE /* Pods_RunnerTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 080832A983AB3161AF782AF8 /* Pods_RunnerTests.framework */; };
+		C0DE0E112610060000000002 /* CaptureProtectedLayerTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE0E112610060000000001 /* CaptureProtectedLayerTree.swift */; };
+		C0DE0F112610060000000002 /* MacosScreenshotProtection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE0F112610060000000001 /* MacosScreenshotProtection.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -102,6 +104,8 @@
 		DA0330C1F129CBC5A4871399 /* Pods_Runner.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Runner.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		F6C82D9AA86CDE8DE4A9290C /* Pods-RunnerTests.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.profile.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.profile.xcconfig"; sourceTree = "<group>"; };
 		F86AA5EDEED671B6B20DAFC3 /* Pods-Runner.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.release.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"; sourceTree = "<group>"; };
+		C0DE0E112610060000000001 /* CaptureProtectedLayerTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureProtectedLayerTree.swift; sourceTree = "<group>"; };
+		C0DE0F112610060000000001 /* MacosScreenshotProtection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacosScreenshotProtection.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -194,6 +198,8 @@
 			children = (
 				33CC10F02044A3C60003C045 /* AppDelegate.swift */,
 				33CC11122044BFA00003C045 /* MainFlutterWindow.swift */,
+				C0DE0F112610060000000001 /* MacosScreenshotProtection.swift */,
+				C0DE0E112610060000000001 /* CaptureProtectedLayerTree.swift */,
 				C0DE0A112610030000000001 /* MacosSetupChannel.swift */,
 				C0DE0B112610040000000001 /* QuickPasteGeometry.swift */,
 				C0DE0C112610050000000001 /* MacosAppUpdateChannel.swift */,
@@ -470,6 +476,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */,
+				C0DE0F112610060000000002 /* MacosScreenshotProtection.swift in Sources */,
+				C0DE0E112610060000000002 /* CaptureProtectedLayerTree.swift in Sources */,
 				C0DE0A112610030000000002 /* MacosSetupChannel.swift in Sources */,
 				C0DE0B112610040000000002 /* QuickPasteGeometry.swift in Sources */,
 				C0DE0C112610050000000002 /* MacosAppUpdateChannel.swift in Sources */,

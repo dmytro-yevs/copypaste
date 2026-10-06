@@ -79,17 +79,24 @@ the same primitive.
 
 ### 3.1 Pre-read privacy gates
 
-- **I-5:** Third-party sensitivity and opt-out metadata do not independently suppress capture. No sensitivity detector or marker filter is enabled.
+- **I-5:** Third-party sensitivity and opt-out metadata do not independently suppress capture. No sensitivity detector or sensitivity-marker filter is enabled.
 - **I-6:** Private mode acknowledges changes and stores nothing.
 - **I-7:** With exclusions configured, macOS denies incomplete generation
   coverage or a candidate set containing any excluded app before type, data,
   native object or file access. Complete known-allowed coverage may capture
-  with ambiguous display identity. Generic missing owner evidence fails closed;
-  an empty exclusion list permits unavailable identity.
-- **I-8:** macOS source metadata is a foreground-derived estimate. Only complete
-  single-candidate evidence retains a name/bundle; ambiguous or unavailable
-  evidence leaves both fields absent. Windows preserves identified clipboard
-  owner metadata. Android denies implicit capture with configured exclusions
+  with foreground-estimated display identity. Generic missing owner evidence
+  fails closed; an empty exclusion list permits unavailable identity.
+- **I-8:** macOS display metadata is independent of capture admission. An admitted
+  read prefers the bounded `org.nspasteboard.source` declaration, resolving its
+  bundle identifier to a platform-reported name. An absent declaration uses the
+  fresh foreground snapshot even when the retained interval contains multiple
+  applications. An empty, invalid or unreadable declaration leaves identity
+  absent; an unresolved declared bundle keeps its identifier without inventing a
+  name. Activations after the change sample invalidate foreground display
+  metadata. Neither a declaration nor a foreground snapshot authenticates the
+  writer or clears excluded/unknown interval evidence. A declared excluded
+  source also denies the content read and subsequent admission. Windows preserves
+  identified clipboard owner metadata. Android denies implicit capture with configured exclusions
   because it has no source witness. The shared inspector says Observed app;
   absent metadata omits the identity component rather than inventing an app.
 - **I-9:** Logs and public errors contain no clipboard content, filename, path,
@@ -239,8 +246,9 @@ events. A consumed Unknown boundary can recover through a same-count,
 service/event-fenced known getter when no later real event or gap is skipped;
 idle duration alone cannot erase debt. A clean later interval must recover.
 
-Only a complete single-candidate interval exposes an observed name/bundle.
-Multiple known allowed candidates may permit capture with null identity.
+Display attribution prefers an optional source declaration, otherwise the fresh
+foreground snapshot. Multiple known allowed candidates no longer erase display
+metadata. Declared source metadata is informational and cannot authorize capture.
 Incomplete/unknown/service-reset/evicted coverage denies with exclusions. Public
 foreground/count observations cannot identify arbitrary unobserved background
 writers or prove that several delayed writes belonged to the consumed interval.
@@ -269,7 +277,11 @@ unchanged. The shared SourceAppLabel owns every displayed icon/name pair.
   while it was active.
 - Incomplete coverage with exclusions skips without type/data/object/file calls;
   empty exclusions permit unknown source. Complete all-known-allowed ambiguous
-  coverage captures with absent identity. Any excluded candidate denies.
+  coverage captures with fresh foreground display metadata when available. Any
+  excluded candidate denies. Declared excluded sources deny content reads;
+  metadata cannot override a denied interval. Empty/invalid/oversized declarations
+  do not fall back to the focused application. A concurrent generation or
+  activation change discards the read.
 - Unchanged polls preserve excluded/unknown debt; consumed Unknown recovery
   permits the first clean later generation without erasing later real events.
 - Generation/service/coverage replacement during decode, resolution or file

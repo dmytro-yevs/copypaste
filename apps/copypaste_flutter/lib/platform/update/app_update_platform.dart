@@ -16,6 +16,8 @@ abstract interface class AppUpdatePlatform {
     DownloadedAppUpdate? package,
   });
 
+  Future<AppUpdateInstallResult?> restoreInstallation();
+
   Future<void> openReleasePage(Uri uri);
 }
 
@@ -70,15 +72,25 @@ class MethodChannelAppUpdatePlatform implements AppUpdatePlatform {
       if (package != null) 'path': package.path,
       if (package != null) 'sha256': package.asset.sha256,
     });
-    return switch (result) {
-      'started' => AppUpdateInstallResult.started,
-      'permission_required' => AppUpdateInstallResult.permissionRequired,
-      'restart_required' => AppUpdateInstallResult.restartRequired,
-      _ => throw const AppUpdateException(
-        'CopyPaste could not start the update.',
-      ),
-    };
+    return _installResult(result);
   }
+
+  @override
+  Future<AppUpdateInstallResult?> restoreInstallation() async {
+    if (!Platform.isAndroid) return null;
+    final result = await _channel.invokeMethod<String>('restoreInstallation');
+    return result == null ? null : _installResult(result);
+  }
+
+  AppUpdateInstallResult _installResult(String? result) => switch (result) {
+    'started' => AppUpdateInstallResult.started,
+    'permission_required' => AppUpdateInstallResult.permissionRequired,
+    'restart_required' => AppUpdateInstallResult.restartRequired,
+    'installed' => AppUpdateInstallResult.installed,
+    _ => throw const AppUpdateException(
+      'CopyPaste could not start the update.',
+    ),
+  };
 
   @override
   Future<void> openReleasePage(Uri uri) =>

@@ -1,9 +1,70 @@
+import 'dart:async';
+
 import 'package:copypaste_flutter/features/update/update.dart';
 import 'package:copypaste_flutter/platform/update/app_update_platform.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 import 'package:pub_semver/pub_semver.dart';
 
 void main() {
+  test('waits for Android confirmation and reports cancellation', () async {
+    final completion = Completer<AppUpdateInstallResult>();
+    final platform = _FakeUpdatePlatform(installCompletion: completion);
+    final controller = AppUpdateController(
+      repository: _FakeUpdateRepository(release: _release()),
+      platform: platform,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    final installation = controller.install();
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.phase, AppUpdatePhase.installing);
+    expect(controller.busy, isTrue);
+    await controller.install();
+    expect(platform.installCalls, 1);
+
+    completion.completeError(PlatformException(code: 'installation_cancelled'));
+    await installation;
+    expect(controller.phase, AppUpdatePhase.error);
+    expect(controller.busy, isFalse);
+    expect(controller.message, 'The update installation was cancelled.');
+  });
+
+  test('reads the installed version after Android confirms success', () async {
+    final completion = Completer<AppUpdateInstallResult>();
+    final platform = _FakeUpdatePlatform(installCompletion: completion);
+    final controller = AppUpdateController(
+      repository: _FakeUpdateRepository(release: _release()),
+      platform: platform,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    final installation = controller.install();
+    await Future<void>.delayed(Duration.zero);
+    platform.version = '1.0.1';
+    completion.complete(AppUpdateInstallResult.installed);
+    await installation;
+    expect(controller.currentVersion, Version.parse('1.0.1'));
+    expect(controller.phase, AppUpdatePhase.upToDate);
+  });
+
+  test('restores an active Android session and reports its failure', () async {
+    final completion = Completer<AppUpdateInstallResult?>();
+    final controller = AppUpdateController(
+      repository: _FakeUpdateRepository(release: _release()),
+      platform: _FakeUpdatePlatform(restoreCompletion: completion),
+    );
+    addTearDown(controller.dispose);
+    final initialization = controller.initialize();
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.phase, AppUpdatePhase.installing);
+    completion.completeError(PlatformException(code: 'installation_storage'));
+    await initialization;
+    expect(controller.phase, AppUpdatePhase.error);
+    expect(controller.message, 'Free up storage to install the update.');
+  });
+
   test(
     'checks the installed channel and exposes an available update',
     () async {
@@ -47,7 +108,7 @@ void main() {
 
       expect(repository.downloadCalls, 1);
       expect(platform.installCalls, 2);
-      expect(controller.phase, AppUpdatePhase.permissionRequired);
+      expect(controller.phase, AppUpdatePhase.installing);
     },
   );
 
@@ -146,7 +207,9 @@ class _FakeUpdateRepository implements AppUpdateRepository {
     required AppUpdateTarget target,
   }) async {
     requestedTarget = target;
-    return release;
+    return release != null && release!.version > currentVersion
+        ? release
+        : null;
   }
 
   @override
@@ -157,19 +220,28 @@ class _FakeUpdatePlatform implements AppUpdatePlatform {
   _FakeUpdatePlatform({
     this.target = AppUpdateTarget.android,
     List<AppUpdateInstallResult>? installResults,
+    this.installCompletion,
+    this.restoreCompletion,
   }) : _installResults = installResults ?? [AppUpdateInstallResult.started];
 
   @override
   final AppUpdateTarget target;
   final List<AppUpdateInstallResult> _installResults;
   int installCalls = 0;
+  String version = '1.0.0';
+  final Completer<AppUpdateInstallResult>? installCompletion;
+  final Completer<AppUpdateInstallResult?>? restoreCompletion;
+
+  @override
+  Future<AppUpdateInstallResult?> restoreInstallation() async =>
+      restoreCompletion == null ? null : await restoreCompletion!.future;
 
   @override
   Future<AppUpdateAvailability> availability() async =>
       const AppUpdateAvailability.available();
 
   @override
-  Future<String> currentVersion() async => '1.0.0';
+  Future<String> currentVersion() async => version;
 
   @override
   Future<AppUpdateInstallResult> install({
@@ -178,6 +250,7 @@ class _FakeUpdatePlatform implements AppUpdatePlatform {
   }) async {
     final index = installCalls.clamp(0, _installResults.length - 1);
     installCalls += 1;
+    if (installCompletion != null) return installCompletion!.future;
     return _installResults[index];
   }
 

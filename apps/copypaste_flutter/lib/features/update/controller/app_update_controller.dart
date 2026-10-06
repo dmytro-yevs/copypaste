@@ -39,7 +39,25 @@ class AppUpdateController extends ChangeNotifier {
     _ => false,
   };
 
-  Future<void> initialize() => check();
+  Future<void> initialize() async {
+    await check();
+    if (_disposed || _platform.target != AppUpdateTarget.android) return;
+    final previousPhase = _phase;
+    _setPhase(AppUpdatePhase.installing);
+    try {
+      final result = await _platform.restoreInstallation();
+      if (_disposed) return;
+      if (result == null) {
+        _setPhase(previousPhase);
+      } else {
+        await _applyInstallResult(result);
+      }
+    } on PlatformException catch (error) {
+      _fail(_platformErrorMessage(error.code));
+    } catch (_) {
+      _fail('CopyPaste could not restore the update installation.');
+    }
+  }
 
   Future<void> check() async {
     if (busy || _disposed) return;
@@ -103,32 +121,13 @@ class AppUpdateController extends ChangeNotifier {
         _downloaded = package;
       }
       _setPhase(AppUpdatePhase.installing);
+      _message = null;
       final result = await _platform.install(
         release: release,
         package: package,
       );
       if (_disposed) return;
-      switch (result) {
-        case AppUpdateInstallResult.started:
-          _message = _platform.target == AppUpdateTarget.android
-              ? 'Continue in the Android system installer.'
-              : 'The installer is starting.';
-          _setPhase(
-            _platform.target == AppUpdateTarget.android
-                ? AppUpdatePhase.permissionRequired
-                : AppUpdatePhase.installing,
-          );
-          break;
-        case AppUpdateInstallResult.permissionRequired:
-          _message =
-              'Allow CopyPaste to install apps in Android settings, then continue.';
-          _setPhase(AppUpdatePhase.permissionRequired);
-          break;
-        case AppUpdateInstallResult.restartRequired:
-          _message = 'The update is installed. Quit and reopen CopyPaste.';
-          _setPhase(AppUpdatePhase.restartRequired);
-          break;
-      }
+      await _applyInstallResult(result);
     } on AppUpdateException catch (error) {
       _fail(error.message);
     } on SocketException {
@@ -139,6 +138,30 @@ class AppUpdateController extends ChangeNotifier {
       _fail(_platformErrorMessage(error.code));
     } catch (_) {
       _fail('CopyPaste could not install the update.');
+    }
+  }
+
+  Future<void> _applyInstallResult(AppUpdateInstallResult result) async {
+    switch (result) {
+      case AppUpdateInstallResult.started:
+        _message = _platform.target == AppUpdateTarget.android
+            ? 'Continue in the Android system installer.'
+            : 'The installer is starting.';
+        _setPhase(AppUpdatePhase.installing);
+        break;
+      case AppUpdateInstallResult.permissionRequired:
+        _message =
+            'Allow CopyPaste to install apps in Android settings, then continue.';
+        _setPhase(AppUpdatePhase.permissionRequired);
+        break;
+      case AppUpdateInstallResult.restartRequired:
+        _message = 'The update is installed. Quit and reopen CopyPaste.';
+        _setPhase(AppUpdatePhase.restartRequired);
+        break;
+      case AppUpdateInstallResult.installed:
+        _setPhase(AppUpdatePhase.idle);
+        await check();
+        break;
     }
   }
 
@@ -160,6 +183,15 @@ class AppUpdateController extends ChangeNotifier {
       'The downloaded package is not newer than this version.',
     'homebrew_unavailable' =>
       'Install CopyPaste with Homebrew to update it here.',
+    'installation_cancelled' => 'The update installation was cancelled.',
+    'installation_blocked' => 'Android blocked the update installation.',
+    'installation_conflict' => 'The update conflicts with the installed app.',
+    'installation_incompatible' =>
+      'The update is incompatible with this device.',
+    'installation_storage' => 'Free up storage to install the update.',
+    'installation_interrupted' =>
+      'The update installation was interrupted. Try again.',
+    'installation_busy' => 'An update installation is already in progress.',
     _ => 'CopyPaste could not install the update.',
   };
 

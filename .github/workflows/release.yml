@@ -312,7 +312,8 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           find qualified -type f ! -name production-receipt.json -exec cp {} dist/ \;
-          gh release create "v$VERSION" --verify-tag --title "CopyPaste $VERSION" --notes-file packaging/release-notes.md dist/*
+          python3 scripts/release/render-release-notes.py --version "$VERSION" --repository "$GITHUB_REPOSITORY" --artifacts dist --output "$RUNNER_TEMP/release-notes.md"
+          gh release create "v$VERSION" --verify-tag --title "CopyPaste $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" dist/*
       - name: Update Homebrew tap
         env:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

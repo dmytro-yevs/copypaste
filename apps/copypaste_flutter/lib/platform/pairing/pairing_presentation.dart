@@ -8,6 +8,8 @@ const _pairingPresentationHostChannel = MethodChannel(
 
 class MethodChannelPairingCaptureProtection
     implements PairingCaptureProtection {
+  // Pairing lifecycle requests reconcile the saved screenshot policy. They
+  // never override the user's Security setting, including for QR and SAS.
   MethodChannelPairingCaptureProtection({MethodChannel? channel})
     : _channel = channel ?? _pairingPresentationHostChannel;
 

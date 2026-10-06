@@ -262,7 +262,8 @@ void main() {
       expect(actions, findsOneWidget);
       expect(metadata, findsOneWidget);
       expect(find.byType(OutlineButton), findsNothing);
-      expect(find.widgetWithText(Button, 'Copy plain text'), findsOneWidget);
+      expect(find.text('Copy plain text'), findsNothing);
+      expect(find.bySemanticsLabel('Copy options'), findsOneWidget);
       expect(find.widgetWithText(Button, 'Pin'), findsOneWidget);
       expect(
         find.descendant(of: scrollContent, matching: actions),
@@ -639,7 +640,8 @@ void main() {
       mediaSize.height * AppOverlaySize.drawerHeightFactor,
     );
     expect(tester.getBottomRight(find.byType(DrawerWrapper)).dy, 800);
-    expect(find.text('Copy plain text'), findsOneWidget);
+    expect(find.text('Copy plain text'), findsNothing);
+    expect(find.bySemanticsLabel('Copy options'), findsOneWidget);
     final detailCard = find.byKey(
       const ValueKey<String>('history-detail-drawer-card'),
     );
@@ -654,6 +656,13 @@ void main() {
     );
     expect(find.descendant(of: detailCard, matching: close), findsNothing);
     expect(find.descendant(of: scrollContent, matching: actions), findsNothing);
+    final metadata = find.byKey(
+      const ValueKey<String>('history-detail-metadata'),
+    );
+    expect(
+      find.descendant(of: scrollContent, matching: metadata),
+      findsOneWidget,
+    );
     final actionsTop = tester.getTopLeft(actions).dy;
     await tester.drag(scrollContent, const Offset(0, -300));
     await tester.pump();
@@ -665,7 +674,7 @@ void main() {
     expect(drawerVisibility, [isTrue, isFalse]);
   });
 
-  testWidgets('fits a tall mobile image inside the drawer without scrolling', (
+  testWidgets('keeps the mobile image fixed while its metadata table scrolls', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(480, 800));
@@ -715,6 +724,9 @@ void main() {
     final fittedContent = find.byKey(
       const ValueKey<String>('history-detail-image-fit-content'),
     );
+    final scrollContent = find.byKey(
+      const ValueKey<String>('history-detail-scroll-metadata'),
+    );
     final imageViewport = find.byKey(
       const ValueKey<String>('history-detail-image-viewport'),
     );
@@ -722,10 +734,31 @@ void main() {
       const ValueKey<String>('history-detail-actions'),
     );
     expect(drawer, findsOneWidget);
-    expect(fittedContent, findsOneWidget);
+    expect(scrollContent, findsOneWidget);
     expect(imageViewport, findsOneWidget);
+    expect(
+      find.ancestor(of: imageViewport, matching: find.byType(Scrollable)),
+      findsNothing,
+    );
+    final metadata = find.byKey(
+      const ValueKey<String>('history-detail-metadata'),
+    );
+    expect(
+      find.descendant(of: scrollContent, matching: metadata),
+      findsOneWidget,
+    );
+    final table = tester.widget<Table>(metadata);
+    final tableContext = tester.element(metadata);
+    for (final row in table.rows!) {
+      final border = row
+          .buildDefaultTheme(tableContext)
+          .border!
+          .resolve(const <WidgetState>{})!;
+      expect(border.bottom.color, Theme.of(tableContext).colorScheme.border);
+      expect(border.bottom.width, 1);
+    }
     final device = find.descendant(
-      of: fittedContent,
+      of: scrollContent,
       matching: find.byKey(const ValueKey<String>('history-detail-device')),
     );
     expect(device, findsOneWidget);
@@ -734,17 +767,20 @@ void main() {
       find.descendant(of: device, matching: find.byIcon(LucideIcons.laptop)),
       findsOneWidget,
     );
-    expect(
-      find.descendant(of: fittedContent, matching: find.byType(Scrollable)),
-      findsNothing,
+    final scrollable = find.descendant(
+      of: scrollContent,
+      matching: find.byType(Scrollable),
     );
+    final scrollState = tester.state<ScrollableState>(scrollable.first);
+    expect(scrollState.position.maxScrollExtent, greaterThan(0));
+    expect(find.descendant(of: scrollContent, matching: actions), findsNothing);
     expect(
       tester.getTopLeft(imageViewport).dy,
       greaterThanOrEqualTo(tester.getTopLeft(fittedContent).dy),
     );
     expect(
       tester.getBottomLeft(imageViewport).dy,
-      lessThanOrEqualTo(tester.getBottomLeft(fittedContent).dy),
+      lessThanOrEqualTo(tester.getTopLeft(scrollContent).dy),
     );
     expect(
       tester.getBottomLeft(imageViewport).dy,
@@ -755,6 +791,18 @@ void main() {
       tester.getBottomLeft(actions).dy,
       lessThanOrEqualTo(tester.getBottomLeft(drawer).dy),
     );
+    final actionsRect = tester.getRect(actions);
+    final imageRect = tester.getRect(imageViewport);
+    final metadataTop = tester.getTopLeft(metadata).dy;
+    await tester.drag(scrollContent, const Offset(0, -300));
+    await tester.pumpAndSettle();
+    expect(scrollState.position.pixels, greaterThan(0));
+    expect(tester.getRect(imageViewport), imageRect);
+    expect(tester.getTopLeft(metadata).dy, lessThan(metadataTop));
+    expect(tester.getRect(actions), actionsRect);
+    expect(find.widgetWithText(Button, 'Copy').hitTestable(), findsOneWidget);
+    expect(find.widgetWithText(Button, 'Pin').hitTestable(), findsOneWidget);
+    expect(find.widgetWithText(Button, 'Delete').hitTestable(), findsOneWidget);
 
     await tester.binding.setSurfaceSize(const Size(700, 480));
     await tester.pumpAndSettle();
@@ -769,7 +817,82 @@ void main() {
       tester.getBottomLeft(actions).dy,
       lessThanOrEqualTo(tester.getBottomLeft(drawer).dy),
     );
+    expect(tester.takeException(), isNull);
   });
+
+  for (final size in [const Size(320, 568), const Size(700, 360)]) {
+    testWidgets('anchors short mobile clip actions at the bottom at $size', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(size);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final repository = _ScreenRepository()
+        ..page = HistoryClipPage(
+          items: [
+            HistoryClip(
+              id: 'short-mobile',
+              contentType: 'text/plain',
+              preview: 'Short mobile clip',
+              createdAt: DateTime.utc(2026),
+              pinned: false,
+            ),
+          ],
+        );
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          home: Scaffold(child: HistoryScreen(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Short mobile clip'));
+      await tester.pumpAndSettle();
+
+      final card = find.byKey(
+        const ValueKey<String>('history-detail-drawer-card'),
+      );
+      final actions = find.byKey(
+        const ValueKey<String>('history-detail-actions'),
+      );
+      final kindIcon = find.byKey(
+        const ValueKey<String>('history-detail-kind-icon'),
+      );
+      expect(
+        tester.getSize(kindIcon),
+        const Size.square(AppControlSize.compact),
+      );
+      final heading = find.descendant(
+        of: find.byKey(const ValueKey<String>('history-detail-heading')),
+        matching: find.text('Text'),
+      );
+      expect(
+        tester.widget<Text>(heading).style?.fontSize,
+        Theme.of(tester.element(heading)).typography.small.fontSize,
+      );
+      final cardBody = find.descendant(of: card, matching: find.byType(Column));
+      expect(
+        tester.getBottomLeft(cardBody.first).dy -
+            tester.getBottomLeft(actions).dy,
+        AppSpacing.xs,
+      );
+      for (final label in ['Copy', 'Pin', 'Delete']) {
+        expect(
+          find.widgetWithText(Button, label).hitTestable(),
+          findsOneWidget,
+        );
+      }
+      expect(find.text('Copy plain text'), findsNothing);
+      expect(
+        find
+            .byKey(const ValueKey<String>('history-copy-options'))
+            .hitTestable(),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets('renders backend facet labels without exposing their IDs', (
     tester,
@@ -1141,6 +1264,67 @@ void main() {
     }
   });
 
+  for (final size in [const Size(1400, 900), const Size(320, 568)]) {
+    testWidgets('copies from the split button and its dropdown at $size', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(size);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final repository = _ScreenRepository()
+        ..page = HistoryClipPage(
+          items: [
+            HistoryClip(
+              id: 'copy-clip',
+              contentType: 'text/html',
+              preview: 'Copy menu clip',
+              createdAt: DateTime.utc(2026),
+              pinned: false,
+            ),
+          ],
+        );
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: Scaffold(child: HistoryScreen(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Copy menu clip'));
+      await tester.pumpAndSettle();
+
+      final copy = find.widgetWithText(Button, 'Copy');
+      final options = find.byKey(
+        const ValueKey<String>('history-copy-options'),
+      );
+      expect(find.text('Copy plain text'), findsNothing);
+      expect(tester.getRect(copy).right, tester.getRect(options).left);
+      expect(tester.getSize(copy).height, tester.getSize(options).height);
+
+      await tester.tap(copy);
+      await tester.pumpAndSettle();
+      expect(repository.copiedIds, ['copy-clip']);
+      expect(repository.plainTextCopiedIds, isEmpty);
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+
+      await tester.tap(options);
+      await tester.pumpAndSettle();
+      expect(find.byType(DropdownMenu), findsOneWidget);
+      expect(repository.copiedIds, ['copy-clip']);
+      await tester.tap(find.text('Copy plain text'));
+      await tester.pumpAndSettle();
+      expect(repository.plainTextCopiedIds, ['copy-clip']);
+      expect(repository.copiedIds, ['copy-clip']);
+      expect(find.byType(DropdownMenu), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+    });
+  }
+
   testWidgets('offers Download for a file whose source is unavailable', (
     tester,
   ) async {
@@ -1179,6 +1363,10 @@ void main() {
 
     await tester.tap(find.text('/Users/person/Documents/report.pdf').first);
     await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey<String>('history-copy-options')),
+      findsNothing,
+    );
     expect(find.widgetWithText(Button, 'Download'), findsOneWidget);
     await tester.tap(find.widgetWithText(Button, 'Download'));
     await tester.pumpAndSettle();
@@ -1202,6 +1390,8 @@ class _ScreenRepository implements HistoryRepository {
   final List<(String, String)> savedFiles = [];
   final Map<String, HistorySourceAppIcon> sourceIcons = {};
   final List<String> requestedSourceIconIds = [];
+  final List<String> copiedIds = [];
+  final List<String> plainTextCopiedIds = [];
   HistoryImagePreview? availableImagePreview;
   final List<HistoryQuery> queries = [];
 
@@ -1235,10 +1425,10 @@ class _ScreenRepository implements HistoryRepository {
   }
 
   @override
-  Future<void> copy(String id) async {}
+  Future<void> copy(String id) async => copiedIds.add(id);
 
   @override
-  Future<void> copyPlainText(String id) async {}
+  Future<void> copyPlainText(String id) async => plainTextCopiedIds.add(id);
 
   @override
   Future<void> saveFile(String id, String destinationPath) async {

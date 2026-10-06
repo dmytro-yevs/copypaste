@@ -67,7 +67,12 @@ class AppUpdateAvailability {
   final String? reason;
 }
 
-enum AppUpdateInstallResult { started, permissionRequired, restartRequired }
+enum AppUpdateInstallResult {
+  started,
+  permissionRequired,
+  restartRequired,
+  installed,
+}
 
 class AppUpdateException implements Exception {
   const AppUpdateException(this.message);

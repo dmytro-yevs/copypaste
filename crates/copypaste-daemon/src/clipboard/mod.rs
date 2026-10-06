@@ -155,7 +155,10 @@ pub(crate) enum SourcePolicyEvidence {
 impl SourcePolicyEvidence {
     fn allows(&self, excluded: &[String], owner: Option<&str>) -> bool {
         match self {
-            Self::MacOs(coverage) => coverage.allows(excluded),
+            Self::MacOs(coverage) => {
+                coverage.allows(excluded)
+                    && !owner.is_some_and(|id| excluded.iter().any(|excluded| excluded == id))
+            }
             Self::Legacy => {
                 excluded.is_empty()
                     || owner.is_some_and(|id| !excluded.iter().any(|excluded| excluded == id))
@@ -416,6 +419,25 @@ mod tests {
         config.excluded_app_bundle_ids = vec!["Safari".into()];
         assert!(!CapturePolicy::new(&config).allows_materialized(&capture));
         capture.app_bundle_id = Some("WindowsOwner".into());
+        assert!(CapturePolicy::new(&config).allows_materialized(&capture));
+    }
+    #[test]
+    fn declared_source_can_deny_but_cannot_authorize_a_macos_interval() {
+        let mut history = super::source_coverage::ActivationHistory::new(1);
+        history.record(Some("Editor".into()));
+        let previous = history.observation();
+        let decision = history.decide(Some((10, previous)), 11, previous, None);
+        let mut capture = super::Capture::text("owned".into());
+        capture.source_policy = super::SourcePolicyEvidence::MacOs(decision.coverage);
+        capture.app_bundle_id = Some("DeclaredSource".into());
+        let mut config = ConfigData {
+            excluded_app_bundle_ids: vec!["DeclaredSource".into()],
+            ..Default::default()
+        };
+        assert!(!CapturePolicy::new(&config).allows_materialized(&capture));
+        config.excluded_app_bundle_ids = vec!["Editor".into()];
+        assert!(!CapturePolicy::new(&config).allows_materialized(&capture));
+        config.excluded_app_bundle_ids.clear();
         assert!(CapturePolicy::new(&config).allows_materialized(&capture));
     }
     #[test]
