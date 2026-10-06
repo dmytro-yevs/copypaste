@@ -7,6 +7,40 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
+  testWidgets('missing Login Item record can be enabled from the switch', (
+    tester,
+  ) async {
+    final setup = _ScreenMacosSetupGateway()
+      ..status = MacosLoginItemStatus.notFound;
+    final controller = MacosOnboardingController(
+      store: MemoryMacosOnboardingStore(complete: true),
+      setup: setup,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.showSetup();
+    await tester.pumpWidget(
+      ShadcnApp(
+        home: MacosOnboardingScreen(
+          controller: controller,
+          onPairDevice: () async {},
+          onOpenHistory: () async {},
+        ),
+      ),
+    );
+
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+    expect(tester.widget<Switch>(find.byType(Switch)).onChanged, isNotNull);
+    await tester.ensureVisible(find.byType(Switch));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(Switch));
+    await tester.pumpAndSettle();
+
+    expect(setup.status, MacosLoginItemStatus.enabled);
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
+    expect(controller.step, MacosOnboardingStep.setup);
+  });
+
   testWidgets('runs Welcome, combined Setup, and Sync in order', (
     tester,
   ) async {

@@ -59,6 +59,7 @@ const UTI_HTML: &str = "public.html";
 const UTI_PNG: &str = "public.png";
 const UTI_TIFF: &str = "public.tiff";
 const UTI_FILE_URL: &str = "public.file-url";
+const UTI_SOURCE: &str = "org.nspasteboard.source";
 /// §3.12 (CopyPaste-pbre): the invariant UTI strings are process-lifetime
 /// constants, built once and reused. allocating ~12 fresh Cocoa strings on
 /// every changed tick.
@@ -80,6 +81,8 @@ struct Utis {
     tiff_probe: Retained<NSArray<NSString>>,
     file_url: Retained<NSString>,
     file_url_probe: Retained<NSArray<NSString>>,
+    source: Retained<NSString>,
+    source_probe: Retained<NSArray<NSString>>,
 }
 
 impl Utis {
@@ -90,6 +93,7 @@ impl Utis {
         let png = NSString::from_str(UTI_PNG);
         let tiff = NSString::from_str(UTI_TIFF);
         let file_url = NSString::from_str(UTI_FILE_URL);
+        let source = NSString::from_str(UTI_SOURCE);
         // `from_vec`, not `from_slice`: the latter needs `T: IsRetainable`, and
         // `NSString` is `ImmutableWithMutableSubclass<NSMutableString>`, which
         // is not. Taking owned `Retained`s is the supported path for it.
@@ -100,12 +104,14 @@ impl Utis {
             png_probe: NSArray::from_vec(vec![png.clone()]),
             tiff_probe: NSArray::from_vec(vec![tiff.clone()]),
             file_url_probe: NSArray::from_vec(vec![file_url.clone()]),
+            source_probe: NSArray::from_vec(vec![source.clone()]),
             text,
             rtf,
             html,
             png,
             tiff,
             file_url,
+            source,
         }
     }
 }
@@ -208,12 +214,6 @@ impl ClipboardSource for MacOsClipboard {
                 Some(&decision),
                 current_count == count,
             );
-            self.note_attribution(&decision);
-            let app_bundle_id = decision
-                .identity
-                .as_ref()
-                .and_then(|app| app.bundle_id.clone());
-            let app_name = decision.identity.as_ref().and_then(|app| app.name.clone());
             let read_valid = || {
                 decision.fence(crate::macos_workspace::source_observation(), unsafe {
                     pb.changeCount()
@@ -275,6 +275,28 @@ impl ClipboardSource for MacOsClipboard {
                         None
                     })?;
                     if !read_valid() {
+                        return None;
+                    }
+                    let app = UTIS.with(|utis| {
+                        attribution::read(
+                            &pb,
+                            &utis.source,
+                            &utis.source_probe,
+                            decision.identity.as_ref(),
+                        )
+                    });
+                    if !read_valid() {
+                        return None;
+                    }
+                    self.note_attribution(&decision, app.as_ref());
+                    let app_bundle_id = app.as_ref().and_then(|app| app.bundle_id.clone());
+                    let app_name = app.and_then(|app| app.name);
+                    // Declared sources may add a denial, never remove the
+                    // pre-read foreground coverage gate.
+                    if app_bundle_id
+                        .as_ref()
+                        .is_some_and(|id| policy.settings.excluded_app_bundle_ids.contains(id))
+                    {
                         return None;
                     }
                     if content_type == copypaste_ipc::content_type::FILE {

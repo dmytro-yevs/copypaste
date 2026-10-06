@@ -1121,7 +1121,9 @@ class _HistoryDetail extends StatelessWidget {
               children: [
                 SizedBox.square(
                   key: const ValueKey<String>('history-detail-kind-icon'),
-                  dimension: AppControlSize.large,
+                  dimension: inDrawer
+                      ? AppControlSize.compact
+                      : AppControlSize.large,
                   child: Card(
                     theme: CardTheme(
                       padding: EdgeInsets.zero,
@@ -1138,8 +1140,17 @@ class _HistoryDetail extends StatelessWidget {
                     ),
                   ),
                 ),
-                const Gap(AppSpacing.md),
-                Expanded(child: Text(clip.contentKind.label).h4()),
+                Gap(inDrawer ? AppSpacing.sm : AppSpacing.md),
+                Expanded(
+                  child: inDrawer
+                      ? Text(
+                          clip.contentKind.label,
+                          style: theme.typography.small.merge(
+                            theme.typography.semiBold,
+                          ),
+                        )
+                      : Text(clip.contentKind.label).h4(),
+                ),
                 if (highlighted != null) ...[
                   const Gap(AppSpacing.sm),
                   SecondaryBadge(child: Text(highlighted.language)),
@@ -1171,9 +1182,9 @@ class _HistoryDetail extends StatelessWidget {
               ],
             ),
           ),
-          const Gap(AppSpacing.lg),
+          Gap(inDrawer ? AppSpacing.sm : AppSpacing.lg),
           Flexible(
-            fit: FlexFit.loose,
+            fit: inDrawer ? FlexFit.tight : FlexFit.loose,
             child: _HistoryDetailContent(
               clip: clip,
               controller: controller,
@@ -1195,10 +1206,39 @@ class _HistoryDetail extends StatelessWidget {
               spacing: AppSpacing.sm,
               runSpacing: AppSpacing.sm,
               children: [
-                Button.primary(
-                  onPressed: () => _copy(context, plainText: false),
-                  leading: const Icon(LucideIcons.copy),
-                  child: const Text('Copy'),
+                ButtonGroup(
+                  children: [
+                    Button.primary(
+                      onPressed: () => _copy(context, plainText: false),
+                      leading: const Icon(LucideIcons.copy),
+                      child: const Text('Copy'),
+                    ),
+                    if (clip.contentKind.isTextual)
+                      Builder(
+                        builder: (buttonContext) => Semantics(
+                          label: 'Copy options',
+                          button: true,
+                          child: Button.primary(
+                            key: const ValueKey<String>('history-copy-options'),
+                            style: const ButtonStyle.primaryIcon(),
+                            onPressed: () => showDropdown<void>(
+                              context: buttonContext,
+                              builder: (_) => DropdownMenu(
+                                children: [
+                                  MenuButton(
+                                    onPressed: (_) =>
+                                        _copy(context, plainText: true),
+                                    leading: const Icon(LucideIcons.alignLeft),
+                                    child: const Text('Copy plain text'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            child: const Icon(LucideIcons.chevronDown),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
                 if (controller.canDownloadSelected)
                   Button.secondary(
@@ -1207,12 +1247,6 @@ class _HistoryDetail extends StatelessWidget {
                         : () => _download(context),
                     leading: const Icon(LucideIcons.download),
                     child: const Text('Download'),
-                  ),
-                if (clip.contentKind.isTextual)
-                  Button.secondary(
-                    onPressed: () => _copy(context, plainText: true),
-                    leading: const Icon(LucideIcons.alignLeft),
-                    child: const Text('Copy plain text'),
                   ),
                 Semantics(
                   toggled: clip.pinned,
@@ -1362,7 +1396,15 @@ class _HistoryDetailContent extends StatelessWidget {
                 child: _DetailImagePreview(clip: clip, controller: controller),
               ),
               const Gap(AppSpacing.lg),
-              ..._mobileMetadata(context),
+              Flexible(
+                child: SingleChildScrollView(
+                  key: const ValueKey<String>('history-detail-scroll-metadata'),
+                  child: _HistoryMetadataTable(
+                    clip: clip,
+                    controller: controller,
+                  ),
+                ),
+              ),
             ],
           ),
         );
@@ -1375,7 +1417,7 @@ class _HistoryDetailContent extends StatelessWidget {
           children: [
             _body(context),
             const Gap(AppSpacing.lg),
-            ..._mobileMetadata(context),
+            _HistoryMetadataTable(clip: clip, controller: controller),
           ],
         ),
       );
@@ -1397,40 +1439,6 @@ class _HistoryDetailContent extends StatelessWidget {
         );
       },
     );
-  }
-
-  List<Widget> _mobileMetadata(BuildContext context) {
-    return [
-      for (final row in _historyMetadataRows(context, clip)) ...[
-        if (_historyMetadataHasIdentity(row))
-          Row(
-            children: [
-              Text('${row.label}:').muted().textSmall(),
-              const Gap(AppSpacing.xs),
-              Expanded(
-                child: _historyMetadataIdentityLabel(
-                  row: row,
-                  clip: clip,
-                  controller: controller,
-                  style: Theme.of(context).typography.textSmall.copyWith(
-                    color: Theme.of(context).colorScheme.mutedForeground,
-                  ),
-                ),
-              ),
-            ],
-          )
-        else
-          Text(
-            '${row.label}: ${row.value}',
-            style: Theme.of(context).typography.textSmall.copyWith(
-              color: row.warning
-                  ? Theme.of(context).colorScheme.destructive
-                  : Theme.of(context).colorScheme.mutedForeground,
-            ),
-          ),
-        const Gap(AppSpacing.xs),
-      ],
-    ];
   }
 
   Widget _body(BuildContext context) {
