@@ -17,6 +17,7 @@ class MainFlutterWindow: NSWindow {
   private var pairingLinksMethodChannel: FlutterMethodChannel?
   private var quickPasteHostMethodChannel: FlutterMethodChannel?
   private var macosSetupChannel: MacosSetupChannel?
+  private var securityChannel: FlutterMethodChannel?
   private var appUpdateChannel: MacosAppUpdateChannel?
   private var protectedPresentation: ProtectedPairingPresentationWindow?
   private var quickPastePresentation: QuickPastePresentationWindow?
@@ -36,6 +37,21 @@ class MainFlutterWindow: NSWindow {
     macosSetupChannel = MacosSetupChannel(
       binaryMessenger: flutterViewController.engine.binaryMessenger
     )
+    MacosScreenshotProtection.shared.register(window: self, view: flutterViewController.view)
+    let security = FlutterMethodChannel(
+      name: "com.copypaste.app/security", binaryMessenger: flutterViewController.engine.binaryMessenger)
+    securityChannel = security
+    security.setMethodCallHandler { call, result in
+      switch call.method {
+      case "getBlockScreenshots": result(MacosScreenshotProtection.shared.blocked)
+      case "setBlockScreenshots":
+        guard let args = call.arguments as? [String: Any], let enabled = args["enabled"] as? Bool else {
+          result(FlutterError(code: "invalid_arguments", message: nil, details: nil)); return
+        }
+        result(MacosScreenshotProtection.shared.setBlocked(enabled))
+      default: result(FlutterMethodNotImplemented)
+      }
+    }
     appUpdateChannel = MacosAppUpdateChannel(
       binaryMessenger: flutterViewController.engine.binaryMessenger
     )
@@ -220,7 +236,6 @@ class MainFlutterWindow: NSWindow {
     guard url.scheme == "copypaste", url.host == "pair", url.path == "/v1" else {
       return
     }
-    sharingType = .none
     pendingPairingURI = url.absoluteString
     makeKeyAndOrderFront(nil)
     NSApplication.shared.activate(ignoringOtherApps: true)
@@ -259,11 +274,10 @@ class MainFlutterWindow: NSWindow {
       switch call.method {
       case "isSupported": result(true)
       case "setCaptureProtection":
-        guard let arguments = call.arguments as? [String: Any], let enabled = arguments["enabled"] as? Bool else {
+        guard let arguments = call.arguments as? [String: Any], arguments["enabled"] is Bool else {
           result(FlutterError(code: "invalid_arguments", message: nil, details: nil)); return
         }
-        self.sharingType = enabled ? .none : .readOnly
-        result(true)
+        result(MacosScreenshotProtection.shared.applyCurrentPolicy())
       case "open":
         guard let arguments = call.arguments as? [String: Any], let ceremonyId = arguments["ceremonyId"] as? String, !ceremonyId.isEmpty else {
           result(FlutterError(code: "invalid_arguments", message: nil, details: nil)); return
@@ -533,6 +547,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     window.collectionBehavior = [.transient, .moveToActiveSpace, .fullScreenAuxiliary]
     window.delegate = self
     window.contentViewController = controller
+    MacosScreenshotProtection.shared.register(window: window, view: controller.view)
     window.contentView?.wantsLayer = true
     window.contentView?.layer?.cornerRadius = 12
     window.contentView?.layer?.masksToBounds = true
@@ -678,7 +693,6 @@ private final class ProtectedPairingPresentationWindow: NSObject, NSWindowDelega
     self.generation = generation
     self.onClose = onClose
     window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 640), styleMask: [.titled, .closable], backing: .buffered, defer: false)
-    window.sharingType = .none
     let project = FlutterDartProject()
     project.dartEntrypointArguments = ["--route=\(protectedPairingRoutePrefix)\(contextId)"]
     controller = FlutterViewController(project: project)
@@ -687,6 +701,7 @@ private final class ProtectedPairingPresentationWindow: NSObject, NSWindowDelega
     window.isReleasedWhenClosed = false
     window.delegate = self
     window.contentViewController = controller
+    MacosScreenshotProtection.shared.register(window: window, view: controller.view)
     RegisterGeneratedPlugins(registry: controller)
     configureContextChannel()
   }

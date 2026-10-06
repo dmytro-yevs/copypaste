@@ -17,6 +17,7 @@ void main() {
     final repository = FakeSettingsRepository();
     final picker = FakeSettingsFilePicker();
     final controller = SettingsController(
+      screenshotProtection: FakeScreenshotProtection(),
       repository: repository,
       filePicker: picker,
       notifications: FakeCaptureNotificationPort(),
@@ -48,6 +49,7 @@ void main() {
     final repository = FakeSettingsRepository();
     final notifications = FakeCaptureNotificationPort();
     final controller = SettingsController(
+      screenshotProtection: FakeScreenshotProtection(),
       repository: repository,
       filePicker: FakeSettingsFilePicker(),
       notifications: notifications,
@@ -71,6 +73,7 @@ void main() {
     final notifications = FakeCaptureNotificationPort()
       ..permissionGranted = false;
     final controller = SettingsController(
+      screenshotProtection: FakeScreenshotProtection(),
       repository: repository,
       filePicker: FakeSettingsFilePicker(),
       notifications: notifications,
@@ -98,6 +101,7 @@ void main() {
           soundOnCopy: false,
         );
       final controller = SettingsController(
+        screenshotProtection: FakeScreenshotProtection(),
         repository: repository,
         filePicker: FakeSettingsFilePicker(),
         notifications: FakeCaptureNotificationPort(),
@@ -138,6 +142,7 @@ void main() {
   }.entries) {
     testWidgets('describes exclusions on ${entry.key.name}', (tester) async {
       final controller = SettingsController(
+        screenshotProtection: FakeScreenshotProtection(),
         repository: FakeSettingsRepository(),
         filePicker: FakeSettingsFilePicker(),
         notifications: FakeCaptureNotificationPort(),
@@ -168,6 +173,7 @@ void main() {
     tester,
   ) async {
     final controller = SettingsController(
+      screenshotProtection: FakeScreenshotProtection(),
       repository: FakeSettingsRepository(),
       filePicker: FakeSettingsFilePicker(),
       notifications: FakeCaptureNotificationPort(),
@@ -232,6 +238,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.binding.setSurfaceSize(const Size(800, 280));
     final controller = SettingsController(
+      screenshotProtection: FakeScreenshotProtection(),
       repository: FakeSettingsRepository(),
       filePicker: FakeSettingsFilePicker(),
       notifications: FakeCaptureNotificationPort(),
@@ -319,6 +326,7 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(320, 480));
     tester.platformDispatcher.textScaleFactorTestValue = 2;
     final controller = SettingsController(
+      screenshotProtection: FakeScreenshotProtection(),
       repository: FakeSettingsRepository(),
       filePicker: FakeSettingsFilePicker(),
       notifications: FakeCaptureNotificationPort(),
@@ -346,6 +354,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.binding.setSurfaceSize(const Size(390, 720));
     final controller = SettingsController(
+      screenshotProtection: FakeScreenshotProtection(),
       repository: FakeSettingsRepository(),
       filePicker: FakeSettingsFilePicker(),
       notifications: FakeCaptureNotificationPort(),
@@ -394,6 +403,7 @@ void main() {
     tester,
   ) async {
     final settings = SettingsController(
+      screenshotProtection: FakeScreenshotProtection(),
       repository: FakeSettingsRepository(),
       filePicker: FakeSettingsFilePicker(),
       notifications: FakeCaptureNotificationPort(),
@@ -439,6 +449,7 @@ void main() {
     tester,
   ) async {
     final settings = SettingsController(
+      screenshotProtection: FakeScreenshotProtection(),
       repository: FakeSettingsRepository(),
       filePicker: FakeSettingsFilePicker(),
       notifications: FakeCaptureNotificationPort(),
@@ -548,6 +559,9 @@ class _SettingsUpdateRepository implements AppUpdateRepository {
 }
 
 class _SettingsUpdatePlatform implements AppUpdatePlatform {
+  @override
+  Future<AppUpdateInstallResult?> restoreInstallation() async => null;
+
   @override
   AppUpdateTarget get target => AppUpdateTarget.android;
 
