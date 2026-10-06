@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -41,21 +42,48 @@ class QuickPasteController extends ChangeNotifier {
   int _presentationGeneration = 0;
   int? _presentationId;
   bool _disposed = false;
+  bool _inspectorOpen = false;
+  Map<String, String> _pinnedShortcuts = {};
+  Future<void> _shortcutSync = Future<void>.value();
 
   bool get autoPaste => _preferences.autoPaste;
   bool get accessibilityGranted => _accessibilityGranted;
   bool get activating => _activating;
   int get presentationGeneration => _presentationGeneration;
   HistoryClip? get focusedClip => _focusedClip;
+  bool get inspectorOpen => _inspectorOpen;
+
+  List<HistoryClip> get items => [
+    ...history.items.where((clip) => !clip.pinned),
+    ...history.items.where((clip) => clip.pinned),
+  ];
+
+  Map<LogicalKeyboardKey, HistoryClip> get shortcuts {
+    final recent = history.items.where((clip) => !clip.pinned).take(9).toList();
+    return {
+      for (final (index, clip) in recent.indexed) _numberKeys[index]: clip,
+      for (final clip in history.items.where((clip) => clip.pinned))
+        ?_pinKeys[_pinnedShortcuts[clip.id]]: clip,
+    };
+  }
+
+  LogicalKeyboardKey? shortcutFor(HistoryClip clip) => shortcuts.entries
+      .where((entry) => entry.value.id == clip.id)
+      .firstOrNull
+      ?.key;
 
   Future<void> initialize() async {
     if (_disposed || _initialized) return;
     _initialized = true;
     _preferences = await _preferencesStore.read();
     if (_disposed) return;
+    _pinnedShortcuts = await _preferencesStore.readPinnedShortcuts();
+    if (_disposed) return;
     await history.initialize();
     if (_disposed) return;
-    await _refreshAccessibility(prompt: false);
+    await _reconcilePinnedShortcuts();
+    if (_disposed) return;
+    await _refreshAccessibility();
     if (!_disposed) notifyListeners();
   }
 
@@ -69,7 +97,12 @@ class QuickPasteController extends ChangeNotifier {
     _preferences = preferences;
     await history.updateQuery(const HistoryQuery());
     if (!_isCurrent(presentationId)) return;
-    await _refreshAccessibility(prompt: _preferences.autoPaste);
+    await _reconcilePinnedShortcuts();
+    if (!_isCurrent(presentationId)) return;
+    await _refreshAccessibility();
+    if (_inspectorOpen && _isCurrent(presentationId) && items.isNotEmpty) {
+      await history.select(items.first.id);
+    }
     if (_isCurrent(presentationId)) notifyListeners();
   }
 
@@ -86,7 +119,28 @@ class QuickPasteController extends ChangeNotifier {
   void focus(HistoryClip clip) {
     if (_focusedClip?.id == clip.id) return;
     _focusedClip = clip;
+    if (_inspectorOpen) unawaited(history.select(clip.id));
     notifyListeners();
+  }
+
+  Future<void> toggleInspector() async {
+    final id = _presentationId;
+    if (id == null || _disposed || _activating) return;
+    final visible = !_inspectorOpen;
+    try {
+      await _host.setInspectorVisible(presentationId: id, visible: visible);
+    } on PlatformException {
+      return;
+    } on MissingPluginException {
+      return;
+    }
+    if (!_isCurrent(id)) return;
+    _inspectorOpen = visible;
+    if (visible) {
+      final clip = _focusedClip ?? items.firstOrNull;
+      if (clip != null) await history.select(clip.id);
+    }
+    if (_isCurrent(id)) notifyListeners();
   }
 
   Future<void> activate(
@@ -109,6 +163,14 @@ class QuickPasteController extends ChangeNotifier {
           : invertAutoPaste
           ? !_preferences.autoPaste
           : _preferences.autoPaste;
+      if (shouldPaste) {
+        try {
+          await _prepareAccessibilityForPaste(presentationId);
+        } catch (_) {
+          // A permission or preference failure still leaves a completed Copy.
+        }
+        if (!_isCurrent(presentationId)) return;
+      }
       if (shouldPaste && _accessibilityGranted) {
         var pasted = false;
         try {
@@ -133,7 +195,7 @@ class QuickPasteController extends ChangeNotifier {
     bool invertAutoPaste = false,
     bool forcePaste = false,
   }) async {
-    final clip = _focusedClip ?? history.items.firstOrNull;
+    final clip = _focusedClip ?? items.firstOrNull;
     if (clip == null) return;
     await activate(
       clip,
@@ -144,13 +206,17 @@ class QuickPasteController extends ChangeNotifier {
   }
 
   Future<void> activateIndex(int index) async {
-    if (index < 0 || index >= history.items.length) return;
-    await activate(history.items[index]);
+    final visibleItems = history.items.where((clip) => !clip.pinned).toList();
+    if (index < 0 || index >= visibleItems.length) return;
+    await activate(visibleItems[index]);
   }
 
   Future<void> toggleFocusedPin() async {
     final clip = _focusedClip;
-    if (clip != null) await history.togglePin(clip);
+    if (clip != null) {
+      await history.togglePin(clip);
+      await _reconcilePinnedShortcuts();
+    }
   }
 
   Future<void> deleteFocused() async {
@@ -196,11 +262,20 @@ class QuickPasteController extends ChangeNotifier {
     return _disposed ? Future.value() : _host.quit();
   }
 
-  Future<void> _refreshAccessibility({required bool prompt}) async {
+  Future<void> _refreshAccessibility() async {
     _accessibilityGranted = await _host.accessibilityGranted();
-    if (!_disposed && prompt && !_accessibilityGranted) {
-      _accessibilityGranted = await _host.requestAccessibility();
-    }
+  }
+
+  Future<void> _prepareAccessibilityForPaste(int presentationId) async {
+    await _refreshAccessibility();
+    if (!_isCurrent(presentationId) || _accessibilityGranted) return;
+    final requested = await _preferencesStore.accessibilityPromptWasRequested();
+    if (!_isCurrent(presentationId) || requested) return;
+    // macOS returns before the user answers. Record the request before showing
+    // it so a denial never prompts again on another selection or app launch.
+    await _preferencesStore.markAccessibilityPromptRequested();
+    if (!_isCurrent(presentationId)) return;
+    _accessibilityGranted = await _host.requestAccessibility();
   }
 
   void _historyChanged() {
@@ -211,7 +286,39 @@ class QuickPasteController extends ChangeNotifier {
           .where((clip) => clip.id == focusedId)
           .firstOrNull;
     }
+    unawaited(_reconcilePinnedShortcuts().catchError((Object error) {}));
     notifyListeners();
+  }
+
+  Future<void> _reconcilePinnedShortcuts() {
+    final operation = _shortcutSync.then((_) async {
+      if (_disposed) return;
+      final next = <String, String>{};
+      for (final entry in _pinnedShortcuts.entries) {
+        if (_pinKeys.containsKey(entry.value) &&
+            !next.containsValue(entry.value)) {
+          next[entry.key] = entry.value;
+        }
+      }
+      for (final clip in history.items) {
+        if (!clip.pinned) next.remove(clip.id);
+      }
+      for (final clip in history.items.where((clip) => clip.pinned)) {
+        if (next.containsKey(clip.id)) continue;
+        final available = _pinKeys.keys
+            .where((key) => !next.containsValue(key))
+            .toList();
+        if (available.isEmpty) break;
+        next[clip.id] = available[Random().nextInt(available.length)];
+      }
+      if (mapEquals(next, _pinnedShortcuts)) return;
+      await _preferencesStore.writePinnedShortcuts(next);
+      if (_disposed) return;
+      _pinnedShortcuts = next;
+      notifyListeners();
+    });
+    _shortcutSync = operation.then<void>((_) {}, onError: (Object error) {});
+    return operation;
   }
 
   @override
@@ -228,3 +335,39 @@ class QuickPasteController extends ChangeNotifier {
     super.dispose();
   }
 }
+
+const _numberKeys = [
+  LogicalKeyboardKey.digit1,
+  LogicalKeyboardKey.digit2,
+  LogicalKeyboardKey.digit3,
+  LogicalKeyboardKey.digit4,
+  LogicalKeyboardKey.digit5,
+  LogicalKeyboardKey.digit6,
+  LogicalKeyboardKey.digit7,
+  LogicalKeyboardKey.digit8,
+  LogicalKeyboardKey.digit9,
+];
+
+// Exclude select-all, quit, paste, close, undo and the pin action itself.
+const _pinKeys = {
+  'b': LogicalKeyboardKey.keyB,
+  'c': LogicalKeyboardKey.keyC,
+  'd': LogicalKeyboardKey.keyD,
+  'e': LogicalKeyboardKey.keyE,
+  'f': LogicalKeyboardKey.keyF,
+  'g': LogicalKeyboardKey.keyG,
+  'h': LogicalKeyboardKey.keyH,
+  'i': LogicalKeyboardKey.keyI,
+  'j': LogicalKeyboardKey.keyJ,
+  'k': LogicalKeyboardKey.keyK,
+  'l': LogicalKeyboardKey.keyL,
+  'm': LogicalKeyboardKey.keyM,
+  'n': LogicalKeyboardKey.keyN,
+  'o': LogicalKeyboardKey.keyO,
+  'r': LogicalKeyboardKey.keyR,
+  's': LogicalKeyboardKey.keyS,
+  't': LogicalKeyboardKey.keyT,
+  'u': LogicalKeyboardKey.keyU,
+  'x': LogicalKeyboardKey.keyX,
+  'y': LogicalKeyboardKey.keyY,
+};
