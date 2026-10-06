@@ -330,13 +330,19 @@ class HistoryController extends ChangeNotifier {
     }
   }
 
-  Future<HistoryImagePreview?> requestImagePreview(String id, {int? maxEdge}) {
-    final cacheKey = '$id:${maxEdge ?? 'thumbnail'}';
+  Future<HistoryImagePreview?> requestImagePreview(
+    String id, {
+    int? maxEdge,
+    HistoryImagePreviewBounds? bounds,
+  }) {
+    final cacheKey =
+        '$id:${maxEdge ?? 'thumbnail'}:${bounds?.width}x${bounds?.height}';
     return _loadCached(
       cache: _imagePreviews,
       inFlight: _imagePreviewLoads,
       id: cacheKey,
-      loader: () => _repository.imagePreview(id, maxEdge: maxEdge),
+      loader: () =>
+          _repository.imagePreview(id, maxEdge: maxEdge, bounds: bounds),
     );
   }
 

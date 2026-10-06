@@ -218,8 +218,11 @@ class _PinRepository implements HistoryRepository {
       items.firstWhere((item) => item.id == id);
 
   @override
-  Future<HistoryImagePreview?> imagePreview(String id, {int? maxEdge}) async =>
-      null;
+  Future<HistoryImagePreview?> imagePreview(
+    String id, {
+    int? maxEdge,
+    HistoryImagePreviewBounds? bounds,
+  }) async => null;
 
   @override
   Future<HistorySourceAppIcon?> sourceAppIcon(String id) async => null;

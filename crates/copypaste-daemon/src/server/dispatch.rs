@@ -111,6 +111,7 @@ fn protocol_gate(request: &Request) -> Option<Response> {
 fn requires_ready(method: &Method) -> bool {
     match method {
         Method::Status => false,
+        Method::Modules { .. } => true,
         // Settings live in the database, so reading them needs it open. There
         // is no degraded mode in v2 — a daemon whose database will not open
         // does not finish starting — so nothing is lost by gating them, and
@@ -191,6 +192,10 @@ fn requires_ready(method: &Method) -> bool {
 pub(super) async fn dispatch_request(state: &Arc<AppState>, request: Request) -> Response {
     let id = request.id;
     match request.method {
+        Method::Modules { operation } => match state.modules.request(operation).await {
+            Ok(json) => Response::ok(id, copypaste_ipc::ResponseData::Modules { json }),
+            Err(error) => Response::err(id, ErrorCode::InvalidRequest, error.to_string()),
+        },
         Method::PairCreateInvite => crate::p2p::handlers::pair_create_invite(state, id).await,
         Method::PairJoin { code, addr } => {
             crate::p2p::handlers::pair_join(state, id, &code, &addr).await
@@ -251,6 +256,7 @@ pub(super) async fn dispatch_request(state: &Arc<AppState>, request: Request) ->
 pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Response {
     match method {
         Method::Status => items::status(state, id),
+        Method::Modules { .. } => unreachable!("module operations use their shared blocking host"),
         Method::SetDeviceName { name } => items::set_device_name(state, id, &name),
         Method::List { limit, cursor } => items::list(state, id, limit, cursor.as_deref()),
         Method::Search { query, limit } => items::search(state, id, &query, limit),
@@ -266,7 +272,8 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
         Method::ImagePreview {
             id: item_id,
             max_edge,
-        } => items::image_preview(state, id, &item_id, max_edge),
+            bounds,
+        } => items::image_preview(state, id, &item_id, max_edge, bounds),
         Method::SourceAppIcon { id: item_id } => items::source_app_icon(state, id, &item_id),
         Method::SaveFile {
             id: item_id,
@@ -393,7 +400,8 @@ mod tests {
         assert!(requires_ready(&Method::Get { id: "x".into() }));
         assert!(requires_ready(&Method::ImagePreview {
             id: "x".into(),
-            max_edge: None
+            max_edge: None,
+            bounds: None,
         }));
         assert!(requires_ready(&Method::Add {
             content: "x".into()

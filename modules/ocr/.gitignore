@@ -1,0 +1,6 @@
+/target/
+/assets/models/*
+!/assets/models/.gitkeep
+/native/*
+!/native/.gitkeep
+__pycache__/

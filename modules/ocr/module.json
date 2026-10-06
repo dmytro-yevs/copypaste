@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "api_version": 1,
+  "id": "copypaste.ocr",
+  "title": "OCR",
+  "description": "Recognize text from an image locally, with automatic script routing.",
+  "version": "0.1.0",
+  "app_versions": ">=1.0.0, <2.0.0",
+  "unload_policy": "process",
+  "commands": [
+    {
+      "id": "recognize-image",
+      "title": "Recognize image text",
+      "description": "Extract text from an image without sending it to a service.",
+      "arguments": [
+        {
+          "id": "image_path",
+          "title": "Image",
+          "kind": "file",
+          "accepted_extensions": ["png", "jpg", "jpeg", "webp", "tiff", "tif", "bmp"],
+          "required": true,
+          "max_bytes": 67108864
+        }
+      ]
+    }
+  ]
+}
