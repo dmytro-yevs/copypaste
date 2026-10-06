@@ -85,7 +85,8 @@ internal object AndroidCaptureState {
         return runCatching {
             !manager.isAppInactive(context.packageName) &&
                 (Build.VERSION.SDK_INT < Build.VERSION_CODES.P ||
-                    manager.appStandbyBucket == UsageStatsManager.STANDBY_BUCKET_ACTIVE)
+                    // Exempted apps have a lower bucket and are also unrestricted.
+                    manager.appStandbyBucket <= UsageStatsManager.STANDBY_BUCKET_ACTIVE)
         }.getOrDefault(false)
     }
 }

@@ -63,12 +63,13 @@ for abi in armeabi-v7a arm64-v8a x86_64; do
     }
 done
 
-for registrar in \
+for reflective_class in \
+    com.copypaste.app.ShizukuGrantService \
     com.google.mlkit.common.internal.CommonComponentRegistrar \
     com.google.mlkit.vision.common.internal.VisionCommonRegistrar; do
-    bytecode="$("$APK_ANALYZER" dex code --class "$registrar" "$APK")"
+    bytecode="$("$APK_ANALYZER" dex code --class "$reflective_class" "$APK")"
     grep -Eq '^\.method public .*<init>\(\)V$' <<<"$bytecode" || {
-        echo "ERROR: APK is missing the public constructor for $registrar" >&2
+        echo "ERROR: APK is missing the public constructor for $reflective_class" >&2
         exit 1
     }
 done

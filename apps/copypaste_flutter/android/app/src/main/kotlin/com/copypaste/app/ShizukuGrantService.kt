@@ -1,7 +1,10 @@
 package com.copypaste.app
 
+import androidx.annotation.Keep
 import kotlin.system.exitProcess
 
+// Shizuku instantiates this service through reflection in its privileged process.
+@Keep
 class ShizukuGrantService : IShizukuGrantService.Stub() {
     override fun applyCaptureGrants(packageName: String): Boolean =
         captureGrantCommands(packageName).all(::runCommand)
