@@ -13,6 +13,14 @@ use std::{
 };
 use zip::{write::SimpleFileOptions, ZipWriter};
 
+const ENTRYPOINT: &str = if cfg!(target_os = "windows") {
+    "bin/module.dll"
+} else if cfg!(target_os = "macos") {
+    "bin/module.dylib"
+} else {
+    "bin/module.so"
+};
+
 fn target() -> ModuleTarget {
     ModuleTarget::current().unwrap_or(ModuleTarget {
         platform: ModulePlatform::Macos,
@@ -50,8 +58,8 @@ impl Fixture {
         let mut manifest = json!({
             "schema_version": 1, "api_version": 1, "id": "copypaste.text-tools",
             "title": "Text Tools", "description": "Transform text.", "version": version,
-            "app_versions": ">=1.0.0, <2.0.0", "target": target(), "entrypoint": "bin/module",
-            "files": [{"path":"bin/module", "sha256":hex::encode(Sha256::digest(library)), "size_bytes":library.len()}],
+            "app_versions": ">=1.0.0, <2.0.0", "target": target(), "entrypoint": ENTRYPOINT,
+            "files": [{"path":ENTRYPOINT, "sha256":hex::encode(Sha256::digest(library)), "size_bytes":library.len()}],
             "commands": [{"id":"transform", "title":"Transform text", "description":"Transform text.",
                 "arguments":[{"id":"text", "title":"Text", "kind":"text", "default":"", "required":true}]}],
             "preferences": [{"id":"uppercase", "title":"Uppercase", "kind":"boolean", "default":false}]
@@ -75,7 +83,7 @@ impl Fixture {
         for (name, bytes) in [
             ("manifest.json", bytes.as_slice()),
             ("manifest.json.sig", signature.as_bytes()),
-            ("bin/module", library),
+            (ENTRYPOINT, library),
         ] {
             archive
                 .start_file(name, SimpleFileOptions::default())
@@ -300,7 +308,8 @@ fn installed_code_tampering_cannot_execute() {
         fixture
             .directory
             .path()
-            .join("modules/packages/copypaste.text-tools/1.0.0/bin/module"),
+            .join("modules/packages/copypaste.text-tools/1.0.0")
+            .join(ENTRYPOINT),
         "tampered",
     )
     .unwrap();
