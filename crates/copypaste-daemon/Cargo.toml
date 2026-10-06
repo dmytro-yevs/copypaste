@@ -82,7 +82,7 @@ image = { workspace = true, features = ["bmp"] }
 core-foundation = "0.10.1"
 block2 = "0.5.1"
 objc2.workspace = true
-objc2-foundation = { workspace = true, features = ["NSThread", "NSNotification", "NSOperation", "NSDictionary", "NSURL", "NSValue", "block2"] }
+objc2-foundation = { workspace = true, features = ["NSThread", "NSNotification", "NSOperation", "NSDictionary", "NSURL", "NSValue", "NSBundle", "block2"] }
 objc2-app-kit = { workspace = true, features = ["NSResponder"] }
 security-framework.workspace = true
 

@@ -62,11 +62,6 @@ impl Coverage {
             SourceConfidence::AmbiguousObservedApplications
         }
     }
-
-    fn single_candidate(&self) -> Option<&str> {
-        (self.incomplete.is_none() && self.candidates.len() == 1)
-            .then(|| self.candidates.first().unwrap().as_str())
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -74,6 +69,8 @@ pub(crate) struct Decision {
     pub(crate) generation: i64,
     pub(crate) sample: Observation,
     pub(crate) coverage: Coverage,
+    /// Fresh foreground metadata for display, never evidence of the writer or
+    /// permission to read an interval containing excluded/unknown activity.
     pub(crate) identity: Option<SourceIdentity>,
     recovery: Option<Observation>,
 }
@@ -246,11 +243,9 @@ impl ActivationHistory {
         } else {
             Some(Incomplete::MissingBoundary)
         };
-        let identity = identity.filter(|identity| {
-            coverage
-                .single_candidate()
-                .is_some_and(|id| identity.bundle_id.as_deref() == Some(id))
-        });
+        // A later activation may belong to a window opened after Copy. Retain
+        // its admission evidence, but do not label the sampled value with it.
+        let identity = identity.filter(|_| sample == end);
         let recovery = (!sample.active_known
             && end.active_known
             && sample.service_id == end.service_id
@@ -373,15 +368,22 @@ mod tests {
         }
     }
     #[test]
-    fn multiple_allowed_candidates_admit_without_guessed_identity() {
+    fn first_copy_after_switch_keeps_fresh_display_identity_and_exclusion_debt() {
         let mut history = ActivationHistory::new(1);
         history.record(app("TextEdit"));
         let mut owner = baseline(&history);
         history.record(app("CopyPaste"));
         let decision = decide(&history, &owner, 11);
         assert!(decision.coverage.allows(&excluded()));
-        assert!(decision.identity.is_none());
-        assert!(!decision.coverage.allows(&vec!["TextEdit".into()]));
+        assert_eq!(
+            decision.identity.as_ref().unwrap().name.as_deref(),
+            Some("CopyPaste")
+        );
+        assert_eq!(
+            decision.coverage.confidence(),
+            SourceConfidence::AmbiguousObservedApplications
+        );
+        assert!(!decision.coverage.allows(&["TextEdit".into()]));
         owner.consume(11, Some(decision.sample), Some(&decision), true);
         assert_eq!(
             decide(&history, &owner, 12)
@@ -391,6 +393,49 @@ mod tests {
                 .as_deref(),
             Some("CopyPaste")
         );
+    }
+
+    #[test]
+    fn startup_display_metadata_does_not_authorize_an_unknown_interval() {
+        let mut history = ActivationHistory::new(1);
+        history.record(app("TextEdit"));
+        let decision = decide(&history, &GenerationCoverage::default(), 11);
+        assert_eq!(decision.identity.unwrap().name.as_deref(), Some("TextEdit"));
+        assert!(decision.coverage.allows(&[]));
+        assert!(!decision.coverage.allows(&excluded()));
+    }
+
+    #[test]
+    fn name_only_foreground_metadata_is_preserved_for_display() {
+        let mut history = ActivationHistory::new(1);
+        history.record(None);
+        let identity = Some(SourceIdentity {
+            bundle_id: None,
+            name: Some("Helper".into()),
+        });
+        let decision = history.decide(None, 11, history.observation(), identity.clone());
+        assert_eq!(decision.identity, identity);
+        assert!(!decision.coverage.allows(&excluded()));
+    }
+
+    #[test]
+    fn activation_after_change_sample_does_not_relabel_the_copy() {
+        let mut history = ActivationHistory::new(1);
+        history.record(app("TextEdit"));
+        let owner = baseline(&history);
+        let sample = history.observation();
+        history.record(app("CopyPaste"));
+        let decision = history.decide(
+            owner.boundary(),
+            11,
+            sample,
+            Some(SourceIdentity {
+                bundle_id: app("CopyPaste"),
+                name: Some("CopyPaste".into()),
+            }),
+        );
+        assert!(decision.identity.is_none());
+        assert!(!decision.coverage.allows(&["TextEdit".into()]));
     }
     #[test]
     fn consumed_unknown_recovers_without_skipping_later_real_events() {

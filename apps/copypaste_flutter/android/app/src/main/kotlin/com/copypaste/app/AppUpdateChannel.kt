@@ -1,37 +1,83 @@
 package com.copypaste.app
 
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import androidx.core.content.FileProvider
+import android.os.Handler
+import android.os.Looper
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.Executors
 
 class AppUpdateChannel(
     private val activity: MainActivity,
     messenger: BinaryMessenger,
 ) {
     private val channel = MethodChannel(messenger, channelName)
+    private val installer = AppUpdateInstaller(activity.applicationContext)
+    private val executor = Executors.newSingleThreadExecutor()
+    private val main = Handler(Looper.getMainLooper())
+    private var pendingResult: MethodChannel.Result? = null
+    @Volatile private var disposed = false
+    private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == AppUpdateInstaller.stateKey || key == AppUpdateInstaller.confirmationKey) {
+            onResume()
+        }
+    }
 
     init {
         channel.setMethodCallHandler(::handle)
+        installer.preferences.registerOnSharedPreferenceChangeListener(listener)
     }
 
     fun dispose() {
+        disposed = true
+        pendingResult = null
+        installer.preferences.unregisterOnSharedPreferenceChangeListener(listener)
+        executor.shutdown()
         channel.setMethodCallHandler(null)
+    }
+
+    fun onResume() {
+        if (disposed) return
+        if (MainActivity.isForeground) installer.confirm(activity)
+        val state = installer.state() ?: return
+        if (state == AppUpdateInstaller.installing) return
+        val result = pendingResult ?: return
+        pendingResult = null
+        installer.clear()
+        if (state == "installed") result.success(state)
+        else result.error(state, null, null)
     }
 
     private fun handle(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
-            "currentVersion" -> result.success(BuildConfig.VERSION_NAME)
+            "currentVersion" -> {
+                @Suppress("DEPRECATION")
+                val installed = activity.packageManager.getPackageInfo(activity.packageName, 0)
+                result.success(installed.versionName)
+            }
             "availability" -> result.success(mapOf("available" to true))
             "install" -> install(call, result)
+            "restoreInstallation" -> {
+                if (pendingResult != null) {
+                    result.error("installation_busy", null, null)
+                    return
+                }
+                installer.restore()
+                if (installer.state() == null) result.success(null)
+                else {
+                    pendingResult = result
+                    onResume()
+                }
+            }
             "openReleasePage" -> openReleasePage(call, result)
             else -> result.notImplemented()
         }
@@ -45,54 +91,81 @@ class AppUpdateChannel(
             return
         }
 
+        if (pendingResult != null || installer.state() == AppUpdateInstaller.installing) {
+            result.error("installation_busy", null, null)
+            return
+        }
+        pendingResult = result
+        executor.execute {
+            try {
+                prepareInstallation(path, expectedSha256!!)
+            } catch (_: Exception) {
+                failInstallation("installation_failed")
+            }
+        }
+    }
+
+    private fun prepareInstallation(path: String, expectedSha256: String) {
         val packageFile = runCatching { File(path).canonicalFile }.getOrNull()
         val updateRoot = File(activity.cacheDir, updateDirectory).canonicalFile
         if (packageFile == null ||
             !packageFile.isFile ||
             !packageFile.path.startsWith(updateRoot.path + File.separator)
         ) {
-            result.error("package_invalid", null, null)
+            failInstallation("package_invalid")
             return
         }
         if (!MessageDigest.isEqual(
                 packageFile.sha256(),
-                expectedSha256!!.hexBytes(),
+                expectedSha256.hexBytes(),
             )
         ) {
-            result.error("package_invalid", null, null)
+            failInstallation("package_invalid")
             return
         }
 
         val validationError = validatePackage(packageFile)
         if (validationError != null) {
-            result.error(validationError, null, null)
+            failInstallation(validationError)
             return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             !activity.packageManager.canRequestPackageInstalls()
         ) {
-            activity.startActivity(
-                Intent(
-                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                    Uri.parse("package:${activity.packageName}"),
-                ),
-            )
-            result.success("permission_required")
+            main.post {
+                if (disposed) return@post
+                try {
+                    activity.startActivity(
+                        Intent(
+                            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            Uri.parse("package:${activity.packageName}"),
+                        ),
+                    )
+                    val result = pendingResult
+                    pendingResult = null
+                    result?.success("permission_required")
+                } catch (_: Exception) {
+                    failInstallation("installation_blocked")
+                }
+            }
             return
         }
 
-        val uri = FileProvider.getUriForFile(
-            activity,
-            "${activity.packageName}.updates",
-            packageFile,
-        )
-        activity.startActivity(
-            Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, androidPackageMimeType)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            },
-        )
-        result.success("started")
+        if (disposed) return
+        val update = activity.packageManager.getPackageArchiveInfo(packageFile.path, 0)
+            ?: return failInstallation("package_invalid")
+        val versionName = update.versionName
+        if (versionName.isNullOrBlank()) return failInstallation("package_invalid")
+        installer.start(packageFile, update.versionCodeCompat(), versionName)
+        main.post { onResume() }
+    }
+
+    private fun failInstallation(code: String) {
+        main.post {
+            val result = pendingResult
+            pendingResult = null
+            result?.error(code, null, null)
+        }
     }
 
     private fun validatePackage(file: File): String? {
@@ -172,8 +245,6 @@ class AppUpdateChannel(
     companion object {
         private const val channelName = "com.copypaste.app/app_update"
         private const val updateDirectory = "copypaste-updates"
-        private const val androidPackageMimeType =
-            "application/vnd.android.package-archive"
         private val sha256Pattern = Regex("^[a-f0-9]{64}$")
     }
 }

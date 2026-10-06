@@ -473,7 +473,7 @@ pub(crate) fn source_observation() -> Option<Observation> {
 }
 
 /// Resolve a generation's retained coverage and optional foreground metadata.
-/// Only complete single-candidate evidence may expose a display identity.
+/// Fresh display identity is independent of the retained admission evidence.
 /// Call only from workers; waiting on main would prevent its own reply.
 pub(crate) fn source_decision(
     previous: Option<(i64, Observation)>,
@@ -662,7 +662,7 @@ mod tests {
     }
     #[tokio::test]
     async fn coordinator_panic_becomes_terminal_error() {
-        let (_, failure) = watch::channel(false);
+        let (_failed, failure) = watch::channel(false);
         let result = coordinate(async { panic!("coordinator test") }, failure).await;
         assert_eq!(
             result.unwrap_err().to_string(),

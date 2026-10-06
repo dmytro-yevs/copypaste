@@ -3,6 +3,17 @@ import 'dart:async';
 import 'package:copypaste_flutter/features/settings/models/settings_models.dart';
 import 'package:copypaste_flutter/features/settings/repository/settings_repository.dart';
 import 'package:copypaste_flutter/platform/notifications/capture_notification_port.dart';
+import 'package:copypaste_flutter/platform/security/screenshot_protection.dart';
+
+class FakeScreenshotProtection implements ScreenshotProtection {
+  bool value = false;
+  @override
+  Future<bool> blocked() async => value;
+  @override
+  Future<void> setBlocked(bool blocked) async {
+    value = blocked;
+  }
+}
 
 class FakeSettingsRepository implements SettingsRepository {
   final StreamController<void> captures = StreamController<void>.broadcast();
