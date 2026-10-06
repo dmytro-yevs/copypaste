@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:copypaste_flutter/generated/api.dart' as runtime;
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
@@ -6,6 +8,7 @@ import 'package:copypaste_flutter/features/settings/models/settings_models.dart'
 import 'package:copypaste_flutter/features/settings/view/settings_screen.dart';
 import 'package:copypaste_flutter/features/update/update.dart';
 import 'package:copypaste_flutter/platform/update/app_update_platform.dart';
+import 'package:copypaste_flutter/platform/notifications/capture_notification_preview.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:pub_semver/pub_semver.dart';
@@ -85,6 +88,90 @@ void main() {
     expect(await controller.setNotifyOnCopy(true), isFalse);
     expect(repository.currentSettings.notifyOnCopy, isFalse);
     expect(controller.errorMessage, contains('permission'));
+  });
+
+  test(
+    'uses the captured clip ID and independently hides its content',
+    () async {
+      final repository = FakeSettingsRepository();
+      const preview = CaptureNotificationPreview(text: 'Copied text');
+      repository.readPreview = (id) async {
+        expect(id, 'captured-clip');
+        return preview;
+      };
+      final notifications = FakeCaptureNotificationPort();
+      final controller = SettingsController(
+        screenshotProtection: FakeScreenshotProtection(),
+        repository: repository,
+        filePicker: FakeSettingsFilePicker(),
+        notifications: notifications,
+        captureRefreshInterval: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await controller.setNotifyOnCopy(true);
+      repository.captures.add('captured-clip');
+      await Future<void>.delayed(Duration.zero);
+      expect(notifications.previews, [preview]);
+
+      await controller.setNotificationPreview(false);
+      repository.captures.add('another-clip');
+      await Future<void>.delayed(Duration.zero);
+      expect(repository.previewReads, 1);
+      expect(notifications.previews, [preview, null]);
+      expect(controller.settings?.notifyOnCopy, isTrue);
+    },
+  );
+
+  test('does not expose a pending preview after it is disabled', () async {
+    final result = Completer<CaptureNotificationPreview?>();
+    final repository = FakeSettingsRepository()
+      ..readPreview = (_) => result.future;
+    final notifications = FakeCaptureNotificationPort();
+    final controller = SettingsController(
+      screenshotProtection: FakeScreenshotProtection(),
+      repository: repository,
+      filePicker: FakeSettingsFilePicker(),
+      notifications: notifications,
+      captureRefreshInterval: Duration.zero,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.setNotifyOnCopy(true);
+    repository.captures.add('clip');
+    await Future<void>.delayed(Duration.zero);
+    await controller.setNotificationPreview(false);
+    result.complete(const CaptureNotificationPreview(text: 'Private text'));
+    await Future<void>.delayed(Duration.zero);
+    expect(notifications.previews, [null]);
+  });
+
+  test('keeps feedback working when a captured clip is unavailable', () async {
+    final repository = FakeSettingsRepository()
+      ..readPreview = (_) async => throw StateError('Deleted clip');
+    final notifications = FakeCaptureNotificationPort();
+    final controller = SettingsController(
+      screenshotProtection: FakeScreenshotProtection(),
+      repository: repository,
+      filePicker: FakeSettingsFilePicker(),
+      notifications: notifications,
+      captureRefreshInterval: Duration.zero,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.setNotifyOnCopy(true);
+    repository.captures.add('deleted-clip');
+    await Future<void>.delayed(Duration.zero);
+    repository.captures.add(null);
+    await Future<void>.delayed(Duration.zero);
+    expect(notifications.previews, [null, null]);
+    expect(controller.errorMessage, isNull);
+  });
+
+  test('notification text preserves Unicode and normalizes whitespace', () {
+    expect(CaptureNotificationPreview.textPreview('a\r\nb\tc'), 'a⏎b⇥c');
+    final preview = CaptureNotificationPreview.textPreview('😀' * 1001);
+    expect(preview, '${'😀' * 1000}…');
   });
 
   test(
@@ -217,6 +304,29 @@ void main() {
     await tester.pump();
     expect(find.text('Notification on copy'), findsOneWidget);
     expect(find.text('Clipboard capture'), findsNothing);
+
+    final previewSwitch = find.descendant(
+      of: find.ancestor(
+        of: find.text('Show clipboard content'),
+        matching: find.byType(Card),
+      ),
+      matching: find.byType(Switch),
+    );
+    expect(tester.widget<Switch>(previewSwitch).enabled, isFalse);
+    await tester.tap(
+      find.descendant(
+        of: find.ancestor(
+          of: find.text('Notification on copy'),
+          matching: find.byType(Card),
+        ),
+        matching: find.byType(Switch),
+      ),
+    );
+    await tester.pump();
+    expect(tester.widget<Switch>(previewSwitch).enabled, isTrue);
+    await tester.tap(previewSwitch);
+    await tester.pump();
+    expect(controller.settings?.notificationPreview, isFalse);
 
     final soundCard = find.ancestor(
       of: find.text('Sound on copy'),

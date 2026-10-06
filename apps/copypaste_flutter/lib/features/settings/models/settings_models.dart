@@ -26,6 +26,7 @@ class RuntimeSettings {
     required this.lanVisibility,
     required this.syncEnabled,
     required this.notifyOnCopy,
+    this.notificationPreview = true,
     required this.soundOnCopy,
   });
 
@@ -35,6 +36,7 @@ class RuntimeSettings {
   final bool lanVisibility;
   final bool syncEnabled;
   final bool notifyOnCopy;
+  final bool notificationPreview;
   final bool soundOnCopy;
 }
 
@@ -46,6 +48,7 @@ class RuntimeSettingsChange {
     this.lanVisibility,
     this.syncEnabled,
     this.notifyOnCopy,
+    this.notificationPreview,
     this.soundOnCopy,
   });
 
@@ -55,6 +58,7 @@ class RuntimeSettingsChange {
   final bool? lanVisibility;
   final bool? syncEnabled;
   final bool? notifyOnCopy;
+  final bool? notificationPreview;
   final bool? soundOnCopy;
 }
 

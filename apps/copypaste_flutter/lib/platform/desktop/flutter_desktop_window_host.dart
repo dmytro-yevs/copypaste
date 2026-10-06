@@ -1,12 +1,15 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/widgets.dart' show Offset, Rect, Size;
+import 'package:flutter/widgets.dart' show IconData, Offset, Rect, Size;
 import 'package:screen_retriever/screen_retriever.dart';
+import 'package:shadcn_flutter/shadcn_flutter.dart' show LucideIcons;
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'desktop_window_controller.dart';
+import 'tray_menu_icons.dart';
+import '../macos/macos_tray_menu.dart';
 
 const _trayIconAsset = 'assets/brand/copypaste.png';
 
@@ -21,6 +24,7 @@ class FlutterDesktopWindowHost
 
   TrayIcon? _trayIcon;
   Image? _trayImage;
+  Map<IconData, Image> _trayMenuImages = {};
   Menu? _trayMenu;
   MenuItem? _openMenuItem;
   MenuItem? _captureMenuItem;
@@ -141,10 +145,7 @@ class FlutterDesktopWindowHost
       'Settings',
       MenuItemType.normal,
     );
-    final quit = MenuItem.createWithLabelAndType(
-      'Quit CopyPaste',
-      MenuItemType.normal,
-    );
+    final quit = MenuItem.createWithLabelAndType('Quit', MenuItemType.normal);
 
     if (image == null ||
         icon == null ||
@@ -168,14 +169,31 @@ class FlutterDesktopWindowHost
     ListenerId? settingsListener;
     ListenerId? quitListener;
     ListenerId? trayListener;
+    final menuImages = <IconData, Image>{};
 
     try {
+      for (final glyph in const [
+        LucideIcons.appWindow,
+        LucideIcons.pause,
+        LucideIcons.play,
+        LucideIcons.settings,
+        LucideIcons.power,
+      ]) {
+        menuImages[glyph] = await createTrayMenuIcon(glyph);
+      }
       menu
         ..addItem(open)
         ..addItem(capture)
         ..addItem(settings)
         ..addSeparator()
         ..addItem(quit);
+      open.icon = menuImages[LucideIcons.appWindow];
+      capture.icon = menuImages[LucideIcons.pause];
+      settings.icon = menuImages[LucideIcons.settings];
+      quit.icon = menuImages[LucideIcons.power];
+      if (Platform.isMacOS) {
+        await showMacosTrayMenuImages(menu.nativeObject.address);
+      }
       icon
         ..icon = image
         ..setTooltip('CopyPaste')
@@ -219,6 +237,7 @@ class FlutterDesktopWindowHost
 
       _trayIcon = icon;
       _trayImage = image;
+      _trayMenuImages = menuImages;
       _trayMenu = menu;
       _openMenuItem = open;
       _captureMenuItem = capture;
@@ -233,6 +252,7 @@ class FlutterDesktopWindowHost
       _disposeTrayResources(
         icon: icon,
         image: image,
+        menuImages: menuImages.values,
         menu: menu,
         open: open,
         capture: capture,
@@ -257,6 +277,7 @@ class FlutterDesktopWindowHost
     if (item == null) return;
     item
       ..label = paused ? 'Resume capture' : 'Pause capture'
+      ..icon = _trayMenuImages[paused ? LucideIcons.play : LucideIcons.pause]
       ..isEnabled = available;
   }
 
@@ -320,6 +341,7 @@ class FlutterDesktopWindowHost
   void _disposeTray() {
     final icon = _trayIcon;
     final image = _trayImage;
+    final menuImages = _trayMenuImages;
     final menu = _trayMenu;
     final open = _openMenuItem;
     final capture = _captureMenuItem;
@@ -332,6 +354,7 @@ class FlutterDesktopWindowHost
     final quitListener = _quitMenuItemListener;
     _trayIcon = null;
     _trayImage = null;
+    _trayMenuImages = {};
     _trayMenu = null;
     _openMenuItem = null;
     _captureMenuItem = null;
@@ -345,6 +368,7 @@ class FlutterDesktopWindowHost
     _disposeTrayResources(
       icon: icon,
       image: image,
+      menuImages: menuImages.values,
       menu: menu,
       open: open,
       capture: capture,
@@ -361,6 +385,7 @@ class FlutterDesktopWindowHost
   void _disposeTrayResources({
     required TrayIcon? icon,
     required Image? image,
+    required Iterable<Image> menuImages,
     required Menu? menu,
     required MenuItem? open,
     required MenuItem? capture,
@@ -397,6 +422,9 @@ class FlutterDesktopWindowHost
     quit?.dispose();
     menu?.dispose();
     image?.dispose();
+    for (final menuImage in menuImages) {
+      menuImage.dispose();
+    }
   }
 
   Display _displayWithGreatestOverlap(
