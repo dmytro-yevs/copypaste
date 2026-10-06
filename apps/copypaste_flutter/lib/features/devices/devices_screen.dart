@@ -103,7 +103,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= AdaptiveBreakpoints.inspector;
-        final pairingOpen = controller.pairingEntryMode != null;
+        final pairingOpen = controller.pairingInspectorOpen;
         final deviceDetailsOpen = controller.deviceDetailsTarget != null;
         final inspectorOpen = pairingOpen || deviceDetailsOpen;
         if (!wide && pairingOpen && !_pairingDrawerOpen && !_deviceDrawerOpen) {
@@ -254,7 +254,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
   Future<void> _openPairingDrawer() async {
     if (_pairingDrawerOpen ||
         _deviceDrawerOpen ||
-        widget.controller.pairingEntryMode == null) {
+        !widget.controller.pairingInspectorOpen) {
       return;
     }
     _pairingDrawerOpen = true;
@@ -289,7 +289,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
               child: AnimatedBuilder(
                 animation: widget.controller,
                 builder: (context, _) {
-                  if (widget.controller.pairingEntryMode == null) {
+                  if (!widget.controller.pairingInspectorOpen) {
                     WidgetsBinding.instance.addPostFrameCallback((_) {
                       closeOnce(context);
                     });
@@ -842,6 +842,7 @@ class _DeviceDetailsInspector extends StatelessWidget {
   Widget _actions(_DetailsDevice device) {
     return Wrap(
       key: const ValueKey<String>('device-details-actions'),
+      alignment: WrapAlignment.center,
       spacing: AppSpacing.sm,
       runSpacing: AppSpacing.sm,
       crossAxisAlignment: WrapCrossAlignment.center,
@@ -1185,7 +1186,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
         ],
         const Gap(AppSpacing.xl),
         Align(
-          alignment: Alignment.centerRight,
+          alignment: Alignment.center,
           child: Button.primary(
             key: const ValueKey<String>('submit-pairing-code'),
             onPressed: widget.controller.pairingInFlight ? null : _submitCode,
@@ -1206,38 +1207,13 @@ class _PairingInspectorState extends State<_PairingInspector> {
     final ceremony = widget.controller.pairing;
     if (ceremony != null) return _pairingProgress(ceremony);
     if (widget.controller.usesSystemScanner) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (widget.controller.systemScanInFlight)
-            const StateView.loading(message: 'Opening Google scanner…')
-          else if (widget.controller.errorMessage case final message?)
-            StateView.error(title: 'Scanner unavailable', message: message)
-          else
-            const StateView.empty(title: 'Scan a pairing QR code'),
-          const Gap(AppSpacing.lg),
-          Wrap(
-            spacing: AppSpacing.sm,
-            runSpacing: AppSpacing.sm,
-            children: [
-              Button.primary(
-                key: const ValueKey<String>('start-pairing-scanner'),
-                onPressed: widget.controller.systemScanInFlight
-                    ? null
-                    : widget.controller.openQrScanner,
-                leading: const Icon(LucideIcons.scanLine),
-                child: const Text('Scan QR'),
-              ),
-              Button.secondary(
-                onPressed: widget.controller.systemScanInFlight
-                    ? null
-                    : widget.controller.openCodeEntry,
-                child: const Text('Enter code'),
-              ),
-            ],
-          ),
-        ],
-      );
+      if (widget.controller.errorMessage case final message?) {
+        return StateView.error(
+          title: 'Pairing action failed',
+          message: message,
+        );
+      }
+      return const StateView.loading(message: 'Connecting device…');
     }
     final scanner = _scanner;
     return Column(
@@ -1283,7 +1259,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
         ],
         const Gap(AppSpacing.lg),
         Align(
-          alignment: Alignment.centerRight,
+          alignment: Alignment.center,
           child: Button.primary(
             key: const ValueKey<String>('start-pairing-scanner'),
             onPressed: _startScanner,
@@ -1350,23 +1326,25 @@ class _PairingInspectorState extends State<_PairingInspector> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Icon(_pairingIcon(ceremony.state)),
-            const Gap(AppSpacing.md),
-            Expanded(child: Text(_pairingTitle(ceremony.state)).h4()),
-            if (ceremony.expiresIn != null && !terminal)
-              SecondaryBadge(child: Text(_expiryLabel(ceremony.expiresIn!))),
+        if (_pairingTitle(ceremony.state) case final title?) ...[
+          Row(
+            children: [
+              Icon(_pairingIcon(ceremony.state)),
+              const Gap(AppSpacing.md),
+              Expanded(child: Text(title).h4()),
+            ],
+          ),
+          if (ceremony.failureMessage ??
+                  ceremony.peerName ??
+                  _pairingDescription(ceremony.state)
+              case final description?) ...[
+            const Gap(AppSpacing.sm),
+            Text(description).muted(),
           ],
-        ),
-        const Gap(AppSpacing.sm),
-        Text(
-          ceremony.failureMessage ??
-              ceremony.peerName ??
-              _pairingDescription(ceremony.state),
-        ).muted(),
+        ],
         if (widget.controller.inviteQrPng case final qrPng?) ...[
-          const Gap(AppSpacing.lg),
+          if (ceremony.state != PairingState.waitingForPeer)
+            const Gap(AppSpacing.lg),
           Center(
             child: ColoredBox(
               color: Colors.white,
@@ -1409,15 +1387,10 @@ class _PairingInspectorState extends State<_PairingInspector> {
         ],
         const Gap(AppSpacing.xl),
         Wrap(
+          alignment: WrapAlignment.center,
           spacing: AppSpacing.sm,
           runSpacing: AppSpacing.sm,
           children: [
-            if (awaitingConfirmation)
-              Button.secondary(
-                onPressed: widget.controller.revealSas,
-                leading: const Icon(LucideIcons.shieldCheck),
-                child: const Text('Show verification code'),
-              ),
             if (awaitingConfirmation)
               Button.destructive(
                 onPressed:
@@ -1434,7 +1407,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
                         !widget.controller.canConfirmPairing
                     ? null
                     : () => widget.controller.confirmPairing(accept: true),
-                child: const Text('Confirm both devices'),
+                child: const Text('Accept'),
               ),
             if (terminal)
               Button.primary(
@@ -1473,8 +1446,8 @@ class _PairingInspectorState extends State<_PairingInspector> {
     PairingState.idle => LucideIcons.link,
   };
 
-  String _pairingTitle(PairingState state) => switch (state) {
-    PairingState.waitingForPeer => 'Ready to pair',
+  String? _pairingTitle(PairingState state) => switch (state) {
+    PairingState.waitingForPeer => null,
     PairingState.handshaking => 'Verifying device',
     PairingState.awaitingConfirmation => 'Confirm on both devices',
     PairingState.confirmed => 'Device paired',
@@ -1485,9 +1458,8 @@ class _PairingInspectorState extends State<_PairingInspector> {
     PairingState.idle => 'Pairing',
   };
 
-  String _pairingDescription(PairingState state) => switch (state) {
-    PairingState.waitingForPeer =>
-      'Show the protected QR code or enter this code on the other device.',
+  String? _pairingDescription(PairingState state) => switch (state) {
+    PairingState.waitingForPeer => null,
     PairingState.handshaking =>
       'The devices are establishing a secure channel.',
     PairingState.awaitingConfirmation =>
@@ -1499,9 +1471,6 @@ class _PairingInspectorState extends State<_PairingInspector> {
     PairingState.timedOut => 'Start a new pairing attempt to continue.',
     PairingState.idle => 'Start a pairing attempt to connect a device.',
   };
-
-  String _expiryLabel(Duration remaining) =>
-      'Expires in ${remaining.inSeconds.clamp(0, 9999)}s';
 }
 
 class _DevicesQrPayloadSink implements PairingQrPayloadSink {

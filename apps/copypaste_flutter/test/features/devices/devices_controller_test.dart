@@ -23,6 +23,53 @@ void main() {
   tearDown(() => controller.dispose());
 
   test(
+    'switches an invitation to code entry while keeping protection',
+    () async {
+      await controller.openInvitation();
+      final cancellation = Completer<void>();
+      gateway.session.cancelPending = cancellation;
+
+      final switching = controller.openCodeEntry(address: '192.0.2.10:47654');
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.canChangePairingMode, isFalse);
+      expect(controller.canClosePairing, isFalse);
+      expect(controller.pairingInspectorOpen, isTrue);
+      expect(controller.inviteQrPng, isNull);
+      await controller.openQrScanner();
+      expect(controller.pairingEntryMode, PairingEntryMode.invite);
+
+      cancellation.complete();
+      await switching;
+      expect(gateway.session.cancelCalls, 1);
+      expect(gateway.session.disposeCalls, 1);
+      expect(controller.pairingEntryMode, PairingEntryMode.enterCode);
+      expect(controller.pendingAddress, '192.0.2.10:47654');
+      expect(controller.pairing, isNull);
+      expect(controller.canChangePairingMode, isTrue);
+      expect(captureProtection.values, [true]);
+    },
+  );
+
+  test('discards a verification code returned after switching modes', () async {
+    await controller.openInvitation();
+    final code = Completer<String>();
+    gateway.session.sasPending = code;
+    gateway.session.emit(
+      const PairingCeremony(state: PairingState.awaitingConfirmation),
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(gateway.session.revealSasCalls, 1);
+
+    await controller.openCodeEntry();
+    code.complete('123456');
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.pairingEntryMode, PairingEntryMode.enterCode);
+    expect(controller.verificationCode, isNull);
+    expect(controller.canConfirmPairing, isFalse);
+  });
+
+  test(
     'old pairing cleanup cannot unprotect a newly opened inspector',
     () async {
       await controller.openInvitation();
@@ -66,10 +113,12 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(captureProtection.values, [true]);
       expect(controller.systemScanInFlight, isTrue);
+      expect(controller.pairingInspectorOpen, isFalse);
       scanner.result.complete('copypaste://pair/v1?test=invitation');
       await scan;
       expect(gateway.joinedUris, ['copypaste://pair/v1?test=invitation']);
       expect(controller.systemScanInFlight, isFalse);
+      expect(controller.pairingInspectorOpen, isTrue);
     },
   );
 
@@ -88,6 +137,7 @@ void main() {
       scanner.result.complete(null);
       await scan;
       expect(controller.pairingInspectorOpen, isFalse);
+      expect(controller.errorMessage, isNull);
       expect(captureProtection.values, [true, false]);
       controller.openThisDeviceDetails();
       expect(controller.deviceDetailsOpen, isTrue);
@@ -126,6 +176,9 @@ void main() {
     );
     await scan;
     expect(controller.errorMessage, contains('Enter the pairing code'));
+    expect(controller.pairingInspectorOpen, isFalse);
+    expect(controller.pairingEntryMode, isNull);
+    expect(captureProtection.values, [true, false]);
     await controller.refresh();
     expect(controller.errorMessage, contains('Enter the pairing code'));
     await controller.openCodeEntry();
@@ -214,13 +267,70 @@ void main() {
         const PairingCeremony(state: PairingState.awaitingConfirmation),
       );
       await Future<void>.delayed(Duration.zero);
-      await controller.revealSas();
       expect(controller.verificationCode, '123456');
       await controller.confirmPairing(accept: true);
 
       expect(gateway.session.confirmations, [true]);
     },
   );
+
+  for (final accept in [true, false]) {
+    test(
+      'automatically shows SAS once before an explicit decision: $accept',
+      () async {
+        await controller.openInvitation();
+        final code = Completer<String>();
+        gateway.session.sasPending = code;
+        for (var update = 0; update < 3; update++) {
+          gateway.session.emit(
+            const PairingCeremony(state: PairingState.awaitingConfirmation),
+          );
+        }
+        await Future<void>.delayed(Duration.zero);
+        expect(gateway.session.revealSasCalls, 1);
+        expect(controller.canConfirmPairing, isFalse);
+        await controller.confirmPairing(accept: accept);
+        expect(gateway.session.confirmations, isEmpty);
+
+        code.complete('123456');
+        await Future<void>.delayed(Duration.zero);
+        expect(controller.verificationCode, '123456');
+        expect(gateway.session.confirmations, isEmpty);
+        await controller.confirmPairing(accept: accept);
+        expect(gateway.session.confirmations, [accept]);
+      },
+    );
+  }
+
+  test(
+    'automatically shows SAS from an already ready joined session',
+    () async {
+      gateway.session.emit(
+        const PairingCeremony(state: PairingState.awaitingConfirmation),
+      );
+      await controller.joinPairingUri('copypaste://pair/v1?test=invitation');
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.verificationCode, '123456');
+      expect(gateway.session.revealSasCalls, 1);
+      expect(gateway.session.confirmations, isEmpty);
+    },
+  );
+
+  test('discards an automatic SAS result after confirmation expires', () async {
+    await controller.openInvitation();
+    final code = Completer<String>();
+    gateway.session.sasPending = code;
+    gateway.session.emit(
+      const PairingCeremony(state: PairingState.awaitingConfirmation),
+    );
+    await Future<void>.delayed(Duration.zero);
+    gateway.session.emit(const PairingCeremony(state: PairingState.timedOut));
+    await Future<void>.delayed(Duration.zero);
+    code.complete('123456');
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.verificationCode, isNull);
+    expect(controller.canConfirmPairing, isFalse);
+  });
 
   test(
     'preserves a terminal status until dismissed and cleans the session',
@@ -655,8 +765,10 @@ class _FakePairingSession implements DevicesPairingSession {
   @override
   Future<String> revealSas() async {
     revealSasCalls += 1;
-    return '123456';
+    return sasPending?.future ?? '123456';
   }
+
+  Completer<String>? sasPending;
 }
 
 Uint8List _testPng() => base64Decode(

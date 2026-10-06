@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:copypaste_flutter/app/theme/app_overlays.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
@@ -996,28 +997,64 @@ class _ClipContent extends StatelessWidget {
       textScaler: MediaQuery.textScalerOf(context),
     )..layout();
     final maxHeight = linePainter.height * 8;
-    return FutureBuilder<HistoryImagePreview?>(
-      future: controller.requestImagePreview(clip.id),
-      builder: (context, snapshot) {
-        final preview = snapshot.data;
-        return ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: maxHeight),
-          child: SizedBox(
-            width: double.infinity,
-            child: preview == null
-                ? const Center(child: Icon(LucideIcons.image))
-                : ClipRRect(
-                    borderRadius: BorderRadius.circular(AppRadius.sm),
-                    child: Image.memory(
-                      preview.bytes,
-                      key: ValueKey<String>('history-card-image-${clip.id}'),
-                      fit: BoxFit.contain,
-                      alignment: Alignment.centerLeft,
-                      errorBuilder: (context, error, stackTrace) =>
-                          const Center(child: Icon(LucideIcons.imageOff)),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+        // Limit both dimensions in physical pixels before decoding the preview.
+        final bounds = HistoryImagePreviewBounds(
+          width: (constraints.maxWidth * pixelRatio).ceil().clamp(1, 2048),
+          height: (maxHeight * pixelRatio).ceil().clamp(1, 2048),
+        );
+        return FutureBuilder<HistoryImagePreview?>(
+          future: controller.requestImagePreview(clip.id, bounds: bounds),
+          builder: (context, snapshot) {
+            final preview = snapshot.data;
+            if (preview == null) {
+              return const Center(child: Icon(LucideIcons.image));
+            }
+            if (preview.width <= 0 || preview.height <= 0) {
+              return const Center(child: Icon(LucideIcons.imageOff));
+            }
+            final scale = math.min(
+              1.0,
+              math.min(
+                constraints.maxWidth / preview.width,
+                maxHeight / preview.height,
+              ),
+            );
+            return Align(
+              alignment: Alignment.centerLeft,
+              child: SizedBox(
+                width: preview.width * scale,
+                height: preview.height * scale,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                  child: Image.memory(
+                    preview.bytes,
+                    key: ValueKey<String>('history-card-image-${clip.id}'),
+                    fit: BoxFit.contain,
+                    alignment: Alignment.centerLeft,
+                    cacheWidth: math.min(
+                      preview.width,
+                      (preview.width * scale * pixelRatio).ceil().clamp(
+                        1,
+                        2048,
+                      ),
                     ),
+                    cacheHeight: math.min(
+                      preview.height,
+                      (preview.height * scale * pixelRatio).ceil().clamp(
+                        1,
+                        2048,
+                      ),
+                    ),
+                    errorBuilder: (context, error, stackTrace) =>
+                        const Center(child: Icon(LucideIcons.imageOff)),
                   ),
-          ),
+                ),
+              ),
+            );
+          },
         );
       },
     );
@@ -1066,6 +1103,17 @@ class _ClipMeta extends StatelessWidget {
               child: SourceAppLabel(
                 name: clip.sourceApp!,
                 icon: controller.requestSourceIcon(clip.id),
+                style: style,
+              ),
+            ),
+          ],
+          if (clip.origin != null) ...[
+            const TextSpan(text: ' • '),
+            WidgetSpan(
+              alignment: PlaceholderAlignment.middle,
+              child: DeviceLabel(
+                name: clip.origin!,
+                deviceClass: clip.originDeviceClass,
                 style: style,
               ),
             ),

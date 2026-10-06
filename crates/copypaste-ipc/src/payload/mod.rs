@@ -174,6 +174,13 @@ pub struct ImagePreview {
     pub height: u32,
 }
 
+/// Physical-pixel bounds for an aspect-preserving image preview.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImagePreviewBounds {
+    pub width: u32,
+    pub height: u32,
+}
+
 /// One item in an export, and the unit an import consumes.
 ///
 /// Deliberately not [`Item`]: an item's id is bound into its ciphertext as

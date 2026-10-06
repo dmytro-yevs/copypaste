@@ -19,6 +19,15 @@ enum Expected {
 
 fn expected(method: &Method) -> Expected {
     match method {
+        Method::Modules { .. } => {
+            if copypaste_modules::ModuleTarget::current().is_some() {
+                Expected::Data(
+                    |data| matches!(data, ResponseData::Modules { json } if json == "[]"),
+                )
+            } else {
+                Expected::Error(ErrorCode::InvalidRequest)
+            }
+        }
         Method::Status => Expected::Data(|data| matches!(data, ResponseData::Status(_))),
         Method::SetDeviceName { .. } => {
             Expected::Data(|data| matches!(data, ResponseData::Empty { .. }))
@@ -81,6 +90,9 @@ fn expected(method: &Method) -> Expected {
 
 fn cases(root: &Path) -> Vec<Method> {
     vec![
+        Method::Modules {
+            operation: copypaste_ipc::ModuleOperation::List,
+        },
         Method::Status,
         Method::SetDeviceName {
             name: "contract device".into(),
@@ -110,6 +122,7 @@ fn cases(root: &Path) -> Vec<Method> {
         },
         Method::ImagePreview {
             max_edge: None,
+            bounds: None,
             id: "missing".into(),
         },
         Method::SourceAppIcon {
@@ -254,7 +267,7 @@ async fn every_method_crosses_the_platform_transport_with_a_typed_outcome() {
     let methods = cases(dir.path());
     assert_eq!(
         methods.len(),
-        45,
+        46,
         "a Method has no contract case, or this count was not bumped with it"
     );
 
