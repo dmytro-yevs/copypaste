@@ -62,6 +62,7 @@ void main() {
     await controller.initialize();
     addTearDown(controller.dispose);
     final settingsController = SettingsController(
+      screenshotProtection: FakeScreenshotProtection(),
       repository: FakeSettingsRepository(),
       filePicker: FakeSettingsFilePicker(),
       notifications: FakeCaptureNotificationPort(),

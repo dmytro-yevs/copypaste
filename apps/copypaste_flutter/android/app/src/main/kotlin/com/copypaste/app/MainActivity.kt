@@ -10,7 +10,6 @@ import java.io.File
 import android.content.Intent
 import android.os.Bundle
 import android.os.Build
-import android.view.WindowManager
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -85,10 +84,9 @@ class MainActivity : FlutterActivity() {
     private var pendingPairingUri: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        ScreenshotProtection.install(application)
+        ScreenshotProtection.apply(window)
         pendingPairingUri = pairingUri(intent)
-        if (pendingPairingUri != null) {
-            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        }
         instance = applicationContext
         initializeNdkContext(applicationContext)
         initializeRuntime(
@@ -106,6 +104,18 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.copypaste.app/security")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "getBlockScreenshots" -> result.success(ScreenshotProtection.blocked)
+                    "setBlockScreenshots" -> {
+                        val enabled = call.argument<Boolean>("enabled")
+                        if (enabled == null) result.error("invalid_arguments", null, null)
+                        else result.success(ScreenshotProtection.setBlocked(enabled))
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         androidCaptureChannel = AndroidCaptureChannel(
             this,
             flutterEngine.dartExecutor.binaryMessenger,
@@ -141,11 +151,7 @@ class MainActivity : FlutterActivity() {
                         if (enabled == null) {
                             result.error("invalid_arguments", null, null)
                         } else {
-                            if (enabled) {
-                                window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                            } else {
-                                window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                            }
+                            ScreenshotProtection.apply(window)
                             result.success(true)
                         }
                     }
@@ -257,7 +263,7 @@ class MainActivity : FlutterActivity() {
         setIntent(intent)
         if (handleExplicitIntake(intent)) return
         val uri = pairingUri(intent) ?: return
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        ScreenshotProtection.apply(window)
         pendingPairingUri = uri
         pairingLinksChannel?.invokeMethod(
             "openPairingUri",
@@ -306,6 +312,7 @@ class MainActivity : FlutterActivity() {
     override fun onResume() {
         super.onResume()
         isForeground = true
+        appUpdateChannel?.onResume()
         foregroundCaptureEligible = true
         refreshForegroundCapture()
         if (!clipboardListenerRegistered) {

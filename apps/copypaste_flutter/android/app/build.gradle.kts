@@ -72,6 +72,14 @@ android {
         buildConfig = true
     }
 
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all {
+            // Robolectric's Android 16 runtime accesses OpenJDK file descriptors.
+            it.jvmArgs("--add-opens=java.base/jdk.internal.access=ALL-UNNAMED")
+        }
+    }
+
 }
 
 val requireReleaseSigning by tasks.registering {
@@ -90,6 +98,11 @@ tasks.configureEach {
     if (name == "assembleRelease" || name == "bundleRelease") {
         dependsOn(requireReleaseSigning)
     }
+    if (name.startsWith("package") && name.endsWith("UnitTestForUnitTest")) {
+        // Host tests package Flutter assets as Android resources.
+        val variant = name.removePrefix("package").removeSuffix("UnitTestForUnitTest")
+        dependsOn("copyFlutterAssets$variant")
+    }
 }
 
 java {
@@ -105,6 +118,7 @@ dependencies {
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.17")
 }
 
 kotlin {
