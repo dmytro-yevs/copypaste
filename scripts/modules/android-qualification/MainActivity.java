@@ -6,9 +6,11 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Runs the actual module host in app-private storage without Internet permission. */
 public final class MainActivity extends Activity {
+    private static final AtomicBoolean started = new AtomicBoolean();
     static { System.loadLibrary("copypaste_module_qualification"); }
     private static native String qualify(
         String packagePath, String fixtures, String data, String appVersion,
@@ -18,6 +20,8 @@ public final class MainActivity extends Activity {
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        // Activity recreation must not start a second workload in the same process.
+        if (!started.compareAndSet(false, true)) return;
         new Thread(() -> {
             String phase = getIntent().getStringExtra("phase");
             if (phase == null) phase = "execute";
