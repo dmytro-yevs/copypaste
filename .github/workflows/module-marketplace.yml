@@ -1,0 +1,49 @@
+name: Publish module marketplace
+
+on:
+  workflow_dispatch:
+    inputs:
+      module_release_tag:
+        description: Published, qualified module release (module-copypaste.<id>-v<version>)
+        required: true
+        type: string
+
+concurrency:
+  group: module-marketplace
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - name: Validate marketplace publisher
+        run: python3 -m unittest discover -s scripts/modules/tests -p 'test_*.py'
+      - name: Download qualified packages and authenticate catalog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODULE_RELEASE_TAG: ${{ inputs.module_release_tag }}
+        run: python3 scripts/modules/prepare-marketplace.py
+      - name: Sign catalog
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: scripts/release/sign-update-artifact.sh dist/modules.json
+      - name: Publish authenticated catalog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ -f dist/create-marketplace-release ]]; then
+            gh release create modules --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false --title "Module marketplace" --notes "Signed catalog of optional first-party CopyPaste modules."
+          fi
+          gh release upload modules dist/modules.json dist/modules.json.sig --repo "$GITHUB_REPOSITORY" --clobber

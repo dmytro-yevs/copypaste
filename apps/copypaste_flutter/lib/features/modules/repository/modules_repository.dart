@@ -13,10 +13,6 @@ abstract interface class ModulesRepository {
   );
 }
 
-abstract interface class ModulePackagePicker {
-  Future<SelectedModulePackage?> choose();
-}
-
 abstract interface class ModuleInputPicker {
   Future<SelectedModuleInput?> chooseInput(ModuleField field);
 }

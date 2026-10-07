@@ -56,7 +56,7 @@ class RuntimeHistoryRepository implements HistoryRepository {
             (facet) => HistorySourceAppFacet(
               id: facet.id,
               label: facet.label,
-              iconItemId: facet.iconItemId,
+              iconId: facet.iconId,
             ),
           )
           .toList(growable: false),
@@ -120,7 +120,7 @@ class RuntimeHistoryRepository implements HistoryRepository {
   @override
   Future<HistorySourceAppIcon?> sourceAppIcon(String id) async {
     _ensureActive();
-    final preview = await runtime.clipSourceAppIcon(id: id);
+    final preview = await runtime.sourceAppIcon(id: id);
     if (preview == null) return null;
     return HistorySourceAppIcon(base64Decode(preview.pngBase64));
   }
@@ -243,6 +243,7 @@ HistoryClip _fromRuntimeClip(runtime.Clip clip, {bool includeBody = false}) {
     origin: clip.originDeviceName,
     originDeviceClass: mapRuntimeDeviceClass(clip.originDeviceClass),
     sourceApp: clip.sourceAppName,
+    sourceAppIconId: clip.sourceAppIconId,
     truncated: clip.truncated,
     colorRgba: clip.colorRgba,
     tooLargeToSync: clip.tooLargeToSync,

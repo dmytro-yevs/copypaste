@@ -25,6 +25,25 @@ abstract final class AppTheme {
         context,
       ).copyWith(fontSize: AppTypographySize.menuMetadata);
 
+  static TextStyle historyMetadataTextStyle(BuildContext context) {
+    final theme = Theme.of(context);
+    return DefaultTextStyle.of(context).style
+        .merge(theme.typography.xSmall)
+        .copyWith(
+          fontSize: AppTypographySize.historyMetadata,
+          height: 1,
+          leadingDistribution: TextLeadingDistribution.even,
+          color: theme.colorScheme.mutedForeground,
+        );
+  }
+
+  static StrutStyle historyMetadataStrutStyle(BuildContext context) =>
+      StrutStyle.fromTextStyle(
+        historyMetadataTextStyle(context),
+        leading: 0,
+        forceStrutHeight: true,
+      );
+
   static const clipboardSearchFieldTheme = TextFieldTheme(
     filled: true,
     border: Border.fromBorderSide(BorderSide.none),

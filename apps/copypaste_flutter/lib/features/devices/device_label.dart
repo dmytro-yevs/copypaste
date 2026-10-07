@@ -13,6 +13,7 @@ class DeviceLabel extends StatelessWidget {
     this.iconSize = AppIconSize.sm,
     this.showName = true,
     this.style,
+    this.strutStyle,
   });
 
   final String name;
@@ -20,6 +21,7 @@ class DeviceLabel extends StatelessWidget {
   final double iconSize;
   final bool showName;
   final TextStyle? style;
+  final StrutStyle? strutStyle;
 
   @override
   Widget build(BuildContext context) {
@@ -35,7 +37,6 @@ class DeviceLabel extends StatelessWidget {
     if (!showName) return ExcludeSemantics(child: leading);
     return Text.rich(
       TextSpan(
-        style: resolvedStyle,
         children: [
           WidgetSpan(
             alignment: PlaceholderAlignment.middle,
@@ -45,6 +46,8 @@ class DeviceLabel extends StatelessWidget {
           TextSpan(text: name),
         ],
       ),
+      style: resolvedStyle,
+      strutStyle: strutStyle,
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
     );

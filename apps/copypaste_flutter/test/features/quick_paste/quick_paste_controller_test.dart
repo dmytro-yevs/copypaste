@@ -134,6 +134,149 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('keeps pinned clips fixed below scrolling history', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    repository.clips.addAll([
+      for (var index = 0; index < 40; index++)
+        HistoryClip(
+          id: 'recent-$index',
+          contentType: 'text/plain',
+          preview: 'Recent clip $index',
+          createdAt: DateTime.utc(2026),
+          pinned: false,
+        ),
+    ]);
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: _ContextHost()..permissionGranted = true,
+    );
+    await tester.binding.setSurfaceSize(const Size(448, 500));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(QuickPasteApp(controller: controller));
+    await tester.pumpAndSettle();
+
+    final historyScroll = find.byKey(
+      const ValueKey('quick-paste-history-scroll'),
+    );
+    final pinned = find.byKey(const ValueKey('quick-paste-pinned'));
+    final pinnedRect = tester.getRect(pinned);
+    final footerRect = tester.getRect(find.text('Clear'));
+    expect(find.descendant(of: historyScroll, matching: pinned), findsNothing);
+    expect(
+      pinnedRect.top,
+      greaterThanOrEqualTo(tester.getRect(historyScroll).bottom),
+    );
+    expect(pinnedRect.bottom, lessThan(footerRect.top));
+
+    await tester.drag(historyScroll, const Offset(0, -300));
+    await tester.pumpAndSettle();
+    final scroll = tester.widget<SingleChildScrollView>(historyScroll);
+    expect(scroll.controller!.offset, greaterThan(0));
+    expect(tester.getRect(pinned), pinnedRect);
+    expect(tester.getRect(find.text('Clear')), footerRect);
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final recentCount in [0, 40]) {
+    testWidgets('fits many pinned clips with $recentCount recent clips', (
+      tester,
+    ) async {
+      final repository = _Repository()..clips.clear();
+      repository.clips.addAll([
+        for (var index = 0; index < 40 + recentCount; index++)
+          HistoryClip(
+            id: 'clip-$index',
+            contentType: 'text/plain',
+            preview: 'Clip $index',
+            createdAt: DateTime.utc(2026),
+            pinned: index < 40,
+          ),
+      ]);
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: _ContextHost()..permissionGranted = true,
+      );
+      await tester.binding.setSurfaceSize(const Size(448, 500));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(QuickPasteApp(controller: controller));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      final pinnedScroll = find.byKey(
+        const ValueKey('quick-paste-pinned-scroll'),
+      );
+      final footerRect = tester.getRect(find.text('Clear'));
+      await tester.drag(pinnedScroll, const Offset(0, -300));
+      await tester.pumpAndSettle();
+      expect(tester.getRect(find.text('Clear')), footerRect);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets(
+    'keeps source icons stable across full-page rebuilds',
+    (tester) async {
+      final repository = _Repository()..clips.clear();
+      repository.sourceIcon = HistorySourceAppIcon(
+        Uint8List.fromList(image.encodePng(image.Image(width: 16, height: 16))),
+      );
+      repository.clips.addAll([
+        for (var index = 0; index < 50; index++)
+          HistoryClip(
+            id: 'icon-$index',
+            contentType: 'text/plain',
+            preview: 'Clip $index',
+            createdAt: DateTime.utc(2026),
+            pinned: false,
+            sourceApp: 'Editor',
+            sourceAppIconId: 'app:editor',
+          ),
+      ]);
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: _ContextHost()..permissionGranted = true,
+      );
+      await tester.binding.setSurfaceSize(const Size(448, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(QuickPasteApp(controller: controller));
+      for (var frame = 0; frame < 12; frame++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+
+      expect(repository.sourceIconCalls, 1);
+      final iconFinder = find.descendant(
+        of: find.byKey(const ValueKey('quick-paste-icon-0')),
+        matching: find.byType(Avatar),
+      );
+      final provider = tester.widget<Avatar>(iconFinder).provider;
+      expect(provider, isNotNull);
+      controller.focus(controller.items[1]);
+      for (var frame = 0; frame < 4; frame++) {
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(tester.widget<Avatar>(iconFinder).provider, provider);
+      }
+      expect(repository.sourceIconCalls, 1);
+      await controller.history.deleteClip('icon-0');
+      await tester.pump(const Duration(milliseconds: 100));
+      final nextIconFinder = find.descendant(
+        of: find.byKey(const ValueKey('quick-paste-icon-1')),
+        matching: find.byType(Avatar),
+      );
+      expect(tester.widget<Avatar>(nextIconFinder).provider, provider);
+      expect(repository.sourceIconCalls, 1);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+      TargetPlatform.android,
+    }),
+  );
+
   testWidgets('image rows show large content previews without image labels', (
     tester,
   ) async {
@@ -147,6 +290,7 @@ void main() {
         createdAt: DateTime.utc(2026),
         pinned: false,
         sourceApp: 'Editor',
+        sourceAppIconId: 'app:editor',
       ),
     );
     final controller = QuickPasteController(
@@ -711,6 +855,8 @@ void main() {
 }
 
 class _Repository implements HistoryRepository {
+  HistorySourceAppIcon? sourceIcon;
+  int sourceIconCalls = 0;
   final clips = <HistoryClip>[
     HistoryClip(
       id: 'pinned',
@@ -719,6 +865,7 @@ class _Repository implements HistoryRepository {
       createdAt: DateTime.utc(2026),
       pinned: true,
       sourceApp: 'Editor',
+      sourceAppIconId: 'app:editor',
     ),
     HistoryClip(
       id: 'recent',
@@ -727,6 +874,7 @@ class _Repository implements HistoryRepository {
       createdAt: DateTime.utc(2026),
       pinned: false,
       sourceApp: 'Editor',
+      sourceAppIconId: 'app:editor',
     ),
   ];
   final copied = <String>[];
@@ -801,7 +949,12 @@ class _Repository implements HistoryRepository {
   Future<void> setPinned(String id, bool pinned) async {}
 
   @override
-  Future<HistorySourceAppIcon?> sourceAppIcon(String id) async => null;
+  Future<HistorySourceAppIcon?> sourceAppIcon(String id) async {
+    sourceIconCalls += 1;
+    return sourceIcon == null
+        ? null
+        : HistorySourceAppIcon(Uint8List.fromList(sourceIcon!.bytes));
+  }
 
   @override
   Stream<HistoryRuntimeEvent> watch() => const Stream.empty();

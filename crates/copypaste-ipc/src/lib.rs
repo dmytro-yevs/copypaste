@@ -47,7 +47,7 @@ pub use response::{ConfigApplied, EventData, EventKind, Response, ResponseData};
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any breaking change to the request or response shape.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// One request. `id` is echoed back so a client can match replies.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,8 +148,9 @@ pub enum Method {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bounds: Option<ImagePreviewBounds>,
     },
-    /// Return one persisted source-application icon by item id.
+    /// Return one shared source-application icon by asset id.
     SourceAppIcon {
+        /// Identity of a shared application-icon asset.
         id: String,
     },
     /// Save the authenticated bytes of one file clip to a user-selected path.
