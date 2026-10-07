@@ -1,3 +1,6 @@
+#[path = "dictionary.rs"]
+mod dictionary;
+use dictionary::dictionary_keys;
 use ort::session::Session;
 use ort::value::Tensor;
 use ort::{inputs, session::builder::SessionBuilder};
@@ -100,10 +103,7 @@ impl CrnnNet {
 
     fn read_keys_from_file(&mut self, path: &str) -> Result<(), OcrError> {
         let content = std::fs::read_to_string(path)?;
-        let mut keys = Vec::new();
-
-        keys.extend(content.split('\n').map(|s| s.to_string()));
-        self.keys = keys;
+        self.keys = dictionary_keys(&content);
         Ok(())
     }
 
