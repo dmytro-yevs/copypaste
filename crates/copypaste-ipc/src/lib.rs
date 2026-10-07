@@ -155,7 +155,7 @@ pub enum Method {
         /// Identity of a shared application-icon asset.
         id: String,
     },
-    /// Save the authenticated bytes of one file clip to a user-selected path.
+    /// Save the authenticated bytes of one image or file clip to a destination.
     /// The destination must not already exist.
     SaveFile {
         id: String,

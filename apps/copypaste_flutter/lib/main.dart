@@ -22,8 +22,10 @@ import 'app/theme/app_theme.dart';
 import 'features/devices/devices.dart';
 import 'features/devices/flutter_rust_devices_gateway.dart';
 import 'features/history/controller/history_controller.dart';
+import 'features/history/controller/history_ocr_controller.dart';
 import 'features/history/repository/file_selector_history_file_downloader.dart';
 import 'features/history/repository/runtime_history_repository.dart';
+import 'features/history/repository/temporary_history_image_input.dart';
 import 'features/onboarding/controller/android_onboarding_controller.dart';
 import 'features/onboarding/controller/macos_onboarding_controller.dart';
 import 'features/onboarding/controller/windows_onboarding_controller.dart';
@@ -255,10 +257,6 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       }
       setState(() {
         _historyRepository = RuntimeHistoryRepository();
-        _historyController = HistoryController(
-          _historyRepository!,
-          fileDownloader: const FileSelectorHistoryFileDownloader(),
-        );
         _devicesGateway = FlutterRustDevicesGateway();
         _devicesController = DevicesController(
           gateway: _devicesGateway!,
@@ -281,6 +279,16 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
               await _startRuntime();
             }
           },
+        );
+        _historyController = HistoryController(
+          _historyRepository!,
+          fileDownloader: const FileSelectorHistoryFileDownloader(),
+          ocr: HistoryOcrController(
+            modules: _modulesController!,
+            imageInput: TemporaryHistoryImageInput(
+              repository: _historyRepository!,
+            ),
+          ),
         );
         _settingsController = SettingsController(
           repository: RuntimeSettingsRepository(),
@@ -378,9 +386,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     _devicesGateway = null;
     _quickPasteSettings = null;
     _settingsController = null;
+    historyController?.dispose();
     _modulesController?.dispose();
     _modulesController = null;
-    historyController?.dispose();
     devicesController?.dispose();
     quickPasteSettings?.dispose();
     settingsController?.removeListener(_syncCaptureControls);
@@ -413,9 +421,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     _devicesGateway = null;
     _quickPasteSettings = null;
     _settingsController = null;
+    historyController?.dispose();
     _modulesController?.dispose();
     _modulesController = null;
-    historyController?.dispose();
     devicesController?.dispose();
     quickPasteSettings?.dispose();
     settingsController?.removeListener(_syncCaptureControls);
