@@ -805,6 +805,7 @@ dependencies = [
 name = "copypaste-p2p"
 version = "1.0.6"
 dependencies = [
+ "chacha20poly1305",
  "copypaste-clock",
  "copypaste-fs",
  "copypaste-ipc",

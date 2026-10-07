@@ -10,12 +10,15 @@ pub enum PeerStoreError {
     #[error("the paired-devices file could not be read or written")]
     Io(#[source] std::io::Error),
 
-    /// Not valid JSON, or tagged as this format but the wrong shape. Never
+    /// An invalid envelope, failed authentication, or invalid decrypted state. Never
     /// repaired by overwriting: the file holds the only copy of every pairing,
     /// and discarding it silently costs the user a manual re-pair of every
     /// device.
     #[error("the paired-devices file is damaged")]
     Corrupt,
+
+    #[error("the paired-devices file could not be encrypted")]
+    Encrypt,
 
     /// A peer record failed validation.
     #[error("peer record is invalid: {0}")]
@@ -65,6 +68,7 @@ mod tests {
         let errors = [
             PeerStoreError::Io(std::io::Error::other("/home/someone/peers.json")),
             PeerStoreError::Corrupt,
+            PeerStoreError::Encrypt,
             PeerStoreError::Invalid("pairing id is empty"),
             PeerStoreError::Revoked,
             PeerStoreError::AlreadyPaired,

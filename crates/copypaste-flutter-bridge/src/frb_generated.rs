@@ -2170,10 +2170,12 @@ impl SseDecode for bool {
 impl SseDecode for crate::api::CaptureState {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_syncStatus = <crate::api::RuntimeSyncStatus>::sse_decode(deserializer);
         let mut var_running = <bool>::sse_decode(deserializer);
         let mut var_paused = <bool>::sse_decode(deserializer);
         let mut var_privateModeEpoch = <u64>::sse_decode(deserializer);
         return crate::api::CaptureState {
+            sync_status: var_syncStatus,
             running: var_running,
             paused: var_paused,
             private_mode_epoch: var_privateModeEpoch,
@@ -2768,6 +2770,20 @@ impl SseDecode for Vec<u8> {
     }
 }
 
+impl SseDecode for Vec<crate::api::RuntimePeerSyncStatus> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::RuntimePeerSyncStatus>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::SyncOutcome> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2925,6 +2941,17 @@ impl SseDecode for Option<i64> {
     }
 }
 
+impl SseDecode for Option<crate::api::RuntimeSyncStatus> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::RuntimeSyncStatus>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<u32> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3009,15 +3036,43 @@ impl SseDecode for crate::api::RuntimeError {
 impl SseDecode for crate::api::RuntimeEvent {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_syncStatus = <Option<crate::api::RuntimeSyncStatus>>::sse_decode(deserializer);
         let mut var_kind = <String>::sse_decode(deserializer);
         let mut var_itemCount = <u64>::sse_decode(deserializer);
         let mut var_captured = <bool>::sse_decode(deserializer);
         let mut var_capturedItemId = <Option<String>>::sse_decode(deserializer);
         return crate::api::RuntimeEvent {
+            sync_status: var_syncStatus,
             kind: var_kind,
             item_count: var_itemCount,
             captured: var_captured,
             captured_item_id: var_capturedItemId,
+        };
+    }
+}
+
+impl SseDecode for crate::api::RuntimePeerSyncStatus {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_pairingId = <String>::sse_decode(deserializer);
+        let mut var_name = <String>::sse_decode(deserializer);
+        let mut var_phase = <crate::api::SyncPhase>::sse_decode(deserializer);
+        let mut var_startedAtMs = <Option<i64>>::sse_decode(deserializer);
+        let mut var_lastSuccessMs = <Option<i64>>::sse_decode(deserializer);
+        let mut var_sent = <u64>::sse_decode(deserializer);
+        let mut var_received = <u64>::sse_decode(deserializer);
+        let mut var_skippedTooLarge = <u64>::sse_decode(deserializer);
+        let mut var_error = <Option<String>>::sse_decode(deserializer);
+        return crate::api::RuntimePeerSyncStatus {
+            pairing_id: var_pairingId,
+            name: var_name,
+            phase: var_phase,
+            started_at_ms: var_startedAtMs,
+            last_success_ms: var_lastSuccessMs,
+            sent: var_sent,
+            received: var_received,
+            skipped_too_large: var_skippedTooLarge,
+            error: var_error,
         };
     }
 }
@@ -3070,6 +3125,20 @@ impl SseDecode for crate::api::RuntimeSettingsPatch {
     }
 }
 
+impl SseDecode for crate::api::RuntimeSyncStatus {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_revision = <u64>::sse_decode(deserializer);
+        let mut var_phase = <crate::api::SyncPhase>::sse_decode(deserializer);
+        let mut var_peers = <Vec<crate::api::RuntimePeerSyncStatus>>::sse_decode(deserializer);
+        return crate::api::RuntimeSyncStatus {
+            revision: var_revision,
+            phase: var_phase,
+            peers: var_peers,
+        };
+    }
+}
+
 impl SseDecode for crate::api::SyncOutcome {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3084,6 +3153,22 @@ impl SseDecode for crate::api::SyncOutcome {
             sent: var_sent,
             received: var_received,
             error_code: var_errorCode,
+        };
+    }
+}
+
+impl SseDecode for crate::api::SyncPhase {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::SyncPhase::Unavailable,
+            1 => crate::api::SyncPhase::Disabled,
+            2 => crate::api::SyncPhase::Waiting,
+            3 => crate::api::SyncPhase::Syncing,
+            4 => crate::api::SyncPhase::Synced,
+            5 => crate::api::SyncPhase::Failed,
+            _ => unreachable!("Invalid variant for SyncPhase: {}", inner),
         };
     }
 }
@@ -3250,6 +3335,7 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::BackupSummary> for crate::api
 impl flutter_rust_bridge::IntoDart for crate::api::CaptureState {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.sync_status.into_into_dart().into_dart(),
             self.running.into_into_dart().into_dart(),
             self.paused.into_into_dart().into_dart(),
             self.private_mode_epoch.into_into_dart().into_dart(),
@@ -3870,6 +3956,7 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::RuntimeError> for crate::api:
 impl flutter_rust_bridge::IntoDart for crate::api::RuntimeEvent {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.sync_status.into_into_dart().into_dart(),
             self.kind.into_into_dart().into_dart(),
             self.item_count.into_into_dart().into_dart(),
             self.captured.into_into_dart().into_dart(),
@@ -3881,6 +3968,34 @@ impl flutter_rust_bridge::IntoDart for crate::api::RuntimeEvent {
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::RuntimeEvent {}
 impl flutter_rust_bridge::IntoIntoDart<crate::api::RuntimeEvent> for crate::api::RuntimeEvent {
     fn into_into_dart(self) -> crate::api::RuntimeEvent {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::RuntimePeerSyncStatus {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.pairing_id.into_into_dart().into_dart(),
+            self.name.into_into_dart().into_dart(),
+            self.phase.into_into_dart().into_dart(),
+            self.started_at_ms.into_into_dart().into_dart(),
+            self.last_success_ms.into_into_dart().into_dart(),
+            self.sent.into_into_dart().into_dart(),
+            self.received.into_into_dart().into_dart(),
+            self.skipped_too_large.into_into_dart().into_dart(),
+            self.error.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::RuntimePeerSyncStatus
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::RuntimePeerSyncStatus>
+    for crate::api::RuntimePeerSyncStatus
+{
+    fn into_into_dart(self) -> crate::api::RuntimePeerSyncStatus {
         self
     }
 }
@@ -3939,6 +4054,25 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::RuntimeSettingsPatch>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::RuntimeSyncStatus {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.revision.into_into_dart().into_dart(),
+            self.phase.into_into_dart().into_dart(),
+            self.peers.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::RuntimeSyncStatus {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::RuntimeSyncStatus>
+    for crate::api::RuntimeSyncStatus
+{
+    fn into_into_dart(self) -> crate::api::RuntimeSyncStatus {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::SyncOutcome {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -3954,6 +4088,26 @@ impl flutter_rust_bridge::IntoDart for crate::api::SyncOutcome {
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::SyncOutcome {}
 impl flutter_rust_bridge::IntoIntoDart<crate::api::SyncOutcome> for crate::api::SyncOutcome {
     fn into_into_dart(self) -> crate::api::SyncOutcome {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::SyncPhase {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Unavailable => 0.into_dart(),
+            Self::Disabled => 1.into_dart(),
+            Self::Waiting => 2.into_dart(),
+            Self::Syncing => 3.into_dart(),
+            Self::Synced => 4.into_dart(),
+            Self::Failed => 5.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::SyncPhase {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::SyncPhase> for crate::api::SyncPhase {
+    fn into_into_dart(self) -> crate::api::SyncPhase {
         self
     }
 }
@@ -4037,6 +4191,7 @@ impl SseEncode for bool {
 impl SseEncode for crate::api::CaptureState {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <crate::api::RuntimeSyncStatus>::sse_encode(self.sync_status, serializer);
         <bool>::sse_encode(self.running, serializer);
         <bool>::sse_encode(self.paused, serializer);
         <u64>::sse_encode(self.private_mode_epoch, serializer);
@@ -4501,6 +4656,16 @@ impl SseEncode for Vec<u8> {
     }
 }
 
+impl SseEncode for Vec<crate::api::RuntimePeerSyncStatus> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::RuntimePeerSyncStatus>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::SyncOutcome> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -4641,6 +4806,16 @@ impl SseEncode for Option<i64> {
     }
 }
 
+impl SseEncode for Option<crate::api::RuntimeSyncStatus> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::RuntimeSyncStatus>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<u32> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -4704,10 +4879,26 @@ impl SseEncode for crate::api::RuntimeError {
 impl SseEncode for crate::api::RuntimeEvent {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Option<crate::api::RuntimeSyncStatus>>::sse_encode(self.sync_status, serializer);
         <String>::sse_encode(self.kind, serializer);
         <u64>::sse_encode(self.item_count, serializer);
         <bool>::sse_encode(self.captured, serializer);
         <Option<String>>::sse_encode(self.captured_item_id, serializer);
+    }
+}
+
+impl SseEncode for crate::api::RuntimePeerSyncStatus {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.pairing_id, serializer);
+        <String>::sse_encode(self.name, serializer);
+        <crate::api::SyncPhase>::sse_encode(self.phase, serializer);
+        <Option<i64>>::sse_encode(self.started_at_ms, serializer);
+        <Option<i64>>::sse_encode(self.last_success_ms, serializer);
+        <u64>::sse_encode(self.sent, serializer);
+        <u64>::sse_encode(self.received, serializer);
+        <u64>::sse_encode(self.skipped_too_large, serializer);
+        <Option<String>>::sse_encode(self.error, serializer);
     }
 }
 
@@ -4739,6 +4930,15 @@ impl SseEncode for crate::api::RuntimeSettingsPatch {
     }
 }
 
+impl SseEncode for crate::api::RuntimeSyncStatus {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <u64>::sse_encode(self.revision, serializer);
+        <crate::api::SyncPhase>::sse_encode(self.phase, serializer);
+        <Vec<crate::api::RuntimePeerSyncStatus>>::sse_encode(self.peers, serializer);
+    }
+}
+
 impl SseEncode for crate::api::SyncOutcome {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -4747,6 +4947,26 @@ impl SseEncode for crate::api::SyncOutcome {
         <u32>::sse_encode(self.sent, serializer);
         <u32>::sse_encode(self.received, serializer);
         <Option<String>>::sse_encode(self.error_code, serializer);
+    }
+}
+
+impl SseEncode for crate::api::SyncPhase {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::SyncPhase::Unavailable => 0,
+                crate::api::SyncPhase::Disabled => 1,
+                crate::api::SyncPhase::Waiting => 2,
+                crate::api::SyncPhase::Syncing => 3,
+                crate::api::SyncPhase::Synced => 4,
+                crate::api::SyncPhase::Failed => 5,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
     }
 }
 

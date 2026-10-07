@@ -1347,6 +1347,67 @@ void main() {
     expect(tester.getSize(searchField).width, 160);
   });
 
+  testWidgets(
+    'preserves the search minimum at the labeled filter breakpoint',
+    (tester) async {
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final controller = HistoryController(_ScreenRepository());
+      addTearDown(controller.dispose);
+      for (final textScale in [1.0, 1.5]) {
+        await tester.binding.setSurfaceSize(const Size(3200, 800));
+        await tester.pumpWidget(
+          ShadcnApp(
+            theme: AppTheme.light,
+            darkTheme: AppTheme.dark,
+            themeMode: ThemeMode.light,
+            builder: (context, child) => AppTheme.builder(
+              context,
+              MediaQuery(
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: TextScaler.linear(textScale)),
+                child: child!,
+              ),
+            ),
+            home: HistoryScreen(controller: controller),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final selects = find.byWidgetPredicate((widget) => widget is Select);
+        expect(
+          selects.evaluate().every(
+            (element) => (element.widget as Select).expandIcon != null,
+          ),
+          isTrue,
+        );
+        final filterWidth = selects.evaluate().fold<double>(
+          0,
+          (sum, element) =>
+              sum + tester.getSize(find.byWidget(element.widget)).width,
+        );
+        final breakpoint =
+            160 + filterWidth + (AppSpacing.sm * 5) + (AppSpacing.lg * 2);
+        for (final width in [breakpoint + 1, breakpoint, breakpoint - 1]) {
+          await tester.binding.setSurfaceSize(Size(width, 800));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          expect(find.byType(TextField), findsOneWidget);
+          expect(
+            tester.getSize(find.byType(TextField)).width,
+            greaterThanOrEqualTo(160),
+            reason: 'Window width $width, text scale $textScale',
+          );
+        }
+      }
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+      TargetPlatform.android,
+    }),
+  );
+
   testWidgets('shows only the standardized kind icon below the breakpoint', (
     tester,
   ) async {

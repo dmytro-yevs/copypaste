@@ -1,3 +1,14 @@
+import 'package:shadcn_flutter/shadcn_flutter.dart';
+
+enum AppStatusTone { muted, info, success, error }
+
+abstract final class AppStatusColor {
+  static const infoLight = Color(0xFF2563EB);
+  static const infoDark = Color(0xFF60A5FA);
+  static const successLight = Color(0xFF15803D);
+  static const successDark = Color(0xFF4ADE80);
+}
+
 /// Shared layout and icon sizing tokens for CopyPaste UI.
 ///
 /// Values follow a compact 4px rhythm so every supported platform uses the
@@ -54,10 +65,12 @@ abstract final class AppTypographySize {
 
 /// Shared dimensions for application layouts.
 abstract final class AppLayoutSize {
+  static const double historySearchMinWidth = 160;
   static const double onboardingContentMaxWidth = 440;
   static const double marketplaceCardMinWidth = 280;
   static const double quickPasteMenuWidth = 448;
   static const double quickPasteInspectorWidth = 360;
+  static const double settingsStackedControlWidth = 420;
   static const double settingsNavigationWidth = 240;
   static const double settingsContentMaxWidth = 900;
 }

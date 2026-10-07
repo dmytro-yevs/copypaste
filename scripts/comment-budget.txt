@@ -69,7 +69,6 @@ crates/copypaste-p2p/src/discovery/record.rs
 crates/copypaste-p2p/src/lib.rs
 crates/copypaste-p2p/src/node/channel.rs
 crates/copypaste-p2p/src/node/mod.rs
-crates/copypaste-p2p/src/peers/file.rs
 crates/copypaste-p2p/src/peers/mod.rs
 crates/copypaste-p2p/src/peers/store.rs
 crates/copypaste-p2p/src/sync/merge.rs

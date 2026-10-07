@@ -12,6 +12,7 @@ import '../features/history/view/history_screen.dart';
 import '../features/settings/controller/quick_paste_settings_controller.dart';
 import '../features/settings/controller/settings_controller.dart';
 import '../features/settings/view/capture_header_action.dart';
+import '../features/settings/view/sync_header_action.dart';
 import '../features/settings/view/settings_screen.dart';
 import '../features/update/controller/app_update_controller.dart';
 import '../platform/desktop/desktop_window_controller.dart';
@@ -74,6 +75,12 @@ class CopyPasteApp extends StatelessWidget {
               headerActions: {
                 if (settingsController != null)
                   AppDestination.history: [
+                    SyncHeaderAction(
+                      controller: settingsController!,
+                      devices: devicesController,
+                      onDrawerVisibilityChanged:
+                          navigation.setBottomOverlayOpen,
+                    ),
                     CaptureHeaderAction(controller: settingsController!),
                   ],
                 if (devicesController != null || settingsController != null)
@@ -81,10 +88,23 @@ class CopyPasteApp extends StatelessWidget {
                     if (devicesController != null)
                       DevicesHeaderActions(controller: devicesController!),
                     if (settingsController != null)
+                      SyncHeaderAction(
+                        controller: settingsController!,
+                        devices: devicesController,
+                        onDrawerVisibilityChanged:
+                            navigation.setBottomOverlayOpen,
+                      ),
+                    if (settingsController != null)
                       CaptureHeaderAction(controller: settingsController!),
                   ],
                 if (settingsController != null)
                   AppDestination.settings: [
+                    SyncHeaderAction(
+                      controller: settingsController!,
+                      devices: devicesController,
+                      onDrawerVisibilityChanged:
+                          navigation.setBottomOverlayOpen,
+                    ),
                     CaptureHeaderAction(controller: settingsController!),
                   ],
               },

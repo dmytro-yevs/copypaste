@@ -8,6 +8,7 @@ import '../../../platform/notifications/capture_notification_port.dart';
 import '../../../platform/notifications/capture_notification_preview.dart';
 import '../../../platform/security/screenshot_protection.dart';
 import '../models/settings_models.dart';
+import '../models/sync_status.dart';
 import '../repository/settings_repository.dart';
 
 class SettingsController extends ChangeNotifier {
@@ -36,6 +37,8 @@ class SettingsController extends ChangeNotifier {
   SettingsLoadState _loadState = SettingsLoadState.loading;
   RuntimeSettings? _settings;
   CaptureSettingsState? _capture;
+  SyncStatus _syncStatus = const SyncStatus();
+  StreamSubscription<SyncStatus>? _syncSubscription;
   String? _errorMessage;
   bool _busy = false;
   bool _blockScreenshots = false;
@@ -47,6 +50,7 @@ class SettingsController extends ChangeNotifier {
   SettingsLoadState get loadState => _loadState;
   RuntimeSettings? get settings => _settings;
   CaptureSettingsState? get capture => _capture;
+  SyncStatus get syncStatus => _syncStatus;
   String? get errorMessage => _errorMessage;
   bool get busy => _busy;
   bool get blockScreenshots => _blockScreenshots;
@@ -68,10 +72,21 @@ class SettingsController extends ChangeNotifier {
       ]);
       _settings = values[0] as RuntimeSettings;
       _capture = values[1] as CaptureSettingsState;
+      _acceptSyncStatus(_capture!.syncStatus);
       _blockScreenshots = values[2] as bool;
       _loadState = SettingsLoadState.ready;
       _errorMessage = null;
       _startCaptureRefresh();
+      _syncSubscription ??= _repository.syncEvents().listen(
+        (status) {
+          _acceptSyncStatus(status);
+          _notify();
+        },
+        onError: (Object error) {
+          _invalidateSyncStatus();
+          _notify();
+        },
+      );
       _captureSubscription ??= _repository.capturedEvents().listen(
         (id) {
           _notificationQueue = _notificationQueue.then(
@@ -265,10 +280,24 @@ class SettingsController extends ChangeNotifier {
       final next = await _repository.captureState();
       if (_disposed || next.epoch < (_capture?.epoch ?? 0)) return;
       _capture = next;
+      _acceptSyncStatus(next.syncStatus);
       _notify();
     } catch (_) {
-      // Keep the last authoritative state while a background refresh is unavailable.
+      _invalidateSyncStatus();
+      _notify();
     }
+  }
+
+  void _acceptSyncStatus(SyncStatus status) {
+    if (_disposed || status.revision < _syncStatus.revision) return;
+    _syncStatus = status;
+  }
+
+  void _invalidateSyncStatus() {
+    _syncStatus = SyncStatus(
+      revision: _syncStatus.revision,
+      peers: _syncStatus.peers,
+    );
   }
 
   String _message(Object error, String fallback) =>
@@ -301,6 +330,7 @@ class SettingsController extends ChangeNotifier {
     _disposed = true;
     _captureTimer?.cancel();
     unawaited(_captureSubscription?.cancel());
+    unawaited(_syncSubscription?.cancel());
     unawaited(_repository.dispose());
     super.dispose();
   }

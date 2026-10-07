@@ -9,6 +9,7 @@ license.workspace = true
 copypaste-clock = { path = "../copypaste-clock" }
 copypaste-fs = { path = "../copypaste-fs" }
 copypaste-ipc = { path = "../copypaste-ipc" }
+chacha20poly1305.workspace = true
 snow.workspace = true
 mdns-sd.workspace = true
 os_info.workspace = true
