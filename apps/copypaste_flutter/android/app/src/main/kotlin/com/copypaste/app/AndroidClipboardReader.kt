@@ -274,6 +274,23 @@ internal object AndroidClipboardReader {
         }
     }
 
+    fun readCaptureMetadata(host: Host, action: () -> Unit): Boolean {
+        val pending = begin(host) ?: return false
+        return try { pending.read("image/png") { action() } } finally { pending.cleanup() }
+    }
+
+    fun captureScreenshot(context: Context, host: Host, uri: Uri, type: String): Boolean {
+        if (!ScreenshotCaptureState.enabled(context) || !ScreenshotCaptureState.mediaGranted(context)) return false
+        val pending = begin(host) ?: return false
+        return try {
+            val saved = binary(context, pending, uri, type, mediaAccess = true)
+            if (saved) NativeRuntimeCapture.scoped(pending.token, true, "image/png") {
+                AndroidCaptureFeedback.onCaptured(context, null)
+            }
+            saved
+        } finally { pending.cleanup() }
+    }
+
     private fun materialize(context: Context, pending: Pending, snapshot: Snapshot): Boolean {
         // A binary payload never falls back to textual/base64 capture.
         return if (snapshot.uri != null) binary(context, pending, snapshot.uri, snapshot.type ?: return false)
@@ -292,11 +309,14 @@ internal object AndroidClipboardReader {
         return null
     }
 
-    private fun binary(context: Context, pending: Pending, uri: Uri, declaredType: String): Boolean {
+    private fun binary(context: Context, pending: Pending, uri: Uri, declaredType: String, mediaAccess: Boolean = false): Boolean {
         if (uri.scheme != "content" || !mimeType.matches(declaredType) || declaredType.startsWith("text/")) return false
         var bytes: ByteArray? = null
         val read = pending.read(declaredType) { limit ->
-            if (context.checkUriPermission(uri, Process.myPid(), Process.myUid(), Intent.FLAG_GRANT_READ_URI_PERMISSION) != PackageManager.PERMISSION_GRANTED) return@read
+            if (mediaAccess) {
+                if (!ScreenshotCaptureState.enabled(context) || !ScreenshotCaptureState.mediaGranted(context) ||
+                    uri.authority != "media" || !declaredType.startsWith("image/")) return@read
+            } else if (context.checkUriPermission(uri, Process.myPid(), Process.myUid(), Intent.FLAG_GRANT_READ_URI_PERMISSION) != PackageManager.PERMISSION_GRANTED) return@read
             val resolver = context.contentResolver
             val resolvedType = resolver.getType(uri)?.lowercase()
             if (resolvedType != null && resolvedType != declaredType) return@read

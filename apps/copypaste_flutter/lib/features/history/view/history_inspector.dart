@@ -11,6 +11,7 @@ import 'package:copypaste_flutter/features/history/models/history_models.dart';
 import 'package:copypaste_flutter/features/history/presentation/history_code_highlighter.dart';
 import 'package:copypaste_flutter/features/history/presentation/history_clip_presentation.dart';
 import 'package:copypaste_flutter/features/history/presentation/source_app_label.dart';
+import 'package:copypaste_flutter/shared/inspector_table.dart';
 import 'package:copypaste_flutter/shared/state_view.dart';
 import 'package:copypaste_flutter/shared/system_date_time.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -224,30 +225,17 @@ class HistoryInspector extends StatelessWidget {
                     ),
                   if (clip.contentKind == HistoryClipKind.image &&
                       controller.ocr?.available == true)
-                    Tooltip(
-                      showDuration: AppMotion.resolve(
-                        context,
-                        AppMotion.standard,
-                      ),
-                      tooltip: (context) => const TooltipContainer(
-                        child: Text('Recognize image text'),
-                      ),
-                      child: Semantics(
-                        label: 'Recognize image text',
-                        button: true,
-                        child: Button.secondary(
-                          key: const ValueKey<String>('history-ocr'),
-                          style: const ButtonStyle.secondaryIcon(),
-                          onPressed: controller.ocr!.canRun
-                              ? () => showHistoryOcrDialog(
-                                  context,
-                                  controller: controller.ocr!,
-                                  clip: clip,
-                                )
-                              : null,
-                          child: const Icon(LucideIcons.scanText),
-                        ),
-                      ),
+                    Button.secondary(
+                      key: const ValueKey<String>('history-ocr'),
+                      onPressed: controller.ocr!.canRun
+                          ? () => showHistoryOcrDialog(
+                              context,
+                              controller: controller.ocr!,
+                              clip: clip,
+                            )
+                          : null,
+                      leading: const Icon(LucideIcons.scanText),
+                      child: const Text('OCR'),
                     ),
                   Semantics(
                     toggled: clip.pinned,
@@ -474,54 +462,27 @@ class _HistoryMetadataTable extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final rows = _historyMetadataRows(context, clip);
-    final textStyle = compact
-        ? AppTheme.clipboardMetadataTextStyle(context)
-        : theme.typography.xSmall;
-    return Table(
-      key: const ValueKey<String>('history-detail-metadata'),
-      columnWidths: const {0: IntrinsicTableSize(), 1: FlexTableSize()},
+    final textStyle = AppTheme.inspectorTextStyle(context, compact: compact);
+    return InspectorTable(
+      tableKey: const ValueKey<String>('history-detail-metadata'),
+      compact: compact,
       rows: [
         for (final row in rows)
-          TableRow(
-            cells: [
-              TableCell(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.sm,
-                    vertical: AppSpacing.sm,
+          (
+            label: row.label,
+            value: _historyMetadataHasIdentity(row)
+                ? _historyMetadataIdentityLabel(
+                    row: row,
+                    clip: clip,
+                    controller: controller,
+                    style: textStyle,
+                  )
+                : SelectableText(
+                    row.value,
+                    style: textStyle.copyWith(
+                      color: row.warning ? theme.colorScheme.destructive : null,
+                    ),
                   ),
-                  child: Text(
-                    row.label,
-                    style: textStyle
-                        .merge(theme.typography.medium)
-                        .copyWith(color: theme.colorScheme.mutedForeground),
-                  ),
-                ),
-              ),
-              TableCell(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.sm,
-                    vertical: AppSpacing.sm,
-                  ),
-                  child: _historyMetadataHasIdentity(row)
-                      ? _historyMetadataIdentityLabel(
-                          row: row,
-                          clip: clip,
-                          controller: controller,
-                          style: textStyle,
-                        )
-                      : SelectableText(
-                          row.value,
-                          style: textStyle.copyWith(
-                            color: row.warning
-                                ? theme.colorScheme.destructive
-                                : null,
-                          ),
-                        ),
-                ),
-              ),
-            ],
           ),
       ],
     );
