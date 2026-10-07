@@ -13,25 +13,9 @@ export DEBIAN_FRONTEND=noninteractive
 # Bound wall-clock so a stuck apt fails the job instead of sitting for an hour.
 APT_TIMEOUT_SECS="${APT_TIMEOUT_SECS:-300}"
 
-# GitHub-hosted ubuntu images point apt at azure.archive.ubuntu.com. That
-# mirror intermittently hangs (Ign: … then silence until the job times out).
-# Force the public archive before any apt call.
-prefer_public_ubuntu_archive() {
-  local f
-  for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list \
-           /etc/apt/sources.list.d/*.sources; do
-    [[ -f "$f" ]] || continue
-    sudo sed -i \
-      -e 's|http://azure\.archive\.ubuntu\.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
-      -e 's|https://azure\.archive\.ubuntu\.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
-      "$f"
-  done
-  if [[ -f /etc/apt/apt-mirrors.txt ]]; then
-    printf 'http://archive.ubuntu.com/ubuntu/\n' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
-  fi
-}
-
-prefer_public_ubuntu_archive
+# Keep package installation on the authenticated public archive. HTTP mirrors
+# have failed before product tests start; transport changes do not alter checks.
+bash "$(dirname "${BASH_SOURCE[0]}")/use-ubuntu-https-archive.sh"
 
 # Pin a versioned server package: the meta package pulls cluster auto-setup.
 # Ubuntu 24.04 ships 16; fall back if the image only has another major.
