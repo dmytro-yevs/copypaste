@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 from urllib.parse import quote
 import zipfile
+from typing import NamedTuple, Optional
 
 ROOT = Path(__file__).resolve().parents[2]
 PUBLIC_KEY = re.search(
@@ -23,6 +24,11 @@ REQUIRED_TARGETS = {
     ("android", "aarch64"), ("android", "arm"), ("android", "x86_64"),
 }
 MAXIMUM_BYTES = 2 * 1024 * 1024 * 1024
+
+
+class VerifiedPackage(NamedTuple):
+    manifest: dict
+    minimum_system_version: Optional[str]
 
 
 def sha256_stream(source):
@@ -121,7 +127,14 @@ def read_package(path, public_key=PUBLIC_KEY):
             raise ValueError("Invalid module target or entrypoint")
         if manifest["entrypoint"] not in inventory:
             raise ValueError("Module entrypoint is missing")
-    return manifest
+        minimum = None
+        if "assets/module-distribution.json" in inventory:
+            if archive.getinfo("assets/module-distribution.json").file_size > 64 * 1024:
+                raise ValueError("Module distribution metadata is too large")
+            distribution = json.loads(archive.read("assets/module-distribution.json"))
+            minimum = distribution["minimum_system_versions"][platform]
+            version_tuple(minimum)
+    return VerifiedPackage(manifest, minimum)
 
 
 def version_tuple(version):
@@ -138,7 +151,8 @@ def build_catalog(packages, release_tag, previous=None, public_key=PUBLIC_KEY):
     targets = set()
     module = None
     for path in sorted(map(Path, packages)):
-        manifest = read_package(path, public_key)
+        verified = read_package(path, public_key)
+        manifest = verified.manifest
         metadata = {key: manifest[key] for key in ("id", "title", "description", "version", "app_versions")}
         if not metadata["title"].strip() or len(metadata["title"]) > 200 or not metadata["description"].strip() or len(metadata["description"]) > 4000:
             raise ValueError("Invalid module description")
@@ -156,6 +170,7 @@ def build_catalog(packages, release_tag, previous=None, public_key=PUBLIC_KEY):
         module["artifacts"].append({
             **target, "url": f"{REPOSITORY}/{quote(release_tag, safe='')}/{quote(path.name, safe='')}",
             "size_bytes": path.stat().st_size, "sha256": digest,
+            **({"minimum_system_version": verified.minimum_system_version} if verified.minimum_system_version else {}),
         })
     if module is None or not REQUIRED_TARGETS <= targets:
         raise ValueError("Qualified packages are required for every shipped platform and Android ABI")
