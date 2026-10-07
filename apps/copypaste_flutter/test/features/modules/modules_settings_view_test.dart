@@ -10,6 +10,197 @@ import 'package:copypaste_flutter/features/modules/view/modules_settings_view.da
 import 'modules_test_support.dart';
 
 void main() {
+  for (final (platform, width) in [
+    (TargetPlatform.android, 320.0),
+    (TargetPlatform.macOS, 1000.0),
+    (TargetPlatform.windows, 1000.0),
+  ]) {
+    testWidgets('OCR uses the same management card in both sections', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(Size(width, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      const ocr = InstalledModule(
+        id: 'copypaste.ocr',
+        title: 'OCR',
+        description: 'Recognize text from images.',
+        version: '0.1.0',
+        enabled: true,
+        sizeBytes: 10,
+        commands: [
+          ModuleCommand(
+            id: 'recognize-image',
+            title: 'Recognize image text',
+            description: '',
+            arguments: [],
+          ),
+        ],
+        preferenceFields: [],
+        preferences: {},
+      );
+      final repository = MemoryModulesRepository()..modules = [ocr];
+      final marketplace = MemoryModuleMarketplace()
+        ..modules = [
+          MarketplaceModule(
+            id: ocr.id,
+            title: ocr.title,
+            description: ocr.description,
+            version: Version.parse(ocr.version),
+            artifact: testMarketplaceModule.artifact,
+          ),
+        ];
+      final controller = ModulesController(
+        repository: repository,
+        marketplace: marketplace,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: Scaffold(
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                child: ModulesSettingsView(controller: controller),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final card = find.byKey(const ValueKey('module-copypaste.ocr'));
+      final remove = find.byKey(const ValueKey('module-remove-copypaste.ocr'));
+      final settings = find.byKey(
+        const ValueKey('module-settings-copypaste.ocr'),
+      );
+      final marketplaceSize = tester.getSize(card);
+      expect(
+        find.descendant(of: card, matching: find.byType(Button)),
+        findsNWidgets(2),
+      );
+      expect(tester.widget<Button>(remove).child, isA<Icon>());
+      expect(tester.widget<Button>(settings).child, isA<Icon>());
+      expect(find.text('Recognize image text'), findsNothing);
+      expect(find.byType(Switch), findsNothing);
+      await tester.tap(find.text('Installed'));
+      await tester.pumpAndSettle();
+      expect(tester.getSize(card), marketplaceSize);
+      expect(
+        find.descendant(of: card, matching: find.byType(Button)),
+        findsNWidgets(2),
+      );
+      await tester.tap(settings);
+      await tester.pumpAndSettle();
+      expect(find.text('OCR settings'), findsOneWidget);
+      expect(find.text('Recognize image text'), findsNothing);
+      expect(find.byType(Switch), findsOneWidget);
+      await tester.tap(find.byType(Switch));
+      await tester.pumpAndSettle();
+      expect(repository.calls, ['enabled:false']);
+      expect(tester.takeException(), isNull);
+    }, variant: TargetPlatformVariant({platform}));
+  }
+
+  testWidgets('restart-required removal is managed through settings', (
+    tester,
+  ) async {
+    final module = InstalledModule(
+      id: testModule.id,
+      title: testModule.title,
+      description: testModule.description,
+      version: testModule.version,
+      enabled: false,
+      sizeBytes: testModule.sizeBytes,
+      commands: const [],
+      preferenceFields: const [],
+      preferences: const {},
+      restartRequired: true,
+    );
+    var restarts = 0;
+    final controller = ModulesController(
+      repository: MemoryModulesRepository()..modules = [module],
+      marketplace: MemoryModuleMarketplace(),
+      restart: () async {
+        restarts++;
+      },
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.selectSection(ModulesSection.installed);
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: Scaffold(
+          child: SingleChildScrollView(
+            child: ModulesSettingsView(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<Button>(
+            find.byKey(const ValueKey('module-remove-copypaste.text-tools')),
+          )
+          .onPressed,
+      isNull,
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('module-settings-copypaste.text-tools')),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(find.byType(Switch)).onChanged, isNull);
+    await tester.tap(find.text('Restart CopyPaste'));
+    await tester.pumpAndSettle();
+    expect(restarts, 1);
+  });
+
+  testWidgets('an installed module is updated from settings', (tester) async {
+    final repository = MemoryModulesRepository()..modules = [testModule];
+    final marketplace = MemoryModuleMarketplace()
+      ..modules = [
+        MarketplaceModule(
+          id: testModule.id,
+          title: testModule.title,
+          description: testModule.description,
+          version: Version.parse('1.1.0'),
+          artifact: testMarketplaceModule.artifact,
+        ),
+      ];
+    final controller = ModulesController(
+      repository: repository,
+      marketplace: marketplace,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: Scaffold(
+          child: SingleChildScrollView(
+            child: ModulesSettingsView(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Update to 1.1.0'), findsNothing);
+    await tester.tap(
+      find.byKey(const ValueKey('module-settings-copypaste.text-tools')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Update to 1.1.0'));
+    await tester.pumpAndSettle();
+    expect(repository.calls, ['install']);
+    expect(marketplace.disposedPackages, 1);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'unsupported versions render a normal module card with installation disabled',
     (tester) async {
@@ -94,19 +285,41 @@ void main() {
       await tester.enterText(find.byType(TextField), 'transform');
       await tester.pumpAndSettle();
       expect(find.text('Text Tools'), findsOneWidget);
+      final install = find.byKey(
+        const ValueKey('module-install-copypaste.text-tools'),
+      );
+      final card = tester.widget<Card>(
+        find.byKey(const ValueKey('module-copypaste.text-tools')),
+      );
+      expect(
+        tester.getSize(install).width,
+        tester.getSize(find.byWidget(card.child)).width,
+      );
       await tester.tap(find.widgetWithText(Button, 'Install'));
       await tester.pumpAndSettle();
       expect(repository.calls, ['install']);
       expect(marketplace.disposedPackages, 1);
+      expect(install, findsNothing);
       expect(
-        tester
-            .widget<Button>(find.widgetWithText(Button, 'Installed'))
-            .onPressed,
-        isNull,
+        find.byKey(const ValueKey('module-remove-copypaste.text-tools')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('module-settings-copypaste.text-tools')),
+        findsOneWidget,
+      );
+      final marketplaceCardSize = tester.getSize(
+        find.byKey(const ValueKey('module-copypaste.text-tools')),
       );
       await tester.tap(find.text('Installed').first);
       await tester.pumpAndSettle();
-      expect(find.text('Transform text'), findsOneWidget);
+      expect(find.text('Transform text'), findsNothing);
+      expect(
+        tester.getSize(
+          find.byKey(const ValueKey('module-copypaste.text-tools')),
+        ),
+        marketplaceCardSize,
+      );
       expect(tester.takeException(), isNull);
     });
   }
@@ -139,6 +352,10 @@ void main() {
     await tester.tap(find.text('Installed'));
     await tester.pumpAndSettle();
     expect(find.text('Text Tools'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const ValueKey('module-settings-copypaste.text-tools')),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.byType(Switch));
     await tester.pumpAndSettle();
     expect(repository.calls, ['enabled:false']);
@@ -172,9 +389,14 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Text Tools'), findsOneWidget);
-      await tester.tap(find.text('Settings'));
+      await tester.tap(
+        find.byKey(const ValueKey('module-settings-copypaste.text-tools')),
+      );
       await tester.pumpAndSettle();
       expect(find.text('Text Tools settings'), findsOneWidget);
+      await tester.tap(find.text('Preferences'));
+      await tester.pumpAndSettle();
+      expect(find.text('Text Tools preferences'), findsOneWidget);
       await tester.tap(find.byType(Switch).last);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Save'));
@@ -193,9 +415,13 @@ void main() {
       expect(repository.lastArguments, {'text': 'Україна'});
       expect(find.text('УКРАЇНА'), findsOneWidget);
       expect(tester.takeException(), isNull);
-      await tester.tap(find.text('Done'));
+      await tester.tap(find.widgetWithText(Button, 'Done').last);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Remove'));
+      await tester.tap(find.widgetWithText(Button, 'Done'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('module-remove-copypaste.text-tools')),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(Button, 'Remove').last);
       await tester.pumpAndSettle();
