@@ -26,6 +26,70 @@ abstract final class AppTheme {
   static const lightSidebarSurface = Color(0xFFF9F9F9);
   static const darkSidebarSurface = Color(0xFF1B1B1B);
 
+  static const mobileNavigationMargin = EdgeInsets.symmetric(
+    horizontal: AppSpacing.lg,
+    vertical: AppSpacing.sm,
+  );
+
+  static const mobileNavigationPadding = EdgeInsets.all(AppSpacing.xs);
+
+  static OutlinedContainerTheme mobileNavigationSurfaceTheme(
+    BuildContext context,
+  ) {
+    final theme = Theme.of(context);
+    return OutlinedContainerTheme(
+      backgroundColor: theme.colorScheme.secondary,
+      borderColor: theme.colorScheme.border,
+      borderRadius: const BorderRadius.all(Radius.circular(AppRadius.full)),
+      padding: EdgeInsets.zero,
+      boxShadow: [
+        BoxShadow(
+          color: theme.brightness == Brightness.dark
+              ? Colors.black.withValues(alpha: 0.3)
+              : theme.colorScheme.foreground.withValues(alpha: 0.07),
+          blurRadius: AppSpacing.lg,
+          offset: const Offset(0, AppSpacing.xs),
+        ),
+      ],
+    );
+  }
+
+  static AbstractButtonStyle mobileNavigationButtonStyle({
+    required bool selected,
+  }) {
+    const padding = EdgeInsets.all((AppControlSize.touch - AppIconSize.md) / 2);
+    return (selected
+            ? const ButtonStyle.secondary()
+            : const ButtonStyle.ghost())
+        .withPadding(padding: padding)
+        .withBorderRadius(
+          borderRadius: const BorderRadius.all(Radius.circular(AppRadius.full)),
+        )
+        .copyWith(
+          decoration: (context, states, value) {
+            if (!selected || value is! BoxDecoration) return value;
+            return value.copyWith(color: Theme.of(context).colorScheme.accent);
+          },
+          textStyle: (context, states, value) => value.copyWith(
+            color: selected
+                ? navigationAccent
+                : states.contains(WidgetState.hovered) ||
+                      states.contains(WidgetState.focused)
+                ? Theme.of(context).colorScheme.foreground
+                : Theme.of(context).colorScheme.mutedForeground,
+          ),
+          iconTheme: (context, states, value) => value.copyWith(
+            size: AppIconSize.md,
+            color: selected
+                ? navigationAccent
+                : states.contains(WidgetState.hovered) ||
+                      states.contains(WidgetState.focused)
+                ? Theme.of(context).colorScheme.foreground
+                : Theme.of(context).colorScheme.mutedForeground,
+          ),
+        );
+  }
+
   static BoxDecoration historyPinnedDropDecoration(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return BoxDecoration(
@@ -80,6 +144,19 @@ abstract final class AppTheme {
         context,
       ).copyWith(fontSize: AppTypographySize.menuMetadata);
 
+  static TextStyle inspectorTextStyle(
+    BuildContext context, {
+    bool compact = false,
+  }) => DefaultTextStyle.of(context).style.merge(
+    compact
+        ? clipboardMetadataTextStyle(context)
+        : Theme.of(context).typography.xSmall,
+  );
+
+  static const inspectorCellPadding = EdgeInsets.all(AppSpacing.sm);
+
+  static const inspectorCellAlignment = Alignment.centerLeft;
+
   static TextStyle historyMetadataTextStyle(BuildContext context) {
     final theme = Theme.of(context);
     return DefaultTextStyle.of(context).style
@@ -111,6 +188,13 @@ abstract final class AppTheme {
 
   static const clipboardInspectorCardTheme = CardTheme(
     borderRadius: BorderRadius.all(Radius.circular(AppRadius.lg)),
+  );
+
+  static const deviceListRowTheme = BasicTheme(
+    leadingAlignment: Alignment.center,
+    trailingAlignment: Alignment.center,
+    contentSpacing: AppSpacing.md,
+    padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
   );
 
   static ThemeData clipboardSearchTheme(BuildContext context) {
@@ -236,11 +320,19 @@ abstract final class AppTheme {
   );
 
   static final _typography = const Typography.geist().copyWith(
-    sans: () => const TextStyle(),
-    mono: () => const TextStyle(fontFamily: 'monospace'),
+    sans: () =>
+        const TextStyle(leadingDistribution: TextLeadingDistribution.even),
+    mono: () => const TextStyle(
+      fontFamily: 'monospace',
+      leadingDistribution: TextLeadingDistribution.even,
+    ),
     xSmall: () => const TextStyle(fontSize: 12, height: 4 / 3),
     small: () => const TextStyle(fontSize: 14, height: 10 / 7),
-    base: () => const TextStyle(fontSize: 14, height: 10 / 7),
+    base: () => const TextStyle(
+      fontSize: 14,
+      height: 10 / 7,
+      leadingDistribution: TextLeadingDistribution.even,
+    ),
     large: () => const TextStyle(fontSize: 16, height: 1.5),
     xLarge: () => const TextStyle(fontSize: 18, height: 4 / 3),
     x2Large: () => const TextStyle(fontSize: 20, height: 1.3),

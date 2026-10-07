@@ -96,7 +96,8 @@ impl AuthenticatedReachability {
             ProbeState::Online => PROBE_REFRESH_LEAD_MS,
             ProbeState::Offline | ProbeState::Unknown => 0,
         };
-        !self.is_current_at(now_ms)
+        (self.state == ProbeState::Online && self.latency_ms.is_none())
+            || !self.is_current_at(now_ms)
             || matches!(
                 self.fresh_until_ms,
                 Some(fresh_until_ms)
@@ -106,6 +107,37 @@ impl AuthenticatedReachability {
 }
 
 impl Node {
+    /// Maintains RTT independently of UI reads for the lifetime of the listener.
+    /// Existing freshness and in-flight guards coalesce every renewal batch.
+    pub(super) async fn monitor_reachability<F>(
+        self: Arc<Self>,
+        on_complete: F,
+        mut shutdown: tokio::sync::watch::Receiver<bool>,
+    ) where
+        F: Fn() + Send + Sync + Clone + 'static,
+    {
+        let mut tick = tokio::time::interval(Duration::from_secs(1));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            if *shutdown.borrow() {
+                return;
+            }
+            tokio::select! {
+                biased;
+                _ = shutdown.changed() => return,
+                _ = tick.tick() => {
+                    let notify = on_complete.clone();
+                    let completion_shutdown = shutdown.clone();
+                    self.refresh_reachability(self.peers().list(), move || {
+                        if !*completion_shutdown.borrow() {
+                            notify();
+                        }
+                    });
+                }
+            }
+        }
+    }
+
     /// Starts at most one content-free probe for each stale or nearly stale
     /// trusted peer.
     ///
@@ -166,7 +198,7 @@ impl Node {
     }
 
     /// Probes one known trusted endpoint. This is public for explicit callers;
-    /// normal listing uses [`Self::refresh_reachability`] for coalescing.
+    /// the system monitor uses [`Self::refresh_reachability`] for coalescing.
     pub async fn probe_one(&self, peer: &Peer) -> Result<AuthenticatedReachability, NodeError> {
         self.probe(peer).await
     }
@@ -327,6 +359,92 @@ mod tests {
     }
 
     #[test]
+    fn incoming_presence_does_not_erase_or_extend_a_local_rtt() {
+        let dir = tempfile::tempdir().unwrap();
+        let node = node(&dir);
+        let now = crate::now_ms();
+        let measured = AuthenticatedReachability::online(Some(24), now);
+        node.record_reachability("peer", measured.clone());
+        node.record_reachability("peer", AuthenticatedReachability::online(None, now + 1));
+        assert_eq!(node.authenticated_reachability("peer"), Some(measured));
+        let unmeasured = AuthenticatedReachability::online(None, now + PROBE_FRESH_MS + 1);
+        node.record_reachability("peer", unmeasured.clone());
+        assert_eq!(
+            node.authenticated_reachability("peer"),
+            Some(unmeasured.clone())
+        );
+        assert!(unmeasured.should_refresh_at(unmeasured.observed_at_ms));
+        node.record_reachability(
+            "peer",
+            AuthenticatedReachability::offline(now + PROBE_FRESH_MS + 2),
+        );
+        assert_eq!(
+            node.authenticated_reachability("peer").unwrap().state,
+            ProbeState::Offline
+        );
+    }
+
+    #[tokio::test]
+    async fn the_monitor_measures_and_renews_without_peer_reads_or_content_sync() {
+        let server_dir = tempfile::tempdir().unwrap();
+        let client_dir = tempfile::tempdir().unwrap();
+        let token = PairingToken::generate();
+        let server = node(&server_dir);
+        server.peers().upsert(peer(&token, None)).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let source = Arc::new(TestSource::new("server", Vec::new()));
+        let listener_task = tokio::spawn(listen(
+            server,
+            listener,
+            Arc::clone(&source),
+            |_, _| {},
+            || {},
+            shutdown_rx.clone(),
+        ));
+        let client = node(&client_dir);
+        let trusted = peer(&token, Some(address));
+        client.peers().upsert(trusted.clone()).unwrap();
+        let (complete_tx, mut complete_rx) = tokio::sync::mpsc::unbounded_channel();
+        let monitor = tokio::spawn(Arc::clone(&client).monitor_reachability(
+            move || {
+                complete_tx.send(()).unwrap();
+            },
+            shutdown_rx,
+        ));
+        tokio::time::timeout(Duration::from_secs(1), complete_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let first = client
+            .authenticated_reachability(&trusted.pairing_id)
+            .unwrap();
+        assert!(first.latency_ms.is_some());
+        assert!(first.is_current_at(crate::now_ms()));
+        assert!(!client.refresh_reachability([trusted.clone()], || panic!(
+            "fresh RTT must not be probed twice"
+        )));
+
+        client.record_reachability(
+            &trusted.pairing_id,
+            AuthenticatedReachability::online(first.latency_ms, crate::now_ms() - PROBE_FRESH_MS),
+        );
+        tokio::time::timeout(Duration::from_secs(2), complete_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let renewed = client
+            .authenticated_reachability(&trusted.pairing_id)
+            .unwrap();
+        assert!(renewed.is_current_at(crate::now_ms()));
+        assert!(renewed.latency_ms.is_some());
+        shutdown_tx.send(true).unwrap();
+        monitor.await.unwrap();
+        listener_task.await.unwrap();
+    }
+
+    #[test]
     fn observations_fail_closed_after_their_freshness_window() {
         let online = AuthenticatedReachability::online(Some(12), 100);
         assert_eq!(online.state_at(100), ProbeState::Online);
@@ -388,7 +506,7 @@ mod tests {
             listener,
             Arc::clone(&source),
             |_, _| {},
-            move |_| {
+            move || {
                 probe_notifications_callback.fetch_add(1, Ordering::Relaxed);
             },
             shutdown_rx,
@@ -473,7 +591,7 @@ mod tests {
             listener,
             Arc::new(TestSource::new("server", Vec::new())),
             |_, _| {},
-            |_| {},
+            || {},
             shutdown_rx,
         ));
 
@@ -608,7 +726,7 @@ mod tests {
             listener,
             Arc::new(TestSource::new("server", Vec::new())),
             |_, _| {},
-            |_| {},
+            || {},
             shutdown_rx,
         ));
 
@@ -676,7 +794,7 @@ mod tests {
             listener,
             Arc::new(TestSource::new("server", Vec::new())),
             |_, _| {},
-            |_| {},
+            || {},
             shutdown_rx,
         ));
         let client = node(&client_dir);

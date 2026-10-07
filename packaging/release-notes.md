@@ -1,14 +1,16 @@
-This update improves Android capture setup and automatic synchronization between paired devices.
+This update adds automatic Android screenshot capture and improves the shared interface, SMS module setup, and paired-device synchronization.
 
-- Retry Android capture setup from onboarding and Settings.
-- Synchronize paired devices automatically and show current sync activity in the shared interface.
-- Encrypt stored pairing keys and peer metadata with a device-specific key.
-- Refresh the shared Settings and History controls.
-- Correct update detection for Homebrew-installed macOS applications.
+- Save new Android screenshots to encrypted History automatically, with a Settings switch enabled by default.
+- Keep screenshot capture independent of Shizuku and preserve its setting across restarts.
+- Unify Android background capture and SMS module permission setup.
+- Refresh shared navigation, History inspectors, device controls, and application themes.
+- Improve paired-device connection and synchronization handling.
 
-Shizuku is used only to apply Android setup grants and can be removed afterward. Android 13 and later can still request temporary system log access when the capture process restarts; this is separate from the Shizuku permission.
+Screenshot capture requires access to all photos and Android notification permission. Existing screenshots are not imported. Private mode, application exclusions, and existing capture limits continue to apply.
 
-Optional modules are selected and installed from the first-party marketplace in Settings. Module cards show application and system version requirements; incompatible modules remain visible with installation disabled. OCR engines and models are not bundled with the application.
+Shizuku is used only to apply Android setup grants and can be removed afterward. Android 13 and later can still request temporary system log access when the clipboard capture process restarts; this is separate from the Shizuku permission.
+
+Optional modules are selected and installed from the first-party marketplace in Settings. OCR engines and models are not bundled with the application.
 
 Application exclusions on macOS use observed app activity; background copies can bypass them. Empty files and multiple-file clipboard selections remain unsupported.
 

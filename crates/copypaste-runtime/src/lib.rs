@@ -291,18 +291,6 @@ impl Runtime {
             }
             Method::Peers => {
                 let peers = self.node.peers().list();
-                let events = self.events.clone();
-                let store = self.store.clone();
-                self.node
-                    .refresh_reachability(peers.iter().cloned(), move || {
-                        let _ = events.send(EventData {
-                            sync_status: None,
-                            event: EventKind::Peers,
-                            item_count: store.count().unwrap_or(0),
-                            captured: false,
-                            captured_item_id: None,
-                        });
-                    });
                 Response::ok(
                     id,
                     ResponseData::Peers(
@@ -491,7 +479,7 @@ impl Runtime {
                     }
                     callback_runtime.emit(EventKind::Peers);
                 },
-                move |_| probe_callback_runtime.emit(EventKind::Peers),
+                move || probe_callback_runtime.emit(EventKind::Peers),
                 shutdown,
             )
             .await;

@@ -1,4 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
+import 'dart:async';
+import 'package:copypaste_flutter/platform/android/android_shizuku_state.dart';
+import 'package:copypaste_flutter/features/modules/controller/sms_access_setup_controller.dart';
+import 'package:copypaste_flutter/features/modules/view/sms_access_setup_dialog.dart';
+import 'package:copypaste_flutter/shared/android_access_setup.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
@@ -25,13 +31,57 @@ const sms = InstalledModule(
 class Access implements ModuleAccessRepository {
   bool granted = false;
   bool starts = true;
+  bool notifications = true;
+  bool supported = true;
+  bool installed = true;
+  bool running = true;
+  bool permission = false;
+  bool refusesGrants = false;
+  bool refusesNotifications = false;
+  int grants = 0;
+  int opens = 0;
+  int reads = 0;
+  bool failsRead = false;
+  Completer<SmsModuleAccessState>? pendingRead;
   int synchronizations = 0;
   @override
-  Future<SmsModuleAccessState> smsState() async =>
-      SmsModuleAccessState(granted: granted, adbCommands: 'adb shell test');
+  Future<SmsModuleAccessState> smsState() async {
+    reads++;
+    if (failsRead) throw const ModulesException('State unavailable.');
+    final pending = pendingRead;
+    if (pending != null) {
+      pendingRead = null;
+      return pending.future;
+    }
+    return SmsModuleAccessState(
+      smsGranted: granted,
+      notificationGranted: notifications,
+      shizuku: AndroidShizukuState(
+        supported: supported,
+        installed: installed,
+        running: running,
+        permission: permission,
+      ),
+      adbCommands: 'adb shell test\nadb shell otp',
+    );
+  }
+
+  @override
+  Future<bool> openShizuku() async {
+    opens++;
+    return true;
+  }
+
+  @override
+  Future<SmsModuleAccessState> requestSmsNotifications() async {
+    notifications = !refusesNotifications;
+    return smsState();
+  }
+
   @override
   Future<SmsModuleAccessState> configureSms() async {
-    granted = true;
+    grants++;
+    granted = !refusesGrants;
     return smsState();
   }
 
@@ -77,10 +127,28 @@ void main() {
         find.byKey(const ValueKey('module-settings-copypaste.sms-codes')),
       );
       await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.widgetWithText(Button, 'Set up SMS access'),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(Button, 'Set up SMS access'));
       await tester.pumpAndSettle();
-      expect(find.text('adb shell test'), findsOneWidget);
-      await tester.tap(find.widgetWithText(Button, 'Apply with Shizuku'));
+      expect(find.byType(AndroidAccessSetup), findsOneWidget);
+      expect(find.byType(SelectableText), findsNothing);
+      await tester.ensureVisible(find.text('ADB'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('ADB'));
+      await tester.pumpAndSettle();
+      expect(find.text('adb shell test\nadb shell otp'), findsOneWidget);
+      await tester.ensureVisible(find.text('Shizuku'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Shizuku'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.widgetWithText(Button, 'Allow CopyPaste'),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(Button, 'Allow CopyPaste'));
       await tester.pumpAndSettle();
       expect(
         find.text(
@@ -88,7 +156,11 @@ void main() {
         ),
         findsOneWidget,
       );
+      await tester.ensureVisible(find.widgetWithText(Button, 'Done').last);
+      await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(Button, 'Done').last);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byType(Switch));
       await tester.pumpAndSettle();
       await tester.tap(find.byType(Switch));
       await tester.pumpAndSettle();
@@ -96,6 +168,241 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+  for (final state in ['missing', 'stopped', 'unsupported', 'ready']) {
+    testWidgets('SMS setup handles Shizuku $state', (tester) async {
+      final access = Access()
+        ..installed = state != 'missing'
+        ..running = state != 'missing' && state != 'stopped'
+        ..supported = state != 'unsupported'
+        ..granted = state == 'ready';
+      final setup = SmsAccessSetupController(access: access);
+      addTearDown(setup.dispose);
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: SmsAccessSetupDialog(controller: setup),
+        ),
+      );
+      await tester.pumpAndSettle();
+      if (state == 'missing' || state == 'stopped') {
+        final label = state == 'missing' ? 'Get Shizuku' : 'Open Shizuku';
+        await tester.ensureVisible(find.widgetWithText(Button, label));
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(Button, label));
+        await tester.pumpAndSettle();
+        expect(access.opens, 1);
+        expect(access.grants, 0);
+      } else if (state == 'unsupported') {
+        expect(find.text('Use the ADB tab on this device.'), findsOneWidget);
+      } else {
+        expect(find.text('One-time access applied'), findsOneWidget);
+        expect(find.text('Allow CopyPaste'), findsNothing);
+      }
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
+  testWidgets('ADB grants update live and commands copy as one block', (
+    tester,
+  ) async {
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map)['text'] as String;
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    final access = Access();
+    final setup = SmsAccessSetupController(access: access);
+    addTearDown(setup.dispose);
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: SmsAccessSetupDialog(controller: setup),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('ADB'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('ADB'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byIcon(LucideIcons.copy));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(LucideIcons.copy));
+    await tester.pumpAndSettle();
+    expect(copied, 'adb shell test\nadb shell otp');
+    expect(find.byIcon(LucideIcons.copyCheck), findsOneWidget);
+    expect(setup.state?.granted, isFalse);
+    access.granted = true;
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(setup.state?.granted, isTrue);
+    expect(access.grants, 0);
+    await tester.pumpWidget(const SizedBox.shrink());
+    final reads = access.reads;
+    await tester.pump(const Duration(seconds: 2));
+    expect(access.reads, reads);
+  });
+
+  testWidgets(
+    'SMS notifications and access fit small screens with large text',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(320, 640));
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      final access = Access()..notifications = false;
+      final setup = SmsAccessSetupController(access: access);
+      addTearDown(setup.dispose);
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: SmsAccessSetupDialog(controller: setup),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.ensureVisible(find.widgetWithText(Button, 'Allow'));
+      await tester.ensureVisible(find.widgetWithText(Button, 'Allow'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(Button, 'Allow'));
+      await tester.pumpAndSettle();
+      expect(setup.state?.notificationGranted, isTrue);
+      await tester.ensureVisible(find.text('ADB'));
+      await tester.ensureVisible(find.text('ADB'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('ADB'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets('denied SMS grants never show ready or enable the module', (
+    tester,
+  ) async {
+    final access = Access()..refusesGrants = true;
+    final setup = SmsAccessSetupController(access: access);
+    addTearDown(setup.dispose);
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: SmsAccessSetupDialog(controller: setup),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.widgetWithText(Button, 'Allow CopyPaste'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(Button, 'Allow CopyPaste'));
+    await tester.pumpAndSettle();
+    expect(find.text('SMS access was not granted.'), findsOneWidget);
+    expect(find.text('One-time access applied'), findsNothing);
+    expect(setup.state?.granted, isFalse);
+    final repository = MemoryModulesRepository()..modules = [sms];
+    final modules = ModulesController(
+      repository: repository,
+      marketplace: MemoryModuleMarketplace(),
+      access: access,
+    );
+    addTearDown(modules.dispose);
+    await modules.initialize();
+    await modules.setEnabled(sms.id, true);
+    expect(repository.calls, isEmpty);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('authorized Shizuku applies SMS grants once', (tester) async {
+    final access = Access()
+      ..permission = true
+      ..refusesGrants = true;
+    final setup = SmsAccessSetupController(access: access);
+    addTearDown(setup.dispose);
+    await tester.pumpWidget(
+      ShadcnApp(home: SmsAccessSetupDialog(controller: setup)),
+    );
+    await tester.pumpAndSettle();
+    expect(access.grants, 1);
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pumpAndSettle();
+    expect(access.grants, 1);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('monitoring stops while paused and refreshes on resume', (
+    tester,
+  ) async {
+    final access = Access();
+    final setup = SmsAccessSetupController(access: access);
+    addTearDown(setup.dispose);
+    setup.setMonitoring(true);
+    await tester.pump();
+    setup.setMonitoring(false);
+    final reads = access.reads;
+    access.granted = true;
+    await tester.pump(const Duration(seconds: 3));
+    expect(access.reads, reads);
+    expect(setup.state?.granted, isFalse);
+    setup.setMonitoring(true);
+    await tester.pump();
+    expect(setup.state?.granted, isTrue);
+    setup.setMonitoring(false);
+  });
+
+  test(
+    'failed state reads recover without retaining a stale setup error',
+    () async {
+      final access = Access()..failsRead = true;
+      final setup = SmsAccessSetupController(access: access);
+      addTearDown(setup.dispose);
+      await setup.refresh();
+      expect(setup.errorMessage, contains('could not be verified'));
+      access.failsRead = false;
+      await setup.refresh();
+      expect(setup.errorMessage, isNull);
+      expect(setup.state?.granted, isFalse);
+    },
+  );
+
+  test('a slow refresh cannot overwrite newly applied grants', () async {
+    final access = Access();
+    final before = await access.smsState();
+    final pending = Completer<SmsModuleAccessState>();
+    access.pendingRead = pending;
+    final setup = SmsAccessSetupController(access: access);
+    addTearDown(setup.dispose);
+    final reading = setup.refresh();
+    await setup.applyAccess();
+    expect(setup.state?.granted, isTrue);
+    pending.complete(before);
+    await reading;
+    expect(setup.state?.granted, isTrue);
+  });
+
+  test('refused notifications keep SMS access incomplete', () async {
+    final access = Access()
+      ..granted = true
+      ..notifications = false
+      ..refusesNotifications = true;
+    final setup = SmsAccessSetupController(access: access);
+    addTearDown(setup.dispose);
+    await setup.requestNotifications();
+    expect(setup.state?.granted, isFalse);
+    expect(setup.errorMessage, contains('Allow notifications'));
+  });
+
   test(
     'requires verified SMS access before enabling and synchronizes disable and removal',
     () async {
@@ -111,7 +418,9 @@ void main() {
       await controller.setEnabled(sms.id, true);
       expect(repository.calls, isEmpty);
       expect(controller.errorMessage, contains('Set up SMS access'));
-      await controller.configureSmsAccess();
+      final setup = controller.smsAccessSetup();
+      addTearDown(setup.dispose);
+      await setup.applyAccess();
       await controller.setEnabled(sms.id, true);
       expect(controller.modules.single.enabled, isTrue);
       await controller.setEnabled(sms.id, false);
@@ -121,6 +430,23 @@ void main() {
       expect(access.synchronizations, greaterThanOrEqualTo(4));
     },
   );
+  test('SMS grants without notifications cannot enable monitoring', () async {
+    final repository = MemoryModulesRepository()..modules = [sms];
+    final access = Access()
+      ..granted = true
+      ..notifications = false;
+    final modules = ModulesController(
+      repository: repository,
+      marketplace: MemoryModuleMarketplace(),
+      access: access,
+    );
+    addTearDown(modules.dispose);
+    await modules.initialize();
+    await modules.setEnabled(sms.id, true);
+    expect(repository.calls, isEmpty);
+    expect(modules.errorMessage, contains('Set up SMS access'));
+  });
+
   test('failed monitoring startup rolls back enabled state', () async {
     final repository = MemoryModulesRepository()..modules = [sms];
     final access = Access()..granted = true;

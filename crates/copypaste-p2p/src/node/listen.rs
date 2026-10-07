@@ -47,7 +47,7 @@ pub async fn listen<S, F, P>(
 ) where
     S: SyncSource + Send + Sync + 'static,
     F: Fn(&str, &SyncOutcome) + Send + Sync + Clone + 'static,
-    P: Fn(&str) + Send + Sync + Clone + 'static,
+    P: Fn() + Send + Sync + Clone + 'static,
 {
     match listener.local_addr() {
         Ok(addr) => node.set_listen_addr(addr),
@@ -55,10 +55,14 @@ pub async fn listen<S, F, P>(
     }
     info!(port = node.port(), "peer listener started");
     let mut sessions = tokio::task::JoinSet::new();
+    let monitor = Arc::clone(&node).monitor_reachability(on_probe.clone(), shutdown.clone());
+    tokio::pin!(monitor);
 
     loop {
         tokio::select! {
+            biased;
             _ = shutdown.changed() => break,
+            _ = &mut monitor => break,
             Some(_) = sessions.join_next() => {}
             accepted = listener.accept() => match accepted {
                 Ok((stream, addr)) => {
@@ -95,7 +99,7 @@ async fn serve_peer<S, F, P>(
 ) where
     S: SyncSource,
     F: Fn(&str, &SyncOutcome),
-    P: Fn(&str),
+    P: Fn(),
 {
     let mut candidates = node.peers().psks();
     let pending = node.pairing_candidate();
@@ -157,7 +161,7 @@ async fn serve_peer<S, F, P>(
                     // The inbound source port belongs to this probe, not to
                     // the peer listener. Preserve the authenticated endpoint.
                     node.touch_peer(&peer, None, None, None);
-                    on_probe(&pairing_id);
+                    on_probe();
                 }
             }
             Err(error) => debug!(%pairing_id, %error, "peer liveness probe failed"),
@@ -259,7 +263,7 @@ mod tests {
             TcpListener::from_std(receiver_listener).unwrap(),
             Arc::new(TestSource::new("receiver", vec![])),
             |_, _| {},
-            move |_| {
+            move || {
                 let _ = completed.send(());
             },
             rx,
@@ -319,7 +323,7 @@ mod tests {
             listener,
             source,
             |_: &str, _: &SyncOutcome| {},
-            |_| {},
+            || {},
             shutdown,
         ));
         (addr, token.to_code())
@@ -360,7 +364,7 @@ mod tests {
             listener,
             Arc::new(TestSource::new("empty", Vec::new())),
             |_: &str, _: &SyncOutcome| {},
-            |_| {},
+            || {},
             rx,
         ));
 
@@ -409,7 +413,7 @@ mod tests {
             listener,
             Arc::clone(&a_source),
             |_: &str, _: &SyncOutcome| {},
-            |_| {},
+            || {},
             shutdown_rx,
         ));
 
@@ -508,7 +512,7 @@ mod tests {
             listener,
             Arc::new(TestSource::new("desktop", Vec::new())),
             |_: &str, _: &SyncOutcome| {},
-            |_| {},
+            || {},
             shutdown,
         ));
 
@@ -609,7 +613,7 @@ mod tests {
             listener,
             Arc::new(TestSource::new("stopper", Vec::new())),
             |_: &str, _: &SyncOutcome| {},
-            |_| {},
+            || {},
             rx,
         ));
         tx.send(true).unwrap();

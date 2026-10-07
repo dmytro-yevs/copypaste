@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0-beta.5";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 202947649;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1414865272;
 
 // Section: executor
 
@@ -1470,7 +1470,7 @@ fn wire__crate__api__restore_history_impl(
         },
     )
 }
-fn wire__crate__api__reveal_pairing_qr_impl(
+fn wire__crate__api__reveal_pairing_invitation_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -1478,7 +1478,7 @@ fn wire__crate__api__reveal_pairing_qr_impl(
 ) {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "reveal_pairing_qr",
+            debug_name: "reveal_pairing_invitation",
             port: Some(port_),
             mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
         },
@@ -1497,7 +1497,8 @@ fn wire__crate__api__reveal_pairing_qr_impl(
             move |context| async move {
                 transform_result_sse::<_, crate::api::RuntimeError>(
                     (move || async move {
-                        let output_ok = crate::api::reveal_pairing_qr(api_ceremony_id).await?;
+                        let output_ok =
+                            crate::api::reveal_pairing_invitation(api_ceremony_id).await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -3003,6 +3004,20 @@ impl SseDecode for crate::api::PairingCeremony {
     }
 }
 
+impl SseDecode for crate::api::PairingInvitation {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_qrPng = <Vec<u8>>::sse_decode(deserializer);
+        let mut var_code = <String>::sse_decode(deserializer);
+        let mut var_address = <Option<String>>::sse_decode(deserializer);
+        return crate::api::PairingInvitation {
+            qr_png: var_qrPng,
+            code: var_code,
+            address: var_address,
+        };
+    }
+}
+
 impl SseDecode for crate::api::Peer {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3281,7 +3296,7 @@ fn pde_ffi_dispatcher_primary_impl(
         37 => wire__crate__api__reorder_pinned_clips_impl(port, ptr, rust_vec_len, data_len),
         38 => wire__crate__api__rescan_devices_impl(port, ptr, rust_vec_len, data_len),
         39 => wire__crate__api__restore_history_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__api__reveal_pairing_qr_impl(port, ptr, rust_vec_len, data_len),
+        40 => wire__crate__api__reveal_pairing_invitation_impl(port, ptr, rust_vec_len, data_len),
         41 => wire__crate__api__reveal_pairing_sas_impl(port, ptr, rust_vec_len, data_len),
         42 => wire__crate__api__revoke_device_impl(port, ptr, rust_vec_len, data_len),
         43 => {
@@ -3914,6 +3929,25 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::PairingCeremony>
     for crate::api::PairingCeremony
 {
     fn into_into_dart(self) -> crate::api::PairingCeremony {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::PairingInvitation {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.qr_png.into_into_dart().into_dart(),
+            self.code.into_into_dart().into_dart(),
+            self.address.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::PairingInvitation {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::PairingInvitation>
+    for crate::api::PairingInvitation
+{
+    fn into_into_dart(self) -> crate::api::PairingInvitation {
         self
     }
 }
@@ -4854,6 +4888,15 @@ impl SseEncode for crate::api::PairingCeremony {
         <Option<u64>>::sse_encode(self.expires_in_ms, serializer);
         <Option<String>>::sse_encode(self.peer_name, serializer);
         <Option<String>>::sse_encode(self.failure_message, serializer);
+    }
+}
+
+impl SseEncode for crate::api::PairingInvitation {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Vec<u8>>::sse_encode(self.qr_png, serializer);
+        <String>::sse_encode(self.code, serializer);
+        <Option<String>>::sse_encode(self.address, serializer);
     }
 }
 

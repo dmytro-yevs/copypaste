@@ -1,9 +1,8 @@
 //! Rust-held pairing ceremony state.
 //!
-//! Generated invitations and SAS values stay in Rust. Flutter receives a random
-//! ceremony id and sanitized progress. A user-entered join code crosses the
-//! bridge only from a capture-protected, obscured input and is consumed by the
-//! backend together with the required endpoint; it is never returned or logged.
+//! Ordinary progress contains only a random ceremony id and sanitized state.
+//! The active pairing inspector explicitly reveals a fresh invitation or bound
+//! SAS. A user-entered join code is consumed with its endpoint and never logged.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -11,7 +10,7 @@ use std::sync::{Mutex, OnceLock};
 use copypaste_ipc::{Method, PairingProgressData, ResponseData};
 use uuid::Uuid;
 
-use crate::api::{PairingCeremony, RuntimeError};
+use crate::api::{PairingCeremony, PairingInvitation, RuntimeError};
 
 struct SecretCeremony {
     invitation: Option<copypaste_ipc::PairingInviteData>,
@@ -152,8 +151,28 @@ pub(crate) async fn confirm(
     Ok(public)
 }
 
-pub(crate) async fn reveal_qr_for_flutter(ceremony_id: &str) -> Result<Vec<u8>, RuntimeError> {
-    let (expected_pairing_id, payload) = {
+pub(crate) async fn reveal_invitation_for_flutter(
+    ceremony_id: &str,
+) -> Result<PairingInvitation, RuntimeError> {
+    reveal_invitation_with_progress(ceremony_id, || async {
+        let response = crate::client::request(Method::PairProgress).await?;
+        let Some(ResponseData::PairingProgress(progress)) = response.data else {
+            return Err(RuntimeError::internal());
+        };
+        Ok(progress)
+    })
+    .await
+}
+
+async fn reveal_invitation_with_progress<F, Fut>(
+    ceremony_id: &str,
+    progress_request: F,
+) -> Result<PairingInvitation, RuntimeError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<PairingProgressData, RuntimeError>>,
+{
+    let (expected_pairing_id, payload, code, address) = {
         let guard = ceremonies()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -165,17 +184,23 @@ pub(crate) async fn reveal_qr_for_flutter(ceremony_id: &str) -> Result<Vec<u8>, 
             .as_ref()
             .ok_or_else(protected_action_rejected)?;
         let payload = invitation_uri(invitation).ok_or_else(RuntimeError::internal)?;
-        (ceremony.pairing_id.clone(), payload)
+        (
+            ceremony.pairing_id.clone(),
+            payload,
+            invitation.code.clone(),
+            invitation.listen_addr.clone(),
+        )
     };
-    let response = crate::client::request(Method::PairProgress).await?;
-    let Some(ResponseData::PairingProgress(progress)) = response.data else {
-        return Err(RuntimeError::internal());
-    };
+    let progress = progress_request().await?;
     if !qr_progress_allows_reveal(&progress, &expected_pairing_id) {
         return Err(protected_action_rejected());
     }
     require(ceremony_id)?;
-    qr_png(&payload).ok_or_else(RuntimeError::internal)
+    Ok(PairingInvitation {
+        qr_png: qr_png(&payload).ok_or_else(RuntimeError::internal)?,
+        code,
+        address,
+    })
 }
 
 pub(crate) async fn reveal_sas_for_flutter(ceremony_id: &str) -> Result<String, RuntimeError> {
@@ -737,6 +762,84 @@ mod tests {
             known_device: None,
             error_code: None,
         }
+    }
+
+    #[tokio::test]
+    async fn flutter_invitation_details_share_the_qr_lifecycle_guard() {
+        let id = "test-flutter-invitation-details";
+        let token = copypaste_p2p::PairingToken::generate();
+        let code = token.to_code();
+        let pairing_id = token.pairing_id();
+        ceremonies().lock().unwrap().insert(
+            id.into(),
+            SecretCeremony {
+                invitation: Some(copypaste_ipc::PairingInviteData {
+                    code: code.clone(),
+                    pairing_id: pairing_id.clone(),
+                    listen_addr: Some("192.0.2.10:47654".into()),
+                    expires_in_secs: 60,
+                }),
+                pairing_id: pairing_id.clone(),
+                native_context: None,
+                generation: 1,
+                decision_in_flight: false,
+            },
+        );
+        let result = reveal_invitation_with_progress(id, || async {
+            Ok(progress(
+                &pairing_id,
+                Some(copypaste_ipc::PairingRole::Responder),
+                copypaste_ipc::PairingState::WaitingForPeer,
+                Some(1),
+            ))
+        })
+        .await
+        .unwrap();
+        assert_eq!(result.code, code);
+        assert_eq!(result.address.as_deref(), Some("192.0.2.10:47654"));
+        assert_eq!(&result.qr_png[..8], b"\x89PNG\r\n\x1a\n");
+        for state in [
+            copypaste_ipc::PairingState::Handshaking,
+            copypaste_ipc::PairingState::AwaitingConfirmation,
+            copypaste_ipc::PairingState::TimedOut,
+        ] {
+            assert!(reveal_invitation_with_progress(id, || async {
+                Ok(progress(
+                    &pairing_id,
+                    Some(copypaste_ipc::PairingRole::Responder),
+                    state,
+                    Some(1),
+                ))
+            })
+            .await
+            .is_err());
+        }
+        for (role, remaining) in [
+            (copypaste_ipc::PairingRole::Initiator, 1),
+            (copypaste_ipc::PairingRole::Responder, 0),
+        ] {
+            assert!(reveal_invitation_with_progress(id, || async {
+                Ok(progress(
+                    &pairing_id,
+                    Some(role),
+                    copypaste_ipc::PairingState::WaitingForPeer,
+                    Some(remaining),
+                ))
+            })
+            .await
+            .is_err());
+        }
+        assert!(reveal_invitation_with_progress(id, || async {
+            remove(id);
+            Ok(progress(
+                &pairing_id,
+                Some(copypaste_ipc::PairingRole::Responder),
+                copypaste_ipc::PairingState::WaitingForPeer,
+                Some(1),
+            ))
+        })
+        .await
+        .is_err());
     }
 
     #[test]

@@ -14,9 +14,10 @@ internal class AndroidSmsModuleChannel(private val activity: MainActivity, messe
     fun dispose() { channel.setMethodCallHandler(null); shizuku.dispose(); worker.shutdown() }
 
     private fun state(): Map<String, Any> = mapOf(
-        "granted" to (AndroidSmsAccess.granted(activity) && AndroidCaptureState.notificationGranted(activity)),
+        "smsGranted" to AndroidSmsAccess.granted(activity),
+        "notificationGranted" to AndroidCaptureState.notificationGranted(activity),
         "adbCommands" to AndroidSmsAccess.commands(activity).joinToString("\n") { "adb shell " + it.joinToString(" ") },
-        "shizukuRunning" to shizuku.facts().running,
+        "shizuku" to shizuku.facts().asMap(),
     )
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
