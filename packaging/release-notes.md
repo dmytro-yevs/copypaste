@@ -4,7 +4,7 @@ This update improves Android capture setup and automatic synchronization between
 - Synchronize paired devices automatically and show current sync activity in the shared interface.
 - Encrypt stored pairing keys and peer metadata with a device-specific key.
 - Refresh the shared Settings and History controls.
-- Allow macOS updates for supported direct installations.
+- Correct update detection for Homebrew-installed macOS applications.
 
 Shizuku is used only to apply Android setup grants and can be removed afterward. Android 13 and later can still request temporary system log access when the capture process restarts; this is separate from the Shizuku permission.
 
