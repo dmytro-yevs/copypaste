@@ -1,5 +1,6 @@
 package com.copypaste.app
 
+// JNI invokes run(long); proguard-rules.pro preserves this upcall and its implementations.
 internal fun interface CaptureCallback {
     fun run(limit: Long)
 }
