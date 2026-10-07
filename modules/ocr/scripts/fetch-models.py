@@ -23,19 +23,20 @@ def fetch(entry, destination):
         print(f"verified {target.name}")
         return
     target.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as temporary:
-        temporary_path = Path(temporary.name)
-        try:
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as temporary:
+            temporary_path = Path(temporary.name)
             with urllib.request.urlopen(entry["url"], timeout=120) as response:
                 while block := response.read(1024 * 1024):
                     temporary.write(block)
             temporary.flush()
-            if digest(temporary_path) != entry["sha256"]:
-                raise ValueError(f"checksum mismatch for {entry['path']}")
-            temporary_path.replace(target)
-        except BaseException:
+        if digest(temporary_path) != entry["sha256"]:
+            raise ValueError(f"checksum mismatch for {entry['path']}")
+        temporary_path.replace(target)
+    finally:
+        if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
-            raise
     print(f"fetched {target.name}")
 
 
@@ -80,17 +81,18 @@ def fetch_dictionary(entry, destination):
         print(f"verified {target.name}")
         return
     target.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        dir=target.parent, mode="w", encoding="utf-8", delete=False
-    ) as temporary:
-        temporary_path = Path(temporary.name)
-        try:
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=target.parent, mode="w", encoding="utf-8", delete=False
+        ) as temporary:
+            temporary_path = Path(temporary.name)
             temporary.write(content)
             temporary.flush()
-            temporary_path.replace(target)
-        except BaseException:
+        temporary_path.replace(target)
+    finally:
+        if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
-            raise
     print(f"generated {target.name}")
 
 
