@@ -54,6 +54,7 @@ abstract final class AppTypographySize {
 
 /// Shared dimensions for application layouts.
 abstract final class AppLayoutSize {
+  static const double onboardingContentMaxWidth = 440;
   static const double marketplaceCardMinWidth = 280;
   static const double quickPasteMenuWidth = 448;
   static const double quickPasteInspectorWidth = 360;
