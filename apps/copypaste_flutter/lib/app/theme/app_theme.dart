@@ -166,13 +166,17 @@ abstract final class AppTheme {
     padding: (context, states, value) => settingsRowPadding,
   );
 
-  static BoxDecoration settingsRowDecoration(
+  static OutlinedContainerTheme settingsRowTheme(
     BuildContext context, {
     required bool highlighted,
-  }) => BoxDecoration(
-    color: highlighted
+  }) => OutlinedContainerTheme(
+    backgroundColor: highlighted
         ? Theme.of(context).colorScheme.accent
         : Colors.transparent,
+    borderStyle: BorderStyle.none,
+    borderWidth: 0,
+    borderRadius: BorderRadius.zero,
+    padding: settingsRowPadding,
   );
 
   /// The shared ChatGPT application light palette.

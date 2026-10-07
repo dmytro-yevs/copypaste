@@ -18,6 +18,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.96"
+          components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: ./scripts/ci/install-postgresql-server.sh
       - run: python3 -m unittest scripts/test_release_safety.py
@@ -175,11 +176,16 @@ jobs:
         with:
           channel: stable
           flutter-version: ${{ steps.flutter.outputs.version }}
+          cache: true
       - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
         if: matrix.platform == 'android'
         with:
           distribution: temurin
           java-version: "25"
+      - uses: ./.github/actions/flutter-build-cache
+        with:
+          platform: ${{ matrix.platform }}
+          profile: debug
       - run: ./scripts/ci/verify-flutter-foundation.sh
         env:
           COPYPASTE_FLUTTER_BUILD_TARGET: ${{ matrix.target }}
