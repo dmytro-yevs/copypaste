@@ -39,6 +39,9 @@ impl ModuleHost {
     }
 
     pub fn has_sms_handler(&self) -> Result<bool, ModuleError> {
+        if ModuleTarget::current().is_none() {
+            return Ok(false);
+        }
         self.manager()?.has_sms_handler()
     }
 
@@ -47,6 +50,9 @@ impl ModuleHost {
         text: &str,
         publish: impl FnMut(&str) -> Result<(), ModuleError>,
     ) -> Result<bool, ModuleError> {
+        if ModuleTarget::current().is_none() {
+            return Ok(false);
+        }
         self.manager()?.dispatch_sms(text, publish)
     }
 

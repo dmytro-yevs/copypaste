@@ -1,7 +1,10 @@
-This update repairs Android clipboard capture in the optimized release APK.
+This update improves Android capture setup and automatic synchronization between paired devices.
 
-- Preserve the callback method Rust uses to read and save clipboard content. Release optimization previously removed it, preventing Full capture verification from completing.
-- Verify the capture callback and native ingestion methods in every production Android APK before publication.
+- Retry Android capture setup from onboarding and Settings.
+- Synchronize paired devices automatically and show current sync activity in the shared interface.
+- Encrypt stored pairing keys and peer metadata with a device-specific key.
+- Refresh the shared Settings and History controls.
+- Allow macOS updates for supported direct installations.
 
 Shizuku is used only to apply Android setup grants and can be removed afterward. Android 13 and later can still request temporary system log access when the capture process restarts; this is separate from the Shizuku permission.
 
