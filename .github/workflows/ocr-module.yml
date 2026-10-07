@@ -127,6 +127,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y patchelf
+          python3 - <<'PY'
+          import os, subprocess
+          subprocess.run([os.environ["ANDROID_HOME"] + "/cmdline-tools/latest/bin/sdkmanager", "--licenses"],
+                         input="y\n" * 100, text=True, check=True)
+          PY
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.13846066" "platforms;android-36" "build-tools;36.0.0"
           python3 modules/ocr/scripts/fetch-models.py --sources modules/ocr/assets/model-sources.json --destination modules/ocr/assets/models
           python3 modules/ocr/scripts/prepare-runtime.py --platform android --architecture ${{ matrix.architecture }} --cache "$RUNNER_TEMP/ocr-runtime" --ndk "$ANDROID_HOME/ndk/29.0.13846066"
