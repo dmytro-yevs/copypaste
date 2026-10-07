@@ -78,6 +78,7 @@ abstract final class AppLayoutSize {
 /// Shared dimensions for application-owned overlays.
 abstract final class AppOverlaySize {
   static const double dialogMaxWidth = 480;
+  static const double dialogContentHeightFactor = 0.5;
   static const double drawerHeightFactor = 0.86;
   static const double toastMaxWidth = 360;
   static const double dragHandleWidth = 36;

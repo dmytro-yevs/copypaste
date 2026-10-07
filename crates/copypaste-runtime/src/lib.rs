@@ -1277,12 +1277,19 @@ impl Runtime {
             }
         };
         let payload = match ClipboardPayload::open(&row, &self.keyring.item_key()) {
-            Ok(payload) if matches!(&payload, ClipboardPayload::File { .. }) => payload,
+            Ok(payload)
+                if matches!(
+                    &payload,
+                    ClipboardPayload::Image { .. } | ClipboardPayload::File { .. }
+                ) =>
+            {
+                payload
+            }
             Ok(_) => {
                 return Response::err(
                     request_id,
                     ErrorCode::UnsupportedContent,
-                    "This clip is not a file.",
+                    "This clip is not an image or file.",
                 );
             }
             Err(_) => {
@@ -1995,6 +2002,41 @@ mod tests {
         assert_ne!(file_id, &text_id);
         assert!(file_event.captured);
         assert_eq!(file_event.item_count, 2);
+    }
+
+    #[test]
+    fn image_export_keeps_original_bytes_and_never_overwrites_a_destination() {
+        let (runtime, dir) = fixture();
+        let original = STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=")
+            .unwrap();
+        runtime
+            .capture_binary(&original, "image/png", None, None)
+            .unwrap();
+        let row = runtime.store.list(1, 0).unwrap().pop().unwrap();
+        let destination = dir.path().join("ocr-input.png");
+        assert!(
+            runtime
+                .save_file(1, &row.id, &destination.to_string_lossy())
+                .ok
+        );
+        assert_eq!(std::fs::read(&destination).unwrap(), original);
+        assert!(
+            !runtime
+                .save_file(2, &row.id, &destination.to_string_lossy())
+                .ok
+        );
+        assert_eq!(std::fs::read(&destination).unwrap(), original);
+        assert_eq!(runtime.store.count().unwrap(), 1);
+
+        seed_text(&runtime, "text-export", "text");
+        let text_destination = dir.path().join("text.png");
+        assert!(
+            !runtime
+                .save_file(3, "text-export", &text_destination.to_string_lossy())
+                .ok
+        );
+        assert!(!text_destination.exists());
     }
 
     #[test]
