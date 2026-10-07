@@ -153,17 +153,9 @@ pub async fn revoke(state: &Arc<AppState>, id: u64, pairing_id: &str) -> Respons
     }
 }
 
-/// Known peers, with current observations and a coalesced authenticated probe
-/// for trusted endpoints that have become stale.
+/// Known peers with observations maintained by the shared listener monitor.
 pub async fn peers(state: &Arc<AppState>, id: u64) -> Response {
     let peers = state.p2p.peers().list();
-    let event_state = Arc::clone(state);
-    state
-        .p2p
-        .node()
-        .refresh_reachability(peers.iter().cloned(), move || {
-            event_state.note_peers_changed();
-        });
     let infos = peers
         .iter()
         .map(|peer| {

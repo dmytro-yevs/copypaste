@@ -1,6 +1,7 @@
 package com.copypaste.app
 
 import android.Manifest
+import android.net.Uri
 import android.content.Context
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -27,6 +28,7 @@ class MainActivity : FlutterActivity() {
         internal var isForeground = false
             private set
         private const val captureNotificationPermissionRequest = 4920
+        private const val screenshotPermissionRequest = 4921
 
         init {
             System.loadLibrary("copypaste_flutter_bridge")
@@ -98,6 +100,7 @@ class MainActivity : FlutterActivity() {
     private var appUpdateChannel: AppUpdateChannel? = null
     private var smsModuleChannel: AndroidSmsModuleChannel? = null
     private var pendingNotificationPermission: ((Boolean) -> Unit)? = null
+    private var pendingScreenshotPermission: (() -> Unit)? = null
     private var pendingPairingUri: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -105,6 +108,7 @@ class MainActivity : FlutterActivity() {
         ScreenshotProtection.apply(window)
         pendingPairingUri = pairingUri(intent)
         ensureRuntime(applicationContext)
+        ScreenshotCaptureState.initialize(this)
         super.onCreate(savedInstanceState)
         clipboardManager = getSystemService(ClipboardManager::class.java)
         handleExplicitIntake(intent)
@@ -267,16 +271,62 @@ class MainActivity : FlutterActivity() {
         )
     }
 
+    internal fun requestScreenshotPermission(completion: () -> Unit) {
+        ScreenshotCaptureState.markPermissionRequested(this)
+        if (ScreenshotCaptureState.mediaGranted(this)) {
+            if (Build.VERSION.SDK_INT >= 33 && !AndroidCaptureState.notificationGranted(this)) {
+                if (ScreenshotCaptureState.permissionAttempts(this) >= 2 &&
+                    !ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.POST_NOTIFICATIONS)) {
+                    openScreenshotPermissionSettings(completion)
+                    return
+                }
+                ScreenshotCaptureState.recordPermissionAttempt(this)
+            }
+            requestCaptureNotificationPermission {
+                ScreenshotCaptureService.restoreIfEnabled(this)
+                completion()
+            }
+            return
+        }
+        if (pendingScreenshotPermission != null) { completion(); return }
+        if (ScreenshotCaptureState.permissionAttempts(this) >= 2 &&
+            !ActivityCompat.shouldShowRequestPermissionRationale(this, ScreenshotCaptureState.mediaPermission())) {
+            openScreenshotPermissionSettings(completion)
+            return
+        }
+        ScreenshotCaptureState.recordPermissionAttempt(this)
+        pendingScreenshotPermission = completion
+        val permissions = mutableListOf(ScreenshotCaptureState.mediaPermission())
+        if (Build.VERSION.SDK_INT >= 34) permissions.add(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+        ActivityCompat.requestPermissions(this, permissions.toTypedArray(), screenshotPermissionRequest)
+    }
+
+    private fun openScreenshotPermissionSettings(completion: () -> Unit) {
+        startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.parse("package:$packageName")))
+        completion()
+    }
+
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == screenshotPermissionRequest) {
+            val completion = pendingScreenshotPermission ?: return
+            pendingScreenshotPermission = null
+            if (ScreenshotCaptureState.mediaGranted(this)) requestCaptureNotificationPermission {
+                ScreenshotCaptureService.restoreIfEnabled(this)
+                completion()
+            } else completion()
+            return
+        }
         if (requestCode != captureNotificationPermissionRequest) return
         val completion = pendingNotificationPermission ?: return
         pendingNotificationPermission = null
         completion(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED)
+        ScreenshotCaptureService.restoreIfEnabled(this)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -334,6 +384,10 @@ class MainActivity : FlutterActivity() {
         super.onResume()
         isForeground = true
         appUpdateChannel?.onResume()
+        if (ScreenshotCaptureState.enabled(this)) {
+            if (!ScreenshotCaptureState.permissionRequested(this)) requestScreenshotPermission {}
+            else ScreenshotCaptureService.restoreIfEnabled(this)
+        }
         foregroundCaptureEligible = true
         refreshForegroundCapture()
         if (!clipboardListenerRegistered) {
@@ -399,6 +453,8 @@ class MainActivity : FlutterActivity() {
         smsModuleChannel = null
         pendingNotificationPermission?.invoke(false)
         pendingNotificationPermission = null
+        pendingScreenshotPermission?.invoke()
+        pendingScreenshotPermission = null
         pairingLinksChannel?.setMethodCallHandler(null)
         pairingLinksChannel = null
         nativeExecutor.shutdown()

@@ -40,6 +40,57 @@ void main() {
     expect(logo, findsOneWidget);
     expect(tester.getRect(logo).right, lessThan(tester.getRect(title).left));
   });
+  testWidgets(
+    'Settings header centers its title, logo, and action icon',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        _shell(
+          headerActions: {
+            AppDestination.settings: [
+              Button.secondary(
+                style: const ButtonStyle.secondaryIcon(),
+                onPressed: () {},
+                child: const Icon(LucideIcons.network),
+              ),
+            ],
+          },
+        ),
+      );
+      await tester.tap(_bottomNavigationItem('Settings'));
+      await tester.pumpAndSettle();
+      final header = find.byType(AppBar);
+      final title = find.descendant(
+        of: header,
+        matching: find.text('Settings'),
+      );
+      final logo = find.byKey(const ValueKey('header-brand-logo'));
+      final action = find.descendant(
+        of: header,
+        matching: find.byIcon(LucideIcons.network),
+      );
+      expect(
+        tester.getCenter(title).dy,
+        closeTo(tester.getCenter(logo).dy, 0.01),
+      );
+      expect(
+        tester.getCenter(title).dy,
+        closeTo(tester.getCenter(action).dy, 0.01),
+      );
+      expect(
+        DefaultTextStyle.of(tester.element(title)).style.leadingDistribution,
+        TextLeadingDistribution.even,
+      );
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
   test('includes the recovered CopyPaste brand asset', () async {
     final asset = await rootBundle.load('assets/brand/copypaste.png');
 
@@ -55,15 +106,15 @@ void main() {
     await tester.pumpWidget(_shell());
 
     expect(find.byType(NavigationBar), findsOneWidget);
-    expect(_bottomNavigationLabel('History'), findsOneWidget);
-    expect(_bottomNavigationLabel('Devices'), findsOneWidget);
-    expect(_bottomNavigationLabel('Settings'), findsOneWidget);
-    await tester.tap(_bottomNavigationLabel('Devices'));
+    expect(_bottomNavigationItem('History'), findsOneWidget);
+    expect(_bottomNavigationItem('Devices'), findsOneWidget);
+    expect(_bottomNavigationItem('Settings'), findsOneWidget);
+    await tester.tap(_bottomNavigationItem('Devices'));
     await tester.pump();
     expect(find.text('Devices body'), findsOneWidget);
   });
 
-  testWidgets('renders a full-width themed mobile navigation dock', (
+  testWidgets('renders a centered capsule with only the active label', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(442, 720));
@@ -85,27 +136,24 @@ void main() {
       navigationBar.selectedKey,
       const ValueKey<AppDestination>(AppDestination.history),
     );
-    expect(navigationBar.labelType, NavigationLabelType.all);
-    expect(navigationBar.labelPosition, NavigationLabelPosition.bottom);
-    expect(navigationBar.alignment, NavigationBarAlignment.spaceEvenly);
-    expect(navigationBar.backgroundColor, theme.colorScheme.secondary);
-    expect(
-      navigationBar.padding,
-      const EdgeInsets.symmetric(
-        horizontal: AppSpacing.lg,
-        vertical: AppSpacing.sm,
-      ),
-    );
-    expect(navigationBar.spacing, AppSpacing.sm);
+    expect(navigationBar.labelType, NavigationLabelType.selected);
+    expect(navigationBar.labelPosition, NavigationLabelPosition.end);
+    expect(navigationBar.alignment, NavigationBarAlignment.center);
+    expect(navigationBar.backgroundColor, Colors.transparent);
+    expect(navigationBar.padding, AppTheme.mobileNavigationPadding);
+    expect(navigationBar.spacing, AppSpacing.xs);
     expect(dockBounds.left, 0);
     expect(dockBounds.width, 442);
-    expect(bounds.width, 442);
+    expect(bounds.width, lessThan(442 - AppSpacing.lg * 2));
+    expect(bounds.center.dx, closeTo(dockBounds.center.dx, 0.5));
     expect(
       find.descendant(of: dock, matching: find.byType(Card)),
       findsNothing,
     );
-    expect(navigationBar.children, hasLength(3));
-    final items = navigationBar.children.cast<NavigationItem>();
+    final items = navigationBar.children.whereType<Flexible>().map(
+      (item) => item.child as NavigationItem,
+    );
+    expect(items, hasLength(3));
     expect(items.map((item) => (item.label! as Text).data), [
       'History',
       'Devices',
@@ -168,6 +216,149 @@ void main() {
       findsOneWidget,
     );
   });
+
+  for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+    testWidgets(
+      'capsule keeps every tab accessible at 320px with 200% text in $mode',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(320, 600));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final semantics = tester.ensureSemantics();
+        final controller = AppNavigationController();
+        addTearDown(controller.dispose);
+
+        try {
+          await tester.pumpWidget(
+            ShadcnApp(
+              theme: AppTheme.light,
+              darkTheme: AppTheme.dark,
+              themeMode: mode,
+              builder: AppTheme.builder,
+              home: MediaQuery(
+                data: const MediaQueryData(
+                  textScaler: TextScaler.linear(2),
+                  padding: EdgeInsets.only(bottom: 24),
+                ),
+                child: AppShell(
+                  controller: controller,
+                  destinations: const {
+                    AppDestination.history: Text('History body'),
+                    AppDestination.devices: Text('Devices body'),
+                    AppDestination.settings: Text('Settings body'),
+                  },
+                ),
+              ),
+            ),
+          );
+
+          for (final destination in appNavigationDestinations) {
+            await tester.tap(_bottomNavigationItem(destination.label));
+            await tester.pumpAndSettle();
+            expect(controller.selectedDestination, destination.destination);
+            expect(find.text('${destination.label} body'), findsOneWidget);
+            final bar = find.byKey(const ValueKey<String>('bottom-navigation'));
+            final barBounds = tester.getRect(bar);
+            final dock = find.byKey(
+              const ValueKey<String>('mobile-navigation-dock'),
+            );
+            final backdrop = tester.widget<ColoredBox>(
+              find.ancestor(of: dock, matching: find.byType(ColoredBox)).first,
+            );
+            expect(
+              backdrop.color,
+              Theme.of(tester.element(dock)).colorScheme.background,
+            );
+            expect(barBounds.left, greaterThanOrEqualTo(AppSpacing.lg));
+            expect(barBounds.right, lessThanOrEqualTo(320 - AppSpacing.lg));
+            expect(barBounds.center.dx, closeTo(160, 0.5));
+            expect(
+              barBounds.bottom,
+              lessThanOrEqualTo(600 - 24 - AppSpacing.sm),
+            );
+
+            for (final item in appNavigationDestinations) {
+              final target = _bottomNavigationItem(item.label);
+              final size = tester.getSize(target);
+              expect(size.width, greaterThanOrEqualTo(AppControlSize.touch));
+              expect(size.height, greaterThanOrEqualTo(AppControlSize.touch));
+              expect(
+                find.descendant(
+                  of: bar,
+                  matching: find.bySemanticsLabel(item.label),
+                ),
+                findsOneWidget,
+              );
+              final label = find.descendant(
+                of: target,
+                matching: find.text(item.label),
+              );
+              expect(
+                label.hitTestable(),
+                item == destination ? findsOneWidget : findsNothing,
+              );
+              final targetBounds = tester.getRect(target);
+              expect(targetBounds.left, greaterThanOrEqualTo(barBounds.left));
+              expect(targetBounds.right, lessThanOrEqualTo(barBounds.right));
+              final iconBounds = tester.getRect(
+                find.descendant(of: target, matching: find.byType(Icon)),
+              );
+              expect(
+                iconBounds.center.dy,
+                closeTo(targetBounds.center.dy, 0.5),
+              );
+              if (item == destination) {
+                final labelBounds = tester.getRect(label);
+                expect(
+                  labelBounds.center.dy,
+                  closeTo(iconBounds.center.dy, 0.5),
+                );
+                expect(
+                  iconBounds.expandToInclude(labelBounds).center.dx,
+                  closeTo(targetBounds.center.dx, 0.5),
+                );
+              } else {
+                expect(
+                  iconBounds.center.dx,
+                  closeTo(targetBounds.center.dx, 0.5),
+                );
+              }
+              expect(
+                MediaQuery.textScalerOf(tester.element(label)).scale(14),
+                28,
+              );
+            }
+            expect(tester.takeException(), isNull);
+          }
+        } finally {
+          semantics.dispose();
+        }
+      },
+      variant: const TargetPlatformVariant({
+        TargetPlatform.android,
+        TargetPlatform.macOS,
+        TargetPlatform.windows,
+      }),
+    );
+  }
+
+  testWidgets(
+    'hides capsule for the keyboard and restores it above safe area',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      addTearDown(tester.view.resetViewInsets);
+      await tester.pumpWidget(_shell());
+      final bar = find.byKey(const ValueKey<String>('bottom-navigation'));
+      expect(bar, findsOneWidget);
+      tester.view.viewInsets = const FakeViewPadding(bottom: 200);
+      await tester.pump();
+      expect(bar, findsNothing);
+      tester.view.resetViewInsets();
+      await tester.pump();
+      expect(bar, findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('uses the shadcn navigation rail at the compact breakpoint', (
     tester,
@@ -533,12 +724,16 @@ void main() {
         find.byKey(const ValueKey<String>('bottom-navigation')),
       );
       expect(
-        ((navigationBar.children.last as NavigationItem).label! as Text).data,
+        ((navigationBar.children.whereType<Flexible>().last.child
+                        as NavigationItem)
+                    .label!
+                as Text)
+            .data,
         'Settings',
       );
-      expect(_bottomNavigationLabel('History'), findsOneWidget);
-      expect(_bottomNavigationLabel('Devices'), findsOneWidget);
-      expect(_bottomNavigationLabel('Settings'), findsOneWidget);
+      expect(_bottomNavigationItem('History'), findsOneWidget);
+      expect(_bottomNavigationItem('Devices'), findsOneWidget);
+      expect(_bottomNavigationItem('Settings'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
@@ -668,10 +863,16 @@ void main() {
   });
 }
 
-Finder _bottomNavigationLabel(String label) {
+Finder _bottomNavigationItem(String label) {
   return find.descendant(
     of: find.byKey(const ValueKey<String>('bottom-navigation')),
-    matching: find.text(label),
+    matching: find.byKey(
+      ValueKey<AppDestination>(
+        appNavigationDestinations
+            .singleWhere((item) => item.label == label)
+            .destination,
+      ),
+    ),
   );
 }
 

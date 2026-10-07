@@ -8,9 +8,10 @@ The SMS body stays in the invocation only. Only the extracted code enters the
 system clipboard, encrypted History, and the existing configured sync source.
 
 Install the signed target-specific `.cpmodule` in Settings > Modules. New event
-modules start disabled. Open **Set up SMS access**, apply the grants through
-Shizuku or the displayed ADB commands, then enable the module. The module
-requires `READ_SMS` and `RECEIVE_SMS`. On systems exposing `READ_OTP_SMS`, setup
+modules start disabled. Open **Set up SMS access**, allow notifications, and
+choose **Shizuku** or **ADB** in the shared Android access setup. Apply the
+grants, then enable the module. Access updates while the setup dialog is open.
+The module requires `READ_SMS` and `RECEIVE_SMS`. On systems exposing `READ_OTP_SMS`, setup
 also grants that app-op to receive protected OTP messages immediately. If the
 installer has not allowlisted the hard-restricted SMS permissions, grant
 verification fails and the module stays disabled; reinstall the APK through an

@@ -232,13 +232,26 @@ class DevicesSnapshot {
   final List<DiscoveredDevice> discovered;
 }
 
-/// Opaque pairing work that keeps QR and SAS material out of ordinary Dart UI.
+/// Invitation material displayed only during an active pairing invitation.
+class PairingInvitation {
+  const PairingInvitation({
+    required this.qrPng,
+    required this.code,
+    this.address,
+  });
+
+  final Uint8List qrPng;
+  final String code;
+  final String? address;
+}
+
+/// Pairing work that exposes invitation material only to the active inspector.
 abstract interface class DevicesPairingSession {
   PairingCeremony get ceremony;
   Stream<PairingCeremony> get updates;
 
-  /// Returns the invite QR immediately after the protected pairing action.
-  Future<Uint8List> revealInviteQr();
+  /// Returns the matching QR, code, and address for the current invitation.
+  Future<PairingInvitation> revealInvitation();
 
   /// Opens the native protected SAS presentation after an explicit user request.
   Future<String> revealSas();

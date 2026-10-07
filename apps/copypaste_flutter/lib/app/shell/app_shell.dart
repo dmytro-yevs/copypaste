@@ -198,7 +198,7 @@ class _AppShellState extends State<AppShell> {
                   Expanded(child: content),
                   if (MediaQuery.viewInsetsOf(context).bottom == 0 &&
                       !widget.controller.bottomOverlayOpen)
-                    _mobileNavigationDock(theme, selectedKey),
+                    _mobileNavigationDock(context, selectedKey),
                 ],
               ),
             };
@@ -235,34 +235,34 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  Widget _mobileNavigationDock(ThemeData theme, Key selectedKey) {
-    return SizedBox(
-      key: const ValueKey<String>('mobile-navigation-dock'),
-      width: double.infinity,
-      child: DecoratedBox(
-        decoration: BoxDecoration(color: theme.colorScheme.secondary),
-        child: SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Divider(),
-              NavigationBar(
-                key: const ValueKey<String>('bottom-navigation'),
-                alignment: NavigationBarAlignment.spaceEvenly,
-                labelType: NavigationLabelType.all,
-                labelPosition: NavigationLabelPosition.bottom,
-                selectedKey: selectedKey,
-                onSelected: _selectDestination,
-                backgroundColor: theme.colorScheme.secondary,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.lg,
-                  vertical: AppSpacing.sm,
+  Widget _mobileNavigationDock(BuildContext context, Key selectedKey) {
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.background,
+      child: SafeArea(
+        key: const ValueKey<String>('mobile-navigation-dock'),
+        top: false,
+        child: Padding(
+          padding: AppTheme.mobileNavigationMargin,
+          child: Center(
+            heightFactor: 1,
+            child: IntrinsicWidth(
+              child: OutlinedContainer(
+                theme: AppTheme.mobileNavigationSurfaceTheme(context),
+                child: NavigationBar(
+                  key: const ValueKey<String>('bottom-navigation'),
+                  alignment: NavigationBarAlignment.center,
+                  labelType: NavigationLabelType.selected,
+                  labelPosition: NavigationLabelPosition.end,
+                  labelSize: NavigationLabelSize.large,
+                  selectedKey: selectedKey,
+                  onSelected: _selectDestination,
+                  backgroundColor: Colors.transparent,
+                  padding: AppTheme.mobileNavigationPadding,
+                  spacing: AppSpacing.xs,
+                  children: _bottomNavigationItems(),
                 ),
-                spacing: AppSpacing.sm,
-                children: _bottomNavigationItems(theme),
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -349,50 +349,42 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  List<Widget> _bottomNavigationItems(ThemeData theme) {
-    const itemPadding = EdgeInsets.symmetric(
-      horizontal: AppSpacing.lg,
-      vertical: AppSpacing.sm,
-    );
-    const itemRadius = BorderRadius.all(Radius.circular(AppRadius.md));
-    final style = const ButtonStyle.ghost(density: ButtonDensity.icon)
-        .withPadding(padding: itemPadding)
-        .withBorderRadius(borderRadius: itemRadius)
-        .withForegroundColor(
-          color: theme.colorScheme.mutedForeground,
-          hoverColor: theme.colorScheme.foreground,
-          focusColor: theme.colorScheme.foreground,
-        );
-    final selectedStyle =
-        const ButtonStyle.secondary(density: ButtonDensity.icon)
-            .withPadding(padding: itemPadding)
-            .withBorderRadius(borderRadius: itemRadius)
-            .withBackgroundColor(
-              color: theme.colorScheme.accent,
-              hoverColor: theme.colorScheme.accent,
-              focusColor: theme.colorScheme.accent,
-            )
-            .withForegroundColor(
-              color: AppTheme.navigationAccent,
-              hoverColor: AppTheme.navigationAccent,
-              focusColor: AppTheme.navigationAccent,
-            );
-    return appNavigationDestinations
-        .map(
-          (destination) => NavigationItem(
+  List<Widget> _bottomNavigationItems() {
+    final style = AppTheme.mobileNavigationButtonStyle(selected: false);
+    final selectedStyle = AppTheme.mobileNavigationButtonStyle(selected: true);
+    return [
+      for (final destination in appNavigationDestinations) ...[
+        if (destination != appNavigationDestinations.first)
+          const NavigationGap(AppSpacing.xs),
+        Flexible(
+          flex: widget.controller.selectedDestination == destination.destination
+              ? 1
+              : 0,
+          child: NavigationItem(
             key: ValueKey<AppDestination>(destination.destination),
             style: style,
             selectedStyle: selectedStyle,
+            spacing: AppSpacing.xs,
+            overflow: NavigationOverflow.ellipsis,
             label: Text(
               destination.label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
             ),
-            child: Icon(destination.icon, size: AppIconSize.md),
+            child: Icon(
+              destination.icon,
+              size: AppIconSize.md,
+              semanticLabel:
+                  widget.controller.selectedDestination ==
+                      destination.destination
+                  ? null
+                  : destination.label,
+            ),
           ),
-        )
-        .toList(growable: false);
+        ),
+      ],
+    ];
   }
 
   void _selectDestination(Key? key) {

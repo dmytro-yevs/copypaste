@@ -65,6 +65,8 @@ abstract final class AppTypographySize {
 
 /// Shared dimensions for application layouts.
 abstract final class AppLayoutSize {
+  static const double inspectorLabelMaxWidth = 160;
+  static const double inspectorLabelWidthFactor = 1 / 3;
   static const double historySearchMinWidth = 160;
   static const double onboardingContentMaxWidth = 440;
   static const double marketplaceCardMinWidth = 280;

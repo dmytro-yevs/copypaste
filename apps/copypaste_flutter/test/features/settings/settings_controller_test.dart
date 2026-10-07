@@ -556,6 +556,23 @@ void main() {
       }
 
       await open('clipboard');
+      final header = find.byType(AppBar);
+      final title = find.descendant(
+        of: header,
+        matching: find.text('Clipboard'),
+      );
+      final backIcon = find.descendant(
+        of: header,
+        matching: find.byIcon(LucideIcons.arrowLeft),
+      );
+      expect(
+        tester.getCenter(title).dy,
+        closeTo(tester.getCenter(backIcon).dy, 0.01),
+      );
+      expect(
+        DefaultTextStyle.of(tester.element(title)).style.leadingDistribution,
+        TextLeadingDistribution.even,
+      );
       expect(find.text('Storage quota'), findsOneWidget);
       expect(find.text('Clipboard capture'), findsOneWidget);
       expect(find.text('Excluded applications'), findsNothing);
