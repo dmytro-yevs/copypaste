@@ -60,7 +60,13 @@ def package(module_dir, library, output, platform, architecture):
         directory = Path(directory)
         manifest_path = directory / "manifest.json"
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-        subprocess.run(["bash", (root / "scripts/release/sign-update-artifact.sh").as_posix(), manifest_path.as_posix()], check=True)
+        bash = "bash"
+        if os.name == "nt":
+            git_bash = Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Git/bin/bash.exe"
+            if not git_bash.is_file():
+                raise ValueError("Windows module signing requires Git Bash.")
+            bash = str(git_bash)
+        subprocess.run([bash, (root / "scripts/release/sign-update-artifact.sh").as_posix(), manifest_path.as_posix()], check=True)
         # The updater signer stores a base64-encoded Minisign envelope. Module
         # packages carry the standard plaintext envelope for the Rust verifier.
         signature = base64.b64decode((directory / "manifest.json.sig").read_text().strip(), validate=True)
