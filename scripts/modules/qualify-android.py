@@ -28,8 +28,14 @@ def main():
     if adb("shell", "getprop", "ro.kernel.qemu") != "1" or adb("shell", "getprop", "ro.product.cpu.abi") != "x86_64":
         raise ValueError("Qualification requires the identified Android x86_64 emulator")
     adb("install", "-r", str(args.apk))
+    if adb("shell", "pm", "clear", PACKAGE) != "Success":
+        raise ValueError("Could not initialize isolated qualification storage")
     for phase in ["execute", "cleanup"]:
         adb("shell", "am", "force-stop", PACKAGE)
+        adb("shell", "am", "start", "-n", PACKAGE + "/.MainActivity",
+            "--es", "phase", phase, "--es", "appVersion", args.app_version,
+            "--es", "commit", args.commit, "--es", "runId", args.run_id)
+        # Exercise another Activity instance while the native workload is running.
         adb("shell", "am", "start", "-n", PACKAGE + "/.MainActivity",
             "--es", "phase", phase, "--es", "appVersion", args.app_version,
             "--es", "commit", args.commit, "--es", "runId", args.run_id)
