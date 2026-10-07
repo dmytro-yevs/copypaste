@@ -143,6 +143,8 @@ jobs:
           cargo test -p copypaste-modules --locked
           cargo test --manifest-path modules/ocr/Cargo.toml --locked
           cargo clippy --manifest-path modules/ocr/Cargo.toml --locked --all-targets -- -D warnings
+          rustc +1.96 --test modules/ocr/vendor/paddle-ocr-rs/src/dictionary.rs -o "$RUNNER_TEMP/ocr-dictionary-tests.exe"
+          "$RUNNER_TEMP/ocr-dictionary-tests.exe"
 
   flutter-foundation:
     name: Flutter foundation (${{ matrix.platform }})
