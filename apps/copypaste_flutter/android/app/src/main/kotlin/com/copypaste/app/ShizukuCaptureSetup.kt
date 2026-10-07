@@ -27,10 +27,12 @@ internal data class ShizukuFacts(
 
 internal class ShizukuCaptureSetup(
     private val context: Context,
+    private val sms: Boolean = false,
     private val onChanged: () -> Unit,
 ) {
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
+    private val permissionRequest = if (sms) 4921 else 4919
     private var pending: ((Boolean) -> Unit)? = null
     private var cancelGrants: (() -> Unit)? = null
     private var disposed = false
@@ -121,8 +123,8 @@ internal class ShizukuCaptureSetup(
             ComponentName(context.packageName, ShizukuGrantService::class.java.name),
         )
             .daemon(false)
-            .tag("copypaste-capture-grants")
-            .processNameSuffix("capture-grants")
+            .tag(if (sms) "copypaste-sms-grants" else "copypaste-capture-grants")
+            .processNameSuffix(if (sms) "sms-grants" else "capture-grants")
             .debuggable(BuildConfig.DEBUG)
             .version(BuildConfig.VERSION_CODE)
         lateinit var connection: ServiceConnection
@@ -147,7 +149,9 @@ internal class ShizukuCaptureSetup(
                     val applied = try {
                         binder?.pingBinder() == true &&
                             service != null &&
-                            service.applyCaptureGrants(context.packageName)
+                            if (sms) service.applySmsGrants(context.packageName,
+                                android.os.Process.myUserHandle().hashCode(), AndroidSmsAccess.otpOpSupported(context))
+                            else service.applyCaptureGrants(context.packageName)
                     } catch (_: Exception) {
                         false
                     }
@@ -176,7 +180,6 @@ internal class ShizukuCaptureSetup(
     }
 
     companion object {
-        private const val permissionRequest = 4919
         private const val timeoutMs = 5_000L
         const val shizukuPackage = "moe.shizuku.privileged.api"
     }

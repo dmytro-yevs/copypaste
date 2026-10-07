@@ -9,6 +9,9 @@ class ShizukuGrantService : IShizukuGrantService.Stub() {
     override fun applyCaptureGrants(packageName: String): Boolean =
         captureGrantCommands(packageName).all(::runCommand)
 
+    override fun applySmsGrants(packageName: String, userId: Int, otpSupported: Boolean): Boolean =
+        smsGrantCommands(packageName, userId, otpSupported).all(::runCommand)
+
     override fun destroy() = exitProcess(0)
 
     private fun runCommand(command: List<String>): Boolean = try {

@@ -18,6 +18,8 @@ def package(module_dir, library, output, platform, architecture):
     if output.suffix != ".cpmodule":
         raise ValueError("Module packages must use the .cpmodule extension.")
     manifest = json.loads((module_dir / "module.json").read_text())
+    if platform not in manifest.get("supported_platforms", ["macos", "windows", "android"]):
+        raise ValueError("This module does not support the requested platform.")
     suffix = {"macos": ".dylib", "windows": ".dll", "android": ".so"}[platform]
     manifest["target"] = {"platform": platform, "architecture": architecture}
     manifest["entrypoint"] = "bin/module" + suffix
