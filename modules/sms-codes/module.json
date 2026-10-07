@@ -5,7 +5,7 @@
   "title": "SMS Codes",
   "description": "Automatically copy login, verification, and transaction codes from new SMS messages.",
   "version": "0.1.0",
-  "app_versions": ">=1.0.6, <2.0.0",
+  "app_versions": ">=1.0.7, <2.0.0",
   "supported_platforms": ["android"],
   "event_handlers": [{"event": "sms_received", "command": "extract-code"}],
   "commands": [{
