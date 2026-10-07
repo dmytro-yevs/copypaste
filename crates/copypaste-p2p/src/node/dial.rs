@@ -36,6 +36,21 @@ impl Node {
         source: &S,
         cycle: &SyncCycle,
     ) -> Result<SyncOutcome, NodeError> {
+        let observation = self.sync_activity.begin(&peer.pairing_id);
+        let result = self.sync_one_observed(peer, source, cycle).await;
+        match &result {
+            Ok(outcome) => observation.finish(Some(&outcome.stats), None),
+            Err(error) => observation.finish(None, Some(error.to_string())),
+        }
+        result
+    }
+
+    async fn sync_one_observed<S: SyncSource>(
+        &self,
+        peer: &Peer,
+        source: &S,
+        cycle: &SyncCycle,
+    ) -> Result<SyncOutcome, NodeError> {
         let cancel = cycle.cancel_token();
         let candidates = self.dial_candidates_with_sources(peer, true);
         if candidates.is_empty() {
@@ -83,7 +98,10 @@ impl Node {
             self.touch_peer(
                 peer,
                 Some(&outcome.peer_device_id),
-                outcome.peer_listen_addr.or(Some(addr)),
+                outcome
+                    .peer_listen_addr
+                    .and_then(super::ListenerEndpoint::advertised)
+                    .or(Some(super::ListenerEndpoint::dialled(addr))),
                 Some(&outcome.peer_device_name),
             );
             Ok(())
@@ -114,8 +132,8 @@ impl Node {
         source: &S,
         cursor: SyncCursor,
     ) -> Result<SyncOutcome, NodeError> {
+        let listen_addr = self.session_listen_addr(session.local_addr());
         let mut channel = NoiseChannel::new(session);
-        let listen_addr = self.listen_addr();
         // The wait for the peer's close is inside the same budget on purpose:
         // see `NoiseChannel::wait_for_close` for why a session is not over when
         // `run_initiator` returns.
@@ -172,7 +190,8 @@ mod tests {
     use tokio::sync::watch;
 
     fn node(dir: &tempfile::TempDir) -> Node {
-        let peers = PeerStore::open(&dir.path().join("peers.json")).unwrap();
+        let peers =
+            PeerStore::open(&dir.path().join("peers.json"), &crate::peers::testutil::KEY).unwrap();
         Node::new(peers, None, 0, true)
     }
 
@@ -246,7 +265,11 @@ mod tests {
 
         let discovery = Discovery::dormant("client", 0).unwrap();
         let client = Node::new(
-            PeerStore::open(&client_dir.path().join("peers.json")).unwrap(),
+            PeerStore::open(
+                &client_dir.path().join("peers.json"),
+                &crate::peers::testutil::KEY,
+            )
+            .unwrap(),
             Some(discovery),
             0,
             true,

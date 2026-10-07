@@ -57,6 +57,10 @@ pub(super) fn status(state: &AppState, id: u64) -> Response {
     Response::ok(
         id,
         ResponseData::Status(StatusData {
+            sync_status: state
+                .p2p
+                .node()
+                .sync_status(state.settings.get().sync_enabled),
             device_details: Some(p2p_contract::local_device_details(
                 &device_name,
                 listen_addr.as_deref(),

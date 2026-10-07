@@ -11,6 +11,7 @@
 //! receiver, so they can be driven from a plain `Vec` of events with no network
 //! and no daemon.
 
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::Duration;
 
@@ -38,7 +39,7 @@ pub struct Discovery {
     daemon: Mutex<Option<ServiceDaemon>>,
     shared: Arc<Shared>,
     device_name: RwLock<String>,
-    port: u16,
+    port: AtomicU16,
 }
 
 /// State the background threads and the public API share.
@@ -53,14 +54,14 @@ struct Shared {
     registration: Mutex<Option<Registration>>,
     /// The port this device listens on, and its own addresses — together, the
     /// endpoint an advertisement of ours would resolve to. See [`is_own_endpoint`].
-    port: u16,
+    port: AtomicU16,
     own_addrs: LocalAddrs,
 }
 
 impl Shared {
     fn for_port(port: u16) -> Self {
         Self {
-            port,
+            port: AtomicU16::new(port),
             ..Self::default()
         }
     }
@@ -94,17 +95,20 @@ impl Discovery {
             daemon: Mutex::new(None),
             shared: Arc::new(Shared::for_port(port)),
             device_name: RwLock::new(device_name.to_string()),
-            port,
+            port: AtomicU16::new(port),
         })
     }
 
     pub fn publish(&self, pairing_ids: &[String]) -> Result<(), DiscoveryError> {
+        if self.port.load(Ordering::Acquire) == 0 {
+            return Ok(());
+        }
         let mut daemon = lock(&self.daemon);
         if let Some(running) = daemon.as_ref() {
             return self.readvertise(running, pairing_ids);
         }
         let device_name = self.device_name();
-        let port = self.port;
+        let port = self.port.load(Ordering::Acquire);
         // Validate and encode before touching the network, so bad input is a
         // clean error rather than a half-started daemon.
         let info = build_service_info(&device_name, &device_name, pairing_ids, port)?;
@@ -175,6 +179,11 @@ impl Discovery {
         lock(&self.daemon).is_some()
     }
 
+    pub(crate) fn set_listener_port(&self, port: u16) {
+        self.port.store(port, Ordering::Release);
+        self.shared.port.store(port, Ordering::Release);
+    }
+
     /// Currently-known peers, stale entries dropped.
     ///
     /// Never blocks on the network — it reads the table the browse thread fills.
@@ -209,7 +218,12 @@ impl Discovery {
             .unwrap_or_else(|| self.device_name());
 
         let device_name = self.device_name();
-        let mut info = build_service_info(&instance, &device_name, pairing_ids, self.port)?;
+        let mut info = build_service_info(
+            &instance,
+            &device_name,
+            pairing_ids,
+            self.port.load(Ordering::Acquire),
+        )?;
         // The name is already ours; probing again would only conflict with our
         // own records and rename us to "<name> (2)".
         info.set_requires_probe(false);
@@ -292,7 +306,12 @@ fn browse_loop(shared: &Shared, events: impl IntoIterator<Item = ServiceEvent>) 
                 let Some(peer) = peer_from_resolved(&resolved, now) else {
                     continue;
                 };
-                if is_own_endpoint(&shared.own_addrs, shared.port, peer.addr, now) {
+                if is_own_endpoint(
+                    &shared.own_addrs,
+                    shared.port.load(Ordering::Acquire),
+                    peer.addr,
+                    now,
+                ) {
                     continue;
                 }
                 lock(&shared.table).observe(&resolved.fullname, peer, now);

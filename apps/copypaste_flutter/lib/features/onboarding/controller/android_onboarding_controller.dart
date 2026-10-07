@@ -22,7 +22,7 @@ class AndroidOnboardingController extends ChangeNotifier {
   final ClipboardWriter _clipboard;
 
   AndroidOnboardingStep _step = AndroidOnboardingStep.welcome;
-  AndroidCaptureMode _mode = AndroidCaptureMode.full;
+  AndroidCaptureMode _selectedMode = AndroidCaptureMode.full;
   AndroidCaptureSetupMethod _method = AndroidCaptureSetupMethod.shizuku;
   AndroidCaptureSetupState? _setupState;
   bool _initialized = false;
@@ -38,7 +38,10 @@ class AndroidOnboardingController extends ChangeNotifier {
   bool _grantError = false;
 
   AndroidOnboardingStep get step => _step;
-  AndroidCaptureMode get mode => _mode;
+  AndroidCaptureMode get mode => _setupState?.backgroundCaptureRunning == true
+      ? AndroidCaptureMode.full
+      : AndroidCaptureMode.limited;
+  AndroidCaptureMode get selectedMode => _selectedMode;
   AndroidCaptureSetupMethod get method => _method;
   AndroidCaptureSetupState? get setupState => _setupState;
   bool get initialized => _initialized;
@@ -62,7 +65,7 @@ class AndroidOnboardingController extends ChangeNotifier {
   }
 
   bool get canContinueCapture =>
-      !_busy && (_mode == AndroidCaptureMode.limited || _verified);
+      !_busy && (_selectedMode == AndroidCaptureMode.limited || _verified);
 
   /// Observe Android only while the setup screen is visible and resumed.
   void setMonitoring(bool enabled) {
@@ -93,7 +96,6 @@ class AndroidOnboardingController extends ChangeNotifier {
     _notify();
     try {
       final progress = await _store.read();
-      _mode = progress.mode;
       _method = progress.method;
       _complete = progress.complete;
       _step = progress.captureStarted
@@ -102,6 +104,9 @@ class AndroidOnboardingController extends ChangeNotifier {
       _verificationBaseline = progress.verificationBaseline;
       _verifying = _verificationBaseline != null;
       _acceptState(await _setup.state());
+      _selectedMode = progress.complete || mode == AndroidCaptureMode.full
+          ? mode
+          : progress.mode;
       if (_complete && !await _setup.setForegroundCaptureEnabled(true)) {
         _errorMessage = 'Clipboard intake could not be enabled.';
       } else {
@@ -135,7 +140,7 @@ class AndroidOnboardingController extends ChangeNotifier {
   }
 
   Future<void> selectMode(AndroidCaptureMode mode) async {
-    if (_busy || _mode == mode) return;
+    if (_busy || _selectedMode == mode) return;
     if (mode == AndroidCaptureMode.limited &&
         (_setupState?.captureEnabled ?? false)) {
       await _runStateAction(_setup.stopCapture);
@@ -145,7 +150,7 @@ class AndroidOnboardingController extends ChangeNotifier {
         return;
       }
     }
-    _mode = mode;
+    _selectedMode = mode;
     _errorMessage = null;
     _notify();
     await _saveChoice();
@@ -222,7 +227,7 @@ class AndroidOnboardingController extends ChangeNotifier {
         _busy ||
         _automaticGrantsAttempted ||
         _step != AndroidOnboardingStep.capture ||
-        _mode != AndroidCaptureMode.full ||
+        _selectedMode != AndroidCaptureMode.full ||
         _method != AndroidCaptureSetupMethod.shizuku ||
         state == null ||
         state.privilegedGrants ||
@@ -243,26 +248,18 @@ class AndroidOnboardingController extends ChangeNotifier {
     if (!state.shizuku.running || !state.shizuku.permission) {
       _automaticGrantsAttempted = false;
     }
-    if (!state.privilegedGrants ||
-        !state.notificationGranted ||
-        (_verified && !state.serviceRunning)) {
-      _verified = false;
-    }
-    if (!state.privilegedGrants ||
-        !state.notificationGranted ||
-        !state.captureEnabled) {
-      _verifying = false;
-      _verificationBaseline = null;
-    }
     final baseline = _verificationBaseline;
-    if (_verifying &&
+    _verified =
+        state.backgroundCaptureRunning &&
+        state.lastCaptureAtMs > (baseline ?? 0);
+    _verifying =
+        !_verified &&
         baseline != null &&
         state.privilegedGrants &&
         state.notificationGranted &&
-        state.serviceRunning &&
-        state.lastCaptureAtMs > baseline) {
-      _verified = true;
-      _verifying = false;
+        state.captureEnabled;
+    if (state.backgroundCaptureRunning) {
+      _selectedMode = AndroidCaptureMode.full;
     }
   }
 
@@ -288,13 +285,11 @@ class AndroidOnboardingController extends ChangeNotifier {
       await _store.writeCaptureProgress(
         verificationBaseline: _verificationBaseline,
       );
-      _setupState = await _setup.startCapture();
+      _acceptState(await _setup.startCapture());
       if (!_setupState!.captureEnabled) {
         _errorMessage = 'Background capture could not be started.';
         return;
       }
-      _verifying = true;
-      _verified = false;
     } catch (_) {
       _errorMessage = 'Background capture could not be started.';
     } finally {
@@ -315,7 +310,7 @@ class AndroidOnboardingController extends ChangeNotifier {
       }
       // Capture setup is complete before the optional pairing screen. A process
       // restart must not require the user to repeat verified permissions.
-      await _store.markComplete(mode: _mode, method: _method);
+      await _store.markComplete(mode: _selectedMode, method: _method);
       _step = AndroidOnboardingStep.sync;
     } catch (_) {
       _errorMessage = 'CopyPaste could not save onboarding progress.';
@@ -330,7 +325,7 @@ class AndroidOnboardingController extends ChangeNotifier {
     _busy = true;
     _notify();
     try {
-      await _store.markComplete(mode: _mode, method: _method);
+      await _store.markComplete(mode: _selectedMode, method: _method);
       _complete = true;
       return true;
     } catch (_) {
@@ -348,15 +343,12 @@ class AndroidOnboardingController extends ChangeNotifier {
     _errorMessage = null;
     _notify();
     try {
-      await _store.resetCompletion();
+      _acceptState(await _setup.state());
       await _store.writeCaptureProgress();
-      _setupState = await _setup.state();
       _complete = false;
       _step = AndroidOnboardingStep.capture;
+      _selectedMode = mode;
       _automaticGrantsAttempted = false;
-      _verificationBaseline = null;
-      _verifying = false;
-      _verified = false;
       return true;
     } catch (_) {
       _errorMessage = 'Android capture setup could not be opened.';
@@ -386,7 +378,7 @@ class AndroidOnboardingController extends ChangeNotifier {
 
   Future<void> _saveChoice() async {
     try {
-      await _store.writeChoice(mode: _mode, method: _method);
+      await _store.writeChoice(mode: _selectedMode, method: _method);
     } catch (_) {
       _errorMessage = 'Android setup choice could not be saved.';
       _notify();

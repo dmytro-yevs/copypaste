@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../../../app/navigation/app_page_route.dart';
 import '../../../app/theme/app_motion.dart';
 import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_theme.dart';
@@ -54,13 +55,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     50 * 1024 * 1024 * 1024,
   ];
 
-  final _captureSectionKey = GlobalKey();
+  final _clipboardSectionKey = GlobalKey();
   final _modulesSectionKey = GlobalKey();
-  final _securitySectionKey = GlobalKey();
+  final _privacySectionKey = GlobalKey();
   final _blockScreenshotsKey = GlobalKey();
-  final _storageSectionKey = GlobalKey();
+  final _dataSectionKey = GlobalKey();
   final _syncSectionKey = GlobalKey();
-  final _feedbackSectionKey = GlobalKey();
+  final _notificationsSectionKey = GlobalKey();
   final _quickPasteSectionKey = GlobalKey();
   final _androidCaptureKey = GlobalKey();
   final _clipboardCaptureKey = GlobalKey();
@@ -76,18 +77,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _applicationUpdatesKey = GlobalKey();
   final _quickPasteShortcutKey = GlobalKey();
   final _quickPasteAutoPasteKey = GlobalKey();
+  final _aboutSectionKey = GlobalKey();
+  final _detailRevision = ValueNotifier<int>(0);
+  final _searchFocus = FocusNode();
   final _searchController = TextEditingController();
   Timer? _highlightTimer;
 
-  _SettingsSectionId _selectedSection = _SettingsSectionId.capture;
+  _SettingsSectionId _selectedSection = _SettingsSectionId.clipboard;
   String _searchQuery = '';
   String? _selectedTargetId;
   String? _highlightedTargetId;
+  bool _compactRouteOpen = false;
 
   @override
   void dispose() {
     _highlightTimer?.cancel();
     _searchController.dispose();
+    _searchFocus.dispose();
+    _detailRevision.dispose();
     super.dispose();
   }
 
@@ -95,7 +102,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: widget.controller,
-      builder: (context, _) => switch (widget.controller.loadState) {
+      builder: (context, _) => _loadedContent(() => _content(context)),
+    );
+  }
+
+  Widget _loadedContent(Widget Function() ready) =>
+      switch (widget.controller.loadState) {
         SettingsLoadState.loading => const StateView.loading(
           message: 'Loading settings.',
         ),
@@ -105,10 +117,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           actionLabel: 'Try again',
           onAction: widget.controller.retry,
         ),
-        SettingsLoadState.ready => _content(context),
-      },
-    );
-  }
+        SettingsLoadState.ready => ready(),
+      };
 
   Widget _content(BuildContext context) {
     final controller = widget.controller;
@@ -121,7 +131,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (context, constraints) {
         final showSidebar =
             constraints.maxWidth >= AdaptiveBreakpoints.settingsNavigation;
-        final content = noSearchResults
+        final content = _compactRouteOpen
+            ? const SizedBox.shrink()
+            : noSearchResults
             ? const StateView.empty(
                 title: 'No settings found',
                 message: 'Try a different search.',
@@ -191,26 +203,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.secondary,
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.lg),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _searchField(),
-                    if (targets.isNotEmpty) ...[
-                      const Gap(AppSpacing.md),
-                      _mobileNavigationSelect(targets, selectedSection),
-                    ],
-                  ],
-                ),
-              ),
+            Padding(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: _searchField(),
             ),
-            const Divider(),
-            Expanded(child: content),
+            Expanded(
+              child: noSearchResults
+                  ? content
+                  : _compactNavigationList(context, targets),
+            ),
           ],
         );
       },
@@ -219,8 +220,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _sectionContent(
     RuntimeSettings settings,
-    _SettingsSectionId selectedSection,
-  ) {
+    _SettingsSectionId selectedSection, {
+    bool showHeading = true,
+  }) {
     final controller = widget.controller;
     return SingleChildScrollView(
       key: PageStorageKey<String>('settings-${selectedSection.slug}-scroll'),
@@ -251,17 +253,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _SettingsSectionId.modules => _SettingsSection(
                   key: _modulesSectionKey,
                   title: 'Modules',
+                  showHeading: showHeading,
+                  groupContent: false,
                   description: 'Optional features for CopyPaste.',
                   children: [ModulesSettingsView(controller: widget.modules!)],
                 ),
-                _SettingsSectionId.capture => _captureSection(settings),
-                _SettingsSectionId.security => _securitySection(),
-                _SettingsSectionId.storageData => _storageSection(settings),
-                _SettingsSectionId.sync => _syncSection(settings),
-                _SettingsSectionId.feedback => _feedbackSection(settings),
+                _SettingsSectionId.clipboard => _clipboardSection(
+                  settings,
+                  showHeading: showHeading,
+                ),
+                _SettingsSectionId.privacy => _privacySection(
+                  settings,
+                  showHeading: showHeading,
+                ),
+                _SettingsSectionId.data => _dataSection(
+                  showHeading: showHeading,
+                ),
+                _SettingsSectionId.sync => _syncSection(
+                  settings,
+                  showHeading: showHeading,
+                ),
+                _SettingsSectionId.notifications => _notificationsSection(
+                  settings,
+                  showHeading: showHeading,
+                ),
+                _SettingsSectionId.about => AnimatedBuilder(
+                  animation: widget.appUpdate ?? widget.controller,
+                  builder: (context, _) =>
+                      _aboutSection(showHeading: showHeading),
+                ),
                 _SettingsSectionId.quickPaste => _QuickPasteSection(
                   key: _quickPasteSectionKey,
                   controller: widget.quickPaste!,
+                  showHeading: showHeading,
                   shortcutKey: _quickPasteShortcutKey,
                   autoPasteKey: _quickPasteAutoPasteKey,
                   shortcutHighlighted: _isHighlighted(
@@ -283,6 +307,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return TextField(
       key: const ValueKey<String>('settings-search'),
       controller: _searchController,
+      focusNode: _searchFocus,
       placeholder: const Text('Search settings'),
       onChanged: _updateSearch,
       features: const [
@@ -292,48 +317,85 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _mobileNavigationSelect(
+  Widget _compactNavigationList(
+    BuildContext context,
     List<_SettingsNavigationTarget> targets,
-    _SettingsSectionId selectedSection,
   ) {
-    final selected = _selectedTarget(targets, selectedSection);
-    return SizedBox(
-      width: double.infinity,
-      child: Select<_SettingsNavigationTarget>(
-        key: const ValueKey<String>('settings-mobile-section-select'),
-        value: selected,
-        placeholder: Text('${targets.length} matching settings'),
-        onChanged: (target) {
-          if (target != null) _activateTarget(target);
-        },
-        popup: SelectPopup<_SettingsNavigationTarget>(
-          items: SelectItemList(
+    return ListView.separated(
+      key: const ValueKey<String>('settings-category-list'),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.zero,
+        AppSpacing.lg,
+        AppSpacing.lg,
+      ),
+      itemCount: targets.length,
+      separatorBuilder: (context, index) => const Divider(),
+      itemBuilder: (context, index) {
+        final target = targets[index];
+        return Button.ghost(
+          key: ValueKey<String>('mobile-${target.widgetKey}'),
+          style: AppTheme.settingsCategoryButtonStyle,
+          alignment: Alignment.centerLeft,
+          onPressed: () => _openCompactSection(context, target),
+          child: Row(
             children: [
-              for (final target in targets)
-                SelectItemButton<_SettingsNavigationTarget>(
-                  key: ValueKey<String>('mobile-${target.widgetKey}'),
-                  value: target,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(target.section.icon, size: AppIconSize.sm),
-                      const Gap(AppSpacing.sm),
-                      Flexible(child: _navigationTargetLabel(target)),
-                    ],
-                  ),
-                ),
+              Icon(target.section.icon, size: AppIconSize.md),
+              const Gap(AppSpacing.md),
+              Expanded(child: _navigationTargetLabel(target)),
+              const Gap(AppSpacing.sm),
+              const Icon(LucideIcons.chevronRight, size: AppIconSize.sm),
             ],
           ),
-        ).call,
-        itemBuilder: (context, target) => Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(target.section.icon, size: AppIconSize.sm),
-            const Gap(AppSpacing.sm),
-            Flexible(child: _navigationTargetLabel(target)),
+        );
+      },
+    );
+  }
+
+  void _openCompactSection(
+    BuildContext context,
+    _SettingsNavigationTarget target,
+  ) {
+    _compactRouteOpen = true;
+    _activateTarget(target);
+    final route = AppPageRoute<void>(
+      disableAnimations: MediaQuery.disableAnimationsOf(context),
+      settings: RouteSettings(name: 'settings/${target.section.slug}'),
+      builder: (context) => AnimatedBuilder(
+        animation: Listenable.merge([widget.controller, _detailRevision]),
+        builder: (context, _) => Scaffold(
+          headers: [
+            AppBar(
+              leading: [
+                Semantics(
+                  label: 'Back to Settings',
+                  child: Button.ghost(
+                    key: const ValueKey<String>('settings-back'),
+                    style: const ButtonStyle.ghostIcon(),
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Icon(LucideIcons.arrowLeft),
+                  ),
+                ),
+              ],
+              title: Text(target.section.label),
+            ),
+            const Divider(),
           ],
+          child: _loadedContent(
+            () => _sectionContent(
+              widget.controller.settings!,
+              target.section,
+              showHeading: false,
+            ),
+          ),
         ),
       ),
+    );
+    unawaited(Navigator.of(context).push<void>(route));
+    unawaited(
+      route.completed.then<void>((_) {
+        if (mounted) setState(() => _compactRouteOpen = false);
+      }),
     );
   }
 
@@ -358,7 +420,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             widget.quickPaste == null) ||
         (_selectedSection == _SettingsSectionId.modules &&
             widget.modules == null)) {
-      return _SettingsSectionId.capture;
+      return _SettingsSectionId.clipboard;
     }
     return _selectedSection;
   }
@@ -400,7 +462,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (widget.onOpenAndroidCaptureSetup != null)
         _SettingsNavigationTarget(
           id: _SettingsTargetId.androidBackgroundCapture,
-          section: _SettingsSectionId.capture,
+          section: _SettingsSectionId.clipboard,
           label: 'Android background capture',
           description: 'Full or Limited mode with Shizuku or ADB setup.',
           keywords: 'background permissions setup',
@@ -408,29 +470,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.clipboardCapture,
-        section: _SettingsSectionId.capture,
+        section: _SettingsSectionId.clipboard,
         label: 'Clipboard capture',
         description: 'Pause or resume clipboard capture.',
         targetKey: _clipboardCaptureKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.excludedApplications,
-        section: _SettingsSectionId.capture,
+        section: _SettingsSectionId.privacy,
         label: 'Excluded applications',
-        description: 'Applications whose clipboard changes are never captured.',
+        description: 'Skip automatic capture from excluded applications.',
         keywords: 'privacy app identifiers',
         targetKey: _excludedApplicationsKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.retention,
-        section: _SettingsSectionId.storageData,
+        section: _SettingsSectionId.clipboard,
         label: 'Retention',
         description: 'Automatically remove old unpinned clipboard items.',
         targetKey: _retentionKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.storageQuota,
-        section: _SettingsSectionId.storageData,
+        section: _SettingsSectionId.clipboard,
         label: 'Storage quota',
         description: 'Maximum local storage used by unpinned history.',
         keywords: 'disk space limit',
@@ -438,7 +500,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.historyFiles,
-        section: _SettingsSectionId.storageData,
+        section: _SettingsSectionId.data,
         label: 'History files',
         description: 'Export history, create backups, or restore a backup.',
         keywords: 'text encrypted backup data',
@@ -461,14 +523,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.notificationOnCopy,
-        section: _SettingsSectionId.feedback,
+        section: _SettingsSectionId.notifications,
         label: 'Notification on copy',
         description: 'Show a notification after a background capture.',
         targetKey: _notificationOnCopyKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.notificationPreview,
-        section: _SettingsSectionId.feedback,
+        section: _SettingsSectionId.notifications,
         label: 'Show clipboard content',
         description: 'Include a clip preview in copy notifications.',
         keywords: 'notification preview text image privacy',
@@ -476,7 +538,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.blockScreenshots,
-        section: _SettingsSectionId.security,
+        section: _SettingsSectionId.privacy,
         label: 'Block screenshots',
         description: 'Prevent screenshots and screen recording of CopyPaste.',
         keywords: 'privacy screen capture protection pairing qr security code',
@@ -484,7 +546,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.soundOnCopy,
-        section: _SettingsSectionId.feedback,
+        section: _SettingsSectionId.notifications,
         label: 'Sound on copy',
         description: 'Play platform feedback after a successful capture.',
         targetKey: _soundOnCopyKey,
@@ -492,7 +554,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (widget.appUpdate != null)
         _SettingsNavigationTarget(
           id: _SettingsTargetId.applicationUpdates,
-          section: _SettingsSectionId.feedback,
+          section: _SettingsSectionId.about,
           label: 'Application updates',
           description: 'Check for and install CopyPaste updates.',
           keywords: 'version github release',
@@ -520,13 +582,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   GlobalKey _sectionKey(_SettingsSectionId section) => switch (section) {
-    _SettingsSectionId.capture => _captureSectionKey,
+    _SettingsSectionId.clipboard => _clipboardSectionKey,
     _SettingsSectionId.modules => _modulesSectionKey,
-    _SettingsSectionId.security => _securitySectionKey,
-    _SettingsSectionId.storageData => _storageSectionKey,
+    _SettingsSectionId.privacy => _privacySectionKey,
+    _SettingsSectionId.data => _dataSectionKey,
     _SettingsSectionId.sync => _syncSectionKey,
-    _SettingsSectionId.feedback => _feedbackSectionKey,
+    _SettingsSectionId.notifications => _notificationsSectionKey,
     _SettingsSectionId.quickPaste => _quickPasteSectionKey,
+    _SettingsSectionId.about => _aboutSectionKey,
   };
 
   Key? _selectedNavigationKey(
@@ -565,6 +628,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _activateTarget(_SettingsNavigationTarget target) {
+    _searchFocus.unfocus();
     final highlight = target.isSearchResult;
     _highlightTimer?.cancel();
     setState(() {
@@ -576,6 +640,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _highlightTimer = Timer(AppMotion.settingsHighlightHold, () {
       if (!mounted || _highlightedTargetId != target.id) return;
       setState(() => _highlightedTargetId = null);
+      _detailRevision.value++;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_revealSearchTarget(target));
@@ -595,15 +660,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
-  Widget _captureSection(RuntimeSettings settings) {
+  Widget _clipboardSection(
+    RuntimeSettings settings, {
+    required bool showHeading,
+  }) {
     final capture = widget.controller.capture;
     return _SettingsSection(
-      key: _captureSectionKey,
-      title: 'Capture',
-      description: 'Control clipboard capture and application exclusions.',
+      showHeading: showHeading,
+      key: _clipboardSectionKey,
+      title: 'Clipboard',
+      description: 'Capture clipboard changes and manage history limits.',
       children: [
         if (widget.onOpenAndroidCaptureSetup != null) ...[
-          _SettingCard(
+          _SettingRow(
             key: _androidCaptureKey,
             highlighted: _isHighlighted(
               _SettingsTargetId.androidBackgroundCapture,
@@ -619,9 +688,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: const Text('Open setup'),
             ),
           ),
-          const Gap(AppSpacing.md),
         ],
-        _SettingCard(
+        _SettingRow(
           key: _clipboardCaptureKey,
           highlighted: _isHighlighted(_SettingsTargetId.clipboardCapture),
           title: 'Clipboard capture',
@@ -634,7 +702,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
         if (capture != null && !capture.running && !capture.paused) ...[
-          const Gap(AppSpacing.md),
           const Alert(
             leading: Icon(LucideIcons.circleAlert),
             title: Text('Capture is not running'),
@@ -643,13 +710,141 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
         ],
-        const Gap(AppSpacing.md),
-        Card(
+        _SettingRow(
+          key: _retentionKey,
+          highlighted: _isHighlighted(_SettingsTargetId.retention),
+          title: 'Retention',
+          description: 'Automatically remove old unpinned clipboard items.',
+          trailing: _valueSelect<int>(
+            value: settings.retentionDays,
+            values: _retentionOptions,
+            label: (value) => value == 0 ? 'Keep forever' : '$value days',
+            onChanged: widget.controller.setRetentionDays,
+          ),
+        ),
+        _SettingRow(
+          key: _storageQuotaKey,
+          highlighted: _isHighlighted(_SettingsTargetId.storageQuota),
+          title: 'Storage quota',
+          description: 'Maximum local storage used by unpinned history.',
+          trailing: _valueSelect<int>(
+            value: settings.storageQuotaBytes,
+            values: _quotaOptions,
+            label: _formatQuota,
+            onChanged: widget.controller.setStorageQuotaBytes,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _dataSection({required bool showHeading}) {
+    return _SettingsSection(
+      showHeading: showHeading,
+      key: _dataSectionKey,
+      title: 'Data',
+      description: 'Export, back up, and restore clipboard history.',
+      children: [
+        Column(
+          key: _historyFilesKey,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _SettingRow(
+              highlighted: _isHighlighted(_SettingsTargetId.historyFiles),
+              title: 'Export text history',
+              description: 'Save text clips in a portable file.',
+              trailing: Button.secondary(
+                onPressed: widget.controller.busy
+                    ? null
+                    : widget.controller.exportTextHistory,
+                leading: const Icon(LucideIcons.fileOutput),
+                child: const Text('Export'),
+              ),
+            ),
+            const Divider(),
+            _SettingRow(
+              highlighted: _isHighlighted(_SettingsTargetId.historyFiles),
+              title: 'Encrypted backup',
+              description: 'Save the complete local history for this device.',
+              trailing: Button.secondary(
+                onPressed: widget.controller.busy
+                    ? null
+                    : widget.controller.createBackup,
+                leading: const Icon(LucideIcons.archive),
+                child: const Text('Create backup'),
+              ),
+            ),
+            const Divider(),
+            _SettingRow(
+              highlighted: _isHighlighted(_SettingsTargetId.historyFiles),
+              title: 'Restore backup',
+              description: 'Replace local history with an encrypted backup.',
+              trailing: Button.destructive(
+                onPressed: widget.controller.busy ? null : _confirmRestore,
+                leading: const Icon(LucideIcons.history),
+                child: const Text('Restore'),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _syncSection(RuntimeSettings settings, {required bool showHeading}) {
+    return _SettingsSection(
+      showHeading: showHeading,
+      key: _syncSectionKey,
+      title: 'Sync',
+      description: 'Control synchronization with paired devices.',
+      children: [
+        _SettingRow(
+          key: _syncEnabledKey,
+          highlighted: _isHighlighted(_SettingsTargetId.sync),
+          title: 'Sync',
+          description: 'Master switch for paired-device synchronization.',
+          trailing: Switch(
+            value: settings.syncEnabled,
+            onChanged: widget.controller.busy
+                ? null
+                : widget.controller.setSyncEnabled,
+          ),
+        ),
+        _SettingRow(
+          key: _lanVisibilityKey,
+          highlighted: _isHighlighted(_SettingsTargetId.lanVisibility),
+          title: 'LAN visibility',
+          description: 'Allow nearby devices to discover this device.',
+          trailing: Switch(
+            value: settings.lanVisibility,
+            onChanged: widget.controller.busy
+                ? null
+                : widget.controller.setLanVisibility,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _privacySection(
+    RuntimeSettings settings, {
+    required bool showHeading,
+  }) {
+    return _SettingsSection(
+      showHeading: showHeading,
+      key: _privacySectionKey,
+      title: 'Privacy',
+      description:
+          'Control which apps are captured and protect clipboard content.',
+      children: [
+        AnimatedContainer(
           key: _excludedApplicationsKey,
-          theme: AppTheme.settingsSearchTargetCardTheme(
+          duration: AppMotion.resolve(context, AppMotion.quick),
+          decoration: AppTheme.settingsRowDecoration(
             context,
             highlighted: _isHighlighted(_SettingsTargetId.excludedApplications),
           ),
+          padding: AppTheme.settingsRowPadding,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -731,131 +926,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ],
           ),
         ),
-      ],
-    );
-  }
-
-  Widget _storageSection(RuntimeSettings settings) {
-    return _SettingsSection(
-      key: _storageSectionKey,
-      title: 'Storage & Data',
-      description: 'Set retention limits and manage local history files.',
-      children: [
-        _SettingCard(
-          key: _retentionKey,
-          highlighted: _isHighlighted(_SettingsTargetId.retention),
-          title: 'Retention',
-          description: 'Automatically remove old unpinned clipboard items.',
-          trailing: _valueSelect<int>(
-            value: settings.retentionDays,
-            values: _retentionOptions,
-            label: (value) => value == 0 ? 'Keep forever' : '$value days',
-            onChanged: widget.controller.setRetentionDays,
-          ),
-        ),
-        const Gap(AppSpacing.md),
-        _SettingCard(
-          key: _storageQuotaKey,
-          highlighted: _isHighlighted(_SettingsTargetId.storageQuota),
-          title: 'Storage quota',
-          description: 'Maximum local storage used by unpinned history.',
-          trailing: _valueSelect<int>(
-            value: settings.storageQuotaBytes,
-            values: _quotaOptions,
-            label: _formatQuota,
-            onChanged: widget.controller.setStorageQuotaBytes,
-          ),
-        ),
-        const Gap(AppSpacing.md),
-        Card(
-          key: _historyFilesKey,
-          theme: AppTheme.settingsSearchTargetCardTheme(
-            context,
-            highlighted: _isHighlighted(_SettingsTargetId.historyFiles),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text('History files').medium(),
-              const Gap(AppSpacing.xs),
-              const Text(
-                'Text export is portable. Encrypted backups preserve the complete local history for this device.',
-              ).muted().textSmall(),
-              const Gap(AppSpacing.lg),
-              Wrap(
-                spacing: AppSpacing.sm,
-                runSpacing: AppSpacing.sm,
-                children: [
-                  Button.secondary(
-                    onPressed: widget.controller.busy
-                        ? null
-                        : widget.controller.exportTextHistory,
-                    leading: const Icon(LucideIcons.fileOutput),
-                    child: const Text('Export text history'),
-                  ),
-                  Button.secondary(
-                    onPressed: widget.controller.busy
-                        ? null
-                        : widget.controller.createBackup,
-                    leading: const Icon(LucideIcons.archive),
-                    child: const Text('Create encrypted backup'),
-                  ),
-                  Button.destructive(
-                    onPressed: widget.controller.busy ? null : _confirmRestore,
-                    leading: const Icon(LucideIcons.history),
-                    child: const Text('Restore backup'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _syncSection(RuntimeSettings settings) {
-    return _SettingsSection(
-      key: _syncSectionKey,
-      title: 'Sync',
-      description: 'Control synchronization with paired devices.',
-      children: [
-        _SettingCard(
-          key: _syncEnabledKey,
-          highlighted: _isHighlighted(_SettingsTargetId.sync),
-          title: 'Sync',
-          description: 'Master switch for paired-device synchronization.',
-          trailing: Switch(
-            value: settings.syncEnabled,
-            onChanged: widget.controller.busy
-                ? null
-                : widget.controller.setSyncEnabled,
-          ),
-        ),
-        const Gap(AppSpacing.md),
-        _SettingCard(
-          key: _lanVisibilityKey,
-          highlighted: _isHighlighted(_SettingsTargetId.lanVisibility),
-          title: 'LAN visibility',
-          description: 'Allow nearby devices to discover this device.',
-          trailing: Switch(
-            value: settings.lanVisibility,
-            onChanged: widget.controller.busy
-                ? null
-                : widget.controller.setLanVisibility,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _securitySection() {
-    return _SettingsSection(
-      key: _securitySectionKey,
-      title: 'Security',
-      description: 'Control screen capture of CopyPaste.',
-      children: [
-        _SettingCard(
+        _SettingRow(
           key: _blockScreenshotsKey,
           highlighted: _isHighlighted(_SettingsTargetId.blockScreenshots),
           title: 'Block screenshots',
@@ -872,13 +943,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _feedbackSection(RuntimeSettings settings) {
+  Widget _notificationsSection(
+    RuntimeSettings settings, {
+    required bool showHeading,
+  }) {
     return _SettingsSection(
-      key: _feedbackSectionKey,
-      title: 'Feedback',
-      description: 'Manage application updates and clipboard feedback.',
+      showHeading: showHeading,
+      key: _notificationsSectionKey,
+      title: 'Notifications',
+      description: 'Choose notifications and sounds for captured clips.',
       children: [
-        _SettingCard(
+        _SettingRow(
           key: _notificationOnCopyKey,
           highlighted: _isHighlighted(_SettingsTargetId.notificationOnCopy),
           title: 'Notification on copy',
@@ -890,8 +965,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 : widget.controller.setNotifyOnCopy,
           ),
         ),
-        const Gap(AppSpacing.md),
-        _SettingCard(
+        _SettingRow(
           key: _notificationPreviewKey,
           highlighted: _isHighlighted(_SettingsTargetId.notificationPreview),
           title: 'Show clipboard content',
@@ -904,8 +978,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 : widget.controller.setNotificationPreview,
           ),
         ),
-        const Gap(AppSpacing.md),
-        _SettingCard(
+        _SettingRow(
           key: _soundOnCopyKey,
           highlighted: _isHighlighted(_SettingsTargetId.soundOnCopy),
           title: 'Sound on copy',
@@ -917,11 +990,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 : widget.controller.setSoundOnCopy,
           ),
         ),
+      ],
+    );
+  }
+
+  Widget _aboutSection({required bool showHeading}) {
+    return _SettingsSection(
+      showHeading: showHeading,
+      key: _aboutSectionKey,
+      title: 'About',
+      description: 'CopyPaste version and application updates.',
+      children: [
+        _SettingRow(
+          title: 'Version',
+          description: 'Installed CopyPaste version.',
+          trailing: Text(
+            widget.appUpdate?.currentVersion?.toString() ?? 'Unavailable',
+          ),
+        ),
         if (widget.appUpdate case final controller?) ...[
           const Gap(AppSpacing.md),
           AnimatedBuilder(
             animation: controller,
-            builder: (context, _) => _SettingCard(
+            builder: (context, _) => _SettingRow(
               key: _applicationUpdatesKey,
               highlighted: _isHighlighted(_SettingsTargetId.applicationUpdates),
               title: 'Application updates',
@@ -1167,29 +1258,49 @@ class _SettingsSection extends StatelessWidget {
     required this.title,
     required this.description,
     required this.children,
+    this.groupContent = true,
+    this.showHeading = true,
   });
 
   final String title;
   final String description;
   final List<Widget> children;
+  final bool groupContent;
+  final bool showHeading;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(title, style: Theme.of(context).typography.h3),
-        const Gap(AppSpacing.xs),
+        if (showHeading) ...[
+          Text(title, style: Theme.of(context).typography.h3),
+          const Gap(AppSpacing.xs),
+        ],
         Text(description).muted(),
         const Gap(AppSpacing.lg),
-        ...children,
+        if (groupContent)
+          Card(
+            theme: AppTheme.settingsGroupCardTheme,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var i = 0; i < children.length; i++) ...[
+                  if (i > 0) const Divider(),
+                  children[i],
+                ],
+              ],
+            ),
+          )
+        else
+          ...children,
       ],
     );
   }
 }
 
-class _SettingCard extends StatelessWidget {
-  const _SettingCard({
+class _SettingRow extends StatelessWidget {
+  const _SettingRow({
     super.key,
     required this.title,
     required this.description,
@@ -1212,16 +1323,21 @@ class _SettingCard extends StatelessWidget {
         Text(description).muted().textSmall(),
       ],
     );
-    return Card(
-      theme: AppTheme.settingsSearchTargetCardTheme(
+    return AnimatedContainer(
+      key: ValueKey<String>('settings-row-$title'),
+      duration: AppMotion.resolve(context, AppMotion.quick),
+      decoration: AppTheme.settingsRowDecoration(
         context,
         highlighted: highlighted,
       ),
+      padding: AppTheme.settingsRowPadding,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final stack =
-              constraints.maxWidth < 420 ||
-              MediaQuery.textScalerOf(context).scale(1) > 1.3;
+              trailing is! Switch &&
+              (constraints.maxWidth <
+                      AppLayoutSize.settingsStackedControlWidth ||
+                  MediaQuery.textScalerOf(context).scale(1) > 1.3);
           if (stack) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1250,6 +1366,7 @@ class _QuickPasteSection extends StatelessWidget {
   const _QuickPasteSection({
     super.key,
     required this.controller,
+    required this.showHeading,
     required this.shortcutKey,
     required this.autoPasteKey,
     required this.shortcutHighlighted,
@@ -1257,6 +1374,7 @@ class _QuickPasteSection extends StatelessWidget {
   });
 
   final QuickPasteSettingsController controller;
+  final bool showHeading;
   final Key shortcutKey;
   final Key autoPasteKey;
   final bool shortcutHighlighted;
@@ -1268,6 +1386,7 @@ class _QuickPasteSection extends StatelessWidget {
       animation: controller,
       builder: (context, _) {
         return _SettingsSection(
+          showHeading: showHeading,
           title: 'Quick Paste',
           description:
               'Open clipboard history from anywhere without switching windows.',
@@ -1283,7 +1402,7 @@ class _QuickPasteSection extends StatelessWidget {
                 ),
               )
             else ...[
-              _SettingCard(
+              _SettingRow(
                 key: shortcutKey,
                 highlighted: shortcutHighlighted,
                 title: 'Open Quick Paste',
@@ -1291,8 +1410,7 @@ class _QuickPasteSection extends StatelessWidget {
                     'The shortcut works while CopyPaste is running in the background.',
                 trailing: _ShortcutRecorder(controller: controller),
               ),
-              const Gap(AppSpacing.md),
-              _SettingCard(
+              _SettingRow(
                 key: autoPasteKey,
                 highlighted: autoPasteHighlighted,
                 title: 'Paste automatically',
@@ -1306,7 +1424,6 @@ class _QuickPasteSection extends StatelessWidget {
               if (Platform.isMacOS &&
                   controller.autoPaste &&
                   !controller.accessibilityGranted) ...[
-                const Gap(AppSpacing.md),
                 Alert(
                   leading: const Icon(LucideIcons.accessibility),
                   title: const Text('Accessibility is required'),
@@ -1331,7 +1448,6 @@ class _QuickPasteSection extends StatelessWidget {
                 ),
               ],
               if (controller.errorMessage case final message?) ...[
-                const Gap(AppSpacing.md),
                 Alert.destructive(
                   leading: const Icon(LucideIcons.circleAlert),
                   title: const Text('Quick Paste needs attention'),
@@ -1439,29 +1555,23 @@ class _ShortcutRecorderState extends State<_ShortcutRecorder> {
 }
 
 enum _SettingsSectionId {
-  modules(
-    label: 'Modules',
-    slug: 'modules',
-    description: 'Install and manage optional modules.',
-    icon: LucideIcons.puzzle,
-  ),
-  capture(
-    label: 'Capture',
-    slug: 'capture',
-    description: 'Clipboard capture and application exclusions.',
+  clipboard(
+    label: 'Clipboard',
+    slug: 'clipboard',
+    description: 'Capture and history limits.',
     icon: LucideIcons.clipboard,
   ),
-  storageData(
-    label: 'Storage & Data',
-    slug: 'storage-data',
-    description: 'Retention, storage limits, export, and backup.',
-    icon: LucideIcons.database,
-  ),
-  security(
-    label: 'Security',
-    slug: 'security',
-    description: 'Screenshot and screen recording protection.',
+  privacy(
+    label: 'Privacy',
+    slug: 'privacy',
+    description: 'Application exclusions and screen protection.',
     icon: LucideIcons.shield,
+  ),
+  quickPaste(
+    label: 'Quick Paste',
+    slug: 'quick-paste',
+    description: 'Shortcut and automatic paste behavior.',
+    icon: LucideIcons.keyboard,
   ),
   sync(
     label: 'Sync',
@@ -1469,17 +1579,29 @@ enum _SettingsSectionId {
     description: 'Synchronization and nearby-device discovery.',
     icon: LucideIcons.refreshCw,
   ),
-  feedback(
-    label: 'Feedback',
-    slug: 'feedback',
-    description: 'Capture feedback and application updates.',
+  notifications(
+    label: 'Notifications',
+    slug: 'notifications',
+    description: 'Capture notifications and sounds.',
     icon: LucideIcons.bell,
   ),
-  quickPaste(
-    label: 'Quick Paste',
-    slug: 'quick-paste',
-    description: 'Shortcut and automatic paste behavior.',
-    icon: LucideIcons.keyboard,
+  data(
+    label: 'Data',
+    slug: 'data',
+    description: 'Export, backup, and restore.',
+    icon: LucideIcons.database,
+  ),
+  modules(
+    label: 'Modules',
+    slug: 'modules',
+    description: 'Install and manage optional modules.',
+    icon: LucideIcons.puzzle,
+  ),
+  about(
+    label: 'About',
+    slug: 'about',
+    description: 'Version and application updates.',
+    icon: LucideIcons.info,
   );
 
   const _SettingsSectionId({

@@ -981,6 +981,7 @@ mod tests {
         let (events_tx, events) = tokio::sync::broadcast::channel(1);
         events_tx
             .send(copypaste_ipc::EventData {
+                sync_status: None,
                 event: copypaste_ipc::EventKind::Items,
                 item_count: 1,
                 captured: false,
@@ -989,6 +990,7 @@ mod tests {
             .unwrap();
         events_tx
             .send(copypaste_ipc::EventData {
+                sync_status: None,
                 event: copypaste_ipc::EventKind::Items,
                 item_count: 2,
                 captured: true,

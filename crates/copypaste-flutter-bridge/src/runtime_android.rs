@@ -626,6 +626,7 @@ pub(crate) async fn watch(
         };
         if sink
             .add(crate::api::RuntimeEvent {
+                sync_status: event.sync_status.map(crate::api::runtime_sync_status),
                 kind: match event.event {
                     copypaste_ipc::EventKind::Items => "items".into(),
                     copypaste_ipc::EventKind::Peers => "peers".into(),

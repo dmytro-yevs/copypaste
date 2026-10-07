@@ -107,7 +107,7 @@ class _CaptureSetup extends StatelessWidget {
         ),
         const Gap(AppSpacing.lg),
         RadioGroup<AndroidCaptureMode>(
-          value: controller.mode,
+          value: controller.selectedMode,
           onChanged: (mode) => unawaited(controller.selectMode(mode)),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -130,7 +130,7 @@ class _CaptureSetup extends StatelessWidget {
             ],
           ),
         ),
-        if (controller.mode == AndroidCaptureMode.full) ...[
+        if (controller.selectedMode == AndroidCaptureMode.full) ...[
           const Gap(AppSpacing.lg),
           Card(
             child: Column(

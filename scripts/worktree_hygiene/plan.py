@@ -45,7 +45,7 @@ def _for_candidate(repo: Path, candidate: Candidate, roots: list[Path]) -> list[
 
 
 _PRIMARY_REASON = (
-    "primary checkout, never removed here; reclaim with scripts/clean-target.sh (DMY-189)"
+    "primary checkout, never removed here; reclaim with cargo clean or the Git cleanup hooks"
 )
 
 

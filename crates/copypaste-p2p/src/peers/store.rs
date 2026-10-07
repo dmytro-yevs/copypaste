@@ -7,6 +7,7 @@ use std::sync::RwLock;
 
 use zeroize::Zeroizing;
 
+use super::crypto;
 use super::file::{only_last_seen_moved, parse, warn_if_permissive, write_atomically, State};
 use super::tentative;
 use super::{Peer, PeerStoreError, MAX_PAIRINGS};
@@ -19,6 +20,7 @@ use crate::transport::PskCandidate;
 /// lock and nothing else.
 pub struct PeerStore {
     path: PathBuf,
+    key: Zeroizing<[u8; 32]>,
     pub(super) state: RwLock<State>,
     unflushed: AtomicBool,
 }
@@ -29,12 +31,12 @@ impl PeerStore {
     ///
     /// # Errors
     ///
-    /// `Corrupt` if damaged; `Io` if it could not be read.
-    pub fn open(path: &Path) -> Result<Self, PeerStoreError> {
+    /// `Corrupt` for a wrong key, damage or plaintext; `Io` for read failures.
+    pub fn open(path: &Path, key: &[u8; 32]) -> Result<Self, PeerStoreError> {
         let state = match std::fs::read(path) {
             Ok(bytes) => {
                 warn_if_permissive(path);
-                let text = Zeroizing::new(bytes);
+                let text = crypto::open(&bytes, key)?;
                 parse(&text)?
             }
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => State::default(),
@@ -42,9 +44,16 @@ impl PeerStore {
         };
         Ok(Self {
             path: path.to_path_buf(),
+            key: Zeroizing::new(*key),
             state: RwLock::new(state),
             unflushed: AtomicBool::new(false),
         })
+    }
+
+    /// One-time conversion authorized by the application's encrypted migration
+    /// marker. Normal opens never accept plaintext, including after conversion.
+    pub fn migrate_plaintext(path: &Path, key: &[u8; 32]) -> Result<(), PeerStoreError> {
+        super::file::migrate_plaintext(path, key)
     }
 
     /// Every peer, ordered by pairing id so callers and tests see a stable sequence.
@@ -271,7 +280,7 @@ impl PeerStore {
     }
 
     pub(super) fn persist(&self, state: &State) -> Result<(), PeerStoreError> {
-        let written = write_atomically(&self.path, state);
+        let written = write_atomically(&self.path, state, &self.key);
         if written.is_ok() {
             self.unflushed.store(false, Ordering::Release);
         }
@@ -313,7 +322,7 @@ mod tests {
     fn opening_a_missing_file_yields_an_empty_store_and_writes_nothing() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
-        let store = PeerStore::open(&path).expect("open");
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
         assert!(store.is_empty());
         assert!(store.list().is_empty());
         assert!(store.psks().is_empty());
@@ -321,7 +330,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_peer_json_without_profile_opens_with_no_authenticated_metadata() {
+    fn legacy_peer_json_without_profile_migrates_without_authenticated_metadata() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
         let psk = hex::encode([7u8; TOKEN_LEN]);
@@ -333,7 +342,8 @@ mod tests {
         )
         .expect("write legacy peer file");
 
-        let peer = PeerStore::open(&path)
+        PeerStore::migrate_plaintext(&path, &crate::peers::testutil::KEY).expect("migrate");
+        let peer = PeerStore::open(&path, &crate::peers::testutil::KEY)
             .expect("legacy peer file")
             .get("legacy")
             .expect("legacy peer");
@@ -345,7 +355,7 @@ mod tests {
     fn authenticated_profile_survives_a_disk_restart() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
-        let store = PeerStore::open(&path).expect("open");
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
         let mut trusted = peer("Phone");
         trusted.profile = Some(DeviceProfile {
             model: Some("Pixel 9".to_string()),
@@ -355,7 +365,7 @@ mod tests {
         let id = trusted.pairing_id.clone();
         store.upsert(trusted).expect("persist profile");
 
-        let reopened = PeerStore::open(&path).expect("reopen");
+        let reopened = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("reopen");
         let persisted = reopened.get(&id).expect("persisted peer");
         assert_eq!(
             persisted
@@ -371,7 +381,7 @@ mod tests {
     fn profile_refresh_is_not_deferred_as_a_last_seen_only_touch() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
-        let store = PeerStore::open(&path).expect("open");
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
         let initial = peer("Phone");
         let id = initial.pairing_id.clone();
         store.upsert(initial).expect("initial peer");
@@ -384,7 +394,7 @@ mod tests {
         refreshed.profile_observed_at_ms = 42;
         assert!(store.touch(refreshed).expect("profile refresh"));
 
-        let reopened = PeerStore::open(&path).expect("reopen");
+        let reopened = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("reopen");
         assert_eq!(
             reopened
                 .get(&id)
@@ -408,7 +418,7 @@ mod tests {
         )
         .expect("write malformed peer file");
         assert!(matches!(
-            PeerStore::open(&path),
+            PeerStore::open(&path, &crate::peers::testutil::KEY),
             Err(PeerStoreError::Corrupt)
         ));
     }
@@ -423,13 +433,13 @@ mod tests {
         let (laptop_id, laptop_psk) = (laptop.pairing_id.clone(), laptop.psk);
         let phone_id = phone.pairing_id.clone();
 
-        let store = PeerStore::open(&path).expect("open");
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
         store.upsert(laptop).expect("upsert laptop");
         store.upsert(phone).expect("upsert phone");
         assert_eq!(store.len(), 2);
 
         // Reopened from disk, everything survives byte for byte.
-        let reopened = PeerStore::open(&path).expect("reopen");
+        let reopened = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("reopen");
         assert_eq!(reopened.len(), 2);
         let got = reopened.get(&laptop_id).expect("laptop present");
         assert_eq!(got.name, "Laptop");
@@ -469,7 +479,7 @@ mod tests {
     fn upsert_replaces_by_pairing_id_and_overwrites_atomically() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
-        let store = PeerStore::open(&path).expect("open");
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
 
         let original = peer("Old name");
         let id = original.pairing_id.clone();
@@ -491,7 +501,7 @@ mod tests {
 
         // One record, not two, and the file was replaced rather than appended.
         assert_eq!(store.len(), 1);
-        let reopened = PeerStore::open(&path).expect("reopen");
+        let reopened = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("reopen");
         assert_eq!(reopened.len(), 1);
         let got = reopened.get(&id).expect("present");
         assert_eq!(got.name, "New name");
@@ -517,7 +527,7 @@ mod tests {
     fn a_stable_device_identity_cannot_occupy_two_pairing_slots() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
-        let store = PeerStore::open(&path).expect("open");
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
 
         let mut established = peer("Phone");
         established.device_id = Some("phone-device-id".to_string());
@@ -537,7 +547,7 @@ mod tests {
         assert!(store.get(&duplicate_pairing_id).is_none());
         assert!(store.contains_device("phone-device-id", "different-pairing"));
 
-        let reopened = PeerStore::open(&path).expect("reopen");
+        let reopened = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("reopen");
         assert_eq!(reopened.len(), 1);
         assert_eq!(
             reopened
@@ -556,7 +566,7 @@ mod tests {
     fn a_repeat_session_does_not_rewrite_the_file_for_last_seen_alone() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
-        let store = PeerStore::open(&path).expect("open");
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
 
         let established = peer("Laptop");
         let id = established.pairing_id.clone();
@@ -578,7 +588,7 @@ mod tests {
 
         store.flush().expect("flush");
         assert_eq!(
-            PeerStore::open(&path)
+            PeerStore::open(&path, &crate::peers::testutil::KEY)
                 .expect("reopen")
                 .get(&id)
                 .expect("present")
@@ -597,7 +607,7 @@ mod tests {
     fn a_changed_name_or_address_still_writes_through() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
-        let store = PeerStore::open(&path).expect("open");
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
 
         let first = peer("placeholder");
         let id = first.pairing_id.clone();
@@ -618,7 +628,7 @@ mod tests {
             })
             .expect("session");
         assert_eq!(
-            PeerStore::open(&path)
+            PeerStore::open(&path, &crate::peers::testutil::KEY)
                 .expect("reopen")
                 .get(&id)
                 .expect("present")
@@ -639,7 +649,7 @@ mod tests {
             })
             .expect("moved");
         assert_eq!(
-            PeerStore::open(&path)
+            PeerStore::open(&path, &crate::peers::testutil::KEY)
                 .expect("reopen")
                 .get(&id)
                 .expect("present")
@@ -652,7 +662,7 @@ mod tests {
     fn remove_reports_whether_anything_went() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
-        let store = PeerStore::open(&path).expect("open");
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
         let p = peer("Tablet");
         let id = p.pairing_id.clone();
         store.upsert(p).expect("upsert");
@@ -660,7 +670,9 @@ mod tests {
         assert!(store.remove(&id).expect("remove"));
         assert!(!store.remove(&id).expect("second remove"), "already gone");
         assert!(store.is_empty());
-        assert!(PeerStore::open(&path).expect("reopen").is_empty());
+        assert!(PeerStore::open(&path, &crate::peers::testutil::KEY)
+            .expect("reopen")
+            .is_empty());
     }
 
     /// `touch` records, it never enrols: the record a finished session carries
@@ -670,7 +682,7 @@ mod tests {
     fn touching_a_pairing_that_is_gone_writes_nothing() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
-        let store = PeerStore::open(&path).expect("open");
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
         let laptop = peer("Laptop");
         let id = laptop.pairing_id.clone();
         store.upsert(laptop.clone()).expect("upsert");
@@ -692,13 +704,15 @@ mod tests {
         );
         assert!(store.get(&id).is_none());
         assert!(store.psks().is_empty());
-        assert!(PeerStore::open(&path).expect("reopen").is_empty());
+        assert!(PeerStore::open(&path, &crate::peers::testutil::KEY)
+            .expect("reopen")
+            .is_empty());
     }
 
     #[test]
     fn an_all_zero_psk_is_refused() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let store = PeerStore::open(&store_path(&dir)).expect("open");
+        let store = PeerStore::open(&store_path(&dir), &crate::peers::testutil::KEY).expect("open");
         let bad = Peer {
             pairing_id: "id".to_string(),
             device_id: None,
@@ -738,7 +752,7 @@ mod tests {
     #[test]
     fn psks_are_handed_out_wiped_on_drop() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let store = PeerStore::open(&store_path(&dir)).expect("open");
+        let store = PeerStore::open(&store_path(&dir), &crate::peers::testutil::KEY).expect("open");
         store.upsert(peer("Laptop")).expect("upsert");
 
         let candidates: Zeroizing<Vec<PskCandidate>> = store.psks();
@@ -756,7 +770,7 @@ mod tests {
     fn the_pairing_list_is_capped_by_refusing_not_by_evicting() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
-        let store = PeerStore::open(&path).expect("open");
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
 
         let ids: Vec<String> = (0..MAX_PAIRINGS)
             .map(|i| {
@@ -779,7 +793,7 @@ mod tests {
         assert_eq!(store.len(), MAX_PAIRINGS);
         assert_eq!(store.psks().len(), MAX_PAIRINGS);
         assert!(store.get(&refused_id).is_none());
-        let reopened = PeerStore::open(&path).expect("reopen");
+        let reopened = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("reopen");
         for id in &ids {
             assert!(reopened.get(id).is_some(), "lost {id}");
         }
@@ -817,7 +831,7 @@ mod tests {
 
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
-        let store = Arc::new(PeerStore::open(&path).expect("open"));
+        let store = Arc::new(PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open"));
 
         let mut handles = Vec::new();
         // Eight threads writing four pairings each would be 32, past
@@ -844,7 +858,7 @@ mod tests {
         assert_eq!(store.len(), expected.len());
         // Every write is serialised through the lock, so the final file has all
         // of them — no thread's rewrite dropped another's record.
-        let reopened = PeerStore::open(&path).expect("reopen");
+        let reopened = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("reopen");
         assert_eq!(reopened.len(), expected.len());
         for id in expected {
             assert!(reopened.get(&id).is_some(), "lost record {id}");

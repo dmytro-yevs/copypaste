@@ -1,7 +1,9 @@
 import '../models/settings_models.dart';
+import '../models/sync_status.dart';
 import '../../../platform/notifications/capture_notification_preview.dart';
 
 abstract interface class SettingsRepository {
+  Stream<SyncStatus> syncEvents();
   Stream<String?> capturedEvents();
 
   Future<CaptureNotificationPreview?> capturePreview(String id);

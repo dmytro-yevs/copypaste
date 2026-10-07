@@ -255,6 +255,7 @@ mod tests {
 
     fn status(protocol_version: u32, backend: &str) -> StatusData {
         StatusData {
+            sync_status: Default::default(),
             device_name: "Test device".into(),
             device_id: None,
             version: "2.0.0-alpha.1".into(),
@@ -372,6 +373,7 @@ mod tests {
     #[test]
     fn a_capture_event_reads_differently_from_any_other_change() {
         let captured = event_text(&EventData {
+            sync_status: None,
             event: EventKind::Items,
             item_count: 3,
             captured: true,
@@ -380,6 +382,7 @@ mod tests {
         assert!(captured.contains("captured"), "{captured}");
 
         let other = event_text(&EventData {
+            sync_status: None,
             event: EventKind::Items,
             item_count: 3,
             captured: false,

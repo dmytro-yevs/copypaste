@@ -204,8 +204,11 @@ fn reopen_with(
     let keyring = Arc::new(Keyring::from_secret(&secret));
     let store = Store::open(&db_path, &keyring.db_key()).expect("store");
     let meta = Meta::open(&store, name).expect("meta");
-    let peers = PeerStore::open(&dir.path().join(copypaste_p2p::peers::DEFAULT_FILE_NAME))
-        .expect("peer store");
+    let peers = PeerStore::open(
+        &dir.path().join(copypaste_p2p::peers::DEFAULT_FILE_NAME),
+        &keyring.peer_store_key(),
+    )
+    .expect("peer store");
     // Port 0 is never bound in these tests; discovery degrades either way.
     let discovery = Discovery::dormant(name, 0).expect("discovery");
     let settings = crate::settings::Settings::load(&meta);

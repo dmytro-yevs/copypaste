@@ -1,6 +1,6 @@
-//! The device secret and the two keys derived from it.
+//! The device secret and the keys derived from it.
 //!
-//! One extract, two expands, no dispatch. The keystore that holds the secret is
+//! Domain-separated derivation, no dispatch. The keystore that holds the secret is
 //! [`super::keystore`]; the envelope that consumes [`ItemKey`] is
 //! [`super::aead`].
 
@@ -33,6 +33,8 @@ const INFO_DB_KEY: &[u8] = b"copypaste/v2/sqlcipher-db-key";
 
 /// HKDF `info` for the per-item content AEAD key.
 const INFO_ITEM_KEY: &[u8] = b"copypaste/v2/item-content-key";
+
+const INFO_PEER_STORE_KEY: &[u8] = b"copypaste/v2/peer-store-key";
 
 /// Development bypass, compiled out unless `dev-ephemeral-key` is enabled.
 #[cfg(feature = "dev-ephemeral-key")]
@@ -122,6 +124,11 @@ impl Keyring {
     /// Key for item content AEAD.
     pub fn item_key(&self) -> ItemKey {
         ItemKey(Zeroizing::new(derive(&self.secret, INFO_ITEM_KEY)))
+    }
+
+    /// Key for the encrypted LAN pairing store, separate from content and SQLCipher.
+    pub fn peer_store_key(&self) -> Zeroizing<[u8; KEY_LEN]> {
+        Zeroizing::new(derive(&self.secret, INFO_PEER_STORE_KEY))
     }
 }
 
@@ -443,12 +450,18 @@ mod tests {
     }
 
     #[test]
-    fn db_key_and_item_key_are_domain_separated() {
+    fn database_item_and_peer_store_keys_are_domain_separated() {
         // Same IKM, same salt, different `info`. If these ever collide, a
         // SQLCipher header disclosure would also disclose the item key.
         let ring = Keyring::from_secret(&SECRET_A);
         let item = ring.item_key();
         assert_ne!(*ring.db_key(), *item.0.as_ref());
+        assert_ne!(*ring.peer_store_key(), *ring.db_key());
+        assert_ne!(*ring.peer_store_key(), *item.0.as_ref());
+        assert_eq!(
+            *ring.peer_store_key(),
+            *Keyring::from_secret(&SECRET_A).peer_store_key()
+        );
     }
 
     #[test]
@@ -458,6 +471,7 @@ mod tests {
         let ring = Keyring::from_secret(&SECRET_A);
         assert_ne!(*ring.db_key(), SECRET_A);
         assert_ne!(*ring.item_key().0.as_ref(), SECRET_A);
+        assert_ne!(*ring.peer_store_key(), SECRET_A);
     }
 
     #[test]
@@ -467,8 +481,11 @@ mod tests {
         // edit of both the constant and this test.
         assert_eq!(INFO_DB_KEY, b"copypaste/v2/sqlcipher-db-key");
         assert_eq!(INFO_ITEM_KEY, b"copypaste/v2/item-content-key");
+        assert_eq!(INFO_PEER_STORE_KEY, b"copypaste/v2/peer-store-key");
         assert_eq!(HKDF_SALT, b"copypaste/v2/device-secret/hkdf-salt");
         assert_ne!(INFO_DB_KEY, INFO_ITEM_KEY);
+        assert_ne!(INFO_PEER_STORE_KEY, INFO_DB_KEY);
+        assert_ne!(INFO_PEER_STORE_KEY, INFO_ITEM_KEY);
     }
 
     #[test]

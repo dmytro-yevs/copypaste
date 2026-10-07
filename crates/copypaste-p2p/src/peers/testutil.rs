@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use super::{Peer, DEFAULT_FILE_NAME};
 use crate::transport::PairingToken;
 
+pub(crate) const KEY: [u8; 32] = [17; 32];
+
 /// A plausible peer record, with a real token behind it so the pairing id and
 /// the PSK are consistent with each other.
 pub(super) fn peer(name: &str) -> Peer {

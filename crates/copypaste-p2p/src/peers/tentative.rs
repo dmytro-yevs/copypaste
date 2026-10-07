@@ -176,7 +176,7 @@ mod tests {
     fn an_uncontended_rollback_puts_the_previous_record_back() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
-        let store = PeerStore::open(&path).expect("open");
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
         let established = peer("Laptop");
         let id = established.pairing_id.clone();
         let original_psk = established.psk;
@@ -196,7 +196,7 @@ mod tests {
             .expect("the established pairing must survive");
         assert!(back.psk_matches(&original_psk));
         assert_eq!(back.name, "Laptop");
-        assert!(PeerStore::open(&path)
+        assert!(PeerStore::open(&path, &crate::peers::testutil::KEY)
             .expect("reopen")
             .get(&id)
             .expect("present")
@@ -210,7 +210,7 @@ mod tests {
     #[test]
     fn a_concurrent_session_write_keeps_its_observations_and_loses_the_new_key() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let store = PeerStore::open(&store_path(&dir)).expect("open");
+        let store = PeerStore::open(&store_path(&dir), &crate::peers::testutil::KEY).expect("open");
         let established = peer("Laptop");
         let id = established.pairing_id.clone();
         let original_psk = established.psk;
@@ -260,7 +260,7 @@ mod tests {
     #[test]
     fn a_tentative_write_is_refused_when_the_slot_moved_first() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let store = PeerStore::open(&store_path(&dir)).expect("open");
+        let store = PeerStore::open(&store_path(&dir), &crate::peers::testutil::KEY).expect("open");
         let established = peer("Laptop");
         let id = established.pairing_id.clone();
         store.upsert(established).expect("upsert");
@@ -286,7 +286,7 @@ mod tests {
     fn a_rollback_that_cannot_be_written_still_takes_the_key_out_of_memory() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
-        let store = PeerStore::open(&path).expect("open");
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
         let mut snapshot = store.snapshot("fresh-pairing");
         let tentative = Peer {
             pairing_id: "fresh-pairing".to_string(),
@@ -329,7 +329,7 @@ mod tests {
     #[test]
     fn a_rollback_never_restores_a_pairing_that_was_revoked_meanwhile() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let store = PeerStore::open(&store_path(&dir)).expect("open");
+        let store = PeerStore::open(&store_path(&dir), &crate::peers::testutil::KEY).expect("open");
         let established = peer("stolen phone");
         let id = established.pairing_id.clone();
         store.upsert(established).expect("upsert");

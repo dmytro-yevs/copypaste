@@ -15,6 +15,7 @@ pub mod device_name;
 pub mod image_preview;
 pub mod ingest;
 pub mod p2p_contract;
+pub mod peer_store;
 pub mod retention;
 pub mod semantic;
 pub mod settings_record;

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:copypaste_flutter/features/settings/models/settings_models.dart';
+import 'package:copypaste_flutter/features/settings/models/sync_status.dart';
 import 'package:copypaste_flutter/features/settings/repository/settings_repository.dart';
 import 'package:copypaste_flutter/platform/notifications/capture_notification_port.dart';
 import 'package:copypaste_flutter/platform/notifications/capture_notification_preview.dart';
@@ -17,6 +18,10 @@ class FakeScreenshotProtection implements ScreenshotProtection {
 }
 
 class FakeSettingsRepository implements SettingsRepository {
+  final syncChanges = StreamController<SyncStatus>.broadcast();
+
+  @override
+  Stream<SyncStatus> syncEvents() => syncChanges.stream;
   final StreamController<String?> captures =
       StreamController<String?>.broadcast();
   CaptureNotificationPreview? preview;
@@ -74,7 +79,10 @@ class FakeSettingsRepository implements SettingsRepository {
   }
 
   @override
-  Future<void> dispose() => captures.close();
+  Future<void> dispose() async {
+    await captures.close();
+    await syncChanges.close();
+  }
 
   @override
   Future<CaptureSettingsState> setCapturePaused(bool paused) async {

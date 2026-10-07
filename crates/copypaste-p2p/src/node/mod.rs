@@ -20,6 +20,7 @@
 //! `online` reads false for everyone, and an explicit address still pairs and
 //! still syncs. Nothing here treats a discovery failure as an error.
 
+mod activity;
 mod channel;
 mod dial;
 mod error;
@@ -226,6 +227,20 @@ pub(crate) struct DialCandidate {
     pub source: DialCandidateSource,
 }
 
+/// An authenticated listener endpoint, never an inbound connection's source port.
+#[derive(Clone, Copy)]
+struct ListenerEndpoint(SocketAddr);
+
+impl ListenerEndpoint {
+    fn dialled(addr: SocketAddr) -> Self {
+        Self(addr)
+    }
+
+    fn advertised(addr: SocketAddr) -> Option<Self> {
+        crate::netif::is_dialable(&addr).then_some(Self(addr))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct DiscoveryCandidateKey {
     pairing_id: String,
@@ -245,6 +260,7 @@ struct DiscoveryCandidateCooldowns {
 /// `discovery`, where `None` is a decision (the user turned LAN visibility
 /// off) rather than a degraded state.
 pub struct Node {
+    sync_activity: Arc<activity::SyncActivity>,
     peers: PeerStore,
     cursors: CursorStore,
     discovery: Option<Discovery>,
@@ -254,6 +270,7 @@ pub struct Node {
     /// port is not an endpoint: tests, Android and a failed bind can all have
     /// a different answer.
     listen_addr: RwLock<Option<SocketAddr>>,
+    bound_addr: RwLock<Option<SocketAddr>>,
     sessions: Arc<Semaphore>,
     browse_until_ms: AtomicI64,
     lan_visible: AtomicBool,
@@ -297,11 +314,13 @@ impl Node {
                 .collect::<Vec<_>>(),
         );
         let node = Self {
+            sync_activity: activity::SyncActivity::new(),
             peers,
             cursors,
             discovery,
             port,
             listen_addr: RwLock::new(None),
+            bound_addr: RwLock::new(None),
             sessions: Arc::new(Semaphore::new(MAX_CONCURRENT_PEER_SESSIONS)),
             browse_until_ms: AtomicI64::new(0),
             lan_visible: AtomicBool::new(lan_visible),
@@ -312,6 +331,9 @@ impl Node {
             probes: Arc::new(Semaphore::new(MAX_CONCURRENT_PEER_SESSIONS)),
             discovery_candidate_cooldowns: Mutex::new(DiscoveryCandidateCooldowns::default()),
         };
+        if let Some(discovery) = &node.discovery {
+            discovery.set_listener_port(0);
+        }
         node.republish();
         node
     }
@@ -319,6 +341,14 @@ impl Node {
     #[must_use]
     pub fn peers(&self) -> &PeerStore {
         &self.peers
+    }
+
+    pub fn sync_status(&self, enabled: bool) -> copypaste_ipc::SyncStatus {
+        self.sync_activity.snapshot(&self.peers.list(), enabled)
+    }
+
+    pub fn subscribe_sync_changes(&self) -> tokio::sync::watch::Receiver<()> {
+        self.sync_activity.subscribe()
     }
 
     #[must_use]
@@ -350,6 +380,13 @@ impl Node {
     #[must_use]
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    /// Bind and publish the actual listener before any client can request it.
+    pub fn bind_listener(&self) -> std::io::Result<std::net::TcpListener> {
+        let listener = bind(self.port)?;
+        self.set_listen_addr(listener.local_addr()?);
+        Ok(listener)
     }
 
     /// Everything currently visible on the LAN. Empty when discovery is off or
@@ -682,21 +719,55 @@ impl Node {
     pub fn listen_addr(&self) -> Option<String> {
         self.listen_addr
             .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(|error| error.into_inner())
             .as_ref()
             .map(ToString::to_string)
     }
 
+    fn session_listen_addr(&self, local_addr: Option<SocketAddr>) -> Option<String> {
+        let bound = (*self
+            .bound_addr
+            .read()
+            .unwrap_or_else(|error| error.into_inner()))?;
+        let advertised = if bound.ip().is_unspecified() {
+            local_addr
+                .filter(|addr| addr.is_ipv4() == bound.is_ipv4())
+                .map(|addr| SocketAddr::new(addr.ip(), bound.port()))
+        } else {
+            Some(bound)
+        }
+        .filter(crate::netif::is_dialable);
+        if let Some(advertised) = advertised {
+            *self
+                .listen_addr
+                .write()
+                .unwrap_or_else(|error| error.into_inner()) = Some(advertised);
+            Some(advertised.to_string())
+        } else {
+            self.listen_addr()
+        }
+    }
+
     pub(crate) fn set_listen_addr(&self, addr: SocketAddr) {
+        *self
+            .bound_addr
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = Some(addr);
         let advertised = if addr.ip().is_unspecified() {
-            crate::netif::routable_ip().map(|ip| SocketAddr::new(ip, addr.port()))
+            crate::netif::routable_ip()
+                .filter(|ip| ip.is_ipv4() == addr.is_ipv4())
+                .map(|ip| SocketAddr::new(ip, addr.port()))
         } else {
             Some(addr)
         };
         *self
             .listen_addr
             .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = advertised;
+            .unwrap_or_else(|error| error.into_inner()) = advertised;
+        if let Some(discovery) = &self.discovery {
+            discovery.set_listener_port(addr.port());
+        }
+        self.republish();
     }
 
     /// Forget a peer. `Ok(false)` when there was no such pairing.
@@ -768,7 +839,7 @@ impl Node {
         &self,
         peer: &Peer,
         device_id: Option<&str>,
-        addr: Option<SocketAddr>,
+        addr: Option<ListenerEndpoint>,
         name: Option<&str>,
     ) {
         // A sync or probe may have refreshed authenticated metadata after its
@@ -790,7 +861,7 @@ impl Node {
             // `[u8; 32]` is `Copy`, so this reads the field rather than moving
             // out of a type that has a `Drop` (see `peers::Peer`).
             psk: current.psk,
-            last_addr: addr.or(current.last_addr),
+            last_addr: addr.map(|addr| addr.0).or(current.last_addr),
             last_seen_ms: crate::now_ms(),
             profile: current.profile.clone(),
             profile_observed_at_ms: current.profile_observed_at_ms,
@@ -824,15 +895,46 @@ mod tests {
 
     fn node() -> (Node, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
-        let peers = PeerStore::open(&dir.path().join("peers.json")).unwrap();
+        let peers =
+            PeerStore::open(&dir.path().join("peers.json"), &crate::peers::testutil::KEY).unwrap();
         (Node::new(peers, None, 0, true), dir)
     }
 
-    fn node_with_discovery() -> (Node, tempfile::TempDir) {
+    fn node_with_discovery() -> (Node, tempfile::TempDir, std::net::TcpListener) {
         let dir = tempfile::tempdir().unwrap();
-        let peers = PeerStore::open(&dir.path().join("peers.json")).unwrap();
+        let peers =
+            PeerStore::open(&dir.path().join("peers.json"), &crate::peers::testutil::KEY).unwrap();
         let discovery = Discovery::dormant("test device", 0).expect("a valid device name");
-        (Node::new(peers, Some(discovery), 0, true), dir)
+        {
+            let node = Node::new(peers, Some(discovery), 0, true);
+            let listener = node.bind_listener().unwrap();
+            (node, dir, listener)
+        }
+    }
+
+    #[test]
+    fn session_advertisement_uses_the_real_bound_port_and_route() {
+        let (node, _dir) = node();
+        let listener = node.bind_listener().unwrap();
+        let port = listener.local_addr().unwrap().port();
+        *node.listen_addr.write().unwrap() = None;
+        let local: SocketAddr = "192.168.1.2:60000".parse().unwrap();
+        assert_eq!(
+            node.session_listen_addr(Some(local)),
+            Some(format!("192.168.1.2:{port}"))
+        );
+        assert_eq!(node.listen_addr(), Some(format!("192.168.1.2:{port}")));
+        assert_ne!(port, 0);
+    }
+
+    #[test]
+    fn an_explicit_bind_is_not_replaced_by_another_network_interface() {
+        let (node, _dir) = node();
+        node.set_listen_addr("127.0.0.1:47654".parse().unwrap());
+        assert_eq!(
+            node.session_listen_addr(Some("192.168.1.2:60000".parse().unwrap())),
+            Some("127.0.0.1:47654".into())
+        );
     }
 
     fn browsing(node: &Node) -> bool {
@@ -841,13 +943,13 @@ mod tests {
 
     #[test]
     fn a_device_with_nothing_to_discover_does_not_run_mdns() {
-        let (node, _dir) = node_with_discovery();
+        let (node, _dir, _listener) = node_with_discovery();
         assert!(!browsing(&node));
     }
 
     #[test]
     fn an_active_invite_keeps_this_device_discoverable() {
-        let (node, _dir) = node_with_discovery();
+        let (node, _dir, _listener) = node_with_discovery();
         assert!(node.peers().list().is_empty());
         node.pair_create_invite().expect("mint a pairing");
         assert!(browsing(&node));
@@ -855,7 +957,7 @@ mod tests {
 
     #[test]
     fn cancelling_the_last_invite_stops_mdns() {
-        let (node, _dir) = node_with_discovery();
+        let (node, _dir, _listener) = node_with_discovery();
         node.pair_create_invite().expect("mint a pairing");
         assert!(browsing(&node));
 
@@ -865,14 +967,14 @@ mod tests {
 
     #[test]
     fn looking_at_the_lan_starts_mdns_on_a_device_with_no_peers() {
-        let (node, _dir) = node_with_discovery();
+        let (node, _dir, _listener) = node_with_discovery();
         assert!(node.seen().is_empty());
         assert!(browsing(&node));
     }
 
     #[test]
     fn mdns_stops_again_once_nobody_is_looking() {
-        let (node, _dir) = node_with_discovery();
+        let (node, _dir, _listener) = node_with_discovery();
         assert!(node.seen().is_empty());
         assert!(browsing(&node));
 
@@ -1001,7 +1103,7 @@ mod tests {
         let path = dir.path().join("peers.json");
         let token = crate::transport::PairingToken::generate();
         let pairing_id = token.pairing_id();
-        PeerStore::open(&path)
+        PeerStore::open(&path, &crate::peers::testutil::KEY)
             .unwrap()
             .upsert(Peer {
                 pairing_id: pairing_id.clone(),
@@ -1017,7 +1119,12 @@ mod tests {
                 profile_observed_at_ms: 1,
             })
             .unwrap();
-        let restarted = Node::new(PeerStore::open(&path).unwrap(), None, 0, true);
+        let restarted = Node::new(
+            PeerStore::open(&path, &crate::peers::testutil::KEY).unwrap(),
+            None,
+            0,
+            true,
+        );
 
         let profile = restarted
             .authenticated_profile(&pairing_id)

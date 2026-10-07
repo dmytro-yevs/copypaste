@@ -46,3 +46,9 @@ native tray or window resources. Windows developers can use their Flutter IDE's
 reload-on-save support.
 
 Write all source code, comments, and documentation in English.
+
+Git build-cache cleanup is enabled with `git config core.hooksPath .githooks`.
+After a commit and before a push, hooks run `cargo clean` for existing local
+workspace and module targets and `flutter clean` for the Flutter app. Cleanup
+skips active builds and never fails the Git operation. It discards build
+caches, so the next build recompiles. See `docs/adr/0026-bound-the-primary-checkout-target-directory.md`.

@@ -3,11 +3,12 @@
 //! A file-backed, thread-safe map from [`crate::PairingToken::pairing_id`] to
 //! [`Peer`]. [`PeerStore::psks`] feeds [`crate::Session::accept_any`], so this
 //! decides who may connect; it also remembers where a peer was last seen. It
-//! holds the PSKs, so the file is itself a key store — see [`file`].
+//! holds the PSKs in an authenticated encrypted file — see [`file`].
 //!
 //! A revocation is kept after the peer record is gone, so a credential someone
 //! retained cannot recreate a device the user cut off ([`PeerStore::revoke`]).
 //!
+mod crypto;
 mod cursor;
 mod error;
 mod file;
@@ -17,7 +18,7 @@ mod store;
 mod tentative;
 
 #[cfg(test)]
-mod testutil;
+pub(crate) mod testutil;
 
 pub use cursor::{CursorStore, DEFAULT_CURSOR_FILE_NAME};
 pub use error::PeerStoreError;

@@ -14,6 +14,9 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:pub_semver/pub_semver.dart';
 
 import 'settings_test_support.dart';
+import '../modules/modules_test_support.dart';
+import 'package:copypaste_flutter/features/modules/controller/modules_controller.dart';
+import 'package:copypaste_flutter/features/modules/view/modules_settings_view.dart';
 
 void main() {
   test('loads and applies the selected backend settings', () async {
@@ -245,6 +248,13 @@ void main() {
       );
       await tester.pump();
 
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey<String>('settings-section-privacy')),
+          matching: find.text('Privacy'),
+        ),
+      );
+      await tester.pump();
       expect(find.text(entry.value), findsOneWidget);
       expect(
         find.text(
@@ -285,20 +295,26 @@ void main() {
       findsOneWidget,
     );
     for (final section in [
-      'settings-section-capture',
-      'settings-section-storage-data',
+      'settings-section-clipboard',
+      'settings-section-data',
       'settings-section-sync',
-      'settings-section-feedback',
+      'settings-section-notifications',
+      'settings-section-privacy',
+      'settings-section-about',
     ]) {
       expect(find.byKey(ValueKey<String>(section)), findsOneWidget);
     }
     expect(find.text('Clipboard capture'), findsOneWidget);
-    expect(find.text('Storage quota'), findsNothing);
+    expect(find.text('Storage quota'), findsOneWidget);
+    expect(find.text('Excluded applications'), findsNothing);
+    expect(find.byType(Card), findsOneWidget);
 
     await tester.tap(
       find.descendant(
-        of: find.byKey(const ValueKey<String>('settings-section-feedback')),
-        matching: find.text('Feedback'),
+        of: find.byKey(
+          const ValueKey<String>('settings-section-notifications'),
+        ),
+        matching: find.text('Notifications'),
       ),
     );
     await tester.pump();
@@ -308,7 +324,9 @@ void main() {
     final previewSwitch = find.descendant(
       of: find.ancestor(
         of: find.text('Show clipboard content'),
-        matching: find.byType(Card),
+        matching: find.byKey(
+          const ValueKey<String>('settings-row-Show clipboard content'),
+        ),
       ),
       matching: find.byType(Switch),
     );
@@ -317,7 +335,9 @@ void main() {
       find.descendant(
         of: find.ancestor(
           of: find.text('Notification on copy'),
-          matching: find.byType(Card),
+          matching: find.byKey(
+            const ValueKey<String>('settings-row-Notification on copy'),
+          ),
         ),
         matching: find.byType(Switch),
       ),
@@ -330,7 +350,9 @@ void main() {
 
     final soundCard = find.ancestor(
       of: find.text('Sound on copy'),
-      matching: find.byType(Card),
+      matching: find.byKey(
+        const ValueKey<String>('settings-row-Sound on copy'),
+      ),
     );
     await tester.tap(
       find.descendant(of: soundCard, matching: find.byType(Switch)),
@@ -373,7 +395,7 @@ void main() {
     );
     expect(result, findsOneWidget);
     expect(
-      find.descendant(of: result, matching: find.text('Storage & Data')),
+      find.descendant(of: result, matching: find.text('Data')),
       findsOneWidget,
     );
     expect(
@@ -392,9 +414,7 @@ void main() {
     expect(find.text('History files'), findsWidgets);
     expect(find.text('Clipboard capture'), findsNothing);
     final contentScroll = find.descendant(
-      of: find.byKey(
-        const PageStorageKey<String>('settings-storage-data-scroll'),
-      ),
+      of: find.byKey(const PageStorageKey<String>('settings-data-scroll')),
       matching: find.byType(Scrollable),
     );
     expect(
@@ -403,9 +423,21 @@ void main() {
     );
     expect(
       tester
-          .widgetList<Card>(find.byType(Card))
-          .where((card) => card.theme?.filled == true),
-      hasLength(1),
+          .widgetList<AnimatedContainer>(
+            find.descendant(
+              of: contentScroll,
+              matching: find.byType(AnimatedContainer),
+            ),
+          )
+          .where(
+            (row) =>
+                row.decoration ==
+                AppTheme.settingsRowDecoration(
+                  tester.element(contentScroll),
+                  highlighted: true,
+                ),
+          ),
+      hasLength(3),
     );
 
     await tester.pump(AppMotion.settingsHighlightHold);
@@ -413,8 +445,20 @@ void main() {
 
     expect(
       tester
-          .widgetList<Card>(find.byType(Card))
-          .where((card) => card.theme?.filled == true),
+          .widgetList<AnimatedContainer>(
+            find.descendant(
+              of: contentScroll,
+              matching: find.byType(AnimatedContainer),
+            ),
+          )
+          .where(
+            (row) =>
+                row.decoration ==
+                AppTheme.settingsRowDecoration(
+                  tester.element(contentScroll),
+                  highlighted: true,
+                ),
+          ),
       isEmpty,
     );
 
@@ -451,18 +495,201 @@ void main() {
     await tester.pump();
 
     expect(
-      find.byKey(const ValueKey<String>('settings-mobile-section-select')),
+      find.byKey(const ValueKey<String>('settings-category-list')),
       findsOneWidget,
     );
     expect(find.byType(NavigationSidebar), findsNothing);
+    for (final slug in [
+      'clipboard',
+      'privacy',
+      'sync',
+      'notifications',
+      'data',
+      'about',
+    ]) {
+      final category = find.byKey(
+        ValueKey<String>('mobile-settings-section-$slug'),
+      );
+      await tester.ensureVisible(category);
+      await tester.tap(category);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byKey(const ValueKey<String>('settings-back')));
+      await tester.pumpAndSettle();
+    }
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('switches settings sections from the mobile selector', (
+  testWidgets(
+    'opens mobile categories and returns with toolbar and system Back',
+    (tester) async {
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.binding.setSurfaceSize(const Size(390, 720));
+      final controller = SettingsController(
+        screenshotProtection: FakeScreenshotProtection(),
+        repository: FakeSettingsRepository(),
+        filePicker: FakeSettingsFilePicker(),
+        notifications: FakeCaptureNotificationPort(),
+        captureRefreshInterval: Duration.zero,
+      );
+      await controller.initialize();
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          darkTheme: AppTheme.dark,
+          themeMode: AppTheme.mode,
+          builder: AppTheme.builder,
+          home: Scaffold(child: SettingsScreen(controller: controller)),
+        ),
+      );
+      await tester.pump();
+
+      Future<void> open(String slug) async {
+        final category = find.byKey(
+          ValueKey<String>('mobile-settings-section-$slug'),
+        );
+        await tester.ensureVisible(category);
+        await tester.tap(category);
+        await tester.pumpAndSettle();
+      }
+
+      await open('clipboard');
+      expect(find.text('Storage quota'), findsOneWidget);
+      expect(find.text('Clipboard capture'), findsOneWidget);
+      expect(find.text('Excluded applications'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey<String>('settings-back')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey<String>('settings-category-list')),
+        findsOneWidget,
+      );
+
+      await open('data');
+      expect(find.text('Encrypted backup'), findsOneWidget);
+      expect(find.text('Storage quota'), findsNothing);
+      expect(find.text('Clipboard capture'), findsNothing);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey<String>('settings-category-list')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'mobile search reveals the new category and survives desktop resize',
+    (tester) async {
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.binding.setSurfaceSize(const Size(390, 720));
+      final controller = SettingsController(
+        screenshotProtection: FakeScreenshotProtection(),
+        repository: FakeSettingsRepository(),
+        filePicker: FakeSettingsFilePicker(),
+        notifications: FakeCaptureNotificationPort(),
+        captureRefreshInterval: Duration.zero,
+      );
+      await controller.initialize();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        ShadcnApp(home: SettingsScreen(controller: controller)),
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey<String>('settings-search')),
+        'retention',
+      );
+      await tester.pump();
+      final result = find.byKey(
+        const ValueKey<String>('mobile-settings-result-retention'),
+      );
+      expect(
+        find.descendant(of: result, matching: find.text('Clipboard')),
+        findsOneWidget,
+      );
+      await tester.tap(result);
+      await tester.pumpAndSettle();
+      expect(find.text('Retention'), findsOneWidget);
+      final row = find.byKey(const ValueKey<String>('settings-row-Retention'));
+      expect(
+        tester.widget<AnimatedContainer>(row).decoration,
+        AppTheme.settingsRowDecoration(tester.element(row), highlighted: true),
+      );
+      await tester.pump(AppMotion.settingsHighlightHold);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<AnimatedContainer>(row).decoration,
+        AppTheme.settingsRowDecoration(tester.element(row), highlighted: false),
+      );
+      await tester.binding.setSurfaceSize(const Size(1000, 720));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byKey(const ValueKey<String>('settings-back')));
+      await tester.pump(AppMotion.emphasized);
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey<String>('settings-navigation-sidebar')),
+        findsOneWidget,
+      );
+      expect(find.text('Storage quota'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'Data actions keep export, backup, and confirmed restore behavior',
+    (tester) async {
+      final repository = FakeSettingsRepository();
+      final controller = SettingsController(
+        screenshotProtection: FakeScreenshotProtection(),
+        repository: repository,
+        filePicker: FakeSettingsFilePicker(),
+        notifications: FakeCaptureNotificationPort(),
+        captureRefreshInterval: Duration.zero,
+      );
+      await controller.initialize();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        ShadcnApp(home: SettingsScreen(controller: controller)),
+      );
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey<String>('settings-section-data')),
+          matching: find.text('Data'),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text('Export'));
+      await tester.pump();
+      expect(repository.exportCalls, 1);
+      await tester.tap(find.text('Create backup'));
+      await tester.pump();
+      expect(repository.backupCalls, 1);
+      final restore = find.text('Restore');
+      await tester.ensureVisible(restore);
+      await tester.tap(restore);
+      await tester.pump();
+      expect(find.text('Replace local history?'), findsOneWidget);
+      expect(repository.restoreCalls, 0);
+      await tester.tap(find.text('Cancel'));
+      await tester.pump(AppMotion.emphasized);
+      await tester.pump();
+      expect(repository.restoreCalls, 0);
+      await tester.tap(restore);
+      await tester.pump();
+      await tester.tap(find.text('Choose backup'));
+      await tester.pump(AppMotion.emphasized);
+      await tester.pump();
+      expect(repository.restoreCalls, 1);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('Modules stays inside Settings with its existing manager', (
     tester,
   ) async {
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.binding.setSurfaceSize(const Size(390, 720));
     final controller = SettingsController(
       screenshotProtection: FakeScreenshotProtection(),
       repository: FakeSettingsRepository(),
@@ -470,42 +697,28 @@ void main() {
       notifications: FakeCaptureNotificationPort(),
       captureRefreshInterval: Duration.zero,
     );
-    await controller.initialize();
+    final modules = ModulesController(
+      repository: MemoryModulesRepository(),
+      marketplace: MemoryModuleMarketplace(),
+    );
+    await Future.wait([controller.initialize(), modules.initialize()]);
     addTearDown(controller.dispose);
-
+    addTearDown(modules.dispose);
     await tester.pumpWidget(
       ShadcnApp(
-        theme: AppTheme.light,
-        darkTheme: AppTheme.dark,
-        themeMode: AppTheme.mode,
-        builder: AppTheme.builder,
-        home: Scaffold(child: SettingsScreen(controller: controller)),
+        home: SettingsScreen(controller: controller, modules: modules),
+      ),
+    );
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey<String>('settings-section-modules')),
+        matching: find.text('Modules'),
       ),
     );
     await tester.pump();
-
-    final select = find.byKey(
-      const ValueKey<String>('settings-mobile-section-select'),
-    );
-    await tester.tap(
-      find.descendant(of: select, matching: find.text('Capture')),
-    );
-    await tester.pump(const Duration(milliseconds: 500));
-
-    final storageOption = find.byKey(
-      const ValueKey<String>('mobile-settings-section-storage-data'),
-    );
-    final storageLabel = find.descendant(
-      of: storageOption,
-      matching: find.text('Storage & Data'),
-    );
-    await tester.ensureVisible(storageLabel);
-    await tester.pump();
-    await tester.tap(storageLabel);
-    await tester.pump();
-
-    expect(find.text('Storage quota'), findsOneWidget);
-    expect(find.text('Clipboard capture'), findsNothing);
+    expect(find.byType(ModulesSettingsView), findsOneWidget);
+    expect(find.text('Marketplace'), findsOneWidget);
+    expect(find.text('Installed'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -535,8 +748,8 @@ void main() {
     await tester.pump();
     await tester.tap(
       find.descendant(
-        of: find.byKey(const ValueKey<String>('settings-section-feedback')),
-        matching: find.text('Feedback'),
+        of: find.byKey(const ValueKey<String>('settings-section-about')),
+        matching: find.text('About'),
       ),
     );
     await tester.pump();
@@ -585,8 +798,8 @@ void main() {
     await tester.pump();
     await tester.tap(
       find.descendant(
-        of: find.byKey(const ValueKey<String>('settings-section-feedback')),
-        matching: find.text('Feedback'),
+        of: find.byKey(const ValueKey<String>('settings-section-about')),
+        matching: find.text('About'),
       ),
     );
     await tester.pump();

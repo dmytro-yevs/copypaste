@@ -7,6 +7,19 @@ import 'app_tokens.dart';
 abstract final class AppTheme {
   static const mode = ThemeMode.system;
 
+  static Color statusColor(BuildContext context, AppStatusTone tone) {
+    final theme = Theme.of(context);
+    final dark = theme.brightness == Brightness.dark;
+    return switch (tone) {
+      AppStatusTone.muted => theme.colorScheme.mutedForeground,
+      AppStatusTone.error => theme.colorScheme.destructive,
+      AppStatusTone.info =>
+        dark ? AppStatusColor.infoDark : AppStatusColor.infoLight,
+      AppStatusTone.success =>
+        dark ? AppStatusColor.successDark : AppStatusColor.successLight,
+    };
+  }
+
   static const navigationAccent = Color(0xFF0285FF);
   static const lightShellSurface = Color(0xFFEDEDED);
   static const darkShellSurface = Color(0xFF212121);
@@ -30,6 +43,14 @@ abstract final class AppTheme {
       borderRadius: BorderRadius.circular(AppRadius.sm),
     );
   }
+
+  static AbstractButtonStyle historyClipButtonStyle({required bool selected}) =>
+      (selected ? const ButtonStyle.secondary() : const ButtonStyle.ghost())
+          .copyWith(
+            padding: (context, states, value) => value.subtract(
+              const EdgeInsets.symmetric(vertical: AppSpacing.xxs),
+            ),
+          );
 
   static AbstractButtonStyle historyDragHandleStyle({
     required bool dragging,
@@ -134,16 +155,25 @@ abstract final class AppTheme {
     );
   }
 
-  static CardTheme settingsSearchTargetCardTheme(
+  static const settingsGroupCardTheme = CardTheme(
+    padding: EdgeInsets.zero,
+    clipBehavior: Clip.antiAlias,
+  );
+
+  static const settingsRowPadding = EdgeInsets.all(AppSpacing.lg);
+
+  static final settingsCategoryButtonStyle = const ButtonStyle.ghost().copyWith(
+    padding: (context, states, value) => settingsRowPadding,
+  );
+
+  static BoxDecoration settingsRowDecoration(
     BuildContext context, {
     required bool highlighted,
-  }) {
-    return CardTheme(
-      filled: highlighted,
-      fillColor: Theme.of(context).colorScheme.accent,
-      duration: AppMotion.resolve(context, AppMotion.quick),
-    );
-  }
+  }) => BoxDecoration(
+    color: highlighted
+        ? Theme.of(context).colorScheme.accent
+        : Colors.transparent,
+  );
 
   /// The shared ChatGPT application light palette.
   static const _lightColors = ColorScheme(

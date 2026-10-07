@@ -2,7 +2,8 @@ import Cocoa
 import FlutterMacOS
 
 private let appUpdateChannelName = "com.copypaste.app/app_update"
-private let copyPasteCask = "dmytro-yevs/copypaste/copypaste"
+private let copyPasteCaskToken = "copypaste"
+private let copyPasteCask = "dmytro-yevs/copypaste/\(copyPasteCaskToken)"
 
 final class MacosAppUpdateChannel {
   private let channel: FlutterMethodChannel
@@ -41,7 +42,7 @@ final class MacosAppUpdateChannel {
         }
         let installed = Self.run(
           brew,
-          arguments: ["list", "--cask", "--versions", copyPasteCask],
+          arguments: ["list", "--cask", "--versions", copyPasteCaskToken],
           timeout: 30
         )
         let availability: [String: Any] = installed
@@ -109,7 +110,7 @@ final class MacosAppUpdateChannel {
       let installedVersion = installed
         ? Self.runCapturing(
             brew,
-            arguments: ["list", "--cask", "--versions", copyPasteCask],
+            arguments: ["list", "--cask", "--versions", copyPasteCaskToken],
             timeout: 30
           )
         : (false, "")

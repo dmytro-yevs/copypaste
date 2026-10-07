@@ -17,7 +17,8 @@ void main() {
 
     await tester.pumpWidget(_app(controller));
 
-    expect(find.text('Full capture'), findsNWidgets(2));
+    expect(find.text('Full capture'), findsOneWidget);
+    expect(find.text('Background capture'), findsOneWidget);
     expect(find.text('Limited capture'), findsOneWidget);
     expect(find.text('Shizuku'), findsOneWidget);
     expect(find.text('ADB'), findsOneWidget);
@@ -157,6 +158,56 @@ void main() {
 
     expect(find.byType(OutlineButton), findsNothing);
   });
+
+  testWidgets('reopened setup displays the running Full capture state', (
+    tester,
+  ) async {
+    final setup = _ScreenAndroidCaptureSetupGateway()
+      ..current = const AndroidCaptureSetupState(
+        packageName: 'com.copypaste.app',
+        privilegedGrants: true,
+        notificationGranted: true,
+        batteryExempt: true,
+        captureEnabled: true,
+        serviceRunning: true,
+        lastCaptureAtMs: 21,
+        shizuku: AndroidShizukuState(
+          supported: true,
+          installed: false,
+          running: false,
+          permission: false,
+        ),
+        adbCommands: _commands,
+      );
+    final controller = AndroidOnboardingController(
+      store: MemoryAndroidOnboardingStore(
+        complete: true,
+        mode: AndroidCaptureMode.limited,
+        verificationBaseline: 20,
+      ),
+      setup: setup,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.reopenCaptureSetup();
+
+    await tester.pumpWidget(_app(controller));
+
+    expect(find.text('Full capture'), findsNWidgets(2));
+    expect(find.text('Background capture is working'), findsOneWidget);
+    expect(
+      tester
+          .widget<RadioGroup<AndroidCaptureMode>>(
+            find.byType(RadioGroup<AndroidCaptureMode>),
+          )
+          .value,
+      AndroidCaptureMode.full,
+    );
+    expect(
+      tester.widget<Button>(find.widgetWithText(Button, 'Continue')).onPressed,
+      isNotNull,
+    );
+  });
 }
 
 const _commands = [
@@ -184,7 +235,7 @@ class _ScreenAndroidCaptureSetupGateway implements AndroidCaptureSetupGateway {
   @override
   Stream<AndroidCaptureSetupState> get changes => const Stream.empty();
 
-  AndroidCaptureSetupState get current => const AndroidCaptureSetupState(
+  AndroidCaptureSetupState current = const AndroidCaptureSetupState(
     packageName: 'com.copypaste.app',
     privilegedGrants: false,
     notificationGranted: false,

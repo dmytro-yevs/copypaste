@@ -8,7 +8,7 @@ Status: accepted
 and codex worktrees. It is a dry run unless given `--apply`.
 
 Removal is delegated, not reinvented: `shutil.rmtree` does the work, and
-`scripts/clean-target.sh` remains the in-checkout reclaim. What this adds is the
+the Git cleanup hooks run native cleaners inside the checkout. What this adds is the
 decision of *whether* a path may be removed at all.
 
 Two published markers carry that decision instead of a heuristic:

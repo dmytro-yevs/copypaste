@@ -521,8 +521,9 @@ class _HistoryToolbar extends StatefulWidget {
 }
 
 class _HistoryToolbarState extends State<_HistoryToolbar> {
-  static const double _compactControlExtent = 40;
-  static const double _minimumExpandedSearchWidth = 160;
+  static const double _compactControlExtent = AppControlSize.large;
+  static const double _minimumExpandedSearchWidth =
+      AppLayoutSize.historySearchMinWidth;
   static const double _toolbarGap = AppSpacing.sm;
   static const int _filterCount = 5;
   bool _searchExpanded = false;
@@ -570,7 +571,14 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
         return Row(
           spacing: _toolbarGap,
           children: [
-            Expanded(child: _searchField(compact: false)),
+            Expanded(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  minWidth: _minimumExpandedSearchWidth,
+                ),
+                child: _searchField(compact: false),
+              ),
+            ),
             ...filters,
           ],
         );
@@ -819,12 +827,16 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
       query.sort.label,
     ];
     final theme = Theme.of(context);
-    final style = DefaultTextStyle.of(context).style
-        .merge(theme.typography.sans)
-        .merge(theme.typography.small)
-        .merge(theme.typography.normal);
+    final style = DefaultTextStyle.of(
+      context,
+    ).style.merge(const ButtonStyle.secondary().textStyle(context, const {}));
     final textScaler = MediaQuery.textScalerOf(context);
-    var width = 160.0;
+    final filterChromeWidth =
+        (AppSpacing.sm * 3) +
+        AppIconSize.sm +
+        (AppSpacing.sm * theme.scaling) +
+        theme.iconTheme.small.size!;
+    var width = _minimumExpandedSearchWidth + (_toolbarGap * _filterCount);
     for (final label in labels) {
       final painter = TextPainter(
         text: TextSpan(text: label, style: style),
@@ -832,7 +844,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
         textDirection: Directionality.of(context),
         textScaler: textScaler,
       )..layout();
-      width += painter.width + 64;
+      width += painter.width.ceilToDouble() + filterChromeWidth;
     }
     return width;
   }
@@ -1023,9 +1035,9 @@ class _HistoryClipCardState extends State<_HistoryClipCard> {
                   key: ValueKey<String>('history-clip-${clip.id}'),
                   onPressed: widget.onPressed,
                   alignment: Alignment.centerLeft,
-                  style: widget.selected
-                      ? const ButtonStyle.secondary()
-                      : const ButtonStyle.ghost(),
+                  style: AppTheme.historyClipButtonStyle(
+                    selected: widget.selected,
+                  ),
                   child: Padding(
                     padding: EdgeInsets.only(
                       right: touch && showHandle
@@ -1037,7 +1049,7 @@ class _HistoryClipCardState extends State<_HistoryClipCard> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _ClipContent(clip: clip, controller: controller),
-                        const Gap(AppSpacing.xs),
+                        const Gap(AppSpacing.xxs),
                         Row(
                           children: [
                             Expanded(

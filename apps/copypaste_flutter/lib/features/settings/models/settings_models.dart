@@ -1,7 +1,10 @@
+import 'sync_status.dart';
+
 enum SettingsLoadState { loading, ready, error }
 
 class CaptureSettingsState {
   const CaptureSettingsState({
+    this.syncStatus = const SyncStatus(),
     required this.running,
     required this.paused,
     required this.epoch,
@@ -10,6 +13,7 @@ class CaptureSettingsState {
   final bool running;
   final bool paused;
   final int epoch;
+  final SyncStatus syncStatus;
 
   String get label {
     if (paused) return 'Paused';

@@ -6,8 +6,8 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `android_runtime_unavailable`, `ceremony_not_found`, `clip`, `cloud_status_response`, `content_class_to_ipc`, `content_class`, `create_private_file`, `daemon_exited_early`, `daemon_spawn_failed`, `daemon_start_failed`, `daemon_unreachable`, `device_class`, `device_details`, `device_endpoint`, `device_latency`, `device_observation_provenance`, `device_observation_trust`, `device_platform`, `device_presence`, `device_profile`, `discovered_response`, `empty_response`, `export_write_failed`, `from_daemon`, `history_query`, `internal`, `item_response`, `module_request`, `not_initialized`, `runtime_settings`, `semantic_kind_to_ipc`, `semantic_kind`, `this_device`, `timeout`, `unsafe_data_directory`, `watch_not_found`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `android_runtime_unavailable`, `ceremony_not_found`, `clip`, `cloud_status_response`, `content_class_to_ipc`, `content_class`, `create_private_file`, `daemon_exited_early`, `daemon_spawn_failed`, `daemon_start_failed`, `daemon_unreachable`, `device_class`, `device_details`, `device_endpoint`, `device_latency`, `device_observation_provenance`, `device_observation_trust`, `device_platform`, `device_presence`, `device_profile`, `discovered_response`, `empty_response`, `export_write_failed`, `from_daemon`, `history_query`, `internal`, `item_response`, `module_request`, `not_initialized`, `runtime_settings`, `runtime_sync_status`, `semantic_kind_to_ipc`, `semantic_kind`, `this_device`, `timeout`, `unsafe_data_directory`, `watch_not_found`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 Future<String> modulesList() => RustLib.instance.api.crateApiModulesList();
 
@@ -277,11 +277,13 @@ class BackupSummary {
 }
 
 class CaptureState {
+  final RuntimeSyncStatus syncStatus;
   final bool running;
   final bool paused;
   final BigInt privateModeEpoch;
 
   const CaptureState({
+    required this.syncStatus,
     required this.running,
     required this.paused,
     required this.privateModeEpoch,
@@ -289,13 +291,17 @@ class CaptureState {
 
   @override
   int get hashCode =>
-      running.hashCode ^ paused.hashCode ^ privateModeEpoch.hashCode;
+      syncStatus.hashCode ^
+      running.hashCode ^
+      paused.hashCode ^
+      privateModeEpoch.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is CaptureState &&
           runtimeType == other.runtimeType &&
+          syncStatus == other.syncStatus &&
           running == other.running &&
           paused == other.paused &&
           privateModeEpoch == other.privateModeEpoch;
@@ -1067,12 +1073,14 @@ class RuntimeError implements FrbException {
 }
 
 class RuntimeEvent {
+  final RuntimeSyncStatus? syncStatus;
   final String kind;
   final BigInt itemCount;
   final bool captured;
   final String? capturedItemId;
 
   const RuntimeEvent({
+    this.syncStatus,
     required this.kind,
     required this.itemCount,
     required this.captured,
@@ -1081,6 +1089,7 @@ class RuntimeEvent {
 
   @override
   int get hashCode =>
+      syncStatus.hashCode ^
       kind.hashCode ^
       itemCount.hashCode ^
       captured.hashCode ^
@@ -1091,10 +1100,62 @@ class RuntimeEvent {
       identical(this, other) ||
       other is RuntimeEvent &&
           runtimeType == other.runtimeType &&
+          syncStatus == other.syncStatus &&
           kind == other.kind &&
           itemCount == other.itemCount &&
           captured == other.captured &&
           capturedItemId == other.capturedItemId;
+}
+
+class RuntimePeerSyncStatus {
+  final String pairingId;
+  final String name;
+  final SyncPhase phase;
+  final PlatformInt64? startedAtMs;
+  final PlatformInt64? lastSuccessMs;
+  final BigInt sent;
+  final BigInt received;
+  final BigInt skippedTooLarge;
+  final String? error;
+
+  const RuntimePeerSyncStatus({
+    required this.pairingId,
+    required this.name,
+    required this.phase,
+    this.startedAtMs,
+    this.lastSuccessMs,
+    required this.sent,
+    required this.received,
+    required this.skippedTooLarge,
+    this.error,
+  });
+
+  @override
+  int get hashCode =>
+      pairingId.hashCode ^
+      name.hashCode ^
+      phase.hashCode ^
+      startedAtMs.hashCode ^
+      lastSuccessMs.hashCode ^
+      sent.hashCode ^
+      received.hashCode ^
+      skippedTooLarge.hashCode ^
+      error.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RuntimePeerSyncStatus &&
+          runtimeType == other.runtimeType &&
+          pairingId == other.pairingId &&
+          name == other.name &&
+          phase == other.phase &&
+          startedAtMs == other.startedAtMs &&
+          lastSuccessMs == other.lastSuccessMs &&
+          sent == other.sent &&
+          received == other.received &&
+          skippedTooLarge == other.skippedTooLarge &&
+          error == other.error;
 }
 
 class RuntimeSettingsData {
@@ -1194,6 +1255,30 @@ class RuntimeSettingsPatch {
           soundOnCopy == other.soundOnCopy;
 }
 
+class RuntimeSyncStatus {
+  final BigInt revision;
+  final SyncPhase phase;
+  final List<RuntimePeerSyncStatus> peers;
+
+  const RuntimeSyncStatus({
+    required this.revision,
+    required this.phase,
+    required this.peers,
+  });
+
+  @override
+  int get hashCode => revision.hashCode ^ phase.hashCode ^ peers.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RuntimeSyncStatus &&
+          runtimeType == other.runtimeType &&
+          revision == other.revision &&
+          phase == other.phase &&
+          peers == other.peers;
+}
+
 class SyncOutcome {
   final String pairingId;
   final String name;
@@ -1228,6 +1313,8 @@ class SyncOutcome {
           received == other.received &&
           errorCode == other.errorCode;
 }
+
+enum SyncPhase { unavailable, disabled, waiting, syncing, synced, failed }
 
 class TextExportSummary {
   final int exported;

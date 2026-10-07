@@ -25,11 +25,15 @@ pub enum NodeError {
     AlreadyPaired,
     #[error("no such paired device")]
     NoPeer,
-    #[error("this peer has never been reached and is not visible on the network; sync from the other device, or re-pair with an address")]
+    #[error(
+        "this peer has never been reached and is not visible on the network; sync from the other device, or re-pair with an address"
+    )]
     NoAddress,
     #[error("the sync session with the other device failed")]
     Session,
-    #[error("the two devices are running versions of CopyPaste that cannot sync with each other; update both and try again")]
+    #[error(
+        "the two devices are running versions of CopyPaste that cannot sync with each other; update both and try again"
+    )]
     PeerVersion,
     #[error("the other device stopped responding")]
     Timeout,

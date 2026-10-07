@@ -193,7 +193,7 @@ mod tests {
         // And the store's own Debug prints neither keys nor the path.
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
-        let store = PeerStore::open(&path).expect("open");
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
         let rendered = format!("{store:?}");
         assert!(!rendered.contains(&path.to_string_lossy().to_string()));
         assert!(!rendered.contains("peers.json"));

@@ -32,7 +32,6 @@ use anyhow::Context;
 use clap::Parser;
 use copypaste_core::{Keyring, Store};
 use copypaste_p2p::discovery::Discovery;
-use copypaste_p2p::peers::PeerStore;
 use tracing::{info, warn};
 
 use crate::cli::{cloud_config, Args};
@@ -129,7 +128,8 @@ async fn run() -> anyhow::Result<()> {
         meta.set_device_name(name).context("set the device name")?;
     }
     let settings = Settings::load(&meta);
-    let peers = PeerStore::open(&peers_path).context("open the paired-device list")?;
+    let peers = copypaste_core::peer_store::open(&store, &keyring, &peers_path)
+        .context("open the paired-device list")?;
     let device_name = meta.device_name();
     let discovery = match Discovery::dormant(&device_name, args.port) {
         Ok(discovery) => Some(discovery),
@@ -181,7 +181,7 @@ async fn run() -> anyhow::Result<()> {
     let listener = server::bind(&socket_path)?;
     // A peer port already in use is not fatal: the rest of the daemon is still
     // worth running, and this device can still sync by dialling out.
-    let peer_listener = match p2p::bind(args.port) {
+    let peer_listener = match state.p2p.node().bind_listener() {
         Ok(listener) => tokio::net::TcpListener::from_std(listener).ok(),
         Err(e) => {
             warn!(error = %e, port = args.port, "could not bind the peer port; not accepting peers");

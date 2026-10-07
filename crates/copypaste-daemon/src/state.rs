@@ -174,6 +174,20 @@ impl AppState {
         self.publish(EventKind::Items, None);
     }
 
+    pub fn note_sync_status_changed(&self) {
+        let _ = self.events.send(EventData {
+            sync_status: Some(
+                self.p2p
+                    .node()
+                    .sync_status(self.settings.get().sync_enabled),
+            ),
+            event: EventKind::Peers,
+            item_count: self.store.count().unwrap_or(0),
+            captured: false,
+            captured_item_id: None,
+        });
+    }
+
     pub fn note_peers_changed(&self) {
         self.publish(EventKind::Peers, None);
     }
@@ -188,6 +202,7 @@ impl AppState {
             return;
         }
         let _ = self.events.send(EventData {
+            sync_status: None,
             event,
             item_count: self.store.count().unwrap_or(0),
             captured: captured_item_id.is_some(),

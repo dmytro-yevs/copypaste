@@ -55,7 +55,7 @@ void main() {
     TargetPlatform.windows,
   ]) {
     testWidgets(
-      'Security switch controls the native policy on ${platform.name}',
+      'Privacy switch controls the native policy on ${platform.name}',
       (tester) async {
         if (platform == TargetPlatform.android) {
           addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -77,37 +77,18 @@ void main() {
         await tester.pump();
         await tester.pump();
         if (platform == TargetPlatform.android) {
-          await tester.tap(
-            find.descendant(
-              of: find.byKey(
-                const ValueKey<String>('settings-mobile-section-select'),
-              ),
-              matching: find.text('Capture'),
-            ),
+          final privacy = find.byKey(
+            const ValueKey<String>('mobile-settings-section-privacy'),
           );
-          await tester.pump(const Duration(milliseconds: 500));
-          await tester.ensureVisible(
-            find.byKey(
-              const ValueKey<String>('mobile-settings-section-security'),
-            ),
-          );
-          await tester.pump();
-          await tester.tap(
-            find.descendant(
-              of: find.byKey(
-                const ValueKey<String>('mobile-settings-section-security'),
-              ),
-              matching: find.text('Security'),
-            ),
-          );
-          await tester.pump(const Duration(milliseconds: 500));
+          await tester.tap(privacy);
+          await tester.pumpAndSettle();
         } else {
           await tester.tap(
             find.descendant(
               of: find.byKey(
-                const ValueKey<String>('settings-section-security'),
+                const ValueKey<String>('settings-section-privacy'),
               ),
-              matching: find.text('Security'),
+              matching: find.text('Privacy'),
             ),
           );
         }
@@ -119,13 +100,16 @@ void main() {
           await tester.pump(const Duration(milliseconds: 500));
           expect(
             find.byKey(
-              const ValueKey<String>('mobile-settings-section-security'),
+              const ValueKey<String>('mobile-settings-section-privacy'),
             ),
             findsNothing,
           );
         }
         expect(tester.widget<Switch>(find.byType(Switch)).enabled, isTrue);
         expect(tester.widget<Switch>(find.byType(Switch)).onChanged, isNotNull);
+        await tester.ensureVisible(find.byType(Switch));
+        await tester.pump();
+        expect(find.byType(Switch).hitTestable(), findsOneWidget);
         await tester.tap(find.byType(Switch));
         await tester.pump();
         await tester.pump();

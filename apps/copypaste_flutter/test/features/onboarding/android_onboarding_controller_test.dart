@@ -220,7 +220,8 @@ void main() {
       await controller.initialize();
 
       expect(controller.step, AndroidOnboardingStep.welcome);
-      expect(controller.mode, AndroidCaptureMode.full);
+      expect(controller.selectedMode, AndroidCaptureMode.full);
+      expect(controller.mode, AndroidCaptureMode.limited);
       expect(controller.method, AndroidCaptureSetupMethod.shizuku);
       expect(controller.canContinueCapture, isFalse);
     },
@@ -313,7 +314,125 @@ void main() {
 
     expect(controller.complete, isFalse);
     expect(controller.step, AndroidOnboardingStep.capture);
-    expect(store.complete, isFalse);
+    expect(store.complete, isTrue);
+  });
+
+  test('live Full capture overrides a saved Limited choice', () async {
+    final setup = _FakeAndroidCaptureSetupGateway(
+      current: _state(
+        privilegedGrants: true,
+        notificationGranted: true,
+        captureEnabled: true,
+        serviceRunning: true,
+        lastCaptureAtMs: 21,
+      ),
+    );
+    final controller = _controller(
+      store: MemoryAndroidOnboardingStore(
+        complete: true,
+        mode: AndroidCaptureMode.limited,
+      ),
+      setup: setup,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    expect(controller.mode, AndroidCaptureMode.full);
+    expect(controller.selectedMode, AndroidCaptureMode.full);
+    expect(controller.verified, isTrue);
+
+    setup.current = _state(lastCaptureAtMs: 21);
+    await controller.refresh();
+
+    expect(controller.mode, AndroidCaptureMode.limited);
+    expect(controller.verified, isFalse);
+    expect(controller.canContinueCapture, isFalse);
+  });
+
+  test('a saved Full choice cannot claim a stopped service is Full', () async {
+    final controller = _controller(
+      store: MemoryAndroidOnboardingStore(
+        complete: true,
+        mode: AndroidCaptureMode.full,
+      ),
+      setup: _FakeAndroidCaptureSetupGateway(
+        current: _state(
+          privilegedGrants: true,
+          notificationGranted: true,
+          captureEnabled: true,
+          lastCaptureAtMs: 21,
+        ),
+      ),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    expect(controller.mode, AndroidCaptureMode.limited);
+    expect(controller.selectedMode, AndroidCaptureMode.limited);
+    expect(controller.verified, isFalse);
+  });
+
+  test('reopening working Full setup preserves completion and proof', () async {
+    final store = MemoryAndroidOnboardingStore(
+      complete: true,
+      verificationBaseline: 20,
+    );
+    final setup = _FakeAndroidCaptureSetupGateway(
+      current: _state(
+        privilegedGrants: true,
+        notificationGranted: true,
+        captureEnabled: true,
+        serviceRunning: true,
+        lastCaptureAtMs: 21,
+      ),
+    );
+    final controller = _controller(store: store, setup: setup);
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    for (var opening = 0; opening < 2; opening++) {
+      expect(await controller.reopenCaptureSetup(), isTrue);
+      expect(controller.step, AndroidOnboardingStep.capture);
+      expect(controller.mode, AndroidCaptureMode.full);
+      expect(controller.verified, isTrue);
+      expect(controller.verifying, isFalse);
+      expect(controller.canContinueCapture, isTrue);
+      expect(store.complete, isTrue);
+      expect(store.verificationBaseline, 20);
+    }
+  });
+
+  test('reopening pending setup keeps the fresh receipt requirement', () async {
+    final store = MemoryAndroidOnboardingStore(verificationBaseline: 20);
+    final setup = _FakeAndroidCaptureSetupGateway(
+      current: _state(
+        privilegedGrants: true,
+        notificationGranted: true,
+        captureEnabled: true,
+        serviceRunning: true,
+        lastCaptureAtMs: 15,
+      ),
+    );
+    final controller = _controller(store: store, setup: setup);
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    expect(await controller.reopenCaptureSetup(), isTrue);
+
+    expect(controller.verified, isFalse);
+    expect(controller.verifying, isTrue);
+    expect(controller.canContinueCapture, isFalse);
+    expect(store.verificationBaseline, 20);
+
+    setup.current = _state(
+      privilegedGrants: true,
+      notificationGranted: true,
+      captureEnabled: true,
+      serviceRunning: true,
+      lastCaptureAtMs: 21,
+    );
+    await controller.refresh();
+    expect(controller.verified, isTrue);
+    expect(controller.canContinueCapture, isTrue);
   });
 }
 

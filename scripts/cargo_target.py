@@ -1,9 +1,7 @@
 """What cargo's own markers say about a target directory.
 
-Shared by `worktree_hygiene` and `target_budget`, which both have to answer the
-same two questions before removing anything: is this really a cargo target, and
-is a build using it. Two copies of a fail-closed check drift into one strict and
-one permissive, and the permissive one is the one that deletes.
+Used by worktree hygiene and Git cleanup hooks to detect Cargo caches and
+active build locks before removing anything.
 """
 
 from __future__ import annotations

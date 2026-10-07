@@ -128,6 +128,7 @@ async fn serve_peer<S, F, P>(
         return;
     }
 
+    let listen_addr = node.session_listen_addr(session.local_addr());
     let mut channel = NoiseChannel::new(session);
     let first = match channel.recv().await {
         Ok(message) => message,
@@ -153,7 +154,9 @@ async fn serve_peer<S, F, P>(
                         AuthenticatedReachability::online(None, crate::now_ms()),
                     );
                     node.record_authenticated_profile(&pairing_id, profile.as_ref());
-                    node.touch_peer(&peer, None, Some(addr), None);
+                    // The inbound source port belongs to this probe, not to
+                    // the peer listener. Preserve the authenticated endpoint.
+                    node.touch_peer(&peer, None, None, None);
                     on_probe(&pairing_id);
                 }
             }
@@ -161,7 +164,7 @@ async fn serve_peer<S, F, P>(
         }
         return;
     }
-    let listen_addr = node.listen_addr();
+    let observation = node.sync_activity.begin(&pairing_id);
     let cursor = node.cursors().get(&pairing_id);
     let outcome = tokio::time::timeout(
         SESSION_TIMEOUT,
@@ -191,14 +194,23 @@ async fn serve_peer<S, F, P>(
                 node.touch_peer(
                     &peer,
                     Some(&outcome.peer_device_id),
-                    outcome.peer_listen_addr,
+                    outcome
+                        .peer_listen_addr
+                        .and_then(super::ListenerEndpoint::advertised),
                     Some(&outcome.peer_device_name),
                 );
             }
             on_session(&pairing_id, &outcome);
+            observation.finish(Some(&outcome.stats), None);
         }
-        Ok(Err(e)) => warn!(%pairing_id, error = %e, "peer sync session failed"),
-        Err(_) => warn!(%pairing_id, "peer sync session timed out"),
+        Ok(Err(e)) => {
+            warn!(%pairing_id, error = %e, "peer sync session failed");
+            observation.finish(None, Some("Peer synchronization failed.".into()));
+        }
+        Err(_) => {
+            warn!(%pairing_id, "peer sync session timed out");
+            observation.finish(None, Some("Peer synchronization timed out.".into()));
+        }
     }
 }
 
@@ -209,8 +221,73 @@ mod tests {
     use crate::sync::testutil::{item, TestSource};
     use crate::transport::PairingToken;
 
+    #[tokio::test]
+    async fn inbound_probes_preserve_the_authenticated_listener_endpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let receiver = node(&dir, "receiver");
+        let sender = node(&dir, "sender");
+        let receiver_listener = receiver.bind_listener().unwrap();
+        let sender_listener = sender.bind_listener().unwrap();
+        let address = SocketAddr::new(
+            "127.0.0.1".parse().unwrap(),
+            receiver_listener.local_addr().unwrap().port(),
+        );
+        let expected = SocketAddr::new(
+            "127.0.0.1".parse().unwrap(),
+            sender_listener.local_addr().unwrap().port(),
+        );
+        let token = PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        let peer = Peer {
+            pairing_id: pairing_id.clone(),
+            device_id: None,
+            name: "probe peer".into(),
+            psk: token.psk(),
+            last_addr: Some(expected),
+            last_seen_ms: 0,
+            profile: None,
+            profile_observed_at_ms: 0,
+        };
+        receiver.peers().upsert(peer.clone()).unwrap();
+        let mut outgoing_peer = peer.clone();
+        outgoing_peer.last_addr = Some(address);
+        sender.peers().upsert(outgoing_peer.clone()).unwrap();
+        let (shutdown, rx) = watch::channel(false);
+        let (completed, mut receipts) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(listen(
+            Arc::clone(&receiver),
+            TcpListener::from_std(receiver_listener).unwrap(),
+            Arc::new(TestSource::new("receiver", vec![])),
+            |_, _| {},
+            move |_| {
+                let _ = completed.send(());
+            },
+            rx,
+        ));
+        for _ in 0..2 {
+            sender.probe_one(&outgoing_peer).await.unwrap();
+            tokio::time::timeout(std::time::Duration::from_secs(1), receipts.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                receiver.peers().get(&pairing_id).unwrap().last_addr,
+                Some(expected)
+            );
+        }
+        assert_eq!(
+            receiver.sync_status(true).phase,
+            copypaste_ipc::SyncPhase::Waiting
+        );
+        let _ = shutdown.send(true);
+    }
+
     fn node(dir: &tempfile::TempDir, name: &str) -> Arc<Node> {
-        let peers = PeerStore::open(&dir.path().join(format!("{name}-peers.json"))).unwrap();
+        let peers = PeerStore::open(
+            &dir.path().join(format!("{name}-peers.json")),
+            &crate::peers::testutil::KEY,
+        )
+        .unwrap();
         Arc::new(Node::new(peers, None, 0, true))
     }
 
@@ -297,13 +374,21 @@ mod tests {
         let a_dir = tempfile::tempdir().unwrap();
         let b_dir = tempfile::tempdir().unwrap();
         let a = Arc::new(Node::new(
-            PeerStore::open(&a_dir.path().join("a-peers.json")).unwrap(),
+            PeerStore::open(
+                &a_dir.path().join("a-peers.json"),
+                &crate::peers::testutil::KEY,
+            )
+            .unwrap(),
             None,
             crate::DEFAULT_PORT,
             true,
         ));
         let b = Node::new(
-            PeerStore::open(&b_dir.path().join("b-peers.json")).unwrap(),
+            PeerStore::open(
+                &b_dir.path().join("b-peers.json"),
+                &crate::peers::testutil::KEY,
+            )
+            .unwrap(),
             None,
             crate::DEFAULT_PORT,
             true,
@@ -397,13 +482,21 @@ mod tests {
         shutdown: watch::Receiver<bool>,
     ) -> (Node, Peer) {
         let a = Arc::new(Node::new(
-            PeerStore::open(&a_dir.path().join("a-peers.json")).unwrap(),
+            PeerStore::open(
+                &a_dir.path().join("a-peers.json"),
+                &crate::peers::testutil::KEY,
+            )
+            .unwrap(),
             None,
             crate::DEFAULT_PORT,
             true,
         ));
         let b = Node::new(
-            PeerStore::open(&b_dir.path().join("b-peers.json")).unwrap(),
+            PeerStore::open(
+                &b_dir.path().join("b-peers.json"),
+                &crate::peers::testutil::KEY,
+            )
+            .unwrap(),
             None,
             crate::DEFAULT_PORT,
             true,
