@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:copypaste_flutter/main.dart';
+import 'package:copypaste_flutter/features/onboarding/controller/windows_onboarding_controller.dart';
+import 'package:copypaste_flutter/features/onboarding/repository/windows_onboarding_store.dart';
 import 'package:copypaste_flutter/app/shell/macos_window_header.dart';
 import 'package:copypaste_flutter/features/onboarding/controller/android_onboarding_controller.dart';
 import 'package:copypaste_flutter/features/onboarding/controller/macos_onboarding_controller.dart';
@@ -14,6 +16,33 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:window_manager/window_manager.dart';
 
 void main() {
+  testWidgets('Windows onboarding finishes on the main History screen', (
+    tester,
+  ) async {
+    final windows = WindowsOnboardingController(
+      store: MemoryWindowsOnboardingStore(),
+    );
+    final macos = _completedOnboarding();
+    addTearDown(windows.dispose);
+    addTearDown(macos.dispose);
+    await tester.pumpWidget(
+      CopyPasteRoot(
+        runtimeEnabled: false,
+        macosOnboardingController: macos,
+        windowsOnboardingController: windows,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Welcome to CopyPaste'), findsOneWidget);
+    await tester.tap(find.widgetWithText(Button, 'Continue'));
+    await tester.pumpAndSettle();
+    expect(find.byType(Button), findsOneWidget);
+    await tester.tap(find.widgetWithText(Button, 'Get started'));
+    await tester.pumpAndSettle();
+    expect(windows.complete, isTrue);
+    expect(find.text('History runtime is unavailable'), findsOneWidget);
+    expect(find.text('CopyPaste is ready'), findsNothing);
+  });
   testWidgets(
     'macOS leaves destructive cleanup out of the native Quit request',
     (tester) async {
@@ -22,6 +51,7 @@ void main() {
       addTearDown(onboarding.dispose);
       await tester.pumpWidget(
         CopyPasteRoot(
+          windowsOnboardingController: _completedWindowsOnboarding(),
           desktopWindow: desktop,
           macosOnboardingController: onboarding,
           runtimeEnabled: false,
@@ -43,6 +73,7 @@ void main() {
 
     await tester.pumpWidget(
       CopyPasteRoot(
+        windowsOnboardingController: _completedWindowsOnboarding(),
         runtimeEnabled: false,
         macosOnboardingController: onboarding,
       ),
@@ -66,6 +97,7 @@ void main() {
 
     await tester.pumpWidget(
       CopyPasteRoot(
+        windowsOnboardingController: _completedWindowsOnboarding(),
         runtimeEnabled: false,
         androidOnboardingController: onboarding,
         macosOnboardingController: macosOnboarding,
@@ -88,6 +120,7 @@ void main() {
 
     await tester.pumpWidget(
       CopyPasteRoot(
+        windowsOnboardingController: _completedWindowsOnboarding(),
         desktopWindow: desktopWindow,
         macosOnboardingController: onboarding,
         runtimeEnabled: false,
@@ -113,6 +146,7 @@ void main() {
 
     await tester.pumpWidget(
       CopyPasteRoot(
+        windowsOnboardingController: _completedWindowsOnboarding(),
         desktopWindow: desktopWindow,
         macosOnboardingController: onboarding,
         runtimeEnabled: false,
@@ -152,6 +186,7 @@ void main() {
 
     await tester.pumpWidget(
       CopyPasteRoot(
+        windowsOnboardingController: _completedWindowsOnboarding(),
         desktopWindow: desktopWindow,
         macosOnboardingController: onboarding,
         runtimeEnabled: false,
@@ -183,6 +218,7 @@ void main() {
 
     await tester.pumpWidget(
       CopyPasteRoot(
+        windowsOnboardingController: _completedWindowsOnboarding(),
         desktopWindow: desktopWindow,
         macosOnboardingController: onboarding,
         runtimeEnabled: false,
@@ -364,4 +400,12 @@ class _QuitHookRecordingController extends DesktopWindowController {
     if (callback != null) quitHookRegistrations += 1;
     super.setBeforeQuit(callback);
   }
+}
+
+WindowsOnboardingController _completedWindowsOnboarding() {
+  final controller = WindowsOnboardingController(
+    store: MemoryWindowsOnboardingStore(complete: true),
+  );
+  addTearDown(controller.dispose);
+  return controller;
 }
