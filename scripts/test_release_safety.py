@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
+from copy import deepcopy
+import hashlib
 import re
 import runpy
 import tempfile
@@ -10,6 +12,72 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseSafetyTest(unittest.TestCase):
+    def qualification(self):
+        return (
+            {"id": 123, "head_sha": "commit", "head_repository": {"full_name": "owner/repo"},
+             "path": ".github/workflows/release.yml", "event": "workflow_dispatch",
+             "status": "completed", "conclusion": "success"},
+            {"total_count": 5, "jobs": [
+                {"name": name, "status": "completed", "conclusion": "success"}
+                for name in ("preflight", "macos", "android", "windows", "qualify")
+            ]},
+            {"artifacts": [{"name": "production-qualified", "expired": False,
+                            "workflow_run": {"id": 123, "head_sha": "commit"}}]},
+        )
+
+    def test_recovery_refuses_skipped_or_failed_native_gates(self):
+        verify = runpy.run_path(str(ROOT / "scripts/release/verify-qualified-run.py"))["verify"]
+        original = self.qualification()
+        verify(*original, "owner/repo", "commit")
+        for index in range(5):
+            for conclusion in ("skipped", "failure", "cancelled"):
+                evidence = deepcopy(original)
+                evidence[1]["jobs"][index]["conclusion"] = conclusion
+                with self.subTest(index=index, conclusion=conclusion), self.assertRaises(ValueError):
+                    verify(*evidence, "owner/repo", "commit")
+
+    def test_recovery_refuses_other_commits_forks_and_expired_artifacts(self):
+        verify = runpy.run_path(str(ROOT / "scripts/release/verify-qualified-run.py"))["verify"]
+        for target, key, value in (
+            ("run", "head_sha", "different"),
+            ("run", "head_repository", {"full_name": "fork/repo"}),
+            ("run", "conclusion", "cancelled"),
+            ("artifact", "expired", True),
+            ("artifact", "workflow_run", {"id": 999, "head_sha": "commit"}),
+        ):
+            evidence = self.qualification()
+            item = evidence[0] if target == "run" else evidence[2]["artifacts"][0]
+            item[key] = value
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                verify(*evidence, "owner/repo", "commit")
+
+    def test_publication_preserves_existing_bytes_and_uploads_only_missing_files(self):
+        missing = runpy.run_path(str(ROOT / "scripts/release/publish-release.py"))["missing_assets"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / "app.apk"
+            package.write_bytes(b"qualified")
+            signature = root / "app.apk.sig"
+            signature.write_bytes(b"signature")
+            release = {"draft": False, "prerelease": False, "assets": [{
+                "name": package.name, "size": package.stat().st_size,
+                "digest": "sha256:" + hashlib.sha256(package.read_bytes()).hexdigest(),
+            }]}
+            self.assertEqual(missing(root, release), [signature])
+            release["assets"][0]["digest"] = "sha256:changed"
+            with self.assertRaisesRegex(ValueError, "differs from qualification"):
+                missing(root, release)
+
+    def test_publication_rejects_unqualified_assets_and_drafts(self):
+        missing = runpy.run_path(str(ROOT / "scripts/release/publish-release.py"))["missing_assets"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "app.apk").write_bytes(b"qualified")
+            with self.assertRaisesRegex(ValueError, "unqualified"):
+                missing(root, {"draft": False, "prerelease": False, "assets": [{"name": "other.apk"}]})
+            with self.assertRaisesRegex(ValueError, "stable"):
+                missing(root, {"draft": True, "prerelease": False, "assets": []})
+
     def test_macos_smoke_requires_disposable_keychain_before_launch(self):
         script = (ROOT / "scripts/release/smoke-macos-production.sh").read_text(
             encoding="utf-8"

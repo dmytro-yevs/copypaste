@@ -23,6 +23,15 @@ Update `packaging/release-notes.md` with the release's changes. The publish job
 renders the versioned links and rejects missing table artifacts before creating
 the GitHub Release.
 
+To finish publication after a publisher interruption, dispatch the production
+workflow with `publish=true` and `qualified_run_id` set to a successful production
+run. Recovery verifies that the source run, every native platform job, and the
+qualification job passed at the exact stable tag commit. It rejects expired
+artifacts and re-hashes all downloaded files against their original receipts.
+Product binaries are reused without rebuilding or moving the release tag.
+Publication verifies existing assets and uploads only missing files; a different
+published digest fails closed. An unchanged Homebrew tap needs no new commit.
+
 Cloud Sync is not a CopyPaste 1.0.2 product capability. Local encrypted history
 and paired-device synchronization remain fully supported.
 
