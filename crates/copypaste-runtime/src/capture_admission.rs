@@ -12,6 +12,8 @@ const MAX_HOSTS: usize = 32;
 pub enum CaptureKind {
     Implicit,
     Explicit,
+    /// A declared module event has a known OS source, not an unknown app.
+    ModuleEvent,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CaptureScope {

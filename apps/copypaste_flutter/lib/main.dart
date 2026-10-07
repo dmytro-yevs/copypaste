@@ -7,6 +7,7 @@ import 'features/modules/repository/runtime_modules_repository.dart';
 import 'features/modules/repository/file_selector_module_input_picker.dart';
 import 'features/modules/repository/github_module_marketplace_repository.dart';
 import 'platform/modules/module_marketplace_platform.dart';
+import 'platform/modules/android_module_access.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -264,6 +265,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
           captureProtection: MethodChannelPairingCaptureProtection(),
         );
         _modulesController = ModulesController(
+          access: Platform.isAndroid ? const AndroidModuleAccess() : null,
           repository: RuntimeModulesRepository(),
           marketplace: GitHubModuleMarketplaceRepository(
             temporaryDirectory: getTemporaryDirectory,
