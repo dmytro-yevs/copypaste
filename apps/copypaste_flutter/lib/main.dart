@@ -25,10 +25,13 @@ import 'features/history/repository/file_selector_history_file_downloader.dart';
 import 'features/history/repository/runtime_history_repository.dart';
 import 'features/onboarding/controller/android_onboarding_controller.dart';
 import 'features/onboarding/controller/macos_onboarding_controller.dart';
+import 'features/onboarding/controller/windows_onboarding_controller.dart';
 import 'features/onboarding/repository/android_onboarding_store.dart';
 import 'features/onboarding/repository/macos_onboarding_store.dart';
+import 'features/onboarding/repository/windows_onboarding_store.dart';
 import 'features/onboarding/view/android_onboarding_screen.dart';
 import 'features/onboarding/view/macos_onboarding_screen.dart';
+import 'features/onboarding/view/windows_onboarding_screen.dart';
 import 'features/quick_paste/quick_paste_app.dart';
 import 'features/quick_paste/quick_paste_controller.dart';
 import 'features/settings/controller/quick_paste_settings_controller.dart';
@@ -120,6 +123,7 @@ class CopyPasteRoot extends StatefulWidget {
     this.desktopWindow,
     this.macosOnboardingController,
     this.androidOnboardingController,
+    this.windowsOnboardingController,
     this.appUpdateController,
     this.runtimeEnabled = true,
   });
@@ -127,6 +131,7 @@ class CopyPasteRoot extends StatefulWidget {
   final DesktopWindowController? desktopWindow;
   final MacosOnboardingController? macosOnboardingController;
   final AndroidOnboardingController? androidOnboardingController;
+  final WindowsOnboardingController? windowsOnboardingController;
   final AppUpdateController? appUpdateController;
   final bool runtimeEnabled;
 
@@ -148,10 +153,13 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   ModulesController? _modulesController;
   MacosOnboardingController? _macosOnboarding;
   AndroidOnboardingController? _androidOnboarding;
+  WindowsOnboardingController? _windowsOnboarding;
   bool _ownsMacosOnboarding = false;
   bool _ownsAndroidOnboarding = false;
+  bool _ownsWindowsOnboarding = false;
   bool _macosOnboardingReady = false;
   bool _androidOnboardingReady = false;
+  bool _windowsOnboardingReady = false;
   _RuntimeState _runtimeState = _RuntimeState.idle;
   String? _runtimeFailureMessage;
   String? _pendingPairingUri;
@@ -172,6 +180,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     });
     _configureMacosOnboarding();
     _configureAndroidOnboarding();
+    _configureWindowsOnboarding();
     unawaited(_appUpdateController?.initialize());
     if (widget.runtimeEnabled) {
       unawaited(_startRuntime());
@@ -197,6 +206,11 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       'CopyPasteRoot cannot replace its Android onboarding controller.',
     );
     assert(
+      oldWidget.windowsOnboardingController ==
+          widget.windowsOnboardingController,
+      'CopyPasteRoot cannot replace its Windows onboarding controller.',
+    );
+    assert(
       oldWidget.appUpdateController == widget.appUpdateController,
       'CopyPasteRoot cannot replace its process-wide update controller.',
     );
@@ -211,6 +225,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     }
     if (_ownsAndroidOnboarding) {
       _androidOnboarding?.dispose();
+    }
+    if (_ownsWindowsOnboarding) {
+      _windowsOnboarding?.dispose();
     }
     _navigation.dispose();
     _appUpdateController?.dispose();
@@ -330,7 +347,8 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
         uri == null ||
         _runtimeState != _RuntimeState.ready ||
         !(_macosOnboarding?.complete ?? true) ||
-        !(_androidOnboarding?.complete ?? true)) {
+        !(_androidOnboarding?.complete ?? true) ||
+        !(_windowsOnboarding?.complete ?? true)) {
       return;
     }
     _pendingPairingUri = null;
@@ -470,15 +488,33 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     setState(() => _androidOnboardingReady = true);
   }
 
-  Future<void> _finishMacosOnboarding(AppDestination destination) async {
-    _navigation.selectDestination(destination);
-    if (!mounted) return;
-    setState(() {});
-    await _activatePendingPairingLink();
+  void _configureWindowsOnboarding() {
+    final injected = widget.windowsOnboardingController;
+    if (injected != null) {
+      _windowsOnboarding = injected;
+    } else if (Platform.isWindows) {
+      _windowsOnboarding = WindowsOnboardingController(
+        store: SharedPreferencesWindowsOnboardingStore(),
+      );
+      _ownsWindowsOnboarding = true;
+    }
+    final controller = _windowsOnboarding;
+    if (controller == null) {
+      _windowsOnboardingReady = true;
+      return;
+    }
+    unawaited(_initializeWindowsOnboarding(controller));
   }
 
-  Future<void> _finishAndroidOnboarding(AppDestination destination) async {
-    _navigation.selectDestination(destination);
+  Future<void> _initializeWindowsOnboarding(
+    WindowsOnboardingController controller,
+  ) async {
+    await controller.initialize();
+    if (mounted) setState(() => _windowsOnboardingReady = true);
+  }
+
+  Future<void> _finishOnboarding() async {
+    _navigation.selectDestination(AppDestination.history);
     if (!mounted) return;
     setState(() {});
     await _activatePendingPairingLink();
@@ -530,7 +566,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
 
   Widget _buildApplication({required bool windowReady}) {
     final unifiedTitleBar = _usesUnifiedMacosTitleBar(windowReady);
-    if (!_macosOnboardingReady || !_androidOnboardingReady) {
+    if (!_macosOnboardingReady ||
+        !_androidOnboardingReady ||
+        !_windowsOnboardingReady) {
       return ShadcnApp(
         title: 'CopyPaste',
         theme: AppTheme.light,
@@ -555,8 +593,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
         builder: AppTheme.builder,
         home: MacosOnboardingScreen(
           controller: onboarding,
-          onPairDevice: () => _finishMacosOnboarding(AppDestination.devices),
-          onOpenHistory: () => _finishMacosOnboarding(AppDestination.history),
+          onFinished: _finishOnboarding,
           unifiedTitleBar: unifiedTitleBar,
         ),
       );
@@ -571,8 +608,21 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
         builder: AppTheme.builder,
         home: AndroidOnboardingScreen(
           controller: androidOnboarding,
-          onPairDevice: () => _finishAndroidOnboarding(AppDestination.devices),
-          onOpenHistory: () => _finishAndroidOnboarding(AppDestination.history),
+          onFinished: _finishOnboarding,
+        ),
+      );
+    }
+    final windowsOnboarding = _windowsOnboarding;
+    if (windowsOnboarding != null && !windowsOnboarding.complete) {
+      return ShadcnApp(
+        title: 'Set up CopyPaste',
+        theme: AppTheme.light,
+        darkTheme: AppTheme.dark,
+        themeMode: AppTheme.mode,
+        builder: AppTheme.builder,
+        home: WindowsOnboardingScreen(
+          controller: windowsOnboarding,
+          onFinished: _finishOnboarding,
         ),
       );
     }
