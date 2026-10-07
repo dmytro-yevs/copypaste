@@ -1,0 +1,24 @@
+[package]
+name = "copypaste-module-sms-codes"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "Offline recognition of login and transaction codes in incoming Android SMS."
+
+[workspace]
+members = []
+resolver = "2"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+copypaste-module-sdk = { path = "../../crates/copypaste-module-sdk" }
+regex = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "symbols"

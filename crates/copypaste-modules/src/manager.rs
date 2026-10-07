@@ -1,6 +1,7 @@
 use crate::{native::ModuleInstance, package::PackageVerifier, ModuleError};
 use copypaste_module_sdk::{
-    resolve_fields, valid_id, ModuleInvocation, ModuleManifest, ModuleOutput, ModuleTarget,
+    resolve_fields, valid_id, ModuleEvent, ModuleInvocation, ModuleManifest, ModuleOutput,
+    ModuleTarget,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -13,6 +14,7 @@ use std::{
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstalledModule {
+    pub events: Vec<ModuleEvent>,
     pub restart_required: bool,
     pub id: String,
     pub title: String,
@@ -222,7 +224,9 @@ impl ModuleManager {
             .collect();
         let record = Record {
             version: manifest.version.clone(),
-            enabled: old.as_ref().is_none_or(|old| old.enabled),
+            enabled: old
+                .as_ref()
+                .map_or(manifest.event_handlers.is_empty(), |old| old.enabled),
             preferences,
             removing: false,
         };
@@ -404,6 +408,77 @@ impl ModuleManager {
         Ok(())
     }
 
+    pub fn has_sms_handler(&self) -> Result<bool, ModuleError> {
+        let state = self.state.lock().map_err(|_| ModuleError::State)?;
+        for (id, record) in &state.registry.modules {
+            if record.enabled
+                && !record.removing
+                && self
+                    .manifest(id, record)?
+                    .event_handlers
+                    .iter()
+                    .any(|handler| handler.event == ModuleEvent::SmsReceived)
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Lifecycle mutations wait through recognition and host publication. No
+    /// callback from disabled, updated or removed code can publish afterwards.
+    pub fn dispatch_sms(
+        &self,
+        text: &str,
+        mut publish: impl FnMut(&str) -> Result<(), ModuleError>,
+    ) -> Result<bool, ModuleError> {
+        if text.is_empty() || text.len() > 64 * 1024 {
+            return Ok(false);
+        }
+        let _mutation = self.mutation.lock().map_err(|_| ModuleError::State)?;
+        let handlers = {
+            let state = self.state.lock().map_err(|_| ModuleError::State)?;
+            let mut handlers = Vec::new();
+            for (id, record) in &state.registry.modules {
+                if !record.enabled || record.removing {
+                    continue;
+                }
+                for handler in self.manifest(id, record)?.event_handlers {
+                    if handler.event == ModuleEvent::SmsReceived {
+                        handlers.push((id.clone(), handler.command));
+                    }
+                }
+            }
+            handlers
+        };
+        let mut codes = std::collections::BTreeSet::new();
+        for (id, command) in handlers {
+            let result = self.invoke(
+                &id,
+                &command,
+                BTreeMap::from([("text".into(), Value::String(text.into()))]),
+            )?;
+            if let ModuleOutput::Text { text: code } = result {
+                if code.is_empty() {
+                    continue;
+                }
+                if !(4..=10).contains(&code.len())
+                    || !code.bytes().all(|byte| byte.is_ascii_alphanumeric())
+                {
+                    return Err(ModuleError::Invalid(
+                        "The SMS module returned an invalid code.".into(),
+                    ));
+                }
+                codes.insert(code);
+            }
+        }
+        if codes.len() != 1 {
+            return Ok(false);
+        }
+        publish(codes.first().ok_or(ModuleError::State)?)?;
+        Ok(true)
+    }
+
     pub fn invoke(
         &self,
         id: &str,
@@ -462,7 +537,23 @@ impl ModuleManager {
 }
 
 fn summary(manifest: ModuleManifest, record: &Record) -> InstalledModule {
+    let events = manifest
+        .event_handlers
+        .iter()
+        .map(|handler| handler.event)
+        .collect();
+    let commands = manifest
+        .commands
+        .into_iter()
+        .filter(|command| {
+            !manifest
+                .event_handlers
+                .iter()
+                .any(|handler| handler.command == command.id)
+        })
+        .collect();
     InstalledModule {
+        events,
         restart_required: false,
         id: manifest.id,
         title: manifest.title,
@@ -470,7 +561,7 @@ fn summary(manifest: ModuleManifest, record: &Record) -> InstalledModule {
         version: manifest.version,
         enabled: record.enabled,
         size_bytes: manifest.files.iter().map(|file| file.size_bytes).sum(),
-        commands: manifest.commands,
+        commands,
         preference_fields: manifest.preferences,
         preferences: record.preferences.clone(),
         error: None,
@@ -479,6 +570,7 @@ fn summary(manifest: ModuleManifest, record: &Record) -> InstalledModule {
 
 fn failed_summary(id: &str, record: &Record, error: String) -> InstalledModule {
     InstalledModule {
+        events: Vec::new(),
         restart_required: false,
         id: id.into(),
         title: id.into(),

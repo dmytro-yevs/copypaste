@@ -3,7 +3,21 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const MANIFEST_VERSION: u32 = 1;
+pub const MANIFEST_VERSION: u32 = 2;
+
+/// Events are delivered by the host only to explicitly enabled modules.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum ModuleEvent {
+    SmsReceived,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ModuleEventHandler {
+    pub event: ModuleEvent,
+    pub command: String,
+}
 
 /// Some native runtimes own process-global callbacks or worker state. Their
 /// code must remain mapped even after individual module instances are dropped.
@@ -64,6 +78,10 @@ impl ModuleTarget {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ModuleManifest {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub supported_platforms: Vec<ModulePlatform>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub event_handlers: Vec<ModuleEventHandler>,
     #[serde(default)]
     pub unload_policy: ModuleUnloadPolicy,
     pub schema_version: u32,
@@ -167,7 +185,11 @@ impl ModuleField {
 /// Validate data once, at the package boundary, before it can enter the registry.
 impl ModuleManifest {
     pub fn validate(&self, host_version: &str, target: ModuleTarget) -> Result<(), String> {
-        if self.schema_version != MANIFEST_VERSION || self.api_version != MODULE_API_VERSION {
+        if !(1..=MANIFEST_VERSION).contains(&self.schema_version)
+            || self.api_version != MODULE_API_VERSION
+            || (self.schema_version == 1
+                && (!self.event_handlers.is_empty() || !self.supported_platforms.is_empty()))
+        {
             return Err("This module uses an unsupported API version.".into());
         }
         if !valid_id(&self.id)
@@ -176,6 +198,15 @@ impl ModuleManifest {
             || self.title.len() > 160
             || self.description.len() > 2048
             || self.target != target
+            || (self.schema_version == 2
+                && (self.supported_platforms.is_empty()
+                    || self.supported_platforms.len() > 3
+                    || !self.supported_platforms.contains(&target.platform)
+                    || self
+                        .supported_platforms
+                        .iter()
+                        .enumerate()
+                        .any(|(i, platform)| self.supported_platforms[..i].contains(platform))))
         {
             return Err("This module is invalid or built for another platform.".into());
         }
@@ -229,6 +260,26 @@ impl ModuleManifest {
                 return Err("The module command inventory is invalid.".into());
             }
             validate_fields(&command.arguments)?;
+        }
+        let mut events = BTreeSet::new();
+        for handler in &self.event_handlers {
+            let command = self
+                .commands
+                .iter()
+                .find(|command| command.id == handler.command);
+            if !events.insert(handler.event)
+                || self.target.platform != ModulePlatform::Android
+                || !command.is_some_and(|command| {
+                    command.arguments.len() == 1
+                        && command.arguments[0].id == "text"
+                        && matches!(
+                            command.arguments[0].value,
+                            ModuleFieldValue::Text { required: true, .. }
+                        )
+                })
+            {
+                return Err("The module event handler is invalid.".into());
+            }
         }
         Ok(())
     }
@@ -356,4 +407,47 @@ pub fn valid_relative_path(value: &str) -> bool {
                 )
         })
         && !value.starts_with('/')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn manifest() -> ModuleManifest {
+        serde_json::from_value(serde_json::json!({
+            "schema_version":2, "api_version":1, "id":"copypaste.sms-codes", "title":"SMS Codes",
+            "description":"Incoming SMS codes", "version":"0.1.0", "app_versions":">=1.0.0, <2.0.0",
+            "target":{"platform":"android","architecture":"aarch64"}, "supported_platforms":["android"],
+            "entrypoint":"bin/module.so", "files":[{"path":"bin/module.so","sha256":"0".repeat(64),"size_bytes":1}],
+            "commands":[{"id":"extract-code","title":"Extract", "description":"Extract", "arguments":[
+                {"id":"text","title":"SMS", "kind":"text", "default":"", "required":true}]}],
+            "event_handlers":[{"event":"sms_received","command":"extract-code"}]
+        })).unwrap()
+    }
+    #[test]
+    fn validates_android_event_contract_and_preserves_legacy_manifests() {
+        let mut module = manifest();
+        assert!(module.validate("1.0.6", module.target).is_ok());
+        module.schema_version = 1;
+        assert!(module.validate("1.0.6", module.target).is_err());
+        module.supported_platforms.clear();
+        module.event_handlers.clear();
+        assert!(module.validate("1.0.6", module.target).is_ok());
+    }
+    #[test]
+    fn refuses_missing_duplicate_foreign_platform_and_malformed_event_handlers() {
+        for change in 0..5 {
+            let mut module = manifest();
+            match change {
+                0 => module.event_handlers[0].command = "unknown".into(),
+                1 => module.event_handlers.push(module.event_handlers[0].clone()),
+                2 => {
+                    module.target.platform = ModulePlatform::Macos;
+                    module.supported_platforms = vec![ModulePlatform::Macos];
+                }
+                3 => module.commands[0].arguments[0].id = "body".into(),
+                _ => module.supported_platforms.clear(),
+            }
+            assert!(module.validate("1.0.6", module.target).is_err());
+        }
+    }
 }
