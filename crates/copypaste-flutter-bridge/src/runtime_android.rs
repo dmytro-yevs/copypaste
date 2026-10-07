@@ -21,6 +21,7 @@ use jni::{
 static APPLICATION_CONTEXT: OnceLock<GlobalRef> = OnceLock::new();
 static JAVA_VM: OnceLock<JavaVM> = OnceLock::new();
 static RUNTIME: OnceLock<Arc<copypaste_runtime::Runtime>> = OnceLock::new();
+static SMS_NETWORK_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
 /// Initializes the context required by `android-native-keyring-store`.
 ///
@@ -413,6 +414,86 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_soundOnCopyEn
     if RUNTIME
         .get()
         .is_some_and(|runtime| runtime.sound_on_copy_enabled())
+    {
+        JNI_TRUE
+    } else {
+        JNI_FALSE
+    }
+}
+
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_copypaste_app_NativeSmsModules_hasHandler(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jboolean {
+    if RUNTIME
+        .get()
+        .is_some_and(|runtime| runtime.has_sms_module())
+    {
+        JNI_TRUE
+    } else {
+        JNI_FALSE
+    }
+}
+
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_copypaste_app_NativeSmsModules_openHost(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jlong {
+    RUNTIME
+        .get()
+        .and_then(|runtime| {
+            runtime
+                .capture_admission()
+                .open_host(copypaste_runtime::capture_admission::CaptureKind::ModuleEvent)
+        })
+        .unwrap_or(0) as jlong
+}
+
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_copypaste_app_NativeSmsModules_ingest(
+    mut env: JNIEnv,
+    _class: JClass,
+    token: jlong,
+    text: JObject,
+) -> jboolean {
+    let Some(runtime) = RUNTIME.get() else {
+        return JNI_FALSE;
+    };
+    if token <= 0 {
+        return JNI_FALSE;
+    }
+    let Some(read) = runtime.capture_admission().acquire(
+        token as u64,
+        copypaste_runtime::capture_admission::CaptureScope::Read,
+    ) else {
+        return JNI_FALSE;
+    };
+    let Ok(text) = env.get_string((&text).into()) else {
+        return JNI_FALSE;
+    };
+    let text = text.to_string_lossy().into_owned();
+    drop(read);
+    if SMS_NETWORK_RUNTIME.get().is_none() {
+        if let Ok(network) = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+        {
+            let _ = SMS_NETWORK_RUNTIME.set(network);
+        }
+    }
+    if let Some(network) = SMS_NETWORK_RUNTIME.get() {
+        // Local clipboard capture remains available while networking is down.
+        let _ = network.block_on(runtime.start_listener());
+    }
+    if runtime
+        .capture_sms_operation(token as u64, &text)
+        .unwrap_or(false)
     {
         JNI_TRUE
     } else {

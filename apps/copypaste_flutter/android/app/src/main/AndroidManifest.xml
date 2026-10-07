@@ -10,6 +10,9 @@
         android:name="android.permission.READ_LOGS"
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
@@ -27,6 +30,11 @@
         <receiver
             android:name=".AppUpdateResultReceiver"
             android:exported="false" />
+        <receiver android:name=".SmsModuleReceiver" android:exported="true" android:enabled="false"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter><action android:name="android.provider.Telephony.SMS_RECEIVED" /></intent-filter>
+            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
+        </receiver>
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -89,6 +97,10 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps CopyPaste clipboard capture active after one-time user-approved setup so copies made in other apps can be saved to the user's private on-device history." />
+        </service>
+        <service android:name=".SmsModuleService" android:exported="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Observes new incoming SMS only while a separately installed SMS code module is enabled, so authentication and transaction codes can be copied to the user's clipboard and encrypted history." />
         </service>
         <provider
             android:name="rikka.shizuku.ShizukuProvider"

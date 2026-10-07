@@ -4,6 +4,7 @@ import '../models/module_marketplace_models.dart';
 import '../models/module_models.dart';
 import '../repository/module_marketplace_repository.dart';
 import '../repository/modules_repository.dart';
+import '../repository/module_access_repository.dart';
 import 'module_form_draft.dart';
 
 class ModulesController extends ChangeNotifier {
@@ -12,10 +13,15 @@ class ModulesController extends ChangeNotifier {
     required ModuleMarketplaceRepository marketplace,
     ModuleInputPicker? inputPicker,
     Future<void> Function()? restart,
+    ModuleAccessRepository? access,
   }) : _repository = repository,
        _marketplace = marketplace,
        _inputPicker = inputPicker,
-       _restart = restart;
+       _restart = restart,
+       _access = access;
+  final ModuleAccessRepository? _access;
+  SmsModuleAccessState? _smsAccess;
+  SmsModuleAccessState? get smsAccess => _smsAccess;
   final ModulesRepository _repository;
   final ModuleMarketplaceRepository _marketplace;
   final ModuleInputPicker? _inputPicker;
@@ -129,6 +135,7 @@ class ModulesController extends ChangeNotifier {
       final modules = await _repository.list();
       if (!_disposed) {
         _modules = modules;
+        await _refreshAccess();
         _state = ModulesLoadState.ready;
       }
     }, refresh: false);
@@ -183,8 +190,51 @@ class ModulesController extends ChangeNotifier {
     }
   }
 
-  Future<void> setEnabled(String id, bool enabled) =>
-      _perform(() => _repository.setEnabled(id, enabled));
+  Future<void> setEnabled(String id, bool enabled) => _perform(() async {
+    final sms =
+        installedModule(id)?.events.contains(ModuleEventKind.smsReceived) ??
+        false;
+    if (sms && enabled) {
+      final state = await _access?.smsState();
+      _smsAccess = state;
+      if (state?.granted != true) {
+        throw const ModulesException(
+          'Set up SMS access before enabling this module.',
+        );
+      }
+    }
+    await _repository.setEnabled(id, enabled);
+    if (sms && _access != null && !await _access.synchronize()) {
+      if (enabled) {
+        await _repository.setEnabled(id, false);
+      }
+      throw const ModulesException('SMS monitoring could not be started.');
+    }
+  });
+
+  Future<void> configureSmsAccess() => _perform(() async {
+    if (_access == null) {
+      throw const ModulesException('SMS access is available only on Android.');
+    }
+    _smsAccess = await _access.configureSms();
+  }, refresh: false);
+
+  Future<void> _refreshAccess() async {
+    if (_access == null) return;
+    final sms = _modules.any(
+      (module) => module.events.contains(ModuleEventKind.smsReceived),
+    );
+    _smsAccess = sms ? await _access.smsState() : null;
+    if (!await _access.synchronize() &&
+        _modules.any(
+          (module) =>
+              module.enabled &&
+              module.events.contains(ModuleEventKind.smsReceived),
+        )) {
+      throw const ModulesException('SMS monitoring needs setup.');
+    }
+  }
+
   Future<void> setPreferences(String id, Map<String, Object> values) =>
       _perform(() => _repository.setPreferences(id, values));
   Future<void> remove(String id) => _perform(() => _repository.remove(id));
@@ -210,6 +260,7 @@ class ModulesController extends ChangeNotifier {
       result = await operation();
       if (refresh && !_disposed) {
         _modules = await _repository.list();
+        await _refreshAccess();
         _state = ModulesLoadState.ready;
       }
     } catch (error) {
