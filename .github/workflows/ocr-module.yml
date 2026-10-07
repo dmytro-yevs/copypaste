@@ -1,0 +1,200 @@
+name: Build and publish OCR module
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish qualified packages and update the signed marketplace
+        required: true
+        type: boolean
+        default: false
+
+concurrency:
+  group: ocr-module-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      app_version: ${{ steps.metadata.outputs.app_version }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - id: metadata
+        run: |
+          python3 - <<'PY'
+          import json, os, tomllib
+          from pathlib import Path
+          module = json.loads(Path("modules/ocr/module.json").read_text())
+          application = tomllib.loads(Path("Cargo.toml").read_text())["workspace"]["package"]["version"]
+          if module["id"] != "copypaste.ocr":
+              raise ValueError("This workflow qualifies the first-party OCR module")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"version={module['version']}\napp_version={application}\n")
+          PY
+  desktop:
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: macos, architecture: aarch64, runner: macos-14, library: libcopypaste_module_ocr.dylib, program: copypaste-module-qualification }
+          - { platform: windows, architecture: x86_64, runner: windows-2022, library: copypaste_module_ocr.dll, program: copypaste-module-qualification.exe }
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: "1.96"
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: |
+            .
+            modules/ocr
+      - name: Prepare pinned offline assets
+        run: |
+          python3 modules/ocr/scripts/fetch-models.py --sources modules/ocr/assets/model-sources.json --destination modules/ocr/assets/models
+          python3 modules/ocr/scripts/prepare-runtime.py --platform ${{ matrix.platform }} --architecture ${{ matrix.architecture }} --cache "$RUNNER_TEMP/ocr-runtime"
+      - name: Build native module and qualification host
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "13.0"
+        run: |
+          cargo +1.96 build --manifest-path modules/ocr/Cargo.toml --release --locked --lib
+          cargo +1.96 build --release --locked -p copypaste-module-qualification
+          cargo +1.96 test --manifest-path modules/ocr/Cargo.toml --locked
+      - name: Sign target package
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          mkdir -p dist
+          python3 scripts/modules/package.py --module-dir modules/ocr --library modules/ocr/target/release/${{ matrix.library }} --platform ${{ matrix.platform }} --architecture ${{ matrix.architecture }} --output dist/CopyPasteModule-copypaste.ocr-v${{ needs.preflight.outputs.version }}-${{ matrix.platform }}-${{ matrix.architecture }}.cpmodule
+      - name: Qualify exact production package
+        run: |
+          version="$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{gsub(/["[:space:]]/, "", $3); print $3; exit}' Cargo.toml)"
+          python3 scripts/modules/qualify-desktop.py --platform ${{ matrix.platform }} --package dist/CopyPasteModule-copypaste.ocr-v${{ needs.preflight.outputs.version }}-${{ matrix.platform }}-${{ matrix.architecture }}.cpmodule --program target/release/${{ matrix.program }} --app-version "$version" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --receipt dist/CopyPasteModule-copypaste.ocr-v${{ needs.preflight.outputs.version }}-${{ matrix.platform }}-${{ matrix.architecture }}.cpmodule.receipt.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ocr-${{ matrix.platform }}
+          if-no-files-found: error
+          path: dist/*
+
+  android:
+    needs: preflight
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { architecture: arm, target: armv7-linux-androideabi }
+          - { architecture: aarch64, target: aarch64-linux-android }
+          - { architecture: x86_64, target: x86_64-linux-android }
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: "1.96"
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: |
+            .
+            modules/ocr
+      - name: Prepare Android toolchain and offline assets
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y patchelf
+          sdkmanager "ndk;29.0.13846066" "platforms;android-36" "build-tools;36.0.0"
+          python3 modules/ocr/scripts/fetch-models.py --sources modules/ocr/assets/model-sources.json --destination modules/ocr/assets/models
+          python3 modules/ocr/scripts/prepare-runtime.py --platform android --architecture ${{ matrix.architecture }} --cache "$RUNNER_TEMP/ocr-runtime" --ndk "$ANDROID_HOME/ndk/29.0.13846066"
+      - name: Build and verify target ABI
+        run: python3 scripts/modules/build-android-module.py --architecture ${{ matrix.architecture }} --ndk "$ANDROID_HOME/ndk/29.0.13846066"
+      - name: Sign target package
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          mkdir -p dist
+          python3 scripts/modules/package.py --module-dir modules/ocr --library modules/ocr/target/${{ matrix.target }}/release/libcopypaste_module_ocr.so --platform android --architecture ${{ matrix.architecture }} --output dist/CopyPasteModule-copypaste.ocr-v${{ needs.preflight.outputs.version }}-android-${{ matrix.architecture }}.cpmodule
+      - name: Build app-private native qualification APK
+        if: matrix.architecture == 'x86_64'
+        run: python3 scripts/modules/build-android-qualification.py --sdk "$ANDROID_HOME" --library target/x86_64-linux-android/release/libcopypaste_module_qualification.so --package dist/CopyPasteModule-copypaste.ocr-v${{ needs.preflight.outputs.version }}-android-x86_64.cpmodule --output dist/ocr-qualification.apk
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ocr-android-${{ matrix.architecture }}
+          if-no-files-found: error
+          path: dist/*
+
+  android-native:
+    needs: [preflight, android]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ocr-android-x86_64
+          path: dist
+      - name: Enable emulator acceleration
+        run: sudo chmod 666 /dev/kvm
+      - uses: ReactiveCircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2
+        with:
+          api-level: 36
+          arch: x86_64
+          target: default
+          disable-animations: true
+          script: python3 scripts/modules/qualify-android.py --apk dist/ocr-qualification.apk --app-version "$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{gsub(/["[:space:]]/, "", $3); print $3; exit}' Cargo.toml)" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --receipt dist/CopyPasteModule-copypaste.ocr-v${{ needs.preflight.outputs.version }}-android-x86_64.cpmodule.receipt.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ocr-android-native
+          if-no-files-found: error
+          path: dist/*.receipt.json
+
+  publish:
+    needs: [preflight, desktop, android, android-native]
+    if: inputs.publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: ocr-*
+          merge-multiple: true
+          path: dist
+      - name: Verify authenticated packages and native receipts
+        run: python3 scripts/modules/verify-release-packages.py --directory dist --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --release-tag module-copypaste.ocr-v${{ needs.preflight.outputs.version }}
+      - name: Publish qualified module release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create module-copypaste.ocr-v${{ needs.preflight.outputs.version }} dist/*.cpmodule dist/*.receipt.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false --title "CopyPaste OCR ${{ needs.preflight.outputs.version }}" --notes "Optional first-party OCR. Signed packages for macOS, Windows, and all shipped Android ABIs. Recognition works offline."
+          gh workflow run module-marketplace.yml --repo "$GITHUB_REPOSITORY" --ref module-copypaste.ocr-v${{ needs.preflight.outputs.version }} -f module_release_tag=module-copypaste.ocr-v${{ needs.preflight.outputs.version }}

@@ -98,6 +98,23 @@ AppUpdateChannel::AppUpdateChannel(flutter::BinaryMessenger* messenger,
       result->Success(flutter::EncodableValue(FLUTTER_VERSION));
       return;
     }
+    if (call.method_name() == "systemVersion") {
+      using RtlGetVersionFunction = LONG(WINAPI*)(OSVERSIONINFOW*);
+      auto* ntdll = ::GetModuleHandleW(L"ntdll.dll");
+      auto get_version = ntdll == nullptr ? nullptr :
+          reinterpret_cast<RtlGetVersionFunction>(::GetProcAddress(ntdll, "RtlGetVersion"));
+      OSVERSIONINFOW version{};
+      version.dwOSVersionInfoSize = sizeof(version);
+      if (get_version == nullptr || get_version(&version) != 0) {
+        result->Error("system_version_unavailable", "System version is unavailable.");
+        return;
+      }
+      result->Success(flutter::EncodableValue(
+          std::to_string(version.dwMajorVersion) + "." +
+          std::to_string(version.dwMinorVersion) + "." +
+          std::to_string(version.dwBuildNumber)));
+      return;
+    }
     if (call.method_name() == "availability") {
       const bool available = CurrentCopyPasteExecutableIsSigned();
       flutter::EncodableMap response;

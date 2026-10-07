@@ -64,6 +64,7 @@ class AppUpdateChannel(
                 val installed = activity.packageManager.getPackageInfo(activity.packageName, 0)
                 result.success(installed.versionName)
             }
+            "systemVersion" -> result.success(android.os.Build.VERSION.RELEASE)
             "availability" -> result.success(mapOf("available" to true))
             "install" -> install(call, result)
             "restoreInstallation" -> {
