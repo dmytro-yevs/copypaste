@@ -17,6 +17,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../presentation/history_color_swatch.dart';
 import 'history_delete_dialog.dart';
+import 'history_ocr_dialog.dart';
 
 class HistoryInspector extends StatelessWidget {
   const HistoryInspector({
@@ -220,6 +221,33 @@ class HistoryInspector extends StatelessWidget {
                           : () => _download(context),
                       leading: const Icon(LucideIcons.download),
                       child: const Text('Download'),
+                    ),
+                  if (clip.contentKind == HistoryClipKind.image &&
+                      controller.ocr?.available == true)
+                    Tooltip(
+                      showDuration: AppMotion.resolve(
+                        context,
+                        AppMotion.standard,
+                      ),
+                      tooltip: (context) => const TooltipContainer(
+                        child: Text('Recognize image text'),
+                      ),
+                      child: Semantics(
+                        label: 'Recognize image text',
+                        button: true,
+                        child: Button.secondary(
+                          key: const ValueKey<String>('history-ocr'),
+                          style: const ButtonStyle.secondaryIcon(),
+                          onPressed: controller.ocr!.canRun
+                              ? () => showHistoryOcrDialog(
+                                  context,
+                                  controller: controller.ocr!,
+                                  clip: clip,
+                                )
+                              : null,
+                          child: const Icon(LucideIcons.scanText),
+                        ),
+                      ),
                     ),
                   Semantics(
                     toggled: clip.pinned,
