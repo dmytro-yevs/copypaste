@@ -2,10 +2,10 @@
 
 CopyPaste v2 has one SQLCipher database filename and one canonical schema. The
 schema is created transactionally for a new v2 database and verified exactly on
-every open. An existing file that does not match is refused without probing,
-upgrading, repairing, deleting or overwriting it.
+every open. Registered older versions are upgraded transactionally. Unknown,
+future, corrupt or altered schemas are refused without modifying history.
 
-The schema in `copypaste-core::storage::schema` is the authoring source. This
+The ordered SQL files in `copypaste-core::storage::migrations` are the authoring source. This
 manifest owns observable behaviour and security properties; it does not repeat
 column order or DDL as a second schema definition.
 
@@ -13,7 +13,8 @@ column order or DDL as a second schema definition.
 
 Storage owns:
 
-- creation and exact verification of the v2 SQLCipher database;
+- creation, registered version upgrades and exact verification of the v2 SQLCipher database;
+- shared source-application icon assets referenced by clipboard rows;
 - per-connection keying and pragma policy;
 - encrypted item rows, tombstones, pin state and device-local settings;
 - atomic dedup, delete, index and retention operations;
@@ -29,8 +30,12 @@ IPC owns request limits and user-facing errors.
 1. The product opens only its v2 database path.
 2. A missing file is reserved and receives the canonical schema in one
    transaction.
-3. An existing file must authenticate with the supplied SQLCipher key and match
-   the canonical schema exactly.
+3. An existing file must authenticate with the supplied SQLCipher key, have
+   complete database pages and exactly match its declared registered schema version.
+   Version zero identifies the original unversioned schema. Pending migrations
+   require a full integrity check and run in one transaction; `PRAGMA user_version`
+   advances only with their commit. Ordinary current-version opens do not scan
+   all ciphertext payloads.
 4. Wrong key, plaintext SQLite, missing/extra schema objects and altered SQL are
    failures. None starts an alternate open path.
 5. Schema verification compares structured SQLite metadata, including tables,
@@ -38,12 +43,14 @@ IPC owns request limits and user-facing errors.
    SQL are normalized only where SQLite itself makes them insignificant.
 6. The pool is built only after key and schema verification succeeds. Every
    pooled connection applies the raw key before any other statement.
-7. No `user_version` ladder, `ALTER TABLE` chain, encounter detector, database
-   conversion, format repair or migration-state table belongs in v2.
-
-Adding a second schema is a product change. It requires a decision about what
-creates it, what opens it, how failure preserves data and when the first schema
-stops being supported. It must not arrive as a convenience branch in `open`.
+7. Each migration declares its next version, SQL and optional data transformation.
+   Validate the final canonical schema before committing. An error rolls back
+   the schema, data and version together; future versions are rejected.
+8. Store one PNG per application identity in `source_app_icons`. Items retain
+   `source_icon_id` references. Unidentified applications share an asset by PNG
+   hash. Release an asset only when its last clipboard reference is removed.
+   Sync hydrates icon metadata at the transport boundary and normalizes it on
+   receipt; paged list rows carry the shared identity without PNG copies.
 
 ## 3. Item and transaction invariants
 
@@ -191,7 +198,8 @@ match. Callers do not trim a materialized search result or map later matches.
 - A missing v2 database is created with the canonical schema and reopens.
 - Wrong key, plaintext SQLite, corrupt database and every missing/altered schema
   object fail without modifying the file.
-- No compatibility or schema-ladder dependency appears in production source.
+- Registered older versions preserve ciphertext, timestamps and pin state when upgraded.
+- Failed migrations leave the old schema and version intact; future versions are refused.
 - The key is the first statement on every writer and pooled reader.
 - Schema and key errors contain no filesystem path.
 - Concurrent readers do not block each other; concurrent writers lose no
@@ -246,9 +254,9 @@ Stable acceptance IDs used by source comments:
 
 ## 6. Load-bearing implementation choices
 
-- Keep one schema constant and one structured verifier.
+- Keep one ordered migration registry and one structured schema verifier.
 - Bind row projections by name or generate mapper and projection together.
-- Use maintained pooling, migration-free schema creation, temporary-file and
+- Use maintained pooling, transactional schema migrations, temporary-file and
   durable-replacement packages already present in the tree.
 - Keep keyset cursors opaque. Their representation may change with the order,
   while clients depend only on round-tripping the token.

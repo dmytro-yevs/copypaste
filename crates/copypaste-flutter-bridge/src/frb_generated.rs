@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0-beta.5";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -159456011;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 202947649;
 
 // Section: executor
 
@@ -255,42 +255,6 @@ fn wire__crate__api__clip_image_preview_impl(
                         let output_ok =
                             crate::api::clip_image_preview(api_id, api_max_edge, api_bounds)
                                 .await?;
-                        Ok(output_ok)
-                    })()
-                    .await,
-                )
-            }
-        },
-    )
-}
-fn wire__crate__api__clip_source_app_icon_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "clip_source_app_icon",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_id = <String>::sse_decode(&mut deserializer);
-            deserializer.end();
-            move |context| async move {
-                transform_result_sse::<_, crate::api::RuntimeError>(
-                    (move || async move {
-                        let output_ok = crate::api::clip_source_app_icon(api_id).await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -1865,6 +1829,42 @@ fn wire__crate__api__set_this_device_name_impl(
         },
     )
 }
+fn wire__crate__api__source_app_icon_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "source_app_icon",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, crate::api::RuntimeError>(
+                    (move || async move {
+                        let output_ok = crate::api::source_app_icon(api_id).await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__start_desktop_runtime_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2195,6 +2195,7 @@ impl SseDecode for crate::api::Clip {
         let mut var_originDeviceName = <Option<String>>::sse_decode(deserializer);
         let mut var_originDeviceClass = <crate::api::DeviceClass>::sse_decode(deserializer);
         let mut var_sourceAppName = <Option<String>>::sse_decode(deserializer);
+        let mut var_sourceAppIconId = <Option<String>>::sse_decode(deserializer);
         let mut var_truncated = <bool>::sse_decode(deserializer);
         let mut var_tooLargeToSync = <bool>::sse_decode(deserializer);
         let mut var_fileDetails = <Option<crate::api::ClipFileDetails>>::sse_decode(deserializer);
@@ -2211,6 +2212,7 @@ impl SseDecode for crate::api::Clip {
             origin_device_name: var_originDeviceName,
             origin_device_class: var_originDeviceClass,
             source_app_name: var_sourceAppName,
+            source_app_icon_id: var_sourceAppIconId,
             truncated: var_truncated,
             too_large_to_sync: var_tooLargeToSync,
             file_details: var_fileDetails,
@@ -2633,11 +2635,11 @@ impl SseDecode for crate::api::HistorySourceAppFacet {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_id = <String>::sse_decode(deserializer);
         let mut var_label = <String>::sse_decode(deserializer);
-        let mut var_iconItemId = <Option<String>>::sse_decode(deserializer);
+        let mut var_iconId = <Option<String>>::sse_decode(deserializer);
         return crate::api::HistorySourceAppFacet {
             id: var_id,
             label: var_label,
-            icon_item_id: var_iconItemId,
+            icon_id: var_iconId,
         };
     }
 }
@@ -3161,52 +3163,52 @@ fn pde_ffi_dispatcher_primary_impl(
         4 => wire__crate__api__cancel_runtime_watch_impl(port, ptr, rust_vec_len, data_len),
         5 => wire__crate__api__capture_state_impl(port, ptr, rust_vec_len, data_len),
         6 => wire__crate__api__clip_image_preview_impl(port, ptr, rust_vec_len, data_len),
-        7 => wire__crate__api__clip_source_app_icon_impl(port, ptr, rust_vec_len, data_len),
-        8 => wire__crate__api__cloud_account_status_impl(port, ptr, rust_vec_len, data_len),
-        9 => wire__crate__api__cloud_sign_in_impl(port, ptr, rust_vec_len, data_len),
-        10 => wire__crate__api__cloud_sign_out_impl(port, ptr, rust_vec_len, data_len),
-        11 => wire__crate__api__cloud_sign_up_impl(port, ptr, rust_vec_len, data_len),
-        12 => wire__crate__api__cloud_sync_now_impl(port, ptr, rust_vec_len, data_len),
-        13 => wire__crate__api__confirm_pairing_ceremony_impl(port, ptr, rust_vec_len, data_len),
-        14 => wire__crate__api__copy_clip_impl(port, ptr, rust_vec_len, data_len),
-        15 => wire__crate__api__copy_clip_as_plain_text_impl(port, ptr, rust_vec_len, data_len),
-        16 => wire__crate__api__create_pairing_ceremony_impl(port, ptr, rust_vec_len, data_len),
-        17 => wire__crate__api__delete_clip_impl(port, ptr, rust_vec_len, data_len),
-        18 => wire__crate__api__delete_clips_through_impl(port, ptr, rust_vec_len, data_len),
-        19 => wire__crate__api__dispose_pairing_ceremony_impl(port, ptr, rust_vec_len, data_len),
-        20 => wire__crate__api__export_text_history_impl(port, ptr, rust_vec_len, data_len),
-        21 => wire__crate__api__get_clip_impl(port, ptr, rust_vec_len, data_len),
-        22 => wire__crate__api__get_runtime_settings_impl(port, ptr, rust_vec_len, data_len),
-        23 => wire__crate__api__history_ceiling_impl(port, ptr, rust_vec_len, data_len),
-        24 => wire__crate__api__history_facets_impl(port, ptr, rust_vec_len, data_len),
-        25 => wire__crate__api__join_pairing_ceremony_impl(port, ptr, rust_vec_len, data_len),
-        26 => wire__crate__api__join_pairing_uri_impl(port, ptr, rust_vec_len, data_len),
-        27 => wire__crate__api__list_clips_impl(port, ptr, rust_vec_len, data_len),
-        28 => wire__crate__api__list_discovered_devices_impl(port, ptr, rust_vec_len, data_len),
-        29 => wire__crate__api__list_peers_impl(port, ptr, rust_vec_len, data_len),
-        30 => wire__crate__api__module_install_impl(port, ptr, rust_vec_len, data_len),
-        31 => wire__crate__api__module_invoke_impl(port, ptr, rust_vec_len, data_len),
-        32 => wire__crate__api__module_remove_impl(port, ptr, rust_vec_len, data_len),
-        33 => wire__crate__api__module_set_enabled_impl(port, ptr, rust_vec_len, data_len),
-        34 => wire__crate__api__module_set_preferences_impl(port, ptr, rust_vec_len, data_len),
-        35 => wire__crate__api__modules_list_impl(port, ptr, rust_vec_len, data_len),
-        36 => wire__crate__api__pairing_ceremony_status_impl(port, ptr, rust_vec_len, data_len),
-        37 => wire__crate__api__query_clips_impl(port, ptr, rust_vec_len, data_len),
-        38 => wire__crate__api__reorder_pinned_clips_impl(port, ptr, rust_vec_len, data_len),
-        39 => wire__crate__api__rescan_devices_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__api__restore_history_impl(port, ptr, rust_vec_len, data_len),
-        41 => wire__crate__api__reveal_pairing_qr_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__api__reveal_pairing_sas_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__api__revoke_device_impl(port, ptr, rust_vec_len, data_len),
-        44 => {
+        7 => wire__crate__api__cloud_account_status_impl(port, ptr, rust_vec_len, data_len),
+        8 => wire__crate__api__cloud_sign_in_impl(port, ptr, rust_vec_len, data_len),
+        9 => wire__crate__api__cloud_sign_out_impl(port, ptr, rust_vec_len, data_len),
+        10 => wire__crate__api__cloud_sign_up_impl(port, ptr, rust_vec_len, data_len),
+        11 => wire__crate__api__cloud_sync_now_impl(port, ptr, rust_vec_len, data_len),
+        12 => wire__crate__api__confirm_pairing_ceremony_impl(port, ptr, rust_vec_len, data_len),
+        13 => wire__crate__api__copy_clip_impl(port, ptr, rust_vec_len, data_len),
+        14 => wire__crate__api__copy_clip_as_plain_text_impl(port, ptr, rust_vec_len, data_len),
+        15 => wire__crate__api__create_pairing_ceremony_impl(port, ptr, rust_vec_len, data_len),
+        16 => wire__crate__api__delete_clip_impl(port, ptr, rust_vec_len, data_len),
+        17 => wire__crate__api__delete_clips_through_impl(port, ptr, rust_vec_len, data_len),
+        18 => wire__crate__api__dispose_pairing_ceremony_impl(port, ptr, rust_vec_len, data_len),
+        19 => wire__crate__api__export_text_history_impl(port, ptr, rust_vec_len, data_len),
+        20 => wire__crate__api__get_clip_impl(port, ptr, rust_vec_len, data_len),
+        21 => wire__crate__api__get_runtime_settings_impl(port, ptr, rust_vec_len, data_len),
+        22 => wire__crate__api__history_ceiling_impl(port, ptr, rust_vec_len, data_len),
+        23 => wire__crate__api__history_facets_impl(port, ptr, rust_vec_len, data_len),
+        24 => wire__crate__api__join_pairing_ceremony_impl(port, ptr, rust_vec_len, data_len),
+        25 => wire__crate__api__join_pairing_uri_impl(port, ptr, rust_vec_len, data_len),
+        26 => wire__crate__api__list_clips_impl(port, ptr, rust_vec_len, data_len),
+        27 => wire__crate__api__list_discovered_devices_impl(port, ptr, rust_vec_len, data_len),
+        28 => wire__crate__api__list_peers_impl(port, ptr, rust_vec_len, data_len),
+        29 => wire__crate__api__module_install_impl(port, ptr, rust_vec_len, data_len),
+        30 => wire__crate__api__module_invoke_impl(port, ptr, rust_vec_len, data_len),
+        31 => wire__crate__api__module_remove_impl(port, ptr, rust_vec_len, data_len),
+        32 => wire__crate__api__module_set_enabled_impl(port, ptr, rust_vec_len, data_len),
+        33 => wire__crate__api__module_set_preferences_impl(port, ptr, rust_vec_len, data_len),
+        34 => wire__crate__api__modules_list_impl(port, ptr, rust_vec_len, data_len),
+        35 => wire__crate__api__pairing_ceremony_status_impl(port, ptr, rust_vec_len, data_len),
+        36 => wire__crate__api__query_clips_impl(port, ptr, rust_vec_len, data_len),
+        37 => wire__crate__api__reorder_pinned_clips_impl(port, ptr, rust_vec_len, data_len),
+        38 => wire__crate__api__rescan_devices_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__restore_history_impl(port, ptr, rust_vec_len, data_len),
+        40 => wire__crate__api__reveal_pairing_qr_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__reveal_pairing_sas_impl(port, ptr, rust_vec_len, data_len),
+        42 => wire__crate__api__revoke_device_impl(port, ptr, rust_vec_len, data_len),
+        43 => {
             wire__crate__api__runtime_settings_patch_default_impl(port, ptr, rust_vec_len, data_len)
         }
-        45 => wire__crate__api__runtime_status_impl(port, ptr, rust_vec_len, data_len),
-        46 => wire__crate__api__save_clip_file_impl(port, ptr, rust_vec_len, data_len),
-        47 => wire__crate__api__search_clips_impl(port, ptr, rust_vec_len, data_len),
-        48 => wire__crate__api__set_capture_paused_impl(port, ptr, rust_vec_len, data_len),
-        49 => wire__crate__api__set_clip_pinned_impl(port, ptr, rust_vec_len, data_len),
-        50 => wire__crate__api__set_this_device_name_impl(port, ptr, rust_vec_len, data_len),
+        44 => wire__crate__api__runtime_status_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__api__save_clip_file_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__api__search_clips_impl(port, ptr, rust_vec_len, data_len),
+        47 => wire__crate__api__set_capture_paused_impl(port, ptr, rust_vec_len, data_len),
+        48 => wire__crate__api__set_clip_pinned_impl(port, ptr, rust_vec_len, data_len),
+        49 => wire__crate__api__set_this_device_name_impl(port, ptr, rust_vec_len, data_len),
+        50 => wire__crate__api__source_app_icon_impl(port, ptr, rust_vec_len, data_len),
         51 => wire__crate__api__start_desktop_runtime_impl(port, ptr, rust_vec_len, data_len),
         52 => wire__crate__api__stop_desktop_runtime_impl(port, ptr, rust_vec_len, data_len),
         53 => wire__crate__api__sync_devices_impl(port, ptr, rust_vec_len, data_len),
@@ -3276,6 +3278,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::Clip {
             self.origin_device_name.into_into_dart().into_dart(),
             self.origin_device_class.into_into_dart().into_dart(),
             self.source_app_name.into_into_dart().into_dart(),
+            self.source_app_icon_id.into_into_dart().into_dart(),
             self.truncated.into_into_dart().into_dart(),
             self.too_large_to_sync.into_into_dart().into_dart(),
             self.file_details.into_into_dart().into_dart(),
@@ -3791,7 +3794,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::HistorySourceAppFacet {
         [
             self.id.into_into_dart().into_dart(),
             self.label.into_into_dart().into_dart(),
-            self.icon_item_id.into_into_dart().into_dart(),
+            self.icon_id.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4054,6 +4057,7 @@ impl SseEncode for crate::api::Clip {
         <Option<String>>::sse_encode(self.origin_device_name, serializer);
         <crate::api::DeviceClass>::sse_encode(self.origin_device_class, serializer);
         <Option<String>>::sse_encode(self.source_app_name, serializer);
+        <Option<String>>::sse_encode(self.source_app_icon_id, serializer);
         <bool>::sse_encode(self.truncated, serializer);
         <bool>::sse_encode(self.too_large_to_sync, serializer);
         <Option<crate::api::ClipFileDetails>>::sse_encode(self.file_details, serializer);
@@ -4389,7 +4393,7 @@ impl SseEncode for crate::api::HistorySourceAppFacet {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.id, serializer);
         <String>::sse_encode(self.label, serializer);
-        <Option<String>>::sse_encode(self.icon_item_id, serializer);
+        <Option<String>>::sse_encode(self.icon_id, serializer);
     }
 }
 

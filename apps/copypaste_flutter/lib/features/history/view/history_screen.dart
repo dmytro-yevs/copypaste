@@ -15,6 +15,7 @@ import 'package:copypaste_flutter/shared/state_view.dart';
 import 'package:copypaste_flutter/shared/system_date_time.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'history_inspector.dart';
+import 'history_delete_dialog.dart';
 import '../presentation/history_color_swatch.dart';
 
 /// The shell-owned History destination body. It intentionally does not add an
@@ -258,6 +259,7 @@ class _HistoryList extends StatelessWidget {
                   section: section,
                 ),
                 _HistoryClipRow(:final clip) => Padding(
+                  key: ValueKey<String>('history-row-${clip.id}'),
                   padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                   child: _HistoryClipCard(
                     clip: clip,
@@ -597,9 +599,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
             label: facet.label,
             child: SourceAppLabel(
               name: facet.label,
-              icon: facet.iconItemId == null
-                  ? Future<HistorySourceAppIcon?>.value(null)
-                  : widget.controller.requestSourceIcon(facet.iconItemId!),
+              icon: widget.controller.requestSourceIcon(facet.iconId),
               iconSize: compact ? AppIconSize.md : AppIconSize.sm,
               showName: !compact,
             ),
@@ -886,7 +886,7 @@ class _HistoryFilterOption<T> {
   int get hashCode => id.hashCode;
 }
 
-class _HistoryClipCard extends StatelessWidget {
+class _HistoryClipCard extends StatefulWidget {
   const _HistoryClipCard({
     required this.clip,
     required this.controller,
@@ -902,40 +902,123 @@ class _HistoryClipCard extends StatelessWidget {
   final VoidCallback onPressed;
 
   @override
+  State<_HistoryClipCard> createState() => _HistoryClipCardState();
+}
+
+class _HistoryClipCardState extends State<_HistoryClipCard> {
+  final _focus = FocusNode(skipTraversal: true);
+  bool _hovered = false;
+  bool _focused = false;
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Semantics(
-      selected: selected,
-      button: true,
-      child: Button(
-        key: ValueKey<String>('history-clip-${clip.id}'),
-        onPressed: onPressed,
-        alignment: Alignment.centerLeft,
-        style: selected
-            ? const ButtonStyle.secondary()
-            : const ButtonStyle.ghost(),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _ClipContent(clip: clip, controller: controller),
-            const Gap(AppSpacing.xs),
-            Row(
-              children: [
-                Expanded(
-                  child: _ClipMeta(
-                    clip: clip,
-                    controller: controller,
-                    showKindLabel: showKindLabel,
-                  ),
-                ),
-                if (clip.pinned) ...[
+    final clip = widget.clip;
+    final controller = widget.controller;
+    return FocusableActionDetector(
+      focusNode: _focus,
+      includeFocusSemantics: false,
+      onShowHoverHighlight: (value) => setState(() => _hovered = value),
+      onShowFocusHighlight: (value) => setState(() => _focused = value),
+      child: Stack(
+        children: [
+          Semantics(
+            selected: widget.selected,
+            button: true,
+            child: Button(
+              key: ValueKey<String>('history-clip-${clip.id}'),
+              onPressed: widget.onPressed,
+              alignment: Alignment.centerLeft,
+              style: widget.selected
+                  ? const ButtonStyle.secondary()
+                  : const ButtonStyle.ghost(),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _ClipContent(clip: clip, controller: controller),
                   const Gap(AppSpacing.xs),
-                  const Icon(LucideIcons.pin, size: AppIconSize.xs),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _ClipMeta(
+                          clip: clip,
+                          controller: controller,
+                          showKindLabel: widget.showKindLabel,
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
-              ],
+              ),
             ),
-          ],
-        ),
+          ),
+          if (_hovered || _focused)
+            Positioned(
+              top: AppSpacing.zero,
+              bottom: AppSpacing.zero,
+              right: AppSpacing.sm,
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  spacing: AppSpacing.xs,
+                  children: [
+                    Tooltip(
+                      tooltip: (context) => TooltipContainer(
+                        child: Text(clip.pinned ? 'Unpin clip' : 'Pin clip'),
+                      ),
+                      child: Semantics(
+                        label: clip.pinned ? 'Unpin clip' : 'Pin clip',
+                        toggled: clip.pinned,
+                        button: true,
+                        child: Button.secondary(
+                          key: ValueKey<String>('history-row-pin-${clip.id}'),
+                          style: const ButtonStyle.secondaryIcon(
+                            density: ButtonDensity.iconDense,
+                          ),
+                          onPressed: controller.isPinPending(clip.id)
+                              ? null
+                              : () => controller.togglePin(clip),
+                          child: Icon(
+                            clip.pinned ? LucideIcons.pinOff : LucideIcons.pin,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Tooltip(
+                      tooltip: (context) =>
+                          const TooltipContainer(child: Text('Delete clip')),
+                      child: Semantics(
+                        label: 'Delete clip',
+                        button: true,
+                        child: Button.destructive(
+                          key: ValueKey<String>(
+                            'history-row-delete-${clip.id}',
+                          ),
+                          style: const ButtonStyle.destructiveIcon(
+                            density: ButtonDensity.iconDense,
+                          ),
+                          onPressed: controller.isDeletePending(clip.id)
+                              ? null
+                              : () => showHistoryDeleteDialog(
+                                  context,
+                                  controller: controller,
+                                  clipId: clip.id,
+                                ),
+                          child: const Icon(LucideIcons.trash2),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -1074,10 +1157,8 @@ class _ClipMeta extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final style = DefaultTextStyle.of(context).style
-        .merge(theme.typography.xSmall)
-        .copyWith(color: theme.colorScheme.mutedForeground);
+    final style = AppTheme.historyMetadataTextStyle(context);
+    final strutStyle = AppTheme.historyMetadataStrutStyle(context);
     final kindIcon = Icon(
       HistoryClipPresentation.icon(clip.contentKind),
       size: AppIconSize.xs,
@@ -1102,8 +1183,10 @@ class _ClipMeta extends StatelessWidget {
               alignment: PlaceholderAlignment.middle,
               child: SourceAppLabel(
                 name: clip.sourceApp!,
-                icon: controller.requestSourceIcon(clip.id),
+                icon: controller.requestSourceIcon(clip.sourceAppIconId),
+                iconSize: AppIconSize.xs,
                 style: style,
+                strutStyle: strutStyle,
               ),
             ),
           ],
@@ -1114,7 +1197,9 @@ class _ClipMeta extends StatelessWidget {
               child: DeviceLabel(
                 name: clip.origin!,
                 deviceClass: clip.originDeviceClass,
+                iconSize: AppIconSize.xs,
                 style: style,
+                strutStyle: strutStyle,
               ),
             ),
           ],
@@ -1123,6 +1208,7 @@ class _ClipMeta extends StatelessWidget {
       ),
       key: ValueKey<String>('history-clip-meta-${clip.id}'),
       style: style,
+      strutStyle: strutStyle,
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
     );

@@ -268,7 +268,7 @@ impl Store {
         // the stable bundle/package id remains the selected value.
         let mut apps = BTreeMap::new();
         let mut app_stmt = conn.prepare(
-            "SELECT id, app_bundle_id, app_name, payload_metadata FROM clipboard_items \
+            "SELECT id, app_bundle_id, app_name, source_icon_id FROM clipboard_items \
              WHERE deleted = 0 AND app_bundle_id IS NOT NULL AND app_name IS NOT NULL \
              ORDER BY app_bundle_id ASC, created_at DESC, id DESC",
         )?;
@@ -281,25 +281,18 @@ impl Store {
             ))
         })?;
         for row in app_rows {
-            let (item_id, id, label, payload_metadata) = row?;
+            let (_item_id, id, label, source_icon_id) = row?;
             if !id.is_empty() && !label.trim().is_empty() {
-                let has_icon = payload_metadata
-                    .as_deref()
-                    .and_then(|value| serde_json::from_str::<crate::PayloadMetadata>(value).ok())
-                    .is_some_and(|metadata| metadata.source_app_icon.is_some());
+                let has_icon = source_icon_id.is_some();
                 let entry = apps.entry(id).or_insert_with(|| (label, None));
                 if entry.1.is_none() && has_icon {
-                    entry.1 = Some(item_id);
+                    entry.1 = source_icon_id;
                 }
             }
         }
         let mut source_apps = apps
             .into_iter()
-            .map(|(id, (label, icon_item_id))| HistorySourceAppFacet {
-                id,
-                label,
-                icon_item_id,
-            })
+            .map(|(id, (label, icon_id))| HistorySourceAppFacet { id, label, icon_id })
             .collect::<Vec<_>>();
         origins.sort_by(|left, right| left.label.cmp(&right.label).then(left.id.cmp(&right.id)));
         source_apps
@@ -884,12 +877,12 @@ mod tests {
                 HistorySourceAppFacet {
                     id: "com.example.editor".into(),
                     label: "Editor".into(),
-                    icon_item_id: Some(local_new.id),
+                    icon_id: local_new.source_icon_id,
                 },
                 HistorySourceAppFacet {
                     id: "com.example.viewer".into(),
                     label: "Viewer".into(),
-                    icon_item_id: None,
+                    icon_id: None,
                 },
             ]
         );

@@ -1,4 +1,7 @@
+import 'package:pub_semver/pub_semver.dart';
+import 'package:copypaste_flutter/features/modules/models/module_marketplace_models.dart';
 import 'package:copypaste_flutter/features/modules/models/module_models.dart';
+import 'package:copypaste_flutter/features/modules/repository/module_marketplace_repository.dart';
 import 'package:copypaste_flutter/features/modules/repository/modules_repository.dart';
 
 const textArgument = ModuleField(
@@ -99,16 +102,48 @@ class MemoryModulesRepository implements ModulesRepository {
   }
 }
 
-class MemoryModulePicker implements ModulePackagePicker {
-  bool cancel = false;
+final testMarketplaceModule = MarketplaceModule(
+  id: testModule.id,
+  title: testModule.title,
+  description: testModule.description,
+  version: Version.parse(testModule.version),
+  artifact: ModuleArtifact(
+    downloadUri: Uri.parse(
+      'https://github.com/dmytro-yevs/copypaste/releases/download/module-text-tools-v1.0.0/text-tools.cpmodule',
+    ),
+    sizeBytes: 10,
+    sha256: '0' * 64,
+  ),
+);
+
+class MemoryModuleMarketplace implements ModuleMarketplaceRepository {
+  List<MarketplaceModule> modules = [testMarketplaceModule];
+  Object? failure;
+  Object? downloadFailure;
   int disposedPackages = 0;
+  bool disposed = false;
   @override
-  Future<SelectedModulePackage?> choose() async => cancel
-      ? null
-      : SelectedModulePackage(
-          path: '/private/test.cpmodule',
-          dispose: () async {
-            disposedPackages++;
-          },
-        );
+  Future<List<MarketplaceModule>> list() async {
+    if (failure case final error?) throw error;
+    return List.unmodifiable(modules);
+  }
+
+  @override
+  Future<SelectedModulePackage> download(
+    MarketplaceModule module, {
+    required void Function(double) onProgress,
+  }) async {
+    if (downloadFailure case final error?) throw error;
+    onProgress(0.5);
+    onProgress(1);
+    return SelectedModulePackage(
+      path: '/private/test.cpmodule',
+      dispose: () async {
+        disposedPackages++;
+      },
+    );
+  }
+
+  @override
+  void dispose() => disposed = true;
 }

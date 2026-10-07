@@ -38,6 +38,7 @@ fn item() -> Item {
         origin_device_class: copypaste_ipc::DeviceClass::Laptop,
         source_app_bundle_id: None,
         source_app_name: None,
+        source_app_icon_id: None,
         too_large_to_sync: false,
         truncated: false,
     }
@@ -174,7 +175,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             source_apps: vec![HistorySourceAppFacet {
                 id: "com.example.app".into(),
                 label: "Example".into(),
-                icon_item_id: Some("item-1".into()),
+                icon_id: Some("item-1".into()),
             }],
         }),
         ResponseData::Item(item()),

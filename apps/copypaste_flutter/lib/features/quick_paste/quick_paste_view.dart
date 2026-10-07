@@ -184,23 +184,48 @@ class _QuickPasteViewState extends State<QuickPasteView> {
     if (items.isEmpty) {
       return const StateView.empty(title: 'No clips found');
     }
-    return Scrollbar(
-      controller: _scroll,
-      child: SingleChildScrollView(
-        controller: _scroll,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            for (final (index, clip) in items.indexed) ...[
-              if (index > 0 && clip.pinned && !items[index - 1].pinned) ...[
-                const Gap(AppSpacing.xs),
-                const Divider(),
-                const Gap(AppSpacing.xs),
-              ],
-              _item(clip),
+    final recent = items.where((clip) => !clip.pinned).toList();
+    final pinned = items.where((clip) => clip.pinned).toList();
+    return LayoutBuilder(
+      builder: (context, constraints) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Scrollbar(
+              controller: _scroll,
+              child: SingleChildScrollView(
+                key: const ValueKey('quick-paste-history-scroll'),
+                controller: _scroll,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [for (final clip in recent) _item(clip)],
+                ),
+              ),
+            ),
+          ),
+          if (pinned.isNotEmpty) ...[
+            if (recent.isNotEmpty) ...[
+              const Gap(AppSpacing.xs),
+              const Divider(),
+              const Gap(AppSpacing.xs),
             ],
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: recent.isEmpty
+                    ? constraints.maxHeight
+                    : constraints.maxHeight / 2,
+              ),
+              child: SingleChildScrollView(
+                key: const ValueKey('quick-paste-pinned-scroll'),
+                primary: false,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [for (final clip in pinned) _item(clip)],
+                ),
+              ),
+            ),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -308,7 +333,9 @@ class _QuickPasteViewState extends State<QuickPasteView> {
                 child: clip.sourceApp != null
                     ? SourceAppLabel(
                         name: clip.sourceApp!,
-                        icon: controller.history.requestSourceIcon(clip.id),
+                        icon: controller.history.requestSourceIcon(
+                          clip.sourceAppIconId,
+                        ),
                         showName: false,
                       )
                     : Icon(

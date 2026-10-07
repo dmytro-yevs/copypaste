@@ -338,6 +338,7 @@ mod tests {
             origin_device_class: copypaste_ipc::DeviceClass::Laptop,
             source_app_bundle_id: None,
             source_app_name: None,
+            source_app_icon_id: None,
             too_large_to_sync: false,
             truncated: false,
         }

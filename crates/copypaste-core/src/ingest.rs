@@ -823,8 +823,9 @@ mod tests {
         .unwrap()
         .into_item();
         assert_eq!(
-            stored
-                .payload_metadata
+            f.store
+                .payload_metadata_for_sync(&stored)
+                .unwrap()
                 .as_deref()
                 .and_then(|json| crate::PayloadMetadata::from_json(json, &stored.content_type)),
             Some(metadata)
@@ -852,8 +853,9 @@ mod tests {
         .unwrap()
         .into_item();
         assert_eq!(
-            stored
-                .payload_metadata
+            f.store
+                .payload_metadata_for_sync(&stored)
+                .unwrap()
                 .as_deref()
                 .and_then(|json| crate::PayloadMetadata::from_json(json, &stored.content_type)),
             Some(metadata),

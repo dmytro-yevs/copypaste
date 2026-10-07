@@ -9,6 +9,10 @@ There are no alias commands, retired envelopes, string-dispatch escape hatches,
 decode-only requests or dual-protocol listeners. A request either decodes as the
 current typed contract or receives a bounded typed rejection.
 
+Protocol version 5 carries shared application-icon asset IDs in item and source
+facet metadata. `SourceAppIcon.id` addresses that asset directly. It does not
+address a clipboard row; the Flutter bridge is generated from this contract.
+
 ## 1. Responsibilities
 
 The IPC layer owns:

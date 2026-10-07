@@ -234,8 +234,8 @@ Future<ClipImagePreview> clipImagePreview({
 
 /// Lazily returns the persisted source-application icon when the backend has
 /// authenticated icon metadata for this clip.
-Future<ClipImagePreview?> clipSourceAppIcon({required String id}) =>
-    RustLib.instance.api.crateApiClipSourceAppIcon(id: id);
+Future<ClipImagePreview?> sourceAppIcon({required String id}) =>
+    RustLib.instance.api.crateApiSourceAppIcon(id: id);
 
 Future<List<Peer>> listPeers() => RustLib.instance.api.crateApiListPeers();
 
@@ -315,6 +315,7 @@ class Clip {
   final String? originDeviceName;
   final DeviceClass originDeviceClass;
   final String? sourceAppName;
+  final String? sourceAppIconId;
   final bool truncated;
   final bool tooLargeToSync;
   final ClipFileDetails? fileDetails;
@@ -332,6 +333,7 @@ class Clip {
     this.originDeviceName,
     required this.originDeviceClass,
     this.sourceAppName,
+    this.sourceAppIconId,
     required this.truncated,
     required this.tooLargeToSync,
     this.fileDetails,
@@ -351,6 +353,7 @@ class Clip {
       originDeviceName.hashCode ^
       originDeviceClass.hashCode ^
       sourceAppName.hashCode ^
+      sourceAppIconId.hashCode ^
       truncated.hashCode ^
       tooLargeToSync.hashCode ^
       fileDetails.hashCode ^
@@ -372,6 +375,7 @@ class Clip {
           originDeviceName == other.originDeviceName &&
           originDeviceClass == other.originDeviceClass &&
           sourceAppName == other.sourceAppName &&
+          sourceAppIconId == other.sourceAppIconId &&
           truncated == other.truncated &&
           tooLargeToSync == other.tooLargeToSync &&
           fileDetails == other.fileDetails &&
@@ -951,16 +955,16 @@ class HistoryFacets {
 class HistorySourceAppFacet {
   final String id;
   final String label;
-  final String? iconItemId;
+  final String? iconId;
 
   const HistorySourceAppFacet({
     required this.id,
     required this.label,
-    this.iconItemId,
+    this.iconId,
   });
 
   @override
-  int get hashCode => id.hashCode ^ label.hashCode ^ iconItemId.hashCode;
+  int get hashCode => id.hashCode ^ label.hashCode ^ iconId.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -969,7 +973,7 @@ class HistorySourceAppFacet {
           runtimeType == other.runtimeType &&
           id == other.id &&
           label == other.label &&
-          iconItemId == other.iconItemId;
+          iconId == other.iconId;
 }
 
 /// Safe pairing state for ordinary Flutter UI. It deliberately has no invite

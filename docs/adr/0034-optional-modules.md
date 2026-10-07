@@ -4,8 +4,8 @@
 
 CopyPaste owns the shared interface, module registry, package installation,
 preferences, and command dispatch. Modules provide separately installed native
-code and assets. They are not dependencies of the application build. OCR will
-be a later module; this foundation includes no OCR engine or models.
+code and assets. They are not dependencies of the application build. OCR is an
+optional module; the base application includes no OCR engine or models.
 
 The first implementation accepts only packages signed by CopyPaste's pinned
 release identity. Modules execute locally on macOS, Android, and Windows. A
@@ -84,8 +84,33 @@ can be retried. Corrupt registry data fails closed and is never reset silently.
 
 ## Deliberate limits of this stage
 
-Installation/update uses a user-selected local signed package. There is no
-public catalog, automatic download, marketplace, or third-party trust UI.
+Settings > Modules opens the first-party marketplace. Marketplace and Installed
+use the shared shadcn components on all supported platforms. Search filters
+module titles and descriptions. Install and Update download the exact package
+for the running process ABI and installed application version, with progress,
+bounded streaming, SHA-256 verification, and private staging cleanup. The
+runtime then verifies the signed manifest and file inventory before activation.
+Installed management remains available when the marketplace is offline.
+
+The catalog lives in the `modules` GitHub Release as `modules.json` and its
+base64-encoded Minisign `modules.json.sig`, using the pinned release key. Catalog
+metadata is authenticated before rendering or resolving a package. Each entry
+contains ID, title, description, stable version, `app_versions`, and platform /
+architecture artifacts with a versioned release URL, compressed size, and
+SHA-256. Only compatible artifacts appear. Module execution remains offline;
+only marketplace discovery and installation require network access.
+
+Publish qualified packages under `module-<id>-v<version>` in the first-party
+repository. The **Publish module marketplace** workflow authenticates every
+package and the previous catalog, enforces matching manifests and packages for
+macOS aarch64, Windows x86_64, and Android arm/aarch64/x86_64, preserves other
+catalog entries, rejects equal versions and downgrades, and signs the new
+catalog with the existing release signer secrets. Publication is a separately
+dispatched operation after native qualification; preparing this workflow does
+not publish packages or establish native acceptance evidence. Local catalog
+generation uses `scripts/modules/catalog.py` and Python 3.9+ / OpenSSL 3+.
+
+There is no third-party trust UI.
 Native first-party code runs inside the owning runtime process: this is not a
 sandbox, and manifest declarations cannot restrict native OS access. A native
 crash can terminate that process. Third-party execution requires an explicit
@@ -112,7 +137,7 @@ Build a module with `cargo build -p copypaste-module-text-tools`. Package it wit
 <built library> --platform <platform> --architecture <architecture> --output
 <package.cpmodule>`. Signing uses the existing release signer environment;
 private keys must never be committed. Install or update the signed package
-through Settings > Modules.
+through the marketplace after publishing the qualified target packages.
 
 Native lifecycle tests establish behavior on their executing host. Android
 cross-compilation and Flutter tests establish source/build compatibility, not

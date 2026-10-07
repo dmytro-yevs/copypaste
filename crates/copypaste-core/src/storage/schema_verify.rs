@@ -10,6 +10,7 @@ const CURRENT_TABLES: &[&str] = &[
     "clipboard_live_count",
     "sync_device_state",
     "sync_device_name",
+    "source_app_icons",
 ];
 
 #[derive(Debug, PartialEq)]
@@ -21,8 +22,12 @@ struct SchemaObject {
 }
 
 pub(super) fn verify_schema(conn: &Connection) -> Result<(), StoreError> {
+    verify_schema_against(conn, super::schema::SCHEMA)
+}
+
+pub(super) fn verify_schema_against(conn: &Connection, schema: &str) -> Result<(), StoreError> {
     let expected = Connection::open_in_memory()?;
-    expected.execute_batch(super::schema::SCHEMA)?;
+    expected.execute_batch(schema)?;
 
     if schema_objects(conn)? != schema_objects(&expected)? {
         return Err(StoreError::InvalidSchema);

@@ -176,6 +176,7 @@ pub struct Clip {
     pub origin_device_name: Option<String>,
     pub origin_device_class: DeviceClass,
     pub source_app_name: Option<String>,
+    pub source_app_icon_id: Option<String>,
     pub truncated: bool,
     pub too_large_to_sync: bool,
     pub file_details: Option<ClipFileDetails>,
@@ -236,7 +237,7 @@ pub struct HistoryDeviceFacet {
 pub struct HistorySourceAppFacet {
     pub id: String,
     pub label: String,
-    pub icon_item_id: Option<String>,
+    pub icon_id: Option<String>,
 }
 #[derive(Debug, Clone)]
 pub struct HistoryFacets {
@@ -731,7 +732,7 @@ pub async fn history_facets() -> Result<HistoryFacets, RuntimeError> {
         .map(|row| HistorySourceAppFacet {
             id: row.id,
             label: row.label,
-            icon_item_id: row.icon_item_id,
+            icon_id: row.icon_id,
         })
         .collect();
     Ok(HistoryFacets {
@@ -888,7 +889,7 @@ pub async fn clip_image_preview(
 
 /// Lazily returns the persisted source-application icon when the backend has
 /// authenticated icon metadata for this clip.
-pub async fn clip_source_app_icon(id: String) -> Result<Option<ClipImagePreview>, RuntimeError> {
+pub async fn source_app_icon(id: String) -> Result<Option<ClipImagePreview>, RuntimeError> {
     let response = client::request(Method::SourceAppIcon { id }).await?;
     match response.data {
         Some(ResponseData::SourceAppIcon(preview)) => Ok(Some(ClipImagePreview {
@@ -1173,6 +1174,7 @@ fn clip(item: copypaste_ipc::Item) -> Clip {
         origin_device_name: item.origin_device_name,
         origin_device_class: device_class(item.origin_device_class),
         source_app_name: item.source_app_name,
+        source_app_icon_id: item.source_app_icon_id,
         truncated: item.truncated,
         too_large_to_sync: item.too_large_to_sync,
         file_details: item.file_details.map(|details| ClipFileDetails {
@@ -1389,6 +1391,7 @@ mod tests {
             origin_device_class: copypaste_ipc::DeviceClass::Phone,
             source_app_bundle_id: None,
             source_app_name: Some("Camera".into()),
+            source_app_icon_id: None,
             too_large_to_sync: true,
             truncated: false,
         });

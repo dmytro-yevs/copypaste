@@ -20,6 +20,7 @@ void main() {
         originDeviceName: 'Work laptop',
         originDeviceClass: runtime.DeviceClass.laptop,
         sourceAppName: 'Editor',
+        sourceAppIconId: 'app:editor',
         truncated: false,
         tooLargeToSync: false,
         fileDetails: runtime.ClipFileDetails(
@@ -154,7 +155,7 @@ void main() {
           runtime.HistorySourceAppFacet(
             id: 'com.example.editor',
             label: 'Editor',
-            iconItemId: 'clip-with-editor-icon',
+            iconId: 'clip-with-editor-icon',
           ),
         ],
       ),
@@ -165,6 +166,6 @@ void main() {
     expect(facets.originDevices.single.deviceClass, DeviceClass.laptop);
     expect(facets.sourceApps.single.id, 'com.example.editor');
     expect(facets.sourceApps.single.label, 'Editor');
-    expect(facets.sourceApps.single.iconItemId, 'clip-with-editor-icon');
+    expect(facets.sourceApps.single.iconId, 'clip-with-editor-icon');
   });
 }

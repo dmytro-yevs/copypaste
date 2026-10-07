@@ -45,14 +45,16 @@ abstract final class AppControlSize {
   static const double touch = 48;
 }
 
-/// Shared desktop menu typography.
+/// Shared compact metadata and desktop menu typography.
 abstract final class AppTypographySize {
+  static const double historyMetadata = 12;
   static const double menu = 13;
   static const double menuMetadata = menu - 2;
 }
 
 /// Shared dimensions for application layouts.
 abstract final class AppLayoutSize {
+  static const double marketplaceCardMinWidth = 280;
   static const double quickPasteMenuWidth = 448;
   static const double quickPasteInspectorWidth = 360;
   static const double settingsNavigationWidth = 240;

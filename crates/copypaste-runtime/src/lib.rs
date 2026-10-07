@@ -1001,7 +1001,7 @@ impl Runtime {
     }
 
     fn source_icon(&self, request_id: u64, item_id: &str) -> Response {
-        match self.store.source_app_icon_metadata(item_id) {
+        match self.store.source_app_icon_by_id(item_id) {
             Ok(Some(icon)) => Response::ok(
                 request_id,
                 ResponseData::SourceAppIcon(copypaste_ipc::ImagePreview {
@@ -1368,6 +1368,7 @@ impl Runtime {
             origin_device_class,
             source_app_bundle_id: row.app_bundle_id,
             source_app_name: row.app_name,
+            source_app_icon_id: row.source_icon_id,
             too_large_to_sync,
             truncated,
         })

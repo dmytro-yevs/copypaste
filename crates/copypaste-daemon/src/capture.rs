@@ -1335,9 +1335,15 @@ mod tests {
                 inner: Some(captured(content, None)),
             }),
         );
-        let first = ingest(&state, content, copypaste_ipc::content_type::TEXT)
-            .unwrap()
-            .into_item();
+        // Seed a strictly older stamp; consecutive writes may share one millisecond.
+        let first = ingest_at(
+            &state,
+            content,
+            copypaste_ipc::content_type::TEXT,
+            copypaste_core::now_ms().saturating_sub(1),
+        )
+        .unwrap()
+        .into_item();
         assert_eq!(state.store.count().unwrap(), 1);
 
         let mut events = state.subscribe();

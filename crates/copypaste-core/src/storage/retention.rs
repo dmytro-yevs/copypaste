@@ -276,20 +276,28 @@ pub(super) fn bump_in_tx(
     created_at: i64,
     app_bundle_id: &Option<String>,
     app_name: &Option<String>,
+    source_icon_id: &Option<String>,
 ) -> rusqlite::Result<StoredItem> {
     if created_at <= existing.created_at {
         return Ok(existing.clone());
     }
     match tx.execute(
         "UPDATE clipboard_items \
-         SET created_at = ?2, app_bundle_id = ?3, app_name = ?4 \
+         SET created_at = ?2, app_bundle_id = ?3, app_name = ?4, source_icon_id = ?5 \
          WHERE id = ?1 AND deleted = 0",
-        params![&existing.id, created_at, app_bundle_id, app_name],
+        params![
+            &existing.id,
+            created_at,
+            app_bundle_id,
+            app_name,
+            source_icon_id
+        ],
     ) {
         Ok(_) => Ok(StoredItem {
             created_at,
             app_bundle_id: app_bundle_id.clone(),
             app_name: app_name.clone(),
+            source_icon_id: source_icon_id.clone(),
             ..existing.clone()
         }),
         // The new stamp lands in a dedup bucket another live row already holds.

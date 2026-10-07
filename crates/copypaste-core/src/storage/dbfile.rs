@@ -21,7 +21,12 @@ use super::connection::{apply_connection_pragmas, apply_key, validate_key};
 use super::model::{stored_item_columns, StoreError};
 
 // The live counter is derived by the target database's item triggers.
-const RESTORED_TABLES: &[&str] = &["clipboard_fts", "clipboard_items", "sync_device_name"];
+const RESTORED_TABLES: &[&str] = &[
+    "clipboard_fts",
+    "clipboard_items",
+    "source_app_icons",
+    "sync_device_name",
+];
 
 #[derive(Debug, thiserror::Error)]
 pub enum RestoreError {
@@ -38,13 +43,29 @@ pub enum RestoreError {
 /// never a fallback to an unkeyed read (AGENTS.md rule 4).
 ///
 pub fn open_validated(path: &Path, db_key: &[u8; 32]) -> Result<Connection, StoreError> {
-    let conn = Connection::open_with_flags(
+    let mut conn = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
     apply_key(&conn, db_key)?;
     validate_key(&conn)?;
-    verify_schema(&conn)?;
+    // Detect truncated files without scanning every payload on ordinary opens.
+    let page_size = match conn.pragma_query_value(None, "page_size", |row| {
+        row.get::<_, rusqlite::types::Value>(0)
+    })? {
+        rusqlite::types::Value::Integer(size) => {
+            u64::try_from(size).map_err(|_| StoreError::IntegrityCheckFailed)?
+        }
+        rusqlite::types::Value::Text(size) => size
+            .parse::<u64>()
+            .map_err(|_| StoreError::IntegrityCheckFailed)?,
+        _ => return Err(StoreError::IntegrityCheckFailed),
+    };
+    if page_size == 0 || !std::fs::metadata(path)?.len().is_multiple_of(page_size) {
+        return Err(StoreError::IntegrityCheckFailed);
+    }
+    conn.pragma_update(None, "foreign_keys", true)?;
+    super::migrations::upgrade(&mut conn)?;
     apply_connection_pragmas(&conn)?;
     Ok(conn)
 }
@@ -139,6 +160,10 @@ impl super::Store {
             // `content_bytes` is recomputed from ciphertext and metadata that
             // actually arrive, so a source file cannot import a byte quota
             // that disagrees with its rows.
+            tx.execute(
+                "INSERT INTO source_app_icons SELECT * FROM restore_src.source_app_icons",
+                [],
+            )?;
             tx.execute(
                 concat!(
                     "INSERT INTO clipboard_items (",

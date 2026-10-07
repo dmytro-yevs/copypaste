@@ -159,10 +159,10 @@ class HistorySourceAppFacet extends HistoryFilterFacet {
   const HistorySourceAppFacet({
     required super.id,
     required super.label,
-    this.iconItemId,
+    this.iconId,
   });
 
-  final String? iconItemId;
+  final String? iconId;
 }
 
 class HistoryFacets {
@@ -187,6 +187,7 @@ class HistoryClip {
     this.origin,
     this.originDeviceClass = DeviceClass.unknown,
     this.sourceApp,
+    this.sourceAppIconId,
     this.truncated = false,
     this.body,
     this.file,
@@ -204,6 +205,7 @@ class HistoryClip {
   final String? origin;
   final DeviceClass originDeviceClass;
   final String? sourceApp;
+  final String? sourceAppIconId;
   final bool truncated;
 
   /// Present only after an explicit get operation for the selected item.
@@ -228,6 +230,7 @@ class HistoryClip {
     origin: origin,
     originDeviceClass: originDeviceClass,
     sourceApp: sourceApp,
+    sourceAppIconId: sourceAppIconId,
     truncated: truncated,
     body: body,
     file: file,

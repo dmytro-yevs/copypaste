@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/gestures.dart';
+
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
@@ -18,6 +20,156 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as raster;
 
 void main() {
+  testWidgets(
+    'overlays compact pin and delete actions on mouse hover',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1400, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final repository = _ScreenRepository()
+        ..page = HistoryClipPage(
+          items: [
+            HistoryClip(
+              id: 'actions',
+              contentType: 'text',
+              preview: 'Hover action clip',
+              createdAt: DateTime.utc(2026),
+              pinned: false,
+            ),
+          ],
+        );
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          darkTheme: AppTheme.dark,
+          builder: AppTheme.builder,
+          home: Scaffold(child: HistoryScreen(controller: controller)),
+        ),
+      );
+      await _pumpHoverActions(tester);
+      final clip = find.byKey(const ValueKey<String>('history-clip-actions'));
+      final pin = find.byKey(const ValueKey<String>('history-row-pin-actions'));
+      final delete = find.byKey(
+        const ValueKey<String>('history-row-delete-actions'),
+      );
+      final rect = tester.getRect(clip);
+      expect(pin, findsNothing);
+      expect(delete, findsNothing);
+
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+      await mouse.moveTo(rect.center);
+      await _pumpHoverActions(tester);
+      expect(pin, findsOneWidget);
+      expect(delete, findsOneWidget);
+      expect(tester.getSize(pin), const Size.square(24));
+      expect(tester.getSize(delete), const Size.square(24));
+      expect(tester.getRect(clip), rect);
+      expect(rect.contains(tester.getCenter(delete)), isTrue);
+
+      await mouse.moveTo(Offset.zero);
+      await _pumpHoverActions(tester);
+      expect(pin, findsNothing);
+      expect(delete, findsNothing);
+      await mouse.moveTo(rect.center);
+      await _pumpHoverActions(tester);
+
+      await mouse.moveTo(tester.getCenter(pin));
+      await _pumpHoverActions(tester);
+      expect(pin, findsOneWidget);
+      await tester.tap(pin, kind: PointerDeviceKind.mouse);
+      await _pumpHoverActions(tester);
+      expect(repository.pinnedUpdates, [('actions', true)]);
+      expect(controller.selectedId, isNull);
+      await mouse.moveTo(tester.getCenter(clip));
+      await _pumpHoverActions(tester);
+      expect(find.byIcon(LucideIcons.pinOff), findsWidgets);
+      await tester.tap(pin, kind: PointerDeviceKind.mouse);
+      await _pumpHoverActions(tester);
+      expect(repository.pinnedUpdates, [('actions', true), ('actions', false)]);
+
+      await mouse.moveTo(tester.getCenter(clip));
+      await _pumpHoverActions(tester);
+      await tester.tap(delete, kind: PointerDeviceKind.mouse);
+      await _pumpHoverActions(tester);
+      expect(find.text('Delete this clip?'), findsOneWidget);
+      expect(repository.deletedIds, isEmpty);
+      await tester.tap(
+        find.widgetWithText(Button, 'Cancel'),
+        kind: PointerDeviceKind.mouse,
+      );
+      await _pumpHoverActions(tester);
+      expect(repository.deletedIds, isEmpty);
+
+      await mouse.moveTo(tester.getCenter(clip));
+      await _pumpHoverActions(tester);
+      await tester.tap(delete, kind: PointerDeviceKind.mouse);
+      await _pumpHoverActions(tester);
+      await tester.tap(
+        find.widgetWithText(Button, 'Delete'),
+        kind: PointerDeviceKind.mouse,
+      );
+      await _pumpHoverActions(tester);
+      expect(repository.deletedIds, ['actions']);
+      expect(controller.items, isEmpty);
+      expect(controller.selectedId, isNull);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
+  testWidgets(
+    'keeps row actions hidden for touch input',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1400, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final repository = _ScreenRepository()
+        ..page = HistoryClipPage(
+          items: [
+            HistoryClip(
+              id: 'touch',
+              contentType: 'text',
+              preview: 'Touch action clip',
+              createdAt: DateTime.utc(2026),
+              pinned: false,
+            ),
+          ],
+        );
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          darkTheme: AppTheme.dark,
+          builder: AppTheme.builder,
+          home: Scaffold(child: HistoryScreen(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Touch action clip'));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey<String>('history-row-pin-touch')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey<String>('history-row-delete-touch')),
+        findsNothing,
+      );
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+      TargetPlatform.android,
+    }),
+  );
+
   for (final scenario in [
     (platform: TargetPlatform.android, width: 480.0, pixelRatio: 1.0),
     (platform: TargetPlatform.windows, width: 900.0, pixelRatio: 2.0),
@@ -363,6 +515,7 @@ void main() {
               createdAt: DateTime.utc(2026),
               pinned: false,
               sourceApp: 'Editor',
+              sourceAppIconId: 'app:editor',
               file: const HistoryFileDetails(
                 name: 'notes.txt',
                 mimeType: 'text/plain',
@@ -832,6 +985,7 @@ void main() {
             origin: 'Work Mac',
             originDeviceClass: DeviceClass.laptop,
             sourceApp: 'Editor',
+            sourceAppIconId: 'app:editor',
             image: const HistoryImageDetails(
               width: 240,
               height: 1200,
@@ -1045,11 +1199,11 @@ void main() {
           HistorySourceAppFacet(
             id: 'com.example.editor',
             label: 'Editor',
-            iconItemId: 'editor-icon-item',
+            iconId: 'app:com.example.editor',
           ),
         ],
       )
-      ..sourceIcons['editor-icon-item'] = HistorySourceAppIcon(
+      ..sourceIcons['app:com.example.editor'] = HistorySourceAppIcon(
         base64Decode(
           'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=',
         ),
@@ -1089,7 +1243,7 @@ void main() {
       find.descendant(of: editorLabel, matching: find.byType(Avatar)),
     );
     expect(editorAvatar.provider, isA<MemoryImage>());
-    expect(repository.requestedSourceIconIds, ['editor-icon-item']);
+    expect(repository.requestedSourceIconIds, ['app:com.example.editor']);
     expect(find.text('com.example.editor'), findsNothing);
     controller.dispose();
   });
@@ -1209,6 +1363,7 @@ void main() {
             pinned: true,
             kind: HistoryClipKind.text,
             sourceApp: 'Editor',
+            sourceAppIconId: 'app:editor',
           ),
         ],
       );
@@ -1216,6 +1371,9 @@ void main() {
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       ShadcnApp(
+        theme: AppTheme.light,
+        darkTheme: AppTheme.dark,
+        themeMode: ThemeMode.light,
         home: SizedBox(
           width: 799,
           height: 800,
@@ -1229,7 +1387,6 @@ void main() {
       const ValueKey<String>('history-clip-meta-meta'),
     );
     final meta = tester.widget<Text>(metaFinder);
-    final metaTheme = Theme.of(tester.element(metaFinder));
     expect(meta.textSpan?.toPlainText(), isNot(contains('Text')));
     final kindIcon = find.descendant(
       of: metaFinder,
@@ -1237,14 +1394,19 @@ void main() {
     );
     expect(kindIcon, findsOneWidget);
     expect(tester.widget<Icon>(kindIcon).size, AppIconSize.xs);
-    expect(meta.style?.fontSize, metaTheme.typography.xSmall.fontSize);
+    expect(meta.style?.fontSize, AppTypographySize.historyMetadata);
+    expect(meta.style?.height, 1);
+    expect(tester.getSize(metaFinder).height, 12);
     expect(
       tester.getSize(find.byType(Avatar)),
-      const Size.square(AppIconSize.sm),
+      const Size.square(AppIconSize.xs),
     );
     expect(
-      tester.widget<Icon>(find.byIcon(LucideIcons.pin)).size,
-      AppIconSize.xs,
+      find.descendant(
+        of: find.byKey(const ValueKey<String>('history-clip-meta')),
+        matching: find.byIcon(LucideIcons.pin),
+      ),
+      findsNothing,
     );
   });
 
@@ -1263,6 +1425,10 @@ void main() {
             createdAt: DateTime.utc(2026),
             pinned: false,
             kind: HistoryClipKind.text,
+            sourceApp: 'Editor',
+            sourceAppIconId: 'app:editor',
+            origin: 'Work Mac',
+            originDeviceClass: DeviceClass.laptop,
           ),
         ],
       );
@@ -1270,6 +1436,9 @@ void main() {
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       ShadcnApp(
+        theme: AppTheme.light,
+        darkTheme: AppTheme.dark,
+        themeMode: ThemeMode.light,
         home: Scaffold(child: HistoryScreen(controller: controller)),
       ),
     );
@@ -1279,6 +1448,17 @@ void main() {
       const ValueKey<String>('history-clip-meta-wide-meta'),
     );
     final meta = tester.widget<Text>(metaFinder);
+    expect(meta.style?.fontSize, 12);
+    expect(meta.style?.height, 1);
+    expect(tester.getSize(metaFinder).height, 12);
+    expect(
+      tester.widget<SourceAppLabel>(find.byType(SourceAppLabel)).iconSize,
+      AppIconSize.xs,
+    );
+    expect(
+      tester.widget<DeviceLabel>(find.byType(DeviceLabel)).iconSize,
+      AppIconSize.xs,
+    );
     expect(meta.textSpan?.toPlainText(), contains('Text'));
     expect(
       find.descendant(of: metaFinder, matching: find.byIcon(LucideIcons.type)),
@@ -1544,6 +1724,13 @@ void main() {
   });
 }
 
+Future<void> _pumpHoverActions(WidgetTester tester) async {
+  // Tooltip anchors keep a tracking ticker active, so settle cannot finish.
+  await tester.pump();
+  await tester.pump(const Duration(seconds: 1));
+  await tester.pump(AppMotion.standard);
+}
+
 void _expectNoRadixIcons(WidgetTester tester) {
   final radixIcons = tester
       .widgetList<Icon>(find.byType(Icon))
@@ -1559,6 +1746,8 @@ class _ScreenRepository implements HistoryRepository {
   final List<String> requestedSourceIconIds = [];
   final List<String> copiedIds = [];
   final List<String> plainTextCopiedIds = [];
+  final List<String> deletedIds = [];
+  final List<(String, bool)> pinnedUpdates = [];
   HistoryImagePreview? availableImagePreview;
   bool fitImagePreviewBounds = false;
   final List<int?> requestedImageEdges = [];
@@ -1628,7 +1817,7 @@ class _ScreenRepository implements HistoryRepository {
   }
 
   @override
-  Future<void> delete(String id) async {}
+  Future<void> delete(String id) async => deletedIds.add(id);
 
   @override
   Future<void> deleteAll() async {}
@@ -1637,7 +1826,8 @@ class _ScreenRepository implements HistoryRepository {
   Future<void> reorderPinned(List<String> ids) async {}
 
   @override
-  Future<void> setPinned(String id, bool pinned) async {}
+  Future<void> setPinned(String id, bool pinned) async =>
+      pinnedUpdates.add((id, pinned));
 }
 
 class _ScreenFileDownloader implements HistoryFileDownloader {

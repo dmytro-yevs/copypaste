@@ -90,6 +90,7 @@ class HistoryController extends ChangeNotifier {
     try {
       _facets = await _repository.facets();
       if (!_disposed) {
+        _trimCachedMedia(_sourceIcons, retainedIds: _retainedSourceIconIds);
         notifyListeners();
       }
     } catch (_) {
@@ -136,7 +137,10 @@ class HistoryController extends ChangeNotifier {
       _state = HistoryLoadState.error;
       _errorMessage = 'History could not be loaded. Try again.';
     }
-    if (_isCurrent(epoch)) notifyListeners();
+    if (_isCurrent(epoch)) {
+      _trimCachedMedia(_sourceIcons, retainedIds: _retainedSourceIconIds);
+      notifyListeners();
+    }
   }
 
   Future<void> loadMore() async {
@@ -275,9 +279,10 @@ class HistoryController extends ChangeNotifier {
 
   Future<bool> deleteSelected() async {
     final id = _selectedId;
-    if (id == null) {
-      return false;
-    }
+    return id == null ? false : deleteClip(id);
+  }
+
+  Future<bool> deleteClip(String id) async {
     if (!_deleteMutations.add(id)) {
       return false;
     }
@@ -285,7 +290,8 @@ class HistoryController extends ChangeNotifier {
     try {
       await _repository.delete(id);
       _items.removeWhere((item) => item.id == id);
-      clearSelection();
+      if (_selectedId == id) clearSelection();
+      _trimCachedMedia(_sourceIcons, retainedIds: _retainedSourceIconIds);
       if (_items.isEmpty) _state = HistoryLoadState.empty;
       notifyListeners();
       return true;
@@ -316,6 +322,7 @@ class HistoryController extends ChangeNotifier {
           !_items.any((item) => item.id == _selectedId)) {
         clearSelection();
       }
+      _trimCachedMedia(_sourceIcons, retainedIds: _retainedSourceIconIds);
       notifyListeners();
       return true;
     } catch (_) {
@@ -346,24 +353,53 @@ class HistoryController extends ChangeNotifier {
     );
   }
 
-  Future<HistorySourceAppIcon?> requestSourceIcon(String id) => _loadCached(
-    cache: _sourceIcons,
-    inFlight: _sourceIconLoads,
-    id: id,
-    loader: () => _repository.sourceAppIcon(id),
-  );
+  Future<HistorySourceAppIcon?> requestSourceIcon(String? iconId) {
+    if (iconId == null) return SynchronousFuture(null);
+    return _loadCached(
+      cache: _sourceIcons,
+      inFlight: _sourceIconLoads,
+      id: iconId,
+      loader: () => _repository.sourceAppIcon(iconId),
+      retainedIds: () => _retainedSourceIconIds,
+      queryBound: false,
+    );
+  }
+
+  Set<String> get _retainedSourceIconIds => {
+    for (final clip in _items) ?clip.sourceAppIconId,
+    ?_selectedClip?.sourceAppIconId,
+    for (final app in _facets.sourceApps) ?app.iconId,
+  };
+
+  void _trimCachedMedia<T>(
+    LinkedHashMap<String, T?> cache, {
+    Set<String> retainedIds = const {},
+  }) {
+    final excess = cache.length - _maxCachedMedia;
+    if (excess <= 0) return;
+    // Displayed icons must not evict one another and trigger reloads on repaint.
+    final retired = cache.keys
+        .where((id) => !retainedIds.contains(id))
+        .take(excess)
+        .toList();
+    for (final id in retired) {
+      cache.remove(id);
+    }
+  }
 
   Future<T?> _loadCached<T>({
     required LinkedHashMap<String, T?> cache,
     required Map<String, Future<T?>> inFlight,
     required String id,
     required Future<T?> Function() loader,
+    Set<String> Function()? retainedIds,
+    bool queryBound = true,
   }) {
     final hasCached = cache.containsKey(id);
     final cached = cache.remove(id);
     if (hasCached) {
       cache[id] = cached;
-      return Future<T?>.value(cached);
+      return SynchronousFuture<T?>(cached);
     }
     final existing = inFlight[id];
     if (existing != null) return existing;
@@ -372,21 +408,17 @@ class HistoryController extends ChangeNotifier {
     request = () async {
       try {
         final value = await loader();
-        if (!_isCurrent(epoch)) {
+        if (_disposed || (queryBound && !_isCurrent(epoch))) {
           return null;
         }
         cache[id] = value;
-        while (cache.length > _maxCachedMedia) {
-          cache.remove(cache.keys.first);
-        }
+        _trimCachedMedia(cache, retainedIds: retainedIds?.call() ?? const {});
         notifyListeners();
         return value;
       } catch (_) {
-        if (_isCurrent(epoch)) {
+        if (!_disposed && (!queryBound || _isCurrent(epoch))) {
           cache[id] = null;
-          while (cache.length > _maxCachedMedia) {
-            cache.remove(cache.keys.first);
-          }
+          _trimCachedMedia(cache, retainedIds: retainedIds?.call() ?? const {});
         }
         return null;
       } finally {

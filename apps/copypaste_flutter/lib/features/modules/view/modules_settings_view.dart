@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_tokens.dart';
@@ -5,11 +7,33 @@ import '../../../shared/state_view.dart';
 import '../controller/modules_controller.dart';
 import '../controller/module_form_draft.dart';
 import '../models/module_models.dart';
+import '../models/module_marketplace_models.dart';
 
-/// Installed module management and command forms share the host's components.
-class ModulesSettingsView extends StatelessWidget {
+/// Marketplace and installed modules share the host's components and state.
+class ModulesSettingsView extends StatefulWidget {
   const ModulesSettingsView({super.key, required this.controller});
   final ModulesController controller;
+
+  @override
+  State<ModulesSettingsView> createState() => _ModulesSettingsViewState();
+}
+
+class _ModulesSettingsViewState extends State<ModulesSettingsView> {
+  ModulesController get controller => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(controller.ensureMarketplace());
+  }
+
+  @override
+  void didUpdateWidget(ModulesSettingsView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != controller) {
+      unawaited(controller.ensureMarketplace());
+    }
+  }
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -17,15 +41,40 @@ class ModulesSettingsView extends StatelessWidget {
     builder: (context, _) => Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Wrap(
-          spacing: AppSpacing.sm,
-          runSpacing: AppSpacing.sm,
+        Row(
           children: [
-            Button.secondary(
-              onPressed: controller.busy ? null : controller.install,
-              leading: const Icon(LucideIcons.download, size: AppIconSize.sm),
-              child: const Text('Install or update module'),
+            Expanded(
+              child: Tabs(
+                expand: true,
+                index: controller.section.index,
+                onChanged: (index) =>
+                    controller.selectSection(ModulesSection.values[index]),
+                children: const [
+                  TabItem(child: Text('Marketplace')),
+                  TabItem(child: Text('Installed')),
+                ],
+              ),
             ),
+            const Gap(AppSpacing.sm),
+            Button.ghost(
+              onPressed:
+                  controller.busy ||
+                      controller.catalogState == ModulesLoadState.loading
+                  ? null
+                  : controller.loadMarketplace,
+              leading: const Icon(LucideIcons.refreshCw, size: AppIconSize.sm),
+              child: const Text('Refresh'),
+            ),
+          ],
+        ),
+        const Gap(AppSpacing.lg),
+        TextField(
+          initialValue: controller.query,
+          placeholder: const Text('Search modules'),
+          onChanged: controller.search,
+          features: const [
+            InputFeature.leading(Icon(LucideIcons.search)),
+            InputFeature.clear(),
           ],
         ),
         const Gap(AppSpacing.lg),
@@ -48,15 +97,21 @@ class ModulesSettingsView extends StatelessWidget {
             onAction: controller.initialize,
           ),
           ModulesLoadState.ready =>
-            controller.modules.isEmpty
-                ? const StateView.empty(
-                    title: 'No modules installed',
-                    message: 'Install a module to add features to CopyPaste.',
+            controller.section == ModulesSection.marketplace
+                ? _marketplace(context)
+                : controller.filteredModules.isEmpty
+                ? StateView.empty(
+                    title: controller.modules.isEmpty
+                        ? 'No modules installed'
+                        : 'No matching modules',
+                    message: controller.modules.isEmpty
+                        ? 'Choose a module from the marketplace.'
+                        : 'Try a different search.',
                   )
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      for (final module in controller.modules) ...[
+                      for (final module in controller.filteredModules) ...[
                         _moduleCard(context, module),
                         const Gap(AppSpacing.md),
                       ],
@@ -66,6 +121,104 @@ class ModulesSettingsView extends StatelessWidget {
       ],
     ),
   );
+
+  Widget _marketplace(BuildContext context) =>
+      switch (controller.catalogState) {
+        ModulesLoadState.loading => const StateView.loading(
+          message: 'Loading marketplace.',
+        ),
+        ModulesLoadState.error => StateView.error(
+          title: 'Marketplace is unavailable',
+          message:
+              controller.catalogError ?? 'Try loading the marketplace again.',
+          actionLabel: 'Try again',
+          onAction: controller.loadMarketplace,
+        ),
+        ModulesLoadState.ready =>
+          controller.catalog.isEmpty
+              ? StateView.empty(
+                  title: controller.query.trim().isEmpty
+                      ? 'No modules available'
+                      : 'No matching modules',
+                  message: controller.query.trim().isEmpty
+                      ? 'Check back for modules for this device.'
+                      : 'Try a different search.',
+                )
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    final columns =
+                        ((constraints.maxWidth + AppSpacing.md) /
+                                (AppLayoutSize.marketplaceCardMinWidth +
+                                    AppSpacing.md))
+                            .floor()
+                            .clamp(1, 3);
+                    final width =
+                        (constraints.maxWidth - AppSpacing.md * (columns - 1)) /
+                        columns;
+                    return Wrap(
+                      spacing: AppSpacing.md,
+                      runSpacing: AppSpacing.md,
+                      children: [
+                        for (final module in controller.catalog)
+                          SizedBox(
+                            width: width,
+                            child: _marketplaceCard(context, module),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+      };
+
+  Widget _marketplaceCard(BuildContext context, MarketplaceModule module) {
+    final installed = controller.installedModule(module.id);
+    final update = installed != null && controller.updateFor(installed) != null;
+    final active = controller.activeModuleId == module.id;
+    return Card(
+      key: ValueKey('marketplace-${module.id}'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Icon(LucideIcons.puzzle, size: AppIconSize.xl),
+          ),
+          const Gap(AppSpacing.lg),
+          Text(module.title).semiBold(),
+          const Gap(AppSpacing.sm),
+          Text(module.description).small().muted(),
+          const Gap(AppSpacing.md),
+          Text('${module.version} · ${module.downloadSize}').small().muted(),
+          const Gap(AppSpacing.lg),
+          if (active) ...[
+            LinearProgressIndicator(
+              value: controller.installing ? null : controller.downloadProgress,
+            ),
+            const Gap(AppSpacing.sm),
+          ],
+          Button.primary(
+            onPressed:
+                controller.busy ||
+                    (installed != null &&
+                        (!update || installed.restartRequired))
+                ? null
+                : () => controller.install(module),
+            child: Text(
+              active
+                  ? controller.installing
+                        ? 'Installing…'
+                        : 'Downloading ${(controller.downloadProgress! * 100).floor()}%'
+                  : installed == null
+                  ? 'Install'
+                  : update
+                  ? 'Update'
+                  : 'Installed',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _moduleCard(BuildContext context, InstalledModule module) => Card(
     key: ValueKey('module-${module.id}'),
@@ -112,6 +265,19 @@ class ModulesSettingsView extends StatelessWidget {
                     ? null
                     : () => _preferences(context, module),
                 child: const Text('Settings'),
+              ),
+            if (controller.updateFor(module) case final update?)
+              Button.secondary(
+                onPressed: controller.busy || module.restartRequired
+                    ? null
+                    : () => controller.install(update),
+                child: Text(
+                  controller.activeModuleId == module.id
+                      ? controller.installing
+                            ? 'Installing…'
+                            : 'Downloading ${(controller.downloadProgress! * 100).floor()}%'
+                      : 'Update to ${update.version}',
+                ),
               ),
             if (module.restartRequired && controller.canRestart)
               Button.secondary(

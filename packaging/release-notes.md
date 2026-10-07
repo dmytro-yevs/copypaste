@@ -7,7 +7,7 @@ This update improves History, Quick Paste, and local module management.
 - Improve clipboard image previews and Android release verification.
 - Fix Windows HTML capture when clipboard allocations contain trailing padding.
 
-Optional modules are installed separately from local signed packages. OCR engines and models are not bundled with the application.
+Optional modules are selected and installed from the first-party marketplace in Settings. OCR engines and models are not bundled with the application.
 
 Application exclusions on macOS use observed app activity; background copies can bypass them. Empty files and multiple-file clipboard selections remain unsupported.
 
