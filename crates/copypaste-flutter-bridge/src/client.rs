@@ -190,6 +190,11 @@ mod tests {
             (copypaste_ipc::EventKind::Peers, "peers"),
         ] {
             let mapped = runtime_event(copypaste_ipc::EventData {
+                sync_status: Some(copypaste_ipc::SyncStatus {
+                    revision: 7,
+                    phase: copypaste_ipc::SyncPhase::Syncing,
+                    peers: Vec::new(),
+                }),
                 event,
                 item_count: 3,
                 captured: true,
@@ -199,6 +204,9 @@ mod tests {
             assert_eq!(mapped.item_count, 3);
             assert!(mapped.captured);
             assert_eq!(mapped.captured_item_id.as_deref(), Some("captured-item"));
+            let sync_status = mapped.sync_status.unwrap();
+            assert_eq!(sync_status.revision, 7);
+            assert!(matches!(sync_status.phase, crate::api::SyncPhase::Syncing));
         }
     }
 }
