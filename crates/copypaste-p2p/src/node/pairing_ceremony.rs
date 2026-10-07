@@ -492,7 +492,7 @@ mod tests {
             listener,
             source,
             |_: &str, _: &SyncOutcome| {},
-            |_| {},
+            || {},
             receiver,
         ));
         (addr, shutdown)

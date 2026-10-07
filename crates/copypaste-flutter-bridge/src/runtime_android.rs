@@ -361,6 +361,24 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestBinary(
     }
 }
 
+// This snapshot distinguishes disabled policy from temporarily busy admission.
+// All provider reads and commits still require runtime-owned capture scopes.
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_implicitCaptureAllowed(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jboolean {
+    if RUNTIME
+        .get()
+        .is_some_and(|runtime| runtime.implicit_capture_allowed())
+    {
+        JNI_TRUE
+    } else {
+        JNI_FALSE
+    }
+}
+
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_setCaptureRunning(

@@ -672,10 +672,21 @@ impl Node {
         pairing_id: &str,
         observation: AuthenticatedReachability,
     ) {
-        self.reachability
+        let mut reachability = self
+            .reachability
             .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(pairing_id.to_string(), observation);
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // An inbound probe proves presence but cannot measure our round trip.
+        // Keep a current local measurement without extending its lifetime.
+        if observation.state == ProbeState::Online
+            && observation.latency_ms.is_none()
+            && reachability.get(pairing_id).is_some_and(|previous| {
+                previous.latency_ms.is_some() && previous.is_current_at(observation.observed_at_ms)
+            })
+        {
+            return;
+        }
+        reachability.insert(pairing_id.to_string(), observation);
     }
 
     /// Re-advertise after the set of pairings changed.

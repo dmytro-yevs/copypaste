@@ -21,6 +21,27 @@ void main() {
     expect(find.text('Loading'), findsOneWidget);
   });
 
+  testWidgets('supports a compact empty state without explanatory copy', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      buildSubject(
+        const StateView.empty(
+          title: 'No devices nearby',
+          compact: true,
+          icon: LucideIcons.monitorSmartphone,
+        ),
+      ),
+    );
+    expect(find.text('No devices nearby'), findsOneWidget);
+    final icon = tester.widget<Icon>(
+      find.byIcon(LucideIcons.monitorSmartphone),
+    );
+    expect(icon.size, 24);
+    expect(find.byType(Button), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('keeps functional loading progress with reduced motion', (
     tester,
   ) async {

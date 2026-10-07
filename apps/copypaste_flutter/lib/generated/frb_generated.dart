@@ -64,7 +64,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0-beta.5';
 
   @override
-  int get rustContentHash => 202947649;
+  int get rustContentHash => 1414865272;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -193,7 +193,9 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiRestoreHistory({required String filePath});
 
-  Future<Uint8List> crateApiRevealPairingQr({required String ceremonyId});
+  Future<PairingInvitation> crateApiRevealPairingInvitation({
+    required String ceremonyId,
+  });
 
   Future<String> crateApiRevealPairingSas({required String ceremonyId});
 
@@ -1433,7 +1435,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "restore_history", argNames: ["filePath"]);
 
   @override
-  Future<Uint8List> crateApiRevealPairingQr({required String ceremonyId}) {
+  Future<PairingInvitation> crateApiRevealPairingInvitation({
+    required String ceremonyId,
+  }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -1447,20 +1451,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_list_prim_u_8_strict,
+          decodeSuccessData: sse_decode_pairing_invitation,
           decodeErrorData: sse_decode_runtime_error,
         ),
-        constMeta: kCrateApiRevealPairingQrConstMeta,
+        constMeta: kCrateApiRevealPairingInvitationConstMeta,
         argValues: [ceremonyId],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiRevealPairingQrConstMeta => const TaskConstMeta(
-    debugName: "reveal_pairing_qr",
-    argNames: ["ceremonyId"],
-  );
+  TaskConstMeta get kCrateApiRevealPairingInvitationConstMeta =>
+      const TaskConstMeta(
+        debugName: "reveal_pairing_invitation",
+        argNames: ["ceremonyId"],
+      );
 
   @override
   Future<String> crateApiRevealPairingSas({required String ceremonyId}) {
@@ -2676,6 +2681,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PairingInvitation dco_decode_pairing_invitation(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return PairingInvitation(
+      qrPng: dco_decode_list_prim_u_8_strict(arr[0]),
+      code: dco_decode_String(arr[1]),
+      address: dco_decode_opt_String(arr[2]),
+    );
+  }
+
+  @protected
   Peer dco_decode_peer(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -3814,6 +3832,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PairingInvitation sse_decode_pairing_invitation(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_qrPng = sse_decode_list_prim_u_8_strict(deserializer);
+    var var_code = sse_decode_String(deserializer);
+    var var_address = sse_decode_opt_String(deserializer);
+    return PairingInvitation(
+      qrPng: var_qrPng,
+      code: var_code,
+      address: var_address,
+    );
+  }
+
+  @protected
   Peer sse_decode_peer(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_pairingId = sse_decode_String(deserializer);
@@ -4876,6 +4909,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_u_64(self.expiresInMs, serializer);
     sse_encode_opt_String(self.peerName, serializer);
     sse_encode_opt_String(self.failureMessage, serializer);
+  }
+
+  @protected
+  void sse_encode_pairing_invitation(
+    PairingInvitation self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_prim_u_8_strict(self.qrPng, serializer);
+    sse_encode_String(self.code, serializer);
+    sse_encode_opt_String(self.address, serializer);
   }
 
   @protected

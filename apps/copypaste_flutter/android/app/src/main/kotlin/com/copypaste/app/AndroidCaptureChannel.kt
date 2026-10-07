@@ -67,6 +67,23 @@ internal class AndroidCaptureChannel(
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "state" -> result.success(state())
+            "screenshotState" -> result.success(ScreenshotCaptureState.asMap(activity))
+            "requestScreenshotPermission" -> activity.requestScreenshotPermission {
+                result.success(ScreenshotCaptureState.asMap(activity))
+            }
+            "setScreenshotCaptureEnabled" -> {
+                val enabled = call.argument<Boolean>("enabled")
+                if (enabled == null) result.error("invalid_arguments", null, null)
+                else {
+                    ScreenshotCaptureState.setEnabled(activity, enabled)
+                    if (enabled) {
+                        activity.requestScreenshotPermission { result.success(ScreenshotCaptureState.asMap(activity)) }
+                    } else ScreenshotCaptureService.stop(activity) { drained ->
+                        if (drained) result.success(ScreenshotCaptureState.asMap(activity))
+                        else result.error("capture_drain_failed", null, null)
+                    }
+                }
+            }
             "requestNotifications" -> activity.requestCaptureNotificationPermission { granted ->
                 result.success(state() + ("notificationGranted" to granted))
             }
@@ -80,10 +97,12 @@ internal class AndroidCaptureChannel(
                 }
             }
             "startCapture" -> {
+                ScreenshotCaptureState.resume(activity)
                 val started = ClipboardCaptureService.startCapture(activity)
                 result.success(state() + ("startRequested" to started))
             }
             "stopCapture" -> {
+                ScreenshotCaptureState.pause(activity)
                 ClipboardCaptureService.stopCapture(activity) { drained ->
                     if (drained) result.success(state()) else result.error("capture_drain_failed", null, null)
                 }

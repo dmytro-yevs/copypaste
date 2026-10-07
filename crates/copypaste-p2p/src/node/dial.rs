@@ -259,7 +259,7 @@ mod tests {
             listener,
             Arc::new(TestSource::new("server", Vec::new())),
             |_, _| {},
-            |_| {},
+            || {},
             shutdown_rx,
         ));
 
@@ -359,7 +359,7 @@ mod tests {
             listener,
             source_a,
             |_pairing_id, _outcome| {},
-            |_| {},
+            || {},
             shutdown_rx,
         ));
         let cycle = SyncCycle::new();

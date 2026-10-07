@@ -473,7 +473,7 @@ mod tests {
             listener,
             source,
             |_: &str, _: &crate::SyncOutcome| {},
-            |_| {},
+            || {},
             receiver,
         ));
         (addr, shutdown)

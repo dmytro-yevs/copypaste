@@ -1,10 +1,10 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
-import '../../../app/theme/app_tokens.dart';
+import '../app/theme/app_tokens.dart';
 
 /// Aligns a setup icon with its title while keeping the description beneath it.
-class OnboardingSettingRow extends StatelessWidget {
-  const OnboardingSettingRow({
+class SetupSettingRow extends StatelessWidget {
+  const SetupSettingRow({
     super.key,
     required this.icon,
     required this.title,

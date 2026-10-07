@@ -1,18 +1,7 @@
 import 'package:flutter/services.dart';
 
-class AndroidShizukuState {
-  const AndroidShizukuState({
-    required this.supported,
-    required this.installed,
-    required this.running,
-    required this.permission,
-  });
-
-  final bool supported;
-  final bool installed;
-  final bool running;
-  final bool permission;
-}
+import 'android_shizuku_state.dart';
+export 'android_shizuku_state.dart';
 
 class AndroidCaptureSetupState {
   const AndroidCaptureSetupState({

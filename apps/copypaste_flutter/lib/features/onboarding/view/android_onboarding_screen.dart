@@ -7,7 +7,8 @@ import '../controller/android_onboarding_controller.dart';
 import '../repository/android_onboarding_store.dart';
 import 'onboarding_intro.dart';
 import 'onboarding_scaffold.dart';
-import 'onboarding_setting_row.dart';
+import '../../../shared/setup_setting_row.dart';
+import '../../../shared/android_access_setup.dart';
 
 class AndroidOnboardingScreen extends StatefulWidget {
   const AndroidOnboardingScreen({
@@ -135,7 +136,7 @@ class _CaptureSetup extends StatelessWidget {
           Card(
             child: Column(
               children: [
-                OnboardingSettingRow(
+                SetupSettingRow(
                   icon: LucideIcons.bell,
                   title: 'Capture notification',
                   description: 'Required while capture runs',
@@ -152,7 +153,7 @@ class _CaptureSetup extends StatelessWidget {
                         ),
                 ),
                 const Gap(AppSpacing.md),
-                OnboardingSettingRow(
+                SetupSettingRow(
                   icon: LucideIcons.batteryCharging,
                   title: 'Background activity',
                   description: 'Recommended to reduce capture loss',
@@ -172,22 +173,24 @@ class _CaptureSetup extends StatelessWidget {
             ),
           ),
           const Gap(AppSpacing.lg),
-          Tabs(
-            index: controller.method.index,
-            expand: true,
-            onChanged: (index) => unawaited(
-              controller.selectMethod(AndroidCaptureSetupMethod.values[index]),
+          if (state != null)
+            AndroidAccessSetup(
+              methodIndex: controller.method.index,
+              onMethodChanged: (index) => unawaited(
+                controller.selectMethod(
+                  AndroidCaptureSetupMethod.values[index],
+                ),
+              ),
+              shizuku: state.shizuku,
+              granted: state.privilegedGrants,
+              busy: controller.busy,
+              adbCommands: controller.adbCommandText,
+              applyAccessLabel: 'Apply capture access',
+              applyAccessDescription: 'Apply one-time capture access.',
+              onOpenShizuku: controller.openShizuku,
+              onApplyAccess: controller.applyShizukuGrants,
+              onCopyCommands: controller.copyAdbCommands,
             ),
-            children: const [
-              TabItem(child: Text('Shizuku')),
-              TabItem(child: Text('ADB')),
-            ],
-          ),
-          const Gap(AppSpacing.lg),
-          if (controller.method == AndroidCaptureSetupMethod.shizuku)
-            _ShizukuSetup(controller: controller)
-          else
-            _AdbSetup(controller: controller),
           const Gap(AppSpacing.lg),
           _Verification(controller: controller),
         ] else ...[
@@ -215,132 +218,6 @@ class _Choice extends StatelessWidget {
   );
 }
 
-class _ShizukuSetup extends StatelessWidget {
-  const _ShizukuSetup({required this.controller});
-  final AndroidOnboardingController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final state = controller.setupState;
-    final shizuku = state?.shizuku;
-    if (shizuku == null) return const SizedBox.shrink();
-    if (!shizuku.supported) {
-      return const Card(
-        child: OnboardingSettingRow(
-          icon: LucideIcons.info,
-          title: 'Android 11 or newer is required',
-          description: 'Use the ADB tab on this device.',
-        ),
-      );
-    }
-    final ready = state!.privilegedGrants;
-    final title = ready
-        ? 'One-time access applied'
-        : !shizuku.installed
-        ? 'Install Shizuku'
-        : !shizuku.running
-        ? 'Pair and start Shizuku'
-        : shizuku.permission
-        ? 'Apply capture access'
-        : 'Allow CopyPaste';
-    final description = ready
-        ? 'Shizuku is no longer needed.'
-        : !shizuku.installed
-        ? 'Get Shizuku to apply one-time access.'
-        : !shizuku.running
-        ? 'Use Wireless debugging in Shizuku, then return.'
-        : shizuku.permission
-        ? 'Apply one-time capture access.'
-        : 'Approve CopyPaste once in Shizuku.';
-    return Card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(title).medium(),
-          const Gap(AppSpacing.xs),
-          Text(description, style: Theme.of(context).typography.xSmall).muted(),
-          if (!ready) ...[
-            const Gap(AppSpacing.md),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Button.primary(
-                onPressed: controller.busy
-                    ? null
-                    : !shizuku.installed || !shizuku.running
-                    ? controller.openShizuku
-                    : controller.applyShizukuGrants,
-                child: Text(
-                  !shizuku.installed
-                      ? 'Get Shizuku'
-                      : !shizuku.running
-                      ? 'Open Shizuku'
-                      : shizuku.permission
-                      ? 'Apply capture access'
-                      : 'Allow CopyPaste',
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _AdbSetup extends StatefulWidget {
-  const _AdbSetup({required this.controller});
-  final AndroidOnboardingController controller;
-
-  @override
-  State<_AdbSetup> createState() => _AdbSetupState();
-}
-
-class _AdbSetupState extends State<_AdbSetup> {
-  bool copied = false;
-
-  @override
-  Widget build(BuildContext context) => Card(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            const Expanded(child: Text('Run on your computer')),
-            const Gap(AppSpacing.sm),
-            Tooltip(
-              tooltip: (context) => const Text('Copy all commands'),
-              child: Button.ghost(
-                style: const ButtonStyle.ghostIcon(),
-                onPressed: widget.controller.adbCommandText.isEmpty
-                    ? null
-                    : () async {
-                        if (await widget.controller.copyAdbCommands() &&
-                            mounted) {
-                          setState(() => copied = true);
-                        }
-                      },
-                child: Icon(copied ? LucideIcons.copyCheck : LucideIcons.copy),
-              ),
-            ),
-          ],
-        ),
-        const Gap(AppSpacing.sm),
-        Text(
-          'Enable USB debugging and connect this phone.',
-          style: Theme.of(context).typography.xSmall,
-        ).muted(),
-        const Gap(AppSpacing.md),
-        SelectableText(
-          widget.controller.adbCommandText,
-          style: Theme.of(
-            context,
-          ).typography.inlineCode.copyWith(fontWeight: FontWeight.normal),
-        ),
-      ],
-    ),
-  );
-}
-
 class _Verification extends StatelessWidget {
   const _Verification({required this.controller});
   final AndroidOnboardingController controller;
@@ -352,7 +229,7 @@ class _Verification extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          OnboardingSettingRow(
+          SetupSettingRow(
             icon: controller.verified
                 ? LucideIcons.circleCheck
                 : LucideIcons.circle,

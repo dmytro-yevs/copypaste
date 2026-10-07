@@ -246,26 +246,30 @@ void main() {
   );
 
   test(
-    'authenticates the catalog, downloads package bytes, and cleans private staging',
+    'creates missing cache directories, authenticates downloads, and cleans private staging',
     () async {
       final client = _Client();
       final directory = await Directory.systemTemp.createTemp(
         'marketplace-test-',
       );
       addTearDown(() => directory.delete(recursive: true));
+      final cache = Directory('${directory.path}/missing/cache');
+      expect(await cache.exists(), isFalse);
       final body = utf8.encode(jsonEncode(catalog()));
       final (publicKey, signature) = await _sign(body);
       client.routes['modules.json'] = _Response(body);
       client.routes['modules.json.sig'] = _Response(utf8.encode(signature));
       final repository = GitHubModuleMarketplaceRepository(
-        temporaryDirectory: () async => directory,
+        temporaryDirectory: () async => cache,
         currentTarget: () async => target,
         client: client,
         signatureVerifier: MinisignVerifier(publicKeyBase64: publicKey),
       );
       addTearDown(repository.dispose);
       final module = (await repository.list()).single;
-      expect(await directory.list().toList(), isEmpty);
+      expect(await cache.exists(), isTrue);
+      expect(await cache.list().toList(), isEmpty);
+      await cache.delete(recursive: true);
       client.routes[module.artifact!.downloadUri.pathSegments.last] = _Response(
         utf8.encode('package'),
       );
@@ -277,7 +281,8 @@ void main() {
       expect(await File(package.path).readAsString(), 'package');
       expect(progress.last, 1);
       await package.dispose();
-      expect(await directory.list().toList(), isEmpty);
+      expect(await cache.exists(), isTrue);
+      expect(await cache.list().toList(), isEmpty);
 
       client.routes[module.artifact!.downloadUri.pathSegments.last] = _Response(
         utf8.encode('changed'),
@@ -286,12 +291,12 @@ void main() {
         repository.download(module, onProgress: (_) {}),
         throwsA(isA<ModulesException>()),
       );
-      expect(await directory.list().toList(), isEmpty);
+      expect(await cache.list().toList(), isEmpty);
       client.routes['modules.json'] = _Response(
         utf8.encode(jsonEncode({'schema_version': 1, 'modules': []})),
       );
       await expectLater(repository.list(), throwsA(isA<ModulesException>()));
-      expect(await directory.list().toList(), isEmpty);
+      expect(await cache.list().toList(), isEmpty);
     },
   );
 

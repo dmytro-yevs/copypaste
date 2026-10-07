@@ -6,6 +6,7 @@ import '../repository/module_marketplace_repository.dart';
 import '../repository/modules_repository.dart';
 import '../repository/module_access_repository.dart';
 import 'module_form_draft.dart';
+import 'sms_access_setup_controller.dart';
 
 class ModulesController extends ChangeNotifier {
   ModulesController({
@@ -20,8 +21,6 @@ class ModulesController extends ChangeNotifier {
        _restart = restart,
        _access = access;
   final ModuleAccessRepository? _access;
-  SmsModuleAccessState? _smsAccess;
-  SmsModuleAccessState? get smsAccess => _smsAccess;
   final ModulesRepository _repository;
   final ModuleMarketplaceRepository _marketplace;
   final ModuleInputPicker? _inputPicker;
@@ -211,7 +210,6 @@ class ModulesController extends ChangeNotifier {
         false;
     if (sms && enabled) {
       final state = await _access?.smsState();
-      _smsAccess = state;
       if (state?.granted != true) {
         throw const ModulesException(
           'Set up SMS access before enabling this module.',
@@ -227,19 +225,20 @@ class ModulesController extends ChangeNotifier {
     }
   });
 
-  Future<void> configureSmsAccess() => _perform(() async {
-    if (_access == null) {
+  bool get canSetUpSmsAccess => _access != null;
+
+  SmsAccessSetupController smsAccessSetup() {
+    final access = _access;
+    if (access == null) {
       throw const ModulesException('SMS access is available only on Android.');
     }
-    _smsAccess = await _access.configureSms();
-  }, refresh: false);
+    return SmsAccessSetupController(access: access);
+  }
+
+  Future<void> refreshSmsAccess() => _perform(_refreshAccess, refresh: false);
 
   Future<void> _refreshAccess() async {
     if (_access == null) return;
-    final sms = _modules.any(
-      (module) => module.events.contains(ModuleEventKind.smsReceived),
-    );
-    _smsAccess = sms ? await _access.smsState() : null;
     if (!await _access.synchronize() &&
         _modules.any(
           (module) =>

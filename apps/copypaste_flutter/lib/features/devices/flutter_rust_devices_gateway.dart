@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:copypaste_flutter/generated/api.dart' as frb;
 
@@ -315,7 +314,9 @@ abstract interface class GeneratedDevicesApi {
     required String verificationCode,
     required bool accept,
   });
-  Future<Uint8List> revealPairingQr({required String ceremonyId});
+  Future<frb.PairingInvitation> revealPairingInvitation({
+    required String ceremonyId,
+  });
   Future<String> revealPairingSas({required String ceremonyId});
   Future<frb.PairingCeremony> cancelPairingCeremony({
     required String ceremonyId,
@@ -384,8 +385,9 @@ class FrbGeneratedDevicesApi implements GeneratedDevicesApi {
   Future<List<frb.DiscoveredDevice>> rescanDevices() => frb.rescanDevices();
 
   @override
-  Future<Uint8List> revealPairingQr({required String ceremonyId}) =>
-      frb.revealPairingQr(ceremonyId: ceremonyId);
+  Future<frb.PairingInvitation> revealPairingInvitation({
+    required String ceremonyId,
+  }) => frb.revealPairingInvitation(ceremonyId: ceremonyId);
 
   @override
   Future<String> revealPairingSas({required String ceremonyId}) =>
@@ -467,8 +469,16 @@ class FlutterRustPairingSession implements DevicesPairingSession {
   }
 
   @override
-  Future<Uint8List> revealInviteQr() =>
-      _api.revealPairingQr(ceremonyId: _ceremonyId);
+  Future<PairingInvitation> revealInvitation() async {
+    final invitation = await _api.revealPairingInvitation(
+      ceremonyId: _ceremonyId,
+    );
+    return PairingInvitation(
+      qrPng: invitation.qrPng,
+      code: invitation.code,
+      address: invitation.address,
+    );
+  }
 
   @override
   Future<String> revealSas() async {

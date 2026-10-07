@@ -171,8 +171,11 @@ Future<PairingCeremony> pairingCeremonyStatus({required String ceremonyId}) =>
     RustLib.instance.api.crateApiPairingCeremonyStatus(ceremonyId: ceremonyId);
 
 /// Renders the Rust-held invitation only inside capture-protected Flutter UI.
-Future<Uint8List> revealPairingQr({required String ceremonyId}) =>
-    RustLib.instance.api.crateApiRevealPairingQr(ceremonyId: ceremonyId);
+Future<PairingInvitation> revealPairingInvitation({
+  required String ceremonyId,
+}) => RustLib.instance.api.crateApiRevealPairingInvitation(
+  ceremonyId: ceremonyId,
+);
 
 /// Returns the bound SAS only for immediate display in capture-protected UI.
 Future<String> revealPairingSas({required String ceremonyId}) =>
@@ -1017,6 +1020,31 @@ class PairingCeremony {
           expiresInMs == other.expiresInMs &&
           peerName == other.peerName &&
           failureMessage == other.failureMessage;
+}
+
+/// Invitation material for immediate display in the active pairing inspector.
+class PairingInvitation {
+  final Uint8List qrPng;
+  final String code;
+  final String? address;
+
+  const PairingInvitation({
+    required this.qrPng,
+    required this.code,
+    this.address,
+  });
+
+  @override
+  int get hashCode => qrPng.hashCode ^ code.hashCode ^ address.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PairingInvitation &&
+          runtimeType == other.runtimeType &&
+          qrPng == other.qrPng &&
+          code == other.code &&
+          address == other.address;
 }
 
 class Peer {

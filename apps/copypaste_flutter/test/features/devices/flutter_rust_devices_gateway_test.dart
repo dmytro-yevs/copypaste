@@ -110,6 +110,15 @@ void main() {
     expect(api.disposedCeremonyIds, ['ceremony-id']);
   });
 
+  test('maps one matching invitation result from Rust', () async {
+    final session = await gateway.createInvitation();
+    final invitation = await session.revealInvitation();
+    expect(invitation.qrPng, [1, 2, 3]);
+    expect(invitation.code, 'PAIRING-CODE');
+    expect(invitation.address, '192.168.50.232:62951');
+    await session.dispose();
+  });
+
   test('passes code and address through the generated join contract', () async {
     final session = await gateway.joinFromProtectedInput(
       code: 'PAIRING-CODE',
@@ -247,8 +256,13 @@ class _FakeGeneratedDevicesApi implements GeneratedDevicesApi {
   Future<List<frb.DiscoveredDevice>> rescanDevices() async => const [];
 
   @override
-  Future<Uint8List> revealPairingQr({required String ceremonyId}) async =>
-      Uint8List.fromList([1, 2, 3]);
+  Future<frb.PairingInvitation> revealPairingInvitation({
+    required String ceremonyId,
+  }) async => frb.PairingInvitation(
+    qrPng: Uint8List.fromList([1, 2, 3]),
+    code: 'PAIRING-CODE',
+    address: '192.168.50.232:62951',
+  );
 
   @override
   Future<String> revealPairingSas({required String ceremonyId}) async =>

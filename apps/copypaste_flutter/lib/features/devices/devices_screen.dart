@@ -5,10 +5,12 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../app/theme/app_motion.dart';
 import '../../app/theme/app_overlays.dart';
+import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_tokens.dart';
 import '../../platform/camera/pairing_camera_scanner.dart';
 import '../../platform/camera/qr_scanner.dart';
 import '../../shared/adaptive_breakpoints.dart';
+import '../../shared/inspector_table.dart';
 import '../../shared/state_view.dart';
 import '../../shared/system_date_time.dart';
 import 'device_presentation.dart';
@@ -202,23 +204,53 @@ class _DevicesScreenState extends State<DevicesScreen> {
         ],
         _deviceCards(context, controller, snapshot),
         const Gap(AppSpacing.xxl),
-        const Text('Nearby devices').h3(),
-        const Gap(AppSpacing.md),
-        if (snapshot.discovered.isEmpty)
-          StateView.empty(
-            title: 'No nearby devices found',
-            message: 'Nearby devices appear after a rescan.',
-            actionLabel: controller.rescanInFlight ? null : 'Rescan',
-            onAction: controller.rescanInFlight ? null : controller.rescan,
-          )
-        else
-          ...snapshot.discovered.map(
-            (device) => Padding(
-              padding: const EdgeInsets.only(bottom: AppSpacing.md),
-              child: _discoveredCard(context, controller, device),
-            ),
-          ),
+        _nearbyDevices(context, controller),
       ],
+    );
+  }
+
+  Widget _nearbyDevices(BuildContext context, DevicesController controller) {
+    final devices = controller.nearbyDevices;
+    return Card(
+      key: const ValueKey<String>('nearby-devices'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(child: const Text('Nearby devices').large().medium()),
+              const Gap(AppSpacing.md),
+              Button.text(
+                key: const ValueKey<String>('rescan-devices'),
+                style: const ButtonStyle.text(density: ButtonDensity.compact),
+                onPressed:
+                    controller.rescanInFlight || controller.actionInFlight
+                    ? null
+                    : controller.rescan,
+                leading: const Icon(LucideIcons.scanLine),
+                child: Text(controller.rescanInFlight ? 'Scanning…' : 'Scan'),
+              ),
+            ],
+          ),
+          const Gap(AppSpacing.md),
+          if (devices.isEmpty)
+            ConstrainedBox(
+              constraints: const BoxConstraints(
+                minHeight: AppControlSize.touch * 4,
+              ),
+              child: const StateView.empty(
+                title: 'No devices nearby',
+                compact: true,
+                icon: DevicePresentation.collectionIcon,
+              ),
+            )
+          else
+            for (var index = 0; index < devices.length; index++) ...[
+              if (index > 0) const Divider(),
+              _discoveredRow(context, controller, devices[index]),
+            ],
+        ],
+      ),
     );
   }
 
@@ -442,37 +474,27 @@ class _DevicesScreenState extends State<DevicesScreen> {
     );
   }
 
-  Widget _discoveredCard(
+  Widget _discoveredRow(
     BuildContext context,
     DevicesController controller,
     DiscoveredDevice device,
   ) {
-    return Card(
-      key: ValueKey<String>('discovered-device-card-${device.id}'),
-      child: Row(
-        children: [
-          _deviceIconTile(context, device.details?.profile?.deviceClass),
-          const Gap(AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(device.name).semiBold(),
-                const Text('Found on this network').muted(),
-              ],
-            ),
-          ),
-          if (device.paired)
-            const SecondaryBadge(child: Text('Already paired'))
-          else
-            Button.secondary(
-              onPressed: controller.pairingInspectorOpen
-                  ? null
-                  : () => controller.openCodeEntry(address: device.address),
-              leading: const Icon(LucideIcons.link),
-              child: const Text('Join'),
-            ),
-        ],
+    return Basic(
+      key: ValueKey<String>('discovered-device-row-${device.id}'),
+      theme: AppTheme.deviceListRowTheme,
+      leading: _deviceIconTile(
+        context,
+        device.details?.profile?.deviceClass,
+        compact: true,
+      ),
+      title: Text(device.name),
+      subtitle: Text(DevicePresentation.osLabel(device.details?.profile)),
+      trailing: Button.primary(
+        onPressed:
+            !controller.pairingInspectorOpen && controller.canChangePairingMode
+            ? () => controller.openCodeEntry(address: device.address)
+            : null,
+        child: const Text('Pair'),
       ),
     );
   }
@@ -531,10 +553,14 @@ class _DevicesScreenState extends State<DevicesScreen> {
     );
   }
 
-  Widget _deviceIconTile(BuildContext context, DeviceClass? deviceClass) {
+  Widget _deviceIconTile(
+    BuildContext context,
+    DeviceClass? deviceClass, {
+    bool compact = false,
+  }) {
     final colors = Theme.of(context).colorScheme;
     return SizedBox.square(
-      dimension: AppControlSize.touch,
+      dimension: compact ? AppControlSize.large : AppControlSize.touch,
       child: Card(
         theme: CardTheme(
           padding: EdgeInsets.zero,
@@ -546,7 +572,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
         child: Center(
           child: Icon(
             DevicePresentation.icon(deviceClass),
-            size: AppIconSize.lg,
+            size: compact ? AppIconSize.md : AppIconSize.lg,
           ),
         ),
       ),
@@ -908,42 +934,11 @@ class _DeviceDetailsTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Table(
-      key: const ValueKey<String>('device-details-metadata'),
-      columnWidths: const {0: IntrinsicTableSize(), 1: FlexTableSize()},
+    return InspectorTable(
+      tableKey: const ValueKey<String>('device-details-metadata'),
       rows: [
         for (final row in rows)
-          TableRow(
-            cells: [
-              TableCell(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.sm,
-                    vertical: AppSpacing.sm,
-                  ),
-                  child: Text(
-                    row.label,
-                    style: theme.typography.xSmall
-                        .merge(theme.typography.medium)
-                        .copyWith(color: theme.colorScheme.mutedForeground),
-                  ),
-                ),
-              ),
-              TableCell(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.sm,
-                    vertical: AppSpacing.sm,
-                  ),
-                  child: SelectableText(
-                    row.value,
-                    style: theme.typography.xSmall,
-                  ),
-                ),
-              ),
-            ],
-          ),
+          (label: row.label, value: SelectableText(row.value)),
       ],
     );
   }
@@ -1342,7 +1337,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
             Text(description).muted(),
           ],
         ],
-        if (widget.controller.inviteQrPng case final qrPng?) ...[
+        if (widget.controller.invitation case final invitation?) ...[
           if (ceremony.state != PairingState.waitingForPeer)
             const Gap(AppSpacing.lg),
           Center(
@@ -1351,7 +1346,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
               child: Padding(
                 padding: const EdgeInsets.all(AppSpacing.md),
                 child: Image.memory(
-                  qrPng,
+                  invitation.qrPng,
                   key: const ValueKey<String>('pairing-invite-qr'),
                   width: 260,
                   height: 260,
@@ -1359,6 +1354,26 @@ class _PairingInspectorState extends State<_PairingInspector> {
                 ),
               ),
             ),
+          ),
+          const Gap(AppSpacing.lg),
+          InspectorTable(
+            tableKey: const ValueKey<String>('pairing-invite-details'),
+            rows: [
+              (
+                label: 'Pairing code',
+                value: SelectableText(
+                  invitation.code,
+                  key: const ValueKey<String>('pairing-invite-code'),
+                ),
+              ),
+              (
+                label: 'Address',
+                value: SelectableText(
+                  invitation.address ?? 'Unavailable',
+                  key: const ValueKey<String>('pairing-invite-address'),
+                ),
+              ),
+            ],
           ),
         ],
         if (widget.controller.verificationCode

@@ -34,7 +34,7 @@ void main() {
       expect(controller.canChangePairingMode, isFalse);
       expect(controller.canClosePairing, isFalse);
       expect(controller.pairingInspectorOpen, isTrue);
-      expect(controller.inviteQrPng, isNull);
+      expect(controller.invitation?.qrPng, isNull);
       await controller.openQrScanner();
       expect(controller.pairingEntryMode, PairingEntryMode.invite);
 
@@ -251,7 +251,7 @@ void main() {
       expect(gateway.session.revealInviteCalls, 1);
       expect(controller.pairing!.state, PairingState.waitingForPeer);
       expect(gateway.session.revealSasCalls, 0);
-      expect(controller.inviteQrPng, isNotNull);
+      expect(controller.invitation?.qrPng, isNotNull);
     },
   );
 
@@ -382,79 +382,92 @@ void main() {
     expect(controller.actionInFlight, isFalse);
   });
 
-  test(
-    'fails closed and refreshes at the earliest freshness deadline',
-    () async {
-      final clock = _TestClock(DateTime.utc(2026, 10, 3, 12));
-      final scheduler = _FreshnessTimerFactory();
-      final deadline = clock.now.add(const Duration(seconds: 5));
-      gateway.snapshot = _snapshot(peers: [_observedPeer(deadline)]);
-      final freshnessController = DevicesController(
-        gateway: gateway,
-        captureProtection: captureProtection,
-        now: () => clock.now,
-        freshnessTimerFactory: scheduler.schedule,
-      );
-      addTearDown(freshnessController.dispose);
+  test('invalidates expired observations without a metadata request', () async {
+    final clock = _TestClock(DateTime.utc(2026, 10, 3, 12));
+    final scheduler = _FreshnessTimerFactory();
+    final deadline = clock.now.add(const Duration(seconds: 5));
+    gateway.snapshot = _snapshot(peers: [_observedPeer(deadline)]);
+    final freshnessController = DevicesController(
+      gateway: gateway,
+      captureProtection: captureProtection,
+      now: () => clock.now,
+      freshnessTimerFactory: scheduler.schedule,
+    );
+    addTearDown(freshnessController.dispose);
 
-      await freshnessController.start();
-      final peer = freshnessController.snapshot!.peers.single;
+    await freshnessController.start();
+    final peer = freshnessController.snapshot!.peers.single;
 
-      expect(freshnessController.peerStateLabel(peer), 'Available');
-      expect(freshnessController.peerLatencyLabel(peer), '24 ms');
-      expect(
-        freshnessController.peerStateLabel(_mdnsPeer(deadline)),
-        'Visible now',
-      );
-      expect(freshnessController.peerLatencyLabel(_mdnsPeer(deadline)), '— ms');
-      expect(scheduler.timers, hasLength(1));
-      expect(scheduler.timers.single.delay, const Duration(seconds: 5));
+    expect(freshnessController.peerStateLabel(peer), 'Available');
+    expect(freshnessController.peerLatencyLabel(peer), '24 ms');
+    expect(
+      freshnessController.peerStateLabel(_mdnsPeer(deadline)),
+      'Visible now',
+    );
+    expect(freshnessController.peerLatencyLabel(_mdnsPeer(deadline)), '— ms');
+    expect(scheduler.timers, hasLength(1));
+    expect(scheduler.timers.single.delay, const Duration(seconds: 5));
 
-      clock.now = deadline.add(const Duration(milliseconds: 1));
-      expect(freshnessController.peerStateLabel(peer), 'Status unknown');
-      expect(freshnessController.peerLatencyLabel(peer), '— ms');
+    clock.now = deadline.add(const Duration(milliseconds: 1));
+    expect(freshnessController.peerStateLabel(peer), 'Status unknown');
+    expect(freshnessController.peerLatencyLabel(peer), '— ms');
 
-      scheduler.timers.single.fire();
-      await Future<void>.delayed(Duration.zero);
+    scheduler.timers.single.fire();
+    await Future<void>.delayed(Duration.zero);
 
-      expect(gateway.loadCalls, 2);
-    },
-  );
+    expect(gateway.loadCalls, 1);
+  });
 
-  test(
-    'refreshes latency before expiry without clearing the displayed value',
-    () async {
-      final clock = _TestClock(DateTime.utc(2026, 10, 3, 12));
-      final scheduler = _FreshnessTimerFactory();
-      final deadline = clock.now.add(const Duration(seconds: 30));
-      gateway.snapshot = _snapshot(peers: [_observedPeer(deadline)]);
-      final freshnessController = DevicesController(
-        gateway: gateway,
-        captureProtection: captureProtection,
-        now: () => clock.now,
-        freshnessTimerFactory: scheduler.schedule,
-      );
-      addTearDown(freshnessController.dispose);
+  test('runtime events renew latency without a UI renewal poll', () async {
+    final clock = _TestClock(DateTime.utc(2026, 10, 3, 12));
+    final scheduler = _FreshnessTimerFactory();
+    final deadline = clock.now.add(const Duration(seconds: 30));
+    gateway.snapshot = _snapshot(peers: [_observedPeer(deadline)]);
+    final freshnessController = DevicesController(
+      gateway: gateway,
+      captureProtection: captureProtection,
+      now: () => clock.now,
+      freshnessTimerFactory: scheduler.schedule,
+    );
+    addTearDown(freshnessController.dispose);
+    await freshnessController.start();
+    expect(scheduler.timers.single.delay, const Duration(seconds: 30));
+    clock.now = deadline.subtract(const Duration(seconds: 10));
+    gateway.snapshot = _snapshot(
+      peers: [_observedPeer(clock.now.add(const Duration(seconds: 30)))],
+    );
+    gateway.emitChange();
+    await Future<void>.delayed(Duration.zero);
+    expect(scheduler.timers.first._cancelled, isTrue);
+    expect(scheduler.timers.last.delay, const Duration(seconds: 30));
+    expect(gateway.loadCalls, 2);
+    expect(
+      freshnessController.peerLatencyLabel(
+        freshnessController.snapshot!.peers.single,
+      ),
+      '24 ms',
+    );
+  });
 
-      await freshnessController.start();
-
-      expect(scheduler.timers, hasLength(1));
-      expect(scheduler.timers.single.delay, const Duration(seconds: 20));
-
-      clock.now = deadline.subtract(const Duration(seconds: 10));
-      scheduler.timers.single.fire();
-      await Future<void>.delayed(Duration.zero);
-
-      expect(
-        freshnessController.peerLatencyLabel(
-          freshnessController.snapshot!.peers.single,
+  test('displays sub-millisecond RTT as less than one millisecond', () async {
+    final now = DateTime.now().toUtc();
+    final peer = DevicePeer(
+      id: 'peer',
+      name: 'Phone',
+      lastSeen: now,
+      online: true,
+      details: DeviceDetails(
+        latency: DeviceLatency(
+          roundTripLatency: Duration.zero,
+          provenance: DeviceObservationProvenance.measured,
+          trust: DeviceObservationTrust.authenticated,
+          observedAt: now,
+          freshUntil: now.add(const Duration(seconds: 30)),
         ),
-        '24 ms',
-      );
-      expect(gateway.loadCalls, 2);
-      expect(scheduler.timers.last.delay, const Duration(seconds: 10));
-    },
-  );
+      ),
+    );
+    expect(controller.peerLatencyLabel(peer), '<1 ms');
+  });
 
   test(
     'keeps device details separate from the protected pairing inspector',
@@ -757,9 +770,13 @@ class _FakePairingSession implements DevicesPairingSession {
   }
 
   @override
-  Future<Uint8List> revealInviteQr() async {
+  Future<PairingInvitation> revealInvitation() async {
     revealInviteCalls += 1;
-    return _testPng();
+    return PairingInvitation(
+      qrPng: _testPng(),
+      code: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRST',
+      address: '192.168.50.232:62951',
+    );
   }
 
   @override

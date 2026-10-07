@@ -65,6 +65,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _quickPasteSectionKey = GlobalKey();
   final _androidCaptureKey = GlobalKey();
   final _clipboardCaptureKey = GlobalKey();
+  final _screenshotCaptureKey = GlobalKey();
   final _excludedApplicationsKey = GlobalKey();
   final _retentionKey = GlobalKey();
   final _storageQuotaKey = GlobalKey();
@@ -468,6 +469,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           keywords: 'background permissions setup',
           targetKey: _androidCaptureKey,
         ),
+      if (widget.controller.screenshotCaptureSupported)
+        _SettingsNavigationTarget(
+          id: _SettingsTargetId.screenshotCapture,
+          section: _SettingsSectionId.clipboard,
+          label: 'Save screenshots',
+          description: 'Automatically save new Android screenshots to History.',
+          keywords: 'images photos capture permissions',
+          targetKey: _screenshotCaptureKey,
+        ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.clipboardCapture,
         section: _SettingsSectionId.clipboard,
@@ -688,6 +698,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: const Text('Open setup'),
             ),
           ),
+        ],
+        if (widget.controller.screenshotCaptureSupported) ...[
+          _SettingRow(
+            key: _screenshotCaptureKey,
+            highlighted: _isHighlighted(_SettingsTargetId.screenshotCapture),
+            title: 'Save screenshots',
+            description: 'Automatically add new screenshots to History.',
+            trailing: Switch(
+              key: const ValueKey<String>('save-screenshots-switch'),
+              value: widget.controller.screenshotCapture.enabled,
+              onChanged: widget.controller.busy
+                  ? null
+                  : widget.controller.setScreenshotCaptureEnabled,
+            ),
+          ),
+          if (widget.controller.screenshotCapture.enabled &&
+              widget.controller.screenshotCapture.needsPermission)
+            _SettingRow(
+              title: 'Screenshot access',
+              description:
+                  'Allow access to all photos and notifications to save new screenshots in the background.',
+              trailing: Button.secondary(
+                key: const ValueKey<String>('screenshot-capture-permission'),
+                onPressed: widget.controller.busy
+                    ? null
+                    : widget.controller.requestScreenshotCapturePermission,
+                child: const Text('Allow access'),
+              ),
+            ),
         ],
         _SettingRow(
           key: _clipboardCaptureKey,
@@ -1653,6 +1692,7 @@ abstract final class _SettingsTargetId {
   static const String androidBackgroundCapture =
       'result-android-background-capture';
   static const String clipboardCapture = 'result-clipboard-capture';
+  static const String screenshotCapture = 'result-screenshot-capture';
   static const String excludedApplications = 'result-excluded-applications';
   static const String retention = 'result-retention';
   static const String storageQuota = 'result-storage-quota';

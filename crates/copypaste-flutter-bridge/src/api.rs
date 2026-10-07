@@ -432,6 +432,13 @@ pub struct PairingCeremony {
     pub failure_message: Option<String>,
 }
 
+/// Invitation material for immediate display in the active pairing inspector.
+pub struct PairingInvitation {
+    pub qr_png: Vec<u8>,
+    pub code: String,
+    pub address: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub enum SyncPhase {
     Unavailable,
@@ -854,8 +861,10 @@ pub async fn pairing_ceremony_status(ceremony_id: String) -> Result<PairingCerem
 }
 
 /// Renders the Rust-held invitation only inside capture-protected Flutter UI.
-pub async fn reveal_pairing_qr(ceremony_id: String) -> Result<Vec<u8>, RuntimeError> {
-    crate::protected::reveal_qr_for_flutter(&ceremony_id).await
+pub async fn reveal_pairing_invitation(
+    ceremony_id: String,
+) -> Result<PairingInvitation, RuntimeError> {
+    crate::protected::reveal_invitation_for_flutter(&ceremony_id).await
 }
 
 /// Returns the bound SAS only for immediate display in capture-protected UI.

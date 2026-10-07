@@ -1,3 +1,6 @@
+import 'package:flutter/foundation.dart';
+
+import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
 import 'package:copypaste_flutter/features/history/repository/history_repository.dart';
@@ -6,6 +9,115 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
+  testWidgets(
+    'collapses each history section independently from its full header',
+    (tester) async {
+      final mobile = defaultTargetPlatform == TargetPlatform.android;
+      await tester.binding.setSurfaceSize(Size(mobile ? 480 : 1400, 1000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final now = DateTime.now();
+      final older = DateTime(now.year, now.month, now.day - 3, 12);
+      final repository = _PinRepository([
+        _clip('Pinned clip', older, pinned: true),
+        _clip('Today clip', now),
+        _clip('Yesterday clip', DateTime(now.year, now.month, now.day - 1, 12)),
+        _clip('Older clip', older),
+      ]);
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          darkTheme: AppTheme.dark,
+          builder: AppTheme.builder,
+          home: Scaffold(child: HistoryScreen(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final sections = {
+        'history-section-pinned': 'Pinned clip',
+        'history-section-today': 'Today clip',
+        'history-section-yesterday': 'Yesterday clip',
+        _dateSectionKey(older): 'Older clip',
+      };
+      final hidden = <String>{};
+      for (final section in sections.entries) {
+        final header = find.byKey(ValueKey<String>(section.key));
+        expect(find.text(section.value), findsOneWidget);
+        // Clicking the divider line also activates the section button.
+        final rect = tester.getRect(header);
+        await tester.tapAt(Offset(rect.left + 20, rect.center.dy));
+        await tester.pumpAndSettle();
+        hidden.add(section.value);
+        expect(header, findsOneWidget);
+        for (final clip in sections.values) {
+          expect(
+            find.text(clip),
+            hidden.contains(clip) ? findsNothing : findsOneWidget,
+          );
+        }
+      }
+      expect(controller.items, hasLength(4));
+      expect(controller.selectedId, isNull);
+      expect(find.text('No clips found'), findsNothing);
+      expect(repository.pinnedUpdates, isEmpty);
+
+      // Reloads and responsive layout changes must not reopen hidden sections.
+      await controller.reload();
+      await tester.binding.setSurfaceSize(Size(mobile ? 1400 : 480, 1000));
+      await tester.pumpAndSettle();
+      for (final clip in sections.values) {
+        expect(find.text(clip), findsNothing);
+      }
+      for (final section in sections.entries) {
+        await tester.tap(find.byKey(ValueKey<String>(section.key)));
+        await tester.pumpAndSettle();
+        expect(find.text(section.value), findsOneWidget);
+      }
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+      TargetPlatform.android,
+    }),
+  );
+
+  testWidgets(
+    'can reach later pages after collapsing the only loaded section',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1400, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final repository = _PinRepository([
+        _clip('Pinned clip', DateTime.now(), pinned: true),
+        _clip('Today clip', DateTime.now()),
+      ]);
+      final controller = HistoryController(repository, pageSize: 1);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        ShadcnApp(
+          home: Scaffold(child: HistoryScreen(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Pinned clip'), findsOneWidget);
+      expect(find.text('Today clip'), findsNothing);
+
+      await tester.tap(
+        find.byKey(const ValueKey<String>('history-section-pinned')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(Button, 'Load more'));
+      await tester.pumpAndSettle();
+      expect(find.text('Pinned clip'), findsNothing);
+      expect(find.text('Today clip'), findsOneWidget);
+      expect(find.widgetWithText(Button, 'Load more'), findsNothing);
+      expect(controller.items, hasLength(2));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('keeps the drawer pin state reactive and visibly selected', (
     tester,
   ) async {
@@ -42,7 +154,10 @@ void main() {
     await tester.tap(pinButton);
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(Button, 'Pinned'), findsOneWidget);
+    expect(
+      find.descendant(of: pinButton, matching: find.text('Pinned')),
+      findsOneWidget,
+    );
     expect(
       (tester.widget<Button>(pinButton).style as ButtonStyle).variance,
       ButtonVariance.secondary,
@@ -191,6 +306,14 @@ void main() {
     expect(find.text('Pinned result'), findsOneWidget);
     expect(find.text('Today result'), findsOneWidget);
     expect(find.text('Older result'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('history-section-pinned')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Pinned result'), findsNothing);
+    expect(find.text('Today result'), findsOneWidget);
+    expect(find.text('Older result'), findsOneWidget);
   });
 }
 
@@ -211,7 +334,14 @@ class _PinRepository implements HistoryRepository {
     required HistoryQuery query,
     required int limit,
     String? cursor,
-  }) async => HistoryClipPage(items: items);
+  }) async {
+    final start = int.parse(cursor ?? '0');
+    final end = (start + limit).clamp(0, items.length);
+    return HistoryClipPage(
+      items: items.sublist(start, end),
+      nextCursor: end < items.length ? '$end' : null,
+    );
+  }
 
   @override
   Future<HistoryClip> get(String id) async =>

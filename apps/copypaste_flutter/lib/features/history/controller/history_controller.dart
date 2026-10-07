@@ -44,6 +44,7 @@ class HistoryController extends ChangeNotifier {
   final Set<String> _pinMutations = <String>{};
   final Set<String> _deleteMutations = <String>{};
   final Set<String> _downloadMutations = <String>{};
+  final Set<String> _collapsedSections = <String>{};
 
   StreamSubscription<HistoryRuntimeEvent>? _watchSubscription;
   Timer? _searchTimer;
@@ -99,6 +100,13 @@ class HistoryController extends ChangeNotifier {
   bool isDeletePending(String id) =>
       _isReorderingPinned || _deleteMutations.contains(id);
   bool isDownloadPending(String id) => _downloadMutations.contains(id);
+  bool isSectionCollapsed(String key) => _collapsedSections.contains(key);
+
+  void toggleSection(String key) {
+    if (!_collapsedSections.add(key)) _collapsedSections.remove(key);
+    notifyListeners();
+  }
+
   bool get canDownloadSelected {
     final file = _selectedClip?.file;
     return _fileDownloader != null && file != null && !file.sourceAvailable;
