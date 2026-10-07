@@ -69,7 +69,7 @@ fn signed_ocr_package_uses_shared_install_invoke_and_removal_contracts() {
     let data = directory.path().join("host");
     let manager = ModuleManager::open(
         &data,
-        "1.0.2",
+        env!("CARGO_PKG_VERSION"),
         ModuleTarget::current().unwrap(),
         &key.pk.to_base64(),
     )
