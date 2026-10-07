@@ -75,6 +75,8 @@ jobs:
           cargo +1.96 build --manifest-path modules/ocr/Cargo.toml --release --locked --lib
           cargo +1.96 build --release --locked -p copypaste-module-qualification
           cargo +1.96 test --manifest-path modules/ocr/Cargo.toml --locked
+          rustc +1.96 --test modules/ocr/vendor/paddle-ocr-rs/src/dictionary.rs -o "$RUNNER_TEMP/ocr-dictionary-tests.exe"
+          "$RUNNER_TEMP/ocr-dictionary-tests.exe"
       - name: Sign target package
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
