@@ -127,6 +127,7 @@ jobs:
             modules/ocr
       - name: Prepare Android toolchain and offline assets
         run: |
+          bash scripts/ci/use-ubuntu-https-archive.sh
           sudo apt-get update
           sudo apt-get install -y patchelf
           python3 - <<'PY'
