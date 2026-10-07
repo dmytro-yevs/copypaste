@@ -21,6 +21,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: ./scripts/ci/install-postgresql-server.sh
       - run: python3 -m unittest scripts/test_release_safety.py
+      - run: python3 -m unittest discover -s scripts/modules/tests -p 'test_*.py'
       - run: cargo +1.96 test --workspace --locked
       - run: ./supabase/dev/verify-schema.sh
 

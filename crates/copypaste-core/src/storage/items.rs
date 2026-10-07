@@ -57,7 +57,7 @@ impl Store {
 
     pub(crate) fn insert_or_bump_late_sealed<E, F>(
         &self,
-        item: NewItem,
+        mut item: NewItem,
         seal: F,
     ) -> Result<Ingest, E>
     where
@@ -71,6 +71,15 @@ impl Store {
         let id = item.id.clone();
         let mut conn = self.conn()?;
         let tx = write_tx(&mut conn).map_err(StoreError::from)?;
+        let (metadata, source_icon_id) = super::source_icons::normalise(
+            &tx,
+            item.app_bundle_id.as_deref(),
+            &item.content_type,
+            item.created_at,
+            item.payload_metadata.as_deref(),
+        )
+        .map_err(E::from)?;
+        item.payload_metadata = metadata;
 
         // The probe and the bump share the insert's transaction, so no third
         // capture can land between finding the row and restamping it.
@@ -83,8 +92,11 @@ impl Store {
                 item.created_at,
                 &item.app_bundle_id,
                 &item.app_name,
+                &source_icon_id,
             )
             .map_err(StoreError::from)?;
+            super::source_icons::release_unused(&tx, source_icon_id.as_deref())
+                .map_err(StoreError::from)?;
             tx.commit().map_err(StoreError::from)?;
             return Ok(Ingest::Bumped(bumped));
         }
@@ -107,8 +119,8 @@ impl Store {
             "INSERT INTO clipboard_items \
                  (id, content_ciphertext, nonce, content_type, content_hash, \
                   pinned, pin_order, created_at, deleted, app_bundle_id, app_name, payload_metadata, \
-                  fts_rowid, content_bytes) \
-             VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL, ?6, 0, ?7, ?8, ?9, ?10, \
+                  fts_rowid, source_icon_id, content_bytes) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL, ?6, 0, ?7, ?8, ?9, ?10, ?11, \
                      LENGTH(COALESCE(?2, X'')) + LENGTH(COALESCE(?9, '')))",
             params![
                 &id,
@@ -121,6 +133,7 @@ impl Store {
                 &item.app_name,
                 &item.payload_metadata,
                 fts_rowid,
+                &source_icon_id,
             ],
         );
 
@@ -145,8 +158,11 @@ impl Store {
                             item.created_at,
                             &item.app_bundle_id,
                             &item.app_name,
+                            &source_icon_id,
                         )
                         .map_err(StoreError::from)?;
+                        super::source_icons::release_unused(&tx, source_icon_id.as_deref())
+                            .map_err(StoreError::from)?;
                         tx.commit().map_err(StoreError::from)?;
                         Ok(Ingest::Bumped(bumped))
                     }
@@ -159,6 +175,7 @@ impl Store {
         tx.commit().map_err(StoreError::from)?;
 
         Ok(Ingest::Inserted(StoredItem {
+            source_icon_id,
             id,
             content_ciphertext,
             nonce,
@@ -248,27 +265,6 @@ impl Store {
             .optional()?)
     }
 
-    /// Read only the bounded source-icon metadata needed by history chrome.
-    pub fn source_app_icon_metadata(
-        &self,
-        id: &str,
-    ) -> Result<Option<crate::SourceAppIconMetadata>, StoreError> {
-        let conn = self.conn()?;
-        let row = conn
-            .query_row(
-                "SELECT payload_metadata, content_type FROM clipboard_items \
-                 WHERE id = ?1 AND deleted = 0",
-                [id],
-                |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?)),
-            )
-            .optional()?;
-        Ok(row.and_then(|(metadata, content_type)| {
-            metadata
-                .and_then(|metadata| crate::PayloadMetadata::from_json(&metadata, &content_type))
-                .and_then(|metadata| metadata.source_app_icon)
-        }))
-    }
-
     /// Soft-deletes an item, returning whether a live row was affected.
     ///
     /// The ciphertext and nonce are wiped and the FTS row is removed in the same
@@ -287,7 +283,7 @@ impl Store {
                         WHEN created_at = 9223372036854775807 THEN created_at \
                         ELSE MAX(created_at + 1, ?2) \
                     END, \
-                    pinned = 0, pin_order = NULL, app_bundle_id = NULL, app_name = NULL, payload_metadata = NULL, \
+                    pinned = 0, pin_order = NULL, app_bundle_id = NULL, app_name = NULL, payload_metadata = NULL, source_icon_id = NULL, \
                     fts_rowid = NULL \
               WHERE id = ?1 AND deleted = 0",
             params![id, crate::now_ms()],
@@ -352,7 +348,7 @@ impl Store {
                         WHEN created_at = 9223372036854775807 THEN created_at \
                         ELSE MAX(created_at + 1, ?1) \
                     END, \
-                    pin_order = NULL, app_bundle_id = NULL, app_name = NULL, payload_metadata = NULL, \
+                    pin_order = NULL, app_bundle_id = NULL, app_name = NULL, payload_metadata = NULL, source_icon_id = NULL, \
                     fts_rowid = NULL \
               WHERE deleted = 0 AND pinned = 0 AND rowid <= ?2",
             params![crate::now_ms(), through],
@@ -399,7 +395,7 @@ mod tests {
     #[test]
     fn source_icon_lookup_never_reads_the_item_body() {
         let s = store();
-        let item = s.insert(item("not read", T0)).unwrap();
+        let mut candidate = item("not read", T0);
         let icon = source_icon();
         let metadata = crate::PayloadMetadata {
             file: None,
@@ -408,14 +404,20 @@ mod tests {
         .to_json("text")
         .unwrap();
 
+        candidate.payload_metadata = Some(metadata);
+        let item = s.insert(candidate).unwrap();
         let conn = s.conn().unwrap();
         conn.execute(
-            "UPDATE clipboard_items SET payload_metadata = ?1, content_ciphertext = NULL, nonce = NULL WHERE id = ?2",
-            rusqlite::params![metadata, item.id],
+            "UPDATE clipboard_items SET content_ciphertext = NULL, nonce = NULL WHERE id = ?1",
+            [&item.id],
         )
         .unwrap();
 
-        assert_eq!(s.source_app_icon_metadata(&item.id).unwrap(), Some(icon));
+        assert_eq!(
+            s.source_app_icon_by_id(item.source_icon_id.as_ref().unwrap())
+                .unwrap(),
+            Some(icon)
+        );
     }
 
     #[test]
