@@ -7,6 +7,7 @@ import '../../../app/theme/app_motion.dart';
 import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../shared/inspector_table.dart';
 import '../../../shared/state_view.dart';
 import '../../../shared/system_date_time.dart';
 import '../../devices/devices_controller.dart';
@@ -230,8 +231,8 @@ class _SyncPeerCard extends StatelessWidget {
           label: 'Last successful sync',
           value: formatSystemDateTime(context, value),
         ),
-      (label: 'Last sent', value: '${peer.sent}'),
-      (label: 'Last received', value: '${peer.received}'),
+      (label: 'Clips sent', value: '${peer.sent}'),
+      (label: 'Clips received', value: '${peer.received}'),
       if (peer.skippedTooLarge > 0)
         (label: 'Items over the size limit', value: '${peer.skippedTooLarge}'),
     ];
@@ -259,15 +260,11 @@ class _SyncPeerCard extends StatelessWidget {
             ),
             const Gap(AppSpacing.md),
           ],
-          Table(
+          InspectorTable(
+            tableKey: ValueKey<String>('sync-peer-metadata-${peer.id}'),
             rows: [
               for (final row in rows)
-                TableRow(
-                  cells: [
-                    TableCell(child: Text(row.label).muted()),
-                    TableCell(child: SelectableText(row.value)),
-                  ],
-                ),
+                (label: row.label, value: SelectableText(row.value)),
             ],
           ),
         ],

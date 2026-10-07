@@ -4,6 +4,7 @@ import 'package:copypaste_flutter/generated/api.dart' as runtime;
 import 'package:flutter/foundation.dart';
 
 import '../../../platform/capture/capture_service_control.dart';
+import '../../../platform/android/screenshot_capture.dart';
 import '../../../platform/notifications/capture_notification_port.dart';
 import '../../../platform/notifications/capture_notification_preview.dart';
 import '../../../platform/security/screenshot_protection.dart';
@@ -20,18 +21,23 @@ class SettingsController extends ChangeNotifier {
     CaptureNotificationPort? notifications,
     ScreenshotProtection screenshotProtection =
         const MethodChannelScreenshotProtection(),
+    ScreenshotCapture screenshotCapture =
+        const MethodChannelScreenshotCapture(),
     this.captureRefreshInterval = const Duration(seconds: 3),
   }) : _repository = repository,
        _filePicker = filePicker,
        _captureControl = captureControl,
        _notifications = notifications ?? PlatformCaptureNotificationPort(),
-       _screenshotProtection = screenshotProtection;
+       _screenshotProtection = screenshotProtection,
+       _screenshotCapture = screenshotCapture;
 
   final SettingsRepository _repository;
   final SettingsFilePicker _filePicker;
   final CaptureServiceControl _captureControl;
   final CaptureNotificationPort _notifications;
   final ScreenshotProtection _screenshotProtection;
+  final ScreenshotCapture _screenshotCapture;
+  ScreenshotCaptureStatus _screenshotStatus = const ScreenshotCaptureStatus();
   final Duration captureRefreshInterval;
 
   SettingsLoadState _loadState = SettingsLoadState.loading;
@@ -54,6 +60,16 @@ class SettingsController extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   bool get busy => _busy;
   bool get blockScreenshots => _blockScreenshots;
+  bool get screenshotCaptureSupported => _screenshotCapture.supported;
+  ScreenshotCaptureStatus get screenshotCapture => _screenshotStatus;
+
+  Future<bool> setScreenshotCaptureEnabled(bool value) => _run(() async {
+    _screenshotStatus = await _screenshotCapture.setEnabled(value);
+  });
+
+  Future<bool> requestScreenshotCapturePermission() => _run(() async {
+    _screenshotStatus = await _screenshotCapture.requestPermission();
+  });
 
   Future<void> initialize() async {
     if (_disposed) return;
@@ -74,6 +90,9 @@ class SettingsController extends ChangeNotifier {
       _capture = values[1] as CaptureSettingsState;
       _acceptSyncStatus(_capture!.syncStatus);
       _blockScreenshots = values[2] as bool;
+      if (_screenshotCapture.supported) {
+        _screenshotStatus = await _screenshotCapture.status();
+      }
       _loadState = SettingsLoadState.ready;
       _errorMessage = null;
       _startCaptureRefresh();
@@ -278,6 +297,9 @@ class SettingsController extends ChangeNotifier {
     if (_disposed || _busy) return;
     try {
       final next = await _repository.captureState();
+      if (_screenshotCapture.supported) {
+        _screenshotStatus = await _screenshotCapture.status();
+      }
       if (_disposed || next.epoch < (_capture?.epoch ?? 0)) return;
       _capture = next;
       _acceptSyncStatus(next.syncStatus);

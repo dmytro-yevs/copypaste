@@ -79,6 +79,54 @@ void main() {
     expect(icons.x4Large.size, AppIconSize.hero);
   });
 
+  testWidgets(
+    'centers text line leading and button icons on every platform',
+    (tester) async {
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: Scaffold(
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Shared label'),
+                  Button.primary(
+                    onPressed: () {},
+                    leading: const Icon(LucideIcons.copy),
+                    child: const Text('Copy label'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      final labelStyle = DefaultTextStyle.of(
+        tester.element(find.text('Shared label')),
+      ).style;
+      expect(labelStyle.leadingDistribution, TextLeadingDistribution.even);
+      final buttonText = find.text('Copy label');
+      final icon = find.byIcon(LucideIcons.copy);
+      expect(
+        tester.getRect(buttonText).center.dy,
+        closeTo(tester.getRect(icon).center.dy, 0.01),
+      );
+      expect(
+        DefaultTextStyle.of(
+          tester.element(buttonText),
+        ).style.leadingDistribution,
+        TextLeadingDistribution.even,
+      );
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
   test('exposes the shared spacing, radius, and compact density contract', () {
     expect(AppSpacing.zero, 0);
     expect(AppSpacing.xxs, 2);

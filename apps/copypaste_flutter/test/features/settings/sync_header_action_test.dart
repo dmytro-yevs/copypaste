@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
+import 'package:copypaste_flutter/shared/inspector_table.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/features/devices/devices.dart';
 import 'package:copypaste_flutter/features/settings/controller/settings_controller.dart';
@@ -99,9 +100,22 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Android phone'), findsOneWidget);
-      expect(find.text('Windows desktop'), findsOneWidget);
       expect(find.text('17 ms'), findsOneWidget);
+      expect(find.byType(InspectorTable), findsWidgets);
+      expect(find.text('Clips sent'), findsWidgets);
+      expect(find.text('Clips received'), findsWidgets);
       expect(find.text('192.168.1.2:47654'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Windows desktop'),
+        200,
+        scrollable: find
+            .descendant(
+              of: find.byKey(const ValueKey('sync-details-drawer')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      expect(find.text('Windows desktop'), findsOneWidget);
       expect(find.text('The device stopped responding.'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.tap(

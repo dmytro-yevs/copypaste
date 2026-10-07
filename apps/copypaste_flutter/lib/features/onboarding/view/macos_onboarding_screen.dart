@@ -7,7 +7,7 @@ import '../../../platform/macos/macos_setup_gateway.dart';
 import '../controller/macos_onboarding_controller.dart';
 import 'onboarding_intro.dart';
 import 'onboarding_scaffold.dart';
-import 'onboarding_setting_row.dart';
+import '../../../shared/setup_setting_row.dart';
 
 class MacosOnboardingScreen extends StatefulWidget {
   const MacosOnboardingScreen({
@@ -120,7 +120,7 @@ class _Setup extends StatelessWidget {
       Text('Set up your Mac', style: Theme.of(context).typography.h1),
       const Gap(AppSpacing.xxl),
       Card(
-        child: OnboardingSettingRow(
+        child: SetupSettingRow(
           icon: LucideIcons.keyboard,
           title: 'Accessibility',
           description: controller.accessibilityGranted
@@ -141,7 +141,7 @@ class _Setup extends StatelessWidget {
       ),
       const Gap(AppSpacing.lg),
       Card(
-        child: OnboardingSettingRow(
+        child: SetupSettingRow(
           icon: LucideIcons.power,
           title: 'Start at login',
           description:
