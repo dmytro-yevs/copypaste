@@ -1,7 +1,11 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
+
 import 'package:copypaste_flutter/app/theme/app_overlays.dart';
+import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/features/devices/device_label.dart';
@@ -174,7 +178,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 }
 
-class _HistoryList extends StatelessWidget {
+class _HistoryList extends StatefulWidget {
   const _HistoryList({
     required this.controller,
     required this.scrollController,
@@ -188,6 +192,19 @@ class _HistoryList extends StatelessWidget {
   final TextEditingController searchController;
   final bool showKindLabel;
   final ValueChanged<HistoryClip> onSelected;
+
+  @override
+  State<_HistoryList> createState() => _HistoryListState();
+}
+
+class _HistoryListState extends State<_HistoryList> {
+  final Map<String, SortableData<String>> _sortableData = {};
+
+  HistoryController get controller => widget.controller;
+  ScrollController get scrollController => widget.scrollController;
+  TextEditingController get searchController => widget.searchController;
+  bool get showKindLabel => widget.showKindLabel;
+  ValueChanged<HistoryClip> get onSelected => widget.onSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -231,6 +248,12 @@ class _HistoryList extends StatelessWidget {
       sort: controller.query.sort,
       now: DateTime.now(),
     );
+    final rowIndices = <Key, int>{
+      for (var index = 0; index < rows.length; index++)
+        _rowKey(rows[index]): index,
+    };
+    final retainedIds = controller.items.map((item) => item.id).toSet();
+    _sortableData.removeWhere((id, _) => !retainedIds.contains(id));
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -244,33 +267,35 @@ class _HistoryList extends StatelessWidget {
         ],
         const Gap(AppSpacing.md),
         Expanded(
-          child: ListView.builder(
-            controller: scrollController,
-            itemCount: rows.length + (controller.isLoadingMore ? 1 : 0),
-            itemBuilder: (context, index) {
-              if (index >= rows.length) {
-                return const Padding(
-                  padding: EdgeInsets.all(AppSpacing.lg),
-                  child: Center(child: CircularProgressIndicator()),
-                );
-              }
-              return switch (rows[index]) {
-                _HistorySectionRow(:final section) => _HistorySectionDivider(
-                  section: section,
-                ),
-                _HistoryClipRow(:final clip) => Padding(
-                  key: ValueKey<String>('history-row-${clip.id}'),
-                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                  child: _HistoryClipCard(
-                    clip: clip,
-                    controller: controller,
-                    selected: controller.selectedId == clip.id,
-                    showKindLabel: showKindLabel,
-                    onPressed: () => onSelected(clip),
-                  ),
-                ),
-              };
-            },
+          child: SortableLayer(
+            clipBehavior: Clip.hardEdge,
+            dropDuration: AppMotion.resolve(context, AppMotion.standard),
+            dropCurve: AppMotion.standardCurve,
+            child: ScrollableSortableLayer(
+              controller: scrollController,
+              scrollThreshold: AppControlSize.touch,
+              child: ListView.builder(
+                controller: scrollController,
+                findChildIndexCallback: (key) => rowIndices[key],
+                itemCount: rows.length + (controller.isLoadingMore ? 1 : 0),
+                itemBuilder: (context, index) {
+                  if (index >= rows.length) {
+                    return const Padding(
+                      padding: EdgeInsets.all(AppSpacing.lg),
+                      child: Center(child: CircularProgressIndicator()),
+                    );
+                  }
+                  return switch (rows[index]) {
+                    _HistorySectionRow(:final section) =>
+                      _HistorySectionDivider(
+                        key: _rowKey(rows[index]),
+                        section: section,
+                      ),
+                    _HistoryClipRow(:final clip) => _clipRow(clip),
+                  };
+                },
+              ),
+            ),
           ),
         ),
         if (controller.errorMessage != null &&
@@ -284,6 +309,60 @@ class _HistoryList extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+
+  Key _rowKey(_HistoryListRow row) => switch (row) {
+    _HistorySectionRow(:final section) => ValueKey<String>(
+      'history-divider-${section.key}',
+    ),
+    _HistoryClipRow(:final clip) => ValueKey<String>('history-row-${clip.id}'),
+  };
+
+  Widget _clipRow(HistoryClip clip) {
+    final child = Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: _HistoryClipCard(
+        clip: clip,
+        controller: controller,
+        selected: controller.selectedId == clip.id,
+        showKindLabel: showKindLabel,
+        onPressed: () => onSelected(clip),
+      ),
+    );
+    final key = ValueKey<String>('history-row-${clip.id}');
+    if (!clip.pinned) return KeyedSubtree(key: key, child: child);
+    return Sortable<String>(
+      key: key,
+      data: _sortableData.putIfAbsent(clip.id, () => SortableData(clip.id)),
+      // Only the library-owned drag handle can initiate a gesture.
+      enabled: false,
+      canAcceptTop: (data) =>
+          controller.canReorderPinned && data.data != clip.id,
+      canAcceptBottom: (data) =>
+          controller.canReorderPinned && data.data != clip.id,
+      onAcceptTop: (data) =>
+          unawaited(controller.movePinned(data.data, clip.id, before: true)),
+      onAcceptBottom: (data) =>
+          unawaited(controller.movePinned(data.data, clip.id, before: false)),
+      onDragStart: () => controller.beginPinnedDrag(clip.id),
+      onDragEnd: controller.endPinnedDrag,
+      onDragCancel: controller.endPinnedDrag,
+      placeholder: Padding(
+        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+        child: DecoratedBox(
+          key: const ValueKey<String>('history-pin-drop-placeholder'),
+          decoration: AppTheme.historyPinnedDropDecoration(context),
+          child: Center(
+            child: Icon(
+              LucideIcons.moveVertical,
+              size: AppIconSize.md,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+          ),
+        ),
+      ),
+      child: child,
     );
   }
 }
@@ -329,7 +408,7 @@ class _HistorySection {
 }
 
 class _HistorySectionDivider extends StatelessWidget {
-  const _HistorySectionDivider({required this.section});
+  const _HistorySectionDivider({super.key, required this.section});
 
   final _HistorySection section;
 
@@ -920,105 +999,217 @@ class _HistoryClipCardState extends State<_HistoryClipCard> {
   Widget build(BuildContext context) {
     final clip = widget.clip;
     final controller = widget.controller;
-    return FocusableActionDetector(
-      focusNode: _focus,
-      includeFocusSemantics: false,
-      onShowHoverHighlight: (value) => setState(() => _hovered = value),
-      onShowFocusHighlight: (value) => setState(() => _focused = value),
-      child: Stack(
-        children: [
-          Semantics(
-            selected: widget.selected,
-            button: true,
-            child: Button(
-              key: ValueKey<String>('history-clip-${clip.id}'),
-              onPressed: widget.onPressed,
-              alignment: Alignment.centerLeft,
-              style: widget.selected
-                  ? const ButtonStyle.secondary()
-                  : const ButtonStyle.ghost(),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _ClipContent(clip: clip, controller: controller),
-                  const Gap(AppSpacing.xs),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _ClipMeta(
-                          clip: clip,
-                          controller: controller,
-                          showKindLabel: widget.showKindLabel,
+    final dragging = controller.draggedPinnedId == clip.id;
+    final touch = Theme.of(context).platform == TargetPlatform.android;
+    final showActions = _hovered || _focused;
+    final showHandle = clip.pinned && controller.hasUnfilteredQuery;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: FocusableActionDetector(
+        focusNode: _focus,
+        includeFocusSemantics: false,
+        onFocusChange: (value) => setState(() => _focused = value),
+        child: DecoratedBox(
+          decoration: dragging
+              ? AppTheme.historyPinnedDragDecoration(context)
+              : const BoxDecoration(),
+          child: Stack(
+            children: [
+              Semantics(
+                selected: widget.selected,
+                button: true,
+                child: Button(
+                  key: ValueKey<String>('history-clip-${clip.id}'),
+                  onPressed: widget.onPressed,
+                  alignment: Alignment.centerLeft,
+                  style: widget.selected
+                      ? const ButtonStyle.secondary()
+                      : const ButtonStyle.ghost(),
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                      right: touch && showHandle
+                          ? AppControlSize.touch + AppSpacing.sm
+                          : AppSpacing.zero,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _ClipContent(clip: clip, controller: controller),
+                        const Gap(AppSpacing.xs),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _ClipMeta(
+                                clip: clip,
+                                controller: controller,
+                                showKindLabel: widget.showKindLabel,
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ],
-              ),
-            ),
-          ),
-          if (_hovered || _focused)
-            Positioned(
-              top: AppSpacing.zero,
-              bottom: AppSpacing.zero,
-              right: AppSpacing.sm,
-              child: Center(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  spacing: AppSpacing.xs,
-                  children: [
-                    Tooltip(
-                      tooltip: (context) => TooltipContainer(
-                        child: Text(clip.pinned ? 'Unpin clip' : 'Pin clip'),
-                      ),
-                      child: Semantics(
-                        label: clip.pinned ? 'Unpin clip' : 'Pin clip',
-                        toggled: clip.pinned,
-                        button: true,
-                        child: Button.secondary(
-                          key: ValueKey<String>('history-row-pin-${clip.id}'),
-                          style: const ButtonStyle.secondaryIcon(
-                            density: ButtonDensity.iconDense,
-                          ),
-                          onPressed: controller.isPinPending(clip.id)
-                              ? null
-                              : () => controller.togglePin(clip),
-                          child: Icon(
-                            clip.pinned ? LucideIcons.pinOff : LucideIcons.pin,
-                          ),
-                        ),
-                      ),
-                    ),
-                    Tooltip(
-                      tooltip: (context) =>
-                          const TooltipContainer(child: Text('Delete clip')),
-                      child: Semantics(
-                        label: 'Delete clip',
-                        button: true,
-                        child: Button.destructive(
-                          key: ValueKey<String>(
-                            'history-row-delete-${clip.id}',
-                          ),
-                          style: const ButtonStyle.destructiveIcon(
-                            density: ButtonDensity.iconDense,
-                          ),
-                          onPressed: controller.isDeletePending(clip.id)
-                              ? null
-                              : () => showHistoryDeleteDialog(
-                                  context,
-                                  controller: controller,
-                                  clipId: clip.id,
-                                ),
-                          child: const Icon(LucideIcons.trash2),
-                        ),
-                      ),
-                    ),
-                  ],
                 ),
               ),
-            ),
-        ],
+              if (showActions || dragging || (touch && showHandle))
+                Positioned(
+                  top: AppSpacing.zero,
+                  bottom: AppSpacing.zero,
+                  right: AppSpacing.sm,
+                  child: Center(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      spacing: AppSpacing.xs,
+                      children: [
+                        if (showActions) ...[
+                          Tooltip(
+                            tooltip: (context) => TooltipContainer(
+                              child: Text(
+                                clip.pinned ? 'Unpin clip' : 'Pin clip',
+                              ),
+                            ),
+                            child: Semantics(
+                              label: clip.pinned ? 'Unpin clip' : 'Pin clip',
+                              toggled: clip.pinned,
+                              button: true,
+                              child: Button.secondary(
+                                key: ValueKey<String>(
+                                  'history-row-pin-${clip.id}',
+                                ),
+                                style: const ButtonStyle.secondaryIcon(
+                                  density: ButtonDensity.iconDense,
+                                ),
+                                onPressed: controller.isPinPending(clip.id)
+                                    ? null
+                                    : () => controller.togglePin(clip),
+                                child: Icon(
+                                  clip.pinned
+                                      ? LucideIcons.pinOff
+                                      : LucideIcons.pin,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                        if (showActions)
+                          Tooltip(
+                            tooltip: (context) => const TooltipContainer(
+                              child: Text('Delete clip'),
+                            ),
+                            child: Semantics(
+                              label: 'Delete clip',
+                              button: true,
+                              child: Button.destructive(
+                                key: ValueKey<String>(
+                                  'history-row-delete-${clip.id}',
+                                ),
+                                style: const ButtonStyle.destructiveIcon(
+                                  density: ButtonDensity.iconDense,
+                                ),
+                                onPressed: controller.isDeletePending(clip.id)
+                                    ? null
+                                    : () => showHistoryDeleteDialog(
+                                        context,
+                                        controller: controller,
+                                        clipId: clip.id,
+                                      ),
+                                child: const Icon(LucideIcons.trash2),
+                              ),
+                            ),
+                          ),
+                        if (showHandle)
+                          Tooltip(
+                            key: ValueKey<String>(
+                              'history-reorder-action-${clip.id}',
+                            ),
+                            tooltip: (context) => const TooltipContainer(
+                              child: Text('Reorder pinned clip'),
+                            ),
+                            child: CallbackShortcuts(
+                              bindings: {
+                                const SingleActivator(
+                                  LogicalKeyboardKey.arrowUp,
+                                  alt: true,
+                                ): () => unawaited(
+                                  controller.shiftPinned(clip.id, up: true),
+                                ),
+                                const SingleActivator(
+                                  LogicalKeyboardKey.arrowDown,
+                                  alt: true,
+                                ): () => unawaited(
+                                  controller.shiftPinned(clip.id, up: false),
+                                ),
+                              },
+                              child: Semantics(
+                                label: 'Reorder pinned clip',
+                                hint:
+                                    'Drag to move. Alt + Up or Down moves one position.',
+                                onIncrease: controller.canReorderPinned
+                                    ? () => unawaited(
+                                        controller.shiftPinned(
+                                          clip.id,
+                                          up: false,
+                                        ),
+                                      )
+                                    : null,
+                                onDecrease: controller.canReorderPinned
+                                    ? () => unawaited(
+                                        controller.shiftPinned(
+                                          clip.id,
+                                          up: true,
+                                        ),
+                                      )
+                                    : null,
+                                // Pan uses twice the touch slop of an axis drag.
+                                // Match the list's threshold so its vertical scroll
+                                // recognizer cannot steal a touch on this handle.
+                                child: MediaQuery(
+                                  data: MediaQuery.of(context).copyWith(
+                                    gestureSettings: DeviceGestureSettings(
+                                      touchSlop:
+                                          (MediaQuery.gestureSettingsOf(
+                                                context,
+                                              ).touchSlop ??
+                                              kTouchSlop) /
+                                          2,
+                                    ),
+                                  ),
+                                  child: Listener(
+                                    onPointerCancel: (_) =>
+                                        controller.cancelPinnedDrag(),
+                                    child: SortableDragHandle(
+                                      enabled: controller.canReorderPinned,
+                                      child: Button.secondary(
+                                        key: ValueKey<String>(
+                                          'history-row-reorder-${clip.id}',
+                                        ),
+                                        style: AppTheme.historyDragHandleStyle(
+                                          dragging: dragging,
+                                          touch: touch,
+                                        ),
+                                        onPressed: controller.canReorderPinned
+                                            ? () {}
+                                            : null,
+                                        child: const Icon(
+                                          LucideIcons.gripVertical,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }

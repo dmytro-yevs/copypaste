@@ -13,6 +13,40 @@ abstract final class AppTheme {
   static const lightSidebarSurface = Color(0xFFF9F9F9);
   static const darkSidebarSurface = Color(0xFF1B1B1B);
 
+  static BoxDecoration historyPinnedDropDecoration(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return BoxDecoration(
+      color: colors.primary.withValues(alpha: 0.12),
+      border: Border.all(color: colors.primary),
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+    );
+  }
+
+  static BoxDecoration historyPinnedDragDecoration(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return BoxDecoration(
+      color: colors.popover,
+      border: Border.all(color: colors.primary),
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+    );
+  }
+
+  static AbstractButtonStyle historyDragHandleStyle({
+    required bool dragging,
+    required bool touch,
+  }) => const ButtonStyle.secondaryIcon(density: ButtonDensity.iconDense)
+      .copyWith(
+        padding: (context, states, value) => touch
+            ? const EdgeInsets.all((AppControlSize.touch - AppIconSize.sm) / 2)
+            : value,
+        mouseCursor: (context, states, value) =>
+            states.contains(WidgetState.disabled)
+            ? value
+            : dragging
+            ? SystemMouseCursors.grabbing
+            : SystemMouseCursors.grab,
+      );
+
   static TextStyle clipboardMenuTextStyle(BuildContext context) =>
       Theme.of(context).typography.small.copyWith(
         fontSize: AppTypographySize.menu,
