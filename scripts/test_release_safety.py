@@ -12,6 +12,21 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseSafetyTest(unittest.TestCase):
+    def test_optimized_capture_contract_rejects_the_stripped_release_callback(self):
+        verify = runpy.run_path(str(ROOT / "scripts/release/verify-capture-jni.py"))["verify"]
+        callback = ".class public interface abstract Lcom/copypaste/app/CaptureCallback;\n"
+        with self.assertRaisesRegex(ValueError, "CaptureCallback.run"):
+            verify(callback, "")
+
+    def test_optimized_capture_contract_requires_both_ingest_methods(self):
+        verify = runpy.run_path(str(ROOT / "scripts/release/verify-capture-jni.py"))["verify"]
+        callback = ".method public abstract run(J)V"
+        text = ".method public static final native ingestText(JLjava/lang/String;)Z"
+        binary = ".method public static final native ingestBinary(J[BLjava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z"
+        verify(callback, text + "\n" + binary)
+        with self.assertRaisesRegex(ValueError, "ingestBinary"):
+            verify(callback, text)
+
     def qualification(self):
         return (
             {"id": 123, "head_sha": "commit", "head_repository": {"full_name": "owner/repo"},

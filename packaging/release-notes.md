@@ -1,9 +1,7 @@
-This update fixes Android background capture setup.
+This update repairs Android clipboard capture in the optimized release APK.
 
-- Fix a crash when a background copy briefly focuses the capture window.
-- Restore the capture setup step and verification progress after an application restart.
-- Save verified setup before the optional device pairing step.
-- Keep completed onboarding when runtime clipboard intake is unavailable.
+- Preserve the callback method Rust uses to read and save clipboard content. Release optimization previously removed it, preventing Full capture verification from completing.
+- Verify the capture callback and native ingestion methods in every production Android APK before publication.
 
 Shizuku is used only to apply Android setup grants and can be removed afterward. Android 13 and later can still request temporary system log access when the capture process restarts; this is separate from the Shizuku permission.
 
