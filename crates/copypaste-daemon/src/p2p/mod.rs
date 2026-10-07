@@ -36,8 +36,6 @@ use crate::cadence::Idle;
 use crate::sync::peer_source;
 use crate::AppState;
 
-pub use copypaste_p2p::node::bind;
-
 /// The node, plus what only a long-lived daemon has: a cadence and a wake.
 pub struct P2p {
     node: Arc<Node>,
@@ -188,9 +186,14 @@ pub async fn forward_pairing_changes(
     mut changes: watch::Receiver<()>,
     mut shutdown: watch::Receiver<bool>,
 ) {
+    let mut sync_changes = state.p2p.node().subscribe_sync_changes();
     loop {
         tokio::select! {
             _ = shutdown.changed() => return,
+            changed = sync_changes.changed() => {
+                if changed.is_err() { return; }
+                state.note_sync_status_changed();
+            },
             changed = changes.changed() => {
                 if changed.is_err() {
                     return;

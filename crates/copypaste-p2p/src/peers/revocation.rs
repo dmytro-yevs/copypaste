@@ -116,7 +116,7 @@ mod tests {
     fn revoking_after_a_deferred_touch_is_durable_immediately() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
-        let store = PeerStore::open(&path).expect("open");
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
 
         let lost = peer("stolen phone");
         let id = lost.pairing_id.clone();
@@ -126,7 +126,7 @@ mod tests {
 
         assert!(store.revoke(&id, 1_753_900_000_000).expect("revoke"));
 
-        let reopened = PeerStore::open(&path).expect("reopen");
+        let reopened = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("reopen");
         assert!(
             reopened.get(&id).is_none(),
             "the pairing survived a restart"
@@ -141,7 +141,7 @@ mod tests {
     fn a_revoked_pairing_cannot_be_added_again() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
-        let store = PeerStore::open(&path).expect("open");
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
 
         let lost = peer("stolen phone");
         let id = lost.pairing_id.clone();
@@ -177,7 +177,7 @@ mod tests {
         assert!(store.psks().is_empty());
 
         // And it survives a restart, which is when a stale file would undo it.
-        let reopened = PeerStore::open(&path).expect("reopen");
+        let reopened = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("reopen");
         assert!(reopened.get(&id).is_none());
         assert_eq!(reopened.revoked().len(), 1);
         assert!(!reopened.revoke(&id, 1).expect("idempotent"));
@@ -207,7 +207,7 @@ mod tests {
     fn revoking_everything_cuts_off_every_device_in_one_write() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
-        let store = PeerStore::open(&path).expect("open");
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
         assert_eq!(store.revoke_all(1).expect("empty is a success"), 0);
 
         let ids: Vec<String> = ["a", "b", "c"]
@@ -224,13 +224,16 @@ mod tests {
         assert!(store.psks().is_empty());
         assert_eq!(store.revoked().len(), 3);
 
-        let reopened = PeerStore::open(&path).expect("reopen");
+        let reopened = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("reopen");
         for id in &ids {
             assert!(reopened.get(id).is_none());
         }
-        let text = std::fs::read_to_string(&path).expect("read");
+        let revocations = reopened.revoked();
         for id in &ids {
-            assert!(text.contains(id), "the audit trail must survive");
+            assert!(
+                revocations.iter().any(|record| &record.pairing_id == id),
+                "the audit trail must survive"
+            );
         }
     }
 
@@ -240,7 +243,7 @@ mod tests {
     #[test]
     fn revoking_an_id_no_peer_could_carry_is_refused() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let store = PeerStore::open(&store_path(&dir)).expect("open");
+        let store = PeerStore::open(&store_path(&dir), &crate::peers::testutil::KEY).expect("open");
 
         for bad in ["", &"a".repeat(129)] {
             assert!(
@@ -259,7 +262,7 @@ mod tests {
     #[test]
     fn revoking_an_unknown_pairing_still_bars_it() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let store = PeerStore::open(&store_path(&dir)).expect("open");
+        let store = PeerStore::open(&store_path(&dir), &crate::peers::testutil::KEY).expect("open");
         let future = peer("not here yet");
         let id = future.pairing_id.clone();
 

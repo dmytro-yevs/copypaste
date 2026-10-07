@@ -125,7 +125,7 @@ class TestProtections(Base):
         self.assertFalse(reported[0].action.remove)
         self.assertGreaterEqual(reported[0].size, 8192)
         self.assertTrue(cache.exists())
-        self.assertIn("clean-target.sh", render(outcomes, dry_run=True))
+        self.assertIn("cargo clean", render(outcomes, dry_run=True))
 
     def test_dirty_worktree_is_preserved(self) -> None:
         tree = self.add_worktree("dirty")

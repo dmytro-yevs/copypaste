@@ -1,7 +1,7 @@
 //! Crypto: one device secret, one derivation path, maintained AEAD constructions.
 //!
-//! A 32-byte device secret in the OS keystore, HKDF-SHA256 into a db key and an
-//! item key ([`keys`]); item content sealed with XChaCha20-Poly1305 whose AAD
+//! A 32-byte device secret in the OS keystore, HKDF-SHA256 into separate database,
+//! item and pairing-store keys ([`keys`]); item content sealed with XChaCha20-Poly1305 whose AAD
 //! binds the item's logical id. Binary content uses RustCrypto STREAM over the
 //! same primitive so ordering and the final block are authenticated too.
 //!

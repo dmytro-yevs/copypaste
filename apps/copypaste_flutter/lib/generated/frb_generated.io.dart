@@ -82,6 +82,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  RuntimeSyncStatus dco_decode_box_autoadd_runtime_sync_status(dynamic raw);
+
+  @protected
   int dco_decode_box_autoadd_u_32(dynamic raw);
 
   @protected
@@ -206,6 +209,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
 
   @protected
+  List<RuntimePeerSyncStatus> dco_decode_list_runtime_peer_sync_status(
+    dynamic raw,
+  );
+
+  @protected
   List<SyncOutcome> dco_decode_list_sync_outcome(dynamic raw);
 
   @protected
@@ -250,6 +258,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
 
   @protected
+  RuntimeSyncStatus? dco_decode_opt_box_autoadd_runtime_sync_status(
+    dynamic raw,
+  );
+
+  @protected
   int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
 
   @protected
@@ -271,13 +284,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RuntimeEvent dco_decode_runtime_event(dynamic raw);
 
   @protected
+  RuntimePeerSyncStatus dco_decode_runtime_peer_sync_status(dynamic raw);
+
+  @protected
   RuntimeSettingsData dco_decode_runtime_settings_data(dynamic raw);
 
   @protected
   RuntimeSettingsPatch dco_decode_runtime_settings_patch(dynamic raw);
 
   @protected
+  RuntimeSyncStatus dco_decode_runtime_sync_status(dynamic raw);
+
+  @protected
   SyncOutcome dco_decode_sync_outcome(dynamic raw);
+
+  @protected
+  SyncPhase dco_decode_sync_phase(dynamic raw);
 
   @protected
   TextExportSummary dco_decode_text_export_summary(dynamic raw);
@@ -375,6 +397,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RuntimeSettingsPatch sse_decode_box_autoadd_runtime_settings_patch(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  RuntimeSyncStatus sse_decode_box_autoadd_runtime_sync_status(
     SseDeserializer deserializer,
   );
 
@@ -523,6 +550,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
+  List<RuntimePeerSyncStatus> sse_decode_list_runtime_peer_sync_status(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<SyncOutcome> sse_decode_list_sync_outcome(SseDeserializer deserializer);
 
   @protected
@@ -585,6 +617,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer);
 
   @protected
+  RuntimeSyncStatus? sse_decode_opt_box_autoadd_runtime_sync_status(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
 
   @protected
@@ -606,6 +643,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RuntimeEvent sse_decode_runtime_event(SseDeserializer deserializer);
 
   @protected
+  RuntimePeerSyncStatus sse_decode_runtime_peer_sync_status(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   RuntimeSettingsData sse_decode_runtime_settings_data(
     SseDeserializer deserializer,
   );
@@ -616,7 +658,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  RuntimeSyncStatus sse_decode_runtime_sync_status(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   SyncOutcome sse_decode_sync_outcome(SseDeserializer deserializer);
+
+  @protected
+  SyncPhase sse_decode_sync_phase(SseDeserializer deserializer);
 
   @protected
   TextExportSummary sse_decode_text_export_summary(
@@ -737,6 +787,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_runtime_settings_patch(
     RuntimeSettingsPatch self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_runtime_sync_status(
+    RuntimeSyncStatus self,
     SseSerializer serializer,
   );
 
@@ -930,6 +986,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_runtime_peer_sync_status(
+    List<RuntimePeerSyncStatus> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_sync_outcome(
     List<SyncOutcome> self,
     SseSerializer serializer,
@@ -1008,6 +1070,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_runtime_sync_status(
+    RuntimeSyncStatus? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
 
   @protected
@@ -1032,6 +1100,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_runtime_event(RuntimeEvent self, SseSerializer serializer);
 
   @protected
+  void sse_encode_runtime_peer_sync_status(
+    RuntimePeerSyncStatus self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_runtime_settings_data(
     RuntimeSettingsData self,
     SseSerializer serializer,
@@ -1044,7 +1118,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_runtime_sync_status(
+    RuntimeSyncStatus self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_sync_outcome(SyncOutcome self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_sync_phase(SyncPhase self, SseSerializer serializer);
 
   @protected
   void sse_encode_text_export_summary(
