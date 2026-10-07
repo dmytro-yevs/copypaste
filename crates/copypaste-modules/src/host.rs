@@ -20,30 +20,43 @@ impl ModuleHost {
         }
     }
 
+    fn manager(&self) -> Result<Arc<ModuleManager>, ModuleError> {
+        let mut initialized = self.manager.lock().map_err(|_| ModuleError::State)?;
+        if let Some(manager) = initialized.as_ref() {
+            return Ok(Arc::clone(manager));
+        }
+        let target = ModuleTarget::current().ok_or_else(|| {
+            ModuleError::Invalid("Modules are unavailable on this platform.".into())
+        })?;
+        let manager = Arc::new(ModuleManager::open(
+            &self.root,
+            env!("CARGO_PKG_VERSION"),
+            target,
+            MODULE_RELEASE_PUBLIC_KEY,
+        )?);
+        *initialized = Some(Arc::clone(&manager));
+        Ok(manager)
+    }
+
+    pub fn has_sms_handler(&self) -> Result<bool, ModuleError> {
+        self.manager()?.has_sms_handler()
+    }
+
+    pub fn dispatch_sms(
+        &self,
+        text: &str,
+        publish: impl FnMut(&str) -> Result<(), ModuleError>,
+    ) -> Result<bool, ModuleError> {
+        self.manager()?.dispatch_sms(text, publish)
+    }
+
     pub async fn request(
         self: &Arc<Self>,
         operation: ModuleOperation,
     ) -> Result<String, ModuleError> {
         let host = Arc::clone(self);
         tokio::task::spawn_blocking(move || {
-            let manager = {
-                let mut initialized = host.manager.lock().map_err(|_| ModuleError::State)?;
-                if let Some(manager) = initialized.as_ref() {
-                    Arc::clone(manager)
-                } else {
-                    let target = ModuleTarget::current().ok_or_else(|| {
-                        ModuleError::Invalid("Modules are unavailable on this platform.".into())
-                    })?;
-                    let manager = Arc::new(ModuleManager::open(
-                        &host.root,
-                        env!("CARGO_PKG_VERSION"),
-                        target,
-                        MODULE_RELEASE_PUBLIC_KEY,
-                    )?);
-                    *initialized = Some(Arc::clone(&manager));
-                    manager
-                }
-            };
+            let manager = host.manager()?;
             let result = match operation {
                 ModuleOperation::List => {
                     serde_json::to_value(manager.list()?).map_err(|_| ModuleError::State)?

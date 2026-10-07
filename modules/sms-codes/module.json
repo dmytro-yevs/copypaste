@@ -1,0 +1,18 @@
+{
+  "schema_version": 2,
+  "api_version": 1,
+  "id": "copypaste.sms-codes",
+  "title": "SMS Codes",
+  "description": "Automatically copy login, verification, and transaction codes from new SMS messages.",
+  "version": "0.1.0",
+  "app_versions": ">=1.0.6, <2.0.0",
+  "supported_platforms": ["android"],
+  "event_handlers": [{"event": "sms_received", "command": "extract-code"}],
+  "commands": [{
+    "id": "extract-code",
+    "title": "Recognize SMS code",
+    "description": "Recognize a single unambiguous authentication or transaction code locally.",
+    "arguments": [{"id": "text", "title": "SMS text", "kind": "text", "default": "", "required": true}]
+  }],
+  "preferences": []
+}

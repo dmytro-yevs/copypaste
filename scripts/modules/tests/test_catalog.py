@@ -35,9 +35,11 @@ class CatalogTest(unittest.TestCase):
         return ("untrusted comment: test\n" + base64.b64encode(b"ED" + self.key_id + signed).decode()
                 + "\ntrusted comment: " + comment + "\n" + base64.b64encode(global_signature).decode()).encode()
 
-    def packages(self, version="0.1.0", omit=None, inconsistent=False, tamper=False):
+    def packages(self, version="0.1.0", omit=None, inconsistent=False, tamper=False, platforms=None):
         paths = []
         for platform, architecture in sorted(catalog.REQUIRED_TARGETS):
+            if platforms is not None and platform not in platforms:
+                continue
             if (platform, architecture) == omit:
                 continue
             suffix = {"macos": ".dylib", "windows": ".dll", "android": ".so"}[platform]
@@ -52,6 +54,9 @@ class CatalogTest(unittest.TestCase):
             }
             if inconsistent and platform == "windows":
                 manifest["description"] = "Different module contract."
+            if platforms is not None:
+                manifest["schema_version"] = 2
+                manifest["supported_platforms"] = platforms
             body = json.dumps(manifest).encode()
             path = self.root / f"ocr-{platform}-{architecture}.cpmodule"
             with zipfile.ZipFile(path, "w") as archive:
@@ -82,6 +87,14 @@ class CatalogTest(unittest.TestCase):
             paths = self.packages(**options)
             with self.assertRaises(ValueError):
                 catalog.build_catalog(paths, "module-copypaste.ocr-v0.1.0", public_key=self.public_key)
+
+    def test_explicit_android_only_module_requires_every_shipped_android_abi(self):
+        paths = self.packages(platforms=["android"])
+        value = catalog.build_catalog(paths, "module-copypaste.ocr-v0.1.0", public_key=self.public_key)
+        self.assertEqual(value["modules"][0]["supported_platforms"], ["android"])
+        self.assertEqual(len(value["modules"][0]["artifacts"]), 3)
+        with self.assertRaises(ValueError):
+            catalog.build_catalog(paths[:-1], "module-copypaste.ocr-v0.1.0", public_key=self.public_key)
 
     def test_rejects_tampering_foreign_signer_and_wrong_tag(self):
         with self.assertRaises(ValueError):

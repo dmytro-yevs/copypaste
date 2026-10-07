@@ -19,6 +19,16 @@ class RuntimeModulesRepository implements ModulesRepository {
           sizeBytes: module['size_bytes'] as int,
           error: module['error'] as String?,
           restartRequired: module['restart_required'] as bool? ?? false,
+          events: List.unmodifiable(
+            (module['events'] as List<dynamic>? ?? const []).map(
+              (event) => switch (event) {
+                'sms_received' => ModuleEventKind.smsReceived,
+                _ => throw const ModulesException(
+                  'The module uses an unsupported event.',
+                ),
+              },
+            ),
+          ),
           commands: List.unmodifiable(
             (module['commands'] as List<dynamic>).map((value) {
               final command = value as Map<String, dynamic>;
