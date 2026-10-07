@@ -1,0 +1,85 @@
+name: Cache Flutter native builds
+description: Restore compiler dependencies without caching Flutter application state or signed artifacts.
+
+inputs:
+  platform:
+    description: macos, android, or windows
+    required: true
+  profile:
+    description: debug or release for desktop runtime helpers
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+      id: rust
+      with:
+        toolchain: "1.96"
+    - name: Locate native compiler caches
+      id: cache-paths
+      shell: bash
+      env:
+        BUILD_PLATFORM: ${{ inputs.platform }}
+      run: |
+        python3 - <<'PY'
+        import os
+        from pathlib import Path
+        import re
+        import tempfile
+
+        with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+            if os.environ['BUILD_PLATFORM'] == 'windows':
+                # Dart uses the OS temporary directory, which can differ from RUNNER_TEMP.
+                directory = Path(tempfile.gettempdir()).as_posix()
+                print(f'windows_bridge={directory}/frb_native_assets_*/**/target', file=output)
+            if os.environ['BUILD_PLATFORM'] == 'android':
+                extension = Path(os.environ['FLUTTER_ROOT']) / 'packages/flutter_tools/gradle/src/main/kotlin/FlutterExtension.kt'
+                ndk = re.search(r'val ndkVersion: String = "([0-9.]+)"', extension.read_text()).group(1)
+                gradle = Path('apps/copypaste_flutter/android/app/build.gradle.kts').read_text()
+                cmake = re.search(r'cmake\s*\{\s*version\s*=\s*"([0-9.]+)"', gradle).group(1)
+                sdk = Path(os.environ['ANDROID_HOME'])
+                for name, version in (('ndk', ndk), ('cmake', cmake)):
+                    directory = sdk / name / version
+                    print(f'{name}_path={directory}', file=output)
+                    print(f'{name}_version={version}', file=output)
+                    print(f'{name}_missing={str(not directory.is_dir()).lower()}', file=output)
+        PY
+    - name: Cache Cargo dependencies and desktop runtime helpers
+      uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      with:
+        shared-key: flutter-${{ inputs.platform }}-${{ inputs.platform == 'android' && 'native' || inputs.profile }}
+        cache-targets: ${{ inputs.platform != 'android' }}
+        cache-bin: false
+        env-vars: OPENSSL
+        save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || github.ref_type == 'tag' }}
+    # The native-assets builder sets --target-dir itself. Root target/ caching
+    # cannot cover these directories. Keep hook metadata and snapshots out.
+    - name: Cache Rust bridge compiler outputs
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          apps/copypaste_flutter/.dart_tool/hooks_runner/shared/copypaste_flutter/build/**/target
+          ${{ steps.cache-paths.outputs.windows_bridge }}
+          !**/target/**/incremental
+        key: flutter-bridge-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-${{ hashFiles('.flutter-version', 'apps/copypaste_flutter/pubspec.lock', 'apps/copypaste_flutter/hook/build.dart', 'Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'crates/copypaste-flutter-bridge/rust-toolchain.toml') }}
+        restore-keys: |
+          flutter-bridge-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-
+    - name: Cache Android Gradle dependencies and build tasks
+      if: inputs.platform == 'android'
+      uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d # v4
+      with:
+        cache-read-only: ${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
+        cache-cleanup: on-success
+    - name: Cache the required Android NDK
+      if: inputs.platform == 'android' && steps.cache-paths.outputs.ndk_missing == 'true'
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ steps.cache-paths.outputs.ndk_path }}
+        key: android-ndk-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-paths.outputs.ndk_version }}
+    - name: Cache the required Android CMake
+      if: inputs.platform == 'android' && steps.cache-paths.outputs.cmake_missing == 'true'
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ steps.cache-paths.outputs.cmake_path }}
+        key: android-cmake-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-paths.outputs.cmake_version }}

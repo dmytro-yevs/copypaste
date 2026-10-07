@@ -96,15 +96,17 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
-        with:
-          toolchain: "1.96"
       - id: flutter
         run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           flutter-version: ${{ steps.flutter.outputs.version }}
+          cache: true
+      - uses: ./.github/actions/flutter-build-cache
+        with:
+          platform: macos
+          profile: release
       - name: Create disposable release keychain
         run: |
           set -euo pipefail
@@ -166,19 +168,21 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
-        with:
-          toolchain: "1.96"
       - id: flutter
         run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           flutter-version: ${{ steps.flutter.outputs.version }}
+          cache: true
       - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
         with:
           distribution: temurin
           java-version: "25"
+      - uses: ./.github/actions/flutter-build-cache
+        with:
+          platform: android
+          profile: release
       - name: Build signed production Android APK
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -213,7 +217,9 @@ jobs:
           chmod +x scripts/release/*.sh
           AAPT2="$tools/aapt2" APKSIGNER="$tools/apksigner" scripts/release/verify-android-release.sh "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk" "${{ needs.preflight.outputs.version }}" "${{ needs.preflight.outputs.android_version_code }}" "$expected"
           scripts/release/sign-update-artifact.sh "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk"
-          (cd apps/copypaste_flutter && dart run tool/verify_update_signature.dart "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk" "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk.sig")
+          # This pure Dart verifier needs no native assets. Run the VM directly
+          # so Dart's package runner does not rebuild the host Rust bridge.
+          (cd apps/copypaste_flutter && dart --disable-dart-dev --packages=.dart_tool/package_config.json tool/verify_update_signature.dart "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk" "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk.sig")
       - name: Write exact-artifact receipt
         run: python3 scripts/release/write-artifact-receipt.py --platform android --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk" --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --output dist/production-receipt.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -238,9 +244,6 @@ jobs:
       OPENSSL_LIBS: 'libssl_static:libcrypto_static'
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
-        with:
-          toolchain: "1.96"
       - id: flutter
         shell: bash
         run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
@@ -248,6 +251,11 @@ jobs:
         with:
           channel: stable
           flutter-version: ${{ steps.flutter.outputs.version }}
+          cache: true
+      - uses: ./.github/actions/flutter-build-cache
+        with:
+          platform: windows
+          profile: release
       - name: Install NSIS
         shell: pwsh
         run: choco install nsis --version=3.11 -y --no-progress
@@ -279,7 +287,8 @@ jobs:
         run: |
           chmod +x scripts/release/sign-update-artifact.sh
           scripts/release/sign-update-artifact.sh "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-windows-x86_64-setup.exe"
-          (cd apps/copypaste_flutter && dart run tool/verify_update_signature.dart "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-windows-x86_64-setup.exe" "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-windows-x86_64-setup.exe.sig")
+          # Use the VM directly; signature verification has no native assets.
+          (cd apps/copypaste_flutter && dart --disable-dart-dev --packages=.dart_tool/package_config.json tool/verify_update_signature.dart "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-windows-x86_64-setup.exe" "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-windows-x86_64-setup.exe.sig")
       - name: Install and run exact Windows artifact
         shell: pwsh
         run: ./scripts/release/smoke-windows-production.ps1 -Installer "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-windows-x86_64-setup.exe" -Version '${{ needs.preflight.outputs.version }}'
