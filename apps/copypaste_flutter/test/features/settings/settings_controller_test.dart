@@ -423,16 +423,16 @@ void main() {
     );
     expect(
       tester
-          .widgetList<AnimatedContainer>(
+          .widgetList<OutlinedContainer>(
             find.descendant(
               of: contentScroll,
-              matching: find.byType(AnimatedContainer),
+              matching: find.byType(OutlinedContainer),
             ),
           )
           .where(
             (row) =>
-                row.decoration ==
-                AppTheme.settingsRowDecoration(
+                row.theme ==
+                AppTheme.settingsRowTheme(
                   tester.element(contentScroll),
                   highlighted: true,
                 ),
@@ -445,16 +445,16 @@ void main() {
 
     expect(
       tester
-          .widgetList<AnimatedContainer>(
+          .widgetList<OutlinedContainer>(
             find.descendant(
               of: contentScroll,
-              matching: find.byType(AnimatedContainer),
+              matching: find.byType(OutlinedContainer),
             ),
           )
           .where(
             (row) =>
-                row.decoration ==
-                AppTheme.settingsRowDecoration(
+                row.theme ==
+                AppTheme.settingsRowTheme(
                   tester.element(contentScroll),
                   highlighted: true,
                 ),
@@ -614,14 +614,14 @@ void main() {
       expect(find.text('Retention'), findsOneWidget);
       final row = find.byKey(const ValueKey<String>('settings-row-Retention'));
       expect(
-        tester.widget<AnimatedContainer>(row).decoration,
-        AppTheme.settingsRowDecoration(tester.element(row), highlighted: true),
+        tester.widget<OutlinedContainer>(row).theme,
+        AppTheme.settingsRowTheme(tester.element(row), highlighted: true),
       );
       await tester.pump(AppMotion.settingsHighlightHold);
       await tester.pumpAndSettle();
       expect(
-        tester.widget<AnimatedContainer>(row).decoration,
-        AppTheme.settingsRowDecoration(tester.element(row), highlighted: false),
+        tester.widget<OutlinedContainer>(row).theme,
+        AppTheme.settingsRowTheme(tester.element(row), highlighted: false),
       );
       await tester.binding.setSurfaceSize(const Size(1000, 720));
       await tester.pumpAndSettle();
