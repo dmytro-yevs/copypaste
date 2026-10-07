@@ -181,11 +181,13 @@ mod tests {
         teardown(&state, vec![("wedged", wedged)], &socket).await;
 
         assert!(!socket.exists(), "the socket outlived the daemon");
-        let persisted = std::fs::read_to_string(&peers_file).expect("the paired-device list");
-        assert!(
-            persisted.contains(&peer.pairing_id),
-            "the pairing was lost on shutdown"
-        );
+        let persisted =
+            copypaste_p2p::peers::PeerStore::open(&peers_file, &state.keyring.peer_store_key())
+                .expect("the encrypted paired-device list");
+        let restored = persisted
+            .get(&peer.pairing_id)
+            .expect("the pairing was lost on shutdown");
+        assert!(restored.psk_matches(&peer.psk));
     }
 
     #[tokio::test(start_paused = true)]
