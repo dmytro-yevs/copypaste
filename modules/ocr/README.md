@@ -6,6 +6,12 @@ The base application has no OCR model or ONNX Runtime dependency.
 
 ## Package preparation
 
+The catalog declares macOS 14+, Windows 10+, and Android 7+ for this runtime.
+CopyPaste 1.0.6+ displays these requirements and keeps incompatible modules
+visible with installation disabled. The **Build and publish OCR module**
+workflow prepares all five shipped packages, signs them, performs native
+qualification, and publishes the module release and signed marketplace.
+
 Run `python3 scripts/fetch-models.py` from this directory. It downloads only
 the PaddlePaddle model files declared at immutable revisions in
 `assets/model-sources.json` and verifies every SHA-256 value. No executable
