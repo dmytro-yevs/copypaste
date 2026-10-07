@@ -1,11 +1,11 @@
-This update improves History, Quick Paste, and local module management.
+This update fixes Android background capture setup.
 
-- Add a shared History inspector with full content and metadata.
-- Improve Quick Paste layout, pinned shortcuts, inspector, and desktop window lifecycle.
-- Add installation and management of signed optional modules in Settings.
-- Improve device pairing and capture notifications.
-- Improve clipboard image previews and Android release verification.
-- Fix Windows HTML capture when clipboard allocations contain trailing padding.
+- Fix a crash when a background copy briefly focuses the capture window.
+- Restore the capture setup step and verification progress after an application restart.
+- Save verified setup before the optional device pairing step.
+- Keep completed onboarding when runtime clipboard intake is unavailable.
+
+Shizuku is used only to apply Android setup grants and can be removed afterward. Android 13 and later can still request temporary system log access when the capture process restarts; this is separate from the Shizuku permission.
 
 Optional modules are selected and installed from the first-party marketplace in Settings. OCR engines and models are not bundled with the application.
 
