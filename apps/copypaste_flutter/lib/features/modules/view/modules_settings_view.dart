@@ -265,11 +265,25 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
         ),
         const Gap(AppSpacing.sm),
         Text(module.error ?? module.description).small().muted(),
+        if (module.events.contains(ModuleEventKind.smsReceived)) ...[
+          const Gap(AppSpacing.sm),
+          Text(
+            controller.smsAccess?.granted == true
+                ? 'SMS access is ready.'
+                : 'SMS access needs setup.',
+          ).small().muted(),
+        ],
         const Gap(AppSpacing.md),
         Wrap(
           spacing: AppSpacing.sm,
           runSpacing: AppSpacing.sm,
           children: [
+            if (module.events.contains(ModuleEventKind.smsReceived) &&
+                controller.smsAccess?.granted != true)
+              Button.secondary(
+                onPressed: controller.busy ? null : () => _smsSetup(context),
+                child: const Text('Set up SMS access'),
+              ),
             for (final command in module.commands)
               Button.secondary(
                 onPressed:
@@ -336,6 +350,49 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
       await draft.close();
     }
   }
+
+  Future<void> _smsSetup(BuildContext context) => AppOverlays.showDialog<void>(
+    context,
+    builder: (dialogContext) => AnimatedBuilder(
+      animation: controller,
+      builder: (_, _) => AppOverlays.alertDialog(
+        icon: LucideIcons.messageSquare,
+        title: const Text('SMS access'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                controller.smsAccess?.granted == true
+                    ? 'Access is ready. Enable SMS Codes to start copying new codes.'
+                    : 'Apply access with Shizuku, or run these ADB commands once. Then refresh Installed modules.',
+              ),
+              if (controller.smsAccess?.granted != true) ...[
+                const Gap(AppSpacing.md),
+                SelectableText(controller.smsAccess?.adbCommands ?? ''),
+              ],
+              if (controller.errorMessage case final error?) ...[
+                const Gap(AppSpacing.md),
+                StateView.error(title: 'SMS setup failed', message: error),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          if (controller.smsAccess?.granted != true)
+            Button.primary(
+              onPressed: controller.busy ? null : controller.configureSmsAccess,
+              child: const Text('Apply with Shizuku'),
+            ),
+          Button.ghost(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+    ),
+  );
 
   Future<void> _invoke(
     BuildContext context,

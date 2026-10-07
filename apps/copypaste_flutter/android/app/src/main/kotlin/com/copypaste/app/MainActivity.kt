@@ -13,6 +13,7 @@ import android.os.Build
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.annotation.Keep
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import com.jakewharton.processphoenix.ProcessPhoenix
@@ -43,6 +44,7 @@ class MainActivity : FlutterActivity() {
             deviceClass: String,
         )
 
+        @Keep
         @JvmStatic
         fun writeClipboardText(text: String): Boolean = runCatching {
             val context = requireNotNull(instance)
@@ -63,6 +65,19 @@ class MainActivity : FlutterActivity() {
         }.isSuccess
 
         private var instance: Context? = null
+
+        @Synchronized
+        internal fun ensureRuntime(context: Context) {
+            instance = context.applicationContext
+            initializeNdkContext(context.applicationContext)
+            initializeRuntime(context.filesDir.resolve("runtime").absolutePath,
+                Build.MODEL, Build.MODEL, Build.VERSION.RELEASE,
+                when (context.resources.configuration.smallestScreenWidthDp) {
+                    in 1 until 600 -> "phone"
+                    in 600..Int.MAX_VALUE -> "tablet"
+                    else -> "unknown"
+                })
+        }
     }
 
     private val pairingPresentationChannel = "com.copypaste.app/pairing_presentation_host"
@@ -81,6 +96,7 @@ class MainActivity : FlutterActivity() {
     private var androidCaptureChannel: AndroidCaptureChannel? = null
     private var pairingScannerChannel: PairingScannerChannel? = null
     private var appUpdateChannel: AppUpdateChannel? = null
+    private var smsModuleChannel: AndroidSmsModuleChannel? = null
     private var pendingNotificationPermission: ((Boolean) -> Unit)? = null
     private var pendingPairingUri: String? = null
 
@@ -88,15 +104,7 @@ class MainActivity : FlutterActivity() {
         ScreenshotProtection.install(application)
         ScreenshotProtection.apply(window)
         pendingPairingUri = pairingUri(intent)
-        instance = applicationContext
-        initializeNdkContext(applicationContext)
-        initializeRuntime(
-            filesDir.resolve("runtime").absolutePath,
-            Build.MODEL,
-            Build.MODEL,
-            Build.VERSION.RELEASE,
-            deviceClass(),
-        )
+        ensureRuntime(applicationContext)
         super.onCreate(savedInstanceState)
         clipboardManager = getSystemService(ClipboardManager::class.java)
         handleExplicitIntake(intent)
@@ -140,6 +148,7 @@ class MainActivity : FlutterActivity() {
             this,
             flutterEngine.dartExecutor.binaryMessenger,
         )
+        smsModuleChannel = AndroidSmsModuleChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         pairingLinksChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             pairingLinksChannelName,
@@ -374,12 +383,6 @@ class MainActivity : FlutterActivity() {
         AndroidClipboardReader.captureForeground(this, foregroundCaptureHost)
     }
 
-    private fun deviceClass(): String = when (resources.configuration.smallestScreenWidthDp) {
-        in 1 until 600 -> "phone"
-        in 600..Int.MAX_VALUE -> "tablet"
-        else -> "unknown"
-    }
-
     override fun onDestroy() {
         foregroundCaptureEligible = false
         AndroidClipboardReader.retireForeground(foregroundCaptureHost)
@@ -392,6 +395,8 @@ class MainActivity : FlutterActivity() {
         pairingScannerChannel = null
         appUpdateChannel?.dispose()
         appUpdateChannel = null
+        smsModuleChannel?.dispose()
+        smsModuleChannel = null
         pendingNotificationPermission?.invoke(false)
         pendingNotificationPermission = null
         pairingLinksChannel?.setMethodCallHandler(null)

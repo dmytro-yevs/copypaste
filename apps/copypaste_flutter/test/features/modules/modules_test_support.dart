@@ -71,6 +71,7 @@ class MemoryModulesRepository implements ModulesRepository {
         commands: module.commands,
         preferenceFields: module.preferenceFields,
         preferences: module.preferences,
+        events: module.events,
       ),
     ];
   }

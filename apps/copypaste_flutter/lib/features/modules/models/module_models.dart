@@ -2,6 +2,8 @@ enum ModulesLoadState { loading, ready, error }
 
 enum ModuleFieldKind { text, boolean, file }
 
+enum ModuleEventKind { smsReceived }
+
 class ModuleField {
   const ModuleField({
     required this.id,
@@ -47,6 +49,7 @@ class InstalledModule {
     required this.preferences,
     this.error,
     this.restartRequired = false,
+    this.events = const [],
   });
   final String id;
   final String title;
@@ -59,6 +62,7 @@ class InstalledModule {
   final Map<String, Object> preferences;
   final String? error;
   final bool restartRequired;
+  final List<ModuleEventKind> events;
 }
 
 class ModuleResult {

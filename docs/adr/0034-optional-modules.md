@@ -10,7 +10,9 @@ optional module; the base application includes no OCR engine or models.
 The first implementation accepts only packages signed by CopyPaste's pinned
 release identity. Modules execute locally on macOS, Android, and Windows. A
 package is specific to one OS and architecture; module behavior and manifest
-contributions must have parity across all three platforms.
+contributions normally have parity across all three platforms. Schema 2 can
+declare `supported_platforms` for explicitly platform-specific capabilities.
+SMS Codes is an Android-only module; it never runs on macOS or Windows.
 
 Raycast's [extension architecture](https://www.raycast.com/blog/how-raycast-api-extensions-work),
 [manifest](https://developers.raycast.com/information/manifest), and
@@ -137,10 +139,23 @@ sandbox, and manifest declarations cannot restrict native OS access. A native
 crash can terminate that process. Third-party execution requires an explicit
 isolation design before it can be enabled.
 
+Schema 1 packages remain supported. Schema 2 adds signed supported platforms
+and event handlers bound to existing commands. `sms_received` is Android-only
+and supplies a bounded invocation-only `text` argument. Event commands are not
+rendered as manual command buttons. New event modules install disabled; the
+shared Installed card exposes native SMS access setup and enable/disable.
+Only enabled, authenticated modules receive events. Lifecycle mutations wait
+through recognition and code publication, so disabling or removing a module
+prevents late output. The SMS host reuses runtime admission, encrypted ingest,
+History events, clipboard writing, and configured sync. Message bodies are
+never persisted by the module or host. Android uses inbox observation plus SMS
+and boot reception; Shizuku grants access only during setup. See
+[`modules/sms-codes/README.md`](../../modules/sms-codes/README.md).
+
 The initial host-rendered primitives are text/boolean/file forms and text/message
 results. File arguments use native pickers; the host keeps an invocation-owned,
 bounded private snapshot until native execution ends. Internal paths are not
-shown as form fields. Background schedules, capture event handlers, content-processing
+shown as form fields. Background schedules, additional capture event handlers, content-processing
 contracts, dependency resolution, rich result views, and secure secret
 preferences require concrete module use cases and versioned additions; they
 are not placeholder implementations in this foundation.

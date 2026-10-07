@@ -561,6 +561,40 @@ impl Runtime {
         Ok(())
     }
 
+    pub fn has_sms_module(&self) -> bool {
+        self.modules.has_sms_handler().unwrap_or(false)
+    }
+
+    /// The SMS body is invocation-only. Only the recognized code enters the
+    /// encrypted History and the normal sync source. Publication holds the
+    /// same admission scope used by native clipboard capture.
+    pub fn capture_sms_operation(&self, token: u64, text: &str) -> Result<bool, RuntimeError> {
+        let mut read = Some(
+            self.capture_admission()
+                .acquire(token, CaptureScope::Read)
+                .ok_or(RuntimeError::CaptureRefused)?,
+        );
+        self.modules
+            .dispatch_sms(text, |code| {
+                drop(read.take());
+                self.publish_sms_code(token, code)
+                    .map_err(|_| copypaste_modules::ModuleError::State)?;
+                Ok(())
+            })
+            .map_err(|_| RuntimeError::Capture)
+    }
+
+    fn publish_sms_code(&self, token: u64, code: &str) -> Result<(), RuntimeError> {
+        self.capture_text_operation(token, code)?;
+        let _completion = self
+            .capture_admission()
+            .acquire(token, CaptureScope::Completion)
+            .ok_or(RuntimeError::CaptureRefused)?;
+        self.clipboard
+            .write(&ClipboardPayload::Text(code.to_owned().into()))
+            .map_err(|_| RuntimeError::Capture)
+    }
+
     /// Records an image or file captured by an in-process platform host.
     pub fn capture_binary(
         &self,
@@ -1754,6 +1788,65 @@ mod tests {
         assert_eq!(runtime.store.count().unwrap(), 1);
         assert!(runtime.store.get("first").unwrap().is_some());
         assert!(runtime.store.get("second").unwrap().is_none());
+    }
+
+    #[test]
+    fn sms_code_uses_encrypted_history_events_and_clipboard_once() {
+        let clipboard = Arc::new(RecordingClipboard::default());
+        let (runtime, _dir) = fixture_with(clipboard.clone());
+        let mut events = runtime.subscribe_events();
+        let host = runtime
+            .capture_admission()
+            .open_host(CaptureKind::ModuleEvent)
+            .unwrap();
+        let token = runtime
+            .capture_admission()
+            .begin(host, Arc::new(|| {}))
+            .unwrap();
+        runtime.publish_sms_code(token, "007123").unwrap();
+        let event = events.try_recv().unwrap();
+        let id = event.captured_item_id.unwrap();
+        let item = match runtime.item(0, &id).data {
+            Some(ResponseData::Item(item)) => item,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(item.content, "007123");
+        assert_eq!(*clipboard.0.lock().unwrap(), ["text:007123"]);
+        assert!(runtime.publish_sms_code(token, "999999").is_err());
+        assert_eq!(runtime.store.count().unwrap(), 1);
+        runtime.capture_admission().abandon(token);
+        runtime.capture_admission().revoke_host(host).unwrap();
+    }
+
+    #[test]
+    fn no_sms_module_or_revoked_privacy_scope_never_publishes_message_bodies() {
+        let clipboard = Arc::new(RecordingClipboard::default());
+        let (runtime, _dir) = fixture_with(clipboard.clone());
+        let host = runtime
+            .capture_admission()
+            .open_host(CaptureKind::ModuleEvent)
+            .unwrap();
+        let token = runtime
+            .capture_admission()
+            .begin(host, Arc::new(|| {}))
+            .unwrap();
+        assert!(!runtime
+            .capture_sms_operation(token, "Your code is 007123")
+            .unwrap());
+        assert_eq!(runtime.store.count().unwrap(), 0);
+        let transition = runtime.capture_admission().transition().unwrap();
+        let mut paused = runtime.settings.config();
+        paused.private_mode = true;
+        transition.publish(paused).unwrap();
+        drop(transition);
+        assert!(runtime.publish_sms_code(token, "007123").is_err());
+        assert!(runtime
+            .capture_admission()
+            .begin(host, Arc::new(|| {}))
+            .is_none());
+        assert!(clipboard.0.lock().unwrap().is_empty());
+        assert_eq!(runtime.store.count().unwrap(), 0);
+        runtime.capture_admission().revoke_host(host).unwrap();
     }
 
     #[test]

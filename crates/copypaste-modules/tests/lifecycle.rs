@@ -148,6 +148,72 @@ fn native_library() -> &'static Path {
 }
 
 #[test]
+fn sms_event_is_opt_in_and_disable_restart_remove_stop_publication() {
+    let fixture = Fixture::new();
+    let android = ModuleTarget {
+        platform: ModulePlatform::Android,
+        ..target()
+    };
+    let open = || {
+        ModuleManager::open(
+            &fixture.directory.path().join("modules"),
+            "1.0.6",
+            android,
+            &fixture.key.pk.to_base64(),
+        )
+        .unwrap()
+    };
+    let manager = open();
+    let library = fs::read(native_library()).unwrap();
+    let package = fixture.package(
+        "1.0.0",
+        &library,
+        |manifest| {
+            manifest["schema_version"] = json!(2);
+            manifest["supported_platforms"] = json!(["android"]);
+            manifest["target"] = json!(android);
+            manifest["event_handlers"] = json!([{"event":"sms_received","command":"transform"}]);
+        },
+        None,
+    );
+    let installed = manager.install(&package).unwrap();
+    assert!(!installed.enabled);
+    assert!(installed.commands.is_empty());
+    let mut published = Vec::new();
+    assert!(!manager
+        .dispatch_sms("123456", |code| {
+            published.push(code.to_string());
+            Ok(())
+        })
+        .unwrap());
+    manager.set_enabled(&installed.id, true).unwrap();
+    assert!(manager.has_sms_handler().unwrap());
+    assert!(manager
+        .dispatch_sms("123456", |code| {
+            published.push(code.to_string());
+            Ok(())
+        })
+        .unwrap());
+    assert_eq!(published, ["123456"]);
+    assert!(manager
+        .dispatch_sms("The entire SMS body must never be published", |_| panic!(
+            "invalid output"
+        ))
+        .is_err());
+    manager.set_enabled(&installed.id, false).unwrap();
+    drop(manager);
+    let manager = open();
+    assert!(!manager.has_sms_handler().unwrap());
+    assert!(!manager
+        .dispatch_sms("123456", |_| panic!("disabled event"))
+        .unwrap());
+    manager.remove(&installed.id).unwrap();
+    assert!(!manager
+        .dispatch_sms("123456", |_| panic!("removed event"))
+        .unwrap());
+}
+
+#[test]
 fn signed_native_module_runs_offline_and_survives_restart_update_disable_and_removal() {
     let fixture = Fixture::new();
     let manager = fixture.manager();
