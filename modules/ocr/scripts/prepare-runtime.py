@@ -30,16 +30,18 @@ def prepare(platform, architecture, destination, cache, ndk=None):
     cache.mkdir(parents=True, exist_ok=True)
     archive = cache / source["url"].rsplit("/", 1)[-1]
     if not archive.exists() or digest(archive) != source["sha256"]:
-        with tempfile.NamedTemporaryFile(dir=cache, delete=False) as output:
-            staged = Path(output.name)
-            try:
+        staged = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=cache, delete=False) as output:
+                staged = Path(output.name)
                 with urllib.request.urlopen(source["url"], timeout=60) as response:
                     shutil.copyfileobj(response, output, 1024 * 1024)
                 output.flush()
-                if digest(staged) != source["sha256"]:
-                    raise ValueError("ONNX Runtime archive checksum mismatch")
-                staged.replace(archive)
-            finally:
+            if digest(staged) != source["sha256"]:
+                raise ValueError("ONNX Runtime archive checksum mismatch")
+            staged.replace(archive)
+        finally:
+            if staged is not None:
                 staged.unlink(missing_ok=True)
     target = destination / platform / architecture
     target.mkdir(parents=True, exist_ok=True)
