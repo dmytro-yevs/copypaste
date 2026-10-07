@@ -31,6 +31,11 @@ jobs:
       - name: Check recognition and build Android package
         run: |
           cargo +1.96 test --manifest-path modules/sms-codes/Cargo.toml --locked
+          python3 - <<'PY'
+          import os, subprocess
+          subprocess.run([os.environ["ANDROID_HOME"] + "/cmdline-tools/latest/bin/sdkmanager", "--licenses"],
+                         input="y\n" * 100, text=True, check=True)
+          PY
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.13846066"
           python3 scripts/modules/build-android-module.py --module-dir modules/sms-codes --library-name libcopypaste_module_sms_codes.so --architecture ${{ matrix.architecture }} --ndk "$ANDROID_HOME/ndk/29.0.13846066"
       - name: Sign separately installed module
