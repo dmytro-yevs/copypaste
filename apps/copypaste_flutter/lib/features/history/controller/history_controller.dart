@@ -51,6 +51,11 @@ class HistoryController extends ChangeNotifier {
   int _skippedUndecryptable = 0;
   bool _isLoadingMore = false;
   bool _isDeletingAll = false;
+  bool _isReorderingPinned = false;
+  bool _refreshAfterPinnedInteraction = false;
+  String? _draggedPinnedId;
+  String? _cancelledPinnedId;
+  Future<void>? _visibleItemsRefresh;
   int _queryEpoch = 0;
   bool _disposed = false;
 
@@ -65,8 +70,28 @@ class HistoryController extends ChangeNotifier {
   bool get canLoadMore => _nextCursor != null;
   bool get isLoadingMore => _isLoadingMore;
   bool get isDeletingAll => _isDeletingAll;
-  bool isPinPending(String id) => _pinMutations.contains(id);
-  bool isDeletePending(String id) => _deleteMutations.contains(id);
+  bool get isReorderingPinned => _isReorderingPinned;
+  String? get draggedPinnedId => _draggedPinnedId;
+  bool get hasUnfilteredQuery =>
+      !_query.hasSearch &&
+      _query.kind == null &&
+      !_query.pinnedOnly &&
+      _query.origin == null &&
+      _query.sourceApp == null;
+  bool get canReorderPinned =>
+      !_disposed &&
+      hasUnfilteredQuery &&
+      _state == HistoryLoadState.ready &&
+      !_isReorderingPinned &&
+      !_isDeletingAll &&
+      _pinMutations.isEmpty &&
+      _deleteMutations.isEmpty &&
+      _skippedUndecryptable == 0 &&
+      _items.where((item) => item.pinned).take(2).length == 2;
+  bool isPinPending(String id) =>
+      _isReorderingPinned || _pinMutations.contains(id);
+  bool isDeletePending(String id) =>
+      _isReorderingPinned || _deleteMutations.contains(id);
   bool isDownloadPending(String id) => _downloadMutations.contains(id);
   bool get canDownloadSelected {
     final file = _selectedClip?.file;
@@ -76,7 +101,11 @@ class HistoryController extends ChangeNotifier {
   Future<void> initialize() async {
     _watchSubscription ??= _repository.watch().listen((event) {
       if (event == HistoryRuntimeEvent.itemsChanged) {
-        unawaited(_reloadItemsAndFacets());
+        if (_draggedPinnedId != null || _isReorderingPinned) {
+          _refreshAfterPinnedInteraction = true;
+        } else {
+          unawaited(_refreshItemsAndFacets());
+        }
       }
     });
     await _reloadItemsAndFacets();
@@ -84,6 +113,62 @@ class HistoryController extends ChangeNotifier {
 
   Future<void> _reloadItemsAndFacets() async {
     await Future.wait([reload(), refreshFacets()]);
+  }
+
+  Future<void> _refreshItemsAndFacets() {
+    late final Future<void> refresh;
+    refresh = _refreshVisibleItemsAndFacets().whenComplete(() {
+      if (identical(_visibleItemsRefresh, refresh)) _visibleItemsRefresh = null;
+    });
+    _visibleItemsRefresh = refresh;
+    return refresh;
+  }
+
+  Future<void> _refreshVisibleItemsAndFacets() async {
+    if (_state != HistoryLoadState.ready) {
+      await _reloadItemsAndFacets();
+      return;
+    }
+    final epoch = ++_queryEpoch;
+    final retainedCount = _items.length;
+    _isLoadingMore = false;
+    _nextCursor = null;
+    await Future.wait([
+      () async {
+        try {
+          await _readVisibleItems(epoch, retainedCount);
+        } catch (_) {
+          if (_isCurrent(epoch)) {
+            _errorMessage = 'History could not be refreshed. Try again.';
+          }
+        }
+        if (_isCurrent(epoch)) notifyListeners();
+      }(),
+      refreshFacets(),
+    ]);
+  }
+
+  Future<void> _readVisibleItems(int epoch, int retainedCount) async {
+    final refreshed = <HistoryClip>[];
+    String? cursor;
+    var skipped = 0;
+    do {
+      final page = await _repository.query(
+        query: _query,
+        limit: pageSize,
+        cursor: cursor,
+      );
+      if (!_isCurrent(epoch)) return;
+      refreshed.addAll(page.items);
+      skipped += page.skippedUndecryptable;
+      cursor = page.nextCursor;
+    } while (cursor != null && refreshed.length < retainedCount);
+    _items
+      ..clear()
+      ..addAll(refreshed);
+    _nextCursor = cursor;
+    _skippedUndecryptable = skipped;
+    _state = _items.isEmpty ? HistoryLoadState.empty : HistoryLoadState.ready;
   }
 
   Future<void> refreshFacets() async {
@@ -115,6 +200,11 @@ class HistoryController extends ChangeNotifier {
   }
 
   Future<void> reload() async {
+    if (_draggedPinnedId != null || _isReorderingPinned) {
+      _queryEpoch++;
+      _refreshAfterPinnedInteraction = true;
+      return;
+    }
     final epoch = ++_queryEpoch;
     _isLoadingMore = false;
     _nextCursor = null;
@@ -144,8 +234,15 @@ class HistoryController extends ChangeNotifier {
   }
 
   Future<void> loadMore() async {
+    while (_visibleItemsRefresh != null) {
+      await _visibleItemsRefresh;
+      if (_disposed) return;
+    }
     final cursor = _nextCursor;
-    if (cursor == null || _isLoadingMore || _state != HistoryLoadState.ready) {
+    if (cursor == null ||
+        _isLoadingMore ||
+        _isReorderingPinned ||
+        _state != HistoryLoadState.ready) {
       return;
     }
     final epoch = _queryEpoch;
@@ -249,6 +346,7 @@ class HistoryController extends ChangeNotifier {
   }
 
   Future<bool> togglePin(HistoryClip clip) async {
+    if (_isReorderingPinned || _draggedPinnedId != null) return false;
     if (!_pinMutations.add(clip.id)) {
       return false;
     }
@@ -277,12 +375,131 @@ class HistoryController extends ChangeNotifier {
     }
   }
 
+  void beginPinnedDrag(String id) {
+    if (!canReorderPinned ||
+        !_items.any((item) => item.id == id && item.pinned)) {
+      return;
+    }
+    if (_visibleItemsRefresh != null) {
+      _queryEpoch++;
+      _refreshAfterPinnedInteraction = true;
+    }
+    _draggedPinnedId = id;
+    _cancelledPinnedId = null;
+    notifyListeners();
+  }
+
+  void endPinnedDrag() {
+    if (_draggedPinnedId == null) return;
+    _draggedPinnedId = null;
+    if (!_disposed) notifyListeners();
+    // Sortable calls drag-end before its accept callback starts the save.
+    scheduleMicrotask(_flushPinnedRefresh);
+  }
+
+  void cancelPinnedDrag() {
+    _cancelledPinnedId = _draggedPinnedId;
+    endPinnedDrag();
+    // Flutter may end an accepted pan on pointer cancellation. Reject that
+    // gesture's drop before clearing the cancellation at the event boundary.
+    scheduleMicrotask(() => _cancelledPinnedId = null);
+  }
+
+  void _flushPinnedRefresh() {
+    if (_disposed || _draggedPinnedId != null || _isReorderingPinned) return;
+    if (_refreshAfterPinnedInteraction) {
+      _refreshAfterPinnedInteraction = false;
+      unawaited(_refreshItemsAndFacets());
+    }
+  }
+
+  Future<bool> shiftPinned(String id, {required bool up}) async {
+    final pins = _items.where((item) => item.pinned).toList();
+    final index = pins.indexWhere((item) => item.id == id);
+    final target = index + (up ? -1 : 1);
+    if (index < 0 || target < 0 || target >= pins.length) return false;
+    return movePinned(id, pins[target].id, before: up);
+  }
+
+  /// Reorders the loaded pin prefix while the backend preserves its unseen tail.
+  Future<bool> movePinned(
+    String id,
+    String targetId, {
+    required bool before,
+  }) async {
+    if (!canReorderPinned || id == targetId || _cancelledPinnedId == id) {
+      return false;
+    }
+    final previous = _items
+        .where((item) => item.pinned)
+        .map((item) => item.id)
+        .toList();
+    if (!previous.contains(id) || !previous.contains(targetId)) return false;
+    final ordered = previous.where((value) => value != id).toList();
+    ordered.insert(ordered.indexOf(targetId) + (before ? 0 : 1), id);
+    if (listEquals(previous, ordered)) return false;
+
+    final retainedCount = _items.length;
+    final previousCursor = _nextCursor;
+    final epoch = ++_queryEpoch;
+    _isReorderingPinned = true;
+    _isLoadingMore = false;
+    _nextCursor = null;
+    _errorMessage = null;
+    _applyPinnedOrder(ordered);
+    notifyListeners();
+    try {
+      await _repository.reorderPinned(ordered);
+    } catch (_) {
+      if (_isCurrent(epoch)) {
+        _applyPinnedOrder(previous);
+        _nextCursor = previousCursor;
+        _errorMessage = 'The pinned order could not be saved. Try again.';
+      }
+      _isReorderingPinned = false;
+      if (!_disposed) notifyListeners();
+      _flushPinnedRefresh();
+      return false;
+    }
+
+    try {
+      if (_isCurrent(epoch)) {
+        _refreshAfterPinnedInteraction = false;
+        // Rebuild the continuation marker without clearing the visible list or
+        // using a cursor whose last pin may have moved to a different position.
+        await _readVisibleItems(epoch, retainedCount);
+      }
+    } catch (_) {
+      if (_isCurrent(epoch)) {
+        _errorMessage =
+            'The order was saved, but history could not be refreshed.';
+      }
+    } finally {
+      _isReorderingPinned = false;
+      if (!_disposed) notifyListeners();
+      _flushPinnedRefresh();
+    }
+    return true;
+  }
+
+  void _applyPinnedOrder(List<String> ids) {
+    final byId = {
+      for (final item in _items.where((item) => item.pinned)) item.id: item,
+    };
+    final unpinned = _items.where((item) => !item.pinned).toList();
+    _items
+      ..clear()
+      ..addAll(ids.map((id) => byId[id]).whereType<HistoryClip>())
+      ..addAll(unpinned);
+  }
+
   Future<bool> deleteSelected() async {
     final id = _selectedId;
     return id == null ? false : deleteClip(id);
   }
 
   Future<bool> deleteClip(String id) async {
+    if (_isReorderingPinned || _draggedPinnedId != null) return false;
     if (!_deleteMutations.add(id)) {
       return false;
     }
@@ -308,7 +525,7 @@ class HistoryController extends ChangeNotifier {
   }
 
   Future<bool> deleteAll() async {
-    if (_isDeletingAll) {
+    if (_isDeletingAll || _isReorderingPinned || _draggedPinnedId != null) {
       return false;
     }
     _isDeletingAll = true;
