@@ -235,7 +235,7 @@ impl StoreSource {
         Some(SyncItem {
             content,
             binary_content,
-            payload_metadata: row.payload_metadata,
+            payload_metadata: self.store.payload_metadata_for_sync(&row).ok()?,
             source_app_bundle_id: row.app_bundle_id,
             source_app_name: row.app_name,
             content_type: row.content_type,

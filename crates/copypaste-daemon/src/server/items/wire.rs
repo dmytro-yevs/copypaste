@@ -127,6 +127,7 @@ fn to_wire_with(
         origin_device_class: origin.device_class,
         source_app_bundle_id: row.app_bundle_id,
         source_app_name: row.app_name,
+        source_app_icon_id: row.source_icon_id,
         too_large_to_sync,
         truncated,
     };

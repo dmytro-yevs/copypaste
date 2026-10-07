@@ -391,6 +391,17 @@ pub(super) fn upsert_in_tx(
     // Before the write below clears `fts_rowid`, and rolled back with it if
     // the dedup index refuses the version.
     delete_fts_row_in_tx(tx, incoming.id)?;
+    let (metadata, source_icon_id) = if incoming.deleted {
+        (None, None)
+    } else {
+        super::source_icons::normalise(
+            tx,
+            incoming.app_bundle_id,
+            incoming.content_type,
+            incoming.created_at,
+            incoming.payload_metadata,
+        )?
+    };
     let (pinned, pin_order, pin_updated_at) = if incoming.deleted {
         (false, None, 0)
     } else {
@@ -409,8 +420,8 @@ pub(super) fn upsert_in_tx(
             "INSERT INTO clipboard_items \
                  (id, content_ciphertext, nonce, content_type, content_hash, \
                   pinned, pin_order, pin_updated_at, created_at, deleted, origin_device_id, app_bundle_id, app_name, \
-                  payload_metadata, fts_rowid, content_bytes) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, \
+                  payload_metadata, fts_rowid, source_icon_id, content_bytes) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
                      LENGTH(COALESCE(?2, X'')) + LENGTH(COALESCE(?14, ''))) \
              ON CONFLICT(id) DO UPDATE SET \
                  content_ciphertext = excluded.content_ciphertext, \
@@ -424,6 +435,7 @@ pub(super) fn upsert_in_tx(
                  app_bundle_id      = excluded.app_bundle_id, \
                  app_name           = excluded.app_name, \
                  payload_metadata   = excluded.payload_metadata, \
+                 source_icon_id     = excluded.source_icon_id, \
                  pinned             = excluded.pinned, \
                  pin_order          = excluded.pin_order, \
                  pin_updated_at     = excluded.pin_updated_at, \
@@ -442,8 +454,9 @@ pub(super) fn upsert_in_tx(
                 incoming.origin_device_id,
                 incoming.app_bundle_id,
                 incoming.app_name,
-                incoming.payload_metadata,
+                metadata,
                 fts_rowid,
+                source_icon_id,
             ],
         );
 
