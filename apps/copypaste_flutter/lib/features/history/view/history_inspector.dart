@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:copypaste_flutter/app/theme/app_overlays.dart';
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_toast.dart';
@@ -17,6 +16,7 @@ import 'package:copypaste_flutter/shared/system_date_time.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../presentation/history_color_swatch.dart';
+import 'history_delete_dialog.dart';
 
 class HistoryInspector extends StatelessWidget {
   const HistoryInspector({
@@ -236,7 +236,11 @@ class HistoryInspector extends StatelessWidget {
                     ),
                   ),
                   Button.destructive(
-                    onPressed: () => _confirmDelete(context, clip.id),
+                    onPressed: () => showHistoryDeleteDialog(
+                      context,
+                      controller: controller,
+                      clipId: clip.id,
+                    ),
                     leading: const Icon(LucideIcons.trash2),
                     child: const Text('Delete'),
                   ),
@@ -310,36 +314,6 @@ class HistoryInspector extends StatelessWidget {
       title: 'Downloaded',
       message: 'File saved.',
       tone: AppToastTone.success,
-    );
-  }
-
-  Future<void> _confirmDelete(BuildContext context, String clipId) {
-    return AppOverlays.showDialog<void>(
-      context,
-      builder: (context) => AnimatedBuilder(
-        animation: controller,
-        builder: (context, child) => AppOverlays.alertDialog(
-          icon: LucideIcons.trash2,
-          title: const Text('Delete this clip?'),
-          actions: [
-            Button.ghost(
-              onPressed: controller.isDeletePending(clipId)
-                  ? null
-                  : () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            Button.destructive(
-              onPressed: controller.isDeletePending(clipId)
-                  ? null
-                  : () async {
-                      final deleted = await controller.deleteSelected();
-                      if (deleted && context.mounted) Navigator.pop(context);
-                    },
-              child: const Text('Delete'),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -541,7 +515,7 @@ Widget _historyMetadataIdentityLabel({
     'Observed app' => SourceAppLabel(
       key: const ValueKey<String>('history-detail-source-app'),
       name: row.value,
-      icon: controller.requestSourceIcon(clip.id),
+      icon: controller.requestSourceIcon(clip.sourceAppIconId),
       style: style,
     ),
     'Device' => DeviceLabel(

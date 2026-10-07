@@ -234,9 +234,9 @@ pub(super) fn image_preview(
     )
 }
 
-/// Return persisted source-icon metadata without opening an item's clipboard body.
+/// Return a shared source-application asset without opening clipboard bodies.
 pub(super) fn source_app_icon(state: &AppState, id: u64, item_id: &str) -> Response {
-    let icon = match state.store.source_app_icon_metadata(item_id) {
+    let icon = match state.store.source_app_icon_by_id(item_id) {
         Ok(icon) => icon,
         Err(error) => return storage_error(id, "source_app_icon", &error),
     };

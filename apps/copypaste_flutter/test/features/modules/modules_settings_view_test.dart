@@ -2,10 +2,101 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/features/modules/controller/modules_controller.dart';
+import 'package:copypaste_flutter/features/modules/models/module_marketplace_models.dart';
+import 'package:copypaste_flutter/features/modules/models/module_models.dart';
+import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/features/modules/view/modules_settings_view.dart';
 import 'modules_test_support.dart';
 
 void main() {
+  for (final width in [320.0, 1000.0]) {
+    testWidgets('marketplace search and installation work at width $width', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(Size(width, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final repository = MemoryModulesRepository();
+      final marketplace = MemoryModuleMarketplace();
+      final controller = ModulesController(
+        repository: repository,
+        marketplace: marketplace,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: Scaffold(
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                child: ModulesSettingsView(controller: controller),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Install or update module'), findsNothing);
+      expect(find.text('Text Tools'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), 'not a module');
+      await tester.pumpAndSettle();
+      expect(find.text('No matching modules'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), 'transform');
+      await tester.pumpAndSettle();
+      expect(find.text('Text Tools'), findsOneWidget);
+      await tester.tap(find.widgetWithText(Button, 'Install'));
+      await tester.pumpAndSettle();
+      expect(repository.calls, ['install']);
+      expect(marketplace.disposedPackages, 1);
+      expect(
+        tester
+            .widget<Button>(find.widgetWithText(Button, 'Installed'))
+            .onPressed,
+        isNull,
+      );
+      await tester.tap(find.text('Installed').first);
+      await tester.pumpAndSettle();
+      expect(find.text('Transform text'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('catalog failure preserves installed module management', (
+    tester,
+  ) async {
+    final repository = MemoryModulesRepository()..modules = [testModule];
+    final marketplace = MemoryModuleMarketplace()
+      ..failure = const ModulesException('Offline.');
+    final controller = ModulesController(
+      repository: repository,
+      marketplace: marketplace,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: Scaffold(
+          child: SingleChildScrollView(
+            child: ModulesSettingsView(controller: controller),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Marketplace is unavailable'), findsOneWidget);
+    await tester.tap(find.text('Installed'));
+    await tester.pumpAndSettle();
+    expect(find.text('Text Tools'), findsOneWidget);
+    await tester.tap(find.byType(Switch));
+    await tester.pumpAndSettle();
+    expect(repository.calls, ['enabled:false']);
+    expect(tester.takeException(), isNull);
+  });
+
   for (final width in [360.0, 1000.0]) {
     testWidgets('module commands and settings work at width $width', (
       tester,
@@ -15,10 +106,11 @@ void main() {
       final repository = MemoryModulesRepository()..modules = [testModule];
       final controller = ModulesController(
         repository: repository,
-        picker: MemoryModulePicker(),
+        marketplace: MemoryModuleMarketplace(),
       );
       addTearDown(controller.dispose);
       await controller.initialize();
+      controller.selectSection(ModulesSection.installed);
       await tester.pumpWidget(
         ShadcnApp(
           theme: AppTheme.light,

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:copypaste_flutter/features/devices/devices_gateway.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
@@ -214,8 +215,8 @@ void main() {
           'one',
           maxEdge: 1024,
         );
-        final firstSourceIcon = controller.requestSourceIcon('one');
-        final repeatedSourceIcon = controller.requestSourceIcon('one');
+        final firstSourceIcon = controller.requestSourceIcon('app:one');
+        final repeatedSourceIcon = controller.requestSourceIcon('app:one');
 
         expect(identical(firstThumbnail, repeatedThumbnail), isTrue);
         expect(identical(firstSourceIcon, repeatedSourceIcon), isTrue);
@@ -229,6 +230,63 @@ void main() {
         controller.dispose();
       },
     );
+
+    test(
+      'retains loaded source icons and bounds retired cache entries',
+      () async {
+        final repository = _HistoryRepository();
+        final clips = [
+          for (var index = 0; index < 50; index++) _clip('icon-$index'),
+        ];
+        repository.pages.addAll([
+          Future.value(HistoryClipPage(items: clips)),
+          Future.value(HistoryClipPage(items: [_clip('next')])),
+          Future.value(HistoryClipPage(items: clips)),
+        ]);
+        final controller = HistoryController(repository);
+        addTearDown(controller.dispose);
+        await controller.initialize();
+        await Future.wait([
+          for (final clip in clips)
+            controller.requestSourceIcon(clip.sourceAppIconId),
+        ]);
+        await Future.wait([
+          for (final clip in clips)
+            controller.requestSourceIcon(clip.sourceAppIconId),
+        ]);
+        expect(repository.sourceIconCalls, 50);
+
+        await controller.updateQuery(const HistoryQuery(search: 'next'));
+        await controller.updateQuery(const HistoryQuery());
+        await controller.requestSourceIcon('app:icon-0');
+        expect(repository.sourceIconCalls, 51);
+        await controller.requestSourceIcon('app:icon-49');
+        expect(repository.sourceIconCalls, 51);
+      },
+    );
+
+    test('shared icon requests survive a history query change', () async {
+      final repository = _HistoryRepository();
+      final pending = Completer<HistorySourceAppIcon?>();
+      repository.sourceIconFuture = pending.future;
+      repository.pages.addAll([
+        Future.value(HistoryClipPage(items: [_clip('one')])),
+        Future.value(HistoryClipPage(items: [_clip('two')])),
+      ]);
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      final first = controller.requestSourceIcon('app:shared');
+      await controller.updateQuery(const HistoryQuery(search: 'two'));
+      final second = controller.requestSourceIcon('app:shared');
+      expect(identical(first, second), isTrue);
+      final icon = HistorySourceAppIcon(Uint8List.fromList([1, 2, 3]));
+      pending.complete(icon);
+      expect(await first, same(icon));
+      expect(await second, same(icon));
+      expect(await controller.requestSourceIcon('app:shared'), same(icon));
+      expect(repository.sourceIconCalls, 1);
+    });
 
     test(
       'loads backend filter labels while retaining their stable IDs',
@@ -313,6 +371,22 @@ void main() {
       controller.dispose();
     });
 
+    test('deletes a clip without changing another clip selection', () async {
+      final repository = _HistoryRepository();
+      repository.pages.add(
+        Future.value(HistoryClipPage(items: [_clip('one'), _clip('two')])),
+      );
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await controller.select('one');
+
+      expect(await controller.deleteClip('two'), isTrue);
+      expect(controller.items.map((clip) => clip.id), ['one']);
+      expect(controller.selectedId, 'one');
+      expect(controller.selectedClip?.id, 'one');
+    });
+
     test('guards delete mutations and preserves state after failure', () async {
       final repository = _HistoryRepository();
       final pendingDelete = Completer<void>();
@@ -388,6 +462,7 @@ void main() {
 
 HistoryClip _clip(String id) => HistoryClip(
   id: id,
+  sourceAppIconId: 'app:$id',
   contentType: 'text/plain',
   preview: id,
   createdAt: DateTime.utc(2026),

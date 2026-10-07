@@ -98,7 +98,7 @@ pub struct HistorySourceAppFacet {
     pub id: String,
     pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub icon_item_id: Option<String>,
+    pub icon_id: Option<String>,
 }
 
 /// Filter values derived from the complete retained history, rather than from
@@ -528,6 +528,10 @@ pub struct Item {
     /// bundle/package id, never this mutable label.
     #[serde(default)]
     pub source_app_name: Option<String>,
+
+    /// Shared icon asset identity, independent of the clipboard item id.
+    #[serde(default)]
+    pub source_app_icon_id: Option<String>,
 
     /// This item exceeds the sync size limit, so sync refuses it before sending
     /// it to another device.
