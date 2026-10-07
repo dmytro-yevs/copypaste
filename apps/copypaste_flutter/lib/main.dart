@@ -4,7 +4,9 @@ import 'platform/lifecycle/application_restarter.dart';
 
 import 'features/modules/controller/modules_controller.dart';
 import 'features/modules/repository/runtime_modules_repository.dart';
-import 'features/modules/repository/file_selector_module_package_picker.dart';
+import 'features/modules/repository/file_selector_module_input_picker.dart';
+import 'features/modules/repository/github_module_marketplace_repository.dart';
+import 'platform/modules/module_marketplace_platform.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -246,7 +248,10 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
         );
         _modulesController = ModulesController(
           repository: RuntimeModulesRepository(),
-          picker: const FileSelectorModulePackagePicker(),
+          marketplace: GitHubModuleMarketplaceRepository(
+            temporaryDirectory: getTemporaryDirectory,
+            currentTarget: ModuleMarketplacePlatform().currentTarget,
+          ),
           inputPicker: const FileSelectorModuleInputPicker(),
           restart: () async {
             if (Platform.isAndroid) {

@@ -12,7 +12,7 @@ macro_rules! item_columns {
     () => {
         "id, content_ciphertext, nonce, content_type, content_hash, created_at, \
          pinned, pin_order, pin_updated_at, deleted, origin_device_id, \
-         app_bundle_id, app_name, payload_metadata"
+         app_bundle_id, app_name, payload_metadata, source_icon_id"
     };
 }
 
@@ -25,7 +25,7 @@ macro_rules! item_columns_ci {
          ci.created_at AS created_at, ci.pinned AS pinned, ci.pin_order AS pin_order, \
          ci.pin_updated_at AS pin_updated_at, ci.deleted AS deleted, \
          ci.origin_device_id AS origin_device_id, ci.app_bundle_id AS app_bundle_id, \
-         ci.app_name AS app_name, ci.payload_metadata AS payload_metadata"
+         ci.app_name AS app_name, ci.payload_metadata AS payload_metadata, ci.source_icon_id AS source_icon_id"
     };
 }
 
@@ -37,7 +37,7 @@ macro_rules! stored_item_columns {
     () => {
         "id, content_ciphertext, nonce, content_type, content_hash, \
          pinned, pin_order, pin_updated_at, created_at, deleted, origin_device_id, \
-         app_bundle_id, app_name, payload_metadata, fts_rowid"
+         app_bundle_id, app_name, payload_metadata, fts_rowid, source_icon_id"
     };
 }
 
@@ -109,6 +109,7 @@ impl Ingest {
 /// on a second connection would violate the storage/sync ownership boundary.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoredItem {
+    pub source_icon_id: Option<String>,
     pub id: String,
     /// Empty on a tombstone: the soft delete wiped the payload.
     pub content_ciphertext: Vec<u8>,
@@ -181,7 +182,7 @@ pub enum StoreError {
     InvalidDeviceName,
 }
 
-pub(super) const ITEM_COLUMN_COUNT: usize = 14;
+pub(super) const ITEM_COLUMN_COUNT: usize = 15;
 
 pub(super) struct ItemColumns([usize; ITEM_COLUMN_COUNT]);
 
@@ -218,6 +219,7 @@ pub(super) fn row_to_item(row: &Row<'_>, columns: &ItemColumns) -> rusqlite::Res
         app_bundle_id: row.get(at[11])?,
         app_name: row.get(at[12])?,
         payload_metadata: row.get(at[13])?,
+        source_icon_id: row.get(at[14])?,
     })
 }
 
@@ -259,7 +261,7 @@ mod tests {
         for sql in [
             concat!("SELECT ", item_columns!(), " FROM clipboard_items"),
             concat!("SELECT ", item_columns_ci!(), " FROM clipboard_items ci"),
-            "SELECT payload_metadata, app_name, app_bundle_id, origin_device_id, deleted, \
+            "SELECT source_icon_id, payload_metadata, app_name, app_bundle_id, origin_device_id, deleted, \
              pin_updated_at, pin_order, pinned, created_at, content_hash, \
              content_type, nonce, content_ciphertext, id FROM clipboard_items",
         ] {
