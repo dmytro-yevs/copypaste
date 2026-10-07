@@ -34,6 +34,8 @@ pub enum EventKind {
 /// One push frame on a [`crate::Method::Watch`] connection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventData {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_status: Option<crate::SyncStatus>,
     pub event: EventKind,
     /// Live item count at the time of the event, so a client can render a badge
     /// without a round trip.

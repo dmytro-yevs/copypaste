@@ -17,10 +17,12 @@ use copypaste_ipc::{
     ErrorCode, EventData, EventKind, Item, ItemPage, Method, Response, ResponseData,
 };
 use copypaste_p2p::discovery::Discovery;
+#[cfg(test)]
 use copypaste_p2p::peers::PeerStore;
 use copypaste_p2p::Node;
 
 pub mod capture_admission;
+mod peer_sync;
 mod settings;
 use capture_admission::{CaptureAdmission, CaptureKind, CaptureScope};
 
@@ -28,6 +30,7 @@ use settings::{RuntimeSettings, SettingsError};
 
 /// Storage and direct peer networking shared by daemon and in-process hosts.
 pub struct Runtime {
+    peer_sync: Arc<peer_sync::PeerSyncDriver>,
     modules: Arc<copypaste_modules::ModuleHost>,
     pub store: Store,
     pub keyring: Arc<Keyring>,
@@ -82,8 +85,12 @@ impl Runtime {
             .device_identity(device_name)
             .map_err(|_| RuntimeError::Storage)?;
         let settings = Arc::new(RuntimeSettings::load(&store));
-        let peers = PeerStore::open(&data_dir.join(copypaste_p2p::peers::DEFAULT_FILE_NAME))
-            .map_err(|_| RuntimeError::PeerStore)?;
+        let peers = copypaste_core::peer_store::open(
+            &store,
+            &keyring,
+            &data_dir.join(copypaste_p2p::peers::DEFAULT_FILE_NAME),
+        )
+        .map_err(|_| RuntimeError::PeerStore)?;
         let discovery = Discovery::dormant(&identity.device_name, port).ok();
         let node = Arc::new(Node::new(
             peers,
@@ -103,6 +110,7 @@ impl Runtime {
         let (shutdown, _) = tokio::sync::watch::channel(false);
         let device_class = copypaste_p2p::DeviceProfile::current().device_class;
         Ok(Self {
+            peer_sync: peer_sync::PeerSyncDriver::new(),
             modules: Arc::new(copypaste_modules::ModuleHost::new(data_dir)),
             store,
             keyring,
@@ -154,6 +162,7 @@ impl Runtime {
                 Response::ok(
                     id,
                     ResponseData::Status(copypaste_ipc::StatusData {
+                        sync_status: self.node.sync_status(settings.config.sync_enabled),
                         device_details: Some(p2p_contract::local_device_details(
                             &self.device_name,
                             self.node.listen_addr().as_deref(),
@@ -287,6 +296,7 @@ impl Runtime {
                 self.node
                     .refresh_reachability(peers.iter().cloned(), move || {
                         let _ = events.send(EventData {
+                            sync_status: None,
                             event: EventKind::Peers,
                             item_count: store.count().unwrap_or(0),
                             captured: false,
@@ -449,7 +459,7 @@ impl Runtime {
         if self.listener_started.swap(true, Ordering::AcqRel) {
             return Ok(());
         }
-        let listener = match copypaste_p2p::node::bind(self.node.port()) {
+        let listener = match self.node.bind_listener() {
             Ok(listener) => listener,
             Err(_) => {
                 self.listener_started.store(false, Ordering::Release);
@@ -489,12 +499,31 @@ impl Runtime {
         });
         let runtime = Arc::clone(self);
         let mut pairing_changes = self.node.subscribe_pairing_changes();
+        let mut sync_changes = self.node.subscribe_sync_changes();
         let mut shutdown = self.shutdown.subscribe();
         tokio::spawn(async move {
             loop {
-                tokio::select! { _ = shutdown.changed() => return, changed = pairing_changes.changed() => if changed.is_err() { return } else { runtime.emit(EventKind::Peers); } }
+                tokio::select! {
+                    _ = shutdown.changed() => return,
+                    changed = pairing_changes.changed() => if changed.is_err() { return } else {
+                        runtime.peer_sync.wake();
+                        runtime.emit(EventKind::Peers);
+                    },
+                    changed = sync_changes.changed() => if changed.is_err() { return } else {
+                        let _ = runtime.events.send(EventData {
+                            sync_status: Some(runtime.node.sync_status(runtime.settings.config().sync_enabled)),
+                            event: EventKind::Peers,
+                            item_count: runtime.store.count().unwrap_or(0),
+                            captured: false,
+                            captured_item_id: None,
+                        });
+                    },
+                }
             }
         });
+        self.peer_sync
+            .set_enabled(self.settings.config().sync_enabled);
+        tokio::spawn(peer_sync::run(Arc::clone(self)));
         Ok(())
     }
 
@@ -733,6 +762,7 @@ impl Runtime {
 
     fn emit(&self, event: EventKind) {
         let _ = self.events.send(EventData {
+            sync_status: None,
             event,
             item_count: self.store.count().unwrap_or(0),
             captured: false,
@@ -741,7 +771,10 @@ impl Runtime {
     }
 
     fn emit_capture(&self, item_id: String) {
+        self.node.note_local_version(now_ms());
+        self.peer_sync.wake();
         let _ = self.events.send(EventData {
+            sync_status: None,
             event: EventKind::Items,
             item_count: self.store.count().unwrap_or(0),
             captured: true,
@@ -756,6 +789,7 @@ impl Runtime {
     ) -> Result<settings::SettingsApplied, SettingsError> {
         let settings = Arc::clone(&self.settings);
         let node = Arc::clone(&self.node);
+        let peer_sync = Arc::clone(&self.peer_sync);
         let store = self.store.clone();
         let events = self.events.clone();
         tokio::task::spawn_blocking(move || {
@@ -776,8 +810,19 @@ impl Runtime {
                 if applied.before.lan_visibility != applied.config.lan_visibility {
                     node.set_lan_visibility(applied.config.lan_visibility);
                 }
+                if applied.before.sync_enabled != applied.config.sync_enabled {
+                    peer_sync.set_enabled(applied.config.sync_enabled);
+                    let _ = events.send(EventData {
+                        sync_status: Some(node.sync_status(applied.config.sync_enabled)),
+                        event: EventKind::Peers,
+                        item_count: store.count().unwrap_or(0),
+                        captured: false,
+                        captured_item_id: None,
+                    });
+                }
                 if removed > 0 {
                     let _ = events.send(EventData {
+                        sync_status: None,
                         event: EventKind::Items,
                         item_count: store.count().unwrap_or(0),
                         captured: false,
@@ -1069,6 +1114,13 @@ impl Runtime {
     }
 
     async fn sync_now(&self, request_id: u64, pairing_id: Option<String>) -> Response {
+        if !self.settings.config().sync_enabled {
+            return Response::err(request_id, ErrorCode::NotReady, "Sync is turned off.");
+        }
+        let _round = self.peer_sync.rounds.enter().await;
+        if !self.settings.config().sync_enabled {
+            return Response::err(request_id, ErrorCode::NotReady, "Sync is turned off.");
+        }
         let peers = match pairing_id {
             Some(id) => match self.node.peers().get(&id) {
                 Some(peer) => vec![peer],
@@ -1079,9 +1131,16 @@ impl Runtime {
         let mut results = Vec::with_capacity(peers.len());
         for peer in &peers {
             let started = std::time::Instant::now();
-            let outcome = self.node.sync_one(peer, self.source.as_ref()).await;
+            let cancel = self.peer_sync.cycle.cancel_token();
+            let outcome = tokio::select! {
+                _ = cancel.cancelled() => Err(copypaste_p2p::NodeError::Session),
+                result = self.node.sync_one_in_cycle(peer, self.source.as_ref(), &self.peer_sync.cycle) => result,
+            };
             if let Ok(outcome) = &outcome {
                 self.remember_device(outcome);
+                if outcome.stats.received > 0 {
+                    self.emit(EventKind::Items);
+                }
             }
             results.push(p2p_contract::sync_result(peer, outcome, started.elapsed()));
         }
@@ -1451,7 +1510,7 @@ mod tests {
         let identity = store.device_identity("fixture phone").unwrap();
         let settings = Arc::new(RuntimeSettings::load(&store));
         let node = Arc::new(Node::new(
-            PeerStore::open(&dir.path().join("peers.json")).unwrap(),
+            PeerStore::open(&dir.path().join("peers.json"), &keyring.peer_store_key()).unwrap(),
             None,
             0,
             true,
@@ -1468,6 +1527,7 @@ mod tests {
         let (shutdown, _) = tokio::sync::watch::channel(false);
         (
             Arc::new(Runtime {
+                peer_sync: peer_sync::PeerSyncDriver::new(),
                 modules: Arc::new(copypaste_modules::ModuleHost::new(dir.path())),
                 store,
                 keyring,
@@ -2224,12 +2284,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn local_text_and_image_capture_sync_without_a_manual_request() {
+        let (receiver, _receiver_dir) = fixture();
+        let (sender, _sender_dir) = fixture();
+        receiver.start_listener().await.unwrap();
+        sender.start_listener().await.unwrap();
+        let receiver_address: std::net::SocketAddr =
+            receiver.node.listen_addr().unwrap().parse().unwrap();
+        let sender_address: std::net::SocketAddr =
+            sender.node.listen_addr().unwrap().parse().unwrap();
+        let token = copypaste_p2p::PairingToken::generate();
+        for (runtime, address) in [(&receiver, sender_address), (&sender, receiver_address)] {
+            runtime
+                .node
+                .peers()
+                .upsert(copypaste_p2p::Peer {
+                    pairing_id: token.pairing_id(),
+                    device_id: None,
+                    name: "automatic peer".into(),
+                    psk: token.psk(),
+                    last_addr: Some(address),
+                    last_seen_ms: 0,
+                    profile: None,
+                    profile_observed_at_ms: 0,
+                })
+                .unwrap();
+        }
+        sender.capture_text("automatic clipboard text").unwrap();
+        let png = STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=").unwrap();
+        sender
+            .capture_binary(&png, "image/png", None, None)
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while receiver.store.count().unwrap() != 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let row = receiver
+            .store
+            .list(2, 0)
+            .unwrap()
+            .into_iter()
+            .find(|row| row.content_type == "image/png")
+            .unwrap();
+        assert_eq!(&*receiver.source.open_bytes(&row).unwrap(), &png);
+        assert_eq!(
+            receiver.store.count().unwrap(),
+            sender.store.count().unwrap()
+        );
+        receiver.shutdown();
+        sender.shutdown();
+    }
+
+    #[tokio::test]
     async fn inbound_loopback_merge_emits_items_and_peers() {
         let (receiver, _receiver_dir) = fixture();
         let (sender, _sender_dir) = fixture();
         seed_text(&sender, "remote-item", "from peer");
         receiver.start_listener().await.unwrap();
+        receiver.peer_sync.cycle.set_enabled(false);
         sender.start_listener().await.unwrap();
+        sender.peer_sync.cycle.set_enabled(false);
         let remote_addr = tokio::time::timeout(Duration::from_secs(1), async {
             loop {
                 if let Some(address) = receiver.node.listen_addr() {
@@ -2265,18 +2382,21 @@ mod tests {
             .sync_one(&peer, sender.source.as_ref())
             .await
             .unwrap();
-        let first = tokio::time::timeout(Duration::from_secs(1), events.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        let second = tokio::time::timeout(Duration::from_secs(1), events.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(matches!(
-            (first.event, second.event),
-            (EventKind::Items, EventKind::Peers) | (EventKind::Peers, EventKind::Items)
-        ));
+        tokio::time::timeout(Duration::from_secs(1), async {
+            let mut items = false;
+            let mut peers = false;
+            while !items || !peers {
+                let event = events.recv().await.unwrap();
+                if event.sync_status.is_some() {
+                    assert_eq!(event.event, EventKind::Peers);
+                } else {
+                    items |= event.event == EventKind::Items;
+                    peers |= event.event == EventKind::Peers;
+                }
+            }
+        })
+        .await
+        .unwrap();
         assert!(receiver.store.get("remote-item").unwrap().is_some());
         receiver.shutdown();
         sender.shutdown();
@@ -2287,6 +2407,7 @@ mod tests {
         let (receiver, _receiver_dir) = fixture();
         let (sender, _sender_dir) = fixture();
         receiver.start_listener().await.unwrap();
+        receiver.peer_sync.cycle.set_enabled(false);
         let remote_addr = tokio::time::timeout(Duration::from_secs(1), async {
             loop {
                 if let Some(address) = receiver.node.listen_addr() {

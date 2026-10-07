@@ -403,6 +403,8 @@ pub struct DiagnosticCounters {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusData {
     #[serde(default)]
+    pub sync_status: crate::SyncStatus,
+    #[serde(default)]
     pub device_name: String,
     /// Stable local device identity. It is unrelated to a peer pairing id and
     /// omitted by older backends that do not expose it yet.

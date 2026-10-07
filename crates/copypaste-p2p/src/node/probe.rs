@@ -208,7 +208,12 @@ impl Node {
                     AuthenticatedReachability::online(Some(latency_ms), crate::now_ms());
                 self.record_reachability(&peer.pairing_id, observation.clone());
                 self.record_authenticated_profile(&peer.pairing_id, profile.as_ref());
-                self.touch_peer(peer, None, Some(candidate.addr), None);
+                self.touch_peer(
+                    peer,
+                    None,
+                    Some(super::ListenerEndpoint::dialled(candidate.addr)),
+                    None,
+                );
                 return Ok(observation);
             }
             if candidate.source == DialCandidateSource::Discovery {
@@ -301,7 +306,7 @@ mod tests {
 
     fn node(dir: &tempfile::TempDir) -> Arc<Node> {
         Arc::new(Node::new(
-            PeerStore::open(&dir.path().join("peers.json")).unwrap(),
+            PeerStore::open(&dir.path().join("peers.json"), &crate::peers::testutil::KEY).unwrap(),
             None,
             0,
             true,
@@ -488,7 +493,11 @@ mod tests {
         });
 
         let client = Arc::new(Node::new(
-            PeerStore::open(&client_dir.path().join("peers.json")).unwrap(),
+            PeerStore::open(
+                &client_dir.path().join("peers.json"),
+                &crate::peers::testutil::KEY,
+            )
+            .unwrap(),
             Some(Discovery::dormant("client", 0).unwrap()),
             0,
             true,
@@ -541,7 +550,7 @@ mod tests {
     fn unverified_discovery_attempts_are_globally_bounded_and_rescan_reenables_one() {
         let dir = tempfile::tempdir().unwrap();
         let node = Node::new(
-            PeerStore::open(&dir.path().join("peers.json")).unwrap(),
+            PeerStore::open(&dir.path().join("peers.json"), &crate::peers::testutil::KEY).unwrap(),
             Some(Discovery::dormant("client", 0).unwrap()),
             0,
             true,
@@ -604,7 +613,11 @@ mod tests {
         ));
 
         let client = Arc::new(Node::new(
-            PeerStore::open(&client_dir.path().join("peers.json")).unwrap(),
+            PeerStore::open(
+                &client_dir.path().join("peers.json"),
+                &crate::peers::testutil::KEY,
+            )
+            .unwrap(),
             Some(Discovery::dormant("client", 0).unwrap()),
             0,
             true,
