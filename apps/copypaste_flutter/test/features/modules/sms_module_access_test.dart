@@ -73,6 +73,10 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('module-settings-copypaste.sms-codes')),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(Button, 'Set up SMS access'));
       await tester.pumpAndSettle();
       expect(find.text('adb shell test'), findsOneWidget);
@@ -84,7 +88,7 @@ void main() {
         ),
         findsOneWidget,
       );
-      await tester.tap(find.widgetWithText(Button, 'Done'));
+      await tester.tap(find.widgetWithText(Button, 'Done').last);
       await tester.pumpAndSettle();
       await tester.tap(find.byType(Switch));
       await tester.pumpAndSettle();

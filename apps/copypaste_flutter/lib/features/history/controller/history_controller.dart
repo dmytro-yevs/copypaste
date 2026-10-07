@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../models/history_models.dart';
 import '../repository/history_file_downloader.dart';
 import '../repository/history_repository.dart';
+import 'history_ocr_controller.dart';
 
 enum HistoryLoadState { initial, loading, ready, empty, error }
 
@@ -19,8 +20,13 @@ class HistoryController extends ChangeNotifier {
     this.pageSize = 50,
     Duration? searchDebounce,
     HistoryFileDownloader? fileDownloader,
+    this.ocr,
   }) : _fileDownloader = fileDownloader,
-       _searchDebounce = searchDebounce ?? const Duration(milliseconds: 250);
+       _searchDebounce = searchDebounce ?? const Duration(milliseconds: 250) {
+    ocr?.addListener(notifyListeners);
+  }
+
+  final HistoryOcrController? ocr;
 
   static const int _maxCachedMedia = 48;
 
@@ -658,6 +664,8 @@ class HistoryController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    ocr?.removeListener(notifyListeners);
+    ocr?.dispose();
     _queryEpoch++;
     _searchTimer?.cancel();
     _watchSubscription?.cancel();

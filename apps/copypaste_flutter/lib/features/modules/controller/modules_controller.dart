@@ -82,6 +82,21 @@ class ModulesController extends ChangeNotifier {
     return null;
   }
 
+  MarketplaceModule? marketplaceModule(String id) {
+    for (final module in _catalog) {
+      if (module.id == id) return module;
+    }
+    return null;
+  }
+
+  List<ModuleCommand> settingsCommands(InstalledModule module) =>
+      List.unmodifiable(
+        module.commands.where(
+          (command) =>
+              module.id != 'copypaste.ocr' || command.id != 'recognize-image',
+        ),
+      );
+
   MarketplaceModule? updateFor(InstalledModule module) {
     for (final release in _catalog) {
       if (release.canInstall &&
