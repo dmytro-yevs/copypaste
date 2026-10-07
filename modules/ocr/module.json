@@ -5,7 +5,7 @@
   "title": "OCR",
   "description": "Recognize text from an image locally, with automatic script routing.",
   "version": "0.1.0",
-  "app_versions": ">=1.0.0, <2.0.0",
+  "app_versions": ">=1.0.6, <2.0.0",
   "unload_policy": "process",
   "commands": [
     {

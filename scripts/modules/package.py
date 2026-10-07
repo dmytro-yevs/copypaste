@@ -60,7 +60,7 @@ def package(module_dir, library, output, platform, architecture):
         directory = Path(directory)
         manifest_path = directory / "manifest.json"
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-        subprocess.run([str(root / "scripts/release/sign-update-artifact.sh"), str(manifest_path)], check=True)
+        subprocess.run(["bash", (root / "scripts/release/sign-update-artifact.sh").as_posix(), manifest_path.as_posix()], check=True)
         # The updater signer stores a base64-encoded Minisign envelope. Module
         # packages carry the standard plaintext envelope for the Rust verifier.
         signature = base64.b64decode((directory / "manifest.json.sig").read_text().strip(), validate=True)

@@ -141,7 +141,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                       ? 'No modules available'
                       : 'No matching modules',
                   message: controller.query.trim().isEmpty
-                      ? 'Check back for modules for this device.'
+                      ? 'Modules will appear here when they are published.'
                       : 'Try a different search.',
                 )
               : LayoutBuilder(
@@ -188,7 +188,23 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
           const Gap(AppSpacing.sm),
           Text(module.description).small().muted(),
           const Gap(AppSpacing.md),
-          Text('${module.version} · ${module.downloadSize}').small().muted(),
+          Text(
+            [
+              module.version.toString(),
+              if (module.downloadSize != null) module.downloadSize!,
+            ].join(' · '),
+          ).small().muted(),
+          if (module.appRequirement != null) ...[
+            const Gap(AppSpacing.sm),
+            Text('Requires ${module.appRequirement}.').small().muted(),
+          ],
+          if (module.unavailableReason != null) ...[
+            const Gap(AppSpacing.sm),
+            Text(module.unavailableReason!).small().muted(),
+          ] else if (module.systemRequirement != null) ...[
+            const Gap(AppSpacing.sm),
+            Text('Requires ${module.systemRequirement}.').small().muted(),
+          ],
           const Gap(AppSpacing.lg),
           if (active) ...[
             LinearProgressIndicator(
@@ -199,6 +215,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
           Button.primary(
             onPressed:
                 controller.busy ||
+                    !module.canInstall ||
                     (installed != null &&
                         (!update || installed.restartRequired))
                 ? null
@@ -208,6 +225,8 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                   ? controller.installing
                         ? 'Installing…'
                         : 'Downloading ${(controller.downloadProgress! * 100).floor()}%'
+                  : !module.canInstall
+                  ? 'Unavailable'
                   : installed == null
                   ? 'Install'
                   : update

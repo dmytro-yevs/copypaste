@@ -6,14 +6,17 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 import 'package:pub_semver/pub_semver.dart';
 import 'package:copypaste_flutter/features/modules/models/module_marketplace_models.dart';
 import 'package:copypaste_flutter/features/modules/models/module_models.dart';
 import 'package:copypaste_flutter/features/modules/repository/github_module_marketplace_repository.dart';
 import 'package:copypaste_flutter/platform/modules/module_marketplace_platform.dart';
+import 'package:copypaste_flutter/platform/update/app_update_platform.dart';
 import 'package:copypaste_flutter/shared/security/minisign_verifier.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   final target = ModuleMarketplaceTarget(
     platform: 'macos',
     architecture: 'aarch64',
@@ -58,7 +61,7 @@ void main() {
             ),
           );
           expect(
-            modules.single.artifact.downloadUri.path,
+            modules.single.artifact!.downloadUri.path,
             endsWith('ocr-$platform-$architecture.cpmodule'),
           );
         }
@@ -73,7 +76,7 @@ void main() {
               appVersion: Version.parse(version),
             ),
           ),
-          isEmpty,
+          hasLength(1),
         );
       }
       expect(
@@ -85,8 +88,102 @@ void main() {
             appVersion: target.appVersion,
           ),
         ),
-        isEmpty,
+        hasLength(1),
       );
+    },
+  );
+
+  test(
+    'keeps incompatible modules visible with exact app and OS requirements',
+    () {
+      final body = catalog();
+      final module = (body['modules'] as List).first as Map;
+      module['app_versions'] = '>=1.0.6, <2.0.0';
+      for (final artifact in module['artifacts'] as List) {
+        (artifact as Map)['minimum_system_version'] = '14.0.0';
+      }
+      final oldApp = const ModuleCatalogParser()
+          .parse(
+            jsonEncode(body),
+            ModuleMarketplaceTarget(
+              platform: 'macos',
+              architecture: 'aarch64',
+              appVersion: Version.parse('1.0.4'),
+              systemVersion: Version.parse('26.0.0'),
+            ),
+          )
+          .single;
+      expect(oldApp.availability, ModuleAvailability.appVersion);
+      expect(oldApp.canInstall, isFalse);
+      expect(oldApp.appRequirement, contains('1.0.6'));
+      final oldSystem = const ModuleCatalogParser()
+          .parse(
+            jsonEncode(body),
+            ModuleMarketplaceTarget(
+              platform: 'macos',
+              architecture: 'aarch64',
+              appVersion: Version.parse('1.0.6'),
+              systemVersion: Version.parse('13.0.0'),
+            ),
+          )
+          .single;
+      expect(oldSystem.availability, ModuleAvailability.systemVersion);
+      expect(oldSystem.unavailableReason, 'Requires macOS 14 or newer.');
+      expect(oldSystem.canInstall, isFalse);
+      final compatible = const ModuleCatalogParser()
+          .parse(
+            jsonEncode(body),
+            ModuleMarketplaceTarget(
+              platform: 'macos',
+              architecture: 'aarch64',
+              appVersion: Version.parse('1.0.6'),
+              systemVersion: Version.parse('14.0.0'),
+            ),
+          )
+          .single;
+      expect(compatible.canInstall, isTrue);
+      final unknownApp = const ModuleCatalogParser()
+          .parse(
+            jsonEncode(body),
+            const ModuleMarketplaceTarget(
+              platform: 'macos',
+              architecture: 'aarch64',
+              appVersion: null,
+            ),
+          )
+          .single;
+      expect(unknownApp.canInstall, isFalse);
+      expect(unknownApp.availability, ModuleAvailability.appVersion);
+    },
+  );
+
+  test(
+    'reads native versions and preserves app prerelease compatibility',
+    () async {
+      const channel = MethodChannel('test/modules/system-version');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            channel,
+            (call) async =>
+                call.method == 'systemVersion' ? '16' : '1.0.6-beta.1',
+          );
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null),
+      );
+      final platform = ModuleMarketplacePlatform(
+        appPlatform: MethodChannelAppUpdatePlatform(channel: channel),
+        systemChannel: channel,
+        currentAbi: () => Abi.androidArm64,
+      );
+      final versions = await platform.currentTarget();
+      expect(versions.appVersion, Version.parse('1.0.6-beta.1'));
+      expect(versions.systemVersion, Version.parse('16.0.0'));
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async => null);
+      final unknown = await platform.currentTarget();
+      expect(unknown.appVersion, isNull);
+      expect(unknown.systemVersion, isNull);
     },
   );
 
@@ -169,7 +266,7 @@ void main() {
       addTearDown(repository.dispose);
       final module = (await repository.list()).single;
       expect(await directory.list().toList(), isEmpty);
-      client.routes[module.artifact.downloadUri.pathSegments.last] = _Response(
+      client.routes[module.artifact!.downloadUri.pathSegments.last] = _Response(
         utf8.encode('package'),
       );
       final progress = <double>[];
@@ -182,7 +279,7 @@ void main() {
       await package.dispose();
       expect(await directory.list().toList(), isEmpty);
 
-      client.routes[module.artifact.downloadUri.pathSegments.last] = _Response(
+      client.routes[module.artifact!.downloadUri.pathSegments.last] = _Response(
         utf8.encode('changed'),
       );
       await expectLater(
@@ -226,7 +323,7 @@ void main() {
       await expectLater(repository.list(), throwsA(isA<ModulesException>()));
       expect(await directory.list().toList(), isEmpty);
       client.routes['modules.json'] = _Response([], statusCode: 404);
-      await expectLater(repository.list(), throwsA(isA<ModulesException>()));
+      expect(await repository.list(), isEmpty);
       expect(await directory.list().toList(), isEmpty);
     },
   );

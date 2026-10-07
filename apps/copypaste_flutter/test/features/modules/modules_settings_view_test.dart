@@ -5,10 +5,58 @@ import 'package:copypaste_flutter/features/modules/controller/modules_controller
 import 'package:copypaste_flutter/features/modules/models/module_marketplace_models.dart';
 import 'package:copypaste_flutter/features/modules/models/module_models.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
+import 'package:pub_semver/pub_semver.dart';
 import 'package:copypaste_flutter/features/modules/view/modules_settings_view.dart';
 import 'modules_test_support.dart';
 
 void main() {
+  testWidgets(
+    'unsupported versions render a normal module card with installation disabled',
+    (tester) async {
+      final marketplace = MemoryModuleMarketplace()
+        ..modules = [
+          MarketplaceModule(
+            id: testMarketplaceModule.id,
+            title: testMarketplaceModule.title,
+            description: testMarketplaceModule.description,
+            version: testMarketplaceModule.version,
+            artifact: testMarketplaceModule.artifact,
+            appVersions: VersionConstraint.parse('>=1.0.6 <2.0.0'),
+            availability: ModuleAvailability.systemVersion,
+            unavailableReason: 'Requires macOS 14 or newer.',
+          ),
+        ];
+      final controller = ModulesController(
+        repository: MemoryModulesRepository(),
+        marketplace: marketplace,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: Scaffold(
+            child: SingleChildScrollView(
+              child: ModulesSettingsView(controller: controller),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Text Tools'), findsOneWidget);
+      expect(find.text('Requires macOS 14 or newer.'), findsOneWidget);
+      expect(find.text('Marketplace is unavailable'), findsNothing);
+      expect(
+        tester
+            .widget<Button>(find.widgetWithText(Button, 'Unavailable'))
+            .onPressed,
+        isNull,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   for (final width in [320.0, 1000.0]) {
     testWidgets('marketplace search and installation work at width $width', (
       tester,

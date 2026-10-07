@@ -42,13 +42,19 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
 
   @override
   Future<List<MarketplaceModule>> list() async {
-    final target = await _currentTarget();
     final directory = await (await _temporaryDirectory()).createTemp(
       'module-catalog-',
     );
     try {
       final catalog = File('${directory.path}/$moduleCatalogName');
-      await _download(_catalogUri, catalog, maximumBytes: 2 * 1024 * 1024);
+      if (!await _download(
+        _catalogUri,
+        catalog,
+        maximumBytes: 2 * 1024 * 1024,
+        allowMissing: true,
+      )) {
+        return const [];
+      }
       final signature = File('${directory.path}/$moduleCatalogName.sig');
       await _download(
         Uri.parse('$_catalogUri.sig'),
@@ -66,7 +72,7 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
       }
       return const ModuleCatalogParser().parse(
         await catalog.readAsString(),
-        target,
+        await _currentTarget(),
       );
     } on SocketException {
       throw const ModulesException(
@@ -85,6 +91,11 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
     required void Function(double progress) onProgress,
   }) async {
     final artifact = module.artifact;
+    if (artifact == null || !module.canInstall) {
+      throw const ModulesException(
+        'This module is not compatible with this device.',
+      );
+    }
     validateModuleAssetUri(artifact.downloadUri);
     if (artifact.sizeBytes <= 0 ||
         artifact.sizeBytes > maximumModulePackageBytes) {
@@ -124,11 +135,12 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
     }
   }
 
-  Future<void> _download(
+  Future<bool> _download(
     Uri uri,
     File destination, {
     required int maximumBytes,
     void Function(double progress)? onProgress,
+    bool allowMissing = false,
   }) async {
     validateModuleAssetUri(uri);
     for (var redirects = 0; redirects <= 5; redirects++) {
@@ -155,9 +167,12 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
       }
       if (response.statusCode != HttpStatus.ok) {
         request.abort();
+        if (allowMissing && response.statusCode == HttpStatus.notFound) {
+          return false;
+        }
         throw ModulesException(
           response.statusCode == HttpStatus.notFound
-              ? 'The module marketplace has not been published yet.'
+              ? 'This module download is currently unavailable.'
               : 'The module marketplace is unavailable. Try again.',
         );
       }
@@ -181,7 +196,7 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
       } finally {
         await output.close();
       }
-      return;
+      return true;
     }
     throw const ModulesException(
       'The module download used too many redirects.',
@@ -243,6 +258,10 @@ class ModuleCatalogParser {
           final uri = Uri.parse(artifact['url'] as String);
           final size = artifact['size_bytes'] as int;
           final digest = artifact['sha256'] as String;
+          final minimumSystemVersion =
+              artifact['minimum_system_version'] == null
+              ? null
+              : Version.parse(artifact['minimum_system_version'] as String);
           validateModuleAssetUri(uri);
           if (!{'macos', 'windows', 'android'}.contains(platform) ||
               !{'x86', 'x86_64', 'arm', 'aarch64'}.contains(architecture) ||
@@ -259,20 +278,53 @@ class ModuleCatalogParser {
               downloadUri: uri,
               sizeBytes: size,
               sha256: digest,
+              minimumSystemVersion: minimumSystemVersion,
             );
           }
         }
-        if (selected != null && compatibility.allows(target.appVersion)) {
-          modules.add(
-            MarketplaceModule(
-              id: id,
-              title: title,
-              description: description,
-              version: version,
-              artifact: selected,
-            ),
-          );
+        var availability = ModuleAvailability.available;
+        String? reason;
+        final minimum = selected?.minimumSystemVersion;
+        final systemName = switch (target.platform) {
+          'macos' => 'macOS',
+          'windows' => 'Windows',
+          'android' => 'Android',
+          _ => 'this system',
+        };
+        final systemRequirement = minimum == null
+            ? null
+            : '$systemName ${minimum.patch != 0
+                  ? minimum.toString()
+                  : minimum.minor != 0
+                  ? '${minimum.major}.${minimum.minor}'
+                  : minimum.major.toString()} or newer';
+        if (selected == null) {
+          availability = ModuleAvailability.platform;
+          reason = 'Not available for this device.';
+        } else if (target.appVersion == null ||
+            !compatibility.allows(target.appVersion!)) {
+          availability = ModuleAvailability.appVersion;
+          reason = target.appVersion == null
+              ? 'The installed CopyPaste version could not be verified.'
+              : 'This module does not support CopyPaste ${target.appVersion}.';
+        } else if (minimum != null &&
+            (target.systemVersion == null || target.systemVersion! < minimum)) {
+          availability = ModuleAvailability.systemVersion;
+          reason = 'Requires $systemRequirement.';
         }
+        modules.add(
+          MarketplaceModule(
+            id: id,
+            title: title,
+            description: description,
+            version: version,
+            artifact: selected,
+            appVersions: compatibility,
+            availability: availability,
+            unavailableReason: reason,
+            systemRequirement: systemRequirement,
+          ),
+        );
       }
       modules.sort(
         (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),

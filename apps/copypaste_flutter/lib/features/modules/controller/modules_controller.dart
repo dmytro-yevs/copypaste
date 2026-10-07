@@ -78,7 +78,8 @@ class ModulesController extends ChangeNotifier {
 
   MarketplaceModule? updateFor(InstalledModule module) {
     for (final release in _catalog) {
-      if (release.id == module.id &&
+      if (release.canInstall &&
+          release.id == module.id &&
           release.version > Version.parse(module.version)) {
         return release;
       }
@@ -141,6 +142,7 @@ class ModulesController extends ChangeNotifier {
     final installed = installedModule(module.id);
     if (_busy ||
         _disposed ||
+        !module.canInstall ||
         !_catalog.contains(module) ||
         (installed != null &&
             (installed.restartRequired ||

@@ -97,7 +97,12 @@ base64-encoded Minisign `modules.json.sig`, using the pinned release key. Catalo
 metadata is authenticated before rendering or resolving a package. Each entry
 contains ID, title, description, stable version, `app_versions`, and platform /
 architecture artifacts with a versioned release URL, compressed size, and
-SHA-256. Only compatible artifacts appear. Module execution remains offline;
+SHA-256 and optional minimum system versions. All published modules appear;
+incompatible app versions, system versions, or architectures are explained on
+their ordinary cards with installation disabled. Unknown native version facts
+also fail closed on the card. An unpublished or empty catalog uses the shared
+empty state; only authentication, invalid metadata, and network failures use
+the error state. Module execution remains offline;
 only marketplace discovery and installation require network access.
 
 Publish qualified packages under `module-<id>-v<version>` in the first-party
@@ -109,6 +114,22 @@ catalog with the existing release signer secrets. Publication is a separately
 dispatched operation after native qualification; preparing this workflow does
 not publish packages or establish native acceptance evidence. Local catalog
 generation uses `scripts/modules/catalog.py` and Python 3.9+ / OpenSSL 3+.
+Minimum system versions come from authenticated
+`assets/module-distribution.json` inside each package. SDK crate releases are
+independent of application releases, so updating CopyPaste does not invalidate
+the separately maintained OCR dependency lock.
+
+The **Build and publish OCR module** workflow builds every shipped target from
+checksum-pinned models and ONNX Runtime 1.28.0. It signs the packages with the
+production identity, then qualifies the exact bytes on native macOS and Windows
+hosts and inside app-private storage on an Android x86_64 emulator with no
+Internet permission. Desktop execution blocks outbound network access. The
+scenarios cover English, separate Ukrainian/English lines, a mixed line,
+disable/enable, and removal completed after process restart. Receipts bind the
+commit, run, target, package size and SHA-256. Android arm and aarch64 builds
+add ELF/16 KiB alignment checks; their compilation is not physical-device
+execution evidence. Publication requires the three platform receipts and all
+five authenticated packages, then dispatches the signed catalog update.
 
 There is no third-party trust UI.
 Native first-party code runs inside the owning runtime process: this is not a
