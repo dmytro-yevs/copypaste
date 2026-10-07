@@ -74,6 +74,12 @@ for reflective_class in \
     }
 done
 
+capture_contract="$(mktemp -d)"
+trap 'rm -rf "$capture_contract"' EXIT
+"$APK_ANALYZER" dex code --class com.copypaste.app.CaptureCallback "$APK" > "$capture_contract/callback.txt"
+"$APK_ANALYZER" dex code --class com.copypaste.app.NativeRuntimeCapture "$APK" > "$capture_contract/runtime.txt"
+python3 "$(dirname "$0")/verify-capture-jni.py" --callback "$capture_contract/callback.txt" --runtime "$capture_contract/runtime.txt"
+
 directory="$(cd "$(dirname "$APK")" && pwd)"
 filename="$(basename "$APK")"
 (cd "$directory" && sha256sum "$filename" > "$filename.sha256")
