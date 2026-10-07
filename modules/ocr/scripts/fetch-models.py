@@ -77,14 +77,14 @@ def fetch_dictionary(entry, destination):
     if actual != entry["dictionary_sha256"]:
         raise ValueError(f"dictionary source checksum mismatch for {entry['path']}")
     content = parse_character_dict(entry["path"], document)
-    if target.is_file() and target.read_text(encoding="utf-8") == content:
+    if target.is_file() and target.read_bytes() == content.encode("utf-8"):
         print(f"verified {target.name}")
         return
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = None
     try:
         with tempfile.NamedTemporaryFile(
-            dir=target.parent, mode="w", encoding="utf-8", delete=False
+            dir=target.parent, mode="w", encoding="utf-8", newline="\n", delete=False
         ) as temporary:
             temporary_path = Path(temporary.name)
             temporary.write(content)
