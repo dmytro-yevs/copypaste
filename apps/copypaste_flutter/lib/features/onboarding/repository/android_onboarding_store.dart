@@ -9,11 +9,15 @@ class AndroidOnboardingProgress {
     required this.complete,
     required this.mode,
     required this.method,
+    this.captureStarted = false,
+    this.verificationBaseline,
   });
 
   final bool complete;
   final AndroidCaptureMode mode;
   final AndroidCaptureSetupMethod method;
+  final bool captureStarted;
+  final int? verificationBaseline;
 }
 
 abstract interface class AndroidOnboardingStore {
@@ -30,6 +34,8 @@ abstract interface class AndroidOnboardingStore {
   });
 
   Future<void> resetCompletion();
+
+  Future<void> writeCaptureProgress({int? verificationBaseline});
 }
 
 class SharedPreferencesAndroidOnboardingStore
@@ -40,6 +46,9 @@ class SharedPreferencesAndroidOnboardingStore
   static const _versionKey = 'onboarding.android.version';
   static const _modeKey = 'onboarding.android.capture-mode';
   static const _methodKey = 'onboarding.android.capture-method';
+  static const _captureStartedKey = 'onboarding.android.capture-started';
+  static const _verificationBaselineKey =
+      'onboarding.android.verification-baseline';
   static const _currentVersion = 1;
 
   final SharedPreferencesAsync _preferences;
@@ -59,6 +68,8 @@ class SharedPreferencesAndroidOnboardingStore
       complete: version != null && version >= _currentVersion,
       mode: mode,
       method: method,
+      captureStarted: await _preferences.getBool(_captureStartedKey) ?? false,
+      verificationBaseline: await _preferences.getInt(_verificationBaselineKey),
     );
   }
 
@@ -81,7 +92,18 @@ class SharedPreferencesAndroidOnboardingStore
   }
 
   @override
-  Future<void> resetCompletion() => _preferences.remove(_versionKey);
+  Future<void> resetCompletion() async {
+    await _preferences.remove(_versionKey);
+    await _preferences.remove(_verificationBaselineKey);
+  }
+
+  @override
+  Future<void> writeCaptureProgress({int? verificationBaseline}) async {
+    await _preferences.setBool(_captureStartedKey, true);
+    if (verificationBaseline != null) {
+      await _preferences.setInt(_verificationBaselineKey, verificationBaseline);
+    }
+  }
 }
 
 class MemoryAndroidOnboardingStore implements AndroidOnboardingStore {
@@ -89,15 +111,24 @@ class MemoryAndroidOnboardingStore implements AndroidOnboardingStore {
     this.complete = false,
     this.mode = AndroidCaptureMode.full,
     this.method = AndroidCaptureSetupMethod.shizuku,
+    this.captureStarted = false,
+    this.verificationBaseline,
   });
 
   bool complete;
   AndroidCaptureMode mode;
   AndroidCaptureSetupMethod method;
+  bool captureStarted;
+  int? verificationBaseline;
 
   @override
-  Future<AndroidOnboardingProgress> read() async =>
-      AndroidOnboardingProgress(complete: complete, mode: mode, method: method);
+  Future<AndroidOnboardingProgress> read() async => AndroidOnboardingProgress(
+    complete: complete,
+    mode: mode,
+    method: method,
+    captureStarted: captureStarted,
+    verificationBaseline: verificationBaseline,
+  );
 
   @override
   Future<void> writeChoice({
@@ -120,5 +151,14 @@ class MemoryAndroidOnboardingStore implements AndroidOnboardingStore {
   @override
   Future<void> resetCompletion() async {
     complete = false;
+    verificationBaseline = null;
+  }
+
+  @override
+  Future<void> writeCaptureProgress({int? verificationBaseline}) async {
+    captureStarted = true;
+    if (verificationBaseline != null) {
+      this.verificationBaseline = verificationBaseline;
+    }
   }
 }

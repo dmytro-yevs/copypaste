@@ -1,6 +1,6 @@
 # ADR-0005 — Android capture: decisions in Rust, facts from Kotlin
 
-**Status:** accepted · amended 2026-10-04
+**Status:** accepted · amended 2026-10-07
 **Scope:** Android platform capture responsibilities. The former host-specific
 implementation was retired; this decision preserves the platform boundary for a
 future Flutter host.
@@ -40,14 +40,27 @@ background-verification timestamp.
 commands shown by the manual ADB setup: `READ_LOGS`, `SYSTEM_ALERT_WINDOW`, both
 background app-ops, inactive false, and the active standby bucket. Shizuku is
 not a runtime dependency after the grants are applied. The foreground capture
-service owns one app-UID logcat reader and its focused 1×1 overlay hand-off.
+service owns one app-UID logcat reader and a focused 1×1 activity hand-off.
+The activity keeps its content view attached throughout focus dispatch and
+finishes on the next main-loop task. It never removes a focused overlay view
+synchronously, which crashes some OEM implementations of `ViewRootImpl`.
 Only occurrence signals leave the reader; raw logs never enter History or IPC.
 Notification permission is required for the foreground service. Battery
 optimization exemption is recommended but does not block completion.
 
+Android 13 and later also require temporary system consent for a new app-UID
+logcat reader. The `READ_LOGS` grant does not suppress that system dialog. The
+reader stays with the capture service across activity exits and re-entry, but
+a process restart can require system consent again. This is independent of
+Shizuku authorization; Shizuku remains removable after applying the grants.
+
 The Full path is complete only after a fresh copy made in another application
 reaches the shared encrypted History. Existing History content, successful
 permission commands, or a foreground-only clipboard read are insufficient.
+Persist the verification baseline and capture-step progress across process
+restarts. Save completion when verified capture setup is accepted, before the
+optional pairing screen. Completed onboarding must not become incomplete due
+to a runtime clipboard-intake failure.
 
 **Rungs 1 and 3 are not built** and are not represented in the state model. An
 overlay bubble and becoming the default IME are both in the specification's

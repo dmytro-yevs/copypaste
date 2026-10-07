@@ -78,10 +78,14 @@ class AndroidOnboardingController extends ChangeNotifier {
       final progress = await _store.read();
       _mode = progress.mode;
       _method = progress.method;
-      _setupState = await _setup.state();
       _complete = progress.complete;
+      _step = progress.captureStarted
+          ? AndroidOnboardingStep.capture
+          : AndroidOnboardingStep.welcome;
+      _verificationBaseline = progress.verificationBaseline;
+      _verifying = _verificationBaseline != null;
+      _acceptState(await _setup.state());
       if (_complete && !await _setup.setForegroundCaptureEnabled(true)) {
-        _complete = false;
         _errorMessage = 'Clipboard intake could not be enabled.';
       } else {
         _errorMessage = null;
@@ -98,6 +102,7 @@ class AndroidOnboardingController extends ChangeNotifier {
   void showCapture() {
     if (_busy || _step != AndroidOnboardingStep.welcome) return;
     _step = AndroidOnboardingStep.capture;
+    unawaited(_saveCaptureProgress());
     _notify();
     _applyAuthorizedSetup();
   }
@@ -263,6 +268,9 @@ class AndroidOnboardingController extends ChangeNotifier {
       _verificationBaseline = before.observedAtMs > before.lastCaptureAtMs
           ? before.observedAtMs
           : before.lastCaptureAtMs;
+      await _store.writeCaptureProgress(
+        verificationBaseline: _verificationBaseline,
+      );
       _setupState = await _setup.startCapture();
       if (!_setupState!.captureEnabled) {
         _errorMessage = 'Background capture could not be started.';
@@ -280,14 +288,24 @@ class AndroidOnboardingController extends ChangeNotifier {
 
   Future<void> continueFromCapture() async {
     if (!canContinueCapture) return;
-    if (!await _setup.setForegroundCaptureEnabled(true)) {
-      _errorMessage = 'Clipboard intake could not be enabled.';
-      _notify();
-      return;
-    }
-    _step = AndroidOnboardingStep.sync;
-    await _saveChoice();
+    _busy = true;
+    _errorMessage = null;
     _notify();
+    try {
+      if (!await _setup.setForegroundCaptureEnabled(true)) {
+        _errorMessage = 'Clipboard intake could not be enabled.';
+        return;
+      }
+      // Capture setup is complete before the optional pairing screen. A process
+      // restart must not require the user to repeat verified permissions.
+      await _store.markComplete(mode: _mode, method: _method);
+      _step = AndroidOnboardingStep.sync;
+    } catch (_) {
+      _errorMessage = 'CopyPaste could not save onboarding progress.';
+    } finally {
+      _busy = false;
+      _notify();
+    }
   }
 
   Future<bool> finish() async {
@@ -314,6 +332,7 @@ class AndroidOnboardingController extends ChangeNotifier {
     _notify();
     try {
       await _store.resetCompletion();
+      await _store.writeCaptureProgress();
       _setupState = await _setup.state();
       _complete = false;
       _step = AndroidOnboardingStep.capture;
@@ -353,6 +372,15 @@ class AndroidOnboardingController extends ChangeNotifier {
       await _store.writeChoice(mode: _mode, method: _method);
     } catch (_) {
       _errorMessage = 'Android setup choice could not be saved.';
+      _notify();
+    }
+  }
+
+  Future<void> _saveCaptureProgress() async {
+    try {
+      await _store.writeCaptureProgress();
+    } catch (_) {
+      _errorMessage = 'CopyPaste could not save onboarding progress.';
       _notify();
     }
   }

@@ -6,6 +6,110 @@ import 'package:copypaste_flutter/platform/android/android_capture_setup_gateway
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('unfinished capture setup resumes after a process restart', () async {
+    final store = MemoryAndroidOnboardingStore();
+    final first = _controller(store: store);
+    await first.initialize();
+    first.showCapture();
+    await Future<void>.delayed(Duration.zero);
+    first.dispose();
+
+    final resumed = _controller(store: store);
+    addTearDown(resumed.dispose);
+    await resumed.initialize();
+    expect(resumed.step, AndroidOnboardingStep.capture);
+    expect(resumed.complete, isFalse);
+  });
+
+  test(
+    'a fresh background receipt survives a process restart without Shizuku',
+    () async {
+      final store = MemoryAndroidOnboardingStore();
+      final setup = _FakeAndroidCaptureSetupGateway(
+        current: _state(
+          privilegedGrants: true,
+          notificationGranted: true,
+          observedAtMs: 20,
+          lastCaptureAtMs: 10,
+          shizukuInstalled: false,
+          shizukuRunning: false,
+        ),
+      );
+      final first = _controller(store: store, setup: setup);
+      await first.initialize();
+      first.showCapture();
+      await first.beginVerification();
+      first.dispose();
+
+      setup.current = _state(
+        privilegedGrants: true,
+        notificationGranted: true,
+        captureEnabled: true,
+        serviceRunning: true,
+        lastCaptureAtMs: 21,
+        shizukuInstalled: false,
+        shizukuRunning: false,
+      );
+      final resumed = _controller(store: store, setup: setup);
+      await resumed.initialize();
+      expect(resumed.step, AndroidOnboardingStep.capture);
+      expect(resumed.verified, isTrue);
+      expect(resumed.canContinueCapture, isTrue);
+      expect(setup.applyCalls, 0);
+
+      await resumed.continueFromCapture();
+      resumed.dispose();
+      final completed = _controller(store: store, setup: setup);
+      addTearDown(completed.dispose);
+      await completed.initialize();
+      expect(completed.complete, isTrue);
+      expect(setup.applyCalls, 0);
+    },
+  );
+
+  test(
+    'a restored verification baseline still refuses older clipboard saves',
+    () async {
+      final setup = _FakeAndroidCaptureSetupGateway(
+        current: _state(
+          privilegedGrants: true,
+          notificationGranted: true,
+          captureEnabled: true,
+          serviceRunning: true,
+          lastCaptureAtMs: 15,
+        ),
+      );
+      final controller = _controller(
+        store: MemoryAndroidOnboardingStore(
+          captureStarted: true,
+          verificationBaseline: 20,
+        ),
+        setup: setup,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      expect(controller.verifying, isTrue);
+      expect(controller.verified, isFalse);
+      expect(controller.canContinueCapture, isFalse);
+    },
+  );
+
+  test(
+    'completed onboarding stays completed when clipboard intake fails',
+    () async {
+      final setup = _FakeAndroidCaptureSetupGateway()
+        ..foregroundEnabled = false;
+      final controller = _controller(
+        store: MemoryAndroidOnboardingStore(complete: true),
+        setup: setup,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      expect(controller.complete, isTrue);
+      expect(controller.errorMessage, contains('could not be enabled'));
+    },
+  );
+
   test(
     'a queued older clipboard save cannot verify a new capture attempt',
     () async {
@@ -230,6 +334,8 @@ AndroidCaptureSetupState _state({
   int lastCaptureAtMs = 0,
   int observedAtMs = 0,
   bool shizukuPermission = false,
+  bool shizukuInstalled = true,
+  bool shizukuRunning = true,
 }) => AndroidCaptureSetupState(
   packageName: 'com.copypaste.app',
   privilegedGrants: privilegedGrants,
@@ -241,8 +347,8 @@ AndroidCaptureSetupState _state({
   observedAtMs: observedAtMs,
   shizuku: AndroidShizukuState(
     supported: true,
-    installed: true,
-    running: true,
+    installed: shizukuInstalled,
+    running: shizukuRunning,
     permission: shizukuPermission,
   ),
   adbCommands: const [
@@ -262,6 +368,7 @@ class _FakeAndroidCaptureSetupGateway implements AndroidCaptureSetupGateway {
   AndroidCaptureSetupState current;
   final events = StreamController<AndroidCaptureSetupState>.broadcast();
   int applyCalls = 0;
+  bool foregroundEnabled = true;
 
   @override
   Stream<AndroidCaptureSetupState> get changes => events.stream;
@@ -282,7 +389,8 @@ class _FakeAndroidCaptureSetupGateway implements AndroidCaptureSetupGateway {
   Future<AndroidCaptureSetupState> requestNotifications() async => current;
 
   @override
-  Future<bool> setForegroundCaptureEnabled(bool enabled) async => true;
+  Future<bool> setForegroundCaptureEnabled(bool enabled) async =>
+      foregroundEnabled;
 
   @override
   Future<AndroidCaptureSetupState> startCapture() async {

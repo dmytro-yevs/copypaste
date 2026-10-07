@@ -3,44 +3,38 @@ package com.copypaste.app
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import android.graphics.PixelFormat
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
-import android.view.ViewTreeObserver
 import android.view.WindowManager
 
 class ClipboardFloatingActivity : Activity() {
-    private lateinit var windowManager: WindowManager
-    private lateinit var floatingView: View
-    private var attached = false
     private var handled = false
-    private lateinit var focusListener: ViewTreeObserver.OnWindowFocusChangeListener
     private val main = Handler(Looper.getMainLooper())
     private val failsafe = Runnable(::finishCapture)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         shrinkActivityWindow()
-        windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        focusListener = ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
-            if (!hasFocus || handled) return@OnWindowFocusChangeListener
-            handled = true
-            floatingView.viewTreeObserver.removeOnWindowFocusChangeListener(focusListener)
+        setContentView(View(this))
+        main.postDelayed(failsafe, captureTimeoutMs)
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus || handled) return
+        handled = true
+        // Finish only after Android has returned from its focus dispatch. Removing
+        // a focused overlay synchronously crashes ViewRootImpl on some OEMs.
+        main.post {
+            if (isFinishing || isDestroyed) return@post
             try {
                 AndroidClipboardReader.captureBackground(this, intent.getLongExtra("capture-host", 0L))
             } finally {
                 finishCapture()
             }
-        }
-        main.postDelayed(failsafe, captureTimeoutMs)
-        try {
-            createFloatingView()
-            focusFloatingView()
-        } catch (_: RuntimeException) {
-            finishCapture()
         }
     }
 
@@ -56,42 +50,13 @@ class ClipboardFloatingActivity : Activity() {
         window.attributes = params
     }
 
-    private fun createFloatingView() {
-        floatingView = View(this)
-        floatingView.viewTreeObserver.addOnWindowFocusChangeListener(focusListener)
-        val params = WindowManager.LayoutParams(
-            1,
-            1,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
-            PixelFormat.TRANSLUCENT,
-        ).apply { gravity = Gravity.TOP or Gravity.START }
-        windowManager.addView(floatingView, params)
-        attached = true
-    }
-
-    private fun focusFloatingView() {
-        if (!attached) return
-        val params = floatingView.layoutParams as WindowManager.LayoutParams
-        params.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-        windowManager.updateViewLayout(floatingView, params)
-    }
-
     private fun finishCapture() {
-        main.removeCallbacks(failsafe)
-        if (attached) {
-            runCatching { floatingView.viewTreeObserver.removeOnWindowFocusChangeListener(focusListener) }
-            runCatching { windowManager.removeViewImmediate(floatingView) }
-            attached = false
-        }
+        main.removeCallbacksAndMessages(null)
         if (!isFinishing) finish()
     }
 
     override fun onDestroy() {
-        finishCapture()
+        main.removeCallbacksAndMessages(null)
         super.onDestroy()
     }
 
