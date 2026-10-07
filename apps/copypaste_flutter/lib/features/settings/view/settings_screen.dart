@@ -837,14 +837,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       description:
           'Control which apps are captured and protect clipboard content.',
       children: [
-        AnimatedContainer(
+        OutlinedContainer(
           key: _excludedApplicationsKey,
           duration: AppMotion.resolve(context, AppMotion.quick),
-          decoration: AppTheme.settingsRowDecoration(
+          theme: AppTheme.settingsRowTheme(
             context,
             highlighted: _isHighlighted(_SettingsTargetId.excludedApplications),
           ),
-          padding: AppTheme.settingsRowPadding,
+          clipBehavior: Clip.none,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -1323,14 +1323,11 @@ class _SettingRow extends StatelessWidget {
         Text(description).muted().textSmall(),
       ],
     );
-    return AnimatedContainer(
+    return OutlinedContainer(
       key: ValueKey<String>('settings-row-$title'),
       duration: AppMotion.resolve(context, AppMotion.quick),
-      decoration: AppTheme.settingsRowDecoration(
-        context,
-        highlighted: highlighted,
-      ),
-      padding: AppTheme.settingsRowPadding,
+      theme: AppTheme.settingsRowTheme(context, highlighted: highlighted),
+      clipBehavior: Clip.none,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final stack =
