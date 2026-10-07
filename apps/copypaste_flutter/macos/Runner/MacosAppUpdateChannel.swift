@@ -27,6 +27,9 @@ final class MacosAppUpdateChannel {
     switch call.method {
     case "currentVersion":
       result(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
+    case "systemVersion":
+      let version = ProcessInfo.processInfo.operatingSystemVersion
+      result("\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)")
     case "availability":
       workQueue.async {
         guard let brew = Self.brewExecutable() else {
