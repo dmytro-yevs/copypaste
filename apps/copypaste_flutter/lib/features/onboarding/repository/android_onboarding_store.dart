@@ -33,8 +33,6 @@ abstract interface class AndroidOnboardingStore {
     required AndroidCaptureSetupMethod method,
   });
 
-  Future<void> resetCompletion();
-
   Future<void> writeCaptureProgress({int? verificationBaseline});
 }
 
@@ -92,12 +90,6 @@ class SharedPreferencesAndroidOnboardingStore
   }
 
   @override
-  Future<void> resetCompletion() async {
-    await _preferences.remove(_versionKey);
-    await _preferences.remove(_verificationBaselineKey);
-  }
-
-  @override
   Future<void> writeCaptureProgress({int? verificationBaseline}) async {
     await _preferences.setBool(_captureStartedKey, true);
     if (verificationBaseline != null) {
@@ -146,12 +138,6 @@ class MemoryAndroidOnboardingStore implements AndroidOnboardingStore {
   }) async {
     await writeChoice(mode: mode, method: method);
     complete = true;
-  }
-
-  @override
-  Future<void> resetCompletion() async {
-    complete = false;
-    verificationBaseline = null;
   }
 
   @override

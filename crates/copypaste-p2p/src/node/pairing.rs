@@ -274,7 +274,7 @@ impl PairingManager {
                 Some(active.status.clone())
             }
             PairingState::Terminal(status) if status.pairing_id.as_deref() == Some(pairing_id) => {
-                return
+                return;
             }
             _ => None,
         };
@@ -450,7 +450,11 @@ mod tests {
 
     fn node(dir: &tempfile::TempDir, name: &str) -> Arc<Node> {
         Arc::new(Node::new(
-            PeerStore::open(&dir.path().join(format!("{name}-peers.json"))).unwrap(),
+            PeerStore::open(
+                &dir.path().join(format!("{name}-peers.json")),
+                &crate::peers::testutil::KEY,
+            )
+            .unwrap(),
             None::<Discovery>,
             0,
             true,

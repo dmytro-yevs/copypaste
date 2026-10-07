@@ -38,6 +38,12 @@ class AndroidCaptureSetupState {
   final int observedAtMs;
   final AndroidShizukuState shizuku;
   final List<String> adbCommands;
+
+  bool get backgroundCaptureRunning =>
+      privilegedGrants &&
+      notificationGranted &&
+      captureEnabled &&
+      serviceRunning;
 }
 
 abstract interface class AndroidCaptureSetupGateway {

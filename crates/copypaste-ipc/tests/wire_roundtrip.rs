@@ -113,6 +113,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
     let variants = vec![
         ResponseData::Modules { json: "[]".into() },
         ResponseData::Status(StatusData {
+            sync_status: Default::default(),
             device_name: "Laptop".into(),
             device_id: Some("device-1".into()),
             version: "2.0.0".into(),
@@ -156,6 +157,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             restart_required: vec!["lan_visibility".into()],
         }),
         ResponseData::Event(EventData {
+            sync_status: None,
             event: EventKind::Items,
             item_count: 1,
             captured: true,

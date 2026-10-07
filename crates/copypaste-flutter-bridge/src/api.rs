@@ -414,6 +414,7 @@ pub enum DeviceObservationTrust {
 
 #[derive(Debug, Clone)]
 pub struct RuntimeEvent {
+    pub sync_status: Option<RuntimeSyncStatus>,
     pub kind: String,
     pub item_count: u64,
     pub captured: bool,
@@ -432,7 +433,70 @@ pub struct PairingCeremony {
 }
 
 #[derive(Debug, Clone)]
+pub enum SyncPhase {
+    Unavailable,
+    Disabled,
+    Waiting,
+    Syncing,
+    Synced,
+    Failed,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimePeerSyncStatus {
+    pub pairing_id: String,
+    pub name: String,
+    pub phase: SyncPhase,
+    pub started_at_ms: Option<i64>,
+    pub last_success_ms: Option<i64>,
+    pub sent: u64,
+    pub received: u64,
+    pub skipped_too_large: u64,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeSyncStatus {
+    pub revision: u64,
+    pub phase: SyncPhase,
+    pub peers: Vec<RuntimePeerSyncStatus>,
+}
+
+pub(crate) fn runtime_sync_status(status: copypaste_ipc::SyncStatus) -> RuntimeSyncStatus {
+    fn phase(value: copypaste_ipc::SyncPhase) -> SyncPhase {
+        match value {
+            copypaste_ipc::SyncPhase::Unavailable => SyncPhase::Unavailable,
+            copypaste_ipc::SyncPhase::Disabled => SyncPhase::Disabled,
+            copypaste_ipc::SyncPhase::Waiting => SyncPhase::Waiting,
+            copypaste_ipc::SyncPhase::Syncing => SyncPhase::Syncing,
+            copypaste_ipc::SyncPhase::Synced => SyncPhase::Synced,
+            copypaste_ipc::SyncPhase::Failed => SyncPhase::Failed,
+        }
+    }
+    RuntimeSyncStatus {
+        revision: status.revision,
+        phase: phase(status.phase),
+        peers: status
+            .peers
+            .into_iter()
+            .map(|peer| RuntimePeerSyncStatus {
+                pairing_id: peer.pairing_id,
+                name: peer.name,
+                phase: phase(peer.phase),
+                started_at_ms: peer.started_at_ms,
+                last_success_ms: peer.last_success_ms,
+                sent: peer.sent,
+                received: peer.received,
+                skipped_too_large: peer.skipped_too_large,
+                error: peer.error,
+            })
+            .collect(),
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct CaptureState {
+    pub sync_status: RuntimeSyncStatus,
     pub running: bool,
     pub paused: bool,
     pub private_mode_epoch: u64,
@@ -529,6 +593,7 @@ pub async fn capture_state() -> Result<CaptureState, RuntimeError> {
     let response = client::request(Method::Status).await?;
     match response.data {
         Some(ResponseData::Status(status)) => Ok(CaptureState {
+            sync_status: runtime_sync_status(status.sync_status),
             running: status.capture_running,
             paused: status.private_mode,
             private_mode_epoch: status.private_mode_epoch,
@@ -1268,6 +1333,7 @@ mod tests {
     #[test]
     fn this_device_maps_the_explicit_local_identity() {
         let device = this_device(copypaste_ipc::StatusData {
+            sync_status: Default::default(),
             device_name: "Desktop".into(),
             device_id: Some("local-device-id".into()),
             version: "1.2.3".into(),

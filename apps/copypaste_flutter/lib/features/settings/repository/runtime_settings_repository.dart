@@ -6,10 +6,23 @@ import 'package:copypaste_flutter/generated/api.dart' as runtime;
 import '../../../platform/notifications/capture_notification_preview.dart';
 
 import '../models/settings_models.dart';
+import '../models/sync_status.dart';
 import 'settings_repository.dart';
 
 class RuntimeSettingsRepository implements SettingsRepository {
   RuntimeSettingsRepository();
+
+  @override
+  Stream<SyncStatus> syncEvents() async* {
+    final watchId = await runtime.allocateRuntimeWatch();
+    try {
+      await for (final event in runtime.watchRuntime(watchId: watchId)) {
+        if (event.syncStatus case final status?) yield _syncStatus(status);
+      }
+    } finally {
+      await runtime.cancelRuntimeWatch(watchId: watchId);
+    }
+  }
 
   @override
   Stream<String?> capturedEvents() async* {
@@ -109,10 +122,43 @@ class RuntimeSettingsRepository implements SettingsRepository {
 
   CaptureSettingsState _captureState(runtime.CaptureState state) =>
       CaptureSettingsState(
+        syncStatus: _syncStatus(state.syncStatus),
         running: state.running,
         paused: state.paused,
         epoch: state.privateModeEpoch.toInt(),
       );
+
+  SyncStatus _syncStatus(runtime.RuntimeSyncStatus status) => SyncStatus(
+    revision: status.revision.toInt(),
+    phase: _syncPhase(status.phase),
+    peers: status.peers
+        .map(
+          (peer) => PeerSyncStatus(
+            id: peer.pairingId,
+            name: peer.name,
+            phase: _syncPhase(peer.phase),
+            startedAt: _syncTime(peer.startedAtMs?.toInt()),
+            lastSuccess: _syncTime(peer.lastSuccessMs?.toInt()),
+            sent: peer.sent.toInt(),
+            received: peer.received.toInt(),
+            skippedTooLarge: peer.skippedTooLarge.toInt(),
+            error: peer.error,
+          ),
+        )
+        .toList(growable: false),
+  );
+
+  DateTime? _syncTime(int? value) =>
+      value == null ? null : DateTime.fromMillisecondsSinceEpoch(value.toInt());
+
+  SyncPhase _syncPhase(runtime.SyncPhase phase) => switch (phase) {
+    runtime.SyncPhase.unavailable => SyncPhase.unavailable,
+    runtime.SyncPhase.disabled => SyncPhase.disabled,
+    runtime.SyncPhase.waiting => SyncPhase.waiting,
+    runtime.SyncPhase.syncing => SyncPhase.syncing,
+    runtime.SyncPhase.synced => SyncPhase.synced,
+    runtime.SyncPhase.failed => SyncPhase.failed,
+  };
 
   RuntimeSettings _settings(runtime.RuntimeSettingsData settings) =>
       RuntimeSettings(
