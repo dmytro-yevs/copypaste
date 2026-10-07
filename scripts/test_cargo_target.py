@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the cargo markers shared by worktree_hygiene and target_budget.
+"""Tests for the cargo markers used by worktree hygiene and Git hooks.
 
 Both callers delete bytes on the strength of these two answers, so each case
 here is a way a cleaner could conclude "idle" or "regenerable" while it is not.

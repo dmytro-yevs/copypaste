@@ -68,7 +68,7 @@ impl Node {
             );
             NodeError::Handshake
         })?;
-        let identity = local_identity(self, source);
+        let identity = local_identity(self, source, session.local_addr());
         let (session, peer, shown) = match establish(
             session,
             identity,
@@ -145,7 +145,7 @@ impl Node {
         source: &S,
     ) -> Result<(), NodeError> {
         let (psk, control) = self.pairing.begin_responder(pairing_id)?;
-        let identity = local_identity(self, source);
+        let identity = local_identity(self, source, session.local_addr());
         let established = establish(
             session,
             identity,
@@ -222,12 +222,16 @@ struct LocalIdentity {
     listen_addr: Option<String>,
 }
 
-fn local_identity<S: SyncSource>(node: &Node, source: &S) -> LocalIdentity {
+fn local_identity<S: SyncSource>(
+    node: &Node,
+    source: &S,
+    local_addr: Option<std::net::SocketAddr>,
+) -> LocalIdentity {
     LocalIdentity {
         device_id: source.device_id(),
         device_name: source.device_name(),
         profile: DeviceProfile::current(),
-        listen_addr: node.listen_addr(),
+        listen_addr: node.session_listen_addr(local_addr),
     }
 }
 
@@ -465,7 +469,11 @@ mod tests {
 
     fn node(dir: &tempfile::TempDir, name: &str) -> Arc<Node> {
         Arc::new(Node::new(
-            PeerStore::open(&dir.path().join(format!("{name}-peers.json"))).unwrap(),
+            PeerStore::open(
+                &dir.path().join(format!("{name}-peers.json")),
+                &crate::peers::testutil::KEY,
+            )
+            .unwrap(),
             None::<Discovery>,
             0,
             true,

@@ -1,19 +1,7 @@
 //! Reading and replacing the file on disk.
 //!
-//! **This file is a key store.** Anything that can read it can impersonate
-//! every paired device and decrypt every future sync session, so the file mode
-//! is not hygiene, it is the access control:
-//!
-//! * Replaced through [`copypaste_fs::write_atomically`] at
-//!   [`Visibility::OwnerOnly`], so a crash mid-write leaves the previous file
-//!   intact and the keys never exist at a mode wider than `0600`. Losing a
-//!   pairing means re-pairing every device by hand, and `AGENTS.md` rule 4 ranks
-//!   data loss as the worst outcome.
-//! * An existing file whose mode is wider than `0600` is reported at `warn`.
-//!
-//! `CopyPaste-5lm` / manifest 02 §3.7 and §6.3: pairing secrets never share a
-//! plaintext peer file with verifier state. The current format needs only the
-//! 32-byte PSK, but the file is no less sensitive for being smaller.
+//! State is encrypted before owner-only atomic replacement. Plaintext exists
+//! only in zeroized memory; migration replaces the old file without a backup.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -21,6 +9,7 @@ use std::path::Path;
 use copypaste_fs::Visibility;
 use zeroize::Zeroizing;
 
+use super::crypto;
 use super::peer::validate_pairing_id;
 use super::{Peer, PeerStoreError, MAX_REVOCATIONS};
 
@@ -74,8 +63,12 @@ pub(super) fn parse(bytes: &[u8]) -> Result<State, PeerStoreError> {
     })
 }
 
-pub(super) fn write_atomically(path: &Path, state: &State) -> Result<(), PeerStoreError> {
-    blocking(|| write_now(path, state))
+pub(super) fn write_atomically(
+    path: &Path,
+    state: &State,
+    key: &[u8; 32],
+) -> Result<(), PeerStoreError> {
+    blocking(|| write_now(path, state, key))
 }
 
 fn blocking<T>(f: impl FnOnce() -> T) -> T {
@@ -88,19 +81,41 @@ fn blocking<T>(f: impl FnOnce() -> T) -> T {
     }
 }
 
-fn write_now(path: &Path, state: &State) -> Result<(), PeerStoreError> {
+fn write_now(path: &Path, state: &State, key: &[u8; 32]) -> Result<(), PeerStoreError> {
     let mut records: Vec<Peer> = state.peers.values().cloned().collect();
     records.sort_by(|a, b| a.pairing_id.cmp(&b.pairing_id));
     let file = StoreFile {
         peers: records,
         revoked: state.revoked.clone(),
     };
-    // The serialised form contains every PSK in hex. Held in `Zeroizing` so the
-    // buffer is wiped once it has been handed to the kernel.
     let json =
         Zeroizing::new(serde_json::to_vec_pretty(&file).map_err(|_| PeerStoreError::Corrupt)?);
+    let envelope = crypto::seal(&json, key)?;
+    copypaste_fs::write_atomically(path, &envelope, Visibility::OwnerOnly)
+        .map_err(PeerStoreError::Io)
+}
 
-    copypaste_fs::write_atomically(path, &json, Visibility::OwnerOnly).map_err(PeerStoreError::Io)
+pub(super) fn migrate_plaintext(path: &Path, key: &[u8; 32]) -> Result<(), PeerStoreError> {
+    migrate_with(path, key, write_atomically)
+}
+
+fn migrate_with(
+    path: &Path,
+    key: &[u8; 32],
+    persist: impl FnOnce(&Path, &State, &[u8; 32]) -> Result<(), PeerStoreError>,
+) -> Result<(), PeerStoreError> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => Zeroizing::new(bytes),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(PeerStoreError::Io(err)),
+    };
+    if bytes.starts_with(crypto::MAGIC) {
+        // A recognized encrypted file must authenticate; never retry it as JSON.
+        parse(&crypto::open(&bytes, key)?)?;
+        return Ok(());
+    }
+    let state = parse(&bytes)?;
+    persist(path, &state, key)
 }
 
 pub(super) fn only_last_seen_moved(state: &State, incoming: &Peer) -> bool {
@@ -115,8 +130,7 @@ pub(super) fn only_last_seen_moved(state: &State, incoming: &Peer) -> bool {
         && stored.profile_observed_at_ms == incoming.profile_observed_at_ms
 }
 
-/// Warn — do not fail — if the file on disk is readable by anyone else. It
-/// holds every pre-shared key.
+/// Retain owner-only permissions in addition to encryption.
 #[cfg(unix)]
 pub(super) fn warn_if_permissive(path: &Path) {
     use std::os::unix::fs::PermissionsExt as _;
@@ -126,7 +140,7 @@ pub(super) fn warn_if_permissive(path: &Path) {
             // The path itself is deliberately not in the message (rule 4).
             tracing::warn!(
                 mode = format!("{mode:o}"),
-                "the paired-devices file is readable beyond its owner; it contains pre-shared keys"
+                "the paired-devices file is readable beyond its owner"
             );
         }
     }
@@ -196,10 +210,11 @@ mod tests {
         // parses.
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
-        let store = PeerStore::open(&path).expect("open");
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
         for i in 0..12 {
             store.upsert(peer(&format!("device-{i}"))).expect("upsert");
-            let reopened = PeerStore::open(&path).expect("file must always parse");
+            let reopened = PeerStore::open(&path, &crate::peers::testutil::KEY)
+                .expect("file must always parse");
             assert_eq!(reopened.len(), i + 1);
         }
     }
@@ -213,11 +228,16 @@ mod tests {
             .build()
             .expect("runtime");
         runtime.block_on(async {
-            let store = PeerStore::open(&path).expect("open");
+            let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
             store.upsert(peer("Laptop")).expect("upsert");
             store.upsert(peer("Phone")).expect("upsert");
         });
-        assert_eq!(PeerStore::open(&path).expect("reopen").len(), 2);
+        assert_eq!(
+            PeerStore::open(&path, &crate::peers::testutil::KEY)
+                .expect("reopen")
+                .len(),
+            2
+        );
     }
 
     #[cfg(unix)]
@@ -226,7 +246,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt as _;
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
-        let store = PeerStore::open(&path).expect("open");
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
         store.upsert(peer("Laptop")).expect("upsert");
 
         let mode = std::fs::metadata(&path).expect("meta").permissions().mode() & 0o777;
@@ -256,7 +276,7 @@ mod tests {
         ] {
             std::fs::write(&path, bad).expect("write");
             assert!(
-                matches!(PeerStore::open(&path), Err(PeerStoreError::Corrupt)),
+                matches!(PeerStore::open(&path, &crate::peers::testutil::KEY), Err(PeerStoreError::Corrupt)),
                 "must reject: {}",
                 String::from_utf8_lossy(bad)
             );
@@ -267,24 +287,112 @@ mod tests {
     }
 
     #[test]
-    fn the_serialised_file_holds_the_psk_as_hex_and_nothing_else_secret() {
+    fn the_file_exposes_neither_pairing_keys_nor_peer_metadata() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = store_path(&dir);
-        let store = PeerStore::open(&path).expect("open");
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
         let p = peer("Laptop");
         let psk = p.psk;
         let pairing_id = p.pairing_id.clone();
         store.upsert(p).expect("upsert");
 
-        let text = std::fs::read_to_string(&path).expect("read");
-        assert!(text.contains(&pairing_id));
-        assert!(
-            text.contains(&hex::encode(psk)),
-            "psk must round-trip as hex"
-        );
-        // The pairing code form of the secret must never be written anywhere.
+        let bytes = std::fs::read(&path).expect("read");
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(bytes.starts_with(crypto::MAGIC));
+        assert!(!text.contains(&pairing_id));
+        assert!(!text.contains("Laptop"));
+        assert!(!text.contains(&hex::encode(psk)));
+        assert!(!bytes.windows(psk.len()).any(|window| window == psk));
         let token = PairingToken::from_bytes(&psk);
         assert!(!text.contains(&token.to_code()));
+        let reopened = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("reopen");
+        assert!(reopened.get(&pairing_id).unwrap().psk_matches(&psk));
+    }
+
+    #[test]
+    fn wrong_keys_and_tampered_envelopes_are_refused_without_rewriting() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = store_path(&dir);
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).unwrap();
+        store.upsert(peer("Laptop")).unwrap();
+        let original = std::fs::read(&path).unwrap();
+        assert!(matches!(
+            PeerStore::open(&path, &[18; 32]),
+            Err(PeerStoreError::Corrupt)
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+
+        for offset in [0, 3, 4, original.len() - 1] {
+            let mut tampered = original.clone();
+            tampered[offset] ^= 1;
+            std::fs::write(&path, &tampered).unwrap();
+            assert!(matches!(
+                PeerStore::open(&path, &crate::peers::testutil::KEY),
+                Err(PeerStoreError::Corrupt)
+            ));
+            assert_eq!(std::fs::read(&path).unwrap(), tampered);
+        }
+        for len in [0, 4, 27, original.len() - 1] {
+            std::fs::write(&path, &original[..len]).unwrap();
+            assert!(matches!(
+                PeerStore::open(&path, &crate::peers::testutil::KEY),
+                Err(PeerStoreError::Corrupt)
+            ));
+        }
+    }
+
+    #[test]
+    fn each_rewrite_uses_a_fresh_nonce_and_leaves_no_plaintext_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = store_path(&dir);
+        let mut state = State::default();
+        let record = peer("Laptop");
+        state.peers.insert(record.pairing_id.clone(), record);
+        write_atomically(&path, &state, &crate::peers::testutil::KEY).unwrap();
+        let first = std::fs::read(&path).unwrap();
+        write_atomically(&path, &state, &crate::peers::testutil::KEY).unwrap();
+        let second = std::fs::read(&path).unwrap();
+        assert_ne!(&first[4..28], &second[4..28]);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+        assert_eq!(
+            PeerStore::open(&path, &crate::peers::testutil::KEY)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn migration_write_failure_preserves_the_original_and_refuses_to_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = store_path(&dir);
+        let legacy = file_with_revocations(r#""revoked-device":42"#);
+        std::fs::write(&path, &legacy).unwrap();
+        let result = migrate_with(&path, &crate::peers::testutil::KEY, |_, state, _| {
+            assert_eq!(state.revoked.get("revoked-device"), Some(&42));
+            Err(PeerStoreError::Io(std::io::Error::other("write failure")))
+        });
+        assert!(matches!(result, Err(PeerStoreError::Io(_))));
+        assert_eq!(std::fs::read(&path).unwrap(), legacy);
+        assert!(matches!(
+            PeerStore::open(&path, &crate::peers::testutil::KEY),
+            Err(PeerStoreError::Corrupt)
+        ));
+    }
+
+    #[test]
+    fn damaged_encrypted_migration_never_falls_back_or_rewrites() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = store_path(&dir);
+        let mut envelope =
+            crypto::seal(&file_with_revocations(""), &crate::peers::testutil::KEY).unwrap();
+        *envelope.last_mut().unwrap() ^= 1;
+        std::fs::write(&path, &envelope).unwrap();
+        let result = migrate_with(&path, &crate::peers::testutil::KEY, |_, _, _| {
+            panic!("a damaged encrypted file must never be rewritten")
+        });
+        assert!(matches!(result, Err(PeerStoreError::Corrupt)));
+        assert_eq!(std::fs::read(&path).unwrap(), envelope);
     }
 
     #[test]
@@ -295,9 +403,14 @@ mod tests {
             .join("nested")
             .join("deeper")
             .join(DEFAULT_FILE_NAME);
-        let store = PeerStore::open(&path).expect("open");
+        let store = PeerStore::open(&path, &crate::peers::testutil::KEY).expect("open");
         store.upsert(peer("Laptop")).expect("upsert");
         assert!(path.exists());
-        assert_eq!(PeerStore::open(&path).expect("reopen").len(), 1);
+        assert_eq!(
+            PeerStore::open(&path, &crate::peers::testutil::KEY)
+                .expect("reopen")
+                .len(),
+            1
+        );
     }
 }

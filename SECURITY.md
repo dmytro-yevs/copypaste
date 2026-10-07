@@ -31,23 +31,24 @@ This document describes the current CopyPaste security model.
 - **The database** is SQLCipher keyed with a raw 32-byte key — the page key is
   supplied directly, so there is no passphrase KDF pass and no cipher parameter
   is set.
-- **Key derivation** is HKDF-SHA256 from a device secret: one extract, two
-  expands (`copypaste/v2/sqlcipher-db-key`, `copypaste/v2/item-content-key`).
-  Neither key is the stored secret.
+- **Key derivation** is HKDF-SHA256 from a device secret, with separate labels
+  for SQLCipher, item content and the LAN pairing store (`copypaste/v2/sqlcipher-db-key`,
+  `copypaste/v2/item-content-key`, `copypaste/v2/peer-store-key`). None is the stored secret.
 - **Crypto fails closed.** A wrong key, a wrong AAD or a tampered ciphertext
   gives an authentication error with no detail and no fallback read.
 - Key material is zeroized on drop; secret comparisons are constant-time.
 
 ### Where the device secret lives
 
-`crypto/keystore/` has three `#[path]` modules and no feature gate: the backend
-is chosen by `target_os` alone, so no build can be configured into the weaker
-one.
+`crypto/keystore/` selects the production backend by platform. Debug macOS
+deliberately retains a development-only `0600` plaintext device-secret file;
+its database and pairing encryption do not protect against theft of that file.
 
 | Platform | Store | State |
 |---|---|---|
 | macOS | Keychain, via `security-framework` | CI runs isolated-Keychain Rust tests; execution remains unverified until that job has passed on this foundation |
 | Android | Android Keystore. It holds keys, not blobs, so an AES-GCM key that never leaves it wraps the secret, and the wrapped blob sits in app-private storage | **Never compiled** — no NDK on any host here |
+| Windows | Device secret sealed with DPAPI under the user's login | Same-device and same-user protection |
 | Linux | `0600` file under the data directory | Development fallback, **not a shipping posture** |
 
 Minting a fresh secret needs both an unambiguous "no entry" *and* a data
@@ -81,7 +82,12 @@ pass shared by every client, with tests asserting it.
   unauthenticated mode to fall back to.
 - A session poisons itself after any authentication failure rather than
   continuing with a desynchronised nonce.
-- Peer keys live in a `0600` file, written atomically.
+- Peer keys and revocations live in an XChaCha20-Poly1305 encrypted envelope in
+  `peers.json`, under the device-derived pairing-store key. Every replacement
+  uses a fresh nonce and retains owner-only atomic writes. Existing plaintext
+  state is converted once, without a plaintext backup, before startup completes.
+  A marker in SQLCipher then disables plaintext import; a wrong key or damaged
+  envelope refuses to open instead of resetting trust or retrying as JSON.
 - **Content crosses the wire as plaintext inside the Noise channel**, and the
   receiver re-encrypts under its own key. Confidentiality comes from the
   transport, not a second envelope — the sender's ciphertext is bound to a key

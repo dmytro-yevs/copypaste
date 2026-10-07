@@ -238,6 +238,11 @@ impl Session {
         self.peer_addr
     }
 
+    /// The local interface actually used by this authenticated TCP connection.
+    pub fn local_addr(&self) -> Option<SocketAddr> {
+        self.framed.get_ref().local_addr().ok()
+    }
+
     /// Six display digits bound to this exact authenticated Noise handshake.
     #[must_use]
     pub fn pairing_sas(&self) -> String {

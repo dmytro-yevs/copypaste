@@ -2104,6 +2104,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RuntimeSyncStatus dco_decode_box_autoadd_runtime_sync_status(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_runtime_sync_status(raw);
+  }
+
+  @protected
   int dco_decode_box_autoadd_u_32(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as int;
@@ -2119,12 +2125,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   CaptureState dco_decode_capture_state(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return CaptureState(
-      running: dco_decode_bool(arr[0]),
-      paused: dco_decode_bool(arr[1]),
-      privateModeEpoch: dco_decode_u_64(arr[2]),
+      syncStatus: dco_decode_runtime_sync_status(arr[0]),
+      running: dco_decode_bool(arr[1]),
+      paused: dco_decode_bool(arr[2]),
+      privateModeEpoch: dco_decode_u_64(arr[3]),
     );
   }
 
@@ -2530,6 +2537,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<RuntimePeerSyncStatus> dco_decode_list_runtime_peer_sync_status(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_runtime_peer_sync_status)
+        .toList();
+  }
+
+  @protected
   List<SyncOutcome> dco_decode_list_sync_outcome(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_sync_outcome).toList();
@@ -2618,6 +2635,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RuntimeSyncStatus? dco_decode_opt_box_autoadd_runtime_sync_status(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_runtime_sync_status(raw);
+  }
+
+  @protected
   int? dco_decode_opt_box_autoadd_u_32(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_u_32(raw);
@@ -2681,13 +2706,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   RuntimeEvent dco_decode_runtime_event(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return RuntimeEvent(
-      kind: dco_decode_String(arr[0]),
-      itemCount: dco_decode_u_64(arr[1]),
-      captured: dco_decode_bool(arr[2]),
-      capturedItemId: dco_decode_opt_String(arr[3]),
+      syncStatus: dco_decode_opt_box_autoadd_runtime_sync_status(arr[0]),
+      kind: dco_decode_String(arr[1]),
+      itemCount: dco_decode_u_64(arr[2]),
+      captured: dco_decode_bool(arr[3]),
+      capturedItemId: dco_decode_opt_String(arr[4]),
+    );
+  }
+
+  @protected
+  RuntimePeerSyncStatus dco_decode_runtime_peer_sync_status(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    return RuntimePeerSyncStatus(
+      pairingId: dco_decode_String(arr[0]),
+      name: dco_decode_String(arr[1]),
+      phase: dco_decode_sync_phase(arr[2]),
+      startedAtMs: dco_decode_opt_box_autoadd_i_64(arr[3]),
+      lastSuccessMs: dco_decode_opt_box_autoadd_i_64(arr[4]),
+      sent: dco_decode_u_64(arr[5]),
+      received: dco_decode_u_64(arr[6]),
+      skippedTooLarge: dco_decode_u_64(arr[7]),
+      error: dco_decode_opt_String(arr[8]),
     );
   }
 
@@ -2728,6 +2773,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RuntimeSyncStatus dco_decode_runtime_sync_status(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return RuntimeSyncStatus(
+      revision: dco_decode_u_64(arr[0]),
+      phase: dco_decode_sync_phase(arr[1]),
+      peers: dco_decode_list_runtime_peer_sync_status(arr[2]),
+    );
+  }
+
+  @protected
   SyncOutcome dco_decode_sync_outcome(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -2740,6 +2798,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       received: dco_decode_u_32(arr[3]),
       errorCode: dco_decode_opt_String(arr[4]),
     );
+  }
+
+  @protected
+  SyncPhase dco_decode_sync_phase(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return SyncPhase.values[raw as int];
   }
 
   @protected
@@ -2937,6 +3001,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RuntimeSyncStatus sse_decode_box_autoadd_runtime_sync_status(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_runtime_sync_status(deserializer));
+  }
+
+  @protected
   int sse_decode_box_autoadd_u_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_u_32(deserializer));
@@ -2951,10 +3023,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   CaptureState sse_decode_capture_state(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_syncStatus = sse_decode_runtime_sync_status(deserializer);
     var var_running = sse_decode_bool(deserializer);
     var var_paused = sse_decode_bool(deserializer);
     var var_privateModeEpoch = sse_decode_u_64(deserializer);
     return CaptureState(
+      syncStatus: var_syncStatus,
       running: var_running,
       paused: var_paused,
       privateModeEpoch: var_privateModeEpoch,
@@ -3488,6 +3562,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<RuntimePeerSyncStatus> sse_decode_list_runtime_peer_sync_status(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <RuntimePeerSyncStatus>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_runtime_peer_sync_status(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<SyncOutcome> sse_decode_list_sync_outcome(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -3663,6 +3751,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RuntimeSyncStatus? sse_decode_opt_box_autoadd_runtime_sync_status(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_runtime_sync_status(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -3740,15 +3841,46 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   RuntimeEvent sse_decode_runtime_event(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_syncStatus = sse_decode_opt_box_autoadd_runtime_sync_status(
+      deserializer,
+    );
     var var_kind = sse_decode_String(deserializer);
     var var_itemCount = sse_decode_u_64(deserializer);
     var var_captured = sse_decode_bool(deserializer);
     var var_capturedItemId = sse_decode_opt_String(deserializer);
     return RuntimeEvent(
+      syncStatus: var_syncStatus,
       kind: var_kind,
       itemCount: var_itemCount,
       captured: var_captured,
       capturedItemId: var_capturedItemId,
+    );
+  }
+
+  @protected
+  RuntimePeerSyncStatus sse_decode_runtime_peer_sync_status(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_pairingId = sse_decode_String(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_phase = sse_decode_sync_phase(deserializer);
+    var var_startedAtMs = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_lastSuccessMs = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_sent = sse_decode_u_64(deserializer);
+    var var_received = sse_decode_u_64(deserializer);
+    var var_skippedTooLarge = sse_decode_u_64(deserializer);
+    var var_error = sse_decode_opt_String(deserializer);
+    return RuntimePeerSyncStatus(
+      pairingId: var_pairingId,
+      name: var_name,
+      phase: var_phase,
+      startedAtMs: var_startedAtMs,
+      lastSuccessMs: var_lastSuccessMs,
+      sent: var_sent,
+      received: var_received,
+      skippedTooLarge: var_skippedTooLarge,
+      error: var_error,
     );
   }
 
@@ -3803,6 +3935,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RuntimeSyncStatus sse_decode_runtime_sync_status(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_revision = sse_decode_u_64(deserializer);
+    var var_phase = sse_decode_sync_phase(deserializer);
+    var var_peers = sse_decode_list_runtime_peer_sync_status(deserializer);
+    return RuntimeSyncStatus(
+      revision: var_revision,
+      phase: var_phase,
+      peers: var_peers,
+    );
+  }
+
+  @protected
   SyncOutcome sse_decode_sync_outcome(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_pairingId = sse_decode_String(deserializer);
@@ -3817,6 +3964,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       received: var_received,
       errorCode: var_errorCode,
     );
+  }
+
+  @protected
+  SyncPhase sse_decode_sync_phase(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return SyncPhase.values[inner];
   }
 
   @protected
@@ -4044,6 +4198,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_runtime_sync_status(
+    RuntimeSyncStatus self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_runtime_sync_status(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_u_32(self, serializer);
@@ -4058,6 +4221,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_capture_state(CaptureState self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_runtime_sync_status(self.syncStatus, serializer);
     sse_encode_bool(self.running, serializer);
     sse_encode_bool(self.paused, serializer);
     sse_encode_u_64(self.privateModeEpoch, serializer);
@@ -4469,6 +4633,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_runtime_peer_sync_status(
+    List<RuntimePeerSyncStatus> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_runtime_peer_sync_status(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_sync_outcome(
     List<SyncOutcome> self,
     SseSerializer serializer,
@@ -4644,6 +4820,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_runtime_sync_status(
+    RuntimeSyncStatus? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_runtime_sync_status(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -4709,10 +4898,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_runtime_event(RuntimeEvent self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_box_autoadd_runtime_sync_status(self.syncStatus, serializer);
     sse_encode_String(self.kind, serializer);
     sse_encode_u_64(self.itemCount, serializer);
     sse_encode_bool(self.captured, serializer);
     sse_encode_opt_String(self.capturedItemId, serializer);
+  }
+
+  @protected
+  void sse_encode_runtime_peer_sync_status(
+    RuntimePeerSyncStatus self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.pairingId, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_sync_phase(self.phase, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.startedAtMs, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.lastSuccessMs, serializer);
+    sse_encode_u_64(self.sent, serializer);
+    sse_encode_u_64(self.received, serializer);
+    sse_encode_u_64(self.skippedTooLarge, serializer);
+    sse_encode_opt_String(self.error, serializer);
   }
 
   @protected
@@ -4748,6 +4955,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_runtime_sync_status(
+    RuntimeSyncStatus self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_64(self.revision, serializer);
+    sse_encode_sync_phase(self.phase, serializer);
+    sse_encode_list_runtime_peer_sync_status(self.peers, serializer);
+  }
+
+  @protected
   void sse_encode_sync_outcome(SyncOutcome self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.pairingId, serializer);
@@ -4755,6 +4973,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_32(self.sent, serializer);
     sse_encode_u_32(self.received, serializer);
     sse_encode_opt_String(self.errorCode, serializer);
+  }
+
+  @protected
+  void sse_encode_sync_phase(SyncPhase self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
   }
 
   @protected
