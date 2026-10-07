@@ -5,7 +5,8 @@ import 'package:copypaste_flutter/features/update/repository/minisign_verifier.d
 Future<void> main(List<String> arguments) async {
   if (arguments.length != 2) {
     stderr.writeln(
-      'usage: dart run tool/verify_update_signature.dart <artifact> <signature>',
+      'usage: dart --disable-dart-dev --packages=.dart_tool/package_config.json '
+      'tool/verify_update_signature.dart <artifact> <signature>',
     );
     exitCode = 2;
     return;

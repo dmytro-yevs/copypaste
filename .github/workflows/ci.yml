@@ -176,11 +176,16 @@ jobs:
         with:
           channel: stable
           flutter-version: ${{ steps.flutter.outputs.version }}
+          cache: true
       - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
         if: matrix.platform == 'android'
         with:
           distribution: temurin
           java-version: "25"
+      - uses: ./.github/actions/flutter-build-cache
+        with:
+          platform: ${{ matrix.platform }}
+          profile: debug
       - run: ./scripts/ci/verify-flutter-foundation.sh
         env:
           COPYPASTE_FLUTTER_BUILD_TARGET: ${{ matrix.target }}
