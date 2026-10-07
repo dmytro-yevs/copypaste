@@ -121,14 +121,14 @@ impl ClipboardPayload {
         }
     }
 
-    /// Write the authenticated bytes of one file clip to a destination selected
-    /// by the user. The destination must not exist so a stale dialog result can
+    /// Write the authenticated bytes of one image or file clip to a destination.
+    /// The destination must not exist so a stale dialog result can
     /// never overwrite an unrelated file.
     pub fn save_file_to(&self, destination: &std::path::Path) -> std::io::Result<()> {
-        let Self::File { bytes, .. } = self else {
+        let (Self::Image { bytes, .. } | Self::File { bytes, .. }) = self else {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                "the clipboard payload is not a file",
+                "the clipboard payload is not an image or file",
             ));
         };
         let mut options = std::fs::OpenOptions::new();
