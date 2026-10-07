@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../../platform/android/android_capture_setup_gateway.dart';
+import '../../../platform/clipboard/clipboard_writer.dart';
 import '../repository/android_onboarding_store.dart';
 
 enum AndroidOnboardingStep { welcome, capture, sync }
@@ -11,11 +12,14 @@ class AndroidOnboardingController extends ChangeNotifier {
   AndroidOnboardingController({
     required AndroidOnboardingStore store,
     required AndroidCaptureSetupGateway setup,
+    ClipboardWriter clipboard = const SystemClipboardWriter(),
   }) : _store = store,
-       _setup = setup;
+       _setup = setup,
+       _clipboard = clipboard;
 
   final AndroidOnboardingStore _store;
   final AndroidCaptureSetupGateway _setup;
+  final ClipboardWriter _clipboard;
 
   AndroidOnboardingStep _step = AndroidOnboardingStep.welcome;
   AndroidCaptureMode _mode = AndroidCaptureMode.full;
@@ -43,6 +47,19 @@ class AndroidOnboardingController extends ChangeNotifier {
   bool get verifying => _verifying;
   bool get verified => _verified;
   String? get errorMessage => _errorMessage;
+  String get adbCommandText => _setupState?.adbCommands.join('\n') ?? '';
+
+  Future<bool> copyAdbCommands() async {
+    if (adbCommandText.isEmpty) return false;
+    try {
+      await _clipboard.writeText(adbCommandText);
+      return true;
+    } catch (_) {
+      _errorMessage = 'Setup commands could not be copied.';
+      _notify();
+      return false;
+    }
+  }
 
   bool get canContinueCapture =>
       !_busy && (_mode == AndroidCaptureMode.limited || _verified);

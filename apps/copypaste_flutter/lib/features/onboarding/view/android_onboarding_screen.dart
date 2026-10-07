@@ -1,25 +1,23 @@
 import 'dart:async';
 
-import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
-
-import '../../devices/device_presentation.dart';
 
 import '../../../app/theme/app_tokens.dart';
 import '../controller/android_onboarding_controller.dart';
 import '../repository/android_onboarding_store.dart';
+import 'onboarding_intro.dart';
+import 'onboarding_scaffold.dart';
+import 'onboarding_setting_row.dart';
 
 class AndroidOnboardingScreen extends StatefulWidget {
   const AndroidOnboardingScreen({
     super.key,
     required this.controller,
-    required this.onPairDevice,
-    required this.onOpenHistory,
+    required this.onFinished,
   });
 
   final AndroidOnboardingController controller;
-  final Future<void> Function() onPairDevice;
-  final Future<void> Function() onOpenHistory;
+  final Future<void> Function() onFinished;
 
   @override
   State<AndroidOnboardingScreen> createState() =>
@@ -50,100 +48,49 @@ class _AndroidOnboardingScreenState extends State<AndroidOnboardingScreen>
   }
 
   @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: controller,
-      builder: (context, child) {
-        return Scaffold(
-          headers: [
-            const AppBar(
-              leading: [
-                Image(
-                  image: AssetImage('assets/brand/copypaste.png'),
-                  width: AppIconSize.md,
-                  height: AppIconSize.md,
-                ),
-              ],
-              title: Text(
-                'Set up CopyPaste',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const Divider(),
-          ],
-          footers: [
-            const Divider(),
-            _Footer(
-              controller: controller,
-              onPairDevice: widget.onPairDevice,
-              onOpenHistory: widget.onOpenHistory,
-            ),
-          ],
-          loadingProgressIndeterminate: controller.busy,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(AppSpacing.xl),
-            child: Align(
-              alignment: Alignment.topCenter,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 680),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Progress(
-                      progress: controller.step.index + 1,
-                      min: 0,
-                      max: AndroidOnboardingStep.values.length.toDouble(),
-                      disableAnimation: MediaQuery.disableAnimationsOf(context),
-                    ),
-                    const Gap(AppSpacing.xl),
-                    switch (controller.step) {
-                      AndroidOnboardingStep.welcome => const _Welcome(),
-                      AndroidOnboardingStep.capture => _CaptureSetup(
-                        controller: controller,
-                      ),
-                      AndroidOnboardingStep.sync => const _Sync(),
-                    },
-                    if (controller.errorMessage case final message?) ...[
-                      const Gap(AppSpacing.md),
-                      Alert.destructive(
-                        leading: const Icon(LucideIcons.circleAlert),
-                        title: const Text('Setup needs attention'),
-                        content: Text(message),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: controller,
+    builder: (context, child) => OnboardingScaffold(
+      stepIndex: controller.step.index,
+      stepCount: AndroidOnboardingStep.values.length,
+      platform: 'Android',
+      busy: controller.busy,
+      errorMessage: controller.errorMessage,
+      onBack:
+          controller.step == AndroidOnboardingStep.capture && !controller.busy
+          ? controller.showPreviousStep
+          : null,
+      action: Button.primary(
+        onPressed: switch (controller.step) {
+          AndroidOnboardingStep.welcome =>
+            controller.busy ? null : controller.showCapture,
+          AndroidOnboardingStep.capture =>
+            controller.canContinueCapture
+                ? controller.continueFromCapture
+                : null,
+          AndroidOnboardingStep.sync => controller.busy ? null : _finish,
+        },
+        child: Text(
+          controller.step == AndroidOnboardingStep.sync
+              ? 'Get started'
+              : 'Continue',
+        ),
+      ),
+      child: switch (controller.step) {
+        AndroidOnboardingStep.welcome => const OnboardingIntro.welcome(),
+        AndroidOnboardingStep.capture => _CaptureSetup(controller: controller),
+        AndroidOnboardingStep.sync => const OnboardingIntro.ready(),
       },
-    );
-  }
-}
-
-class _Welcome extends StatelessWidget {
-  const _Welcome();
-
-  @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const Icon(LucideIcons.smartphone, size: AppIconSize.state),
-      const Gap(AppSpacing.xl),
-      Text('Welcome to CopyPaste', style: Theme.of(context).typography.h2),
-      const Gap(AppSpacing.sm),
-      const Text(
-        'Save clipboard history on this phone and pair it with your other devices.',
-      ).muted(),
-    ],
+    ),
   );
+
+  Future<void> _finish() async {
+    if (await controller.finish()) await widget.onFinished();
+  }
 }
 
 class _CaptureSetup extends StatelessWidget {
   const _CaptureSetup({required this.controller});
-
   final AndroidOnboardingController controller;
 
   @override
@@ -152,32 +99,32 @@ class _CaptureSetup extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('Background capture', style: Theme.of(context).typography.h2),
-        const Gap(AppSpacing.sm),
-        const Text(
-          'Choose whether CopyPaste may save copies made while another app is open.',
-        ).muted(),
+        Text(
+          controller.mode == AndroidCaptureMode.full
+              ? 'Full capture'
+              : 'Background capture',
+          style: Theme.of(context).typography.h1,
+        ),
         const Gap(AppSpacing.lg),
         RadioGroup<AndroidCaptureMode>(
           value: controller.mode,
           onChanged: (mode) => unawaited(controller.selectMode(mode)),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              RadioCard<AndroidCaptureMode>(
+              const RadioCard<AndroidCaptureMode>(
                 value: AndroidCaptureMode.full,
-                child: const _Choice(
-                  title: 'Full background capture',
-                  description:
-                      'One-time Shizuku or ADB setup. Copies from other apps are saved automatically.',
+                child: _Choice(
+                  title: 'Full capture',
+                  description: 'Set up once, then verify a real copy.',
                 ),
               ),
               const Gap(AppSpacing.sm),
-              RadioCard<AndroidCaptureMode>(
+              const RadioCard<AndroidCaptureMode>(
                 value: AndroidCaptureMode.limited,
-                child: const _Choice(
-                  title: 'Limited mode',
-                  description:
-                      'Use Share to CopyPaste, or return here after copying.',
+                child: _Choice(
+                  title: 'Limited capture',
+                  description: 'Share to CopyPaste or return after copying.',
                 ),
               ),
             ],
@@ -185,31 +132,44 @@ class _CaptureSetup extends StatelessWidget {
         ),
         if (controller.mode == AndroidCaptureMode.full) ...[
           const Gap(AppSpacing.lg),
-          const Alert(
-            leading: Icon(LucideIcons.shieldCheck),
-            title: Text('What the one-time setup allows'),
-            content: Text(
-              'CopyPaste reads only ClipboardService events needed to detect a blocked background read, then briefly focuses a 1×1 overlay to read the clipboard. Shizuku is not used after setup.',
+          Card(
+            child: Column(
+              children: [
+                OnboardingSettingRow(
+                  icon: LucideIcons.bell,
+                  title: 'Capture notification',
+                  description: 'Required while capture runs',
+                  statusIcon: state?.notificationGranted == true
+                      ? LucideIcons.circleCheck
+                      : null,
+                  action: state?.notificationGranted == true
+                      ? null
+                      : Button.ghost(
+                          onPressed: controller.busy
+                              ? null
+                              : controller.requestNotifications,
+                          child: const Text('Allow'),
+                        ),
+                ),
+                const Gap(AppSpacing.md),
+                OnboardingSettingRow(
+                  icon: LucideIcons.batteryCharging,
+                  title: 'Background activity',
+                  description: 'Recommended to reduce capture loss',
+                  statusIcon: state?.batteryExempt == true
+                      ? LucideIcons.circleCheck
+                      : null,
+                  action: state?.batteryExempt == true
+                      ? null
+                      : Button.ghost(
+                          onPressed: controller.busy
+                              ? null
+                              : controller.requestBatteryExemption,
+                          child: const Text('Open'),
+                        ),
+                ),
+              ],
             ),
-          ),
-          const Gap(AppSpacing.md),
-          _PermissionCard(
-            icon: LucideIcons.bell,
-            title: 'Capture notification',
-            description: 'Required while background capture is running.',
-            granted: state?.notificationGranted ?? false,
-            actionLabel: 'Allow',
-            onAction: controller.requestNotifications,
-          ),
-          const Gap(AppSpacing.sm),
-          _PermissionCard(
-            icon: LucideIcons.batteryCharging,
-            title: 'Background activity',
-            description:
-                'Recommended to reduce capture loss on battery-managed devices.',
-            granted: state?.batteryExempt ?? false,
-            actionLabel: 'Open settings',
-            onAction: controller.requestBatteryExemption,
           ),
           const Gap(AppSpacing.lg),
           Tabs(
@@ -223,22 +183,16 @@ class _CaptureSetup extends StatelessWidget {
               TabItem(child: Text('ADB')),
             ],
           ),
-          const Gap(AppSpacing.md),
+          const Gap(AppSpacing.lg),
           if (controller.method == AndroidCaptureSetupMethod.shizuku)
             _ShizukuSetup(controller: controller)
           else
             _AdbSetup(controller: controller),
-          const Gap(AppSpacing.md),
+          const Gap(AppSpacing.lg),
           _Verification(controller: controller),
         ] else ...[
           const Gap(AppSpacing.lg),
-          const Alert(
-            leading: Icon(LucideIcons.info),
-            title: Text('Limited mode'),
-            content: Text(
-              'Background capture stays off. Share items to CopyPaste or return to the app after copying. You can set up Full mode later.',
-            ),
-          ),
+          const Text('You can set up Full capture later.').muted().textSmall(),
         ],
       ],
     );
@@ -247,7 +201,6 @@ class _CaptureSetup extends StatelessWidget {
 
 class _Choice extends StatelessWidget {
   const _Choice({required this.title, required this.description});
-
   final String title;
   final String description;
 
@@ -257,78 +210,13 @@ class _Choice extends StatelessWidget {
     children: [
       Text(title).medium(),
       const Gap(AppSpacing.xs),
-      Text(description).muted().textSmall(),
+      Text(description, style: Theme.of(context).typography.xSmall).muted(),
     ],
-  );
-}
-
-class _PermissionCard extends StatelessWidget {
-  const _PermissionCard({
-    required this.icon,
-    required this.title,
-    required this.description,
-    required this.granted,
-    required this.actionLabel,
-    required this.onAction,
-  });
-
-  final IconData icon;
-  final String title;
-  final String description;
-  final bool granted;
-  final String actionLabel;
-  final Future<void> Function() onAction;
-
-  @override
-  Widget build(BuildContext context) => Card(
-    child: LayoutBuilder(
-      builder: (context, constraints) {
-        final details = Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon),
-            const Gap(AppSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title).medium(),
-                  const Gap(AppSpacing.xs),
-                  Text(description).muted().textSmall(),
-                ],
-              ),
-            ),
-          ],
-        );
-        final action = granted
-            ? const Icon(LucideIcons.circleCheck)
-            : Button.secondary(onPressed: onAction, child: Text(actionLabel));
-        if (constraints.maxWidth < 420) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              details,
-              const Gap(AppSpacing.md),
-              Align(alignment: Alignment.centerLeft, child: action),
-            ],
-          );
-        }
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Expanded(child: details),
-            const Gap(AppSpacing.md),
-            action,
-          ],
-        );
-      },
-    ),
   );
 }
 
 class _ShizukuSetup extends StatelessWidget {
   const _ShizukuSetup({required this.controller});
-
   final AndroidOnboardingController controller;
 
   @override
@@ -337,15 +225,17 @@ class _ShizukuSetup extends StatelessWidget {
     final shizuku = state?.shizuku;
     if (shizuku == null) return const SizedBox.shrink();
     if (!shizuku.supported) {
-      return const Alert(
-        leading: Icon(LucideIcons.info),
-        title: Text('Android 11 or newer is required'),
-        content: Text('Use the ADB tab on this device.'),
+      return const Card(
+        child: OnboardingSettingRow(
+          icon: LucideIcons.info,
+          title: 'Android 11 or newer is required',
+          description: 'Use the ADB tab on this device.',
+        ),
       );
     }
     final ready = state!.privilegedGrants;
     final title = ready
-        ? 'One-time grants applied'
+        ? 'One-time access applied'
         : !shizuku.installed
         ? 'Install Shizuku'
         : !shizuku.running
@@ -354,21 +244,21 @@ class _ShizukuSetup extends StatelessWidget {
         ? 'Apply capture access'
         : 'Allow CopyPaste';
     final description = ready
-        ? 'Shizuku is no longer required for capture.'
+        ? 'Shizuku is no longer needed.'
         : !shizuku.installed
-        ? 'Install Shizuku from its official download page.'
+        ? 'Get Shizuku to apply one-time access.'
         : !shizuku.running
-        ? 'Use Wireless debugging pairing in Shizuku, then return here.'
+        ? 'Use Wireless debugging in Shizuku, then return.'
         : shizuku.permission
-        ? 'CopyPaste is allowed in Shizuku. Applying Android capture access.'
-        : 'Approve CopyPaste once so it can apply the setup commands.';
+        ? 'Apply one-time capture access.'
+        : 'Approve CopyPaste once in Shizuku.';
     return Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(title).medium(),
           const Gap(AppSpacing.xs),
-          Text(description).muted().textSmall(),
+          Text(description, style: Theme.of(context).typography.xSmall).muted(),
           if (!ready) ...[
             const Gap(AppSpacing.md),
             Align(
@@ -379,11 +269,6 @@ class _ShizukuSetup extends StatelessWidget {
                     : !shizuku.installed || !shizuku.running
                     ? controller.openShizuku
                     : controller.applyShizukuGrants,
-                leading: Icon(
-                  !shizuku.installed || !shizuku.running
-                      ? LucideIcons.externalLink
-                      : LucideIcons.shieldCheck,
-                ),
                 child: Text(
                   !shizuku.installed
                       ? 'Get Shizuku'
@@ -402,92 +287,84 @@ class _ShizukuSetup extends StatelessWidget {
   }
 }
 
-class _AdbSetup extends StatelessWidget {
+class _AdbSetup extends StatefulWidget {
   const _AdbSetup({required this.controller});
-
   final AndroidOnboardingController controller;
 
   @override
-  Widget build(BuildContext context) {
-    final commands = controller.setupState?.adbCommands ?? const <String>[];
-    return Card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Text('Run these commands on your computer').medium(),
-          const Gap(AppSpacing.xs),
-          const Text(
-            'Enable USB debugging, connect this phone, accept the debugging prompt, then run every command in order.',
-          ).muted().textSmall(),
-          const Gap(AppSpacing.md),
-          for (var index = 0; index < commands.length; index++) ...[
-            _Command(command: commands[index], number: index + 1),
-            if (index != commands.length - 1) const Gap(AppSpacing.sm),
-          ],
-        ],
-      ),
-    );
-  }
+  State<_AdbSetup> createState() => _AdbSetupState();
 }
 
-class _Command extends StatefulWidget {
-  const _Command({required this.command, required this.number});
-
-  final String command;
-  final int number;
-
-  @override
-  State<_Command> createState() => _CommandState();
-}
-
-class _CommandState extends State<_Command> {
+class _AdbSetupState extends State<_AdbSetup> {
   bool copied = false;
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Expanded(child: SelectableText(widget.command).textSmall()),
-      const Gap(AppSpacing.sm),
-      Button.fixed(
-        style: const ButtonStyle.fixedIcon(),
-        onPressed: () async {
-          await Clipboard.setData(ClipboardData(text: widget.command));
-          if (mounted) setState(() => copied = true);
-        },
-        child: Icon(copied ? LucideIcons.copyCheck : LucideIcons.copy),
-      ),
-    ],
+  Widget build(BuildContext context) => Card(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const Expanded(child: Text('Run on your computer')),
+            const Gap(AppSpacing.sm),
+            Tooltip(
+              tooltip: (context) => const Text('Copy all commands'),
+              child: Button.ghost(
+                style: const ButtonStyle.ghostIcon(),
+                onPressed: widget.controller.adbCommandText.isEmpty
+                    ? null
+                    : () async {
+                        if (await widget.controller.copyAdbCommands() &&
+                            mounted) {
+                          setState(() => copied = true);
+                        }
+                      },
+                child: Icon(copied ? LucideIcons.copyCheck : LucideIcons.copy),
+              ),
+            ),
+          ],
+        ),
+        const Gap(AppSpacing.sm),
+        Text(
+          'Enable USB debugging and connect this phone.',
+          style: Theme.of(context).typography.xSmall,
+        ).muted(),
+        const Gap(AppSpacing.md),
+        SelectableText(
+          widget.controller.adbCommandText,
+          style: Theme.of(
+            context,
+          ).typography.inlineCode.copyWith(fontWeight: FontWeight.normal),
+        ),
+      ],
+    ),
   );
 }
 
 class _Verification extends StatelessWidget {
   const _Verification({required this.controller});
-
   final AndroidOnboardingController controller;
 
   @override
   Widget build(BuildContext context) {
     final state = controller.setupState;
-    if (controller.verified) {
-      return const Alert(
-        leading: Icon(LucideIcons.circleCheck),
-        title: Text('Background capture is working'),
-        content: Text('A copy made in another app reached your local History.'),
-      );
-    }
     return Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text('Verify with a real copy').medium(),
-          const Gap(AppSpacing.xs),
-          Text(
-            controller.verifying
-                ? 'Leave CopyPaste, copy text in another app, then return here.'
-                : 'Start capture, copy text in another app, then return. Setup is complete only after the copy reaches History.',
-          ).muted().textSmall(),
-          const Gap(AppSpacing.md),
-          if (!controller.verifying)
+          OnboardingSettingRow(
+            icon: controller.verified
+                ? LucideIcons.circleCheck
+                : LucideIcons.circle,
+            title: controller.verified
+                ? 'Background capture is working'
+                : 'Verify a real copy',
+            description: controller.verified
+                ? 'A new copy reached your local History.'
+                : 'Copy in another app, then return here.',
+          ),
+          if (!controller.verified && !controller.verifying) ...[
+            const Gap(AppSpacing.md),
             Align(
               alignment: Alignment.centerLeft,
               child: Button.primary(
@@ -497,111 +374,12 @@ class _Verification extends StatelessWidget {
                         state?.notificationGranted == true
                     ? controller.beginVerification
                     : null,
-                leading: const Icon(LucideIcons.clipboardCheck),
                 child: const Text('Start capture'),
               ),
             ),
+          ],
         ],
       ),
     );
-  }
-}
-
-class _Sync extends StatelessWidget {
-  const _Sync();
-
-  @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const Icon(LucideIcons.badgeCheck, size: AppIconSize.state),
-      const Gap(AppSpacing.xl),
-      Text('CopyPaste is ready', style: Theme.of(context).typography.h2),
-      const Gap(AppSpacing.sm),
-      const Text(
-        'Pair another device, or open your clipboard History.',
-      ).muted(),
-    ],
-  );
-}
-
-class _Footer extends StatelessWidget {
-  const _Footer({
-    required this.controller,
-    required this.onPairDevice,
-    required this.onOpenHistory,
-  });
-
-  final AndroidOnboardingController controller;
-  final Future<void> Function() onPairDevice;
-  final Future<void> Function() onOpenHistory;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.all(AppSpacing.lg),
-    child: LayoutBuilder(
-      builder: (context, constraints) {
-        final back = controller.step == AndroidOnboardingStep.welcome
-            ? null
-            : Button.ghost(
-                onPressed: controller.busy ? null : controller.showPreviousStep,
-                leading: const Icon(LucideIcons.arrowLeft),
-                child: const Text('Back'),
-              );
-        final actions = switch (controller.step) {
-          AndroidOnboardingStep.welcome => <Widget>[
-            Button.primary(
-              onPressed: controller.busy ? null : controller.showCapture,
-              child: const Text('Continue'),
-            ),
-          ],
-          AndroidOnboardingStep.capture => <Widget>[
-            Button.primary(
-              onPressed: controller.canContinueCapture
-                  ? controller.continueFromCapture
-                  : null,
-              child: const Text('Continue'),
-            ),
-          ],
-          AndroidOnboardingStep.sync => <Widget>[
-            Button.ghost(
-              onPressed: controller.busy ? null : () => _finish(onOpenHistory),
-              child: const Text('Open History'),
-            ),
-            Button.primary(
-              onPressed: controller.busy ? null : () => _finish(onPairDevice),
-              leading: const Icon(DevicePresentation.collectionIcon),
-              child: const Text('Pair a device'),
-            ),
-          ],
-        };
-        if (constraints.maxWidth < 440) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              for (var index = 0; index < actions.length; index++) ...[
-                actions[index],
-                if (index != actions.length - 1) const Gap(AppSpacing.sm),
-              ],
-              if (back != null) ...[const Gap(AppSpacing.sm), back],
-            ],
-          );
-        }
-        return Row(
-          children: [
-            if (back case final Widget button) button,
-            const Spacer(),
-            for (var index = 0; index < actions.length; index++) ...[
-              actions[index],
-              if (index != actions.length - 1) const Gap(AppSpacing.sm),
-            ],
-          ],
-        );
-      },
-    ),
-  );
-
-  Future<void> _finish(Future<void> Function() destination) async {
-    if (await controller.finish()) await destination();
   }
 }

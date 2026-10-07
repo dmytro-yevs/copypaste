@@ -3,6 +3,7 @@ import 'package:copypaste_flutter/features/onboarding/repository/android_onboard
 import 'package:copypaste_flutter/features/onboarding/view/android_onboarding_screen.dart';
 import 'package:copypaste_flutter/platform/android/android_capture_setup_gateway.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
@@ -16,8 +17,8 @@ void main() {
 
     await tester.pumpWidget(_app(controller));
 
-    expect(find.text('Full background capture'), findsOneWidget);
-    expect(find.text('Limited mode'), findsOneWidget);
+    expect(find.text('Full capture'), findsNWidgets(2));
+    expect(find.text('Limited capture'), findsOneWidget);
     expect(find.text('Shizuku'), findsOneWidget);
     expect(find.text('ADB'), findsOneWidget);
     expect(find.text('Check again'), findsNothing);
@@ -27,13 +28,85 @@ void main() {
     expect(find.text('Check access'), findsNothing);
     expect(find.text('Check capture'), findsNothing);
 
-    for (final command in _commands) {
-      expect(find.text(command), findsOneWidget);
-    }
+    expect(find.text(_commands.join('\n')), findsOneWidget);
     final continueButton = tester.widget<Button>(
       find.widgetWithText(Button, 'Continue'),
     );
     expect(continueButton.onPressed, isNull);
+    expect(
+      tester.getSize(find.byType(Tabs)).width,
+      tester.getSize(find.byType(RadioGroup<AndroidCaptureMode>)).width,
+    );
+    expect(
+      tester.getCenter(find.byIcon(LucideIcons.bell)).dy,
+      tester.getCenter(find.text('Capture notification')).dy,
+    );
+  });
+
+  testWidgets('copies all six ADB commands as one multiline block', (
+    tester,
+  ) async {
+    String? copiedText;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copiedText = (call.arguments as Map)['text'] as String;
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    final controller = _controller();
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.showCapture();
+    await controller.selectMethod(AndroidCaptureSetupMethod.adb);
+    await tester.pumpWidget(_app(controller));
+
+    expect(find.byType(SelectableText), findsOneWidget);
+    final copy = find.byIcon(LucideIcons.copy);
+    expect(copy, findsOneWidget);
+    await tester.ensureVisible(copy);
+    await tester.pumpAndSettle();
+    await tester.tap(copy);
+    await tester.pumpAndSettle();
+
+    expect(copiedText, _commands.join('\n'));
+    expect(find.byIcon(LucideIcons.copyCheck), findsOneWidget);
+  });
+
+  testWidgets('final step has one action and completes before opening home', (
+    tester,
+  ) async {
+    final controller = _controller();
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.showCapture();
+    await controller.selectMode(AndroidCaptureMode.limited);
+    await controller.continueFromCapture();
+    var finished = false;
+    await tester.pumpWidget(
+      ShadcnApp(
+        home: AndroidOnboardingScreen(
+          controller: controller,
+          onFinished: () async {
+            finished = controller.complete;
+          },
+        ),
+      ),
+    );
+    expect(find.byType(Button), findsOneWidget);
+    expect(find.text('Open History'), findsNothing);
+    expect(find.text('Pair a device'), findsNothing);
+    await tester.tap(find.widgetWithText(Button, 'Get started'));
+    await tester.pumpAndSettle();
+    expect(finished, isTrue);
   });
 
   testWidgets('Limited mode reaches Sync without privileged setup', (
@@ -74,36 +147,6 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('stacks the Sync footer actions on a narrow phone', (
-    tester,
-  ) async {
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.binding.setSurfaceSize(const Size(320, 640));
-    final controller = _controller();
-    addTearDown(controller.dispose);
-    await controller.initialize();
-    controller.showCapture();
-    await controller.selectMode(AndroidCaptureMode.limited);
-    await controller.continueFromCapture();
-
-    await tester.pumpWidget(_app(controller));
-
-    final openHistory = find.widgetWithText(Button, 'Open History');
-    final pairDevice = find.widgetWithText(Button, 'Pair a device');
-    final back = find.widgetWithText(Button, 'Back');
-    expect(openHistory, findsOneWidget);
-    expect(pairDevice, findsOneWidget);
-    expect(back, findsOneWidget);
-    expect(
-      tester.getTopLeft(openHistory).dy,
-      lessThan(tester.getTopLeft(pairDevice).dy),
-    );
-    expect(
-      tester.getTopLeft(pairDevice).dy,
-      lessThan(tester.getTopLeft(back).dy),
-    );
-  });
-
   testWidgets('uses no outline button variants', (tester) async {
     final controller = _controller();
     addTearDown(controller.dispose);
@@ -133,8 +176,7 @@ AndroidOnboardingController _controller() => AndroidOnboardingController(
 Widget _app(AndroidOnboardingController controller) => ShadcnApp(
   home: AndroidOnboardingScreen(
     controller: controller,
-    onPairDevice: () async {},
-    onOpenHistory: () async {},
+    onFinished: () async {},
   ),
 );
 

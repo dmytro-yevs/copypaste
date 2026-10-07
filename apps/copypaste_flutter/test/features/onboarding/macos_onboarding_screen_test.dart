@@ -23,8 +23,7 @@ void main() {
       ShadcnApp(
         home: MacosOnboardingScreen(
           controller: controller,
-          onPairDevice: () async {},
-          onOpenHistory: () async {},
+          onFinished: () async {},
         ),
       ),
     );
@@ -51,18 +50,14 @@ void main() {
     );
     addTearDown(controller.dispose);
     await controller.initialize();
-    var pairCalls = 0;
-    var historyCalls = 0;
+    var finishCalls = 0;
 
     await tester.pumpWidget(
       ShadcnApp(
         home: MacosOnboardingScreen(
           controller: controller,
-          onPairDevice: () async {
-            pairCalls += 1;
-          },
-          onOpenHistory: () async {
-            historyCalls += 1;
+          onFinished: () async {
+            finishCalls += 1;
           },
         ),
       ),
@@ -73,7 +68,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Accessibility'), findsOneWidget);
-    expect(find.text('Optional'), findsOneWidget);
+    expect(find.text('Optional for auto-paste'), findsOneWidget);
     expect(find.text('Start at login'), findsOneWidget);
     expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
     expect(
@@ -85,12 +80,12 @@ void main() {
     await tester.pump();
 
     expect(find.text('CopyPaste is ready'), findsOneWidget);
-    await tester.tap(find.widgetWithText(Button, 'Pair a device'));
+    await tester.tap(find.widgetWithText(Button, 'Get started'));
     await tester.pump();
     await tester.pump();
 
-    expect(pairCalls, 1);
-    expect(historyCalls, 0);
+    expect(finishCalls, 1);
+    expect(find.byType(Button), findsOneWidget);
     expect(controller.complete, isTrue);
   });
 
@@ -113,8 +108,7 @@ void main() {
       ShadcnApp(
         home: MacosOnboardingScreen(
           controller: controller,
-          onPairDevice: () async {},
-          onOpenHistory: () async {},
+          onFinished: () async {},
         ),
       ),
     );
@@ -148,8 +142,7 @@ void main() {
       ShadcnApp(
         home: MacosOnboardingScreen(
           controller: controller,
-          onPairDevice: () async {},
-          onOpenHistory: () async {},
+          onFinished: () async {},
         ),
       ),
     );
@@ -158,7 +151,8 @@ void main() {
 
     expect(find.text('CopyPaste is ready'), findsOneWidget);
     expect(find.text('Optional setup needs attention'), findsOneWidget);
-    expect(find.widgetWithText(Button, 'Open Settings'), findsOneWidget);
+    expect(find.widgetWithText(Button, 'Open Settings'), findsNothing);
+    expect(find.widgetWithText(Button, 'Get started'), findsOneWidget);
   });
 
   testWidgets('uses the unified header when macOS owns the title bar', (
@@ -175,8 +169,7 @@ void main() {
       ShadcnApp(
         home: MacosOnboardingScreen(
           controller: controller,
-          onPairDevice: () async {},
-          onOpenHistory: () async {},
+          onFinished: () async {},
           unifiedTitleBar: true,
         ),
       ),
