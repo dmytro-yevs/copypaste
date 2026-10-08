@@ -9,9 +9,11 @@
 #![cfg_attr(target_os = "windows", deny(unsafe_code))]
 
 pub mod binary;
+mod binary_reference;
 pub mod clipboard_payload;
 pub mod crypto;
 pub mod device_name;
+pub mod file_import;
 pub mod image_preview;
 pub mod ingest;
 pub mod p2p_contract;

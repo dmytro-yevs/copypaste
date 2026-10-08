@@ -24,7 +24,8 @@
 //!   the first time an eviction lands on one and not the other.
 //! * **One live row per distinct content.** [`Store::insert_or_bump`] promotes
 //!   the existing row rather than writing a second one, across all of history
-//!   and not only a recent window (manifest 01 I-23).
+//!   and not only a recent window (manifest 01 I-23). Explicit file imports
+//!   retain separate named records and share their encrypted binary payload.
 //! * **Errors never contain a filesystem path** (AGENTS.md rule 4 — the path
 //!   discloses the local username). Nothing in [`StoreError`] formats a path,
 //!   and the underlying `rusqlite` errors do not carry one either.
@@ -35,6 +36,7 @@
 mod connection;
 mod creation;
 mod dbfile;
+mod file_payloads;
 mod history;
 mod identity;
 mod items;
