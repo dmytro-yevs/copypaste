@@ -744,7 +744,9 @@ class _DeviceDetailsInspector extends StatelessWidget {
                   button: true,
                   child: Button.ghost(
                     key: const ValueKey<String>('close-device-details'),
-                    style: const ButtonStyle.ghostIcon(),
+                    style: AppTheme.controlButtonStyle(
+                      const ButtonStyle.ghostIcon(),
+                    ),
                     onPressed: onClose,
                     child: const Icon(LucideIcons.x),
                   ),
@@ -1065,7 +1067,9 @@ class _PairingInspectorState extends State<_PairingInspector> {
               Expanded(child: Text(_modeTitle(mode)).h3()),
               Button.ghost(
                 key: const ValueKey<String>('close-pairing-inspector'),
-                style: const ButtonStyle.ghostIcon(),
+                style: AppTheme.controlButtonStyle(
+                  const ButtonStyle.ghostIcon(),
+                ),
                 onPressed: widget.controller.canClosePairing
                     ? widget.onClose
                     : null,

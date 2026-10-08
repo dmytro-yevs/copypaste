@@ -189,7 +189,9 @@ class _AdbSetupState extends State<_AdbSetup> {
             Tooltip(
               tooltip: (context) => const Text('Copy all commands'),
               child: Button.ghost(
-                style: const ButtonStyle.ghostIcon(),
+                style: AppTheme.controlButtonStyle(
+                  const ButtonStyle.ghostIcon(),
+                ),
                 onPressed: widget.setup.adbCommands.isEmpty
                     ? null
                     : () async {

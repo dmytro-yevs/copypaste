@@ -220,6 +220,19 @@ void main() {
       );
       expect(ocrButton.child, isA<Icon>());
       expect(ocrButton.leading, isNull);
+      final actionHeight = tester
+          .getSize(find.byKey(const ValueKey('history-detail-copy')))
+          .height;
+      for (final key in [
+        'history-ocr',
+        'history-detail-delete',
+        'history-pin-screenshot',
+      ]) {
+        expect(
+          tester.getSize(find.byKey(ValueKey(key))).height,
+          closeTo(actionHeight, 0.01),
+        );
+      }
       expect(find.text('OCR'), findsNothing);
       expect(find.bySemanticsLabel('Recognize image text'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('history-ocr')));

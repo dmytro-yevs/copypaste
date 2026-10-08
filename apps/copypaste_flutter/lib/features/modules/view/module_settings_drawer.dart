@@ -58,7 +58,9 @@ class ModuleSettingsDrawer extends StatelessWidget {
                         button: true,
                         child: Button.ghost(
                           key: ValueKey('module-settings-close-$moduleId'),
-                          style: const ButtonStyle.ghostIcon(),
+                          style: AppTheme.controlButtonStyle(
+                            const ButtonStyle.ghostIcon(),
+                          ),
                           onPressed: () => closeDrawer(context),
                           child: const Icon(LucideIcons.x),
                         ),

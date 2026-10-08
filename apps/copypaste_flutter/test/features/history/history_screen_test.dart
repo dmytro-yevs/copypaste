@@ -1299,9 +1299,11 @@ void main() {
       find.byWidgetPredicate((widget) => widget is Select),
       findsNWidgets(5),
     );
+    final controlHeight = tester.getSize(searchButton).height;
+    expect(controlHeight, greaterThanOrEqualTo(AppControlSize.large));
     for (final control in controls) {
       final size = tester.getSize(find.byWidget(control.widget));
-      expect(size, const Size.square(40));
+      expect(size, Size.square(controlHeight));
     }
 
     final search = tester.widget<Button>(searchButton);
@@ -1311,14 +1313,13 @@ void main() {
     final firstSelectFinder = find
         .byWidgetPredicate((widget) => widget is Select)
         .first;
-    final firstSelect = tester.widget<Select<dynamic>>(firstSelectFinder);
-    final selectDecoration =
-        firstSelect.theme!.decoration!(
-              tester.element(firstSelectFinder),
-              const {},
-              const BoxDecoration(),
-            )
-            as BoxDecoration;
+    final selectContext = tester.element(firstSelectFinder);
+    final selectTheme = ComponentTheme.maybeOf<SelectTheme>(selectContext)!;
+    final selectDecoration = selectTheme.decoration!(
+      tester.element(firstSelectFinder),
+      const {},
+      const BoxDecoration(),
+    ) as BoxDecoration;
     expect(searchDecoration.color, selectDecoration.color);
     expect(searchDecoration.borderRadius, selectDecoration.borderRadius);
   });
@@ -1352,7 +1353,7 @@ void main() {
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final controller = HistoryController(_ScreenRepository());
       addTearDown(controller.dispose);
-      for (final textScale in [1.0, 1.5]) {
+      for (final textScale in [1.0, 1.5, 2.0]) {
         await tester.binding.setSurfaceSize(const Size(3200, 800));
         await tester.pumpWidget(
           ShadcnApp(
@@ -1362,9 +1363,8 @@ void main() {
             builder: (context, child) => AppTheme.builder(
               context,
               MediaQuery(
-                data: MediaQuery.of(
-                  context,
-                ).copyWith(textScaler: TextScaler.linear(textScale)),
+                data: MediaQuery.of(context)
+                    .copyWith(textScaler: TextScaler.linear(textScale)),
                 child: child!,
               ),
             ),
@@ -1405,6 +1405,21 @@ void main() {
             greaterThanOrEqualTo(160),
             reason: 'Window width $width, text scale $textScale',
           );
+          final height = tester
+              .getSize(
+                find.byKey(const ValueKey<String>('history-import-files')),
+              )
+              .height;
+          expect(
+            tester.getSize(find.byType(TextField)).height,
+            closeTo(height, 0.01),
+          );
+          for (final select in selects.evaluate()) {
+            expect(
+              tester.getSize(find.byWidget(select.widget)).height,
+              closeTo(height, 0.01),
+            );
+          }
         }
       }
     },
@@ -1635,13 +1650,12 @@ void main() {
         const {WidgetState.focused},
         const {WidgetState.pressed},
       ]) {
-        final decoration =
-            select.theme!.decoration!(
-                  selectContext,
-                  states,
-                  const BoxDecoration(),
-                )
-                as BoxDecoration;
+        final selectTheme = ComponentTheme.maybeOf<SelectTheme>(selectContext)!;
+        final decoration = selectTheme.decoration!(
+          selectContext,
+          states,
+          const BoxDecoration(),
+        ) as BoxDecoration;
         expect(decoration.border?.top.style, BorderStyle.none);
       }
     }

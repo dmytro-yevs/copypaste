@@ -82,7 +82,9 @@ class _SmsAccessSetupDrawerState extends State<SmsAccessSetupDrawer>
                         button: true,
                         child: Button.ghost(
                           key: const ValueKey('sms-access-setup-close'),
-                          style: const ButtonStyle.ghostIcon(),
+                          style: AppTheme.controlButtonStyle(
+                            const ButtonStyle.ghostIcon(),
+                          ),
                           onPressed: controller.busy
                               ? null
                               : () => closeDrawer(context),

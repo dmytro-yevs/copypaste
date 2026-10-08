@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:shadcn_flutter/shadcn_flutter.dart';
+import '../../../app/theme/app_theme.dart';
 
 import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_tokens.dart';
@@ -254,7 +255,9 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                           button: true,
                           child: Button.ghost(
                             key: ValueKey('module-remove-$id'),
-                            style: const ButtonStyle.ghostIcon(),
+                            style: AppTheme.controlButtonStyle(
+                              const ButtonStyle.ghostIcon(),
+                            ),
                             onPressed:
                                 controller.busy || installed.restartRequired
                                 ? null
@@ -273,7 +276,9 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                           button: true,
                           child: Button.secondary(
                             key: ValueKey('module-settings-$id'),
-                            style: const ButtonStyle.secondaryIcon(),
+                            style: AppTheme.controlButtonStyle(
+                              const ButtonStyle.secondaryIcon(),
+                            ),
                             onPressed: controller.busy
                                 ? null
                                 : () => _settings(context, id),

@@ -172,14 +172,66 @@ abstract final class AppTheme {
 
   static final AbstractButtonStyle historyToolbarIconStyle =
       const ButtonStyle.secondaryIcon().copyWith(
-        padding: (context, states, value) =>
-            const EdgeInsets.all((AppControlSize.large - AppIconSize.md) / 2),
+        padding: (context, states, value) => EdgeInsets.all(
+          (controlHeight(context, minimum: AppControlSize.large) -
+                  AppIconSize.md) /
+              2,
+        ),
         decoration: (context, states, value) => _buttonDecoration(
           context,
           states,
           softSelectDecoration(context, states, value),
         ),
       );
+
+  static double controlHeight(
+    BuildContext context, {
+    double minimum = AppControlSize.regular,
+  }) {
+    final lineHeight = _controlLineHeight(context);
+    final height = lineHeight.ceilToDouble() + AppSpacing.sm * 2;
+    return height < minimum ? minimum : height;
+  }
+
+  static EdgeInsets controlFieldPadding(
+    BuildContext context, {
+    double horizontal = AppSpacing.md,
+    double minimum = AppControlSize.regular,
+  }) {
+    final lineHeight = _controlLineHeight(context).ceilToDouble();
+    return EdgeInsets.symmetric(
+      horizontal: horizontal,
+      vertical: (controlHeight(context, minimum: minimum) - lineHeight) / 2,
+    );
+  }
+
+  static AbstractButtonStyle controlButtonStyle(ButtonStyle style) {
+    if (style.density != ButtonDensity.icon) return style;
+    return style.copyWith(
+      padding: (context, states, value) {
+        final padding = value.resolve(Directionality.of(context));
+        final iconSize =
+            style.iconTheme(context, states).size ??
+            Theme.of(context).iconTheme.small.size ??
+            AppIconSize.sm;
+        final vertical = (controlHeight(context) - iconSize) / 2;
+        return EdgeInsets.fromLTRB(
+          padding.left,
+          vertical,
+          padding.right,
+          vertical,
+        );
+      },
+    );
+  }
+
+  static double _controlLineHeight(BuildContext context) {
+    final textStyle = DefaultTextStyle.of(
+      context,
+    ).style.merge(const ButtonStyle.primary().textStyle(context, const {}));
+    return MediaQuery.textScalerOf(context).scale(textStyle.fontSize!) *
+        (textStyle.height ?? 1);
+  }
 
   static BoxDecoration historyFileDropDecoration(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
@@ -336,7 +388,7 @@ abstract final class AppTheme {
   }
 
   static SelectTheme primarySelectTheme(BuildContext context) {
-    const style = ButtonStyle.primaryIcon();
+    final style = controlButtonStyle(const ButtonStyle.primaryIcon());
     return SelectTheme(
       adaptiveOverlay: false,
       overlayConfiguration: AppOverlays.selectPopoverConfiguration(
@@ -703,14 +755,11 @@ abstract final class AppTheme {
           border: Border.fromBorderSide(BorderSide.none),
         ),
         child: ComponentTheme<TextFieldTheme>(
-          data: const TextFieldTheme(
+          data: TextFieldTheme(
             filled: true,
-            border: Border.fromBorderSide(BorderSide.none),
-            borderRadius: BorderRadius.all(Radius.circular(AppRadius.md)),
-            padding: EdgeInsets.symmetric(
-              horizontal: AppSpacing.md,
-              vertical: AppSpacing.sm,
-            ),
+            border: const Border.fromBorderSide(BorderSide.none),
+            borderRadius: const BorderRadius.all(Radius.circular(AppRadius.md)),
+            padding: controlFieldPadding(context),
           ),
           child: ComponentTheme<SelectTheme>(
             data: SelectTheme(
