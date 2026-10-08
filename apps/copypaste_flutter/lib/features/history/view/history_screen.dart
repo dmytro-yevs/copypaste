@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
+
 import '../../../platform/files/history_file_drop_target.dart';
 
 import 'package:copypaste_flutter/app/theme/app_overlays.dart';
@@ -19,6 +20,7 @@ import 'package:copypaste_flutter/shared/adaptive_breakpoints.dart';
 import 'package:copypaste_flutter/shared/state_view.dart';
 import 'package:copypaste_flutter/shared/system_date_time.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
+
 import 'history_inspector.dart';
 import 'history_delete_dialog.dart';
 import '../presentation/history_color_swatch.dart';
@@ -291,6 +293,9 @@ class _HistoryListState extends State<_HistoryList> {
         );
     final retainedIds = controller.items.map((item) => item.id).toSet();
     _sortableData.removeWhere((id, _) => !retainedIds.contains(id));
+    final bottomPadding = MediaQuery.paddingOf(context).bottom;
+    final hasError = controller.errorMessage != null;
+    final hasLoadMore = controller.isLoadingMore || showLoadMore;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -313,11 +318,22 @@ class _HistoryListState extends State<_HistoryList> {
               scrollThreshold: AppControlSize.touch,
               child: ListView.builder(
                 controller: scrollController,
+                padding: EdgeInsets.only(bottom: bottomPadding),
                 findChildIndexCallback: (key) => rowIndices[key],
                 itemCount:
-                    rows.length +
-                    (controller.isLoadingMore || showLoadMore ? 1 : 0),
+                    rows.length + (hasLoadMore ? 1 : 0) + (hasError ? 1 : 0),
                 itemBuilder: (context, index) {
+                  if (hasError &&
+                      index == rows.length + (hasLoadMore ? 1 : 0)) {
+                    return Padding(
+                      padding: const EdgeInsets.only(top: AppSpacing.sm),
+                      child: Alert.destructive(
+                        leading: const Icon(LucideIcons.circleAlert),
+                        title: const Text('History needs attention'),
+                        content: Text(controller.errorMessage!),
+                      ),
+                    );
+                  }
                   if (index >= rows.length) {
                     return Padding(
                       padding: const EdgeInsets.all(AppSpacing.lg),
@@ -347,17 +363,6 @@ class _HistoryListState extends State<_HistoryList> {
             ),
           ),
         ),
-        if (controller.errorMessage != null &&
-            (controller.state == HistoryLoadState.ready ||
-                controller.state == HistoryLoadState.empty))
-          Padding(
-            padding: const EdgeInsets.only(top: AppSpacing.sm),
-            child: Alert.destructive(
-              leading: const Icon(LucideIcons.circleAlert),
-              title: const Text('History needs attention'),
-              content: Text(controller.errorMessage!),
-            ),
-          ),
       ],
     );
   }
@@ -1258,8 +1263,7 @@ class _HistoryClipCardState extends State<_HistoryClipCard> {
                               },
                               child: Semantics(
                                 label: 'Reorder pinned clip',
-                                hint:
-                                    'Drag to move. Alt + Up or Down moves one position.',
+                                hint: 'Drag to move. Alt + Up or Down moves one position.',
                                 onIncrease: controller.canReorderPinned
                                     ? () => unawaited(
                                         controller.shiftPinned(
@@ -1283,9 +1287,8 @@ class _HistoryClipCardState extends State<_HistoryClipCard> {
                                   data: MediaQuery.of(context).copyWith(
                                     gestureSettings: DeviceGestureSettings(
                                       touchSlop:
-                                          (MediaQuery.gestureSettingsOf(
-                                                context,
-                                              ).touchSlop ??
+                                          (MediaQuery.gestureSettingsOf(context)
+                                                  .touchSlop ??
                                               kTouchSlop) /
                                           2,
                                     ),

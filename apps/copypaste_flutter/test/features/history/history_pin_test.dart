@@ -148,8 +148,13 @@ void main() {
     );
     expect(find.widgetWithText(Button, 'Pin'), findsOneWidget);
     expect(
-      (tester.widget<Button>(pinButton).style as ButtonStyle).variance,
-      ButtonVariance.outline,
+      (tester
+                  .widget<Button>(pinButton)
+                  .style
+                  .decoration(tester.element(pinButton), const {})
+              as BoxDecoration)
+          .color,
+      Theme.of(tester.element(pinButton)).colorScheme.input.scaleAlpha(0.3),
     );
 
     await tester.tap(pinButton);
@@ -160,8 +165,13 @@ void main() {
       findsOneWidget,
     );
     expect(
-      (tester.widget<Button>(pinButton).style as ButtonStyle).variance,
-      ButtonVariance.secondary,
+      (tester
+                  .widget<Button>(pinButton)
+                  .style
+                  .decoration(tester.element(pinButton), const {})
+              as BoxDecoration)
+          .color,
+      Theme.of(tester.element(pinButton)).colorScheme.secondary,
     );
     expect(repository.pinnedUpdates, [('drawer-pin', true)]);
 
