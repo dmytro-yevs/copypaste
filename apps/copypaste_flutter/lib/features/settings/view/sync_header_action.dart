@@ -32,12 +32,14 @@ class SyncHeaderAction extends StatefulWidget {
 }
 
 class _SyncHeaderActionState extends State<SyncHeaderAction> {
+  final _drawerFocus = FocusNode();
   OverlayCompleter<void>? _drawer;
   bool _opening = false;
 
   @override
   void dispose() {
     if (_drawer?.isCompleted == false) _drawer!.remove();
+    _drawerFocus.dispose();
     super.dispose();
   }
 
@@ -82,13 +84,14 @@ class _SyncHeaderActionState extends State<SyncHeaderAction> {
           height:
               MediaQuery.sizeOf(context).height *
               AppOverlaySize.drawerHeightFactor,
-          child: Focus(
-            autofocus: true,
-            child: CallbackShortcuts(
-              bindings: <ShortcutActivator, VoidCallback>{
-                const SingleActivator(LogicalKeyboardKey.escape): () =>
-                    unawaited(closeDrawer(context)),
-              },
+          child: CallbackShortcuts(
+            bindings: <ShortcutActivator, VoidCallback>{
+              const SingleActivator(LogicalKeyboardKey.escape): () =>
+                  unawaited(closeDrawer(context)),
+            },
+            child: Focus(
+              focusNode: _drawerFocus,
+              autofocus: true,
               child: AnimatedBuilder(
                 animation: Listenable.merge([
                   widget.controller,
@@ -104,6 +107,12 @@ class _SyncHeaderActionState extends State<SyncHeaderAction> {
           ),
         ),
       );
+      // The backdrop navigator can take focus as the drawer mounts.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && identical(_drawer, drawer) && !drawer.isCompleted) {
+          _drawerFocus.requestFocus();
+        }
+      });
       await drawer.future;
     } finally {
       _drawer = null;

@@ -85,38 +85,7 @@ final class MacosAppUpdateChannel {
         )
         return
       }
-      let updated = Self.run(
-        brew,
-        arguments: ["update-if-needed"],
-        timeout: 180
-      )
-      let inspected = updated && Self.run(
-        brew,
-        arguments: ["outdated", "--cask", "--json=v2", copyPasteCask],
-        timeout: 60
-      )
-      let installed = inspected && Self.run(
-        brew,
-        arguments: [
-          "upgrade",
-          "--cask",
-          "--no-ask",
-          "--no-quit",
-          "--require-sha",
-          copyPasteCask,
-        ],
-        timeout: 600
-      )
-      let installedVersion = installed
-        ? Self.runCapturing(
-            brew,
-            arguments: ["list", "--cask", "--versions", copyPasteCaskToken],
-            timeout: 30
-          )
-        : (false, "")
-      if installedVersion.0 && installedVersion.1
-        .split(whereSeparator: { $0.isWhitespace })
-        .contains(Substring(expectedVersion)) {
+      if Self.installUpdate(using: brew, expectedVersion: expectedVersion) {
         self.complete(result, value: "restart_required")
       } else {
         self.complete(
@@ -125,6 +94,38 @@ final class MacosAppUpdateChannel {
         )
       }
     }
+  }
+
+  static func installUpdate(using brew: URL, expectedVersion: String) -> Bool {
+    let updated = Self.run(
+      brew,
+      arguments: ["update-if-needed"],
+      timeout: 180
+    )
+    // A named `brew outdated` returns 1 when an update is available.
+    // Let upgrade determine whether installation is needed instead.
+    let installed = updated && Self.run(
+      brew,
+      arguments: [
+        "upgrade",
+        "--cask",
+        "--no-ask",
+        "--no-quit",
+        "--require-sha",
+        copyPasteCask,
+      ],
+      timeout: 600
+    )
+    let installedVersion = installed
+      ? Self.runCapturing(
+          brew,
+          arguments: ["list", "--cask", "--versions", copyPasteCaskToken],
+          timeout: 30
+        )
+      : (false, "")
+    return installedVersion.0 && installedVersion.1
+      .split(whereSeparator: { $0.isWhitespace })
+      .contains(Substring(expectedVersion))
   }
 
   private func openReleasePage(
