@@ -32,32 +32,103 @@ pub(super) fn upgrade(conn: &mut Connection) -> Result<(), StoreError> {
 
 fn run_registered(conn: &mut Connection, migrations: &[Migration]) -> Result<(), StoreError> {
     let version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if version > LATEST_VERSION {
+    let latest = migrations.last().map_or(0, |step| step.version);
+    if version > latest {
         return Err(StoreError::InvalidSchema);
     }
-    if version == LATEST_VERSION {
-        return schema_verify::verify_schema(conn);
+    let mut applied = if has_ledger(conn)? {
+        let mut statement =
+            conn.prepare("SELECT version FROM copypaste_schema_migrations ORDER BY version")?;
+        let recorded = statement
+            .query_map([], |row| row.get::<_, u32>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        if recorded.last().copied().unwrap_or(0) != version {
+            return Err(StoreError::InvalidSchema);
+        }
+        recorded
+    } else {
+        migrations
+            .iter()
+            .filter(|step| step.version <= version)
+            .map(|step| step.version)
+            .collect()
+    };
+    schema_verify::verify_schema_against(conn, &schema_for(&applied, migrations)?)?;
+    let missing = migrations
+        .iter()
+        .filter(|step| !applied.contains(&step.version))
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        return Ok(());
     }
-    let expected = schema_at(version);
-    schema_verify::verify_schema_against(conn, &expected)?;
     super::dbfile::verify_integrity(conn)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    for migration in migrations.iter().filter(|step| step.version > version) {
+    for migration in missing {
         tx.execute_batch(migration.sql)?;
         (migration.transform)(&tx)?;
-        tx.pragma_update(None, "user_version", migration.version)?;
+        applied.push(migration.version);
     }
-    schema_verify::verify_schema(&tx)?;
+    record_versions(&tx, &applied)?;
+    tx.pragma_update(None, "user_version", latest)?;
+    schema_verify::verify_schema_against(&tx, &schema_for(&applied, migrations)?)?;
     tx.commit()?;
     Ok(())
 }
 
-fn schema_at(version: u32) -> String {
+fn has_ledger(conn: &Connection) -> Result<bool, StoreError> {
+    Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'copypaste_schema_migrations')", [], |row| row.get(0))?)
+}
+
+fn record_versions(conn: &Connection, versions: &[u32]) -> Result<(), StoreError> {
+    if has_ledger(conn)? {
+        for version in versions {
+            conn.execute(
+                "INSERT OR IGNORE INTO copypaste_schema_migrations (version) VALUES (?1)",
+                [version],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn record_current(conn: &Connection) -> Result<(), StoreError> {
+    record_versions(
+        conn,
+        &MIGRATIONS
+            .iter()
+            .map(|step| step.version)
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn schema_for(versions: &[u32], migrations: &[Migration]) -> Result<String, StoreError> {
+    if versions
+        .iter()
+        .any(|version| !migrations.iter().any(|step| step.version == *version))
+    {
+        return Err(StoreError::InvalidSchema);
+    }
     let mut schema = INITIAL_SCHEMA.to_string();
-    for migration in MIGRATIONS.iter().filter(|step| step.version <= version) {
+    for migration in migrations
+        .iter()
+        .filter(|step| versions.contains(&step.version))
+    {
         schema.push_str(migration.sql);
     }
-    schema
+    Ok(schema)
+}
+
+#[cfg(test)]
+fn schema_at(version: u32) -> String {
+    schema_for(
+        &MIGRATIONS
+            .iter()
+            .filter(|step| step.version <= version)
+            .map(|step| step.version)
+            .collect::<Vec<_>>(),
+        MIGRATIONS,
+    )
+    .unwrap()
 }
 
 fn share_source_icons(conn: &Connection) -> Result<(), StoreError> {
@@ -177,6 +248,141 @@ mod tests {
             .unwrap(),
             metadata
         );
+    }
+
+    #[test]
+    fn version_one_history_survives_upgrade_to_version_three() {
+        use super::super::{connection::apply_key, Store};
+        assert_eq!(LATEST_VERSION, 3);
+        let keyring = crate::Keyring::from_secret(&[37; 32]);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.db");
+        let conn = Connection::open(&path).unwrap();
+        apply_key(&conn, &keyring.db_key()).unwrap();
+        conn.execute_batch(&schema_at(1)).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+        let (nonce, ciphertext) =
+            crate::encrypt(b"retained history", &keyring.item_key(), "existing").unwrap();
+        conn.execute("INSERT INTO clipboard_items (id, content_ciphertext, nonce, content_type, content_hash, created_at) VALUES ('existing', ?1, ?2, 'text', 'existing-hash', 1)", rusqlite::params![ciphertext, nonce]).unwrap();
+        drop(conn);
+        let store = Store::open(&path, &keyring.db_key()).unwrap();
+        let row = store.get("existing").unwrap().unwrap();
+        assert_eq!(
+            &*crate::decrypt(
+                &row.content_ciphertext,
+                &row.nonce,
+                &keyring.item_key(),
+                &row.id
+            )
+            .unwrap(),
+            b"retained history"
+        );
+        assert_eq!(
+            store
+                .conn()
+                .unwrap()
+                .pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))
+                .unwrap(),
+            3
+        );
+        schema_verify::verify_schema(&store.conn().unwrap()).unwrap();
+        drop(store);
+        assert_eq!(
+            Store::open(&path, &keyring.db_key())
+                .unwrap()
+                .count()
+                .unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_later_registered_version_two_is_applied_after_version_three() {
+        let first = [
+            Migration {
+                version: 1,
+                sql: MIGRATIONS[0].sql,
+                transform: share_source_icons,
+            },
+            Migration {
+                version: 3,
+                sql: MIGRATIONS
+                    .iter()
+                    .find(|step| step.version == 3)
+                    .unwrap()
+                    .sql,
+                transform: |_| Ok(()),
+            },
+        ];
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&schema_for(&[1], &first).unwrap())
+            .unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+        conn.execute("INSERT INTO clipboard_items (id, content_type, content_hash, created_at) VALUES ('keep', 'text', 'keep-hash', 1)", []).unwrap();
+        run_registered(&mut conn, &first).unwrap();
+        assert_eq!(
+            conn.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))
+                .unwrap(),
+            3
+        );
+        let later = [
+            Migration {
+                version: 1,
+                sql: first[0].sql,
+                transform: share_source_icons,
+            },
+            Migration {
+                version: 2,
+                sql: "CREATE TABLE late_search_state (id INTEGER PRIMARY KEY NOT NULL);",
+                transform: |_| Ok(()),
+            },
+            Migration {
+                version: 3,
+                sql: first[1].sql,
+                transform: |_| Ok(()),
+            },
+        ];
+        run_registered(&mut conn, &later).unwrap();
+        conn.execute("INSERT INTO late_search_state (id) VALUES (7)", [])
+            .unwrap();
+        run_registered(&mut conn, &later).unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM late_search_state WHERE id = 7",
+                [],
+                |r| r.get::<_, u32>(0)
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE id = 'keep'",
+                [],
+                |r| r.get::<_, u32>(0)
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM copypaste_schema_migrations",
+                [],
+                |r| r.get::<_, u32>(0)
+            )
+            .unwrap(),
+            3
+        );
+        assert_eq!(
+            conn.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))
+                .unwrap(),
+            3
+        );
+        conn.execute_batch("DROP INDEX idx_items_history").unwrap();
+        assert!(matches!(
+            run_registered(&mut conn, &later),
+            Err(StoreError::InvalidSchema)
+        ));
     }
 
     #[test]
