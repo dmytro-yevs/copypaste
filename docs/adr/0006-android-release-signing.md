@@ -77,8 +77,10 @@ for direct download, which is the channel this ADR is about.
 - The Rust Android targets and the NDK are pinned in the workflow, for the
   reason `rust-toolchain.toml` exists — an unpinned NDK is a build that changes
   under you.
-- A universal APK is built rather than per-ABI splits. It is larger; it is also
-  one file that installs on any device, which is what direct download needs.
+- Universal, arm64, and armv7 APKs are published. Universal keeps x86_64 support
+  and the original filename for older updaters. ARM variants reduce download
+  size. Every variant uses the same durable certificate and version code;
+  Flutter's per-ABI version-code offsets are disabled for GitHub distribution.
 - The Flutter workflow builds the signed universal APK, verifies its package,
   version, debuggable flag, ABI libraries, certificate fingerprint, and
   checksum, then installs and starts that exact artifact on an x86_64 emulator.

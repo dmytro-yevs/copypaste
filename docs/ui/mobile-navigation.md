@@ -30,6 +30,16 @@ interactive outside the capsule. Main lists include the footer clearance so
 their final items can be scrolled above it. The bar hides for the keyboard and
 bottom overlays.
 
+The shell exposes the measured footer clearance through `MediaQuery.padding`,
+including the capsule margins and system bottom safe area exactly once. Every
+root list and settings detail scroll view adds that clearance to its content
+padding. Fixed bottom content reserves it outside the list instead. Bounded
+`StateView` layouts use the same clearance; unbounded states let their enclosing
+scroll view own it. Clearance follows accessibility text scaling and disappears
+when the capsule hides.
+History operation errors scroll with the list so enlarged messages cannot
+collapse its viewport or overflow into the capsule.
+
 Tapping a tab activates its retained screen and animates its selection without
 highlighting intermediate tabs. Swiping the compact content pages
 updates the tab selection continuously. Repeating a tab activation pops its

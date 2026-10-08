@@ -439,17 +439,54 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(390, 600));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       addTearDown(tester.view.resetViewInsets);
-      await tester.pumpWidget(_shell());
+      final controller = AppNavigationController();
+      addTearDown(controller.dispose);
+      double? contentBottomPadding;
+      await tester.pumpWidget(
+        _shell(
+          controller: controller,
+          destinations: {
+            AppDestination.history: Builder(
+              builder: (context) {
+                contentBottomPadding = MediaQuery.paddingOf(context).bottom;
+                return const Text('History body');
+              },
+            ),
+            AppDestination.devices: const SizedBox.expand(),
+            AppDestination.settings: const SizedBox.expand(),
+          },
+        ),
+      );
       final bar = find.byKey(const ValueKey<String>('bottom-navigation'));
       expect(bar, findsOneWidget);
+      final footerHeight = tester
+          .getSize(find.byKey(const ValueKey('mobile-navigation-dock')))
+          .height;
+      expect(contentBottomPadding, closeTo(footerHeight, 0.01));
       tester.view.viewInsets = const FakeViewPadding(bottom: 200);
       await tester.pump();
       expect(bar, findsNothing);
+      expect(contentBottomPadding, 0);
       tester.view.resetViewInsets();
       await tester.pump();
       expect(bar, findsOneWidget);
+      expect(contentBottomPadding, closeTo(footerHeight, 0.01));
+      controller.setBottomOverlayOpen(true);
+      await tester.pump();
+      expect(contentBottomPadding, 0);
+      controller.setBottomOverlayOpen(false);
+      await tester.pump();
+      expect(contentBottomPadding, closeTo(footerHeight, 0.01));
+      await tester.binding.setSurfaceSize(const Size(640, 600));
+      await tester.pump();
+      expect(contentBottomPadding, 0);
       expect(tester.takeException(), isNull);
     },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
   );
 
   testWidgets('uses the shadcn navigation rail at the compact breakpoint', (

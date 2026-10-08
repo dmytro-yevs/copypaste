@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:ffi';
 
 import 'package:copypaste_flutter/features/update/update.dart';
+import 'package:copypaste_flutter/platform/update/app_update_architecture.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pub_semver/pub_semver.dart';
 
@@ -70,6 +72,102 @@ void main() {
     expect(release?.asset, isNull);
   });
 
+  test('Android process ABI selects ARM variants or universal', () {
+    expect(
+      currentAndroidUpdateArchitecture(abi: Abi.androidArm64),
+      AndroidAppUpdateArchitecture.arm64,
+    );
+    expect(
+      currentAndroidUpdateArchitecture(abi: Abi.androidArm),
+      AndroidAppUpdateArchitecture.armv7,
+    );
+    for (final abi in [Abi.androidX64, Abi.androidIA32, Abi.macosArm64]) {
+      expect(currentAndroidUpdateArchitecture(abi: abi), isNull);
+    }
+  });
+
+  for (final architecture in AndroidAppUpdateArchitecture.values) {
+    test('Android ${architecture.name} prefers its signed APK', () {
+      final raw = _androidVariants('1.0.1');
+      final release = parser.latestFor(
+        jsonEncode([raw]),
+        currentVersion: Version.parse('1.0.0'),
+        target: AppUpdateTarget.android,
+        androidArchitecture: architecture,
+      );
+      final name = 'CopyPaste-v1.0.1-android-${architecture.name}.apk';
+      expect(release?.asset?.name, name);
+      expect(release?.asset?.signatureUri.path, endsWith('/$name.sig'));
+    });
+
+    test(
+      'Android ${architecture.name} falls back to older universal releases',
+      () {
+        final release = parser.latestFor(
+          jsonEncode([
+            _release(
+              '1.0.1',
+              prerelease: false,
+              target: AppUpdateTarget.android,
+            ),
+          ]),
+          currentVersion: Version.parse('1.0.0'),
+          target: AppUpdateTarget.android,
+          androidArchitecture: architecture,
+        );
+        expect(release?.asset?.name, 'CopyPaste-v1.0.1-android.apk');
+      },
+    );
+
+    test(
+      'Android ${architecture.name} requires its own signature and digest',
+      () {
+        for (final invalidPart in ['signature', 'digest']) {
+          final raw = _androidVariants('1.0.1');
+          final name = 'CopyPaste-v1.0.1-android-${architecture.name}.apk';
+          final assets = raw['assets']! as List<Map<String, Object?>>;
+          if (invalidPart == 'signature') {
+            assets.removeWhere((asset) => asset['name'] == '$name.sig');
+          } else {
+            assets
+                .firstWhere((asset) => asset['name'] == name)
+                .remove('digest');
+          }
+          final release = parser.latestFor(
+            jsonEncode([raw]),
+            currentVersion: Version.parse('1.0.0'),
+            target: AppUpdateTarget.android,
+            androidArchitecture: architecture,
+          );
+          expect(release?.asset?.name, 'CopyPaste-v1.0.1-android.apk');
+          assets.removeWhere(
+            (asset) => (asset['name']! as String).startsWith(
+              'CopyPaste-v1.0.1-android.apk',
+            ),
+          );
+          expect(
+            parser.latestFor(
+              jsonEncode([raw]),
+              currentVersion: Version.parse('1.0.0'),
+              target: AppUpdateTarget.android,
+              androidArchitecture: architecture,
+            ),
+            isNull,
+          );
+        }
+      },
+    );
+  }
+
+  test('Android without a shipped ARM architecture uses universal', () {
+    final release = parser.latestFor(
+      jsonEncode([_androidVariants('1.0.1')]),
+      currentVersion: Version.parse('1.0.0'),
+      target: AppUpdateTarget.android,
+    );
+    expect(release?.asset?.name, 'CopyPaste-v1.0.1-android.apk');
+  });
+
   test('rejects malformed GitHub metadata with a bounded update error', () {
     expect(
       () => parser.latestFor(
@@ -80,6 +178,33 @@ void main() {
       throwsA(isA<AppUpdateException>()),
     );
   });
+}
+
+Map<String, Object?> _androidVariants(String version) {
+  final raw = _release(
+    version,
+    prerelease: false,
+    target: AppUpdateTarget.android,
+  );
+  final universal = (raw['assets']! as List<Map<String, Object?>>).toList();
+  raw['assets'] = [
+    ...universal,
+    for (final architecture in AndroidAppUpdateArchitecture.values)
+      for (final asset in universal)
+        {
+          ...asset,
+          'name': (asset['name']! as String).replaceFirst(
+            '-android.apk',
+            '-android-${architecture.name}.apk',
+          ),
+          'browser_download_url': (asset['browser_download_url']! as String)
+              .replaceFirst(
+                '-android.apk',
+                '-android-${architecture.name}.apk',
+              ),
+        },
+  ];
+  return raw;
 }
 
 Map<String, Object?> _release(

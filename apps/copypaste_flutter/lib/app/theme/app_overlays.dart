@@ -1,6 +1,7 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import 'app_motion.dart';
+import 'app_theme.dart';
 import 'app_tokens.dart';
 
 /// Shared presentation and behavior for application-owned overlays.
@@ -84,7 +85,14 @@ abstract final class AppOverlays {
       leading: Icon(icon, size: AppIconSize.sm),
       title: title,
       content: content,
-      actions: actions,
+      actions: actions
+          ?.map(
+            (action) => ButtonStyleOverride(
+              decoration: AppTheme.actionButtonDecoration,
+              child: action,
+            ),
+          )
+          .toList(),
       padding: const EdgeInsets.all(AppSpacing.xl),
       surfaceOpacity: 1,
       surfaceBlur: 0,

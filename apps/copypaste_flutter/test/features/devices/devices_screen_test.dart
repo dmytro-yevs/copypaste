@@ -3,11 +3,100 @@ import 'dart:convert';
 
 import 'package:copypaste_flutter/features/devices/devices.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
+import 'package:copypaste_flutter/app/navigation/navigation.dart';
+import 'package:copypaste_flutter/app/shell/app_shell.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
+  testWidgets(
+    'last nearby device remains actionable above floating navigation',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(320, 720));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final gateway = _ScreenGateway(
+        discovered: [
+          for (var index = 0; index < 8; index++)
+            _discoveredDevice('Nearby $index'),
+        ],
+      );
+      final controller = DevicesController(
+        gateway: gateway,
+        captureProtection: _CaptureProtection(),
+      );
+      final navigation = AppNavigationController(
+        initialDestination: AppDestination.devices,
+      );
+      addTearDown(controller.dispose);
+      addTearDown(navigation.dispose);
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: (context, child) => AppTheme.builder(
+            context,
+            MediaQuery(
+              data: MediaQuery.of(context).copyWith(
+                padding: const EdgeInsets.only(bottom: 24),
+                viewPadding: const EdgeInsets.only(bottom: 24),
+                textScaler: const TextScaler.linear(2),
+              ),
+              child: child!,
+            ),
+          ),
+          home: AppShell(
+            controller: navigation,
+            destinations: {
+              AppDestination.history: const SizedBox.expand(),
+              AppDestination.devices: DevicesScreen(
+                controller: controller,
+                onDrawerVisibilityChanged: navigation.setBottomOverlayOpen,
+              ),
+              AppDestination.settings: const SizedBox.expand(),
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final position = tester
+          .state<ScrollableState>(
+            find
+                .descendant(
+                  of: find.byType(ListView),
+                  matching: find.byType(Scrollable),
+                )
+                .first,
+          )
+          .position;
+      position.jumpTo(position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      final pair = find.descendant(
+        of: find.byKey(const ValueKey('discovered-device-row-Nearby 7')),
+        matching: find.widgetWithText(Button, 'Pair'),
+      );
+      expect(
+        tester.getRect(pair).bottom,
+        lessThan(
+          tester
+              .getRect(find.byKey(const ValueKey('mobile-navigation-dock')))
+              .top,
+        ),
+      );
+      await tester.tap(pair);
+      await tester.pumpAndSettle();
+      expect(controller.pairingEntryMode, PairingEntryMode.enterCode);
+      await tester.runAsync(controller.closePairing);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
   testWidgets(
     'unmounting a screen preserves its app-owned devices controller',
     (tester) async {
@@ -73,10 +162,7 @@ void main() {
         expect(decoration, isA<BoxDecoration>());
         expect(
           (decoration as BoxDecoration).border,
-          Border.all(
-            color: Theme.of(scanContext).colorScheme.border,
-            strokeAlign: BorderSide.strokeAlignCenter,
-          ),
+          isNull,
         );
         expect(decoration.color, anyOf(isNull, Colors.transparent));
         expect(

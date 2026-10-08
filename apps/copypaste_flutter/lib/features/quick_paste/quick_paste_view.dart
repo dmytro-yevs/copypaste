@@ -525,50 +525,53 @@ class _Footer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = AppTheme.clipboardMenuButtonStyle();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Button.ghost(
-          style: style,
-          alignment: Alignment.centerLeft,
-          onPressed: () => confirmClear(context, controller),
-          child: const Text('Clear'),
-        ),
-        Button.ghost(
-          style: style,
-          alignment: Alignment.centerLeft,
-          onPressed: controller.openSettings,
-          child: Row(
-            children: [
-              const Expanded(child: Text('Preferences…')),
-              MenuShortcut(
-                activator: _desktopShortcut(LogicalKeyboardKey.comma),
-                combiner: const SizedBox.shrink(),
-              ),
-            ],
+    return ButtonStyleOverride(
+      decoration: AppTheme.actionButtonDecoration,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Button.ghost(
+            style: style,
+            alignment: Alignment.centerLeft,
+            onPressed: () => confirmClear(context, controller),
+            child: const Text('Clear'),
           ),
-        ),
-        Button.ghost(
-          style: style,
-          alignment: Alignment.centerLeft,
-          onPressed: () => showAbout(context),
-          child: const Text('About'),
-        ),
-        Button.ghost(
-          style: style,
-          alignment: Alignment.centerLeft,
-          onPressed: controller.quit,
-          child: Row(
-            children: [
-              const Expanded(child: Text('Quit')),
-              MenuShortcut(
-                activator: _desktopShortcut(LogicalKeyboardKey.keyQ),
-                combiner: const SizedBox.shrink(),
-              ),
-            ],
+          Button.ghost(
+            style: style,
+            alignment: Alignment.centerLeft,
+            onPressed: controller.openSettings,
+            child: Row(
+              children: [
+                const Expanded(child: Text('Preferences…')),
+                MenuShortcut(
+                  activator: _desktopShortcut(LogicalKeyboardKey.comma),
+                  combiner: const SizedBox.shrink(),
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+          Button.ghost(
+            style: style,
+            alignment: Alignment.centerLeft,
+            onPressed: () => showAbout(context),
+            child: const Text('About'),
+          ),
+          Button.ghost(
+            style: style,
+            alignment: Alignment.centerLeft,
+            onPressed: controller.quit,
+            child: Row(
+              children: [
+                const Expanded(child: Text('Quit')),
+                MenuShortcut(
+                  activator: _desktopShortcut(LogicalKeyboardKey.keyQ),
+                  combiner: const SizedBox.shrink(),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 

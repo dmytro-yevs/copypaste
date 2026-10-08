@@ -5,12 +5,13 @@ APK="${1:-}"
 VERSION="${2:-}"
 EXPECTED_VERSION_CODE="${3:-}"
 EXPECTED_CERT="${4:-}"
+ARCHITECTURE="${5:-universal}"
 AAPT2="${AAPT2:-}"
 APKSIGNER="${APKSIGNER:-}"
 APK_ANALYZER="${APK_ANALYZER:-$(dirname "$(dirname "$(dirname "$AAPT2")")")/cmdline-tools/latest/bin/apkanalyzer}"
 
 [[ -f "$APK" && "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$EXPECTED_VERSION_CODE" =~ ^[1-9][0-9]*$ ]] || {
-    echo "ERROR: usage: $0 <apk> <stable-version> <version-code> <certificate-sha256>" >&2
+    echo "ERROR: usage: $0 <apk> <stable-version> <version-code> <certificate-sha256> [universal|arm64|armv7]" >&2
     exit 1
 }
 [[ "$EXPECTED_CERT" =~ ^[a-fA-F0-9]{64}$ ]] || {
@@ -56,12 +57,7 @@ if grep -q '^application-debuggable' <<<"$badging"; then
     exit 1
 fi
 
-for abi in armeabi-v7a arm64-v8a x86_64; do
-    unzip -Z1 "$APK" | grep "^lib/$abi/.*\.so$" > /dev/null || {
-        echo "ERROR: production APK is missing $abi native libraries" >&2
-        exit 1
-    }
-done
+python3 "$(dirname "$0")/verify-android-abis.py" "$APK" "$ARCHITECTURE"
 
 for reflective_class in \
     com.copypaste.app.ShizukuGrantService \

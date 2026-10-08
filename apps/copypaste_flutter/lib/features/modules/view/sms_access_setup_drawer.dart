@@ -44,136 +44,139 @@ class _SmsAccessSetupDrawerState extends State<SmsAccessSetupDrawer>
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: controller,
-    builder: (context, _) {
-      final state = controller.state;
-      return CallbackShortcuts(
-        bindings: {
-          const SingleActivator(LogicalKeyboardKey.escape): () {
-            if (!controller.busy) unawaited(closeDrawer(context));
+  Widget build(BuildContext context) => ButtonStyleOverride(
+    decoration: AppTheme.actionButtonDecoration,
+    child: AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final state = controller.state;
+        return CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.escape): () {
+              if (!controller.busy) unawaited(closeDrawer(context));
+            },
           },
-        },
-        child: Focus(
-          autofocus: true,
-          child: ConstrainedBox(
-            key: const ValueKey('sms-access-setup-drawer'),
-            constraints: AppOverlays.drawerContentConstraints(context),
-            child: Scaffold(
-              headers: [
-                AppBar(
-                  title: const Text(
-                    'SMS access',
-                    key: ValueKey('sms-access-setup-title'),
-                  ),
-                  leading: const [
-                    Icon(
-                      LucideIcons.messageSquare,
-                      key: ValueKey('sms-access-setup-icon'),
+          child: Focus(
+            autofocus: true,
+            child: ConstrainedBox(
+              key: const ValueKey('sms-access-setup-drawer'),
+              constraints: AppOverlays.drawerContentConstraints(context),
+              child: Scaffold(
+                headers: [
+                  AppBar(
+                    title: const Text(
+                      'SMS access',
+                      key: ValueKey('sms-access-setup-title'),
                     ),
-                  ],
-                  trailing: [
-                    Tooltip(
-                      tooltip: (context) => const TooltipContainer(
-                        child: Text('Close SMS access'),
+                    leading: const [
+                      Icon(
+                        LucideIcons.messageSquare,
+                        key: ValueKey('sms-access-setup-icon'),
                       ),
-                      child: Semantics(
-                        label: 'Close SMS access',
-                        button: true,
-                        child: Button.ghost(
-                          key: const ValueKey('sms-access-setup-close'),
-                          style: AppTheme.controlButtonStyle(
-                            const ButtonStyle.ghostIcon(),
+                    ],
+                    trailing: [
+                      Tooltip(
+                        tooltip: (context) => const TooltipContainer(
+                          child: Text('Close SMS access'),
+                        ),
+                        child: Semantics(
+                          label: 'Close SMS access',
+                          button: true,
+                          child: Button.ghost(
+                            key: const ValueKey('sms-access-setup-close'),
+                            style: AppTheme.controlButtonStyle(
+                              const ButtonStyle.ghostIcon(),
+                            ),
+                            onPressed: controller.busy
+                                ? null
+                                : () => closeDrawer(context),
+                            child: const Icon(LucideIcons.x),
                           ),
-                          onPressed: controller.busy
-                              ? null
-                              : () => closeDrawer(context),
-                          child: const Icon(LucideIcons.x),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-                const Divider(),
-              ],
-              footers: [
-                const Divider(),
-                Padding(
-                  padding: const EdgeInsets.all(AppSpacing.lg),
-                  child: Button.primary(
-                    key: const ValueKey('sms-access-setup-done'),
-                    alignment: AppTheme.moduleSettingsActionAlignment,
-                    onPressed: controller.busy
-                        ? null
-                        : () => closeDrawer(context),
-                    child: const Text('Done'),
+                    ],
                   ),
-                ),
-              ],
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(AppSpacing.lg),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (controller.loading)
-                      const StateView.loading(message: 'Checking SMS access.')
-                    else if (state != null) ...[
-                      Text(
-                        state.granted
-                            ? 'Access is ready. Enable SMS Codes to start copying new codes.'
-                            : 'Allow access to copy codes from new SMS messages.',
-                      ),
-                      const Gap(AppSpacing.lg),
-                      Card(
-                        child: SetupSettingRow(
-                          icon: LucideIcons.bell,
-                          title: 'SMS notification',
-                          description: 'Required while SMS Codes runs',
-                          statusIcon: state.notificationGranted
-                              ? LucideIcons.circleCheck
-                              : null,
-                          action: state.notificationGranted
-                              ? null
-                              : Button.ghost(
-                                  onPressed: controller.busy
-                                      ? null
-                                      : controller.requestNotifications,
-                                  child: const Text('Allow'),
-                                ),
+                  const Divider(),
+                ],
+                footers: [
+                  const Divider(),
+                  Padding(
+                    padding: const EdgeInsets.all(AppSpacing.lg),
+                    child: Button.primary(
+                      key: const ValueKey('sms-access-setup-done'),
+                      alignment: AppTheme.moduleSettingsActionAlignment,
+                      onPressed: controller.busy
+                          ? null
+                          : () => closeDrawer(context),
+                      child: const Text('Done'),
+                    ),
+                  ),
+                ],
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(AppSpacing.lg),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (controller.loading)
+                        const StateView.loading(message: 'Checking SMS access.')
+                      else if (state != null) ...[
+                        Text(
+                          state.granted
+                              ? 'Access is ready. Enable SMS Codes to start copying new codes.'
+                              : 'Allow access to copy codes from new SMS messages.',
                         ),
-                      ),
-                      const Gap(AppSpacing.lg),
-                      AndroidAccessSetup(
-                        methodIndex: controller.methodIndex,
-                        onMethodChanged: controller.selectMethod,
-                        shizuku: state.shizuku,
-                        granted: state.smsGranted,
-                        busy: controller.busy,
-                        adbCommands: state.adbCommands,
-                        applyAccessLabel: 'Apply SMS access',
-                        applyAccessDescription: 'Apply one-time SMS access.',
-                        onOpenShizuku: controller.openShizuku,
-                        onApplyAccess: controller.applyAccess,
-                        onCopyCommands: controller.copyAdbCommands,
-                      ),
+                        const Gap(AppSpacing.lg),
+                        Card(
+                          child: SetupSettingRow(
+                            icon: LucideIcons.bell,
+                            title: 'SMS notification',
+                            description: 'Required while SMS Codes runs',
+                            statusIcon: state.notificationGranted
+                                ? LucideIcons.circleCheck
+                                : null,
+                            action: state.notificationGranted
+                                ? null
+                                : Button.ghost(
+                                    onPressed: controller.busy
+                                        ? null
+                                        : controller.requestNotifications,
+                                    child: const Text('Allow'),
+                                  ),
+                          ),
+                        ),
+                        const Gap(AppSpacing.lg),
+                        AndroidAccessSetup(
+                          methodIndex: controller.methodIndex,
+                          onMethodChanged: controller.selectMethod,
+                          shizuku: state.shizuku,
+                          granted: state.smsGranted,
+                          busy: controller.busy,
+                          adbCommands: state.adbCommands,
+                          applyAccessLabel: 'Apply SMS access',
+                          applyAccessDescription: 'Apply one-time SMS access.',
+                          onOpenShizuku: controller.openShizuku,
+                          onApplyAccess: controller.applyAccess,
+                          onCopyCommands: controller.copyAdbCommands,
+                        ),
+                      ],
+                      if (controller.errorMessage case final error?) ...[
+                        const Gap(AppSpacing.md),
+                        StateView.error(
+                          title: 'SMS setup failed',
+                          message: error,
+                          actionLabel: state == null ? 'Try again' : null,
+                          onAction: state == null ? controller.refresh : null,
+                        ),
+                      ],
                     ],
-                    if (controller.errorMessage case final error?) ...[
-                      const Gap(AppSpacing.md),
-                      StateView.error(
-                        title: 'SMS setup failed',
-                        message: error,
-                        actionLabel: state == null ? 'Try again' : null,
-                        onAction: state == null ? controller.refresh : null,
-                      ),
-                    ],
-                  ],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
-      );
-    },
+        );
+      },
+    ),
   );
 }

@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:copypaste_flutter/generated/api.dart' as runtime;
+import 'package:copypaste_flutter/app/navigation/navigation.dart';
+import 'package:copypaste_flutter/app/shell/app_shell.dart';
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/features/settings/controller/settings_controller.dart';
@@ -15,10 +17,142 @@ import 'package:pub_semver/pub_semver.dart';
 
 import 'settings_test_support.dart';
 import '../modules/modules_test_support.dart';
+
 import 'package:copypaste_flutter/features/modules/controller/modules_controller.dart';
 import 'package:copypaste_flutter/features/modules/view/modules_settings_view.dart';
 
 void main() {
+  testWidgets(
+    'mobile settings categories clear the floating navigation at every text scale',
+    (tester) async {
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      for (final textScale in [1.0, 2.0]) {
+        await tester.binding.setSurfaceSize(const Size(320, 720));
+        final controller = SettingsController(
+          screenshotProtection: FakeScreenshotProtection(),
+          repository: FakeSettingsRepository(),
+          filePicker: FakeSettingsFilePicker(),
+          notifications: FakeCaptureNotificationPort(),
+          captureRefreshInterval: Duration.zero,
+        );
+        final navigation = AppNavigationController(
+          initialDestination: AppDestination.settings,
+        );
+        final modules = ModulesController(
+          repository: MemoryModulesRepository(),
+          marketplace: MemoryModuleMarketplace(),
+        );
+        addTearDown(controller.dispose);
+        addTearDown(navigation.dispose);
+        addTearDown(modules.dispose);
+        await Future.wait([controller.initialize(), modules.initialize()]);
+        await tester.pumpWidget(
+          ShadcnApp(
+            theme: AppTheme.light,
+            builder: (context, child) => AppTheme.builder(
+              context,
+              MediaQuery(
+                data: MediaQuery.of(context).copyWith(
+                  padding: const EdgeInsets.only(bottom: 24),
+                  viewPadding: const EdgeInsets.only(bottom: 24),
+                  textScaler: TextScaler.linear(textScale),
+                ),
+                child: child!,
+              ),
+            ),
+            home: AppShell(
+              controller: navigation,
+              destinations: {
+                AppDestination.history: const SizedBox.expand(),
+                AppDestination.devices: const SizedBox.expand(),
+                AppDestination.settings: SettingsScreen(
+                  controller: controller,
+                  modules: modules,
+                ),
+              },
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        for (final slug in [
+          'clipboard',
+          'modules',
+          'privacy',
+          'sync',
+          'notifications',
+          'data',
+          'about',
+        ]) {
+          final category = find.byKey(
+            ValueKey('mobile-settings-section-$slug'),
+          );
+          final categoryList = find.byKey(
+            const ValueKey('settings-category-list'),
+          );
+          final categoryPosition = tester
+              .state<ScrollableState>(
+                find.descendant(
+                  of: categoryList,
+                  matching: find.byType(Scrollable),
+                ),
+              )
+              .position;
+          categoryPosition.jumpTo(0);
+          await tester.pumpAndSettle();
+          await tester.scrollUntilVisible(
+            category,
+            150,
+            scrollable: find.descendant(
+              of: categoryList,
+              matching: find.byType(Scrollable),
+            ),
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(category);
+          await tester.pumpAndSettle();
+          final section = find.byKey(PageStorageKey('settings-$slug-scroll'));
+          final position = tester
+              .state<ScrollableState>(
+                find
+                    .descendant(of: section, matching: find.byType(Scrollable))
+                    .first,
+              )
+              .position;
+          position.jumpTo(position.maxScrollExtent);
+          await tester.pumpAndSettle();
+          final lastText = find
+              .descendant(of: section, matching: find.byType(Text))
+              .last;
+          expect(
+            tester.getRect(lastText).bottom,
+            lessThan(
+              tester
+                  .getRect(find.byKey(const ValueKey('mobile-navigation-dock')))
+                  .top,
+            ),
+            reason: '$slug at $textScale text scale must clear navigation.',
+          );
+          if (slug == 'data') {
+            await tester.tap(find.widgetWithText(Button, 'Restore'));
+            await tester.pumpAndSettle();
+            expect(find.text('Choose backup'), findsOneWidget);
+            await tester.tap(find.widgetWithText(Button, 'Cancel'));
+            await tester.pumpAndSettle();
+          }
+          await tester.tap(find.byKey(const ValueKey('settings-back')));
+          await tester.pumpAndSettle();
+        }
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
   test('loads and applies the selected backend settings', () async {
     final repository = FakeSettingsRepository();
     final picker = FakeSettingsFilePicker();
@@ -678,6 +812,19 @@ void main() {
         ),
       );
       await tester.pump();
+      for (final label in ['Export', 'Create backup']) {
+        final button = find.widgetWithText(Button, label);
+        final clickable = tester.widget<Clickable>(
+          find.descendant(of: button, matching: find.byType(Clickable)).first,
+        );
+        final decoration =
+            clickable.decoration!.resolve(const {}) as BoxDecoration;
+        expect(decoration.border?.top.style, BorderStyle.solid);
+        expect(
+          decoration.border?.top.color,
+          Theme.of(tester.element(button)).colorScheme.border,
+        );
+      }
       await tester.tap(find.text('Export'));
       await tester.pump();
       expect(repository.exportCalls, 1);

@@ -2,6 +2,8 @@ import 'package:pub_semver/pub_semver.dart';
 
 enum AppUpdateTarget { macos, windows, android }
 
+enum AndroidAppUpdateArchitecture { arm64, armv7 }
+
 enum AppUpdatePhase {
   idle,
   checking,

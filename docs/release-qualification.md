@@ -5,7 +5,7 @@ CopyPaste releases one stable version across macOS, Android, and Windows.
 
 - an ad-hoc sealed macOS DMG with the bundled release daemon and Homebrew
   per-machine self-signing helper;
-- a universal Android APK signed by the durable release keystore;
+- universal, arm64, and armv7 Android APKs signed by the durable release keystore;
 - an Authenticode-signed current-user Windows NSIS installer.
 
 Every downloadable updater artifact also receives the repository's detached
@@ -22,6 +22,17 @@ Every release uses `packaging/release-template.md` for platform download tables.
 Update `packaging/release-notes.md` with the release's changes. The publish job
 renders the versioned links and rejects missing table artifacts before creating
 the GitHub Release.
+
+The download table groups platforms by architecture. Android ARM variants are
+built with `--split-per-abi --target-platform android-arm,android-arm64`.
+The universal APK also includes x86_64 and keeps the existing `android.apk`
+filename for older updaters. All three APKs share the same version code;
+`force-version-code-ignoring-abi=true` disables Flutter's per-ABI offsets.
+Each APK must contain exactly its expected ABIs and complete Flutter, Dart,
+Rust bridge, and pairing libraries. Android qualification receipts cover all
+three APKs. The updater selects the running process's ARM variant when its
+package and signature metadata are available, otherwise the signed universal
+APK. Recovery still accepts single-artifact receipts from earlier releases.
 
 To finish publication after a publisher interruption, dispatch the production
 workflow with `publish=true` and `qualified_run_id` set to a successful production

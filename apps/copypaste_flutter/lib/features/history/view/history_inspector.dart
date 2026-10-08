@@ -129,7 +129,7 @@ class HistoryInspector extends StatelessWidget {
                         key: const ValueKey<String>(
                           'history-detail-inspector-close',
                         ),
-                        style: AppTheme.controlButtonStyle(
+                        style: AppTheme.actionButtonStyle(
                           const ButtonStyle.ghostIcon(),
                         ),
                         onPressed: onClose ?? controller.clearSelection,
@@ -185,7 +185,7 @@ class HistoryInspector extends StatelessWidget {
                                 key: const ValueKey<String>(
                                   'history-detail-copy',
                                 ),
-                                style: AppTheme.controlButtonStyle(
+                                style: AppTheme.actionButtonStyle(
                                   iconOnly
                                       ? const ButtonStyle.primaryIcon()
                                       : const ButtonStyle.primary(),
@@ -215,9 +215,9 @@ class HistoryInspector extends StatelessWidget {
                                   expandIcon: null,
                                   itemBuilder: (context, _) => Icon(
                                     LucideIcons.chevronDown,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.primaryForeground,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .primaryForeground,
                                   ),
                                   onChanged: (plainText) {
                                     if (plainText == true) {
@@ -263,7 +263,7 @@ class HistoryInspector extends StatelessWidget {
                               key: const ValueKey<String>(
                                 'history-detail-download',
                               ),
-                              style: AppTheme.controlButtonStyle(
+                              style: AppTheme.actionButtonStyle(
                                 iconOnly
                                     ? const ButtonStyle.secondaryIcon()
                                     : const ButtonStyle.secondary(),
@@ -291,7 +291,7 @@ class HistoryInspector extends StatelessWidget {
                           toggled: clip.pinned,
                           child: Button(
                             key: ValueKey<String>('history-pin-${clip.id}'),
-                            style: AppTheme.controlButtonStyle(
+                            style: AppTheme.actionButtonStyle(
                               ButtonStyle(
                                 variance: clip.pinned
                                     ? ButtonVariance.secondary
@@ -324,7 +324,7 @@ class HistoryInspector extends StatelessWidget {
                             button: true,
                             child: Button.secondary(
                               key: const ValueKey<String>('history-ocr'),
-                              style: AppTheme.controlButtonStyle(
+                              style: AppTheme.actionButtonStyle(
                                 const ButtonStyle.secondaryIcon(),
                               ),
                               onPressed: controller.ocr!.canRun
@@ -348,7 +348,7 @@ class HistoryInspector extends StatelessWidget {
                             key: const ValueKey<String>(
                               'history-detail-delete',
                             ),
-                            style: AppTheme.controlButtonStyle(
+                            style: AppTheme.actionButtonStyle(
                               iconOnly
                                   ? const ButtonStyle.destructiveIcon()
                                   : const ButtonStyle.destructive(),
@@ -408,7 +408,7 @@ class HistoryInspector extends StatelessWidget {
             alignment: Alignment.centerRight,
             child: Button.ghost(
               key: const ValueKey<String>('history-detail-drawer-close'),
-              style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
+              style: AppTheme.actionButtonStyle(const ButtonStyle.ghostIcon()),
               onPressed: () => closeDrawer(context),
               child: const Icon(LucideIcons.x),
             ),
@@ -442,7 +442,7 @@ class HistoryInspector extends StatelessWidget {
     ];
     final theme = Theme.of(context);
     double widthOf(ButtonStyle buttonStyle, String? label) {
-      final style = AppTheme.controlButtonStyle(buttonStyle);
+      final style = AppTheme.actionButtonStyle(buttonStyle);
       final iconWidth =
           style.iconTheme(context, const {}).size ?? AppIconSize.sm;
       final padding = style
@@ -452,9 +452,8 @@ class HistoryInspector extends StatelessWidget {
       final painter = TextPainter(
         text: TextSpan(
           text: label,
-          style: DefaultTextStyle.of(
-            context,
-          ).style.merge(style.textStyle(context, const {})),
+          style: DefaultTextStyle.of(context).style
+              .merge(style.textStyle(context, const {})),
         ),
         textDirection: Directionality.of(context),
         textScaler: MediaQuery.textScalerOf(context),
