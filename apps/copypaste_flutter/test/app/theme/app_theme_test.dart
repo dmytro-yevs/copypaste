@@ -192,9 +192,9 @@ void main() {
         closeTo(tester.getRect(icon).center.dy, 0.01),
       );
       expect(
-        DefaultTextStyle.of(
-          tester.element(buttonText),
-        ).style.leadingDistribution,
+        DefaultTextStyle.of(tester.element(buttonText))
+            .style
+            .leadingDistribution,
         TextLeadingDistribution.even,
       );
     },
@@ -323,9 +323,11 @@ void main() {
       const {WidgetState.focused},
       const {WidgetState.pressed},
     ]) {
-      final decoration =
-          selectTheme!.decoration!(themedContext, states, const BoxDecoration())
-              as BoxDecoration;
+      final decoration = selectTheme!.decoration!(
+        themedContext,
+        states,
+        const BoxDecoration(),
+      ) as BoxDecoration;
       expect(decoration.border?.top.style, BorderStyle.none);
     }
     expect(inputOtpTheme?.spacing, AppSpacing.sm);
@@ -417,7 +419,7 @@ void main() {
   });
 
   testWidgets(
-    'borders every button consistently without changing navigation',
+    'preserves stock button borders outside action surfaces',
     (tester) async {
       for (final mode in [ThemeMode.light, ThemeMode.dark]) {
         late BuildContext context;
@@ -438,16 +440,10 @@ void main() {
         final buttonStyles = <AbstractButtonStyle>[
           ButtonVariance.primary,
           ButtonVariance.secondary,
-          ButtonVariance.outline,
           ButtonVariance.ghost,
           ButtonVariance.link,
           ButtonVariance.text,
           ButtonVariance.destructive,
-          ButtonVariance.fixed,
-          ButtonVariance.menu,
-          ButtonVariance.menubar,
-          ButtonVariance.muted,
-          ButtonVariance.card,
           const ButtonStyle.secondaryIcon(),
           const ButtonStyle.ghostIcon(),
           AppTheme.historyToolbarIconStyle,
@@ -476,17 +472,105 @@ void main() {
             final decoration =
                 style.decoration(context, states) as BoxDecoration;
             expect(
-              decoration.border,
-              Border.all(
-                color: Theme.of(context).colorScheme.border,
-                strokeAlign: BorderSide.strokeAlignCenter,
-              ),
+              decoration.border?.top.style,
+              anyOf(isNull, BorderStyle.none),
             );
           }
           for (final style in navigationStyles) {
             final decoration =
                 style.decoration(context, states) as BoxDecoration;
             expect(decoration.border?.top.style, BorderStyle.none);
+          }
+        }
+      }
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
+  testWidgets(
+    'action borders stay inside their declared scope',
+    (tester) async {
+      for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+        await tester.pumpWidget(
+          ShadcnApp(
+            theme: AppTheme.light,
+            darkTheme: AppTheme.dark,
+            themeMode: mode,
+            builder: AppTheme.builder,
+            home: Scaffold(
+              child: Row(
+                children: [
+                  Button.secondary(
+                    key: const ValueKey('toolbar-button'),
+                    style: const ButtonStyle.secondaryIcon(),
+                    onPressed: () {},
+                    child: const Icon(LucideIcons.filter),
+                  ),
+                  ButtonStyleOverride(
+                    decoration: AppTheme.actionButtonDecoration,
+                    child: Button.secondary(
+                      key: const ValueKey('setting-action'),
+                      onPressed: () {},
+                      child: const Text('Export'),
+                    ),
+                  ),
+                  ButtonGroup(
+                    children: [
+                      Button.primary(
+                        key: const ValueKey('group-action'),
+                        style: AppTheme.actionButtonStyle(
+                          const ButtonStyle.primary(),
+                        ),
+                        onPressed: () {},
+                        child: const Text('Copy'),
+                      ),
+                      Button.primary(
+                        onPressed: () {},
+                        child: const Icon(LucideIcons.chevronDown),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+        for (final states in <Set<WidgetState>>[
+          const {},
+          const {WidgetState.hovered},
+          const {WidgetState.focused},
+          const {WidgetState.pressed},
+          const {WidgetState.disabled},
+        ]) {
+          for (final key in [
+            'toolbar-button',
+            'setting-action',
+            'group-action',
+          ]) {
+            final button = find.byKey(ValueKey(key));
+            final clickable = tester.widget<Clickable>(
+              find
+                  .descendant(of: button, matching: find.byType(Clickable))
+                  .first,
+            );
+            final decoration =
+                clickable.decoration!.resolve(states) as BoxDecoration;
+            if (key == 'toolbar-button') {
+              expect(
+                decoration.border?.top.style,
+                anyOf(isNull, BorderStyle.none),
+              );
+            } else {
+              expect(decoration.border?.top.style, BorderStyle.solid);
+              expect(
+                decoration.border?.top.color,
+                Theme.of(tester.element(button)).colorScheme.border,
+              );
+            }
           }
         }
       }
@@ -590,8 +674,7 @@ void main() {
     expect(
       offenders,
       isEmpty,
-      reason:
-          'All application buttons must use shadcn Button with a ButtonStyle modifier.',
+      reason: 'All application buttons must use shadcn Button with a ButtonStyle modifier.',
     );
   });
 
@@ -634,8 +717,7 @@ void main() {
     expect(
       offenders,
       isEmpty,
-      reason:
-          'Application-owned overlays must use AppOverlays instead of local visual configuration.',
+      reason: 'Application-owned overlays must use AppOverlays instead of local visual configuration.',
     );
   });
 

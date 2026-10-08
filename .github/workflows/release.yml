@@ -179,7 +179,7 @@ jobs:
         with:
           platform: android
           profile: release
-      - name: Build signed production Android APK
+      - name: Build signed universal and ARM Android APKs
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -205,19 +205,31 @@ jobs:
           tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
           cd apps/copypaste_flutter
           flutter pub get --enforce-lockfile
-          flutter build apk --release --build-name "${{ needs.preflight.outputs.version }}" --build-number "${{ needs.preflight.outputs.android_version_code }}"
-          "$tools/apksigner" sign --ks "$ANDROID_KEYSTORE_PATH" --ks-key-alias "$ANDROID_KEY_ALIAS" --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEY_PASSWORD build/app/outputs/flutter-apk/app-release.apk
+          flutter build apk --release --target-platform android-arm,android-arm64,android-x64 --build-name "${{ needs.preflight.outputs.version }}" --build-number "${{ needs.preflight.outputs.android_version_code }}"
+          mkdir -p ../../dist
+          cp build/app/outputs/flutter-apk/app-release.apk "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk"
+          flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 --build-name "${{ needs.preflight.outputs.version }}" --build-number "${{ needs.preflight.outputs.android_version_code }}"
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android-arm64.apk"
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android-armv7.apk"
           cd ../..
-          mkdir -p dist
-          cp apps/copypaste_flutter/build/app/outputs/flutter-apk/app-release.apk "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk"
           chmod +x scripts/release/*.sh
-          AAPT2="$tools/aapt2" APKSIGNER="$tools/apksigner" scripts/release/verify-android-release.sh "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk" "${{ needs.preflight.outputs.version }}" "${{ needs.preflight.outputs.android_version_code }}" "$expected"
-          scripts/release/sign-update-artifact.sh "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk"
-          # This pure Dart verifier needs no native assets. Run the VM directly
-          # so Dart's package runner does not rebuild the host Rust bridge.
-          (cd apps/copypaste_flutter && dart --disable-dart-dev --packages=.dart_tool/package_config.json tool/verify_update_signature.dart "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk" "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk.sig")
+          for architecture in universal arm64 armv7; do
+            suffix="-$architecture"
+            [[ "$architecture" != universal ]] || suffix=""
+            artifact="dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android$suffix.apk"
+            "$tools/apksigner" sign --ks "$ANDROID_KEYSTORE_PATH" --ks-key-alias "$ANDROID_KEY_ALIAS" --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEY_PASSWORD "$artifact"
+            AAPT2="$tools/aapt2" APKSIGNER="$tools/apksigner" scripts/release/verify-android-release.sh "$artifact" "${{ needs.preflight.outputs.version }}" "${{ needs.preflight.outputs.android_version_code }}" "$expected" "$architecture"
+            scripts/release/sign-update-artifact.sh "$artifact"
+            # Run the pure Dart verifier without rebuilding native assets.
+            (cd apps/copypaste_flutter && dart --disable-dart-dev --packages=.dart_tool/package_config.json tool/verify_update_signature.dart "../../$artifact" "../../$artifact.sig")
+          done
       - name: Write exact-artifact receipt
-        run: python3 scripts/release/write-artifact-receipt.py --platform android --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk" --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --output dist/production-receipt.json
+        run: |
+          python3 scripts/release/write-artifact-receipt.py --platform android \
+            --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk" \
+            --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android-arm64.apk" \
+            --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android-armv7.apk" \
+            --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --output dist/production-receipt.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: production-android
