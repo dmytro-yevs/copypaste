@@ -13,6 +13,7 @@ const CURRENT_TABLES: &[&str] = &[
     "source_app_icons",
     "shared_binary_payloads",
     "history_file_payloads",
+    "copypaste_schema_migrations",
 ];
 
 #[derive(Debug, PartialEq)]
