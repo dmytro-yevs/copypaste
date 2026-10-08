@@ -553,7 +553,7 @@ void main() {
       expect(find.byType(OutlineButton), findsNothing);
       expect(find.text('Copy plain text'), findsNothing);
       expect(find.bySemanticsLabel('Copy options'), findsOneWidget);
-      expect(find.widgetWithText(Button, 'Pin'), findsOneWidget);
+      expect(_detailAction('Pin'), findsOneWidget);
       expect(
         find.descendant(of: scrollContent, matching: actions),
         findsNothing,
@@ -1090,9 +1090,9 @@ void main() {
     expect(tester.getRect(imageViewport), imageRect);
     expect(tester.getTopLeft(metadata).dy, lessThan(metadataTop));
     expect(tester.getRect(actions), actionsRect);
-    expect(find.widgetWithText(Button, 'Copy').hitTestable(), findsOneWidget);
-    expect(find.widgetWithText(Button, 'Pin').hitTestable(), findsOneWidget);
-    expect(find.widgetWithText(Button, 'Delete').hitTestable(), findsOneWidget);
+    expect(_detailAction('Copy').hitTestable(), findsOneWidget);
+    expect(_detailAction('Pin').hitTestable(), findsOneWidget);
+    expect(_detailAction('Delete').hitTestable(), findsOneWidget);
 
     await tester.binding.setSurfaceSize(const Size(700, 480));
     await tester.pumpAndSettle();
@@ -1168,10 +1168,7 @@ void main() {
         AppSpacing.xs,
       );
       for (final label in ['Copy', 'Pin', 'Delete']) {
-        expect(
-          find.widgetWithText(Button, label).hitTestable(),
-          findsOneWidget,
-        );
+        expect(_detailAction(label).hitTestable(), findsOneWidget);
       }
       expect(find.text('Copy plain text'), findsNothing);
       expect(
@@ -1686,7 +1683,7 @@ void main() {
         await tester.tap(find.text('Copy menu clip'));
         await tester.pumpAndSettle();
 
-        final copy = find.widgetWithText(Button, 'Copy');
+        final copy = _detailAction('Copy');
         final options = find.byKey(
           const ValueKey<String>('history-copy-options'),
         );
@@ -1785,14 +1782,26 @@ void main() {
       find.byKey(const ValueKey<String>('history-copy-options')),
       findsNothing,
     );
-    expect(find.widgetWithText(Button, 'Download'), findsOneWidget);
-    await tester.tap(find.widgetWithText(Button, 'Download'));
+    expect(_detailAction('Download'), findsOneWidget);
+    await tester.tap(_detailAction('Download'));
     await tester.pumpAndSettle();
 
     expect(repository.savedFiles, [('remote-file', '/tmp/report.pdf')]);
     expect(downloader.presented, ['/tmp/report.pdf']);
     await tester.pump(const Duration(seconds: 6));
   });
+}
+
+Finder _detailAction(String label) {
+  if (label == 'Pin') {
+    return find.byWidgetPredicate(
+      (widget) =>
+          widget is Button &&
+          widget.key is ValueKey<String> &&
+          (widget.key as ValueKey<String>).value.startsWith('history-pin-'),
+    );
+  }
+  return find.byKey(ValueKey<String>('history-detail-${label.toLowerCase()}'));
 }
 
 Future<void> _pumpHoverActions(WidgetTester tester) async {

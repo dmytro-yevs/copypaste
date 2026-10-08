@@ -71,6 +71,7 @@ Future<void> main() async {
           temporaryDirectory: getTemporaryDirectory,
         ),
         platform: MethodChannelAppUpdatePlatform(),
+        restart: const ApplicationRestarter().restart,
       ),
     ),
   );

@@ -2,14 +2,64 @@ import 'package:flutter/widgets.dart';
 
 import 'app_destination.dart';
 import 'app_page_route.dart';
+import '../theme/app_motion.dart';
 
 /// Owns shell destination selection and the nested content navigation stack.
 class AppNavigationController extends ChangeNotifier {
   AppNavigationController({
     AppDestination initialDestination = AppDestination.history,
-  }) : _selectedDestination = initialDestination;
+  }) : _selectedDestination = initialDestination,
+       visualPosition = ValueNotifier<double>(
+         initialDestination.index.toDouble(),
+       );
 
   final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+  final ValueNotifier<double> visualPosition;
+  final ValueNotifier<bool> pageGestureActive = ValueNotifier(false);
+  bool pageTransitionActive = false;
+  final Map<AppDestination, ScrollController> _scrollControllers = {};
+
+  ScrollController scrollControllerFor(AppDestination destination) =>
+      _scrollControllers.putIfAbsent(destination, ScrollController.new);
+
+  /// A repeated activation returns to the root and scrolls its main list up.
+  Future<void> activateDestination(
+    AppDestination destination, {
+    bool disableAnimations = false,
+  }) async {
+    if (destination != _selectedDestination) {
+      selectDestination(destination);
+      return;
+    }
+    navigatorKey.currentState?.popUntil((route) => route.isFirst);
+    final controller = _scrollControllers[destination];
+    if (controller == null || !controller.hasClients) return;
+    final duration = AppMotion.resolveDisabled(
+      disableAnimations,
+      AppMotion.navigation,
+    );
+    await Future.wait([
+      for (final position in controller.positions.toList())
+        if (duration == Duration.zero)
+          Future<void>.sync(() => position.jumpTo(position.minScrollExtent))
+        else
+          position.animateTo(
+            position.minScrollExtent,
+            duration: duration,
+            curve: AppMotion.navigationCurve,
+          ),
+    ]);
+  }
+
+  @override
+  void dispose() {
+    visualPosition.dispose();
+    pageGestureActive.dispose();
+    for (final controller in _scrollControllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
 
   AppDestination _selectedDestination;
   bool _bottomOverlayOpen = false;
@@ -65,5 +115,10 @@ class AppNavigationController extends ChangeNotifier {
   }
 
   /// Handles Escape without requesting an application or window close.
-  Future<bool> handleEscape() => maybePop<void>();
+  Future<bool> handleEscape() async {
+    if (await maybePop<void>()) return true;
+    if (_selectedDestination == AppDestination.history) return false;
+    selectDestination(AppDestination.history);
+    return true;
+  }
 }

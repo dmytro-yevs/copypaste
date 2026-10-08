@@ -13,11 +13,15 @@ class AppUpdateController extends ChangeNotifier {
   AppUpdateController({
     required AppUpdateRepository repository,
     required AppUpdatePlatform platform,
+    Future<void> Function()? restart,
   }) : _repository = repository,
-       _platform = platform;
+       _platform = platform,
+       _restart = restart;
 
   final AppUpdateRepository _repository;
   final AppUpdatePlatform _platform;
+  final Future<void> Function()? _restart;
+  bool _restarting = false;
 
   AppUpdatePhase _phase = AppUpdatePhase.idle;
   Version? _currentVersion;
@@ -32,12 +36,15 @@ class AppUpdateController extends ChangeNotifier {
   AppRelease? get release => _release;
   String? get message => _message;
   double get downloadProgress => _downloadProgress;
-  bool get busy => switch (_phase) {
-    AppUpdatePhase.checking ||
-    AppUpdatePhase.downloading ||
-    AppUpdatePhase.installing => true,
-    _ => false,
-  };
+  bool get canRestart => _restart != null;
+  bool get busy =>
+      _restarting ||
+      switch (_phase) {
+        AppUpdatePhase.checking ||
+        AppUpdatePhase.downloading ||
+        AppUpdatePhase.installing => true,
+        _ => false,
+      };
 
   Future<void> initialize() async {
     await check();
@@ -155,13 +162,34 @@ class AppUpdateController extends ChangeNotifier {
         _setPhase(AppUpdatePhase.permissionRequired);
         break;
       case AppUpdateInstallResult.restartRequired:
-        _message = 'The update is installed. Quit and reopen CopyPaste.';
+        _message = 'The update is installed. Restart CopyPaste to use it.';
         _setPhase(AppUpdatePhase.restartRequired);
         break;
       case AppUpdateInstallResult.installed:
         _setPhase(AppUpdatePhase.idle);
         await check();
         break;
+    }
+  }
+
+  Future<void> restartApplication() async {
+    final restart = _restart;
+    if (restart == null ||
+        _phase != AppUpdatePhase.restartRequired ||
+        busy ||
+        _disposed) {
+      return;
+    }
+    _restarting = true;
+    _message = 'Restarting CopyPaste.';
+    notifyListeners();
+    try {
+      await restart();
+    } catch (_) {
+      _message = 'CopyPaste could not restart. Try again.';
+    } finally {
+      _restarting = false;
+      if (!_disposed) notifyListeners();
     }
   }
 
