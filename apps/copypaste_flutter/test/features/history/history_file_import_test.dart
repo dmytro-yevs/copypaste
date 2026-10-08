@@ -106,50 +106,84 @@ void main() {
   });
 
   for (final width in [320.0, 480.0, 1400.0]) {
-    testWidgets('icon import remains accessible at width $width', (
-      tester,
-    ) async {
-      await tester.binding.setSurfaceSize(Size(width, 900));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      final repository = _Repository();
-      final picker = _Picker([_Input('a.pdf')]);
-      final controller = HistoryController(repository, filePicker: picker);
-      addTearDown(controller.dispose);
-      addTearDown(repository.events.close);
-      await tester.pumpWidget(
-        ShadcnApp(
-          theme: AppTheme.light,
-          darkTheme: AppTheme.dark,
-          builder: AppTheme.builder,
-          home: Scaffold(child: HistoryScreen(controller: controller)),
-        ),
-      );
-      await tester.pumpAndSettle();
-      final button = find.byKey(const ValueKey('history-import-files'));
-      expect(button, findsOneWidget);
-      expect(
-        find.descendant(
-          of: button,
-          matching: find.byIcon(LucideIcons.filePlus),
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(of: button, matching: find.byType(Text)),
-        findsNothing,
-      );
-      await tester.tap(button);
-      await tester.pumpAndSettle();
-      expect(picker.calls, 1);
-      expect(repository.imported, ['a.pdf']);
-      expect(tester.takeException(), isNull);
-      if (width == 320) {
-        await tester.tap(find.byKey(const ValueKey('history-search-toggle')));
+    testWidgets(
+      'icon import remains accessible at width $width',
+      (tester) async {
+        await tester.binding.setSurfaceSize(Size(width, 900));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final repository = _Repository();
+        final picker = _Picker([_Input('a.pdf')]);
+        final controller = HistoryController(repository, filePicker: picker);
+        addTearDown(controller.dispose);
+        addTearDown(repository.events.close);
+        await tester.pumpWidget(
+          ShadcnApp(
+            theme: AppTheme.light,
+            darkTheme: AppTheme.dark,
+            builder: AppTheme.builder,
+            home: Scaffold(child: HistoryScreen(controller: controller)),
+          ),
+        );
         await tester.pumpAndSettle();
+        final button = find.byKey(const ValueKey('history-import-files'));
         expect(button, findsOneWidget);
+        expect(
+          find.descendant(
+            of: button,
+            matching: find.byIcon(LucideIcons.filePlus),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: button, matching: find.byType(Text)),
+          findsNothing,
+        );
+        final controls = find.byWidgetPredicate((widget) => widget is Select);
+        final importPosition = tester.getCenter(button);
+        for (final control in controls.evaluate()) {
+          final position = tester.getCenter(find.byWidget(control.widget));
+          expect(
+            position.dy < importPosition.dy ||
+                (position.dy == importPosition.dy &&
+                    position.dx < importPosition.dx),
+            isTrue,
+          );
+        }
+        await tester.tap(button);
+        await tester.pumpAndSettle();
+        expect(picker.calls, 1);
+        expect(repository.imported, ['a.pdf']);
         expect(tester.takeException(), isNull);
-      }
-    });
+        if (width == 320) {
+          final search = find.byKey(const ValueKey('history-search-toggle'));
+          final searchPosition = tester.getCenter(search);
+          for (final control in controls.evaluate()) {
+            final position = tester.getCenter(find.byWidget(control.widget));
+            expect(
+              searchPosition.dy < position.dy ||
+                  (searchPosition.dy == position.dy &&
+                      searchPosition.dx < position.dx),
+              isTrue,
+            );
+          }
+          await tester.tap(search);
+          await tester.pumpAndSettle();
+          expect(button, findsNothing);
+          expect(find.byType(TextField), findsOneWidget);
+          await tester.tap(find.byIcon(LucideIcons.x));
+          await tester.pump(const Duration(milliseconds: 250));
+          await tester.pumpAndSettle();
+          expect(button, findsOneWidget);
+          expect(search, findsOneWidget);
+          expect(tester.takeException(), isNull);
+        }
+      },
+      variant: TargetPlatformVariant({
+        TargetPlatform.macOS,
+        TargetPlatform.windows,
+        TargetPlatform.android,
+      }),
+    );
   }
 
   testWidgets('external drop imports files and excludes directories and text', (
