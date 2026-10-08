@@ -54,6 +54,24 @@ class MarketplaceModule {
   final ModuleAvailability availability;
   final String? unavailableReason;
   final String? systemRequirement;
+
+  /// Requirements already explain version incompatibility on the card.
+  String? get availabilityNotice {
+    if (availability == ModuleAvailability.systemVersion &&
+        systemRequirement != null) {
+      return null;
+    }
+    if (availability == ModuleAvailability.appVersion &&
+        appRequirement != null &&
+        (unavailableReason?.startsWith(
+              'This module does not support CopyPaste ',
+            ) ??
+            false)) {
+      return null;
+    }
+    return unavailableReason;
+  }
+
   bool get canInstall =>
       artifact != null && availability == ModuleAvailability.available;
 
@@ -66,17 +84,23 @@ class MarketplaceModule {
       final min = constraint.min;
       final max = constraint.max;
       if (min != null && max != null) {
-        return 'CopyPaste ${constraint.includeMin ? '' : 'after '}$min to ${constraint.includeMax ? '' : 'before '}$max';
+        return 'CopyPaste ${constraint.includeMin ? '≥' : '>'}$min, ${constraint.includeMax ? '≤' : '<'}${_displayUpperVersion(max)}';
       }
       if (min != null) {
-        return 'CopyPaste $min ${constraint.includeMin ? 'or newer' : 'or later'}';
+        return 'CopyPaste ${constraint.includeMin ? '≥' : '>'}$min';
       }
       if (max != null) {
-        return 'CopyPaste ${constraint.includeMax ? 'up to' : 'before'} $max';
+        return 'CopyPaste ${constraint.includeMax ? '≤' : '<'}${_displayUpperVersion(max)}';
       }
     }
     return 'CopyPaste $constraint';
   }
+
+  // pub_semver represents an exclusive stable upper bound with a -0 sentinel.
+  String _displayUpperVersion(Version version) =>
+      version.preRelease.length == 1 && version.preRelease.single == 0
+      ? '${version.major}.${version.minor}.${version.patch}'
+      : version.toString();
 }
 
 String formatModuleSize(int bytes) {

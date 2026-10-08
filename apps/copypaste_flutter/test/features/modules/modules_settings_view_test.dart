@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/features/modules/controller/modules_controller.dart';
@@ -94,13 +95,153 @@ void main() {
       await tester.tap(settings);
       await tester.pumpAndSettle();
       expect(find.text('OCR settings'), findsOneWidget);
+      final drawer = find.byKey(
+        const ValueKey('module-settings-drawer-copypaste.ocr'),
+      );
+      final drawerCenter = tester.getCenter(drawer).dx;
+      expect(
+        tester.getSize(drawer).width,
+        lessThanOrEqualTo(AppOverlaySize.dialogMaxWidth),
+      );
+      expect(
+        tester.getCenter(find.text('OCR settings')).dx,
+        closeTo(drawerCenter, 0.01),
+      );
+      final settingsIcon = find.descendant(
+        of: drawer,
+        matching: find.byIcon(LucideIcons.settings),
+      );
+      expect(tester.getCenter(settingsIcon).dx, closeTo(drawerCenter, 0.01));
+      final enabledIcon = find.descendant(
+        of: drawer,
+        matching: find.byIcon(LucideIcons.power),
+      );
+      final done = find.byKey(
+        const ValueKey('module-settings-done-copypaste.ocr'),
+      );
+      expect(
+        tester.getCenter(find.text('Done')).dx,
+        closeTo(tester.getCenter(done).dx, 0.01),
+      );
+      final enabledCenter = tester.getCenter(find.text('Enabled')).dy;
+      expect(tester.getCenter(enabledIcon).dy, closeTo(enabledCenter, 0.01));
+      expect(
+        tester.getCenter(find.byType(Switch)).dy,
+        closeTo(enabledCenter, 0.01),
+      );
       expect(find.text('Recognize image text'), findsNothing);
       expect(find.byType(Switch), findsOneWidget);
       await tester.tap(find.byType(Switch));
       await tester.pumpAndSettle();
       expect(repository.calls, ['enabled:false']);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(drawer, findsNothing);
       expect(tester.takeException(), isNull);
     }, variant: TargetPlatformVariant({platform}));
+  }
+
+  for (final (platform, width) in [
+    (TargetPlatform.android, 320.0),
+    (TargetPlatform.macOS, 650.0),
+    (TargetPlatform.windows, 1000.0),
+  ]) {
+    for (final scale in [1.0, 1.6]) {
+      testWidgets('module sizes and actions align at $width with scale $scale', (
+        tester,
+      ) async {
+        await tester.binding.setSurfaceSize(Size(width, 1600));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final marketplace = MemoryModuleMarketplace()
+          ..modules = [
+            for (var index = 0; index < 4; index++)
+              MarketplaceModule(
+                id: index == 0 ? testModule.id : 'module-$index',
+                title: index == 0 ? testModule.title : 'Module $index',
+                description: index == 1
+                    ? 'Automatically copy login, verification, and transaction codes from new SMS messages.'
+                    : testModule.description,
+                version: testMarketplaceModule.version,
+                artifact: index == 1 ? null : testMarketplaceModule.artifact,
+                appVersions: VersionConstraint.parse('>=1.0.6 <2.0.0'),
+                availability: index == 1
+                    ? ModuleAvailability.platform
+                    : ModuleAvailability.available,
+                unavailableReason: index == 1
+                    ? 'Not available for this device.'
+                    : null,
+              ),
+          ];
+        final controller = ModulesController(
+          repository: MemoryModulesRepository()..modules = [testModule],
+          marketplace: marketplace,
+        );
+        addTearDown(controller.dispose);
+        await controller.initialize();
+        await tester.pumpWidget(
+          ShadcnApp(
+            theme: AppTheme.light,
+            builder: (context, child) => AppTheme.builder(
+              context,
+              MediaQuery(
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: TextScaler.linear(scale)),
+                child: child!,
+              ),
+            ),
+            home: Scaffold(
+              child: SingleChildScrollView(
+                child: ModulesSettingsView(controller: controller),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final ids = [testModule.id, 'module-1', 'module-2', 'module-3'];
+        final size = tester.getSize(
+          find.byKey(ValueKey('module-${ids.first}')),
+        );
+        for (final id in ids) {
+          final card = find.byKey(ValueKey('module-$id'));
+          expect(tester.getSize(card), size);
+          final action = find.byKey(
+            ValueKey(
+              id == testModule.id
+                  ? 'module-settings-$id'
+                  : 'module-install-$id',
+            ),
+          );
+          expect(
+            tester.getBottomRight(card).dy - tester.getBottomRight(action).dy,
+            closeTo(
+              tester
+                      .getBottomRight(
+                        find.byKey(ValueKey('module-${ids.first}')),
+                      )
+                      .dy -
+                  tester
+                      .getBottomRight(
+                        find.byKey(ValueKey('module-settings-${ids.first}')),
+                      )
+                      .dy,
+              0.01,
+            ),
+          );
+        }
+        expect(find.text('Not available for this device.'), findsOneWidget);
+        expect(find.text('Unavailable'), findsNothing);
+        expect(
+          tester
+              .widget<Button>(
+                find.byKey(const ValueKey('module-install-module-1')),
+              )
+              .onPressed,
+          isNull,
+        );
+        expect(tester.takeException(), isNull);
+      }, variant: TargetPlatformVariant({platform}));
+    }
   }
 
   testWidgets('restart-required removal is managed through settings', (
@@ -215,6 +356,7 @@ void main() {
             appVersions: VersionConstraint.parse('>=1.0.6 <2.0.0'),
             availability: ModuleAvailability.systemVersion,
             unavailableReason: 'Requires macOS 14 or newer.',
+            systemRequirement: 'macOS 14 or newer',
           ),
         ];
       final controller = ModulesController(
@@ -236,12 +378,13 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Text Tools'), findsOneWidget);
-      expect(find.text('Requires macOS 14 or newer.'), findsOneWidget);
+      expect(find.text('macOS 14 or newer'), findsOneWidget);
+      expect(find.text('Requires macOS 14 or newer.'), findsNothing);
+      expect(find.text('CopyPaste ≥1.0.6, <2.0.0'), findsOneWidget);
+      expect(find.text('Unavailable'), findsNothing);
       expect(find.text('Marketplace is unavailable'), findsNothing);
       expect(
-        tester
-            .widget<Button>(find.widgetWithText(Button, 'Unavailable'))
-            .onPressed,
+        tester.widget<Button>(find.widgetWithText(Button, 'Install')).onPressed,
         isNull,
       );
       expect(tester.takeException(), isNull);

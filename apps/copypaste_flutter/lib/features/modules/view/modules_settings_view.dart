@@ -4,11 +4,13 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../shared/state_view.dart';
+import '../../../shared/equal_height_grid.dart';
 import '../controller/modules_controller.dart';
 import '../controller/module_form_draft.dart';
 import '../models/module_models.dart';
 import '../models/module_marketplace_models.dart';
 import 'sms_access_setup_dialog.dart';
+import 'module_settings_drawer.dart';
 
 /// Marketplace and installed modules share the host's components and state.
 class ModulesSettingsView extends StatefulWidget {
@@ -154,23 +156,10 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                 ]),
       };
 
-  Widget _cards(List<Widget> cards) => LayoutBuilder(
-    builder: (context, constraints) {
-      final columns =
-          ((constraints.maxWidth + AppSpacing.md) /
-                  (AppLayoutSize.marketplaceCardMinWidth + AppSpacing.md))
-              .floor()
-              .clamp(1, 3);
-      final width =
-          (constraints.maxWidth - AppSpacing.md * (columns - 1)) / columns;
-      return Wrap(
-        spacing: AppSpacing.md,
-        runSpacing: AppSpacing.md,
-        children: [
-          for (final card in cards) SizedBox(width: width, child: card),
-        ],
-      );
-    },
+  Widget _cards(List<Widget> cards) => EqualHeightGrid(
+    minChildWidth: AppLayoutSize.marketplaceCardMinWidth,
+    spacing: AppSpacing.md,
+    children: cards,
   );
 
   Widget _moduleCard(
@@ -187,100 +176,115 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
       key: ValueKey('module-$id'),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Align(
-            alignment: Alignment.centerLeft,
-            child: Icon(LucideIcons.puzzle, size: AppIconSize.xl),
-          ),
-          const Gap(AppSpacing.lg),
-          Text(installed?.title ?? marketplace!.title).semiBold(),
-          const Gap(AppSpacing.sm),
-          Text(
-            installed?.description ?? marketplace!.description,
-          ).small().muted(),
-          const Gap(AppSpacing.md),
-          Text(
-            [
-              installed?.version ?? marketplace!.version.toString(),
-              ?size,
-            ].join(' · '),
-          ).small().muted(),
-          if (marketplace?.appRequirement case final requirement?) ...[
-            const Gap(AppSpacing.sm),
-            Text('Requires $requirement.').small().muted(),
-          ],
-          if (installed?.error case final error?) ...[
-            const Gap(AppSpacing.sm),
-            Text(error).small().muted(),
-          ] else if (installed == null &&
-              marketplace?.unavailableReason != null) ...[
-            const Gap(AppSpacing.sm),
-            Text(marketplace!.unavailableReason!).small().muted(),
-          ] else if (marketplace?.systemRequirement
-              case final requirement?) ...[
-            const Gap(AppSpacing.sm),
-            Text('Requires $requirement.').small().muted(),
-          ],
-          const Gap(AppSpacing.lg),
-          if (active) ...[
-            LinearProgressIndicator(
-              value: controller.installing ? null : controller.downloadProgress,
-            ),
-            const Gap(AppSpacing.sm),
-          ],
-          if (installed == null)
-            Button.primary(
-              key: ValueKey('module-install-$id'),
-              onPressed: controller.busy || !marketplace!.canInstall
-                  ? null
-                  : () => controller.install(marketplace),
-              child: Text(
-                active
-                    ? _installationLabel()
-                    : marketplace!.canInstall
-                    ? 'Install'
-                    : 'Unavailable',
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Icon(LucideIcons.puzzle, size: AppIconSize.xl),
               ),
-            )
-          else
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Tooltip(
-                  tooltip: (_) =>
-                      const TooltipContainer(child: Text('Remove module')),
-                  child: Semantics(
-                    label: 'Remove module',
-                    button: true,
-                    child: Button.ghost(
-                      key: ValueKey('module-remove-$id'),
-                      style: const ButtonStyle.ghostIcon(),
-                      onPressed: controller.busy || installed.restartRequired
-                          ? null
-                          : () => _remove(context, installed),
-                      child: const Icon(LucideIcons.trash2),
-                    ),
-                  ),
-                ),
+              const Gap(AppSpacing.lg),
+              Text(installed?.title ?? marketplace!.title).semiBold(),
+              const Gap(AppSpacing.sm),
+              Text(
+                installed?.description ?? marketplace!.description,
+              ).small().muted(),
+              const Gap(AppSpacing.md),
+              Text(
+                [
+                  installed?.version ?? marketplace!.version.toString(),
+                  ?size,
+                ].join(' · '),
+              ).small().muted(),
+              if (marketplace?.appRequirement case final requirement?) ...[
                 const Gap(AppSpacing.sm),
-                Tooltip(
-                  tooltip: (_) =>
-                      const TooltipContainer(child: Text('Module settings')),
-                  child: Semantics(
-                    label: 'Module settings',
-                    button: true,
-                    child: Button.secondary(
-                      key: ValueKey('module-settings-$id'),
-                      style: const ButtonStyle.secondaryIcon(),
-                      onPressed: controller.busy
-                          ? null
-                          : () => _settings(context, id),
-                      child: const Icon(LucideIcons.settings),
-                    ),
+                Text(requirement).small().muted(),
+              ],
+              if (marketplace?.systemRequirement case final requirement?) ...[
+                const Gap(AppSpacing.sm),
+                Text(requirement).small().muted(),
+              ],
+              if (installed?.error case final error?) ...[
+                const Gap(AppSpacing.sm),
+                Text(error).small().muted(),
+              ] else if (installed == null &&
+                  marketplace?.availabilityNotice != null) ...[
+                const Gap(AppSpacing.sm),
+                Text(marketplace!.availabilityNotice!).small().muted(),
+              ],
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: AppSpacing.lg),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (active) ...[
+                  LinearProgressIndicator(
+                    value: controller.installing
+                        ? null
+                        : controller.downloadProgress,
                   ),
-                ),
+                  const Gap(AppSpacing.sm),
+                ],
+                if (installed == null)
+                  Button.primary(
+                    key: ValueKey('module-install-$id'),
+                    onPressed: controller.busy || !marketplace!.canInstall
+                        ? null
+                        : () => controller.install(marketplace),
+                    child: Text(active ? _installationLabel() : 'Install'),
+                  )
+                else
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Tooltip(
+                        tooltip: (_) => const TooltipContainer(
+                          child: Text('Remove module'),
+                        ),
+                        child: Semantics(
+                          label: 'Remove module',
+                          button: true,
+                          child: Button.ghost(
+                            key: ValueKey('module-remove-$id'),
+                            style: const ButtonStyle.ghostIcon(),
+                            onPressed:
+                                controller.busy || installed.restartRequired
+                                ? null
+                                : () => _remove(context, installed),
+                            child: const Icon(LucideIcons.trash2),
+                          ),
+                        ),
+                      ),
+                      const Gap(AppSpacing.sm),
+                      Tooltip(
+                        tooltip: (_) => const TooltipContainer(
+                          child: Text('Module settings'),
+                        ),
+                        child: Semantics(
+                          label: 'Module settings',
+                          button: true,
+                          child: Button.secondary(
+                            key: ValueKey('module-settings-$id'),
+                            style: const ButtonStyle.secondaryIcon(),
+                            onPressed: controller.busy
+                                ? null
+                                : () => _settings(context, id),
+                            child: const Icon(LucideIcons.settings),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
               ],
             ),
+          ),
         ],
       ),
     );
@@ -290,123 +294,17 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
       ? 'Installing…'
       : 'Downloading ${((controller.downloadProgress ?? 0) * 100).floor()}%';
 
-  Future<void> _settings(
-    BuildContext context,
-    String id,
-  ) => AppOverlays.showDialog<void>(
+  Future<void> _settings(BuildContext context, String id) => showOverlay<void>(
     context,
-    builder: (dialogContext) => AnimatedBuilder(
-      animation: controller,
-      builder: (context, _) {
-        final module = controller.installedModule(id);
-        final update = module == null ? null : controller.updateFor(module);
-        return AppOverlays.alertDialog(
-          icon: LucideIcons.settings,
-          title: Text('${module?.title ?? 'Module'} settings'),
-          content: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight:
-                  MediaQuery.sizeOf(context).height *
-                  AppOverlaySize.dialogContentHeightFactor,
-            ),
-            child: SingleChildScrollView(
-              child: module == null
-                  ? const StateView.empty(title: 'Module removed')
-                  : Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (module.error ?? controller.errorMessage
-                            case final error?) ...[
-                          StateView.error(
-                            title: 'Module operation failed',
-                            message: error,
-                          ),
-                          const Gap(AppSpacing.md),
-                        ],
-                        Switch(
-                          key: ValueKey('module-enabled-$id'),
-                          value: module.enabled,
-                          leading: const Text('Enabled'),
-                          onChanged:
-                              controller.busy ||
-                                  module.error != null ||
-                                  module.restartRequired
-                              ? null
-                              : (value) => controller.setEnabled(id, value),
-                        ),
-                        if (controller.canSetUpSmsAccess &&
-                            module.events.contains(
-                              ModuleEventKind.smsReceived,
-                            )) ...[
-                          const Gap(AppSpacing.md),
-                          Button.secondary(
-                            onPressed: controller.busy
-                                ? null
-                                : () => _smsSetup(context),
-                            child: const Text('Set up SMS access'),
-                          ),
-                        ],
-                        if (module.preferenceFields.isNotEmpty) ...[
-                          const Gap(AppSpacing.md),
-                          Button.secondary(
-                            onPressed: controller.busy || module.error != null
-                                ? null
-                                : () => _preferences(context, module),
-                            child: const Text('Preferences'),
-                          ),
-                        ],
-                        for (final command in controller.settingsCommands(
-                          module,
-                        )) ...[
-                          const Gap(AppSpacing.md),
-                          Button.secondary(
-                            onPressed:
-                                controller.busy ||
-                                    !module.enabled ||
-                                    module.error != null
-                                ? null
-                                : () => _invoke(context, module, command),
-                            child: Text(command.title),
-                          ),
-                        ],
-                        if (update != null) ...[
-                          const Gap(AppSpacing.md),
-                          Button.secondary(
-                            onPressed: controller.busy || module.restartRequired
-                                ? null
-                                : () => controller.install(update),
-                            child: Text(
-                              controller.activeModuleId == id
-                                  ? _installationLabel()
-                                  : 'Update to ${update.version}',
-                            ),
-                          ),
-                        ],
-                        if (module.restartRequired &&
-                            controller.canRestart) ...[
-                          const Gap(AppSpacing.md),
-                          Button.secondary(
-                            onPressed: controller.busy
-                                ? null
-                                : controller.restartApplication,
-                            child: const Text('Restart CopyPaste'),
-                          ),
-                        ],
-                      ],
-                    ),
-            ),
-          ),
-          actions: [
-            Button.primary(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Done'),
-            ),
-          ],
-        );
-      },
+    AppOverlays.bottomDrawerConfiguration,
+    builder: (context) => ModuleSettingsDrawer(
+      controller: controller,
+      moduleId: id,
+      onPreferences: (module) => _preferences(context, module),
+      onInvoke: (module, command) => _invoke(context, module, command),
+      onSmsSetup: () => _smsSetup(context),
     ),
-  );
+  ).future;
 
   Future<void> _preferences(
     BuildContext context,

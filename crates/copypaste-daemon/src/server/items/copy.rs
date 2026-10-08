@@ -57,7 +57,10 @@ pub(crate) fn save_file(
         Ok(opened) => opened,
         Err(response) => return *response,
     };
-    if !matches!(payload, ClipboardPayload::File { .. }) {
+    if !matches!(
+        payload,
+        ClipboardPayload::Image { .. } | ClipboardPayload::File { .. }
+    ) {
         return unsupported(id);
     }
     match payload.save_file_to(path) {
