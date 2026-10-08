@@ -20,8 +20,8 @@ const MIGRATIONS: &[Migration] = &[
         transform: share_source_icons,
     },
     Migration {
-        version: 2,
-        sql: include_str!("migrations/002_file_import.sql"),
+        version: 3,
+        sql: include_str!("migrations/003_file_import.sql"),
         transform: |_| Ok(()),
     },
 ];

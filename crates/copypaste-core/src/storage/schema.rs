@@ -7,7 +7,7 @@ use super::model::StoreError;
 pub(super) const SCHEMA: &str = concat!(
     include_str!("migrations/000_initial.sql"),
     include_str!("migrations/001_source_icons.sql"),
-    include_str!("migrations/002_file_import.sql"),
+    include_str!("migrations/003_file_import.sql"),
 );
 
 pub(super) fn create(conn: &mut Connection) -> Result<(), StoreError> {
