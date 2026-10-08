@@ -51,9 +51,9 @@ class AndroidAccessSetup extends StatelessWidget {
     final theme = Theme.of(context);
     final tabsTheme = ComponentTheme.maybeOf<TabsTheme>(context);
     final direction = Directionality.of(context);
-    final style = DefaultTextStyle.of(context).style
-        .merge(theme.typography.small)
-        .merge(theme.typography.medium);
+    final style = DefaultTextStyle.of(
+      context,
+    ).style.merge(theme.typography.small).merge(theme.typography.medium);
     var labelWidth = 0.0;
     for (final label in ['Shizuku', 'ADB']) {
       final painter = TextPainter(
@@ -210,8 +210,9 @@ class _AdbSetupState extends State<_AdbSetup> {
         const Gap(AppSpacing.md),
         SelectableText(
           widget.setup.adbCommands,
-          style: Theme.of(context).typography.inlineCode
-              .copyWith(fontWeight: FontWeight.normal),
+          style: Theme.of(
+            context,
+          ).typography.inlineCode.copyWith(fontWeight: FontWeight.normal),
         ),
       ],
     ),

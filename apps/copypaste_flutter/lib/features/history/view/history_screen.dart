@@ -41,7 +41,8 @@ class HistoryScreen extends StatefulWidget {
 
 class _HistoryScreenState extends State<HistoryScreen> {
   late final TextEditingController _searchController;
-  late final ScrollController _scrollController;
+  ScrollController? _scrollController;
+  ScrollController? _fallbackScrollController;
   bool _detailDrawerOpen = false;
   bool _fileDragHover = false;
 
@@ -51,20 +52,33 @@ class _HistoryScreenState extends State<HistoryScreen> {
     _searchController = TextEditingController(
       text: widget.controller.query.search,
     );
-    _scrollController = ScrollController()..addListener(_loadMoreWhenNeeded);
     unawaited(widget.controller.initialize());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next =
+        PrimaryScrollController.maybeOf(context) ??
+        (_fallbackScrollController ??= ScrollController());
+    if (identical(next, _scrollController)) return;
+    _scrollController?.removeListener(_loadMoreWhenNeeded);
+    _scrollController = next;
+    next.addListener(_loadMoreWhenNeeded);
   }
 
   @override
   void dispose() {
     _searchController.dispose();
-    _scrollController.dispose();
+    _scrollController?.removeListener(_loadMoreWhenNeeded);
+    _fallbackScrollController?.dispose();
     super.dispose();
   }
 
   void _loadMoreWhenNeeded() {
-    if (!_scrollController.hasClients) return;
-    final position = _scrollController.position;
+    final controller = _scrollController;
+    if (controller == null || !controller.hasClients) return;
+    final position = controller.position;
     if (position.pixels >= position.maxScrollExtent - 360) {
       unawaited(widget.controller.loadMore());
     }
@@ -121,7 +135,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     final list = _HistoryList(
       controller: widget.controller,
-      scrollController: _scrollController,
+      scrollController: _scrollController!,
       searchController: _searchController,
       showKindLabel: wide,
       onSelected: (clip) => _select(context, clip, wide: wide),

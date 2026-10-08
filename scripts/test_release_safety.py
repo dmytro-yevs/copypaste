@@ -11,6 +11,77 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+class FlutterCacheKeyTest(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.key = runpy.run_path(str(ROOT / "scripts/ci/flutter-cache-key.py"))["fingerprint"]
+        self.files = {
+            "Cargo.toml": '[workspace.package]\nversion = "1.0.1"\n[workspace.metadata]\nandroid-release-version-code = 300000001\n[profile.release]\nlto = "thin"\n',
+            "Cargo.lock": 'version = 4\n[[package]]\nname = "local"\nversion = "1.0.1"\ndependencies = ["helper 1.0.1", "external"]\n[[package]]\nname = "helper"\nversion = "1.0.1"\n[[package]]\nname = "external"\nversion = "2.0.0"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "abc"\n',
+            "crates/local/Cargo.toml": '[package]\nname = "local"\nversion = "1.0.1"\n[features]\ncapture = []\n',
+            ".flutter-version": "3.47.6\n",
+            "apps/copypaste_flutter/pubspec.lock": "packages: {}\n",
+            "apps/copypaste_flutter/hook/build.dart": "void main() {}\n",
+            "crates/copypaste-flutter-bridge/rust-toolchain.toml": '[toolchain]\nchannel = "1.96.0"\n',
+        }
+        self.write_files()
+
+    def write_files(self):
+        for name, content in self.files.items():
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+
+    def test_release_bump_reuses_dependency_cache(self):
+        original = self.key(self.root)
+        for name in ("Cargo.toml", "Cargo.lock", "crates/local/Cargo.toml"):
+            self.files[name] = self.files[name].replace("1.0.1", "1.0.2")
+        self.files["Cargo.toml"] = self.files["Cargo.toml"].replace("300000001", "300000002")
+        self.write_files()
+        self.assertEqual(original, self.key(self.root))
+
+    def test_locked_external_dependency_change_invalidates_cache(self):
+        original = self.key(self.root)
+        self.files["Cargo.lock"] = self.files["Cargo.lock"].replace("2.0.0", "2.0.1")
+        self.write_files()
+        self.assertNotEqual(original, self.key(self.root))
+
+    def test_compiler_and_dependency_inputs_invalidate_cache(self):
+        changes = {
+            "Cargo.toml": ('lto = "thin"', 'lto = false'),
+            "crates/local/Cargo.toml": ('capture = []', 'capture = ["helper/capture"]'),
+            ".flutter-version": ("3.47.6", "3.47.7"),
+            "apps/copypaste_flutter/pubspec.lock": ("packages: {}", "packages: {cryptography: {version: 2.9.0}}"),
+            "apps/copypaste_flutter/hook/build.dart": ("void main() {}", "void main() { configureCargo(); }"),
+            "crates/copypaste-flutter-bridge/rust-toolchain.toml": ("1.96.0", "1.97.0"),
+        }
+        for name, (old, new) in changes.items():
+            with self.subTest(name=name):
+                original = self.key(self.root)
+                before = self.files[name]
+                self.files[name] = before.replace(old, new)
+                self.write_files()
+                self.assertNotEqual(original, self.key(self.root))
+                self.files[name] = before
+                self.write_files()
+
+    def test_cargo_flags_invalidate_cache(self):
+        original = self.key(self.root)
+        path = self.root / ".cargo/config.toml"
+        path.parent.mkdir()
+        path.write_text('[build]\nrustflags = ["-C", "target-cpu=native"]\n', encoding="utf-8")
+        self.assertNotEqual(original, self.key(self.root))
+
+    def test_checkout_line_endings_do_not_create_another_cache(self):
+        original = self.key(self.root)
+        for name in self.files:
+            path = self.root / name
+            path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+        self.assertEqual(original, self.key(self.root))
+
+
 class ReleaseSafetyTest(unittest.TestCase):
     def test_optimized_capture_contract_rejects_the_stripped_release_callback(self):
         verify = runpy.run_path(str(ROOT / "scripts/release/verify-capture-jni.py"))["verify"]

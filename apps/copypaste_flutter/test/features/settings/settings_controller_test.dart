@@ -785,6 +785,57 @@ void main() {
     );
   });
 
+  testWidgets('installed macOS update offers Restart and invokes relaunch', (
+    tester,
+  ) async {
+    final settings = SettingsController(
+      screenshotProtection: FakeScreenshotProtection(),
+      repository: FakeSettingsRepository(),
+      filePicker: FakeSettingsFilePicker(),
+      notifications: FakeCaptureNotificationPort(),
+      captureRefreshInterval: Duration.zero,
+    );
+    var restarts = 0;
+    final updater = AppUpdateController(
+      repository: _SettingsUpdateRepository(),
+      platform: _SettingsUpdatePlatform(
+        target: AppUpdateTarget.macos,
+        result: AppUpdateInstallResult.restartRequired,
+      ),
+      restart: () async {
+        restarts++;
+      },
+    );
+    await Future.wait([settings.initialize(), updater.initialize()]);
+    await updater.install();
+    addTearDown(settings.dispose);
+    addTearDown(updater.dispose);
+    await tester.pumpWidget(
+      ShadcnApp(
+        theme: AppTheme.light,
+        builder: AppTheme.builder,
+        home: SettingsScreen(controller: settings, appUpdate: updater),
+      ),
+    );
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey<String>('settings-section-about')),
+        matching: find.text('About'),
+      ),
+    );
+    await tester.pump();
+    final restart = find.byKey(
+      const ValueKey<String>('restart-after-app-update'),
+    );
+    await tester.ensureVisible(restart);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('Restart CopyPaste'), findsOneWidget);
+    expect(find.text('Quit CopyPaste'), findsNothing);
+    await tester.tap(restart);
+    await tester.pump();
+    expect(restarts, 1);
+  });
+
   testWidgets('shows a toast after a manual update check finds no update', (
     tester,
   ) async {
@@ -899,11 +950,16 @@ class _SettingsUpdateRepository implements AppUpdateRepository {
 }
 
 class _SettingsUpdatePlatform implements AppUpdatePlatform {
+  _SettingsUpdatePlatform({
+    this.target = AppUpdateTarget.android,
+    this.result = AppUpdateInstallResult.started,
+  });
+  final AppUpdateInstallResult result;
   @override
   Future<AppUpdateInstallResult?> restoreInstallation() async => null;
 
   @override
-  AppUpdateTarget get target => AppUpdateTarget.android;
+  final AppUpdateTarget target;
 
   @override
   Future<AppUpdateAvailability> availability() async =>
@@ -916,7 +972,7 @@ class _SettingsUpdatePlatform implements AppUpdatePlatform {
   Future<AppUpdateInstallResult> install({
     required AppRelease release,
     DownloadedAppUpdate? package,
-  }) async => AppUpdateInstallResult.started;
+  }) async => result;
 
   @override
   Future<void> openReleasePage(Uri uri) async {}

@@ -653,7 +653,8 @@ class _HistoryRepository implements HistoryRepository {
   Stream<HistoryRuntimeEvent> watch() => events.stream;
 
   @override
-  Future<HistoryFacets> facets() => facetsFuture ?? Future.value(availableFacets);
+  Future<HistoryFacets> facets() =>
+      facetsFuture ?? Future.value(availableFacets);
 
   @override
   Future<HistoryClipPage> query({
