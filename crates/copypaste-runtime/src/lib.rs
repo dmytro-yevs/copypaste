@@ -141,6 +141,7 @@ impl Runtime {
                 | Method::Pin { .. }
                 | Method::ReorderPinned { .. }
                 | Method::Restore { .. }
+                | Method::ImportFile { .. }
         );
         let peer_mutation = matches!(
             &method,
@@ -245,6 +246,29 @@ impl Runtime {
                 id: item_id,
                 dest_path,
             } => self.save_file(id, &item_id, &dest_path),
+            Method::ImportFile {
+                path,
+                filename,
+                mime_type,
+                source_reference,
+            } => {
+                match copypaste_core::file_import::import_file(
+                    &self.store,
+                    &self.keyring,
+                    Path::new(&path),
+                    &filename,
+                    &mime_type,
+                    source_reference.as_deref(),
+                    &self.settings.config(),
+                ) {
+                    Ok(_) => {
+                        self.node.note_local_version(now_ms());
+                        self.peer_sync.wake();
+                        Response::ok(id, ResponseData::Empty {})
+                    }
+                    Err(error) => Response::err(id, ErrorCode::InvalidRequest, error.to_string()),
+                }
+            }
             Method::Delete { id: item_id } => match self.store.delete(&item_id) {
                 Ok(true) => Response::ok(id, ResponseData::Empty {}),
                 Ok(false) => Response::err(id, ErrorCode::NotFound, "The clip was not found."),
@@ -1402,8 +1426,20 @@ impl Runtime {
             .plain_text()
             .and_then(|text| copypaste_core::classify_semantic(&row.content_type, text));
         let too_large_to_sync = payload.byte_len() > copypaste_ipc::MAX_CONTENT_BYTES;
+        let imported_image_metadata = row
+            .payload_metadata
+            .as_deref()
+            .and_then(|value| copypaste_core::PayloadMetadata::from_json(value, &row.content_type))
+            .and_then(|value| value.file);
         let file_details = match &payload {
-            ClipboardPayload::File { bytes, metadata } => {
+            ClipboardPayload::File { bytes, .. } | ClipboardPayload::Image { bytes, .. }
+                if imported_image_metadata.is_some()
+                    || matches!(&payload, ClipboardPayload::File { .. }) =>
+            {
+                let metadata = match &payload {
+                    ClipboardPayload::File { metadata, .. } => metadata,
+                    _ => &imported_image_metadata,
+                };
                 let source_reference = metadata
                     .as_ref()
                     .and_then(|metadata| metadata.source_reference.clone());
@@ -1420,7 +1456,8 @@ impl Runtime {
                     file_count: 1,
                 })
             }
-            ClipboardPayload::Text(_)
+            ClipboardPayload::File { .. }
+            | ClipboardPayload::Text(_)
             | ClipboardPayload::Image { .. }
             | ClipboardPayload::Unsupported { .. } => None,
         };
@@ -1561,6 +1598,46 @@ mod tests {
                 }
             });
             Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn explicit_file_import_publishes_each_named_record_without_capture_admission() {
+        let (runtime, dir) = fixture();
+        let source = dir.path().join("source.pdf");
+        std::fs::write(&source, b"%PDF original").unwrap();
+        let mut events = runtime.events.subscribe();
+        for name in ["a.pdf", "b.pdf"] {
+            let response = runtime
+                .request(
+                    1,
+                    Method::ImportFile {
+                        path: source.to_string_lossy().into_owned(),
+                        filename: name.to_owned(),
+                        mime_type: "application/pdf".to_owned(),
+                        source_reference: Some("content://documents/source.pdf".to_owned()),
+                    },
+                )
+                .await;
+            assert!(response.ok, "{response:?}");
+            let event = events.recv().await.unwrap();
+            assert_eq!(event.event, EventKind::Items);
+            assert!(!event.captured);
+        }
+        assert_eq!(runtime.store.count().unwrap(), 2);
+        for row in runtime.store.list(10, 0).unwrap() {
+            let Some(item) = runtime.item_value(row, false) else {
+                panic!("expected readable item");
+            };
+            let file = item.file_details.unwrap();
+            assert_eq!(
+                file.source_reference.as_deref(),
+                Some("content://documents/source.pdf")
+            );
+            assert!(!file.source_available);
+            let saved = dir.path().join(format!("{}.saved", item.id));
+            assert!(runtime.save_file(2, &item.id, &saved.to_string_lossy()).ok);
+            assert_eq!(std::fs::read(saved).unwrap(), b"%PDF original");
         }
     }
 

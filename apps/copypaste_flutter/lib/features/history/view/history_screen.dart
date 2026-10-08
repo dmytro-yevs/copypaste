@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
+import '../../../platform/files/history_file_drop_target.dart';
 
 import 'package:copypaste_flutter/app/theme/app_overlays.dart';
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
@@ -42,6 +43,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   late final TextEditingController _searchController;
   late final ScrollController _scrollController;
   bool _detailDrawerOpen = false;
+  bool _fileDragHover = false;
 
   @override
   void initState() {
@@ -77,9 +79,25 @@ class _HistoryScreenState extends State<HistoryScreen> {
           builder: (context, constraints) {
             final wide = constraints.maxWidth >= AdaptiveBreakpoints.inspector;
             final body = _bodyFor(context, wide: wide);
-            return Padding(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              child: body,
+            return HistoryFileDropTarget(
+              enabled:
+                  widget.controller.canImportFiles &&
+                  !widget.controller.isImportingFiles &&
+                  !_detailDrawerOpen,
+              onFiles: (files) =>
+                  unawaited(widget.controller.importFiles(files)),
+              onHover: (hover) {
+                if (mounted) setState(() => _fileDragHover = hover);
+              },
+              child: DecoratedBox(
+                decoration: _fileDragHover
+                    ? AppTheme.historyFileDropDecoration(context)
+                    : const BoxDecoration(),
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.lg),
+                  child: body,
+                ),
+              ),
             );
           },
         );
@@ -319,7 +337,8 @@ class _HistoryListState extends State<_HistoryList> {
           ),
         ),
         if (controller.errorMessage != null &&
-            controller.state == HistoryLoadState.ready)
+            (controller.state == HistoryLoadState.ready ||
+                controller.state == HistoryLoadState.empty))
           Padding(
             padding: const EdgeInsets.only(top: AppSpacing.sm),
             child: Alert.destructive(
@@ -586,30 +605,36 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
         final collapseSearch =
             constraints.maxWidth <
             _minimumExpandedSearchWidth +
-                (_compactControlExtent * _filterCount) +
-                (_toolbarGap * _filterCount);
+                (_compactControlExtent * (_filterCount + 1)) +
+                (_toolbarGap * (_filterCount + 1));
         if (collapseSearch && _searchExpanded) {
           return SizedBox(
             width: constraints.maxWidth,
-            child: _searchField(compact: true),
+            child: Row(
+              spacing: _toolbarGap,
+              children: [
+                Expanded(child: _searchField(compact: true)),
+                _importButton(),
+              ],
+            ),
           );
         }
 
         final filters = _filterSelects(context, compact: compactFilters);
         if (collapseSearch) {
-          return Row(
+          return Wrap(
             spacing: _toolbarGap,
+            runSpacing: _toolbarGap,
             children: [
+              _importButton(),
               Semantics(
                 label: 'Search history',
                 button: true,
                 child: Button.secondary(
                   key: const ValueKey<String>('history-search-toggle'),
-                  style: const ButtonStyle.secondaryIcon(
-                    density: ButtonDensity.iconComfortable,
-                  ).copyWith(decoration: AppTheme.softSelectDecoration),
+                  style: AppTheme.historyToolbarIconStyle,
                   onPressed: () => setState(() => _searchExpanded = true),
-                  child: const Icon(LucideIcons.search),
+                  child: const Icon(LucideIcons.search, size: AppIconSize.md),
                 ),
               ),
               ...filters,
@@ -629,11 +654,32 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
               ),
             ),
             ...filters,
+            _importButton(),
           ],
         );
       },
     );
   }
+
+  Widget _importButton() => Semantics(
+    label: 'Import files',
+    button: true,
+    child: Tooltip(
+      tooltip: (_) => const TooltipContainer(child: Text('Import files')),
+      child: Button.secondary(
+        key: const ValueKey<String>('history-import-files'),
+        style: AppTheme.historyToolbarIconStyle,
+        onPressed:
+            widget.controller.canImportFiles &&
+                !widget.controller.isImportingFiles
+            ? () => unawaited(widget.controller.chooseFiles())
+            : null,
+        child: widget.controller.isImportingFiles
+            ? const CircularProgressIndicator(size: AppIconSize.md)
+            : const Icon(LucideIcons.filePlus, size: AppIconSize.md),
+      ),
+    ),
+  );
 
   Widget _searchField({required bool compact}) {
     return TextField(
@@ -885,7 +931,10 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
         AppIconSize.sm +
         (AppSpacing.sm * theme.scaling) +
         theme.iconTheme.small.size!;
-    var width = _minimumExpandedSearchWidth + (_toolbarGap * _filterCount);
+    var width =
+        _minimumExpandedSearchWidth +
+        _compactControlExtent +
+        (_toolbarGap * (_filterCount + 1));
     for (final label in labels) {
       final painter = TextPainter(
         text: TextSpan(text: label, style: style),

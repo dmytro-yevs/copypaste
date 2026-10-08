@@ -1,3 +1,4 @@
+import 'package:copypaste_flutter/features/history/repository/history_file_importer.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
@@ -318,6 +319,9 @@ void main() {
 }
 
 class _PinRepository implements HistoryRepository {
+  @override
+  Future<void> importFile(HistoryImportFile file) async {}
+
   _PinRepository(this.items);
 
   final List<HistoryClip> items;

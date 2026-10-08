@@ -422,7 +422,7 @@ pub(super) fn upsert_in_tx(
                   pinned, pin_order, pin_updated_at, created_at, deleted, origin_device_id, app_bundle_id, app_name, \
                   payload_metadata, fts_rowid, source_icon_id, content_bytes) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, \
-                     LENGTH(COALESCE(?2, X'')) + LENGTH(COALESCE(?14, ''))) \
+                     ?17 + LENGTH(COALESCE(?14, ''))) \
              ON CONFLICT(id) DO UPDATE SET \
                  content_ciphertext = excluded.content_ciphertext, \
                  content_bytes      = excluded.content_bytes, \
@@ -442,7 +442,7 @@ pub(super) fn upsert_in_tx(
                  fts_rowid          = excluded.fts_rowid",
             params![
                 incoming.id,
-                incoming.content_ciphertext,
+                incoming.content_ciphertext.map(super::file_payloads::row_ciphertext),
                 incoming.nonce,
                 incoming.content_type,
                 incoming.content_hash,
@@ -457,11 +457,17 @@ pub(super) fn upsert_in_tx(
                 metadata,
                 fts_rowid,
                 source_icon_id,
+                incoming.content_ciphertext.map_or(0, |bytes| bytes.len()),
             ],
         );
 
     match written {
-        Ok(_) => Ok(true),
+        Ok(_) => {
+            if let Some(bytes) = incoming.content_ciphertext {
+                super::file_payloads::link(tx, incoming.id, incoming.content_hash, bytes)?;
+            }
+            Ok(true)
+        }
         Err(e) if is_constraint_violation(&e) => {
             tracing::warn!(
                 "an incoming item collides with the dedup index under another id; skipping it"

@@ -6,6 +6,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import '../../devices/flutter_rust_devices_gateway.dart';
 import '../models/history_models.dart';
 import 'history_repository.dart';
+import 'history_file_importer.dart';
 
 /// Production History port backed only by generated Flutter/Rust bindings.
 ///
@@ -22,6 +23,7 @@ class RuntimeHistoryRepository implements HistoryRepository {
 
   final RuntimeWatchLease _watchLease;
   bool _disposed = false;
+  Future<BigInt>? _fileImportMaxBytes;
 
   @override
   Stream<HistoryRuntimeEvent> watch() {
@@ -141,6 +143,21 @@ class RuntimeHistoryRepository implements HistoryRepository {
   Future<void> saveFile(String id, String destinationPath) async {
     _ensureActive();
     await runtime.saveClipFile(id: id, destPath: destinationPath);
+  }
+
+  @override
+  Future<void> importFile(HistoryImportFile file) async {
+    _ensureActive();
+    final maxBytes =
+        (await (_fileImportMaxBytes ??= runtime.historyFileImportMaxBytes()))
+            .toInt();
+    final path = await file.prepare(maxBytes);
+    await runtime.importClipFile(
+      path: path,
+      filename: file.name,
+      mimeType: file.mimeType,
+      sourceReference: file.sourceReference,
+    );
   }
 
   @override

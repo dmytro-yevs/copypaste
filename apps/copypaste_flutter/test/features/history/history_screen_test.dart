@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:copypaste_flutter/features/history/repository/history_file_importer.dart';
 import 'package:flutter/gestures.dart';
 
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
@@ -1293,6 +1294,7 @@ void main() {
     );
     final controls = <Element>[
       ...searchButton.evaluate(),
+      ...find.byKey(const ValueKey<String>('history-import-files')).evaluate(),
       ...find.byWidgetPredicate((widget) => widget is Select).evaluate(),
     ];
     expect(searchButton, findsOneWidget);
@@ -1327,14 +1329,14 @@ void main() {
   testWidgets('keeps the expanded search field at least 160 pixels wide', (
     tester,
   ) async {
-    await tester.binding.setSurfaceSize(const Size(432, 800));
+    await tester.binding.setSurfaceSize(const Size(480, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final controller = HistoryController(_ScreenRepository());
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       ShadcnApp(
         home: SizedBox(
-          width: 432,
+          width: 480,
           height: 800,
           child: HistoryScreen(controller: controller),
         ),
@@ -1387,7 +1389,15 @@ void main() {
               sum + tester.getSize(find.byWidget(element.widget)).width,
         );
         final breakpoint =
-            160 + filterWidth + (AppSpacing.sm * 5) + (AppSpacing.lg * 2);
+            160 +
+            filterWidth +
+            tester
+                .getSize(
+                  find.byKey(const ValueKey<String>('history-import-files')),
+                )
+                .width +
+            (AppSpacing.sm * 6) +
+            (AppSpacing.lg * 2);
         for (final width in [breakpoint + 1, breakpoint, breakpoint - 1]) {
           await tester.binding.setSurfaceSize(Size(width, 800));
           await tester.pumpAndSettle();
@@ -1800,6 +1810,9 @@ void _expectNoRadixIcons(WidgetTester tester) {
 }
 
 class _ScreenRepository implements HistoryRepository {
+  @override
+  Future<void> importFile(HistoryImportFile file) async {}
+
   HistoryClipPage page = const HistoryClipPage(items: []);
   HistoryFacets availableFacets = const HistoryFacets();
   final List<(String, String)> savedFiles = [];
