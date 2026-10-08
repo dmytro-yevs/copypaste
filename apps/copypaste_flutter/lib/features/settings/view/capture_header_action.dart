@@ -1,4 +1,5 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
+import '../../../app/theme/app_theme.dart';
 
 import '../../../app/theme/app_motion.dart';
 import '../controller/settings_controller.dart';
@@ -23,7 +24,9 @@ class CaptureHeaderAction extends StatelessWidget {
           ),
           child: Button.secondary(
             key: const ValueKey<String>('capture-header-toggle'),
-            style: const ButtonStyle.secondaryIcon(),
+            style: AppTheme.controlButtonStyle(
+              const ButtonStyle.secondaryIcon(),
+            ),
             onPressed: capture == null || controller.busy
                 ? null
                 : controller.toggleCapture,

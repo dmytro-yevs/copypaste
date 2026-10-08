@@ -1,4 +1,5 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
+import '../../app/theme/app_theme.dart';
 
 import '../../app/theme/app_motion.dart';
 import '../../app/theme/app_tokens.dart';
@@ -114,13 +115,15 @@ class DevicesHeaderActions extends StatelessWidget {
     final button = primary
         ? Button.primary(
             key: key,
-            style: const ButtonStyle.primaryIcon(),
+            style: AppTheme.controlButtonStyle(const ButtonStyle.primaryIcon()),
             onPressed: onPressed,
             child: Icon(icon),
           )
         : Button.secondary(
             key: key,
-            style: const ButtonStyle.secondaryIcon(),
+            style: AppTheme.controlButtonStyle(
+              const ButtonStyle.secondaryIcon(),
+            ),
             onPressed: onPressed,
             child: Icon(icon),
           );

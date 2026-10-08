@@ -9,6 +9,84 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
+  testWidgets(
+    'mixed controls share a height at normal and enlarged text sizes',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1600, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      for (final scale in [1.0, 1.5, 2.0]) {
+        await tester.pumpWidget(
+          ShadcnApp(
+            theme: AppTheme.light,
+            builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(context)
+                  .copyWith(textScaler: TextScaler.linear(scale)),
+              child: Builder(
+                builder: (context) => AppTheme.builder(context, child),
+              ),
+            ),
+            home: Scaffold(
+              child: Row(
+                children: [
+                  Button.primary(
+                    key: const ValueKey('text-control'),
+                    onPressed: () {},
+                    child: const Text('Copy'),
+                  ),
+                  Button.secondary(
+                    key: const ValueKey('icon-control'),
+                    style: AppTheme.controlButtonStyle(
+                      const ButtonStyle.secondaryIcon(),
+                    ),
+                    onPressed: () {},
+                    child: const Icon(LucideIcons.scanText),
+                  ),
+                  const SizedBox(
+                    width: 240,
+                    child: TextField(
+                      key: ValueKey('input-control'),
+                      placeholder: Text('Search'),
+                    ),
+                  ),
+                  Select<String>(
+                    key: const ValueKey('select-control'),
+                    value: 'All',
+                    onChanged: (_) {},
+                    itemBuilder: (context, value) => Text(value),
+                    popup: const SelectPopup<String>(
+                      items: SelectItemList(
+                        children: [
+                          SelectItemButton(value: 'All', child: Text('All')),
+                        ],
+                      ),
+                    ).call,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final height = tester
+            .getSize(find.byKey(const ValueKey('text-control')))
+            .height;
+        for (final key in ['icon-control', 'input-control', 'select-control']) {
+          expect(
+            tester.getSize(find.byKey(ValueKey(key))).height,
+            closeTo(height, 0.01),
+            reason: '$key at text scale $scale',
+          );
+        }
+        expect(tester.takeException(), isNull);
+      }
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
   test('uses one system light and dark shadcn theme', () {
     expect(AppTheme.mode, ThemeMode.system);
     expect(AppTheme.light.colorScheme.brightness, Brightness.light);

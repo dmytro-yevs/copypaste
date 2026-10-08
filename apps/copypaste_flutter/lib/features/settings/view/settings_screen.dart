@@ -989,7 +989,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           tooltip: (context) =>
                               TooltipContainer(child: Text('Remove $appId')),
                           child: Button.ghost(
-                            style: const ButtonStyle.ghostIcon(),
+                            style: AppTheme.controlButtonStyle(
+                              const ButtonStyle.ghostIcon(),
+                            ),
                             onPressed: widget.controller.busy
                                 ? null
                                 : () => widget.controller.removeExcludedApp(
@@ -1619,7 +1621,7 @@ class _ShortcutRecorderState extends State<_ShortcutRecorder> {
             tooltip: (context) =>
                 const TooltipContainer(child: Text('Reset shortcut')),
             child: Button.ghost(
-              style: const ButtonStyle.ghostIcon(),
+              style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
               onPressed: widget.controller.busy || _recording
                   ? null
                   : widget.controller.resetShortcut,
