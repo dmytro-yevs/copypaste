@@ -11,6 +11,8 @@ const CURRENT_TABLES: &[&str] = &[
     "sync_device_state",
     "sync_device_name",
     "source_app_icons",
+    "shared_binary_payloads",
+    "history_file_payloads",
 ];
 
 #[derive(Debug, PartialEq)]

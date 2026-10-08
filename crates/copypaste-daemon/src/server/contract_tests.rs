@@ -80,7 +80,8 @@ fn expected(method: &Method) -> Expected {
         Method::PairConfirm { .. } => Expected::Error(ErrorCode::NotReady),
         Method::PairJoin { .. } => Expected::Error(ErrorCode::PairingCode),
         Method::Unpair { .. } => Expected::Error(ErrorCode::PeerNotFound),
-        Method::Import { .. }
+        Method::ImportFile { .. }
+        | Method::Import { .. }
         | Method::Restore { .. }
         | Method::CloudSignIn { .. }
         | Method::CloudSignUp { .. }
@@ -131,6 +132,12 @@ fn cases(root: &Path) -> Vec<Method> {
         Method::SaveFile {
             id: "missing".into(),
             dest_path: root.join("saved-file.bin").display().to_string(),
+        },
+        Method::ImportFile {
+            path: root.join("missing-import.pdf").display().to_string(),
+            filename: "missing-import.pdf".to_owned(),
+            mime_type: "application/pdf".to_owned(),
+            source_reference: None,
         },
         Method::Add {
             content: "contract item".into(),
@@ -267,7 +274,7 @@ async fn every_method_crosses_the_platform_transport_with_a_typed_outcome() {
     let methods = cases(dir.path());
     assert_eq!(
         methods.len(),
-        46,
+        47,
         "a Method has no contract case, or this count was not bumped with it"
     );
 
