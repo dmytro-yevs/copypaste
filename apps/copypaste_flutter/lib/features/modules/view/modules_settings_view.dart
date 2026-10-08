@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:shadcn_flutter/shadcn_flutter.dart';
+
 import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../shared/state_view.dart';
@@ -9,7 +10,7 @@ import '../controller/modules_controller.dart';
 import '../controller/module_form_draft.dart';
 import '../models/module_models.dart';
 import '../models/module_marketplace_models.dart';
-import 'sms_access_setup_dialog.dart';
+import 'sms_access_setup_drawer.dart';
 import 'module_settings_drawer.dart';
 
 /// Marketplace and installed modules share the host's components and state.
@@ -190,9 +191,9 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
               const Gap(AppSpacing.lg),
               Text(installed?.title ?? marketplace!.title).semiBold(),
               const Gap(AppSpacing.sm),
-              Text(
-                installed?.description ?? marketplace!.description,
-              ).small().muted(),
+              Text(installed?.description ?? marketplace!.description)
+                  .small()
+                  .muted(),
               const Gap(AppSpacing.md),
               Text(
                 [
@@ -332,10 +333,11 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
   Future<void> _smsSetup(BuildContext context) async {
     final setup = controller.smsAccessSetup();
     try {
-      await AppOverlays.showDialog<void>(
+      await showOverlay<void>(
         context,
-        builder: (_) => SmsAccessSetupDialog(controller: setup),
-      );
+        AppOverlays.bottomDrawerConfiguration,
+        builder: (_) => SmsAccessSetupDrawer(controller: setup),
+      ).future;
     } finally {
       setup.dispose();
       await controller.refreshSmsAccess();
