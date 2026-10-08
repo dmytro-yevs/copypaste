@@ -257,7 +257,7 @@ class _AppShellState extends State<AppShell> {
                 alignment: NavigationBarAlignment.center,
                 labelType: NavigationLabelType.all,
                 labelPosition: NavigationLabelPosition.bottom,
-                labelSize: NavigationLabelSize.large,
+                labelSize: NavigationLabelSize.small,
                 selectedKey: selectedKey,
                 onSelected: _selectDestination,
                 backgroundColor: Colors.transparent,
@@ -368,6 +368,7 @@ class _AppShellState extends State<AppShell> {
             overflow: NavigationOverflow.ellipsis,
             label: Text(
               destination.label,
+              style: AppTheme.mobileNavigationLabelStyle,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
