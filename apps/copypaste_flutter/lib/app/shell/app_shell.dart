@@ -209,24 +209,26 @@ class _AppShellState extends State<AppShell> {
                   widget.controller.handleEscape();
                 },
               },
-              child: Column(
-                children: [
-                  if (widget.unifiedTitleBar)
-                    MacosWindowHeader(
-                      title: Text(
-                        selectedDestination.navigationDestination.label,
+              child: DrawerOverlay(
+                child: Column(
+                  children: [
+                    if (widget.unifiedTitleBar)
+                      MacosWindowHeader(
+                        title: Text(
+                          selectedDestination.navigationDestination.label,
+                        ),
+                        leading: railToggle,
+                        actions: headerActions,
                       ),
-                      leading: railToggle,
-                      actions: headerActions,
+                    Expanded(
+                      child: SafeArea(
+                        top: !widget.unifiedTitleBar,
+                        bottom: mode != _ShellNavigationMode.bottom,
+                        child: navigation,
+                      ),
                     ),
-                  Expanded(
-                    child: SafeArea(
-                      top: !widget.unifiedTitleBar,
-                      bottom: mode != _ShellNavigationMode.bottom,
-                      child: navigation,
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             );
           },

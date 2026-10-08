@@ -1,17 +1,9 @@
-This update adds automatic Android screenshot capture and improves the shared interface, SMS module setup, and paired-device synchronization.
+This update fixes the Sync details drawer and macOS in-app updates.
 
-- Save new Android screenshots to encrypted History automatically, with a Settings switch enabled by default.
-- Keep screenshot capture independent of Shizuku and preserve its setting across restarts.
-- Unify Android background capture and SMS module permission setup.
-- Refresh shared navigation, History inspectors, device controls, and application themes.
-- Improve paired-device connection and synchronization handling.
-
-Screenshot capture requires access to all photos and Android notification permission. Existing screenshots are not imported. Private mode, application exclusions, and existing capture limits continue to apply.
-
-Shizuku is used only to apply Android setup grants and can be removed afterward. Android 13 and later can still request temporary system log access when the clipboard capture process restarts; this is separate from the Shizuku permission.
+- Open and close Sync details reliably from the shared header on macOS, Android, and Windows.
+- Close Sync details with Escape and restore navigation after closing.
+- Allow available Homebrew updates to reach installation and verify the installed version before reporting success.
 
 Optional modules are selected and installed from the first-party marketplace in Settings. OCR engines and models are not bundled with the application.
-
-Application exclusions on macOS use observed app activity; background copies can bypass them. Empty files and multiple-file clipboard selections remain unsupported.
 
 Cloud Sync is not part of this release.
