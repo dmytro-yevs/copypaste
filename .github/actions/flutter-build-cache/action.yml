@@ -27,8 +27,11 @@ runs:
         from pathlib import Path
         import re
         import tempfile
+        import runpy
 
         with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+            fingerprint = runpy.run_path('scripts/ci/flutter-cache-key.py')['fingerprint']
+            print(f'bridge_fingerprint={fingerprint(Path.cwd())}', file=output)
             if os.environ['BUILD_PLATFORM'] == 'windows':
                 # Dart uses the OS temporary directory, which can differ from RUNNER_TEMP.
                 directory = Path(tempfile.gettempdir()).as_posix()
@@ -52,17 +55,29 @@ runs:
         cache-targets: ${{ inputs.platform != 'android' }}
         cache-bin: false
         env-vars: OPENSSL
-        save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || github.ref_type == 'tag' }}
+        save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
     # The native-assets builder sets --target-dir itself. Root target/ caching
     # cannot cover these directories. Keep hook metadata and snapshots out.
     - name: Cache Rust bridge compiler outputs
+      if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: |
           apps/copypaste_flutter/.dart_tool/hooks_runner/shared/copypaste_flutter/build/**/target
           ${{ steps.cache-paths.outputs.windows_bridge }}
           !**/target/**/incremental
-        key: flutter-bridge-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-${{ hashFiles('.flutter-version', 'apps/copypaste_flutter/pubspec.lock', 'apps/copypaste_flutter/hook/build.dart', 'Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'crates/copypaste-flutter-bridge/rust-toolchain.toml') }}
+        key: flutter-bridge-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-${{ steps.cache-paths.outputs.bridge_fingerprint }}
+        restore-keys: |
+          flutter-bridge-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-
+    - name: Restore shared Rust bridge compiler outputs
+      if: github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          apps/copypaste_flutter/.dart_tool/hooks_runner/shared/copypaste_flutter/build/**/target
+          ${{ steps.cache-paths.outputs.windows_bridge }}
+          !**/target/**/incremental
+        key: flutter-bridge-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-${{ steps.cache-paths.outputs.bridge_fingerprint }}
         restore-keys: |
           flutter-bridge-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust.outputs.cachekey }}-
     - name: Cache Android Gradle dependencies and build tasks
@@ -72,14 +87,26 @@ runs:
         cache-read-only: ${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
         cache-cleanup: on-success
     - name: Cache the required Android NDK
-      if: inputs.platform == 'android' && steps.cache-paths.outputs.ndk_missing == 'true'
+      if: inputs.platform == 'android' && steps.cache-paths.outputs.ndk_missing == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ${{ steps.cache-paths.outputs.ndk_path }}
         key: android-ndk-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-paths.outputs.ndk_version }}
+    - name: Restore the shared Android NDK
+      if: inputs.platform == 'android' && steps.cache-paths.outputs.ndk_missing == 'true' && github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ steps.cache-paths.outputs.ndk_path }}
+        key: android-ndk-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-paths.outputs.ndk_version }}
     - name: Cache the required Android CMake
-      if: inputs.platform == 'android' && steps.cache-paths.outputs.cmake_missing == 'true'
+      if: inputs.platform == 'android' && steps.cache-paths.outputs.cmake_missing == 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ steps.cache-paths.outputs.cmake_path }}
+        key: android-cmake-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-paths.outputs.cmake_version }}
+    - name: Restore the shared Android CMake
+      if: inputs.platform == 'android' && steps.cache-paths.outputs.cmake_missing == 'true' && github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ${{ steps.cache-paths.outputs.cmake_path }}
         key: android-cmake-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-paths.outputs.cmake_version }}

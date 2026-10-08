@@ -1,0 +1,53 @@
+name: Set up Flutter with shared caches
+description: Keep dependency caches in the default branch and avoid the slow Windows SDK archive.
+
+inputs:
+  version:
+    description: Exact stable Flutter version
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Locate Flutter and pub caches
+      id: paths
+      uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+      with:
+        channel: stable
+        flutter-version: ${{ inputs.version }}
+        dry-run: true
+    - name: Cache the Flutter SDK on the default branch
+      if: runner.os != 'Windows' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ steps.paths.outputs.CACHE-PATH }}
+        key: ${{ steps.paths.outputs.CACHE-KEY }}
+    - name: Restore the shared Flutter SDK
+      if: runner.os != 'Windows' && github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ steps.paths.outputs.CACHE-PATH }}
+        key: ${{ steps.paths.outputs.CACHE-KEY }}
+    - name: Cache pub dependencies on the default branch
+      if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ steps.paths.outputs.PUB-CACHE-PATH }}
+        key: ${{ steps.paths.outputs.PUB-CACHE-KEY }}-${{ hashFiles('**/pubspec.lock') }}
+        restore-keys: ${{ steps.paths.outputs.PUB-CACHE-KEY }}-
+    - name: Restore shared pub dependencies
+      if: github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ steps.paths.outputs.PUB-CACHE-PATH }}
+        key: ${{ steps.paths.outputs.PUB-CACHE-KEY }}-${{ hashFiles('**/pubspec.lock') }}
+        restore-keys: ${{ steps.paths.outputs.PUB-CACHE-KEY }}-
+    - name: Install Flutter
+      uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+      with:
+        channel: stable
+        flutter-version: ${{ inputs.version }}
+        cache-path: ${{ steps.paths.outputs.CACHE-PATH }}
+        pub-cache-path: ${{ steps.paths.outputs.PUB-CACHE-PATH }}
+        cache: false
+        pub-cache: false

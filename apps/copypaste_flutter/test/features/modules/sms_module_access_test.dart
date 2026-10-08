@@ -122,8 +122,9 @@ void main() {
             builder: (context, child) => AppTheme.builder(
               context,
               MediaQuery(
-                data: MediaQuery.of(context)
-                    .copyWith(textScaler: TextScaler.linear(scale)),
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: TextScaler.linear(scale)),
                 child: child!,
               ),
             ),
@@ -468,30 +469,33 @@ void main() {
     expect(setup.errorMessage, contains('Allow notifications'));
   });
 
-  test('requires verified SMS access before enabling and synchronizes disable and removal', () async {
-    final repository = MemoryModulesRepository()..modules = [sms];
-    final access = Access();
-    final controller = ModulesController(
-      repository: repository,
-      marketplace: MemoryModuleMarketplace(),
-      access: access,
-    );
-    addTearDown(controller.dispose);
-    await controller.initialize();
-    await controller.setEnabled(sms.id, true);
-    expect(repository.calls, isEmpty);
-    expect(controller.errorMessage, contains('Set up SMS access'));
-    final setup = controller.smsAccessSetup();
-    addTearDown(setup.dispose);
-    await setup.applyAccess();
-    await controller.setEnabled(sms.id, true);
-    expect(controller.modules.single.enabled, isTrue);
-    await controller.setEnabled(sms.id, false);
-    expect(controller.modules.single.enabled, isFalse);
-    await controller.remove(sms.id);
-    expect(controller.modules, isEmpty);
-    expect(access.synchronizations, greaterThanOrEqualTo(4));
-  });
+  test(
+    'requires verified SMS access before enabling and synchronizes disable and removal',
+    () async {
+      final repository = MemoryModulesRepository()..modules = [sms];
+      final access = Access();
+      final controller = ModulesController(
+        repository: repository,
+        marketplace: MemoryModuleMarketplace(),
+        access: access,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await controller.setEnabled(sms.id, true);
+      expect(repository.calls, isEmpty);
+      expect(controller.errorMessage, contains('Set up SMS access'));
+      final setup = controller.smsAccessSetup();
+      addTearDown(setup.dispose);
+      await setup.applyAccess();
+      await controller.setEnabled(sms.id, true);
+      expect(controller.modules.single.enabled, isTrue);
+      await controller.setEnabled(sms.id, false);
+      expect(controller.modules.single.enabled, isFalse);
+      await controller.remove(sms.id);
+      expect(controller.modules, isEmpty);
+      expect(access.synchronizations, greaterThanOrEqualTo(4));
+    },
+  );
   test('SMS grants without notifications cannot enable monitoring', () async {
     final repository = MemoryModulesRepository()..modules = [sms];
     final access = Access()
