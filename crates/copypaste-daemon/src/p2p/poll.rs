@@ -35,23 +35,30 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) {
             state.p2p.idle().interval()
         };
 
-        tokio::select! {
+        let woke = tokio::select! {
             // Shutdown first, so a wake storm cannot starve teardown.
             biased;
             _ = shutdown.changed() => break,
-            _ = state.p2p.wake_signal() => {}
-            _ = tokio::time::sleep(wait) => {}
-        }
+            _ = state.p2p.wake_signal() => true,
+            _ = tokio::time::sleep(wait) => false,
+        };
 
         if *shutdown.borrow() {
             break;
         }
-        // A tick that collides with a pass already in flight would dial the
-        // same peers a second time, and the far side's session limit is what
-        // would refuse it.
-        let Some(permit) = state.p2p.try_begin_round() else {
-            debug!("a peer sync pass is already running; skipping this tick");
-            continue;
+        // New content queues behind a manual pass instead of losing its wake
+        // until the polling interval. Ordinary timer ticks can still skip.
+        let permit = if woke {
+            tokio::select! {
+                biased;
+                _ = shutdown.changed() => break,
+                permit = state.p2p.begin_round() => permit,
+            }
+        } else {
+            let Some(permit) = state.p2p.try_begin_round() else {
+                continue;
+            };
+            permit
         };
         state.p2p.node().reconcile_discovery();
         round(&state, permit, &shutdown).await;
@@ -98,15 +105,15 @@ async fn round(
         return;
     }
 
-    let mut moved = 0u64;
+    let mut sessions = tokio::task::JoinSet::new();
     for peer in &reachable {
-        // Inside the session, not only between peers. A peer that answers the
-        // TCP connect and then says nothing has no timeout of its own, so
-        // checking only between peers let one asleep laptop hold teardown for
-        // as long as it stayed silent — past the app's quit budget, which then
-        // kills the daemon and takes the peer flush and the socket removal with
-        // it. Abandoning a session costs nothing: nothing is committed until it
-        // completes.
+        let state = Arc::clone(state);
+        let peer = (*peer).clone();
+        let cycle = cycle.clone();
+        sessions.spawn(async move { super::handlers::sync_one(&state, &peer, &cycle).await });
+    }
+    let mut moved = 0u64;
+    while !sessions.is_empty() {
         let result = tokio::select! {
             biased;
             _ = cancel.cancelled() => {
@@ -117,11 +124,19 @@ async fn round(
                 debug!("a peer sync pass was cut short for shutdown");
                 break;
             }
-            result = super::handlers::sync_one(state, peer, &cycle) => result,
+            _ = state.p2p.wake_signal() => {
+                // A new clipboard version takes priority over unfinished old
+                // sessions. Preserve its wake for a pass over the latest store.
+                state.p2p.wake();
+                break;
+            }
+            result = sessions.join_next() => result,
         };
-        moved += u64::from(result.sent) + u64::from(result.received);
-        if result.received > 0 {
-            state.note_remote_change();
+        if let Some(Ok(result)) = result {
+            moved += u64::from(result.sent) + u64::from(result.received);
+            if result.received > 0 {
+                state.note_remote_change();
+            }
         }
     }
 
@@ -157,6 +172,58 @@ mod tests {
             .await
             .expect("the loop must observe shutdown")
             .expect("no panic");
+    }
+
+    #[tokio::test]
+    async fn a_capture_wake_survives_an_already_running_manual_round() {
+        let (state, _dir) = test_state("alpha");
+        let peer = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        peer_at(&state, "receiver", &peer.local_addr().unwrap().to_string());
+        let held = state.p2p.begin_round().await;
+        let (tx, rx) = watch::channel(false);
+        let task = tokio::spawn(run(Arc::clone(&state), rx));
+        state.note_local_change();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        drop(held);
+        let (stream, _) = tokio::time::timeout(Duration::from_secs(1), peer.accept())
+            .await
+            .expect("the capture wake must queue rather than wait for a timer")
+            .unwrap();
+        tx.send(true).unwrap();
+        task.await.unwrap();
+        drop(stream);
+    }
+
+    #[tokio::test]
+    async fn a_silent_peer_cannot_delay_other_peers_or_the_next_copy() {
+        let (state, _dir) = test_state("alpha");
+        let first = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let second = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        peer_at(&state, "a-silent", &first.local_addr().unwrap().to_string());
+        peer_at(
+            &state,
+            "b-receiver",
+            &second.local_addr().unwrap().to_string(),
+        );
+        let (tx, rx) = watch::channel(false);
+        let task = tokio::spawn(run(Arc::clone(&state), rx));
+        state.note_local_change();
+        let (first_stream, _) = tokio::time::timeout(Duration::from_secs(1), first.accept())
+            .await
+            .unwrap()
+            .unwrap();
+        let (second_stream, _) = tokio::time::timeout(Duration::from_secs(1), second.accept())
+            .await
+            .expect("another peer must be dialled without waiting for the silent peer")
+            .unwrap();
+        state.note_local_change();
+        let (next_stream, _) = tokio::time::timeout(Duration::from_secs(1), second.accept())
+            .await
+            .expect("the next copy must not wait for an old silent session")
+            .unwrap();
+        tx.send(true).unwrap();
+        task.await.unwrap();
+        drop((first_stream, second_stream, next_stream));
     }
 
     /// A round with no peers must not touch the cadence: doubling on "there was

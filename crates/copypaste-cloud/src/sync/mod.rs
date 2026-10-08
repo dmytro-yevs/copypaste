@@ -51,6 +51,7 @@ pub mod pull;
 pub mod push;
 pub mod retry;
 pub mod source;
+#[cfg(feature = "storage")]
 pub mod store;
 pub mod transport;
 pub mod unreadable;
@@ -66,6 +67,7 @@ pub use outcome::{SyncError, SyncStats};
 pub use pull::MAX_FUTURE_SKEW_MS;
 pub use push::{too_large_to_sync, MAX_BINARY_BYTES, MAX_TEXT_BYTES};
 pub use source::{Applied, CloudSource, LocalItem};
+#[cfg(feature = "storage")]
 pub use store::{floor_after_round, Offer, Scan, StoreView, UPLOAD_SCAN_LIMIT};
 pub use transport::{AuthApi, AuthFault, RestApi, TransportFault};
 pub use unreadable::{Sweep, UnreadableUploads, UploadFloor};

@@ -1,0 +1,7 @@
+{
+  "minimum_system_versions": {
+    "macos": "14.0.0",
+    "windows": "10.0.0",
+    "android": "7.0.0"
+  }
+}

@@ -1,17 +1,22 @@
 //! Installation, lifecycle, and command dispatch for first-party optional modules.
 #![deny(unsafe_code)]
 
+mod cloud_request;
 mod host;
 mod input;
 mod manager;
 #[allow(unsafe_code)]
 mod native;
 mod package;
+mod resources;
+mod semantic_search;
+mod sync;
 pub use copypaste_module_sdk::{
     ModuleCommand, ModuleField, ModuleFieldValue, ModuleOutput, ModuleTarget,
 };
 pub use host::ModuleHost;
 pub use manager::{InstalledModule, ModuleManager};
+pub use sync::SyncServices;
 
 /// The release signing identity already used by the application updater.
 /// Developer keys can be supplied only by an explicitly constructed test/tool host.

@@ -58,9 +58,11 @@ void main() {
       await controller.initialize();
       final queries = repository.queries;
       final selection = controller.chooseFiles();
+      expect(controller.canSuspend, isFalse);
       repository.events.add(HistoryRuntimeEvent.itemsChanged);
       picker.pending!.complete([]);
       await selection;
+      expect(controller.canSuspend, isTrue);
       expect(repository.queries, queries + 1);
       expect(repository.imported, isEmpty);
       expect(controller.errorMessage, isNull);

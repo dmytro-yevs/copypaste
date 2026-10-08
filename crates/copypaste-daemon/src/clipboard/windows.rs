@@ -298,6 +298,34 @@ impl ClipboardSource for WindowsClipboard {
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::ClipboardWriteError;
 
+        if matches!(
+            content_type,
+            copypaste_ipc::content_type::HTML | copypaste_ipc::content_type::RICH_TEXT
+        ) {
+            let name = if content_type == copypaste_ipc::content_type::HTML {
+                "HTML Format"
+            } else {
+                "Rich Text Format"
+            };
+            let html = if content_type == copypaste_ipc::content_type::HTML {
+                Some(std::str::from_utf8(bytes).map_err(|_| ClipboardWriteError::Failed)?)
+            } else {
+                None
+            };
+            let format = raw::register_format(name)
+                .ok_or(ClipboardWriteError::Failed)?
+                .get();
+            return self
+                .write(|| {
+                    raw::empty()?;
+                    if let Some(html) = html {
+                        raw::set_html(format, html)
+                    } else {
+                        raw::set_without_clear(format, bytes)
+                    }
+                })
+                .map_err(|_| ClipboardWriteError::Failed);
+        }
         if content_type == copypaste_ipc::content_type::FILE {
             let metadata = metadata.ok_or(ClipboardWriteError::Failed)?;
             let staging = self.staging.as_ref().ok_or(ClipboardWriteError::Failed)?;

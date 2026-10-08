@@ -114,10 +114,10 @@ void main() {
     expect(find.text('Devices body'), findsOneWidget);
   });
 
-  testWidgets('renders a centered capsule with only the active label', (
+  testWidgets('renders a compact capsule with every label below its icon', (
     tester,
   ) async {
-    await tester.binding.setSurfaceSize(const Size(442, 720));
+    await tester.binding.setSurfaceSize(const Size(639, 720));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(_shell());
@@ -130,21 +130,20 @@ void main() {
     );
     final dock = find.byKey(const ValueKey<String>('mobile-navigation-dock'));
     final dockBounds = tester.getRect(dock);
-    final theme = Theme.of(tester.element(dock));
 
     expect(
       navigationBar.selectedKey,
       const ValueKey<AppDestination>(AppDestination.history),
     );
-    expect(navigationBar.labelType, NavigationLabelType.selected);
-    expect(navigationBar.labelPosition, NavigationLabelPosition.end);
+    expect(navigationBar.labelType, NavigationLabelType.all);
+    expect(navigationBar.labelPosition, NavigationLabelPosition.bottom);
     expect(navigationBar.alignment, NavigationBarAlignment.center);
     expect(navigationBar.backgroundColor, Colors.transparent);
     expect(navigationBar.padding, AppTheme.mobileNavigationPadding);
     expect(navigationBar.spacing, AppSpacing.xs);
     expect(dockBounds.left, 0);
-    expect(dockBounds.width, 442);
-    expect(bounds.width, lessThan(442 - AppSpacing.lg * 2));
+    expect(dockBounds.width, 639);
+    expect(bounds.width, lessThan(639 - AppSpacing.lg * 2));
     expect(bounds.center.dx, closeTo(dockBounds.center.dx, 0.5));
     expect(
       find.descendant(of: dock, matching: find.byType(Card)),
@@ -176,7 +175,7 @@ void main() {
     );
     expect(
       (selectedDecoration as BoxDecoration).color,
-      theme.colorScheme.accent,
+      AppTheme.navigationAccent.withValues(alpha: 0.12),
     );
     expect(
       items.first.selectedStyle!.iconTheme(tester.element(selectedItem), const {
@@ -184,7 +183,89 @@ void main() {
       }).color,
       AppTheme.navigationAccent,
     );
+
+    for (final destination in appNavigationDestinations) {
+      await tester.tap(_bottomNavigationItem(destination.label));
+      await tester.pumpAndSettle();
+      expect(find.text('${destination.label} body'), findsOneWidget);
+      expect(
+        tester.getRect(find.byType(NavigationBar)).width,
+        closeTo(bounds.width, 0.5),
+      );
+      for (final item in appNavigationDestinations) {
+        final target = _bottomNavigationItem(item.label);
+        final label = find.descendant(
+          of: target,
+          matching: find.text(item.label),
+        );
+        final icon = find.descendant(of: target, matching: find.byType(Icon));
+        expect(label.hitTestable(), findsOneWidget);
+        expect(
+          tester.getRect(label).top,
+          greaterThan(tester.getRect(icon).bottom),
+        );
+        expect(
+          tester.getCenter(label).dx,
+          closeTo(tester.getCenter(icon).dx, 0.5),
+        );
+      }
+    }
   });
+
+  testWidgets(
+    'mobile dock floats over content and keeps its margins interactive',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 720));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      var contentTaps = 0;
+      final controller = AppNavigationController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        _shell(
+          controller: controller,
+          destinations: {
+            AppDestination.history: Listener(
+              onPointerDown: (_) => contentTaps++,
+              child: ColoredBox(
+                key: const ValueKey('floating-content'),
+                color: Colors.white,
+                child: ListView(
+                  children: [
+                    for (var index = 0; index < 30; index++)
+                      Padding(
+                        padding: const EdgeInsets.all(AppSpacing.xxl),
+                        child: Text('Row $index'),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            AppDestination.devices: const Text('Devices body'),
+            AppDestination.settings: const Text('Settings body'),
+          },
+        ),
+      );
+      final dockBounds = tester.getRect(
+        find.byKey(const ValueKey('mobile-navigation-dock')),
+      );
+      expect(
+        tester.getRect(find.byKey(const ValueKey('floating-content'))).bottom,
+        720,
+      );
+      await tester.tapAt(Offset(AppSpacing.xs, dockBounds.center.dy));
+      expect(contentTaps, 1);
+      await tester.drag(find.byType(ListView), const Offset(0, -5000));
+      await tester.pumpAndSettle();
+      expect(
+        tester.getRect(find.text('Row 29')).bottom,
+        lessThanOrEqualTo(dockBounds.top),
+      );
+      await tester.tap(_bottomNavigationItem('Devices'));
+      await tester.pumpAndSettle();
+      expect(controller.selectedDestination, AppDestination.devices);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('hides mobile navigation while a bottom overlay is open', (
     tester,
@@ -258,16 +339,6 @@ void main() {
             expect(find.text('${destination.label} body'), findsOneWidget);
             final bar = find.byKey(const ValueKey<String>('bottom-navigation'));
             final barBounds = tester.getRect(bar);
-            final dock = find.byKey(
-              const ValueKey<String>('mobile-navigation-dock'),
-            );
-            final backdrop = tester.widget<ColoredBox>(
-              find.ancestor(of: dock, matching: find.byType(ColoredBox)).first,
-            );
-            expect(
-              backdrop.color,
-              Theme.of(tester.element(dock)).colorScheme.background,
-            );
             expect(barBounds.left, greaterThanOrEqualTo(AppSpacing.lg));
             expect(barBounds.right, lessThanOrEqualTo(320 - AppSpacing.lg));
             expect(barBounds.center.dx, closeTo(160, 0.5));
@@ -292,36 +363,23 @@ void main() {
                 of: target,
                 matching: find.text(item.label),
               );
-              expect(
-                label.hitTestable(),
-                item == destination ? findsOneWidget : findsNothing,
-              );
+              expect(label.hitTestable(), findsOneWidget);
               final targetBounds = tester.getRect(target);
               expect(targetBounds.left, greaterThanOrEqualTo(barBounds.left));
               expect(targetBounds.right, lessThanOrEqualTo(barBounds.right));
               final iconBounds = tester.getRect(
                 find.descendant(of: target, matching: find.byType(Icon)),
               );
+              final labelBounds = tester.getRect(label);
+              expect(labelBounds.top, greaterThan(iconBounds.bottom));
               expect(
-                iconBounds.center.dy,
-                closeTo(targetBounds.center.dy, 0.5),
+                labelBounds.center.dx,
+                closeTo(targetBounds.center.dx, 0.5),
               );
-              if (item == destination) {
-                final labelBounds = tester.getRect(label);
-                expect(
-                  labelBounds.center.dy,
-                  closeTo(iconBounds.center.dy, 0.5),
-                );
-                expect(
-                  iconBounds.expandToInclude(labelBounds).center.dx,
-                  closeTo(targetBounds.center.dx, 0.5),
-                );
-              } else {
-                expect(
-                  iconBounds.center.dx,
-                  closeTo(targetBounds.center.dx, 0.5),
-                );
-              }
+              expect(
+                iconBounds.center.dx,
+                closeTo(targetBounds.center.dx, 0.5),
+              );
               expect(
                 MediaQuery.textScalerOf(tester.element(label)).scale(14),
                 28,

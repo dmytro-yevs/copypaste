@@ -8,12 +8,23 @@ class ModuleFormDraft extends ChangeNotifier {
     required this.fields,
     required Map<String, Object> initial,
     ModuleInputPicker? picker,
+    this.models = const [],
+    this.languageField,
   }) : _picker = picker,
        _values = {
          for (final field in fields)
            field.id: initial[field.id] ?? field.defaultValue,
        };
   final List<ModuleField> fields;
+  final List<ModuleSearchModel> models;
+  final String? languageField;
+  ModuleSearchModel? get selectedModel {
+    final value = _values[languageField];
+    return value is List
+        ? ModuleSearchModel.forLanguages(models, value.cast<String>())
+        : null;
+  }
+
   final ModuleInputPicker? _picker;
   final Map<String, Object> _values;
   final Map<String, SelectedModuleInput> _files = {};
@@ -24,12 +35,21 @@ class ModuleFormDraft extends ChangeNotifier {
   bool get busy => _busy;
   String? get errorMessage => _error;
   String? fileName(String id) => _files[id]?.name;
-  bool get valid => fields.every(
-    (field) =>
-        !field.required ||
-        field.kind == ModuleFieldKind.boolean ||
-        (_values[field.id] as String).trim().isNotEmpty,
-  );
+  bool get valid =>
+      fields.every((field) {
+        final value = _values[field.id];
+        if (field.kind == ModuleFieldKind.choices) {
+          if (value is! List || (field.required && value.isEmpty)) return false;
+          return value.length == value.toSet().length &&
+              value.every(
+                (id) => field.options.any((option) => option.id == id),
+              );
+        }
+        return !field.required ||
+            field.kind == ModuleFieldKind.boolean ||
+            (value is String && value.trim().isNotEmpty);
+      }) &&
+      (models.isEmpty || selectedModel != null);
 
   void setValue(String id, Object value) {
     if (_closed) return;
@@ -77,6 +97,9 @@ class ModuleFormDraft extends ChangeNotifier {
     super.dispose();
     final files = _files.values.toList();
     _files.clear();
+    for (final field in fields.where((field) => field.secret)) {
+      _values[field.id] = '';
+    }
     await Future.wait(files.map((file) => file.dispose()));
   }
 }

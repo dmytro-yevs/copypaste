@@ -46,7 +46,7 @@ pub(super) fn import(state: &AppState, id: u64, items: Vec<ExportItem>) -> Respo
                 // forward. `delete`, `delete_all` and `restore` already do it;
                 // import was the writer that did not.
                 if let Some(oldest) = oldest {
-                    crate::cloud::note_version_written(state, oldest);
+                    state.modules.note_version(oldest);
                     state.p2p.node().note_local_version(oldest);
                 }
                 state.note_local_change();
@@ -141,7 +141,10 @@ mod tests {
         let after_a_sync = copypaste_core::now_ms();
         state
             .meta
-            .set_state_ms(crate::cloud::KEY_UPLOAD_FLOOR, after_a_sync)
+            .set_state_ms(
+                "module:copypaste.supabase:cloud_upload_floor_ms",
+                after_a_sync,
+            )
             .unwrap();
 
         let old = 1_700_000_000_000;
@@ -164,7 +167,10 @@ mod tests {
         );
 
         assert_eq!(
-            state.meta.state_ms(crate::cloud::KEY_UPLOAD_FLOOR).unwrap(),
+            state
+                .meta
+                .state_ms("module:copypaste.supabase:cloud_upload_floor_ms")
+                .unwrap(),
             old
         );
         let offered = state.store.versions_since(old, 100).unwrap();
@@ -182,7 +188,7 @@ mod tests {
         let floor = copypaste_core::now_ms();
         state
             .meta
-            .set_state_ms(crate::cloud::KEY_UPLOAD_FLOOR, floor)
+            .set_state_ms("module:copypaste.supabase:cloud_upload_floor_ms", floor)
             .unwrap();
         match import_of(&state, exported.items).data {
             Some(ResponseData::Import(result)) => assert_eq!(result.inserted, 0),
@@ -190,7 +196,10 @@ mod tests {
         }
 
         assert_eq!(
-            state.meta.state_ms(crate::cloud::KEY_UPLOAD_FLOOR).unwrap(),
+            state
+                .meta
+                .state_ms("module:copypaste.supabase:cloud_upload_floor_ms")
+                .unwrap(),
             floor
         );
     }

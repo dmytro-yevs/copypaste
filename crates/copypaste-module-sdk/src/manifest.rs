@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const MANIFEST_VERSION: u32 = 2;
+pub const MANIFEST_VERSION: u32 = 4;
 
 /// Events are delivered by the host only to explicitly enabled modules.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -78,6 +78,10 @@ impl ModuleTarget {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ModuleManifest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_provider: Option<ModuleSyncProvider>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_provider: Option<crate::ModuleSearchProvider>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub supported_platforms: Vec<ModulePlatform>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -97,6 +101,13 @@ pub struct ModuleManifest {
     pub commands: Vec<ModuleCommand>,
     #[serde(default)]
     pub preferences: Vec<ModuleField>,
+}
+
+/// A background sync command. The host schedules it; native code owns transport.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ModuleSyncProvider {
+    pub command: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -128,8 +139,16 @@ pub struct ModuleField {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ModuleFieldValue {
+    Choices {
+        options: Vec<ModuleChoice>,
+        default: Vec<String>,
+        #[serde(default)]
+        required: bool,
+    },
     Text {
         default: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        secret: bool,
         #[serde(default)]
         required: bool,
     },
@@ -145,6 +164,13 @@ pub enum ModuleFieldValue {
     },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ModuleChoice {
+    pub id: String,
+    pub title: String,
+}
+
 fn default_input_file_bytes() -> u64 {
     64 * 1024 * 1024
 }
@@ -152,6 +178,7 @@ fn default_input_file_bytes() -> u64 {
 impl ModuleField {
     pub fn default_value(&self) -> Value {
         match &self.value {
+            ModuleFieldValue::Choices { default, .. } => serde_json::json!(default),
             ModuleFieldValue::Text { default, .. } => Value::String(default.clone()),
             ModuleFieldValue::Boolean { default } => Value::Bool(*default),
             ModuleFieldValue::File { .. } => Value::String(String::new()),
@@ -160,6 +187,9 @@ impl ModuleField {
     pub fn accepts(&self, value: &Value) -> bool {
         self.accepts_stored(value)
             && match &self.value {
+                ModuleFieldValue::Choices { required: true, .. } => {
+                    value.as_array().is_some_and(|values| !values.is_empty())
+                }
                 ModuleFieldValue::Text { required: true, .. }
                 | ModuleFieldValue::File { required: true, .. } => {
                     value.as_str().is_some_and(|value| !value.trim().is_empty())
@@ -172,6 +202,15 @@ impl ModuleField {
     /// runs. They still need the correct scalar type and size.
     pub fn accepts_stored(&self, value: &Value) -> bool {
         match &self.value {
+            ModuleFieldValue::Choices { options, .. } => value.as_array().is_some_and(|values| {
+                values.len() <= options.len()
+                    && values.iter().enumerate().all(|(index, value)| {
+                        value
+                            .as_str()
+                            .is_some_and(|id| options.iter().any(|option| option.id == id))
+                            && !values[..index].contains(value)
+                    })
+            }),
             ModuleFieldValue::Text { .. } => value.as_str().is_some_and(|s| s.len() <= 64 * 1024),
             ModuleFieldValue::Boolean { .. } => value.is_boolean(),
             ModuleFieldValue::File { .. } => value.as_str().is_some_and(|value| {
@@ -186,6 +225,22 @@ impl ModuleField {
 impl ModuleManifest {
     pub fn validate(&self, host_version: &str, target: ModuleTarget) -> Result<(), String> {
         if !(1..=MANIFEST_VERSION).contains(&self.schema_version)
+            || (self.schema_version < 3
+                && (self.search_provider.is_some()
+                    || self
+                        .preferences
+                        .iter()
+                        .chain(self.commands.iter().flat_map(|command| &command.arguments))
+                        .any(|field| matches!(field.value, ModuleFieldValue::Choices { .. }))))
+            || (self.schema_version < 4
+                && (self.sync_provider.is_some()
+                    || self
+                        .preferences
+                        .iter()
+                        .chain(self.commands.iter().flat_map(|command| &command.arguments))
+                        .any(|field| {
+                            matches!(field.value, ModuleFieldValue::Text { secret: true, .. })
+                        })))
             || self.api_version != MODULE_API_VERSION
             || (self.schema_version == 1
                 && (!self.event_handlers.is_empty() || !self.supported_platforms.is_empty()))
@@ -198,7 +253,7 @@ impl ModuleManifest {
             || self.title.len() > 160
             || self.description.len() > 2048
             || self.target != target
-            || (self.schema_version == 2
+            || (self.schema_version >= 2
                 && (self.supported_platforms.is_empty()
                     || self.supported_platforms.len() > 3
                     || !self.supported_platforms.contains(&target.platform)
@@ -242,6 +297,71 @@ impl ModuleManifest {
             return Err("The module entrypoint is missing.".into());
         }
         validate_fields(&self.preferences)?;
+        if self
+            .preferences
+            .iter()
+            .any(|field| matches!(field.value, ModuleFieldValue::Text { secret: true, .. }))
+        {
+            return Err("Secrets must use transient commands and encrypted host state.".into());
+        }
+        if let Some(provider) = &self.sync_provider {
+            if !valid_id(&provider.command)
+                || !self
+                    .commands
+                    .iter()
+                    .any(|command| command.id == provider.command && command.arguments.is_empty())
+            {
+                return Err("The sync provider command is invalid.".into());
+            }
+        }
+        if let Some(provider) = &self.search_provider {
+            if !valid_id(&provider.command)
+                || provider.models.is_empty()
+                || provider.models.len() > 16
+                || !self.commands.iter().any(|command| {
+                    command.id == provider.command
+                        && command.arguments.len() == 2
+                        && ["text", "role"].iter().all(|id| {
+                            command.arguments.iter().any(|field| {
+                                field.id == *id
+                                    && matches!(
+                                        field.value,
+                                        ModuleFieldValue::Text { required: true, .. }
+                                    )
+                            })
+                        })
+                })
+            {
+                return Err("The search provider command is invalid.".into());
+            }
+            let field = self
+                .preferences
+                .iter()
+                .find(|field| field.id == provider.language_field)
+                .ok_or("The search language preference is missing.")?;
+            let ModuleFieldValue::Choices {
+                options,
+                required: true,
+                ..
+            } = &field.value
+            else {
+                return Err("The search provider requires a language selection.".into());
+            };
+            let mut ids = BTreeSet::new();
+            for model in &provider.models {
+                model.validate()?;
+                if !ids.insert(&model.id) {
+                    return Err("Search model ids must be unique.".into());
+                }
+            }
+            if options.iter().any(|option| {
+                provider
+                    .model_for(std::slice::from_ref(&option.id))
+                    .is_none()
+            }) {
+                return Err("A search language has no compatible model.".into());
+            }
+        }
         if self
             .preferences
             .iter()
@@ -291,6 +411,20 @@ fn validate_fields(fields: &[ModuleField]) -> Result<(), String> {
         return Err("Too many module fields.".into());
     }
     for field in fields {
+        if let ModuleFieldValue::Choices { options, .. } = &field.value {
+            let mut choices = BTreeSet::new();
+            if options.is_empty()
+                || options.len() > 128
+                || options.iter().any(|option| {
+                    !valid_id(&option.id)
+                        || option.title.trim().is_empty()
+                        || option.title.len() > 160
+                        || !choices.insert(&option.id)
+                })
+            {
+                return Err("The module choices are invalid.".into());
+            }
+        }
         if let ModuleFieldValue::File {
             accepted_extensions,
             max_bytes,
@@ -423,6 +557,41 @@ mod tests {
             "event_handlers":[{"event":"sms_received","command":"extract-code"}]
         })).unwrap()
     }
+    #[test]
+    fn sync_capability_and_secret_inputs_require_schema_four_and_validate_the_boundary() {
+        let mut module = manifest();
+        module.schema_version = 4;
+        module.sync_provider = Some(ModuleSyncProvider {
+            command: "sync".into(),
+        });
+        module.commands.push(ModuleCommand {
+            id: "sync".into(),
+            title: "Sync".into(),
+            description: "Synchronize".into(),
+            arguments: Vec::new(),
+        });
+        assert!(module.validate("1.0.10", module.target).is_ok());
+        module.schema_version = 3;
+        assert!(module.validate("1.0.10", module.target).is_err());
+        module.schema_version = 4;
+        module.sync_provider.as_mut().unwrap().command = "missing".into();
+        assert!(module.validate("1.0.10", module.target).is_err());
+        module.sync_provider = None;
+        module.preferences.push(ModuleField {
+            id: "password".into(),
+            title: "Password".into(),
+            value: ModuleFieldValue::Text {
+                default: String::new(),
+                required: false,
+                secret: true,
+            },
+        });
+        assert!(
+            module.validate("1.0.10", module.target).is_err(),
+            "secret preferences cannot enter the plaintext registry"
+        );
+    }
+
     #[test]
     fn validates_android_event_contract_and_preserves_legacy_manifests() {
         let mut module = manifest();

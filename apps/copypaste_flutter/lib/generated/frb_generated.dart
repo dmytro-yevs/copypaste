@@ -2835,17 +2835,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   RuntimeSettingsData dco_decode_runtime_settings_data(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return RuntimeSettingsData(
       retentionDays: dco_decode_u_32(arr[0]),
       storageQuotaBytes: dco_decode_u_64(arr[1]),
       excludedAppIds: dco_decode_list_String(arr[2]),
       lanVisibility: dco_decode_bool(arr[3]),
       syncEnabled: dco_decode_bool(arr[4]),
-      notifyOnCopy: dco_decode_bool(arr[5]),
-      notificationPreview: dco_decode_bool(arr[6]),
-      soundOnCopy: dco_decode_bool(arr[7]),
+      instantClipboard: dco_decode_bool(arr[5]),
+      notifyOnCopy: dco_decode_bool(arr[6]),
+      notificationPreview: dco_decode_bool(arr[7]),
+      soundOnCopy: dco_decode_bool(arr[8]),
     );
   }
 
@@ -2853,17 +2854,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   RuntimeSettingsPatch dco_decode_runtime_settings_patch(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return RuntimeSettingsPatch(
       retentionDays: dco_decode_opt_box_autoadd_u_32(arr[0]),
       storageQuotaBytes: dco_decode_opt_box_autoadd_u_64(arr[1]),
       excludedAppIds: dco_decode_opt_list_String(arr[2]),
       lanVisibility: dco_decode_opt_box_autoadd_bool(arr[3]),
       syncEnabled: dco_decode_opt_box_autoadd_bool(arr[4]),
-      notifyOnCopy: dco_decode_opt_box_autoadd_bool(arr[5]),
-      notificationPreview: dco_decode_opt_box_autoadd_bool(arr[6]),
-      soundOnCopy: dco_decode_opt_box_autoadd_bool(arr[7]),
+      instantClipboard: dco_decode_opt_box_autoadd_bool(arr[5]),
+      notifyOnCopy: dco_decode_opt_box_autoadd_bool(arr[6]),
+      notificationPreview: dco_decode_opt_box_autoadd_bool(arr[7]),
+      soundOnCopy: dco_decode_opt_box_autoadd_bool(arr[8]),
     );
   }
 
@@ -4004,6 +4006,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_excludedAppIds = sse_decode_list_String(deserializer);
     var var_lanVisibility = sse_decode_bool(deserializer);
     var var_syncEnabled = sse_decode_bool(deserializer);
+    var var_instantClipboard = sse_decode_bool(deserializer);
     var var_notifyOnCopy = sse_decode_bool(deserializer);
     var var_notificationPreview = sse_decode_bool(deserializer);
     var var_soundOnCopy = sse_decode_bool(deserializer);
@@ -4013,6 +4016,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       excludedAppIds: var_excludedAppIds,
       lanVisibility: var_lanVisibility,
       syncEnabled: var_syncEnabled,
+      instantClipboard: var_instantClipboard,
       notifyOnCopy: var_notifyOnCopy,
       notificationPreview: var_notificationPreview,
       soundOnCopy: var_soundOnCopy,
@@ -4029,6 +4033,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_excludedAppIds = sse_decode_opt_list_String(deserializer);
     var var_lanVisibility = sse_decode_opt_box_autoadd_bool(deserializer);
     var var_syncEnabled = sse_decode_opt_box_autoadd_bool(deserializer);
+    var var_instantClipboard = sse_decode_opt_box_autoadd_bool(deserializer);
     var var_notifyOnCopy = sse_decode_opt_box_autoadd_bool(deserializer);
     var var_notificationPreview = sse_decode_opt_box_autoadd_bool(deserializer);
     var var_soundOnCopy = sse_decode_opt_box_autoadd_bool(deserializer);
@@ -4038,6 +4043,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       excludedAppIds: var_excludedAppIds,
       lanVisibility: var_lanVisibility,
       syncEnabled: var_syncEnabled,
+      instantClipboard: var_instantClipboard,
       notifyOnCopy: var_notifyOnCopy,
       notificationPreview: var_notificationPreview,
       soundOnCopy: var_soundOnCopy,
@@ -5054,6 +5060,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_list_String(self.excludedAppIds, serializer);
     sse_encode_bool(self.lanVisibility, serializer);
     sse_encode_bool(self.syncEnabled, serializer);
+    sse_encode_bool(self.instantClipboard, serializer);
     sse_encode_bool(self.notifyOnCopy, serializer);
     sse_encode_bool(self.notificationPreview, serializer);
     sse_encode_bool(self.soundOnCopy, serializer);
@@ -5070,6 +5077,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_list_String(self.excludedAppIds, serializer);
     sse_encode_opt_box_autoadd_bool(self.lanVisibility, serializer);
     sse_encode_opt_box_autoadd_bool(self.syncEnabled, serializer);
+    sse_encode_opt_box_autoadd_bool(self.instantClipboard, serializer);
     sse_encode_opt_box_autoadd_bool(self.notifyOnCopy, serializer);
     sse_encode_opt_box_autoadd_bool(self.notificationPreview, serializer);
     sse_encode_opt_box_autoadd_bool(self.soundOnCopy, serializer);

@@ -102,3 +102,6 @@ graphify-out/
 
 # scripts/mutation-gate is the only importable Python package in the tree.
 __pycache__/
+
+# Native module build outputs
+/modules/*/target/

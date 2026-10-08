@@ -13,6 +13,7 @@
 //! violate manifest 05 INV-C2.
 
 mod batch;
+mod instant_clipboard;
 mod merge;
 mod prepare;
 mod round;
@@ -22,6 +23,7 @@ mod source;
 mod testkit;
 
 pub use batch::{apply_remote_p2p_versions, apply_remote_versions, P2pPin};
+pub use instant_clipboard::InstantClipboard;
 pub use merge::{
     apply_remote_version, local_winner_stamp, open_version, open_version_bytes, MergeError,
     OpenVersionError, RemoteVersion,

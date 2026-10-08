@@ -11,6 +11,153 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('HistoryController', () {
+    test(
+      'suspension releases payloads and restores the same search and selection',
+      () async {
+        final repository = _HistoryRepository()
+          ..pages.addAll([
+            Future.value(
+              HistoryClipPage(items: [_clip('before')], nextCursor: 'next'),
+            ),
+            Future.value(HistoryClipPage(items: [_clip('after')])),
+          ]);
+        final controller = HistoryController(repository);
+        addTearDown(controller.dispose);
+        await controller.updateQuery(
+          const HistoryQuery(search: 'saved', sort: HistorySort.oldest),
+        );
+        await controller.initialize();
+        await controller.select('after');
+        controller.toggleSection('today');
+        controller.suspend();
+        expect(controller.items, isEmpty);
+        expect(controller.selectedClip, isNull);
+        expect(controller.selectedId, 'after');
+        expect(controller.query.search, 'saved');
+        expect(controller.query.sort, HistorySort.oldest);
+        expect(controller.isSectionCollapsed('today'), isTrue);
+        final reads = repository.requests.length;
+        repository.events.add(HistoryRuntimeEvent.itemsChanged);
+        await Future<void>.delayed(Duration.zero);
+        expect(repository.requests, hasLength(reads));
+        repository.pages.add(
+          Future.value(HistoryClipPage(items: [_clip('fresh')])),
+        );
+        await controller.initialize();
+        expect(controller.items.single.id, 'fresh');
+        expect(controller.selectedClip?.id, 'after');
+        expect(repository.requests.last.query.search, 'saved');
+      },
+    );
+
+    test(
+      'stale media cannot repopulate caches or erase resumed in-flight requests',
+      () async {
+        final repository = _HistoryRepository();
+        final oldIcon = Completer<HistorySourceAppIcon?>();
+        final newIcon = Completer<HistorySourceAppIcon?>();
+        final oldImage = Completer<HistoryImagePreview?>();
+        repository.sourceIconFuture = oldIcon.future;
+        repository.imagePreviewFutures.add(oldImage.future);
+        final controller = HistoryController(repository);
+        addTearDown(controller.dispose);
+        final staleIconRequest = controller.requestSourceIcon('icon');
+        final staleImageRequest = controller.requestImagePreview('image');
+        controller.suspend();
+        expect(await controller.requestSourceIcon('icon'), isNull);
+        expect(await controller.requestImagePreview('image'), isNull);
+        expect(repository.sourceIconCalls, 1);
+        repository.pages.add(Future.value(const HistoryClipPage(items: [])));
+        await controller.initialize();
+        repository.sourceIconFuture = newIcon.future;
+        final resumedIconRequest = controller.requestSourceIcon('icon');
+        oldIcon.complete(HistorySourceAppIcon(Uint8List(1024)));
+        oldImage.complete(
+          HistoryImagePreview(Uint8List(1024), width: 16, height: 16),
+        );
+        expect(await staleIconRequest, isNull);
+        expect(await staleImageRequest, isNull);
+        expect(
+          identical(controller.requestSourceIcon('icon'), resumedIconRequest),
+          isTrue,
+        );
+        final icon = HistorySourceAppIcon(Uint8List(64));
+        newIcon.complete(icon);
+        expect(await resumedIconRequest, same(icon));
+        expect(await controller.requestSourceIcon('icon'), same(icon));
+        expect(repository.sourceIconCalls, 2);
+      },
+    );
+
+    test(
+      'query and facet responses completing while suspended are discarded',
+      () async {
+        final repository = _HistoryRepository();
+        final page = Completer<HistoryClipPage>();
+        final facets = Completer<HistoryFacets>();
+        repository.facetsFuture = facets.future;
+        repository.pages.add(page.future);
+        final controller = HistoryController(repository);
+        addTearDown(controller.dispose);
+        final loading = controller.initialize();
+        controller.suspend();
+        page.complete(HistoryClipPage(items: [_clip('stale')]));
+        facets.complete(
+          const HistoryFacets(
+            sourceApps: [
+              HistorySourceAppFacet(
+                id: 'stale',
+                label: 'Stale',
+                iconId: 'icon',
+              ),
+            ],
+          ),
+        );
+        await loading;
+        expect(controller.items, isEmpty);
+        expect(controller.state, HistoryLoadState.initial);
+        expect(controller.facets.sourceApps, isEmpty);
+      },
+    );
+
+    test(
+      'starts search with relevance and preserves an explicit search sort',
+      () async {
+        final repository = _HistoryRepository()
+          ..pages.addAll(
+            List.generate(
+              5,
+              (_) => Future.value(const HistoryClipPage(items: [])),
+            ),
+          );
+        final controller = HistoryController(
+          repository,
+          searchDebounce: Duration.zero,
+        );
+        addTearDown(controller.dispose);
+
+        controller.updateSearch('meeting');
+        await Future<void>.delayed(Duration.zero);
+        expect(controller.query.sort, HistorySort.relevance);
+
+        await controller.updateQuery(
+          controller.query.copyWith(sort: HistorySort.oldest),
+        );
+        controller.updateSearch('meting');
+        await Future<void>.delayed(Duration.zero);
+        expect(controller.query.sort, HistorySort.oldest);
+
+        await controller.updateQuery(
+          controller.query.copyWith(sort: HistorySort.relevance),
+        );
+        controller.updateSearch('');
+        await Future<void>.delayed(Duration.zero);
+        expect(controller.query.sort, HistorySort.newest);
+        expect(repository.requests, hasLength(5));
+        expect(controller.state, HistoryLoadState.empty);
+      },
+    );
+
     test('classifies every supported clip representation', () {
       expect(HistoryClipKindX.fromContentType('text'), HistoryClipKind.text);
       expect(
@@ -493,6 +640,7 @@ class _HistoryRepository implements HistoryRepository {
   int deleteCalls = 0;
   int deleteAllCalls = 0;
   HistoryFacets availableFacets = const HistoryFacets();
+  Future<HistoryFacets>? facetsFuture;
   final List<Future<HistoryImagePreview?>> imagePreviewFutures = [];
   final List<int?> imagePreviewEdges = [];
   final List<HistoryImagePreviewBounds?> imagePreviewBounds = [];
@@ -505,7 +653,7 @@ class _HistoryRepository implements HistoryRepository {
   Stream<HistoryRuntimeEvent> watch() => events.stream;
 
   @override
-  Future<HistoryFacets> facets() async => availableFacets;
+  Future<HistoryFacets> facets() => facetsFuture ?? Future.value(availableFacets);
 
   @override
   Future<HistoryClipPage> query({

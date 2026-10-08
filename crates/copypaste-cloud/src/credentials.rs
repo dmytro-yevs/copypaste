@@ -1,3 +1,4 @@
+#[cfg(feature = "storage")]
 use copypaste_core::{Store, StoreError};
 use thiserror::Error;
 use zeroize::Zeroizing;
@@ -85,12 +86,16 @@ pub enum AccountChange {
 
 #[derive(Debug, Error)]
 pub enum CredentialError {
+    #[error("encrypted host state is unavailable")]
+    Host,
     #[error("cloud credential storage is unavailable")]
+    #[cfg(feature = "storage")]
     Store(#[source] StoreError),
     #[error("the stored cloud credentials do not belong to the active account")]
     AccountMismatch,
 }
 
+#[cfg(feature = "storage")]
 impl From<StoreError> for CredentialError {
     fn from(error: StoreError) -> Self {
         Self::Store(error)
@@ -121,7 +126,25 @@ pub trait CredentialStore {
     fn clear_cloud_credentials(&self) -> Result<(), CredentialError>;
 }
 
-impl CredentialStore for Store {
+/// Encrypted state supplied by the application, including native module hosts.
+pub trait CredentialState {
+    fn state(&self, key: &str) -> Result<Option<String>, CredentialError>;
+    fn set_state_all(&self, entries: &[(&str, &str)]) -> Result<(), CredentialError>;
+    fn clear_state(&self, keys: &[&str]) -> Result<(), CredentialError>;
+}
+#[cfg(feature = "storage")]
+impl CredentialState for Store {
+    fn state(&self, key: &str) -> Result<Option<String>, CredentialError> {
+        Ok(Store::state(self, key)?)
+    }
+    fn set_state_all(&self, entries: &[(&str, &str)]) -> Result<(), CredentialError> {
+        Ok(Store::set_state_all(self, entries)?)
+    }
+    fn clear_state(&self, keys: &[&str]) -> Result<(), CredentialError> {
+        Ok(Store::clear_state(self, keys)?)
+    }
+}
+impl<T: CredentialState> CredentialStore for T {
     fn cloud_credentials(&self) -> Result<Option<StoredCredentials>, CredentialError> {
         let mut values = CREDENTIAL_KEYS
             .iter()
@@ -292,7 +315,7 @@ impl CredentialStore for Store {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "storage"))]
 mod tests {
     use super::*;
 

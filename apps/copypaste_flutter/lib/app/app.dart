@@ -36,6 +36,7 @@ class CopyPasteApp extends StatelessWidget {
     this.runtimeUnavailableMessage,
     this.onRetryRuntime,
     this.onOpenAndroidCaptureSetup,
+    this.navigatorKey,
   });
 
   final AppNavigationController navigation;
@@ -49,10 +50,12 @@ class CopyPasteApp extends StatelessWidget {
   final String? runtimeUnavailableMessage;
   final Future<void> Function()? onRetryRuntime;
   final Future<void> Function()? onOpenAndroidCaptureSetup;
+  final GlobalKey<NavigatorState>? navigatorKey;
 
   @override
   Widget build(BuildContext context) {
     return ShadcnApp(
+      navigatorKey: navigatorKey,
       title: 'CopyPaste',
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,

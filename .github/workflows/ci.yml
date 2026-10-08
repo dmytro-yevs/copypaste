@@ -28,6 +28,10 @@ jobs:
         run: |
           cargo +1.96 test --manifest-path modules/sms-codes/Cargo.toml --locked
           cargo +1.96 clippy --manifest-path modules/sms-codes/Cargo.toml --locked --all-targets -- -D warnings
+      - name: Supabase module contracts
+        run: |
+          cargo +1.96 test --manifest-path modules/supabase/Cargo.toml --locked
+          cargo +1.96 clippy --manifest-path modules/supabase/Cargo.toml --locked --all-targets -- -D warnings
       - run: ./supabase/dev/verify-schema.sh
 
   macos-core:

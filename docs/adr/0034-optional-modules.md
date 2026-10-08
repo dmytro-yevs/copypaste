@@ -104,8 +104,7 @@ incompatible app versions, system versions, or architectures are explained on
 their ordinary cards with installation disabled. Unknown native version facts
 also fail closed on the card. An unpublished or empty catalog uses the shared
 empty state; only authentication, invalid metadata, and network failures use
-the error state. Module execution remains offline;
-only marketplace discovery and installation require network access.
+the error state. Modules execute locally. OCR and SMS Codes remain offline; optional sync providers own their network connections. Marketplace discovery and installation also require network access.
 
 Publish qualified packages under `module-<id>-v<version>` in the first-party
 repository. The **Publish module marketplace** workflow authenticates every
@@ -178,3 +177,40 @@ through the marketplace after publishing the qualified target packages.
 Native lifecycle tests establish behavior on their executing host. Android
 cross-compilation and Flutter tests establish source/build compatibility, not
 physical Android or installed Windows acceptance evidence.
+
+## Supabase Sync
+
+`copypaste.supabase` is a separately installed schema 4 module. It installs
+disabled and contributes a background sync command plus shared account forms.
+The daemon and Android runtime include no Supabase transport implementation.
+Local history and P2P remain available without this module. No existing account
+migration is required because Supabase has not been configured in deployed apps.
+
+The unchanged ABI v1 entrypoint remains available. Schema 4 sync packages also
+export `copypaste_module_with_host_v1`, receiving a C-compatible callback record.
+Only authenticated manifests declaring `sync_provider` receive this service.
+The callback carries bounded serialized requests; no Rust object, database
+handle, device key, or allocator ownership crosses libraries. Ordinary command
+and result limits remain 1 MiB; the separate host channel is bounded at 32 MiB,
+uses base64 for binary content, and upload scans cap plaintext at 8 MiB.
+
+`copypaste-sync` owns transport-neutral history versions, merge adaptation,
+upload scans, unreadable-row recovery, and adaptive cadence. The module owns
+Supabase Auth, REST, Realtime, sync encryption, refresh, and network workers.
+The application's `SyncServices` owns encrypted, per-module device state and
+atomic history application using the same merge owner as P2P. It fences upload
+progress with a revision so older local or peer writes are not lost during a
+network round. Applied remote versions wake History and the existing P2P relay.
+
+Account passwords and sync passphrases are transient obscured command fields;
+secret preferences are rejected. Only the session tokens and derived sync key
+are stored in the application's SQLCipher database under the module namespace.
+Disabling keeps account state for re-enabling; removal clears that namespace
+and package data without deleting clipboard history. A live host lease cancels
+network operations before disable, update, removal, or shutdown completes.
+Modules join every worker before their library and callback context are freed.
+The global synchronization switch applies to both P2P and installed providers.
+
+The Supabase package has its own Cargo lock and five target artifacts: macOS
+ARM64, Windows x86_64, and Android ARM, ARM64, and x86_64. The dedicated build
+workflow signs artifacts but does not publish a Marketplace catalog.

@@ -12,6 +12,37 @@ use super::model::StoreError;
 use super::store::Store;
 
 impl Store {
+    /// Providers with durable upload progress, including disabled packages.
+    pub fn sync_provider_ids(&self) -> Result<Vec<String>, StoreError> {
+        let conn = self.conn()?;
+        let mut statement = conn.prepare(
+            "SELECT key FROM sync_device_state WHERE key GLOB 'module:*:cloud_upload_floor_ms'",
+        )?;
+        let keys = statement.query_map([], |row| row.get::<_, String>(0))?;
+        let mut ids = Vec::new();
+        for key in keys {
+            let key = key?;
+            if let Some(id) = key
+                .strip_prefix("module:")
+                .and_then(|key| key.strip_suffix(":cloud_upload_floor_ms"))
+            {
+                ids.push(id.to_owned());
+            }
+        }
+        Ok(ids)
+    }
+
+    /// Remove only encrypted state owned by a removed first-party module.
+    pub fn clear_module_state(&self, id: &str) -> Result<(), StoreError> {
+        let conn = self.conn()?;
+        let prefix = format!("module:{id}:");
+        conn.execute(
+            "DELETE FROM sync_device_state WHERE substr(key, 1, length(?1)) = ?1",
+            [prefix],
+        )?;
+        Ok(())
+    }
+
     /// Read one value, or `None` when it has never been set.
     pub fn state(&self, key: &str) -> Result<Option<String>, StoreError> {
         let conn = self.conn()?;

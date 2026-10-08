@@ -36,16 +36,23 @@ where
         .settings
         .apply_with_effects(&state.meta, patch, effects)
     {
-        Ok(config) => Response::ok(
-            id,
-            ResponseData::Config(ConfigApplied {
-                config: config.config,
-                restart_required: ConfigData::restart_required_by(patch)
-                    .into_iter()
-                    .map(str::to_string)
-                    .collect(),
-            }),
-        ),
+        Ok(config) => {
+            if patch.sync_enabled.is_some() {
+                state
+                    .modules
+                    .sync_enabled_changed(config.config.sync_enabled);
+            }
+            Response::ok(
+                id,
+                ResponseData::Config(ConfigApplied {
+                    config: config.config,
+                    restart_required: ConfigData::restart_required_by(patch)
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect(),
+                }),
+            )
+        }
         // `ConfigError`'s text names a field and a bound and can contain no
         // path — the type is built that way, and `copypaste_ipc::config` has a
         // test pinning it — so it is safe to pass through verbatim. That is
@@ -77,7 +84,6 @@ fn apply_runtime_effects(state: &AppState, transition: &SettingsTransition) {
             .set_lan_visibility(transition.config().lan_visibility);
     }
     if let Some(enabled) = transition.sync_enabled_changed() {
-        state.cloud.sync_enabled_changed(enabled);
         state.p2p.sync_enabled_changed(enabled);
     }
 }
@@ -349,7 +355,6 @@ mod tests {
     #[test]
     fn the_live_sync_switch_replaces_cancelled_transport_cycles() {
         let (state, _dir) = test_state("sync-transition");
-        let cloud_before = state.cloud.sync_cancel();
         let peers_before = state.p2p.sync_cycle().cancel_token();
 
         let off = set(
@@ -361,7 +366,7 @@ mod tests {
             },
         );
         assert!(off.ok);
-        assert!(cloud_before.is_cancelled());
+        assert!(!state.settings.get().sync_enabled);
         assert!(peers_before.is_cancelled());
 
         let on = set(
@@ -373,7 +378,7 @@ mod tests {
             },
         );
         assert!(on.ok);
-        assert!(!state.cloud.sync_cancel().is_cancelled());
+        assert!(state.settings.get().sync_enabled);
         assert!(!state.p2p.sync_cycle().cancel_token().is_cancelled());
     }
 
@@ -398,8 +403,7 @@ mod tests {
         assert_eq!(status.private_mode_epoch, read.private_mode_epoch);
         drop(state);
 
-        let (restarted, _dir) =
-            crate::testutil::reopen(dir, crate::cloud::Cloud::new(None), "private-mode");
+        let (restarted, _dir) = crate::testutil::reopen(dir, "private-mode");
         let restarted_mode = private_mode_data(call(&restarted, Method::GetPrivateMode));
         assert!(restarted_mode.private_mode);
         assert_eq!(restarted_mode.private_mode_epoch, 0);

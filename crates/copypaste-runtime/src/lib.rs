@@ -44,11 +44,17 @@ pub struct Runtime {
     shutdown: tokio::sync::watch::Sender<bool>,
     listener_started: AtomicBool,
     capture_running: AtomicBool,
+    module_sync_started: AtomicBool,
     clipboard: Arc<dyn ClipboardWriter>,
+    instant_clipboard: Arc<copypaste_core::sync::InstantClipboard>,
 }
 
 pub trait ClipboardWriter: Send + Sync {
-    fn write(&self, payload: &ClipboardPayload) -> Result<(), ClipboardWriteError>;
+    fn write(
+        &self,
+        payload: &ClipboardPayload,
+        content_type: &str,
+    ) -> Result<(), ClipboardWriteError>;
 }
 
 #[derive(Clone)]
@@ -59,7 +65,7 @@ struct ItemOrigin {
 }
 struct UnavailableClipboard;
 impl ClipboardWriter for UnavailableClipboard {
-    fn write(&self, _: &ClipboardPayload) -> Result<(), ClipboardWriteError> {
+    fn write(&self, _: &ClipboardPayload, _: &str) -> Result<(), ClipboardWriteError> {
         Err(ClipboardWriteError::Failed)
     }
 }
@@ -98,20 +104,89 @@ impl Runtime {
             port,
             settings.config().lan_visibility,
         ));
+        let modules = Arc::new(copypaste_modules::ModuleHost::new(data_dir));
+        let module_versions = Arc::downgrade(&modules);
         let source_settings = Arc::clone(&settings);
-        let source = Arc::new(StoreSource::with_retention_settings(
-            store.clone(),
-            Arc::clone(&keyring),
-            identity.device_id.clone(),
-            identity.device_name.clone(),
-            move || source_settings.config(),
-        ));
+        let instant_clipboard = Arc::new(copypaste_core::sync::InstantClipboard::default());
+        let clipboard_gate = Arc::clone(&instant_clipboard);
+        let clipboard_store = store.clone();
+        let clipboard_keyring = Arc::clone(&keyring);
+        let clipboard_settings = Arc::clone(&settings);
+        let clipboard_writer = Arc::clone(&clipboard);
+        let source = Arc::new(
+            StoreSource::with_retention_settings(
+                store.clone(),
+                Arc::clone(&keyring),
+                identity.device_id.clone(),
+                identity.device_name.clone(),
+                move || source_settings.config(),
+            )
+            .on_applied(move |stamp| {
+                if let Some(modules) = module_versions.upgrade() {
+                    modules.note_version(stamp);
+                }
+            })
+            .on_clip_received(move |row| {
+                let _ = clipboard_settings.with_clipboard_settings(|settings| {
+                    clipboard_gate.apply(
+                        &clipboard_store,
+                        &clipboard_keyring,
+                        row,
+                        || settings,
+                        |payload| clipboard_writer.write(payload, &row.content_type),
+                    );
+                });
+            }),
+        );
         let (events, _) = tokio::sync::broadcast::channel(64);
+        let modules = Arc::new(copypaste_modules::ModuleHost::new(data_dir));
+        let changed_events = events.clone();
+        let changed_store = store.clone();
+        modules.bind_search(
+            store.clone(),
+            Arc::new(move || {
+                let _ = changed_events.send(EventData {
+                    sync_status: None,
+                    event: EventKind::Items,
+                    item_count: changed_store.count().unwrap_or(0),
+                    captured: false,
+                    captured_item_id: None,
+                });
+            }),
+        );
         let (shutdown, _) = tokio::sync::watch::channel(false);
+        let module_shutdown = shutdown.subscribe();
+        let module_settings = Arc::clone(&settings);
+        let module_events = events.clone();
+        let module_store = store.clone();
+        let module_node = Arc::clone(&node);
+        let module_peers = peer_sync::PeerSyncDriver::new();
+        let module_relay = Arc::clone(&module_peers);
+        modules
+            .set_sync_services(Arc::new(copypaste_modules::SyncServices::new(
+                store.clone(),
+                copypaste_sync::store::StoreView::new(
+                    source.without_version_hook(),
+                    identity.device_id.clone(),
+                ),
+                move || !*module_shutdown.borrow() && module_settings.config().sync_enabled,
+                move |stamp| {
+                    module_node.cursors().note_local(stamp);
+                    module_relay.wake();
+                    let _ = module_events.send(EventData {
+                        sync_status: None,
+                        event: EventKind::Items,
+                        item_count: module_store.count().unwrap_or(0),
+                        captured: false,
+                        captured_item_id: None,
+                    });
+                },
+            )))
+            .map_err(|_| RuntimeError::Storage)?;
         let device_class = copypaste_p2p::DeviceProfile::current().device_class;
         Ok(Self {
             peer_sync: peer_sync::PeerSyncDriver::new(),
-            modules: Arc::new(copypaste_modules::ModuleHost::new(data_dir)),
+            modules,
             store,
             keyring,
             source,
@@ -124,7 +199,9 @@ impl Runtime {
             shutdown,
             listener_started: AtomicBool::new(false),
             capture_running: AtomicBool::new(false),
+            module_sync_started: AtomicBool::new(false),
             clipboard,
+            instant_clipboard,
         })
     }
 
@@ -134,6 +211,7 @@ impl Runtime {
     /// take a daemon shortcut: they use the same encrypted store, merge source
     /// and Noise node as the desktop service.
     pub async fn request(&self, id: u64, method: Method) -> Response {
+        self.start_module_sync();
         let item_mutation = matches!(
             &method,
             Method::Delete { .. }
@@ -215,7 +293,8 @@ impl Runtime {
                         );
                     }
                 };
-                match self.store.query_history_bounded_for_device(
+                match self.modules.query_history(
+                    &self.store,
                     &query,
                     cursor.as_ref(),
                     limit.clamp(1, 1000),
@@ -430,28 +509,12 @@ impl Runtime {
             Method::Export { limit } => self.export(id, limit),
             Method::Backup { dest_path } => self.backup(id, &dest_path),
             Method::Restore { src_path, confirm } => self.restore(id, &src_path, confirm),
-            Method::CloudStatus => Response::ok(
-                id,
-                ResponseData::CloudStatus(copypaste_ipc::CloudStatusData {
-                    configured: false,
-                    signed_in: false,
-                    key_ready: false,
-                    email: None,
-                    last_sync_ms: None,
-                    last_error: None,
-                    poll_interval_secs: 0,
-                    unreadable_uploads: 0,
-                }),
-            ),
-            Method::CloudSignIn { .. }
+            method @ (Method::CloudStatus
+            | Method::CloudSignIn { .. }
             | Method::CloudSignUp { .. }
             | Method::CloudSetEndpoint { .. }
             | Method::CloudSignOut
-            | Method::CloudSyncNow => Response::err(
-                id,
-                ErrorCode::InvalidRequest,
-                "Cloud sync is not configured on this device.",
-            ),
+            | Method::CloudSyncNow) => self.modules.cloud_request(id, method).await,
             _ => Response::err(
                 id,
                 ErrorCode::InvalidRequest,
@@ -459,6 +522,7 @@ impl Runtime {
             ),
         };
         if response.ok && item_mutation {
+            self.modules.note_version(0);
             self.emit(EventKind::Items);
         }
         if response.ok && peer_mutation {
@@ -467,7 +531,20 @@ impl Runtime {
         response
     }
 
+    /// Module workers have their own lifecycle, independent of the peer TCP port.
+    pub fn start_module_sync(&self) {
+        if self.module_sync_started.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let modules = Arc::clone(&self.modules);
+        let shutdown = self.shutdown.subscribe();
+        tokio::spawn(async move {
+            modules.run_sync(shutdown).await;
+        });
+    }
+
     pub async fn start_listener(self: &Arc<Self>) -> Result<(), RuntimeError> {
+        self.start_module_sync();
         if self.listener_started.swap(true, Ordering::AcqRel) {
             return Ok(());
         }
@@ -597,7 +674,7 @@ impl Runtime {
             || self.settings.config(),
         )
         .map_err(|_| RuntimeError::Capture)?;
-        self.emit_capture(ingested.into_item().id);
+        self.emit_capture(ingested.into_item());
         permit.committed();
         Ok(())
     }
@@ -632,7 +709,10 @@ impl Runtime {
             .acquire(token, CaptureScope::Completion)
             .ok_or(RuntimeError::CaptureRefused)?;
         self.clipboard
-            .write(&ClipboardPayload::Text(code.to_owned().into()))
+            .write(
+                &ClipboardPayload::Text(code.to_owned().into()),
+                copypaste_ipc::content_type::TEXT,
+            )
             .map_err(|_| RuntimeError::Capture)
     }
 
@@ -731,7 +811,7 @@ impl Runtime {
             &settings,
         )
         .map_err(|_| RuntimeError::Capture)?;
-        self.emit_capture(ingested.into_item().id);
+        self.emit_capture(ingested.into_item());
         permit.committed();
         Ok(())
     }
@@ -773,6 +853,9 @@ impl Runtime {
     }
 
     fn emit(&self, event: EventKind) {
+        if event == EventKind::Items {
+            self.modules.history_changed();
+        }
         let _ = self.events.send(EventData {
             sync_status: None,
             event,
@@ -782,15 +865,19 @@ impl Runtime {
         });
     }
 
-    fn emit_capture(&self, item_id: String) {
-        self.node.note_local_version(now_ms());
+    fn emit_capture(&self, item: copypaste_core::StoredItem) {
+        self.modules.history_changed();
+        self.instant_clipboard
+            .note_local(&self.store, item.created_at);
+        self.node.note_local_version(item.created_at);
+        self.modules.note_version(item.created_at);
         self.peer_sync.wake();
         let _ = self.events.send(EventData {
             sync_status: None,
             event: EventKind::Items,
             item_count: self.store.count().unwrap_or(0),
             captured: true,
-            captured_item_id: Some(item_id),
+            captured_item_id: Some(item.id),
         });
     }
 
@@ -802,10 +889,11 @@ impl Runtime {
         let settings = Arc::clone(&self.settings);
         let node = Arc::clone(&self.node);
         let peer_sync = Arc::clone(&self.peer_sync);
+        let modules = Arc::clone(&self.modules);
         let store = self.store.clone();
         let events = self.events.clone();
         tokio::task::spawn_blocking(move || {
-            settings.apply_with_effects(&patch, |applied| {
+            let applied = settings.apply_with_effects(&patch, |applied| {
                 let removed = if reconcile_retention {
                     let enforce = copypaste_core::retention::policy_tightened(
                         &applied.before,
@@ -841,7 +929,11 @@ impl Runtime {
                         captured_item_id: None,
                     });
                 }
-            })
+            })?;
+            if applied.before.sync_enabled != applied.config.sync_enabled {
+                modules.sync_enabled_changed(applied.config.sync_enabled);
+            }
+            Ok(applied)
         })
         .await
         .map_err(|_| SettingsError::Store)?
@@ -1006,7 +1098,8 @@ impl Runtime {
     }
 
     fn search(&self, id: u64, query: &str, limit: u32) -> Response {
-        match self.store.search_bounded(
+        match self.modules.search(
+            &self.store,
             query,
             limit.clamp(1, 1000),
             copypaste_ipc::MAX_CONTENT_BYTES,
@@ -1236,8 +1329,18 @@ impl Runtime {
                 "This clip cannot be pasted as plain text.",
             );
         }
-        match self.clipboard.write(&payload) {
-            Ok(()) => self.item(request_id, item_id),
+        match self.clipboard.write(
+            &payload,
+            if plain_text {
+                copypaste_ipc::content_type::TEXT
+            } else {
+                &row.content_type
+            },
+        ) {
+            Ok(()) => {
+                self.instant_clipboard.note_local(&self.store, now_ms());
+                self.item(request_id, item_id)
+            }
             Err(ClipboardWriteError::UnsupportedContent) => Response::err(
                 request_id,
                 ErrorCode::UnsupportedContent,
@@ -1573,7 +1676,9 @@ mod tests {
                 shutdown,
                 listener_started: AtomicBool::new(false),
                 capture_running: AtomicBool::new(false),
+                module_sync_started: AtomicBool::new(false),
                 clipboard,
+                instant_clipboard: Arc::default(),
             }),
             dir,
         )
@@ -1582,7 +1687,11 @@ mod tests {
     #[derive(Default)]
     struct RecordingClipboard(Mutex<Vec<String>>);
     impl ClipboardWriter for RecordingClipboard {
-        fn write(&self, payload: &ClipboardPayload) -> Result<(), ClipboardWriteError> {
+        fn write(
+            &self,
+            payload: &ClipboardPayload,
+            _content_type: &str,
+        ) -> Result<(), ClipboardWriteError> {
             self.0.lock().unwrap().push(match payload {
                 ClipboardPayload::Text(value) => format!("text:{}", value.as_str()),
                 ClipboardPayload::Image { content_type, .. } => format!("image:{content_type}"),
@@ -1991,6 +2100,48 @@ mod tests {
         assert_eq!(
             *clipboard.0.lock().unwrap(),
             vec!["text:trusted text", "text:trusted text"]
+        );
+    }
+
+    #[test]
+    fn the_opened_runtime_applies_received_content_through_its_platform_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let clipboard = Arc::new(RecordingClipboard::default());
+        let runtime =
+            Runtime::open_with_clipboard(dir.path(), "receiver", 0, clipboard.clone()).unwrap();
+        let incoming = copypaste_core::RemoteVersion {
+            item_id: "incoming",
+            content: "from another device",
+            binary_content: None,
+            payload_metadata: None,
+            content_type: "text",
+            created_at: 100,
+            deleted: false,
+            content_hash: None,
+            origin_device_id: "sender",
+            app_bundle_id: None,
+            app_name: None,
+        };
+        assert!(runtime.source.apply_version(&incoming).unwrap());
+        assert_eq!(*clipboard.0.lock().unwrap(), ["text:from another device"]);
+        runtime
+            .settings
+            .apply(&copypaste_ipc::ConfigPatch {
+                instant_clipboard: Some(false),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(runtime
+            .source
+            .apply_version(&copypaste_core::RemoteVersion {
+                created_at: 200,
+                ..incoming
+            })
+            .unwrap());
+        assert_eq!(clipboard.0.lock().unwrap().len(), 1);
+        assert_eq!(
+            runtime.store.get("incoming").unwrap().unwrap().created_at,
+            200
         );
     }
 
@@ -2417,11 +2568,14 @@ mod tests {
                 })
                 .unwrap();
         }
+        let running_manual_round = sender.peer_sync.rounds.enter().await;
         sender.capture_text("automatic clipboard text").unwrap();
         let png = STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=").unwrap();
         sender
             .capture_binary(&png, "image/png", None, None)
             .unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        drop(running_manual_round);
         tokio::time::timeout(Duration::from_secs(2), async {
             while receiver.store.count().unwrap() != 2 {
                 tokio::task::yield_now().await;

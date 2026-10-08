@@ -15,6 +15,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import 'app/app.dart';
+import 'app/ui_memory_controller.dart';
+import 'platform/lifecycle/application_visibility.dart';
 import 'app/navigation/navigation.dart';
 import 'app/shell/macos_window_header.dart';
 import 'app/theme/app_motion.dart';
@@ -167,6 +169,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   _RuntimeState _runtimeState = _RuntimeState.idle;
   String? _runtimeFailureMessage;
   String? _pendingPairingUri;
+  final _rootNavigatorKey = GlobalKey<NavigatorState>();
+  late final ApplicationVisibility _visibility;
+  late final UiMemoryController _uiMemory;
 
   bool _usesUnifiedMacosTitleBar(bool windowReady) =>
       Platform.isMacOS && _desktopWindow != null && windowReady;
@@ -174,6 +179,13 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   @override
   void initState() {
     super.initState();
+    _visibility = ApplicationVisibility(
+      windowVisible: _desktopWindow?.isVisible,
+    );
+    _uiMemory = UiMemoryController(
+      visible: _visibility,
+      canSuspend: _canSuspendPresentation,
+    )..addListener(_memoryStateChanged);
     _pairingLinksChannel.setMethodCallHandler(_handlePairingLinkCall);
     unawaited(_takePendingPairingLink());
     if (!Platform.isMacOS) {
@@ -222,6 +234,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
 
   @override
   void dispose() {
+    _uiMemory.removeListener(_memoryStateChanged);
+    _uiMemory.dispose();
+    _visibility.dispose();
     _pairingLinksChannel.setMethodCallHandler(null);
     _desktopWindow?.setOpenSettings(null);
     if (_ownsMacosOnboarding) {
@@ -238,6 +253,43 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     unawaited(_prepareForTermination());
     _disposeDesktopWindow(_desktopWindow);
     super.dispose();
+  }
+
+  bool _canSuspendPresentation() =>
+      _runtimeState == _RuntimeState.ready &&
+      _macosOnboardingReady &&
+      _androidOnboardingReady &&
+      _windowsOnboardingReady &&
+      (_macosOnboarding?.complete ?? true) &&
+      (_androidOnboarding?.complete ?? true) &&
+      (_windowsOnboarding?.complete ?? true) &&
+      (_historyController?.canSuspend ?? true) &&
+      _devicesController?.pairingEntryMode == null &&
+      !(_devicesController?.systemScanInFlight ?? false) &&
+      !(_devicesController?.actionInFlight ?? false) &&
+      !(_settingsController?.busy ?? false) &&
+      !(_modulesController?.busy ?? false) &&
+      !(_appUpdateController?.busy ?? false) &&
+      !_navigation.bottomOverlayOpen &&
+      !(_navigation.navigatorKey.currentState?.canPop() ?? false) &&
+      !(_rootNavigatorKey.currentState?.canPop() ?? false);
+
+  void _memoryStateChanged() {
+    if (!mounted) return;
+    if (_uiMemory.suspended) _historyController?.suspend();
+    setState(() {});
+    if (_uiMemory.suspended) {
+      // Dispose image listeners before clearing the shared decoded-image cache.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _uiMemory.suspended) {
+          PaintingBinding.instance.imageCache.clear();
+          PaintingBinding.instance.imageCache.clearLiveImages();
+        }
+      });
+      // Hidden/paused lifecycle states disable ordinary frames. One warm-up
+      // frame disposes presentation now instead of retaining it until reopening.
+      WidgetsBinding.instance.scheduleWarmUpFrame();
+    }
   }
 
   Future<void> _startRuntime() async {
@@ -577,6 +629,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   }
 
   Widget _buildApplication({required bool windowReady}) {
+    if (_uiMemory.suspended) return const SizedBox.expand();
     final unifiedTitleBar = _usesUnifiedMacosTitleBar(windowReady);
     if (!_macosOnboardingReady ||
         !_androidOnboardingReady ||
@@ -639,6 +692,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       );
     }
     return CopyPasteApp(
+      navigatorKey: _rootNavigatorKey,
       navigation: _navigation,
       historyController: _historyController,
       devicesController: _devicesController,

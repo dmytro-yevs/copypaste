@@ -466,6 +466,8 @@ impl ClipboardSource for MacOsClipboard {
         use copypaste_core::ClipboardWriteError;
 
         let uti = match content_type {
+            copypaste_ipc::content_type::HTML => UTI_HTML,
+            copypaste_ipc::content_type::RICH_TEXT => UTI_RTF,
             copypaste_ipc::content_type::IMAGE_PNG => UTI_PNG,
             copypaste_ipc::content_type::IMAGE_TIFF => UTI_TIFF,
             "image/jpeg" => "public.jpeg",

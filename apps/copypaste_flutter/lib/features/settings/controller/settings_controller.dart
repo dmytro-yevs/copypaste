@@ -9,6 +9,7 @@ import '../../../platform/notifications/capture_notification_port.dart';
 import '../../../platform/notifications/capture_notification_preview.dart';
 import '../../../platform/security/screenshot_protection.dart';
 import '../models/settings_models.dart';
+import 'settings_navigation_state.dart';
 import '../models/sync_status.dart';
 import '../repository/settings_repository.dart';
 
@@ -30,6 +31,8 @@ class SettingsController extends ChangeNotifier {
        _notifications = notifications ?? PlatformCaptureNotificationPort(),
        _screenshotProtection = screenshotProtection,
        _screenshotCapture = screenshotCapture;
+
+  final navigation = SettingsNavigationState();
 
   final SettingsRepository _repository;
   final SettingsFilePicker _filePicker;
@@ -177,6 +180,9 @@ class SettingsController extends ChangeNotifier {
 
   Future<bool> setLanVisibility(bool value) =>
       _update(RuntimeSettingsChange(lanVisibility: value));
+
+  Future<bool> setInstantClipboard(bool value) =>
+      _update(RuntimeSettingsChange(instantClipboard: value));
 
   Future<bool> setSyncEnabled(bool value) =>
       _update(RuntimeSettingsChange(syncEnabled: value));

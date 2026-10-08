@@ -1,6 +1,6 @@
 enum ModulesLoadState { loading, ready, error }
 
-enum ModuleFieldKind { text, boolean, file }
+enum ModuleFieldKind { text, boolean, file, choices }
 
 enum ModuleEventKind { smsReceived }
 
@@ -11,6 +11,8 @@ class ModuleField {
     required this.kind,
     required this.defaultValue,
     this.required = false,
+    this.secret = false,
+    this.options = const [],
     this.acceptedExtensions = const [],
     this.maxBytes = 64 * 1024 * 1024,
   });
@@ -19,8 +21,46 @@ class ModuleField {
   final ModuleFieldKind kind;
   final Object defaultValue;
   final bool required;
+  final bool secret;
+  final List<ModuleChoice> options;
   final List<String> acceptedExtensions;
   final int maxBytes;
+}
+
+class ModuleChoice {
+  const ModuleChoice({required this.id, required this.title});
+  final String id;
+  final String title;
+}
+
+class ModuleSearchModel {
+  const ModuleSearchModel({
+    required this.id,
+    required this.title,
+    required this.languages,
+    required this.sizeBytes,
+    required this.available,
+  });
+  final String id;
+  final String title;
+  final List<String> languages;
+  final int sizeBytes;
+  final bool available;
+
+  static ModuleSearchModel? forLanguages(
+    List<ModuleSearchModel> models,
+    Iterable<String> languages,
+  ) {
+    if (languages.isEmpty) return null;
+    ModuleSearchModel? selected;
+    for (final model in models) {
+      if (languages.every(model.languages.contains) &&
+          (selected == null || model.sizeBytes < selected.sizeBytes)) {
+        selected = model;
+      }
+    }
+    return selected;
+  }
 }
 
 class ModuleCommand {
@@ -47,6 +87,8 @@ class InstalledModule {
     required this.commands,
     required this.preferenceFields,
     required this.preferences,
+    this.searchModels = const [],
+    this.searchLanguageField,
     this.error,
     this.restartRequired = false,
     this.events = const [],
@@ -60,6 +102,8 @@ class InstalledModule {
   final List<ModuleCommand> commands;
   final List<ModuleField> preferenceFields;
   final Map<String, Object> preferences;
+  final List<ModuleSearchModel> searchModels;
+  final String? searchLanguageField;
   final String? error;
   final bool restartRequired;
   final List<ModuleEventKind> events;

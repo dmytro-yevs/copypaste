@@ -27,6 +27,14 @@ abstract final class AppOverlays {
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
       );
 
+  static BoxConstraints drawerContentConstraints(BuildContext context) =>
+      BoxConstraints.tightFor(
+        width: double.infinity,
+        height:
+            MediaQuery.sizeOf(context).height *
+            AppOverlaySize.drawerHeightFactor,
+      );
+
   static PopoverConfiguration selectPopoverConfiguration(
     BuildContext context, {
     PopoverConstraint widthConstraint = PopoverConstraint.anchorMinSize,

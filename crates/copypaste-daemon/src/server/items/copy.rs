@@ -15,9 +15,15 @@ pub(crate) fn copy(state: &AppState, id: u64, item_id: &str) -> Response {
         Ok(opened) => opened,
         Err(response) => return *response,
     };
-    if let Err(error) = state.clipboard().write_payload(&item.id, &payload) {
+    if let Err(error) = state
+        .clipboard()
+        .write_payload(&item.id, &payload, &item.content_type)
+    {
         return write_error(id, error);
     }
+    state
+        .instant_clipboard
+        .note_local(&state.store, copypaste_core::now_ms());
     Response::ok(id, ResponseData::Item(item))
 }
 
@@ -30,9 +36,16 @@ pub(crate) fn copy_plain_text(state: &AppState, id: u64, item_id: &str) -> Respo
     if !matches!(payload, ClipboardPayload::Text(_)) {
         return unsupported(id);
     }
-    if let Err(error) = state.clipboard().write_payload(&item.id, &payload) {
+    if let Err(error) =
+        state
+            .clipboard()
+            .write_payload(&item.id, &payload, copypaste_ipc::content_type::TEXT)
+    {
         return write_error(id, error);
     }
+    state
+        .instant_clipboard
+        .note_local(&state.store, copypaste_core::now_ms());
     Response::ok(id, ResponseData::Item(item))
 }
 
@@ -90,7 +103,7 @@ fn fetch(
                 id,
                 ErrorCode::NotFound,
                 MSG_NOT_FOUND,
-            )))
+            )));
         }
         Err(error) => return Err(Box::new(storage_error(id, "get", &error))),
     };

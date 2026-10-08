@@ -23,6 +23,20 @@ const LIVE_ITEMS_SQL: &str = concat!(
 );
 
 impl Store {
+    /// The newest live content's ID and stamp, independently of pin order.
+    /// Reads only ordering metadata, never the potentially large ciphertext.
+    pub fn newest_live_key(&self) -> Result<Option<(String, i64)>, StoreError> {
+        let conn = self.conn()?;
+        Ok(conn
+            .query_row(
+                "SELECT id, created_at FROM clipboard_items WHERE deleted = 0 \
+             ORDER BY created_at DESC, id DESC LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?)
+    }
+
     /// Stores a capture, or promotes the row that already holds this content.
     ///
     /// Dedup is **unbounded**: a match is looked for across all live history,

@@ -345,8 +345,7 @@ mod tests {
         assert_eq!(state.settings.get().poll_interval_ms, 250);
 
         // A restart reads it back.
-        let (restarted, _dir) =
-            crate::testutil::reopen(dir, crate::cloud::Cloud::new(None), "alpha");
+        let (restarted, _dir) = crate::testutil::reopen(dir, "alpha");
         let loaded = restarted.settings.get();
         assert_eq!(loaded.poll_interval_ms, 250);
         assert_eq!(loaded.max_text_size_bytes, 256 * 1024);
@@ -638,8 +637,7 @@ mod tests {
         // And the repair survives a restart rather than being reported again.
         drop(settings);
         drop(state);
-        let (restarted, _dir) =
-            crate::testutil::reopen(dir, crate::cloud::Cloud::new(None), "alpha");
+        let (restarted, _dir) = crate::testutil::reopen(dir, "alpha");
         let reloaded = restarted.settings.get();
         assert!(reloaded.health().is_none());
         assert_eq!(reloaded.poll_interval_ms, 250);

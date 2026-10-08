@@ -5,7 +5,7 @@ development backend consists of one table, its policies, its
 Realtime configuration, and a retention job. It lives in `supabase/` and is
 applied with the Supabase CLI.
 
-The client is `crates/copypaste-cloud`. Its release integration test speaks to
+The client is the optional `modules/supabase` package, using `crates/copypaste-cloud`. Its release integration test speaks to
 a disposable local Supabase project through the same GoTrue, PostgREST, and
 Realtime clients the product uses. `crates/copypaste-cloud/src/rest/mod.rs`
 carries the SQL contract this deployment implements.
@@ -119,7 +119,7 @@ Then, in the project:
    and not `delete` — see [Realtime](#realtime). The migration will warn rather
    than fail if it could not change it.
 
-The anon key ships in the binary. That is intended: it gets a request past the
+The publishable key is configured in the optional module preferences. That is intended: it gets a request past the
 API gateway and nothing else, because `anon` holds no privilege and no policy on
 this table (`tests/02` asserts the refusal).
 

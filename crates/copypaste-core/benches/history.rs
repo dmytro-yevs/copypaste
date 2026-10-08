@@ -109,6 +109,32 @@ fn search(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("unique", history), &history, |b, _| {
             b.iter(|| store.search(black_box("clipping"), 500).expect("search"));
         });
+        for (name, query) in [
+            ("typo", "quik"),
+            ("infix", "ipping"),
+            ("multi_word", "quik brwon fox"),
+            ("no_match", "unfindableword"),
+        ] {
+            group.bench_with_input(BenchmarkId::new(name, history), &history, |b, _| {
+                b.iter(|| store.search(black_box(query), 50).expect("search"));
+            });
+        }
+        let query = copypaste_core::HistoryQuery {
+            search: Some("quik brwon fox".into()),
+            sort: copypaste_core::HistorySort::Relevance,
+            ..Default::default()
+        };
+        group.bench_with_input(
+            BenchmarkId::new("ranked_page", history),
+            &history,
+            |b, _| {
+                b.iter(|| {
+                    store
+                        .query_history_bounded(black_box(&query), None, 50, 64 * 1024)
+                        .expect("search page")
+                });
+            },
+        );
     }
     group.finish();
 }
@@ -128,5 +154,38 @@ fn count(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, pages, decrypt, search, count);
+/// Stress spelling expansion with a much less repetitive vocabulary than the
+/// normal paragraph fixture: eight distinct alphabetic words per retained clip.
+fn vocabulary_search(c: &mut Criterion) {
+    let keyring = keyring();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = support::store_in(dir.path());
+    for index in 0..10_000 {
+        let mut text = support::clipping(ROW_BYTES, index);
+        for word in 0..8 {
+            text.push_str(" topic");
+            let mut code = index * 8 + word;
+            for _ in 0..4 {
+                text.push(char::from(b'a' + (code % 26) as u8));
+                code /= 26;
+            }
+        }
+        store
+            .insert(support::row(&keyring, &text, support::T0 + index as i64))
+            .expect("insert");
+    }
+    let mut group = c.benchmark_group("history/search_vocabulary");
+    for (name, query) in [
+        ("rare_word", "topicaaab"),
+        ("multi_word", "quik brwon fox"),
+        ("no_match", "unfindableword"),
+    ] {
+        group.bench_function(name, |b| {
+            b.iter(|| store.search(black_box(query), 50).expect("search"));
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(benches, pages, decrypt, search, count, vocabulary_search);
 criterion_main!(benches);

@@ -29,8 +29,17 @@ class ModulesController extends ChangeNotifier {
   Future<void> restartApplication() => _perform(() async {
     await _restart?.call();
   }, refresh: false);
-  ModuleFormDraft form(List<ModuleField> fields, Map<String, Object> initial) =>
-      ModuleFormDraft(fields: fields, initial: initial, picker: _inputPicker);
+  ModuleFormDraft form(
+    List<ModuleField> fields,
+    Map<String, Object> initial, {
+    InstalledModule? module,
+  }) => ModuleFormDraft(
+    fields: fields,
+    initial: initial,
+    picker: _inputPicker,
+    models: module?.searchModels ?? const [],
+    languageField: module?.searchLanguageField,
+  );
   ModulesLoadState _state = ModulesLoadState.loading;
   List<InstalledModule> _modules = const [];
   bool _busy = false;
@@ -46,6 +55,8 @@ class ModulesController extends ChangeNotifier {
   String? _activeModuleId;
   double? _downloadProgress;
   bool _installing = false;
+  bool _configuringModel = false;
+  bool get configuringModel => _configuringModel;
   ModulesSection get section => _section;
   ModulesLoadState get catalogState => _catalogState;
   String? get catalogError => _catalogError;
@@ -249,8 +260,27 @@ class ModulesController extends ChangeNotifier {
     }
   }
 
-  Future<void> setPreferences(String id, Map<String, Object> values) =>
-      _perform(() => _repository.setPreferences(id, values));
+  Future<void> setPreferences(String id, Map<String, Object> values) async {
+    if (_busy || _disposed) return;
+    final module = installedModule(id);
+    final languages = values[module?.searchLanguageField];
+    final model = languages is List
+        ? ModuleSearchModel.forLanguages(
+            module?.searchModels ?? const [],
+            languages.cast<String>(),
+          )
+        : null;
+    _configuringModel = model != null && !model.available;
+    _activeModuleId = _configuringModel ? id : null;
+    try {
+      await _perform(() => _repository.setPreferences(id, values));
+    } finally {
+      _configuringModel = false;
+      _activeModuleId = null;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
   Future<void> remove(String id) => _perform(() => _repository.remove(id));
   Future<ModuleResult?> invoke(
     String id,

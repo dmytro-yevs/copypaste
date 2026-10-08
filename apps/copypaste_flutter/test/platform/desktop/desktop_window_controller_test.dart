@@ -1,10 +1,52 @@
 import 'dart:async';
 
 import 'package:copypaste_flutter/platform/desktop/desktop_window_controller.dart';
+import 'package:copypaste_flutter/platform/desktop/flutter_desktop_window_host.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('DesktopWindowController', () {
+    test(
+      'native window adapter forwards visibility rather than focus loss',
+      () {
+        final host = FlutterDesktopWindowHost();
+        final visibility = <bool>[];
+        host.setVisibilityChangedHandler(visibility.add);
+        host.onWindowBlur();
+        expect(visibility, isEmpty);
+        host.onWindowMinimize();
+        host.onWindowRestore();
+        host.onWindowEvent('hide');
+        host.onWindowEvent('show');
+        expect(visibility, [false, true, false, true]);
+        host.setVisibilityChangedHandler(null);
+        host.onWindowMinimize();
+        expect(visibility, hasLength(4));
+      },
+    );
+
+    test(
+      'reports native minimize/restore and tray hide/show visibility',
+      () async {
+        final host = _FakeDesktopWindowHost();
+        final controller = DesktopWindowController(
+          host: host,
+          geometryStore: _FakeGeometryStore(),
+        );
+        await controller.initialize();
+        expect(controller.isVisible.value, isTrue);
+        host.visibilityHandler!(false);
+        expect(controller.isVisible.value, isFalse);
+        host.visibilityHandler!(true);
+        expect(controller.isVisible.value, isTrue);
+        await controller.handleCloseRequested();
+        expect(controller.isVisible.value, isFalse);
+        await controller.showFromTrayOrDock();
+        expect(controller.isVisible.value, isTrue);
+        await controller.dispose();
+      },
+    );
+
     test('reports the window as unavailable before setup starts', () {
       final controller = DesktopWindowController(
         host: _FakeDesktopWindowHost(),
@@ -471,6 +513,13 @@ void main() {
 }
 
 class _FakeDesktopWindowHost implements DesktopWindowHost {
+  void Function(bool)? visibilityHandler;
+
+  @override
+  void setVisibilityChangedHandler(void Function(bool)? handler) {
+    visibilityHandler = handler;
+  }
+
   _FakeDesktopWindowHost({
     this.failedTrayInitializations = 0,
     this.failedQuitAttempts = 0,

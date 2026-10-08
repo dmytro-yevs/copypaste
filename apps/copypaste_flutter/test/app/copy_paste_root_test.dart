@@ -1,6 +1,10 @@
 import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:flutter/foundation.dart' show SynchronousFuture;
 
 import 'package:copypaste_flutter/main.dart';
+import 'package:copypaste_flutter/app/app.dart';
 import 'package:copypaste_flutter/features/onboarding/controller/windows_onboarding_controller.dart';
 import 'package:copypaste_flutter/features/onboarding/repository/windows_onboarding_store.dart';
 import 'package:copypaste_flutter/app/shell/macos_window_header.dart';
@@ -16,6 +20,77 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:window_manager/window_manager.dart';
 
 void main() {
+  testWidgets(
+    'hidden timeout unloads screens and decoded images, then restores navigation',
+    (tester) async {
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      addTearDown(
+        () => tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        ),
+      );
+      final host = _FakeDesktopWindowHost();
+      final desktopWindow = DesktopWindowController(
+        host: host,
+        geometryStore: const _NoopGeometryStore(),
+      );
+      final onboarding = _completedOnboarding();
+      addTearDown(onboarding.dispose);
+      await tester.pumpWidget(
+        CopyPasteRoot(
+          windowsOnboardingController: _completedWindowsOnboarding(),
+          desktopWindow: desktopWindow,
+          macosOnboardingController: onboarding,
+          runtimeEnabled: false,
+        ),
+      );
+      await desktopWindow.initialize();
+      await host.requestSettings();
+      await tester.pumpAndSettle();
+      expect(find.text('Settings runtime is unavailable'), findsOneWidget);
+      final cache = PaintingBinding.instance.imageCache;
+      // Use a deterministic decoded image fixture, independent of asset I/O.
+      final recorder = ui.PictureRecorder();
+      ui.Canvas(recorder).drawPaint(ui.Paint());
+      final picture = recorder.endRecording();
+      final image = picture.toImageSync(1024, 1024);
+      picture.dispose();
+      cache.putIfAbsent(
+        'hidden-memory-fixture',
+        () => OneFrameImageStreamCompleter(
+          SynchronousFuture(ImageInfo(image: image)),
+        ),
+      );
+      addTearDown(cache.clear);
+      final cachedBytes = cache.currentSizeBytes;
+      expect(cachedBytes, greaterThan(0));
+      host.visibilityHandler!(false);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      await tester.pump(const Duration(seconds: 59));
+      expect(find.byType(CopyPasteApp), findsOneWidget);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(find.byType(CopyPasteApp), findsNothing);
+      expect(
+        host.disposeCalls,
+        0,
+        reason: 'The native tray host remains alive.',
+      );
+      expect(cache.currentSizeBytes, 0);
+      expect(cache.liveImageCount, 0);
+      debugPrint(
+        'Hidden UI decoded image cache: $cachedBytes bytes -> ${cache.currentSizeBytes} bytes',
+      );
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await host.requestSettings();
+      await tester.pumpAndSettle();
+      expect(find.text('Settings runtime is unavailable'), findsOneWidget);
+      expect(host.disposeCalls, 0);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    },
+  );
+
   testWidgets('Windows onboarding finishes on the main History screen', (
     tester,
   ) async {
@@ -316,6 +391,13 @@ class _NoopGeometryStore implements DesktopWindowGeometryStore {
 }
 
 class _FakeDesktopWindowHost implements DesktopWindowHost {
+  void Function(bool)? visibilityHandler;
+
+  @override
+  void setVisibilityChangedHandler(void Function(bool)? handler) {
+    visibilityHandler = handler;
+  }
+
   _FakeDesktopWindowHost({this.windowInitializationFails = false});
 
   int disposeCalls = 0;

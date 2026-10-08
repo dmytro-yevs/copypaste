@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 use copypaste_ipc::{ErrorCode, Method, Request, Response, PROTOCOL_VERSION};
 use tracing::{debug, error};
-use zeroize::Zeroizing;
 
 use super::messages::{MSG_INTERNAL, MSG_MALFORMED, MSG_NOT_READY};
 use super::{config, dbadmin, items, transfer};
@@ -214,30 +213,12 @@ pub(super) async fn dispatch_request(state: &Arc<AppState>, request: Request) ->
         }
         Method::Discovered => crate::p2p::handlers::discovered(state, id).await,
         Method::Rescan => crate::p2p::handlers::rescan(state, id).await,
-        Method::CloudSignIn {
-            email,
-            password,
-            passphrase,
-        } => {
-            let password = Zeroizing::new(password);
-            let passphrase = Zeroizing::new(passphrase);
-            crate::cloud::handlers::sign_in(state, id, &email, &password, &passphrase).await
-        }
-        Method::CloudSignUp {
-            email,
-            password,
-            passphrase,
-        } => {
-            let password = Zeroizing::new(password);
-            let passphrase = Zeroizing::new(passphrase);
-            crate::cloud::handlers::sign_up(state, id, &email, &password, &passphrase).await
-        }
-        Method::CloudSetEndpoint { url, anon_key } => {
-            crate::cloud::handlers::set_endpoint(state, id, &url, &anon_key).await
-        }
-        Method::CloudSignOut => crate::cloud::handlers::sign_out(state, id).await,
-        Method::CloudStatus => crate::cloud::handlers::status(state, id).await,
-        Method::CloudSyncNow => crate::cloud::handlers::sync_now(state, id).await,
+        method @ (Method::CloudSignIn { .. }
+        | Method::CloudSignUp { .. }
+        | Method::CloudSetEndpoint { .. }
+        | Method::CloudSignOut
+        | Method::CloudStatus
+        | Method::CloudSyncNow) => state.modules.cloud_request(id, method).await,
         // Not `_`: a method added to the enum lands here and then fails to
         // build inside `dispatch_store`, which is where it has to be handled.
         method => {

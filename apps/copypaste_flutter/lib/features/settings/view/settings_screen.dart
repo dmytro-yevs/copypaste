@@ -19,6 +19,7 @@ import '../../../shared/adaptive_breakpoints.dart';
 import '../../../shared/state_view.dart';
 import '../controller/quick_paste_settings_controller.dart';
 import '../controller/settings_controller.dart';
+import '../controller/settings_navigation_state.dart';
 import '../models/settings_models.dart';
 import '../../update/controller/app_update_controller.dart';
 import '../../update/models/app_update_models.dart';
@@ -71,6 +72,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _storageQuotaKey = GlobalKey();
   final _historyFilesKey = GlobalKey();
   final _syncEnabledKey = GlobalKey();
+  final _instantClipboardKey = GlobalKey();
   final _lanVisibilityKey = GlobalKey();
   final _notificationOnCopyKey = GlobalKey();
   final _notificationPreviewKey = GlobalKey();
@@ -81,12 +83,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _aboutSectionKey = GlobalKey();
   final _detailRevision = ValueNotifier<int>(0);
   final _searchFocus = FocusNode();
-  final _searchController = TextEditingController();
+  late final TextEditingController _searchController;
   Timer? _highlightTimer;
 
-  _SettingsSectionId _selectedSection = _SettingsSectionId.clipboard;
-  String _searchQuery = '';
-  String? _selectedTargetId;
+  SettingsSectionId get _selectedSection =>
+      widget.controller.navigation.section;
+  String get _searchQuery =>
+      widget.controller.navigation.searchText.trim().toLowerCase();
+  String? get _selectedTargetId =>
+      widget.controller.navigation.selectedTargetId;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController(
+      text: widget.controller.navigation.searchText,
+    );
+  }
+
   String? _highlightedTargetId;
   bool _compactRouteOpen = false;
 
@@ -221,7 +235,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _sectionContent(
     RuntimeSettings settings,
-    _SettingsSectionId selectedSection, {
+    SettingsSectionId selectedSection, {
     bool showHeading = true,
   }) {
     final controller = widget.controller;
@@ -251,7 +265,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const Gap(AppSpacing.xxxl),
               ],
               switch (selectedSection) {
-                _SettingsSectionId.modules => _SettingsSection(
+                SettingsSectionId.modules => _SettingsSection(
                   key: _modulesSectionKey,
                   title: 'Modules',
                   showHeading: showHeading,
@@ -259,31 +273,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   description: 'Optional features for CopyPaste.',
                   children: [ModulesSettingsView(controller: widget.modules!)],
                 ),
-                _SettingsSectionId.clipboard => _clipboardSection(
+                SettingsSectionId.clipboard => _clipboardSection(
                   settings,
                   showHeading: showHeading,
                 ),
-                _SettingsSectionId.privacy => _privacySection(
+                SettingsSectionId.privacy => _privacySection(
                   settings,
                   showHeading: showHeading,
                 ),
-                _SettingsSectionId.data => _dataSection(
+                SettingsSectionId.data => _dataSection(
                   showHeading: showHeading,
                 ),
-                _SettingsSectionId.sync => _syncSection(
+                SettingsSectionId.sync => _syncSection(
                   settings,
                   showHeading: showHeading,
                 ),
-                _SettingsSectionId.notifications => _notificationsSection(
+                SettingsSectionId.notifications => _notificationsSection(
                   settings,
                   showHeading: showHeading,
                 ),
-                _SettingsSectionId.about => AnimatedBuilder(
+                SettingsSectionId.about => AnimatedBuilder(
                   animation: widget.appUpdate ?? widget.controller,
                   builder: (context, _) =>
                       _aboutSection(showHeading: showHeading),
                 ),
-                _SettingsSectionId.quickPaste => _QuickPasteSection(
+                SettingsSectionId.quickPaste => _QuickPasteSection(
                   key: _quickPasteSectionKey,
                   controller: widget.quickPaste!,
                   showHeading: showHeading,
@@ -329,7 +343,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         AppSpacing.zero,
         AppSpacing.lg,
         AppSpacing.lg,
-      ),
+      ).add(EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom)),
       itemCount: targets.length,
       separatorBuilder: (context, index) => const Divider(),
       itemBuilder: (context, index) {
@@ -416,12 +430,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  _SettingsSectionId get _effectiveSelectedSection {
-    if ((_selectedSection == _SettingsSectionId.quickPaste &&
+  SettingsSectionId get _effectiveSelectedSection {
+    if ((_selectedSection == SettingsSectionId.quickPaste &&
             widget.quickPaste == null) ||
-        (_selectedSection == _SettingsSectionId.modules &&
+        (_selectedSection == SettingsSectionId.modules &&
             widget.modules == null)) {
-      return _SettingsSectionId.clipboard;
+      return SettingsSectionId.clipboard;
     }
     return _selectedSection;
   }
@@ -435,10 +449,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   List<_SettingsNavigationTarget> _sectionTargets() {
     return [
-      for (final section in _SettingsSectionId.values)
-        if ((section != _SettingsSectionId.quickPaste ||
+      for (final section in SettingsSectionId.values)
+        if ((section != SettingsSectionId.quickPaste ||
                 widget.quickPaste != null) &&
-            (section != _SettingsSectionId.modules || widget.modules != null))
+            (section != SettingsSectionId.modules || widget.modules != null))
           _SettingsNavigationTarget(
             id: 'section-${section.slug}',
             section: section,
@@ -454,7 +468,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (widget.modules != null)
         _SettingsNavigationTarget(
           id: 'result-modules',
-          section: _SettingsSectionId.modules,
+          section: SettingsSectionId.modules,
           label: 'Modules',
           description: 'Install, update, and remove optional modules.',
           keywords: 'features commands extensions',
@@ -463,7 +477,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (widget.onOpenAndroidCaptureSetup != null)
         _SettingsNavigationTarget(
           id: _SettingsTargetId.androidBackgroundCapture,
-          section: _SettingsSectionId.clipboard,
+          section: SettingsSectionId.clipboard,
           label: 'Android background capture',
           description: 'Full or Limited mode with Shizuku or ADB setup.',
           keywords: 'background permissions setup',
@@ -472,7 +486,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (widget.controller.screenshotCaptureSupported)
         _SettingsNavigationTarget(
           id: _SettingsTargetId.screenshotCapture,
-          section: _SettingsSectionId.clipboard,
+          section: SettingsSectionId.clipboard,
           label: 'Save screenshots',
           description: 'Automatically save new Android screenshots to History.',
           keywords: 'images photos capture permissions',
@@ -480,14 +494,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.clipboardCapture,
-        section: _SettingsSectionId.clipboard,
+        section: SettingsSectionId.clipboard,
         label: 'Clipboard capture',
         description: 'Pause or resume clipboard capture.',
         targetKey: _clipboardCaptureKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.excludedApplications,
-        section: _SettingsSectionId.privacy,
+        section: SettingsSectionId.privacy,
         label: 'Excluded applications',
         description: 'Skip automatic capture from excluded applications.',
         keywords: 'privacy app identifiers',
@@ -495,14 +509,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.retention,
-        section: _SettingsSectionId.clipboard,
+        section: SettingsSectionId.clipboard,
         label: 'Retention',
         description: 'Automatically remove old unpinned clipboard items.',
         targetKey: _retentionKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.storageQuota,
-        section: _SettingsSectionId.clipboard,
+        section: SettingsSectionId.clipboard,
         label: 'Storage quota',
         description: 'Maximum local storage used by unpinned history.',
         keywords: 'disk space limit',
@@ -510,7 +524,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.historyFiles,
-        section: _SettingsSectionId.data,
+        section: SettingsSectionId.data,
         label: 'History files',
         description: 'Export history, create backups, or restore a backup.',
         keywords: 'text encrypted backup data',
@@ -518,14 +532,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.sync,
-        section: _SettingsSectionId.sync,
+        section: SettingsSectionId.sync,
         label: 'Sync',
         description: 'Paired-device synchronization.',
         targetKey: _syncEnabledKey,
       ),
       _SettingsNavigationTarget(
+        id: _SettingsTargetId.instantClipboard,
+        section: SettingsSectionId.sync,
+        label: 'Instant clipboard',
+        description: 'Automatically copy new clips from other devices.',
+        keywords: 'automatic copy paste sync received',
+        targetKey: _instantClipboardKey,
+      ),
+      _SettingsNavigationTarget(
         id: _SettingsTargetId.lanVisibility,
-        section: _SettingsSectionId.sync,
+        section: SettingsSectionId.sync,
         label: 'LAN visibility',
         description: 'Allow nearby devices to discover this device.',
         keywords: 'local network discovery',
@@ -533,14 +555,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.notificationOnCopy,
-        section: _SettingsSectionId.notifications,
+        section: SettingsSectionId.notifications,
         label: 'Notification on copy',
         description: 'Show a notification after a background capture.',
         targetKey: _notificationOnCopyKey,
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.notificationPreview,
-        section: _SettingsSectionId.notifications,
+        section: SettingsSectionId.notifications,
         label: 'Show clipboard content',
         description: 'Include a clip preview in copy notifications.',
         keywords: 'notification preview text image privacy',
@@ -548,7 +570,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.blockScreenshots,
-        section: _SettingsSectionId.privacy,
+        section: SettingsSectionId.privacy,
         label: 'Block screenshots',
         description: 'Prevent screenshots and screen recording of CopyPaste.',
         keywords: 'privacy screen capture protection pairing qr security code',
@@ -556,7 +578,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       _SettingsNavigationTarget(
         id: _SettingsTargetId.soundOnCopy,
-        section: _SettingsSectionId.notifications,
+        section: SettingsSectionId.notifications,
         label: 'Sound on copy',
         description: 'Play platform feedback after a successful capture.',
         targetKey: _soundOnCopyKey,
@@ -564,7 +586,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (widget.appUpdate != null)
         _SettingsNavigationTarget(
           id: _SettingsTargetId.applicationUpdates,
-          section: _SettingsSectionId.about,
+          section: SettingsSectionId.about,
           label: 'Application updates',
           description: 'Check for and install CopyPaste updates.',
           keywords: 'version github release',
@@ -573,7 +595,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (widget.quickPaste != null) ...[
         _SettingsNavigationTarget(
           id: _SettingsTargetId.quickPasteShortcut,
-          section: _SettingsSectionId.quickPaste,
+          section: SettingsSectionId.quickPaste,
           label: 'Open Quick Paste',
           description: 'Configure the global Quick Paste shortcut.',
           keywords: 'keyboard hotkey',
@@ -581,7 +603,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         _SettingsNavigationTarget(
           id: _SettingsTargetId.quickPasteAutoPaste,
-          section: _SettingsSectionId.quickPaste,
+          section: SettingsSectionId.quickPaste,
           label: 'Paste automatically',
           description: 'Paste the selected clip into the previous app.',
           keywords: 'accessibility automatic',
@@ -591,20 +613,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ];
   }
 
-  GlobalKey _sectionKey(_SettingsSectionId section) => switch (section) {
-    _SettingsSectionId.clipboard => _clipboardSectionKey,
-    _SettingsSectionId.modules => _modulesSectionKey,
-    _SettingsSectionId.privacy => _privacySectionKey,
-    _SettingsSectionId.data => _dataSectionKey,
-    _SettingsSectionId.sync => _syncSectionKey,
-    _SettingsSectionId.notifications => _notificationsSectionKey,
-    _SettingsSectionId.quickPaste => _quickPasteSectionKey,
-    _SettingsSectionId.about => _aboutSectionKey,
+  GlobalKey _sectionKey(SettingsSectionId section) => switch (section) {
+    SettingsSectionId.clipboard => _clipboardSectionKey,
+    SettingsSectionId.modules => _modulesSectionKey,
+    SettingsSectionId.privacy => _privacySectionKey,
+    SettingsSectionId.data => _dataSectionKey,
+    SettingsSectionId.sync => _syncSectionKey,
+    SettingsSectionId.notifications => _notificationsSectionKey,
+    SettingsSectionId.quickPaste => _quickPasteSectionKey,
+    SettingsSectionId.about => _aboutSectionKey,
   };
 
   Key? _selectedNavigationKey(
     List<_SettingsNavigationTarget> targets,
-    _SettingsSectionId selectedSection,
+    SettingsSectionId selectedSection,
   ) {
     final selected = _selectedTarget(targets, selectedSection);
     return selected == null ? null : ValueKey<String>(selected.widgetKey);
@@ -612,7 +634,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   _SettingsNavigationTarget? _selectedTarget(
     List<_SettingsNavigationTarget> targets,
-    _SettingsSectionId selectedSection,
+    SettingsSectionId selectedSection,
   ) {
     for (final target in targets) {
       if (_searchQuery.isEmpty && target.section == selectedSection) {
@@ -642,8 +664,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final highlight = target.isSearchResult;
     _highlightTimer?.cancel();
     setState(() {
-      _selectedSection = target.section;
-      _selectedTargetId = highlight ? target.id : null;
+      widget.controller.navigation.select(
+        target.section,
+        targetId: highlight ? target.id : null,
+      );
       _highlightedTargetId = highlight ? target.id : null;
     });
     if (!highlight) return;
@@ -665,8 +689,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _updateSearch(String value) {
     setState(() {
-      _searchQuery = value.trim().toLowerCase();
-      _selectedTargetId = null;
+      widget.controller.navigation.search(value);
     });
   }
 
@@ -847,6 +870,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: widget.controller.busy
                 ? null
                 : widget.controller.setSyncEnabled,
+          ),
+        ),
+        _SettingRow(
+          key: _instantClipboardKey,
+          highlighted: _isHighlighted(_SettingsTargetId.instantClipboard),
+          title: 'Instant clipboard',
+          description:
+              'Automatically copy newer clips from other devices to this clipboard.',
+          trailing: Switch(
+            key: const ValueKey('instant-clipboard-switch'),
+            value: settings.instantClipboard,
+            onChanged: widget.controller.busy
+                ? null
+                : widget.controller.setInstantClipboard,
           ),
         ),
         _SettingRow(
@@ -1590,69 +1627,6 @@ class _ShortcutRecorderState extends State<_ShortcutRecorder> {
   }
 }
 
-enum _SettingsSectionId {
-  clipboard(
-    label: 'Clipboard',
-    slug: 'clipboard',
-    description: 'Capture and history limits.',
-    icon: LucideIcons.clipboard,
-  ),
-  privacy(
-    label: 'Privacy',
-    slug: 'privacy',
-    description: 'Application exclusions and screen protection.',
-    icon: LucideIcons.shield,
-  ),
-  quickPaste(
-    label: 'Quick Paste',
-    slug: 'quick-paste',
-    description: 'Shortcut and automatic paste behavior.',
-    icon: LucideIcons.keyboard,
-  ),
-  sync(
-    label: 'Sync',
-    slug: 'sync',
-    description: 'Synchronization and nearby-device discovery.',
-    icon: LucideIcons.refreshCw,
-  ),
-  notifications(
-    label: 'Notifications',
-    slug: 'notifications',
-    description: 'Capture notifications and sounds.',
-    icon: LucideIcons.bell,
-  ),
-  data(
-    label: 'Data',
-    slug: 'data',
-    description: 'Export, backup, and restore.',
-    icon: LucideIcons.database,
-  ),
-  modules(
-    label: 'Modules',
-    slug: 'modules',
-    description: 'Install and manage optional modules.',
-    icon: LucideIcons.puzzle,
-  ),
-  about(
-    label: 'About',
-    slug: 'about',
-    description: 'Version and application updates.',
-    icon: LucideIcons.info,
-  );
-
-  const _SettingsSectionId({
-    required this.label,
-    required this.slug,
-    required this.description,
-    required this.icon,
-  });
-
-  final String label;
-  final String slug;
-  final String description;
-  final IconData icon;
-}
-
 class _SettingsNavigationTarget {
   const _SettingsNavigationTarget({
     required this.id,
@@ -1664,7 +1638,7 @@ class _SettingsNavigationTarget {
   });
 
   final String id;
-  final _SettingsSectionId section;
+  final SettingsSectionId section;
   final String label;
   final String description;
   final String keywords;
@@ -1698,6 +1672,7 @@ abstract final class _SettingsTargetId {
   static const String storageQuota = 'result-storage-quota';
   static const String historyFiles = 'result-history-files';
   static const String sync = 'result-sync';
+  static const String instantClipboard = 'result-instant-clipboard';
   static const String lanVisibility = 'result-lan-visibility';
   static const String notificationOnCopy = 'result-notification-on-copy';
   static const String notificationPreview = 'result-notification-preview';

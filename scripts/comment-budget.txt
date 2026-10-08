@@ -22,12 +22,10 @@ crates/copypaste-cloud/src/realtime/subscription.rs
 crates/copypaste-cloud/src/rest/client.rs
 crates/copypaste-cloud/src/rest/item.rs
 crates/copypaste-cloud/src/rest/mod.rs
-crates/copypaste-cloud/src/sync/cadence.rs
 crates/copypaste-cloud/src/sync/mod.rs
 crates/copypaste-cloud/src/sync/pull.rs
 crates/copypaste-cloud/src/sync/push.rs
 crates/copypaste-cloud/src/sync/retry.rs
-crates/copypaste-cloud/src/sync/source.rs
 crates/copypaste-cloud/src/sync/transport.rs
 crates/copypaste-core/src/crypto/keys.rs
 crates/copypaste-core/src/crypto/keystore/android.rs
@@ -48,9 +46,6 @@ crates/copypaste-daemon/src/capture.rs
 crates/copypaste-daemon/src/clipboard/fake.rs
 crates/copypaste-daemon/src/clipboard/macos.rs
 crates/copypaste-daemon/src/clipboard/mod.rs
-crates/copypaste-daemon/src/cloud/mod.rs
-crates/copypaste-daemon/src/cloud/realtime.rs
-crates/copypaste-daemon/src/cloud/source.rs
 crates/copypaste-daemon/src/p2p/handlers.rs
 crates/copypaste-daemon/src/p2p/mod.rs
 crates/copypaste-daemon/src/p2p/poll.rs

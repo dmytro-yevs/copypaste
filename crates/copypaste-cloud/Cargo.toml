@@ -6,6 +6,8 @@ rust-version.workspace = true
 license.workspace = true
 
 [features]
+default = ["storage"]
+storage = ["dep:copypaste-core", "copypaste-sync/storage"]
 # Plaintext is only for loopback test servers. Shipped callers do not enable it.
 test-endpoints = []
 
@@ -16,8 +18,10 @@ required-features = ["test-endpoints"]
 # Supabase owns auth, Postgres, Realtime and RLS; this crate owns encrypted rows,
 # signatures, polling and merge policy.
 [dependencies]
+copypaste-payload = { path = "../copypaste-payload" }
+copypaste-sync = { path = "../copypaste-sync", default-features = false }
 copypaste-clock = { path = "../copypaste-clock" }
-copypaste-core = { path = "../copypaste-core" }
+copypaste-core = { path = "../copypaste-core", optional = true }
 # The content-type predicates that decide text from binary. One vocabulary for
 # the wire and for the store; a second copy here is how "is this text" comes to
 # mean two things on the two sides of the encryption boundary.

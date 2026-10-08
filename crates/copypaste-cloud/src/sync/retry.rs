@@ -108,7 +108,8 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
 
         match self.auth.refresh(&refresh_token).await {
             Ok(session) => match self.install_refreshed_session(revision, session) {
-                SessionRevision::Current | SessionRevision::Superseded => Ok(()),
+                SessionRevision::Current => self.persist_current_session(),
+                SessionRevision::Superseded => Ok(()),
                 SessionRevision::Fenced => Err(SyncError::SessionExpired),
             },
             Err(error) => match self.revision_state(revision) {
@@ -213,6 +214,27 @@ mod tests {
             config(),
             session("token-1"),
         )
+    }
+
+    #[tokio::test]
+    async fn refresh_persists_the_rotated_session_before_returning_to_data_requests() {
+        let saved = Arc::new(Mutex::new(String::new()));
+        let sink = Arc::clone(&saved);
+        let sync = driver(FakeRest::default(), FakeAuth::default()).with_session_persistence(
+            move |session| {
+                *sink.lock().unwrap() = session.access_token.clone();
+                Ok(())
+            },
+        );
+        sync.refresh_session().await.unwrap();
+        assert_eq!(*saved.lock().unwrap(), "token-refreshed");
+        let sync = driver(FakeRest::default(), FakeAuth::default())
+            .with_session_persistence(|_| Err(SyncError::Source("encrypted state unavailable")));
+        assert!(matches!(
+            sync.refresh_session().await,
+            Err(SyncError::Source(_))
+        ));
+        assert_eq!(sync.rest.upserts.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

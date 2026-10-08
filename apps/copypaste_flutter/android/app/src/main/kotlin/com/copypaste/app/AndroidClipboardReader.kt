@@ -250,7 +250,7 @@ internal object AndroidClipboardReader {
         var snapshot: Snapshot? = null
         val read = runCatching { pending.read("text/plain") { limit ->
             val primary = clipboard?.primaryClip
-            if (primary != null && primary.description.label?.toString() != "CopyPaste") {
+            if (primary != null && primary.description.label?.toString() != AndroidClipboardWriter.label) {
                 snapshot = Snapshot(
                     text = text(primary, limit),
                     uri = primary.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri,

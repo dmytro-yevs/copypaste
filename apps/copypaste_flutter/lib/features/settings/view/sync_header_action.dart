@@ -78,12 +78,9 @@ class _SyncHeaderActionState extends State<SyncHeaderAction> {
       final drawer = _drawer = showOverlay<void>(
         context,
         AppOverlays.bottomDrawerConfiguration,
-        builder: (context) => SizedBox(
+        builder: (context) => ConstrainedBox(
           key: const ValueKey<String>('sync-details-drawer'),
-          width: double.infinity,
-          height:
-              MediaQuery.sizeOf(context).height *
-              AppOverlaySize.drawerHeightFactor,
+          constraints: AppOverlays.drawerContentConstraints(context),
           child: CallbackShortcuts(
             bindings: <ShortcutActivator, VoidCallback>{
               const SingleActivator(LogicalKeyboardKey.escape): () =>

@@ -3178,6 +3178,7 @@ impl SseDecode for crate::api::RuntimeSettingsData {
         let mut var_excludedAppIds = <Vec<String>>::sse_decode(deserializer);
         let mut var_lanVisibility = <bool>::sse_decode(deserializer);
         let mut var_syncEnabled = <bool>::sse_decode(deserializer);
+        let mut var_instantClipboard = <bool>::sse_decode(deserializer);
         let mut var_notifyOnCopy = <bool>::sse_decode(deserializer);
         let mut var_notificationPreview = <bool>::sse_decode(deserializer);
         let mut var_soundOnCopy = <bool>::sse_decode(deserializer);
@@ -3187,6 +3188,7 @@ impl SseDecode for crate::api::RuntimeSettingsData {
             excluded_app_ids: var_excludedAppIds,
             lan_visibility: var_lanVisibility,
             sync_enabled: var_syncEnabled,
+            instant_clipboard: var_instantClipboard,
             notify_on_copy: var_notifyOnCopy,
             notification_preview: var_notificationPreview,
             sound_on_copy: var_soundOnCopy,
@@ -3202,6 +3204,7 @@ impl SseDecode for crate::api::RuntimeSettingsPatch {
         let mut var_excludedAppIds = <Option<Vec<String>>>::sse_decode(deserializer);
         let mut var_lanVisibility = <Option<bool>>::sse_decode(deserializer);
         let mut var_syncEnabled = <Option<bool>>::sse_decode(deserializer);
+        let mut var_instantClipboard = <Option<bool>>::sse_decode(deserializer);
         let mut var_notifyOnCopy = <Option<bool>>::sse_decode(deserializer);
         let mut var_notificationPreview = <Option<bool>>::sse_decode(deserializer);
         let mut var_soundOnCopy = <Option<bool>>::sse_decode(deserializer);
@@ -3211,6 +3214,7 @@ impl SseDecode for crate::api::RuntimeSettingsPatch {
             excluded_app_ids: var_excludedAppIds,
             lan_visibility: var_lanVisibility,
             sync_enabled: var_syncEnabled,
+            instant_clipboard: var_instantClipboard,
             notify_on_copy: var_notifyOnCopy,
             notification_preview: var_notificationPreview,
             sound_on_copy: var_soundOnCopy,
@@ -4124,6 +4128,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::RuntimeSettingsData {
             self.excluded_app_ids.into_into_dart().into_dart(),
             self.lan_visibility.into_into_dart().into_dart(),
             self.sync_enabled.into_into_dart().into_dart(),
+            self.instant_clipboard.into_into_dart().into_dart(),
             self.notify_on_copy.into_into_dart().into_dart(),
             self.notification_preview.into_into_dart().into_dart(),
             self.sound_on_copy.into_into_dart().into_dart(),
@@ -4151,6 +4156,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::RuntimeSettingsPatch {
             self.excluded_app_ids.into_into_dart().into_dart(),
             self.lan_visibility.into_into_dart().into_dart(),
             self.sync_enabled.into_into_dart().into_dart(),
+            self.instant_clipboard.into_into_dart().into_dart(),
             self.notify_on_copy.into_into_dart().into_dart(),
             self.notification_preview.into_into_dart().into_dart(),
             self.sound_on_copy.into_into_dart().into_dart(),
@@ -5035,6 +5041,7 @@ impl SseEncode for crate::api::RuntimeSettingsData {
         <Vec<String>>::sse_encode(self.excluded_app_ids, serializer);
         <bool>::sse_encode(self.lan_visibility, serializer);
         <bool>::sse_encode(self.sync_enabled, serializer);
+        <bool>::sse_encode(self.instant_clipboard, serializer);
         <bool>::sse_encode(self.notify_on_copy, serializer);
         <bool>::sse_encode(self.notification_preview, serializer);
         <bool>::sse_encode(self.sound_on_copy, serializer);
@@ -5049,6 +5056,7 @@ impl SseEncode for crate::api::RuntimeSettingsPatch {
         <Option<Vec<String>>>::sse_encode(self.excluded_app_ids, serializer);
         <Option<bool>>::sse_encode(self.lan_visibility, serializer);
         <Option<bool>>::sse_encode(self.sync_enabled, serializer);
+        <Option<bool>>::sse_encode(self.instant_clipboard, serializer);
         <Option<bool>>::sse_encode(self.notify_on_copy, serializer);
         <Option<bool>>::sse_encode(self.notification_preview, serializer);
         <Option<bool>>::sse_encode(self.sound_on_copy, serializer);

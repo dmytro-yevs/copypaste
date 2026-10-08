@@ -18,6 +18,7 @@ class FlutterDesktopWindowHost
     implements DesktopWindowHost {
   Future<void> Function()? _onCloseRequested;
   Future<void> Function()? _onBoundsChanged;
+  void Function(bool)? _onVisibilityChanged;
   bool _listening = false;
   bool _preventsClose = false;
   bool _reuseExistingGeometry = false;
@@ -286,6 +287,7 @@ class FlutterDesktopWindowHost
 
   @override
   Future<void> showAndFocus() async {
+    if (await windowManager.isMinimized()) await windowManager.restore();
     await windowManager.show();
     await windowManager.focus();
   }
@@ -299,9 +301,15 @@ class FlutterDesktopWindowHost
   }
 
   @override
+  void setVisibilityChangedHandler(void Function(bool)? onVisibilityChanged) {
+    _onVisibilityChanged = onVisibilityChanged;
+  }
+
+  @override
   Future<void> dispose() async {
     _onCloseRequested = null;
     _onBoundsChanged = null;
+    _onVisibilityChanged = null;
     _disposeTray();
     if (_listening) {
       windowManager.removeListener(this);
@@ -319,6 +327,18 @@ class FlutterDesktopWindowHost
     if (onCloseRequested != null) {
       unawaited(onCloseRequested());
     }
+  }
+
+  @override
+  void onWindowMinimize() => _onVisibilityChanged?.call(false);
+
+  @override
+  void onWindowRestore() => _onVisibilityChanged?.call(true);
+
+  @override
+  void onWindowEvent(String eventName) {
+    if (eventName == 'hide') _onVisibilityChanged?.call(false);
+    if (eventName == 'show') _onVisibilityChanged?.call(true);
   }
 
   @override

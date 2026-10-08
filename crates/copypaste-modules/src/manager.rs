@@ -14,6 +14,8 @@ use std::{
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstalledModule {
+    pub search_language_field: Option<String>,
+    pub search_models: Vec<copypaste_module_sdk::SearchModelInfo>,
     pub events: Vec<ModuleEvent>,
     pub restart_required: bool,
     pub id: String,
@@ -62,6 +64,7 @@ pub struct ModuleManager {
     verifier: PackageVerifier,
     state: Mutex<State>,
     mutation: Mutex<()>,
+    sync_services: Mutex<Option<Arc<crate::SyncServices>>>,
 }
 
 impl ModuleManager {
@@ -102,6 +105,7 @@ impl ModuleManager {
                 sequence: 0,
             }),
             mutation: Mutex::new(()),
+            sync_services: Mutex::new(None),
         })
     }
 
@@ -172,7 +176,7 @@ impl ModuleManager {
                 match self.manifest(id, record) {
                     Ok(manifest) => {
                         match validate_stored_preferences(&manifest, &record.preferences) {
-                            Ok(_) => summary(manifest, record),
+                            Ok(_) => self.summary(manifest, record),
                             Err(error) => failed_summary(id, record, error),
                         }
                     }
@@ -224,9 +228,12 @@ impl ModuleManager {
             .collect();
         let record = Record {
             version: manifest.version.clone(),
-            enabled: old
-                .as_ref()
-                .map_or(manifest.event_handlers.is_empty(), |old| old.enabled),
+            enabled: old.as_ref().map_or(
+                manifest.event_handlers.is_empty()
+                    && manifest.search_provider.is_none()
+                    && manifest.sync_provider.is_none(),
+                |old| old.enabled,
+            ),
             preferences,
             removing: false,
         };
@@ -257,7 +264,7 @@ impl ModuleManager {
         if let Some(old) = old {
             let _ = fs::remove_dir_all(self.directory(&manifest.id, &old.version));
         }
-        Ok(summary(manifest, &record))
+        Ok(self.summary(manifest, &record))
     }
 
     pub fn set_enabled(&self, id: &str, enabled: bool) -> Result<(), ModuleError> {
@@ -274,7 +281,13 @@ impl ModuleManager {
             ));
         }
         if enabled {
-            self.manifest(id, record)?;
+            let manifest = self.manifest(id, record)?;
+            if let Some(provider) = &manifest.search_provider {
+                let model = selected_model(provider, &record.preferences)?;
+                if !crate::resources::available(&self.root.join("data").join(id), model) {
+                    return Err(ModuleError::Invalid("Choose languages and download their model before enabling semantic search.".into()));
+                }
+            }
         }
         record.enabled = enabled;
         self.persist(&registry)?;
@@ -296,6 +309,37 @@ impl ModuleManager {
         id: &str,
         values: BTreeMap<String, Value>,
     ) -> Result<(), ModuleError> {
+        // Downloads do not hold the registry/state locks or block other modules.
+        let (manifest, preferences) = {
+            let state = self.state.lock().map_err(|_| ModuleError::State)?;
+            let record = state
+                .registry
+                .modules
+                .get(id)
+                .ok_or(ModuleError::NotInstalled)?;
+            if record.removing {
+                return Err(ModuleError::Disabled);
+            }
+            let manifest = self.manifest(id, record)?;
+            let preferences = resolve_fields(&manifest.preferences, &values)?;
+            (manifest, preferences)
+        };
+        let prepared = if let Some(provider) = &manifest.search_provider {
+            crate::resources::prepare(
+                &self.root,
+                &self.root.join("data").join(id),
+                selected_model(provider, &preferences)?,
+                || {
+                    self.state.lock().is_ok_and(|state| {
+                        state.registry.modules.get(id).is_some_and(|record| {
+                            !record.removing && record.version == manifest.version
+                        })
+                    })
+                },
+            )?
+        } else {
+            None
+        };
         let _mutation = self.mutation.lock().map_err(|_| ModuleError::State)?;
         let mut state = self.state.lock().map_err(|_| ModuleError::State)?;
         let mut registry = state.registry.clone();
@@ -303,11 +347,109 @@ impl ModuleManager {
             .modules
             .get_mut(id)
             .ok_or(ModuleError::NotInstalled)?;
-        let manifest = self.manifest(id, record)?;
-        record.preferences = resolve_fields(&manifest.preferences, &values)?;
+        if record.removing || record.version != manifest.version {
+            return Err(ModuleError::Disabled);
+        }
+        let same_search_model = manifest.search_provider.as_ref().is_some_and(|provider| {
+            selected_model(provider, &record.preferences).ok()
+                == selected_model(provider, &preferences).ok()
+        });
+        record.preferences = preferences;
+        // Release model sessions before replacing repaired model files on Windows.
+        let previous = if !same_search_model || prepared.is_some() {
+            state.loaded.remove(id)
+        } else {
+            None
+        };
+        if let Some(previous) = previous {
+            previous.instance.stop();
+        }
+        if let Some(prepared) = prepared {
+            // The lifecycle lease prevents removal during final publication.
+            prepared.publish(
+                &self.root.join("data").join(id),
+                selected_model(
+                    manifest
+                        .search_provider
+                        .as_ref()
+                        .ok_or(ModuleError::State)?,
+                    &record.preferences,
+                )?,
+            )?;
+        }
         self.persist(&registry)?;
         state.registry = registry;
+        let previous = if manifest.sync_provider.is_some() {
+            state.loaded.remove(id)
+        } else {
+            None
+        };
+        drop(state);
+        if let Some(previous) = previous {
+            previous.instance.stop();
+        }
         Ok(())
+    }
+
+    pub(crate) fn search_configuration(&self) -> Result<Option<SearchConfiguration>, ModuleError> {
+        let state = self.state.lock().map_err(|_| ModuleError::State)?;
+        self.search_configuration_in(&state.registry)
+    }
+
+    fn search_configuration_in(
+        &self,
+        registry: &Registry,
+    ) -> Result<Option<SearchConfiguration>, ModuleError> {
+        for (id, record) in &registry.modules {
+            if !record.enabled || record.removing {
+                continue;
+            }
+            let manifest = self.manifest(id, record)?;
+            let Some(provider) = &manifest.search_provider else {
+                continue;
+            };
+            let model = selected_model(provider, &record.preferences)?;
+            if !crate::resources::available(&self.root.join("data").join(id), model) {
+                continue;
+            }
+            use sha2::Digest;
+            let scope = hex::encode(sha2::Sha256::digest(
+                serde_json::to_vec(&(id, &record.version, model))
+                    .map_err(|_| ModuleError::State)?,
+            ));
+            return Ok(Some(SearchConfiguration {
+                id: id.clone(),
+                command: provider.command.clone(),
+                model: model.clone(),
+                scope,
+            }));
+        }
+        Ok(None)
+    }
+
+    pub(crate) fn search_loaded(&self, id: &str) -> bool {
+        self.state
+            .lock()
+            .is_ok_and(|state| state.loaded.contains_key(id))
+    }
+
+    /// Hold admission only through storage publication, not model inference.
+    /// Other modules' network commands cannot block a search inference call.
+    pub(crate) fn search_lease<T>(
+        &self,
+        configuration: &SearchConfiguration,
+        run: impl FnOnce() -> Result<T, ModuleError>,
+    ) -> Result<T, ModuleError> {
+        let state = self.state.lock().map_err(|_| ModuleError::State)?;
+        if self
+            .search_configuration_in(&state.registry)?
+            .as_ref()
+            .map(|value| &value.scope)
+            != Some(&configuration.scope)
+        {
+            return Err(ModuleError::Disabled);
+        }
+        run()
     }
 
     pub fn remove(&self, id: &str) -> Result<(), ModuleError> {
@@ -332,6 +474,14 @@ impl ModuleManager {
         drop(state);
         if let Some(previous) = previous {
             previous.instance.stop();
+        }
+        if let Some(services) = self
+            .sync_services
+            .lock()
+            .map_err(|_| ModuleError::State)?
+            .as_ref()
+        {
+            services.clear(id)?;
         }
         if crate::native::pinned_under(&self.root.join("packages").join(id)) {
             let data = self.root.join("data").join(id);
@@ -367,6 +517,16 @@ impl ModuleManager {
             .collect();
         let mut registry = state.registry.clone();
         for id in pending {
+            if let Some(services) = self
+                .sync_services
+                .lock()
+                .map_err(|_| ModuleError::State)?
+                .as_ref()
+            {
+                if services.clear(&id).is_err() {
+                    continue;
+                }
+            }
             let packages = self.root.join("packages").join(&id);
             if crate::native::pinned_under(&packages) {
                 continue;
@@ -404,6 +564,67 @@ impl ModuleManager {
         if registry.modules.len() != state.registry.modules.len() {
             self.persist(&registry)?;
             state.registry = registry;
+        }
+        Ok(())
+    }
+
+    fn summary(&self, manifest: ModuleManifest, record: &Record) -> InstalledModule {
+        let models = manifest
+            .search_provider
+            .as_ref()
+            .map(|provider| {
+                provider
+                    .models
+                    .iter()
+                    .map(|model| copypaste_module_sdk::SearchModelInfo {
+                        id: model.id.clone(),
+                        title: model.title.clone(),
+                        languages: model.languages.clone(),
+                        size_bytes: model.size_bytes(),
+                        available: crate::resources::available(
+                            &self.root.join("data").join(&manifest.id),
+                            model,
+                        ),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut result = summary(manifest, record);
+        result.search_models = models;
+        result
+    }
+
+    pub fn set_sync_services(&self, services: Arc<crate::SyncServices>) -> Result<(), ModuleError> {
+        *self.sync_services.lock().map_err(|_| ModuleError::State)? = Some(services);
+        Ok(())
+    }
+    pub(crate) fn sync_providers(
+        &self,
+        enabled_only: bool,
+    ) -> Result<Vec<(String, String)>, ModuleError> {
+        let state = self.state.lock().map_err(|_| ModuleError::State)?;
+        let mut providers = Vec::new();
+        for (id, record) in &state.registry.modules {
+            if record.removing || (enabled_only && !record.enabled) {
+                continue;
+            }
+            if let Some(provider) = self.manifest(id, record)?.sync_provider {
+                providers.push((id.clone(), provider.command));
+            }
+        }
+        Ok(providers)
+    }
+    pub(crate) fn stop_sync_providers(&self) -> Result<(), ModuleError> {
+        let providers = self.sync_providers(false)?;
+        let instances: Vec<_> = {
+            let mut state = self.state.lock().map_err(|_| ModuleError::State)?;
+            providers
+                .iter()
+                .filter_map(|(id, _)| state.loaded.remove(id))
+                .collect()
+        };
+        for instance in instances {
+            instance.instance.stop();
         }
         Ok(())
     }
@@ -525,6 +746,15 @@ impl ModuleManager {
                 &self.directory(id, &record.version),
                 &self.root.join("data").join(id),
                 &invocation,
+                if manifest.sync_provider.is_some() {
+                    self.sync_services
+                        .lock()
+                        .map_err(|_| ModuleError::State)?
+                        .clone()
+                } else {
+                    None
+                },
+                id,
             )
         })();
         drop(instance);
@@ -546,13 +776,26 @@ fn summary(manifest: ModuleManifest, record: &Record) -> InstalledModule {
         .commands
         .into_iter()
         .filter(|command| {
-            !manifest
-                .event_handlers
-                .iter()
-                .any(|handler| handler.command == command.id)
+            manifest
+                .sync_provider
+                .as_ref()
+                .is_none_or(|provider| provider.command != command.id)
+                && manifest
+                    .search_provider
+                    .as_ref()
+                    .is_none_or(|provider| provider.command != command.id)
+                && !manifest
+                    .event_handlers
+                    .iter()
+                    .any(|handler| handler.command == command.id)
         })
         .collect();
     InstalledModule {
+        search_language_field: manifest
+            .search_provider
+            .as_ref()
+            .map(|provider| provider.language_field.clone()),
+        search_models: Vec::new(),
         events,
         restart_required: false,
         id: manifest.id,
@@ -570,6 +813,8 @@ fn summary(manifest: ModuleManifest, record: &Record) -> InstalledModule {
 
 fn failed_summary(id: &str, record: &Record, error: String) -> InstalledModule {
     InstalledModule {
+        search_language_field: None,
+        search_models: Vec::new(),
         events: Vec::new(),
         restart_required: false,
         id: id.into(),
@@ -624,4 +869,28 @@ fn validate_stored_preferences(
         }
     }
     Ok(())
+}
+
+#[derive(Clone)]
+pub(crate) struct SearchConfiguration {
+    pub id: String,
+    pub command: String,
+    pub model: copypaste_module_sdk::SearchModel,
+    pub scope: String,
+}
+
+fn selected_model<'a>(
+    provider: &'a copypaste_module_sdk::ModuleSearchProvider,
+    preferences: &BTreeMap<String, Value>,
+) -> Result<&'a copypaste_module_sdk::SearchModel, ModuleError> {
+    let languages: Vec<String> = preferences
+        .get(&provider.language_field)
+        .and_then(Value::as_array)
+        .ok_or_else(|| ModuleError::Invalid("Choose at least one search language.".into()))?
+        .iter()
+        .map(|value| value.as_str().map(str::to_owned).ok_or(ModuleError::State))
+        .collect::<Result<_, _>>()?;
+    provider.model_for(&languages).ok_or_else(|| {
+        ModuleError::Invalid("No model supports the selected search languages.".into())
+    })
 }
