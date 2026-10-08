@@ -150,12 +150,13 @@ abstract final class AppTheme {
   }) {
     final accent = Theme.of(context).colorScheme.accent;
     return (selected
-            ? const ButtonStyle.secondary(density: ButtonDensity.icon)
-                  .withBackgroundColor(
-                    color: accent,
-                    hoverColor: accent,
-                    focusColor: accent,
-                  )
+            ? const ButtonStyle.secondary(
+                density: ButtonDensity.icon,
+              ).withBackgroundColor(
+                color: accent,
+                hoverColor: accent,
+                focusColor: accent,
+              )
             : const ButtonStyle.ghost(density: ButtonDensity.icon))
         .copyWith(decoration: _navigationButtonDecoration);
   }
@@ -221,8 +222,9 @@ abstract final class AppTheme {
   }
 
   static double _controlLineHeight(BuildContext context) {
-    final textStyle = DefaultTextStyle.of(context).style
-        .merge(const ButtonStyle.primary().textStyle(context, const {}));
+    final textStyle = DefaultTextStyle.of(
+      context,
+    ).style.merge(const ButtonStyle.primary().textStyle(context, const {}));
     return MediaQuery.textScalerOf(context).scale(textStyle.fontSize!) *
         (textStyle.height ?? 1);
   }
@@ -276,8 +278,9 @@ abstract final class AppTheme {
       );
 
   static TextStyle clipboardMetadataTextStyle(BuildContext context) =>
-      clipboardMenuTextStyle(context)
-          .copyWith(fontSize: AppTypographySize.menuMetadata);
+      clipboardMenuTextStyle(
+        context,
+      ).copyWith(fontSize: AppTypographySize.menuMetadata);
 
   static TextStyle inspectorTextStyle(
     BuildContext context, {
@@ -365,8 +368,8 @@ abstract final class AppTheme {
         horizontal: AppSpacing.xs,
         vertical: AppSpacing.xs,
       ),
-      textStyle: (context, states, value) => clipboardMenuTextStyle(context)
-          .copyWith(
+      textStyle: (context, states, value) =>
+          clipboardMenuTextStyle(context).copyWith(
             color: value.color,
             leadingDistribution: TextLeadingDistribution.even,
           ),
