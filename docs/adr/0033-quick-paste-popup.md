@@ -60,6 +60,17 @@ clip, loads its full content through the History repository, and uses
 11-point metadata text. Expanding, collapsing, and reopening clamp the window
 to its current monitor's work area without changing the paste target.
 
+Hovering a clip for 1500 milliseconds opens this same inspector automatically,
+matching Maccy's default preview delay. Leaving the row before the delay cancels
+the pending open. Once open, the inspector stays available and follows the
+focused clip immediately. Manually closing it suppresses automatic reopening
+for that clip until selection changes. Scrolling, search, paste, popup close,
+reopen, and shutdown cancel pending hover work. Manual controls remain available
+for keyboard and touch input.
+
+Reference: [Maccy preview controller](https://github.com/p0deje/Maccy/blob/a92c11ae3e7a86a57dc6359bad59e330e4625ede/Maccy/Observables/SlideoutController.swift)
+and [default delay](https://github.com/p0deje/Maccy/blob/a92c11ae3e7a86a57dc6359bad59e330e4625ede/Maccy/Extensions/Defaults.Keys%2BNames.swift).
+
 Each invocation reads the current pointer position, selects the monitor that
 contains that point, and places the popup's top-left corner immediately below
 the pointer. The result is clamped to that monitor's work area, including

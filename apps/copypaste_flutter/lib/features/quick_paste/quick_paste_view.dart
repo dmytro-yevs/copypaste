@@ -24,15 +24,16 @@ class QuickPasteView extends StatefulWidget {
   State<QuickPasteView> createState() => _QuickPasteViewState();
 }
 
-class _FocusClipIntent extends Intent {
-  const _FocusClipIntent();
-}
-
 class _QuickPasteViewState extends State<QuickPasteView> {
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
   final _scroll = ScrollController();
+  final _pinnedScroll = ScrollController();
+  final _rowKeys = <String, GlobalKey>{};
+  Future<void> _focusTraversal = Future<void>.value();
+  bool _paginationCheckScheduled = false;
   int _generation = 0;
+  HistoryQuery _query = const HistoryQuery();
 
   QuickPasteController get controller => widget.controller;
 
@@ -40,15 +41,25 @@ class _QuickPasteViewState extends State<QuickPasteView> {
   void initState() {
     super.initState();
     _generation = controller.presentationGeneration;
+    _query = controller.history.query;
     controller.addListener(_presentationChanged);
+    _scroll.addListener(_scrolled);
+    _pinnedScroll.addListener(_scrolled);
   }
 
   void _presentationChanged() {
-    if (_generation == controller.presentationGeneration) return;
+    final presentationChanged =
+        _generation != controller.presentationGeneration;
+    final queryChanged = !identical(_query, controller.history.query);
+    if (!presentationChanged && !queryChanged) return;
     _generation = controller.presentationGeneration;
-    _search.clear();
-    _searchFocus.requestFocus();
+    _query = controller.history.query;
+    if (presentationChanged) {
+      _search.clear();
+      _searchFocus.requestFocus();
+    }
     if (_scroll.hasClients) _scroll.jumpTo(0);
+    if (_pinnedScroll.hasClients) _pinnedScroll.jumpTo(0);
   }
 
   @override
@@ -57,6 +68,7 @@ class _QuickPasteViewState extends State<QuickPasteView> {
     _search.dispose();
     _searchFocus.dispose();
     _scroll.dispose();
+    _pinnedScroll.dispose();
     super.dispose();
   }
 
@@ -64,43 +76,40 @@ class _QuickPasteViewState extends State<QuickPasteView> {
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: controller,
-      builder: (context, child) => SubFocusScope(
-        key: ValueKey(controller.presentationGeneration),
-        builder: (context, scope) => CallbackShortcuts(
-          bindings: _shortcutBindings(context, scope),
-          child: ClipRRect(
-            borderRadius: const BorderRadius.all(Radius.circular(AppRadius.lg)),
-            child: Scaffold(
-              backgroundColor: Theme.of(context).colorScheme.popover,
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.sm),
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final menu = _menu(context);
-                    if (!controller.inspectorOpen) return menu;
-                    final menuWidth =
-                        (AppLayoutSize.quickPasteMenuWidth - AppSpacing.sm * 2)
-                            .clamp(0.0, constraints.maxWidth * 0.55)
-                            .toDouble();
-                    return Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        SizedBox(width: menuWidth, child: menu),
-                        const Gap(AppSpacing.sm),
-                        Expanded(
-                          child: HistoryInspector(
-                            controller: controller.history,
-                            inDrawer: false,
-                            showActions: false,
-                            compact: true,
-                            onClose: () =>
-                                unawaited(controller.toggleInspector()),
-                          ),
+      builder: (context, child) => CallbackShortcuts(
+        bindings: _shortcutBindings(),
+        child: ClipRRect(
+          borderRadius: const BorderRadius.all(Radius.circular(AppRadius.lg)),
+          child: Scaffold(
+            backgroundColor: Theme.of(context).colorScheme.popover,
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.sm),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final menu = _menu(context);
+                  if (!controller.inspectorOpen) return menu;
+                  final menuWidth =
+                      (AppLayoutSize.quickPasteMenuWidth - AppSpacing.sm * 2)
+                          .clamp(0.0, constraints.maxWidth * 0.55)
+                          .toDouble();
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SizedBox(width: menuWidth, child: menu),
+                      const Gap(AppSpacing.sm),
+                      Expanded(
+                        child: HistoryInspector(
+                          controller: controller.history,
+                          inDrawer: false,
+                          showActions: false,
+                          compact: true,
+                          onClose: () =>
+                              unawaited(controller.toggleInspector()),
                         ),
-                      ],
-                    );
-                  },
-                ),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
           ),
@@ -169,6 +178,40 @@ class _QuickPasteViewState extends State<QuickPasteView> {
     ],
   );
 
+  void _scrolled() {
+    final clip = controller.focusedClip;
+    if (clip != null) controller.hoverClip(clip, hovered: false);
+    _loadMoreWhenNeeded();
+  }
+
+  void _loadMoreWhenNeeded() {
+    final history = controller.history;
+    if (!history.canLoadMore ||
+        history.isLoadingMore ||
+        history.state != HistoryLoadState.ready ||
+        controller.paginationFailed) {
+      return;
+    }
+    final scroll = history.items.any((clip) => !clip.pinned)
+        ? _scroll
+        : _pinnedScroll;
+    if (!scroll.hasClients || !scroll.position.hasContentDimensions) return;
+    final position = scroll.position;
+    if (position.viewportDimension > 0 &&
+        position.extentAfter <= position.viewportDimension) {
+      unawaited(controller.loadMore());
+    }
+  }
+
+  void _checkPaginationAfterLayout() {
+    if (_paginationCheckScheduled) return;
+    _paginationCheckScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _paginationCheckScheduled = false;
+      if (mounted) _loadMoreWhenNeeded();
+    });
+  }
+
   Widget _history(BuildContext context) {
     final history = controller.history;
     if (history.state == HistoryLoadState.loading && controller.items.isEmpty) {
@@ -184,8 +227,11 @@ class _QuickPasteViewState extends State<QuickPasteView> {
     if (items.isEmpty) {
       return const StateView.empty(title: 'No clips found');
     }
+    final retainedIds = items.map((clip) => clip.id).toSet();
+    _rowKeys.removeWhere((id, _) => !retainedIds.contains(id));
     final recent = items.where((clip) => !clip.pinned).toList();
     final pinned = items.where((clip) => clip.pinned).toList();
+    _checkPaginationAfterLayout();
     return LayoutBuilder(
       builder: (context, constraints) => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -193,13 +239,11 @@ class _QuickPasteViewState extends State<QuickPasteView> {
           Expanded(
             child: Scrollbar(
               controller: _scroll,
-              child: SingleChildScrollView(
-                key: const ValueKey('quick-paste-history-scroll'),
-                controller: _scroll,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [for (final clip in recent) _item(clip)],
-                ),
+              child: _clipList(
+                recent,
+                scroll: _scroll,
+                key: 'quick-paste-history-scroll',
+                showPagination: recent.isNotEmpty,
               ),
             ),
           ),
@@ -215,13 +259,12 @@ class _QuickPasteViewState extends State<QuickPasteView> {
                     ? constraints.maxHeight
                     : constraints.maxHeight / 2,
               ),
-              child: SingleChildScrollView(
-                key: const ValueKey('quick-paste-pinned-scroll'),
-                primary: false,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [for (final clip in pinned) _item(clip)],
-                ),
+              child: _clipList(
+                pinned,
+                scroll: _pinnedScroll,
+                key: 'quick-paste-pinned-scroll',
+                shrinkWrap: true,
+                showPagination: recent.isEmpty,
               ),
             ),
           ],
@@ -230,28 +273,102 @@ class _QuickPasteViewState extends State<QuickPasteView> {
     );
   }
 
-  Map<ShortcutActivator, VoidCallback> _shortcutBindings(
-    BuildContext context,
-    SubFocusScopeState scope,
-  ) {
-    void move(TraversalDirection direction, [int count = 1]) {
-      for (var step = 0; step < count; step++) {
-        scope.nextFocus(direction);
-      }
-      scope.invokeActionOnFocused(const _FocusClipIntent());
-    }
+  Widget _clipList(
+    List<HistoryClip> clips, {
+    required ScrollController scroll,
+    required String key,
+    bool shrinkWrap = false,
+    required bool showPagination,
+  }) {
+    final history = controller.history;
+    final indices = {
+      for (final (index, clip) in clips.indexed)
+        ValueKey('quick-paste-${clip.id}'): index,
+    };
+    return ListView.builder(
+      key: ValueKey(key),
+      controller: scroll,
+      primary: false,
+      padding: EdgeInsets.zero,
+      shrinkWrap: shrinkWrap,
+      findChildIndexCallback: (key) => indices[key],
+      itemCount: clips.length + (showPagination && history.canLoadMore ? 1 : 0),
+      itemBuilder: (context, index) {
+        if (index < clips.length) return _item(clips[index]);
+        if (history.isLoadingMore) {
+          return const Padding(
+            padding: EdgeInsets.all(AppSpacing.sm),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        return Button.ghost(
+          key: const ValueKey('quick-paste-load-more'),
+          style: AppTheme.clipboardMenuButtonStyle(),
+          onPressed: controller.loadMore,
+          child: Text(controller.paginationFailed ? 'Try again' : 'Load more'),
+        );
+      },
+    );
+  }
 
+  void _moveFocus(int offset) {
+    final generation = controller.presentationGeneration;
+    final query = controller.history.query;
+    _focusTraversal = _focusTraversal.then((_) async {
+      if (!mounted ||
+          generation != controller.presentationGeneration ||
+          !identical(query, controller.history.query)) {
+        return;
+      }
+      await controller.moveFocus(offset);
+      if (!mounted || generation != controller.presentationGeneration) return;
+      final clip = controller.focusedClip;
+      if (clip != null) await _revealFocused(clip, generation, query);
+    });
+  }
+
+  Future<void> _revealFocused(
+    HistoryClip clip,
+    int generation,
+    HistoryQuery query,
+  ) async {
+    await WidgetsBinding.instance.endOfFrame;
+    final scroll = clip.pinned ? _pinnedScroll : _scroll;
+    while (mounted &&
+        generation == controller.presentationGeneration &&
+        identical(query, controller.history.query) &&
+        controller.focusedClip?.id == clip.id &&
+        scroll.hasClients) {
+      final rowContext = _rowKeys[clip.id]?.currentContext;
+      if (rowContext != null && rowContext.mounted) {
+        await Scrollable.ensureVisible(rowContext);
+        return;
+      }
+      final clips = controller.items
+          .where((item) => item.pinned == clip.pinned)
+          .toList();
+      final target = clips.indexWhere((item) => item.id == clip.id);
+      final firstMounted = clips.indexWhere(
+        (item) => _rowKeys[item.id]?.currentContext != null,
+      );
+      final position = scroll.position;
+      final direction = target < firstMounted ? -1 : 1;
+      final next = (position.pixels + position.viewportDimension * direction)
+          .clamp(position.minScrollExtent, position.maxScrollExtent);
+      if (next == position.pixels) return;
+      scroll.jumpTo(next.toDouble());
+      await WidgetsBinding.instance.endOfFrame;
+    }
+  }
+
+  Map<ShortcutActivator, VoidCallback> _shortcutBindings() {
     final bindings = <ShortcutActivator, VoidCallback>{
       const SingleActivator(LogicalKeyboardKey.escape): () =>
           unawaited(controller.close()),
-      const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
-          move(TraversalDirection.down),
-      const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
-          move(TraversalDirection.up),
-      const SingleActivator(LogicalKeyboardKey.pageDown): () =>
-          move(TraversalDirection.down, 5),
-      const SingleActivator(LogicalKeyboardKey.pageUp): () =>
-          move(TraversalDirection.up, 5),
+      const SingleActivator(LogicalKeyboardKey.arrowDown): () => _moveFocus(1),
+      const SingleActivator(LogicalKeyboardKey.arrowUp): () => _moveFocus(-1),
+      const SingleActivator(LogicalKeyboardKey.pageDown): () => _moveFocus(5),
+      const SingleActivator(LogicalKeyboardKey.pageUp): () => _moveFocus(-5),
       const SingleActivator(LogicalKeyboardKey.enter): () =>
           unawaited(controller.activateFocused()),
       const SingleActivator(LogicalKeyboardKey.enter, shift: true): () =>
@@ -285,75 +402,65 @@ class _QuickPasteViewState extends State<QuickPasteView> {
 
   Widget _item(HistoryClip clip) {
     final shortcut = controller.shortcutFor(clip);
-    return Actions(
-      actions: {
-        _FocusClipIntent: CallbackAction<_FocusClipIntent>(
-          onInvoke: (_) {
-            controller.focus(clip);
-            return null;
-          },
-        ),
-      },
-      child: SubFocus(
-        key: ValueKey('quick-paste-${clip.id}'),
-        builder: (context, focus) => Button.ghost(
-          style: AppTheme.clipboardMenuButtonStyle(selected: focus.isFocused),
-          alignment: Alignment.centerLeft,
-          onHover: (hovered) {
-            if (hovered) {
-              focus.requestFocus();
-              controller.focus(clip);
-            }
-          },
-          onFocus: (focused) {
-            if (focused) {
-              focus.requestFocus();
-              controller.focus(clip);
-            }
-          },
-          onPressed: controller.activating
-              ? null
-              : () {
-                  final keyboard = HardwareKeyboard.instance;
-                  unawaited(
-                    controller.activate(
-                      clip,
-                      plainText: keyboard.isShiftPressed,
-                      invertAutoPaste:
-                          keyboard.isAltPressed && !keyboard.isShiftPressed,
-                      forcePaste:
-                          keyboard.isAltPressed && keyboard.isShiftPressed,
-                    ),
-                  );
-                },
-          child: Row(
-            children: [
-              SizedBox(
-                width: AppIconSize.sm,
-                child: clip.sourceApp != null
-                    ? SourceAppLabel(
-                        name: clip.sourceApp!,
-                        icon: controller.history.requestSourceIcon(
-                          clip.sourceAppIconId,
-                        ),
-                        showName: false,
-                      )
-                    : Icon(
-                        HistoryClipPresentation.icon(clip.contentKind),
-                        size: AppIconSize.sm,
+    return KeyedSubtree(
+      key: ValueKey('quick-paste-${clip.id}'),
+      child: Builder(
+        key: _rowKeys.putIfAbsent(clip.id, GlobalKey.new),
+        builder: (context) => MouseRegion(
+          onEnter: (_) => controller.hoverClip(clip, hovered: true),
+          onExit: (_) => controller.hoverClip(clip, hovered: false),
+          child: Button.ghost(
+            style: AppTheme.clipboardMenuButtonStyle(
+              selected: controller.focusedClip?.id == clip.id,
+            ),
+            alignment: Alignment.centerLeft,
+            onFocus: (focused) {
+              if (focused) controller.focus(clip);
+            },
+            onPressed: controller.activating
+                ? null
+                : () {
+                    final keyboard = HardwareKeyboard.instance;
+                    unawaited(
+                      controller.activate(
+                        clip,
+                        plainText: keyboard.isShiftPressed,
+                        invertAutoPaste:
+                            keyboard.isAltPressed && !keyboard.isShiftPressed,
+                        forcePaste:
+                            keyboard.isAltPressed && keyboard.isShiftPressed,
                       ),
-              ),
-              const Gap(AppSpacing.sm),
-              Expanded(
-                child: _ClipContent(clip: clip, controller: controller),
-              ),
-              const Gap(AppSpacing.sm),
-              if (shortcut != null)
-                MenuShortcut(
-                  activator: _desktopShortcut(shortcut),
-                  combiner: const SizedBox.shrink(),
+                    );
+                  },
+            child: Row(
+              children: [
+                SizedBox(
+                  width: AppIconSize.sm,
+                  child: clip.sourceApp != null
+                      ? SourceAppLabel(
+                          name: clip.sourceApp!,
+                          icon: controller.history.requestSourceIcon(
+                            clip.sourceAppIconId,
+                          ),
+                          showName: false,
+                        )
+                      : Icon(
+                          HistoryClipPresentation.icon(clip.contentKind),
+                          size: AppIconSize.sm,
+                        ),
                 ),
-            ],
+                const Gap(AppSpacing.sm),
+                Expanded(
+                  child: _ClipContent(clip: clip, controller: controller),
+                ),
+                const Gap(AppSpacing.sm),
+                if (shortcut != null)
+                  MenuShortcut(
+                    activator: _desktopShortcut(shortcut),
+                    combiner: const SizedBox.shrink(),
+                  ),
+              ],
+            ),
           ),
         ),
       ),

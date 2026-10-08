@@ -197,6 +197,16 @@ abstract final class AppTheme {
     padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
   );
 
+  static const moduleSettingsRowTheme = BasicTheme(
+    leadingAlignment: Alignment.center,
+    trailingAlignment: Alignment.center,
+    titleAlignment: Alignment.centerLeft,
+    contentSpacing: AppSpacing.md,
+    padding: EdgeInsets.zero,
+  );
+
+  static const moduleSettingsActionAlignment = Alignment.center;
+
   static ThemeData clipboardSearchTheme(BuildContext context) {
     final theme = Theme.of(context);
     return theme.copyWith(

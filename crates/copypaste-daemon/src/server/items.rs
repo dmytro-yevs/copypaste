@@ -1212,6 +1212,40 @@ mod tests {
     }
 
     #[test]
+    fn save_file_exports_original_image_for_ocr_without_overwriting() {
+        let (state, dir) = test_state("save-image-for-ocr");
+        let original = STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=")
+            .unwrap();
+        let stored = binary_item(
+            &state,
+            copypaste_ipc::content_type::IMAGE_PNG,
+            &original,
+            None,
+        );
+        let destination = dir.path().join("ocr-input.png");
+
+        assert!(save_file(&state, 1, &stored.id, &destination.to_string_lossy()).ok);
+        assert_eq!(std::fs::read(&destination).unwrap(), original);
+        assert_eq!(
+            save_file(&state, 2, &stored.id, &destination.to_string_lossy()).error_code,
+            Some(ErrorCode::InvalidRequest)
+        );
+        assert_eq!(std::fs::read(&destination).unwrap(), original);
+        assert_eq!(state.store.count().unwrap(), 1);
+
+        let ResponseData::Item(text) = add(&state, 3, "text").data.unwrap() else {
+            panic!("text clip must be added");
+        };
+        let text_destination = dir.path().join("text.png");
+        assert_eq!(
+            save_file(&state, 4, &text.id, &text_destination.to_string_lossy()).error_code,
+            Some(ErrorCode::UnsupportedContent)
+        );
+        assert!(!text_destination.exists());
+    }
+
+    #[test]
     fn image_preview_refuses_an_undecodable_image() {
         let (state, _dir) = test_state("image-preview-invalid");
         let image = copypaste_core::ingest_binary_into_with_capture_context(

@@ -13,12 +13,17 @@ final class MacosScreenshotProtection {
     func apply(_ blocked: Bool) -> Bool {
       if blocked {
         if protection == nil { protection = CaptureProtectedLayerTree(layer: layer) }
+        if window?.isVisible == true { protection?.resume() }
+        else { protection?.suspend() }
         return protection?.healthy == true
       }
       protection?.detach()
       protection = nil
       return true
     }
+
+    func suspend() { protection?.suspend() }
+    func resume() { protection?.resume() }
   }
 
   private var clients: [Client] = []
@@ -28,9 +33,12 @@ final class MacosScreenshotProtection {
   private init() {
     closeObserver = NotificationCenter.default.addObserver(
       forName: NSWindow.willCloseNotification, object: nil, queue: .main
-    ) { [weak self] _ in
+    ) { [weak self] notification in
       // Do not restore capture during a close animation. Retained windows can
       // reopen and must keep following the policy until they are deallocated.
+      if let window = notification.object as? NSWindow {
+        self?.clients.first(where: { $0.window === window })?.suspend()
+      }
       DispatchQueue.main.async { [weak self] in self?.pruneClients() }
     }
   }
@@ -50,6 +58,14 @@ final class MacosScreenshotProtection {
   func applyCurrentPolicy() -> Bool {
     pruneClients()
     return clients.allSatisfy { $0.apply(blocked) }
+  }
+
+  func resume(window: NSWindow) {
+    clients.first(where: { $0.window === window })?.resume()
+  }
+
+  func suspend(window: NSWindow) {
+    clients.first(where: { $0.window === window })?.suspend()
   }
 
   func setBlocked(_ value: Bool) -> Bool {

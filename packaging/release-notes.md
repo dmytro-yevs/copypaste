@@ -1,8 +1,9 @@
-This update fixes the Sync details drawer and macOS in-app updates.
+This update improves protected rendering memory, Quick Paste, and module settings.
 
-- Open and close Sync details reliably from the shared header on macOS, Android, and Windows.
-- Close Sync details with Escape and restore navigation after closing.
-- Allow available Homebrew updates to reach installation and verify the installed version before reporting success.
+- Bound macOS capture-protected frame buffers, coalesce pending frames, and release buffers when windows are hidden or closed.
+- Improve Quick Paste row actions, previews, and pinned keyboard shortcuts.
+- Open module-specific settings in a shared drawer and keep module cards aligned.
+- Keep image clipboard copies available as PNG while preserving original image data.
 
 Optional modules are selected and installed from the first-party marketplace in Settings. OCR engines and models are not bundled with the application.
 
