@@ -1,7 +1,7 @@
 name: copypaste_flutter
 description: "CopyPaste Flutter application."
 publish_to: 'none'
-version: 1.0.7+8
+version: 1.0.10+11
 
 environment:
   sdk: ">=3.11.0 <4.0.0"
@@ -31,6 +31,8 @@ dependencies:
   crypto: 3.0.7
   cryptography: 2.9.0
   pub_semver: 2.2.1
+  desktop_drop: 0.8.4
+  mime: 2.1.0
 
 dependency_overrides:
   hotkey_manager_windows:

@@ -278,6 +278,31 @@ pub(super) fn add(state: &AppState, id: u64, content: &str) -> Response {
     }
 }
 
+pub(super) fn import_file(
+    state: &AppState,
+    id: u64,
+    path: &str,
+    filename: &str,
+    mime_type: &str,
+    source_reference: Option<&str>,
+) -> Response {
+    match copypaste_core::file_import::import_file(
+        &state.store,
+        &state.keyring,
+        std::path::Path::new(path),
+        filename,
+        mime_type,
+        source_reference,
+        &state.settings.get(),
+    ) {
+        Ok(_) => {
+            state.note_local_change();
+            Response::ok(id, ResponseData::Empty {})
+        }
+        Err(error) => Response::err(id, ErrorCode::InvalidRequest, error.to_string()),
+    }
+}
+
 /// One item, decrypted, with nothing else touched.
 ///
 /// Deliberately not `copy`: reading an item must not publish it to the system
@@ -412,6 +437,49 @@ mod tests {
     use base64::engine::general_purpose::STANDARD;
     use copypaste_ipc::limits::LIST_PREVIEW_BYTES;
     use copypaste_ipc::{content_type::TEXT, Method};
+
+    #[test]
+    fn explicit_file_import_keeps_each_named_record_and_original_bytes() {
+        let (state, dir) = test_state("explicit-file-import");
+        let source = dir.path().join("source.pdf");
+        std::fs::write(&source, b"%PDF original").unwrap();
+        for name in ["a.pdf", "b.pdf"] {
+            let response = dispatch_store(
+                &state,
+                1,
+                Method::ImportFile {
+                    path: source.to_string_lossy().into_owned(),
+                    filename: name.to_owned(),
+                    mime_type: "application/pdf".to_owned(),
+                    source_reference: None,
+                },
+            );
+            assert!(response.ok, "{response:?}");
+        }
+        assert_eq!(state.store.count().unwrap(), 2);
+        let Some(ResponseData::Page(page)) = list(&state, 2, 10, None).data else {
+            panic!("expected page");
+        };
+        let mut names = page
+            .items
+            .iter()
+            .map(|item| {
+                item.file_details
+                    .as_ref()
+                    .unwrap()
+                    .filename
+                    .clone()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(names, ["a.pdf", "b.pdf"]);
+        for item in page.items {
+            let saved = dir.path().join(format!("{}.saved", item.id));
+            assert!(save_file(&state, 3, &item.id, &saved.to_string_lossy()).ok);
+            assert_eq!(std::fs::read(saved).unwrap(), b"%PDF original");
+        }
+    }
 
     fn seed_legacy_text(state: &AppState, id: &str, content: &str, content_type: &str) {
         let key = state.keyring.item_key();
@@ -1209,6 +1277,40 @@ mod tests {
             save_file(&state, 2, &stored.id, &destination.to_string_lossy()).error_code,
             Some(ErrorCode::InvalidRequest)
         );
+    }
+
+    #[test]
+    fn save_file_exports_original_image_for_ocr_without_overwriting() {
+        let (state, dir) = test_state("save-image-for-ocr");
+        let original = STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=")
+            .unwrap();
+        let stored = binary_item(
+            &state,
+            copypaste_ipc::content_type::IMAGE_PNG,
+            &original,
+            None,
+        );
+        let destination = dir.path().join("ocr-input.png");
+
+        assert!(save_file(&state, 1, &stored.id, &destination.to_string_lossy()).ok);
+        assert_eq!(std::fs::read(&destination).unwrap(), original);
+        assert_eq!(
+            save_file(&state, 2, &stored.id, &destination.to_string_lossy()).error_code,
+            Some(ErrorCode::InvalidRequest)
+        );
+        assert_eq!(std::fs::read(&destination).unwrap(), original);
+        assert_eq!(state.store.count().unwrap(), 1);
+
+        let ResponseData::Item(text) = add(&state, 3, "text").data.unwrap() else {
+            panic!("text clip must be added");
+        };
+        let text_destination = dir.path().join("text.png");
+        assert_eq!(
+            save_file(&state, 4, &text.id, &text_destination.to_string_lossy()).error_code,
+            Some(ErrorCode::UnsupportedContent)
+        );
+        assert!(!text_destination.exists());
     }
 
     #[test]

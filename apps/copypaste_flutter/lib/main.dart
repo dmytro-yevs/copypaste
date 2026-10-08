@@ -24,6 +24,7 @@ import 'features/devices/flutter_rust_devices_gateway.dart';
 import 'features/history/controller/history_controller.dart';
 import 'features/history/controller/history_ocr_controller.dart';
 import 'features/history/repository/file_selector_history_file_downloader.dart';
+import 'platform/files/history_file_picker.dart';
 import 'features/history/repository/runtime_history_repository.dart';
 import 'features/history/repository/temporary_history_image_input.dart';
 import 'features/onboarding/controller/android_onboarding_controller.dart';
@@ -283,6 +284,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
         _historyController = HistoryController(
           _historyRepository!,
           fileDownloader: const FileSelectorHistoryFileDownloader(),
+          filePicker: const SystemHistoryFilePicker(),
           ocr: HistoryOcrController(
             modules: _modulesController!,
             imageInput: TemporaryHistoryImageInput(

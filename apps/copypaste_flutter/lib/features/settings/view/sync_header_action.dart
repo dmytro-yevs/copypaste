@@ -7,6 +7,7 @@ import '../../../app/theme/app_motion.dart';
 import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
+import '../../../shared/inspector_table.dart';
 import '../../../shared/state_view.dart';
 import '../../../shared/system_date_time.dart';
 import '../../devices/devices_controller.dart';
@@ -31,12 +32,14 @@ class SyncHeaderAction extends StatefulWidget {
 }
 
 class _SyncHeaderActionState extends State<SyncHeaderAction> {
+  final _drawerFocus = FocusNode();
   OverlayCompleter<void>? _drawer;
   bool _opening = false;
 
   @override
   void dispose() {
     if (_drawer?.isCompleted == false) _drawer!.remove();
+    _drawerFocus.dispose();
     super.dispose();
   }
 
@@ -81,13 +84,14 @@ class _SyncHeaderActionState extends State<SyncHeaderAction> {
           height:
               MediaQuery.sizeOf(context).height *
               AppOverlaySize.drawerHeightFactor,
-          child: Focus(
-            autofocus: true,
-            child: CallbackShortcuts(
-              bindings: <ShortcutActivator, VoidCallback>{
-                const SingleActivator(LogicalKeyboardKey.escape): () =>
-                    unawaited(closeDrawer(context)),
-              },
+          child: CallbackShortcuts(
+            bindings: <ShortcutActivator, VoidCallback>{
+              const SingleActivator(LogicalKeyboardKey.escape): () =>
+                  unawaited(closeDrawer(context)),
+            },
+            child: Focus(
+              focusNode: _drawerFocus,
+              autofocus: true,
               child: AnimatedBuilder(
                 animation: Listenable.merge([
                   widget.controller,
@@ -103,6 +107,12 @@ class _SyncHeaderActionState extends State<SyncHeaderAction> {
           ),
         ),
       );
+      // The backdrop navigator can take focus as the drawer mounts.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && identical(_drawer, drawer) && !drawer.isCompleted) {
+          _drawerFocus.requestFocus();
+        }
+      });
       await drawer.future;
     } finally {
       _drawer = null;
@@ -230,8 +240,8 @@ class _SyncPeerCard extends StatelessWidget {
           label: 'Last successful sync',
           value: formatSystemDateTime(context, value),
         ),
-      (label: 'Last sent', value: '${peer.sent}'),
-      (label: 'Last received', value: '${peer.received}'),
+      (label: 'Clips sent', value: '${peer.sent}'),
+      (label: 'Clips received', value: '${peer.received}'),
       if (peer.skippedTooLarge > 0)
         (label: 'Items over the size limit', value: '${peer.skippedTooLarge}'),
     ];
@@ -259,15 +269,11 @@ class _SyncPeerCard extends StatelessWidget {
             ),
             const Gap(AppSpacing.md),
           ],
-          Table(
+          InspectorTable(
+            tableKey: ValueKey<String>('sync-peer-metadata-${peer.id}'),
             rows: [
               for (final row in rows)
-                TableRow(
-                  cells: [
-                    TableCell(child: Text(row.label).muted()),
-                    TableCell(child: SelectableText(row.value)),
-                  ],
-                ),
+                (label: row.label, value: SelectableText(row.value)),
             ],
           ),
         ],

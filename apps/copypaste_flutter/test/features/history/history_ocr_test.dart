@@ -214,6 +214,13 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('history-clip-screenshot')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('history-ocr')), findsOneWidget);
+      final ocrButton = tester.widget<Button>(
+        find.byKey(const ValueKey('history-ocr')),
+      );
+      expect(ocrButton.child, isA<Icon>());
+      expect(ocrButton.leading, isNull);
+      expect(find.text('OCR'), findsNothing);
+      expect(find.bySemanticsLabel('Recognize image text'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('history-ocr')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));

@@ -9,6 +9,8 @@ class StateView extends StatelessWidget {
   const StateView.loading({super.key, this.message})
     : kind = StateViewKind.loading,
       title = 'Loading',
+      compact = false,
+      icon = LucideIcons.inbox,
       actionLabel = null,
       onAction = null;
 
@@ -16,6 +18,8 @@ class StateView extends StatelessWidget {
     super.key,
     required this.title,
     this.message,
+    this.compact = false,
+    this.icon = LucideIcons.inbox,
     this.actionLabel,
     this.onAction,
   }) : kind = StateViewKind.empty,
@@ -28,9 +32,13 @@ class StateView extends StatelessWidget {
     this.actionLabel,
     this.onAction,
   }) : kind = StateViewKind.error,
+       compact = false,
+       icon = LucideIcons.inbox,
        assert((actionLabel == null) == (onAction == null));
 
   final StateViewKind kind;
+  final bool compact;
+  final IconData icon;
   final String title;
   final String? message;
   final String? actionLabel;
@@ -46,7 +54,7 @@ class StateView extends StatelessWidget {
           child: content,
         );
         final paddedChild = Padding(
-          padding: const EdgeInsets.all(AppSpacing.xxl),
+          padding: EdgeInsets.all(compact ? AppSpacing.lg : AppSpacing.xxl),
           child: Center(child: child),
         );
         if (!constraints.hasBoundedHeight) return paddedChild;
@@ -66,7 +74,7 @@ class StateView extends StatelessWidget {
         leading: const CircularProgressIndicator(),
       ),
       StateViewKind.empty => _standardContent(
-        leading: const Icon(LucideIcons.inbox, size: AppIconSize.state),
+        leading: Icon(icon, size: compact ? AppIconSize.lg : AppIconSize.state),
       ),
       StateViewKind.error => _errorContent(
         showTrailingAction: availableWidth >= 420,
@@ -103,8 +111,11 @@ class StateView extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         ExcludeSemantics(child: leading),
-        const Gap(AppSpacing.lg),
-        Text(title, textAlign: TextAlign.center).h3(),
+        Gap(compact ? AppSpacing.md : AppSpacing.lg),
+        if (compact)
+          Text(title, textAlign: TextAlign.center).small().muted()
+        else
+          Text(title, textAlign: TextAlign.center).h3(),
         if (message != null) ...[
           const Gap(AppSpacing.sm),
           Text(message!, textAlign: TextAlign.center).muted(),

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:copypaste_flutter/features/history/repository/history_file_importer.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
@@ -462,6 +463,9 @@ Future<void> _pumpActions(WidgetTester tester) async {
 }
 
 class _ReorderRepository implements HistoryRepository {
+  @override
+  Future<void> importFile(HistoryImportFile file) async {}
+
   _ReorderRepository(this.items);
   final List<HistoryClip> items;
   final events = StreamController<HistoryRuntimeEvent>.broadcast();

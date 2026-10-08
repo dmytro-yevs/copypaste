@@ -517,6 +517,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "color_quant"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
+
+[[package]]
 name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -555,7 +561,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-cli"
-version = "1.0.7"
+version = "1.0.10"
 dependencies = [
  "backon",
  "clap",
@@ -572,11 +578,11 @@ dependencies = [
 
 [[package]]
 name = "copypaste-clock"
-version = "1.0.7"
+version = "1.0.10"
 
 [[package]]
 name = "copypaste-cloud"
-version = "1.0.7"
+version = "1.0.10"
 dependencies = [
  "argon2",
  "backon",
@@ -608,7 +614,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-core"
-version = "1.0.7"
+version = "1.0.10"
 dependencies = [
  "android-native-keyring-store",
  "base64",
@@ -627,6 +633,7 @@ dependencies = [
  "r2d2_sqlite",
  "rand 0.8.7",
  "rusqlite",
+ "rustix",
  "scopeguard",
  "security-framework",
  "serde",
@@ -649,7 +656,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-daemon"
-version = "1.0.7"
+version = "1.0.10"
 dependencies = [
  "anyhow",
  "backon",
@@ -699,7 +706,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-feedback"
-version = "1.0.7"
+version = "1.0.10"
 dependencies = [
  "tracing",
  "winsafe",
@@ -707,7 +714,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-flutter-bridge"
-version = "1.0.7"
+version = "1.0.10"
 dependencies = [
  "copypaste-core",
  "copypaste-ipc",
@@ -731,14 +738,14 @@ dependencies = [
 
 [[package]]
 name = "copypaste-fs"
-version = "1.0.7"
+version = "1.0.10"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "copypaste-ipc"
-version = "1.0.7"
+version = "1.0.10"
 dependencies = [
  "copypaste-module-sdk",
  "directories",
@@ -783,7 +790,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-modules"
-version = "1.0.7"
+version = "1.0.10"
 dependencies = [
  "copypaste-fs",
  "copypaste-module-sdk",
@@ -803,7 +810,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-p2p"
-version = "1.0.7"
+version = "1.0.10"
 dependencies = [
  "chacha20poly1305",
  "copypaste-clock",
@@ -837,14 +844,14 @@ dependencies = [
 
 [[package]]
 name = "copypaste-retry"
-version = "1.0.7"
+version = "1.0.10"
 dependencies = [
  "backon",
 ]
 
 [[package]]
 name = "copypaste-runtime"
-version = "1.0.7"
+version = "1.0.10"
 dependencies = [
  "base64",
  "copypaste-core",
@@ -860,7 +867,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-runtime-log"
-version = "1.0.7"
+version = "1.0.10"
 dependencies = [
  "anyhow",
  "copypaste-clock",
@@ -875,7 +882,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-source-app"
-version = "1.0.7"
+version = "1.0.10"
 dependencies = [
  "base64",
  "image",
@@ -1532,6 +1539,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gif"
+version = "0.14.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee8cfcc411d9adbbaba82fb72661cc1bcca13e8bba98b364e62b2dba8f960159"
+dependencies = [
+ "color_quant",
+ "weezl",
+]
+
+[[package]]
 name = "gimli"
 version = "0.32.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1854,10 +1871,25 @@ checksum = "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
 dependencies = [
  "bytemuck",
  "byteorder-lite",
+ "color_quant",
+ "gif",
+ "image-webp",
  "moxcms",
  "num-traits",
  "png",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
+]
+
+[[package]]
+name = "image-webp"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "525e9ff3e1a4be2fbea1fdf0e98686a6d98b4d8f937e1bf7402245af1909e8c3"
+dependencies = [
+ "byteorder-lite",
+ "quick-error",
 ]
 
 [[package]]

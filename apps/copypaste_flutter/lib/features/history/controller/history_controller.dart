@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../models/history_models.dart';
 import '../repository/history_file_downloader.dart';
 import '../repository/history_repository.dart';
+import '../repository/history_file_importer.dart';
 import 'history_ocr_controller.dart';
 
 enum HistoryLoadState { initial, loading, ready, empty, error }
@@ -21,7 +22,9 @@ class HistoryController extends ChangeNotifier {
     Duration? searchDebounce,
     HistoryFileDownloader? fileDownloader,
     this.ocr,
-  }) : _fileDownloader = fileDownloader,
+    HistoryFilePicker? filePicker,
+  }) : _filePicker = filePicker,
+       _fileDownloader = fileDownloader,
        _searchDebounce = searchDebounce ?? const Duration(milliseconds: 250) {
     ocr?.addListener(notifyListeners);
   }
@@ -34,6 +37,11 @@ class HistoryController extends ChangeNotifier {
   final int pageSize;
   final Duration _searchDebounce;
   final HistoryFileDownloader? _fileDownloader;
+  final HistoryFilePicker? _filePicker;
+  bool _isImportingFiles = false;
+  bool _refreshAfterFileImport = false;
+  bool get canImportFiles => _filePicker != null && !_disposed;
+  bool get isImportingFiles => _isImportingFiles;
   final List<HistoryClip> _items = [];
   final LinkedHashMap<String, HistoryImagePreview?> _imagePreviews =
       LinkedHashMap();
@@ -44,6 +52,7 @@ class HistoryController extends ChangeNotifier {
   final Set<String> _pinMutations = <String>{};
   final Set<String> _deleteMutations = <String>{};
   final Set<String> _downloadMutations = <String>{};
+  final Set<String> _collapsedSections = <String>{};
 
   StreamSubscription<HistoryRuntimeEvent>? _watchSubscription;
   Timer? _searchTimer;
@@ -99,6 +108,13 @@ class HistoryController extends ChangeNotifier {
   bool isDeletePending(String id) =>
       _isReorderingPinned || _deleteMutations.contains(id);
   bool isDownloadPending(String id) => _downloadMutations.contains(id);
+  bool isSectionCollapsed(String key) => _collapsedSections.contains(key);
+
+  void toggleSection(String key) {
+    if (!_collapsedSections.add(key)) _collapsedSections.remove(key);
+    notifyListeners();
+  }
+
   bool get canDownloadSelected {
     final file = _selectedClip?.file;
     return _fileDownloader != null && file != null && !file.sourceAvailable;
@@ -107,6 +123,10 @@ class HistoryController extends ChangeNotifier {
   Future<void> initialize() async {
     _watchSubscription ??= _repository.watch().listen((event) {
       if (event == HistoryRuntimeEvent.itemsChanged) {
+        if (_isImportingFiles) {
+          _refreshAfterFileImport = true;
+          return;
+        }
         if (_draggedPinnedId != null || _isReorderingPinned) {
           _refreshAfterPinnedInteraction = true;
         } else {
@@ -349,6 +369,85 @@ class HistoryController extends ChangeNotifier {
       _downloadMutations.remove(clip.id);
       if (!_disposed) notifyListeners();
     }
+  }
+
+  Future<void> chooseFiles() async {
+    final picker = _filePicker;
+    if (picker == null || _disposed || _isImportingFiles) return;
+    _isImportingFiles = true;
+    notifyListeners();
+    String? failure;
+    try {
+      failure = await _importFiles(await picker.chooseFiles());
+    } catch (_) {
+      failure = 'Files could not be selected. Try again.';
+    } finally {
+      await _finishFileImport(failure);
+    }
+  }
+
+  Future<void> importFiles(List<HistoryImportFile> files) async {
+    if (_disposed || _isImportingFiles) {
+      for (final file in files) {
+        await _releaseImportFile(file);
+      }
+      return;
+    }
+    _isImportingFiles = true;
+    notifyListeners();
+    String? failure;
+    try {
+      failure = await _importFiles(files);
+    } finally {
+      await _finishFileImport(failure);
+    }
+  }
+
+  Future<String?> _importFiles(List<HistoryImportFile> files) async {
+    if (files.isEmpty) return null;
+    var failed = 0;
+    String? failedName;
+    _errorMessage = null;
+    for (final file in files) {
+      try {
+        if (!_disposed) {
+          await _repository.importFile(file);
+          _refreshAfterFileImport = true;
+        }
+      } catch (_) {
+        failed++;
+        failedName ??= file.name;
+      } finally {
+        await _releaseImportFile(file);
+      }
+    }
+    return failed == 0
+        ? null
+        : '$failed of ${files.length} files could not be imported. First: $failedName. Check access and the History size limit.';
+  }
+
+  Future<void> _releaseImportFile(HistoryImportFile file) async {
+    try {
+      await file.dispose();
+    } catch (_) {
+      /* Best-effort temporary-file cleanup. */
+    }
+  }
+
+  Future<void> _finishFileImport(String? failure) async {
+    _isImportingFiles = false;
+    if (_disposed) return;
+    if (_refreshAfterFileImport) {
+      _refreshAfterFileImport = false;
+      if (_draggedPinnedId != null || _isReorderingPinned) {
+        _refreshAfterPinnedInteraction = true;
+      } else {
+        await _refreshItemsAndFacets();
+      }
+    }
+    if (_disposed) return;
+    if (failure != null) _errorMessage = failure;
+    notifyListeners();
   }
 
   Future<bool> togglePin(HistoryClip clip) async {

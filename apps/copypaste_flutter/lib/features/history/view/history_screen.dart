@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
+import '../../../platform/files/history_file_drop_target.dart';
 
 import 'package:copypaste_flutter/app/theme/app_overlays.dart';
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
@@ -42,6 +43,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   late final TextEditingController _searchController;
   late final ScrollController _scrollController;
   bool _detailDrawerOpen = false;
+  bool _fileDragHover = false;
 
   @override
   void initState() {
@@ -77,9 +79,25 @@ class _HistoryScreenState extends State<HistoryScreen> {
           builder: (context, constraints) {
             final wide = constraints.maxWidth >= AdaptiveBreakpoints.inspector;
             final body = _bodyFor(context, wide: wide);
-            return Padding(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              child: body,
+            return HistoryFileDropTarget(
+              enabled:
+                  widget.controller.canImportFiles &&
+                  !widget.controller.isImportingFiles &&
+                  !_detailDrawerOpen,
+              onFiles: (files) =>
+                  unawaited(widget.controller.importFiles(files)),
+              onHover: (hover) {
+                if (mounted) setState(() => _fileDragHover = hover);
+              },
+              child: DecoratedBox(
+                decoration: _fileDragHover
+                    ? AppTheme.historyFileDropDecoration(context)
+                    : const BoxDecoration(),
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.lg),
+                  child: body,
+                ),
+              ),
             );
           },
         );
@@ -247,11 +265,19 @@ class _HistoryListState extends State<_HistoryList> {
       controller.items,
       sort: controller.query.sort,
       now: DateTime.now(),
+      isSectionCollapsed: controller.isSectionCollapsed,
     );
     final rowIndices = <Key, int>{
       for (var index = 0; index < rows.length; index++)
         _rowKey(rows[index]): index,
     };
+    final showLoadMore =
+        controller.canLoadMore &&
+        rows.any(
+          (row) =>
+              row is _HistorySectionRow &&
+              controller.isSectionCollapsed(row.section.key),
+        );
     final retainedIds = controller.items.map((item) => item.id).toSet();
     _sortableData.removeWhere((id, _) => !retainedIds.contains(id));
     return Column(
@@ -277,12 +303,22 @@ class _HistoryListState extends State<_HistoryList> {
               child: ListView.builder(
                 controller: scrollController,
                 findChildIndexCallback: (key) => rowIndices[key],
-                itemCount: rows.length + (controller.isLoadingMore ? 1 : 0),
+                itemCount:
+                    rows.length +
+                    (controller.isLoadingMore || showLoadMore ? 1 : 0),
                 itemBuilder: (context, index) {
                   if (index >= rows.length) {
-                    return const Padding(
-                      padding: EdgeInsets.all(AppSpacing.lg),
-                      child: Center(child: CircularProgressIndicator()),
+                    return Padding(
+                      padding: const EdgeInsets.all(AppSpacing.lg),
+                      child: Center(
+                        child: controller.isLoadingMore
+                            ? const CircularProgressIndicator()
+                            : Button.ghost(
+                                onPressed: () =>
+                                    unawaited(controller.loadMore()),
+                                child: const Text('Load more'),
+                              ),
+                      ),
                     );
                   }
                   return switch (rows[index]) {
@@ -290,6 +326,8 @@ class _HistoryListState extends State<_HistoryList> {
                       _HistorySectionDivider(
                         key: _rowKey(rows[index]),
                         section: section,
+                        collapsed: controller.isSectionCollapsed(section.key),
+                        onToggle: () => controller.toggleSection(section.key),
                       ),
                     _HistoryClipRow(:final clip) => _clipRow(clip),
                   };
@@ -299,7 +337,8 @@ class _HistoryListState extends State<_HistoryList> {
           ),
         ),
         if (controller.errorMessage != null &&
-            controller.state == HistoryLoadState.ready)
+            (controller.state == HistoryLoadState.ready ||
+                controller.state == HistoryLoadState.empty))
           Padding(
             padding: const EdgeInsets.only(top: AppSpacing.sm),
             child: Alert.destructive(
@@ -408,9 +447,16 @@ class _HistorySection {
 }
 
 class _HistorySectionDivider extends StatelessWidget {
-  const _HistorySectionDivider({super.key, required this.section});
+  const _HistorySectionDivider({
+    super.key,
+    required this.section,
+    required this.collapsed,
+    required this.onToggle,
+  });
 
   final _HistorySection section;
+  final bool collapsed;
+  final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -418,9 +464,26 @@ class _HistorySectionDivider extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
       child: Semantics(
         header: true,
-        child: Divider(
+        button: true,
+        expanded: !collapsed,
+        child: Button.ghost(
           key: ValueKey<String>('history-section-${section.key}'),
-          child: Text(section.label(context)),
+          onPressed: onToggle,
+          child: Divider(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              spacing: AppSpacing.xs,
+              children: [
+                Icon(
+                  collapsed
+                      ? LucideIcons.chevronRight
+                      : LucideIcons.chevronDown,
+                  size: AppIconSize.sm,
+                ),
+                Text(section.label(context)),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -431,6 +494,7 @@ List<_HistoryListRow> _historyListRows(
   List<HistoryClip> items, {
   required HistorySort sort,
   required DateTime now,
+  required bool Function(String) isSectionCollapsed,
 }) {
   final rows = <_HistoryListRow>[];
   final pinned = items.where((item) => item.pinned);
@@ -438,7 +502,9 @@ List<_HistoryListRow> _historyListRows(
     rows.add(
       const _HistorySectionRow(_HistorySection(_HistorySectionKind.pinned)),
     );
-    rows.addAll(pinned.map(_HistoryClipRow.new));
+    if (!isSectionCollapsed('pinned')) {
+      rows.addAll(pinned.map(_HistoryClipRow.new));
+    }
   }
 
   final unpinned = items.where((item) => !item.pinned).toList();
@@ -465,7 +531,9 @@ List<_HistoryListRow> _historyListRows(
       rows.add(_HistorySectionRow(section));
       previousSectionKey = section.key;
     }
-    rows.add(_HistoryClipRow(clip));
+    if (!isSectionCollapsed(section.key)) {
+      rows.add(_HistoryClipRow(clip));
+    }
   }
   return rows;
 }
@@ -537,30 +605,36 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
         final collapseSearch =
             constraints.maxWidth <
             _minimumExpandedSearchWidth +
-                (_compactControlExtent * _filterCount) +
-                (_toolbarGap * _filterCount);
+                (_compactControlExtent * (_filterCount + 1)) +
+                (_toolbarGap * (_filterCount + 1));
         if (collapseSearch && _searchExpanded) {
           return SizedBox(
             width: constraints.maxWidth,
-            child: _searchField(compact: true),
+            child: Row(
+              spacing: _toolbarGap,
+              children: [
+                Expanded(child: _searchField(compact: true)),
+                _importButton(),
+              ],
+            ),
           );
         }
 
         final filters = _filterSelects(context, compact: compactFilters);
         if (collapseSearch) {
-          return Row(
+          return Wrap(
             spacing: _toolbarGap,
+            runSpacing: _toolbarGap,
             children: [
+              _importButton(),
               Semantics(
                 label: 'Search history',
                 button: true,
                 child: Button.secondary(
                   key: const ValueKey<String>('history-search-toggle'),
-                  style: const ButtonStyle.secondaryIcon(
-                    density: ButtonDensity.iconComfortable,
-                  ).copyWith(decoration: AppTheme.softSelectDecoration),
+                  style: AppTheme.historyToolbarIconStyle,
                   onPressed: () => setState(() => _searchExpanded = true),
-                  child: const Icon(LucideIcons.search),
+                  child: const Icon(LucideIcons.search, size: AppIconSize.md),
                 ),
               ),
               ...filters,
@@ -580,11 +654,32 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
               ),
             ),
             ...filters,
+            _importButton(),
           ],
         );
       },
     );
   }
+
+  Widget _importButton() => Semantics(
+    label: 'Import files',
+    button: true,
+    child: Tooltip(
+      tooltip: (_) => const TooltipContainer(child: Text('Import files')),
+      child: Button.secondary(
+        key: const ValueKey<String>('history-import-files'),
+        style: AppTheme.historyToolbarIconStyle,
+        onPressed:
+            widget.controller.canImportFiles &&
+                !widget.controller.isImportingFiles
+            ? () => unawaited(widget.controller.chooseFiles())
+            : null,
+        child: widget.controller.isImportingFiles
+            ? const CircularProgressIndicator(size: AppIconSize.md)
+            : const Icon(LucideIcons.filePlus, size: AppIconSize.md),
+      ),
+    ),
+  );
 
   Widget _searchField({required bool compact}) {
     return TextField(
@@ -836,7 +931,10 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
         AppIconSize.sm +
         (AppSpacing.sm * theme.scaling) +
         theme.iconTheme.small.size!;
-    var width = _minimumExpandedSearchWidth + (_toolbarGap * _filterCount);
+    var width =
+        _minimumExpandedSearchWidth +
+        _compactControlExtent +
+        (_toolbarGap * (_filterCount + 1));
     for (final label in labels) {
       final painter = TextPainter(
         text: TextSpan(text: label, style: style),

@@ -1,4 +1,5 @@
 import '../models/history_models.dart';
+import 'history_file_importer.dart';
 
 /// Consumer-facing port over generated Rust bindings.
 ///
@@ -24,6 +25,7 @@ abstract interface class HistoryRepository {
   Future<void> copy(String id);
   Future<void> copyPlainText(String id);
   Future<void> saveFile(String id, String destinationPath);
+  Future<void> importFile(HistoryImportFile file);
   Future<void> setPinned(String id, bool pinned);
   Future<void> delete(String id);
   Future<void> deleteAll();

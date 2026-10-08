@@ -42,9 +42,7 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
 
   @override
   Future<List<MarketplaceModule>> list() async {
-    final directory = await (await _temporaryDirectory()).createTemp(
-      'module-catalog-',
-    );
+    final directory = await _createStagingDirectory('module-catalog-');
     try {
       final catalog = File('${directory.path}/$moduleCatalogName');
       if (!await _download(
@@ -101,9 +99,7 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
         artifact.sizeBytes > maximumModulePackageBytes) {
       throw const ModulesException('The module package size is invalid.');
     }
-    final directory = await (await _temporaryDirectory()).createTemp(
-      'module-download-',
-    );
+    final directory = await _createStagingDirectory('module-download-');
     try {
       final file = File('${directory.path}/package.cpmodule');
       await _download(
@@ -133,6 +129,12 @@ class GitHubModuleMarketplaceRepository implements ModuleMarketplaceRepository {
       }
       rethrow;
     }
+  }
+
+  Future<Directory> _createStagingDirectory(String prefix) async {
+    final root = await _temporaryDirectory();
+    await root.create(recursive: true);
+    return root.createTemp(prefix);
   }
 
   Future<bool> _download(

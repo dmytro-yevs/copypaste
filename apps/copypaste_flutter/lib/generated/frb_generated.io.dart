@@ -275,6 +275,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PairingCeremony dco_decode_pairing_ceremony(dynamic raw);
 
   @protected
+  PairingInvitation dco_decode_pairing_invitation(dynamic raw);
+
+  @protected
   Peer dco_decode_peer(dynamic raw);
 
   @protected
@@ -632,6 +635,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PairingCeremony sse_decode_pairing_ceremony(SseDeserializer deserializer);
+
+  @protected
+  PairingInvitation sse_decode_pairing_invitation(SseDeserializer deserializer);
 
   @protected
   Peer sse_decode_peer(SseDeserializer deserializer);
@@ -1087,6 +1093,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_pairing_ceremony(
     PairingCeremony self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_pairing_invitation(
+    PairingInvitation self,
     SseSerializer serializer,
   );
 
