@@ -27,13 +27,40 @@ abstract final class AppTheme {
   static const darkSidebarSurface = Color(0xFF1B1B1B);
 
   static const mobileNavigationMargin = EdgeInsets.symmetric(
-    horizontal: AppSpacing.lg,
+    horizontal: AppSpacing.sm,
     vertical: AppSpacing.sm,
   );
 
-  static const mobileNavigationPadding = EdgeInsets.all(AppSpacing.xs);
+  static const mobileNavigationPadding = EdgeInsets.all(
+    AppSpacing.xs - mobileNavigationBorderWidth,
+  );
 
-  static final mobileNavigationLabelStyle = _typography.xSmall;
+  static final mobileNavigationLabelStyle = _typography.xSmall.copyWith(
+    fontSize: AppTypographySize.navigation,
+    fontWeight: FontWeight.w700,
+    height: AppControlSize.navigationLabelHeight / AppTypographySize.navigation,
+  );
+
+  static TextStyle mobileNavigationTextStyle({
+    required bool selected,
+    double fontSize = AppTypographySize.navigation,
+  }) => mobileNavigationLabelStyle.copyWith(
+    fontSize: fontSize,
+    fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
+    height: AppControlSize.navigationLabelHeight / fontSize,
+  );
+
+  static ThemeData mobileNavigationTheme(BuildContext context) {
+    final theme = Theme.of(context);
+    return theme.copyWith(
+      scaling: () => 1,
+      typography: () => theme.typography.scale(1 / theme.scaling),
+      enableFeedback: () => false,
+    );
+  }
+
+  static const mobileNavigationSelectionOpacity = 0.09;
+  static const mobileNavigationBorderWidth = 0.4;
 
   static OutlinedContainerTheme mobileNavigationSurfaceTheme(
     BuildContext context,
@@ -41,16 +68,23 @@ abstract final class AppTheme {
     final theme = Theme.of(context);
     return OutlinedContainerTheme(
       backgroundColor: theme.colorScheme.secondary,
-      borderColor: theme.colorScheme.border,
-      borderRadius: const BorderRadius.all(Radius.circular(AppRadius.full)),
+      surfaceOpacity: 0.76,
+      surfaceBlur: AppSpacing.lg,
+      borderColor: theme.brightness == Brightness.dark
+          ? const Color(0x11FFFFFF)
+          : const Color(0x20000000),
+      borderWidth: mobileNavigationBorderWidth,
+      borderRadius: const BorderRadius.all(
+        Radius.circular(AppRadius.navigation),
+      ),
       padding: EdgeInsets.zero,
       boxShadow: [
         BoxShadow(
           color: theme.brightness == Brightness.dark
-              ? Colors.black.withValues(alpha: 0.3)
-              : theme.colorScheme.foreground.withValues(alpha: 0.07),
-          blurRadius: AppSpacing.lg,
-          offset: const Offset(0, AppSpacing.xs),
+              ? const Color(0x04FFFFFF)
+              : const Color(0x20000000),
+          blurRadius: AppSpacing.navigationShadowBlur,
+          offset: const Offset(0, AppSpacing.navigationShadowOffset),
         ),
       ],
     );
@@ -58,10 +92,13 @@ abstract final class AppTheme {
 
   static AbstractButtonStyle mobileNavigationButtonStyle({
     required bool selected,
+    double? selectionFactor,
+    double horizontalPadding = AppSpacing.lg,
   }) {
-    const padding = EdgeInsets.symmetric(
-      horizontal: AppSpacing.xl,
-      vertical: AppSpacing.md,
+    final factor = selectionFactor ?? (selected ? 1.0 : 0.0);
+    final padding = EdgeInsets.symmetric(
+      horizontal: horizontalPadding,
+      vertical: AppSpacing.xs,
     );
     return (selected
             ? const ButtonStyle.secondary()
@@ -72,29 +109,56 @@ abstract final class AppTheme {
         )
         .copyWith(
           decoration: (context, states, value) {
-            if (!selected || value is! BoxDecoration) return value;
-            return value.copyWith(
-              color: navigationAccent.withValues(alpha: 0.12),
-            );
+            value = _navigationButtonDecoration(context, states, value);
+            if (value is! BoxDecoration) return value;
+            return value.copyWith(color: Colors.transparent);
           },
           textStyle: (context, states, value) => value.copyWith(
-            color: selected
-                ? navigationAccent
-                : states.contains(WidgetState.hovered) ||
-                      states.contains(WidgetState.focused)
-                ? Theme.of(context).colorScheme.foreground
-                : Theme.of(context).colorScheme.mutedForeground,
+            color: Color.lerp(
+              Theme.of(context).colorScheme.foreground,
+              navigationAccent,
+              factor,
+            ),
           ),
           iconTheme: (context, states, value) => value.copyWith(
             size: AppIconSize.lg,
-            color: selected
-                ? navigationAccent
-                : states.contains(WidgetState.hovered) ||
-                      states.contains(WidgetState.focused)
-                ? Theme.of(context).colorScheme.foreground
-                : Theme.of(context).colorScheme.mutedForeground,
+            color: Color.lerp(
+              Theme.of(context).colorScheme.foreground,
+              navigationAccent,
+              factor,
+            ),
           ),
         );
+  }
+
+  static BoxDecoration mobileNavigationSelectionDecoration(double factor) =>
+      BoxDecoration(
+        color: navigationAccent.withValues(
+          alpha:
+              mobileNavigationSelectionOpacity *
+              AppMotion.navigationCurve.transform(factor),
+        ),
+        borderRadius: const BorderRadius.all(Radius.circular(AppRadius.full)),
+      );
+
+  static final navigationIconButtonStyle = const ButtonStyle.ghostIcon()
+      .copyWith(decoration: _navigationButtonDecoration);
+
+  static AbstractButtonStyle navigationRailButtonStyle(
+    BuildContext context, {
+    required bool selected,
+  }) {
+    final accent = Theme.of(context).colorScheme.accent;
+    return (selected
+            ? const ButtonStyle.secondary(
+                density: ButtonDensity.icon,
+              ).withBackgroundColor(
+                color: accent,
+                hoverColor: accent,
+                focusColor: accent,
+              )
+            : const ButtonStyle.ghost(density: ButtonDensity.icon))
+        .copyWith(decoration: _navigationButtonDecoration);
   }
 
   static BoxDecoration historyPinnedDropDecoration(BuildContext context) {
@@ -110,7 +174,11 @@ abstract final class AppTheme {
       const ButtonStyle.secondaryIcon().copyWith(
         padding: (context, states, value) =>
             const EdgeInsets.all((AppControlSize.large - AppIconSize.md) / 2),
-        decoration: softSelectDecoration,
+        decoration: (context, states, value) => _buttonDecoration(
+          context,
+          states,
+          softSelectDecoration(context, states, value),
+        ),
       );
 
   static BoxDecoration historyFileDropDecoration(BuildContext context) {
@@ -287,7 +355,16 @@ abstract final class AppTheme {
 
   static const settingsRowPadding = EdgeInsets.all(AppSpacing.lg);
 
+  static final settingsNavigationButtonStyle = const ButtonStyle.ghost()
+      .copyWith(decoration: _navigationButtonDecoration);
+
+  static final settingsNavigationSelectedButtonStyle =
+      const ButtonStyle.secondary().copyWith(
+        decoration: _navigationButtonDecoration,
+      );
+
   static final settingsCategoryButtonStyle = const ButtonStyle.ghost().copyWith(
+    decoration: _navigationButtonDecoration,
     padding: (context, states, value) => settingsRowPadding,
   );
 
@@ -428,6 +505,7 @@ abstract final class AppTheme {
   );
 
   static const _primaryButtonTheme = PrimaryButtonTheme(
+    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -435,6 +513,7 @@ abstract final class AppTheme {
   );
 
   static const _secondaryButtonTheme = SecondaryButtonTheme(
+    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -442,6 +521,7 @@ abstract final class AppTheme {
   );
 
   static const _outlineButtonTheme = OutlineButtonTheme(
+    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -449,6 +529,7 @@ abstract final class AppTheme {
   );
 
   static const _ghostButtonTheme = GhostButtonTheme(
+    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -456,6 +537,7 @@ abstract final class AppTheme {
   );
 
   static const _linkButtonTheme = LinkButtonTheme(
+    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -463,6 +545,7 @@ abstract final class AppTheme {
   );
 
   static const _textButtonTheme = TextButtonTheme(
+    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -470,6 +553,7 @@ abstract final class AppTheme {
   );
 
   static const _destructiveButtonTheme = DestructiveButtonTheme(
+    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -477,6 +561,7 @@ abstract final class AppTheme {
   );
 
   static const _fixedButtonTheme = FixedButtonTheme(
+    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -484,6 +569,7 @@ abstract final class AppTheme {
   );
 
   static const _menuButtonTheme = MenuButtonTheme(
+    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -491,6 +577,7 @@ abstract final class AppTheme {
   );
 
   static const _menubarButtonTheme = MenubarButtonTheme(
+    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -498,6 +585,7 @@ abstract final class AppTheme {
   );
 
   static const _mutedButtonTheme = MutedButtonTheme(
+    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -505,6 +593,7 @@ abstract final class AppTheme {
   );
 
   static const _cardButtonTheme = CardButtonTheme(
+    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -687,6 +776,29 @@ abstract final class AppTheme {
     IconThemeData value,
   ) {
     return value.copyWith(size: AppIconSize.sm);
+  }
+
+  static Decoration _buttonDecoration(
+    BuildContext context,
+    Set<WidgetState> states,
+    Decoration value,
+  ) {
+    if (value is! BoxDecoration) return value;
+    return value.copyWith(
+      border: Border.all(
+        color: Theme.of(context).colorScheme.border,
+        strokeAlign: BorderSide.strokeAlignCenter,
+      ),
+    );
+  }
+
+  static Decoration _navigationButtonDecoration(
+    BuildContext context,
+    Set<WidgetState> states,
+    Decoration value,
+  ) {
+    if (value is! BoxDecoration) return value;
+    return value.copyWith(border: const Border.fromBorderSide(BorderSide.none));
   }
 
   static EdgeInsetsGeometry _buttonMargin(

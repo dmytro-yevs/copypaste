@@ -1,12 +1,66 @@
 import Cocoa
 import AVFoundation
 import CoreVideo
+import CoreImage
 import IOSurface
 import FlutterMacOS
 import XCTest
 @testable import CopyPaste_Dev
 
 final class CaptureProtectedRenderingTests: XCTestCase {
+  func testProtectedFramesPreserveThemeColorsAndAdvertiseSRGB() throws {
+    let srgb = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+    let extended = try XCTUnwrap(CGColorSpace(name: CGColorSpace.extendedSRGB))
+    let context = CIContext()
+    let extent = CGRect(x: 0, y: 0, width: 32, height: 32)
+    let colors: [[CGFloat]] = [
+      [24 / 255, 24 / 255, 24 / 255, 1],
+      [33 / 255, 33 / 255, 33 / 255, 1],
+      [223 / 255, 223 / 255, 223 / 255, 1],
+      [1, 1, 1, 1],
+      [0.7, 0.35, 0.1, 1],
+    ]
+    let pool = CaptureProtectedPixelBufferPool(available: {})
+    for pixelFormat in [kCVPixelFormatType_32BGRA, kCVPixelFormatType_40ARGBLEWideGamut] {
+      for components in colors {
+        var original: CVPixelBuffer?
+        XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, 32, 32, pixelFormat,
+          [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &original), kCVReturnSuccess)
+        let originalBuffer = try XCTUnwrap(original)
+        let inputSpace = pixelFormat == kCVPixelFormatType_32BGRA ? srgb : extended
+        let color = try XCTUnwrap(CGColor(colorSpace: srgb, components: components))
+        let image = CIImage(color: CIColor(cgColor: color)).cropped(to: extent)
+        context.render(image, to: originalBuffer, bounds: extent, colorSpace: inputSpace)
+        let surface = try XCTUnwrap(CVPixelBufferGetIOSurface(originalBuffer)?.takeUnretainedValue())
+        IOSurfaceSetValue(surface, kIOSurfaceColorSpace,
+                          pixelFormat == kCVPixelFormatType_32BGRA ? CGColorSpace.sRGB : CGColorSpace.extendedSRGB)
+        // Match production: wrap Flutter's IOSurface in a new untagged pixel buffer.
+        var wrapped: Unmanaged<CVPixelBuffer>?
+        XCTAssertEqual(CVPixelBufferCreateWithIOSurface(kCFAllocatorDefault, surface, nil, &wrapped),
+                       kCVReturnSuccess)
+        let source = try XCTUnwrap(wrapped?.takeRetainedValue())
+        let rendered = try XCTUnwrap(pool.buffer(width: 32, height: 32).1)
+        CaptureProtectedFrameConverter.render(source, to: rendered)
+        XCTAssertEqual(CVPixelBufferLockBaseAddress(rendered, .readOnly), kCVReturnSuccess)
+        let bytes = try XCTUnwrap(CVPixelBufferGetBaseAddress(rendered)).assumingMemoryBound(to: UInt8.self)
+        for (index, component) in [components[2], components[1], components[0], components[3]].enumerated() {
+          XCTAssertEqual(Double(bytes[index]), Double(component * 255), accuracy: 1)
+        }
+        CVPixelBufferUnlockBaseAddress(rendered, .readOnly)
+        var format: CMVideoFormatDescription?
+        XCTAssertEqual(CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault,
+          imageBuffer: rendered, formatDescriptionOut: &format), noErr)
+        let description = try XCTUnwrap(format)
+        XCTAssertEqual(CMFormatDescriptionGetExtension(description,
+          extensionKey: kCMFormatDescriptionExtension_TransferFunction) as? String,
+          kCVImageBufferTransferFunction_sRGB as String)
+        XCTAssertEqual(CMFormatDescriptionGetExtension(description,
+          extensionKey: kCMFormatDescriptionExtension_ColorPrimaries) as? String,
+          kCVImageBufferColorPrimaries_ITU_R_709_2 as String)
+      }
+    }
+  }
+
   func testPoolNeverAllocatesMoreThanThreeRetainedFrames() throws {
     let pool = CaptureProtectedPixelBufferPool(available: {})
     var frames: [CVPixelBuffer] = []
@@ -194,6 +248,58 @@ final class MacosAppUpdateTests: XCTestCase {
   func testSuccessRequiresExpectedVersionAndSuccessfulVersionCheck() throws {
     XCTAssertFalse(try install(installedVersion: "1.0.7").0)
     XCTAssertFalse(try install(listStatus: 1).0)
+  }
+}
+
+final class MacosApplicationLifecycleTests: XCTestCase {
+  func testRelaunchWaitsForTheOldProcessAndPreservesTheInstalledBundlePath() throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("copypaste-relaunch-test-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let application = directory.appendingPathComponent("Updated CopyPaste ' ;.app")
+    try FileManager.default.createDirectory(at: application, withIntermediateDirectories: true)
+    let receipt = directory.appendingPathComponent("opened")
+    let opener = directory.appendingPathComponent("fake-open")
+    try "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$(dirname \"$0\")/opened\"\n"
+      .write(to: opener, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: opener.path)
+    let oldProcess = Process()
+    oldProcess.executableURL = URL(fileURLWithPath: "/bin/cat")
+    let input = Pipe()
+    oldProcess.standardInput = input
+    oldProcess.standardOutput = FileHandle.nullDevice
+    oldProcess.standardError = FileHandle.nullDevice
+    try oldProcess.run()
+    defer { if oldProcess.isRunning { oldProcess.terminate() } }
+    let helper = try MacosApplicationLifecycle.scheduleRelaunch(
+      applicationURL: application, processID: oldProcess.processIdentifier, opener: opener
+    )
+    defer { if helper.isRunning { helper.terminate() } }
+    XCTAssertTrue(oldProcess.isRunning)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: receipt.path))
+    try input.fileHandleForWriting.close()
+    oldProcess.waitUntilExit()
+    let finished = expectation(description: "The relaunch helper exits")
+    DispatchQueue.global().async { helper.waitUntilExit(); finished.fulfill() }
+    wait(for: [finished], timeout: 5)
+    XCTAssertEqual(helper.terminationStatus, 0)
+    XCTAssertEqual(try String(contentsOf: receipt, encoding: .utf8), "-n\n-a\n\(application.path)\n")
+  }
+
+  func testMissingBundleDoesNotScheduleRelaunch() {
+    XCTAssertThrowsError(try MacosApplicationLifecycle.scheduleRelaunch(
+      applicationURL: URL(fileURLWithPath: "/missing-copypaste-\(UUID().uuidString).app"),
+      processID: ProcessInfo.processInfo.processIdentifier
+    ))
+  }
+
+  func testMissingOpenerDoesNotScheduleRelaunch() {
+    XCTAssertThrowsError(try MacosApplicationLifecycle.scheduleRelaunch(
+      applicationURL: FileManager.default.temporaryDirectory,
+      processID: ProcessInfo.processInfo.processIdentifier,
+      opener: URL(fileURLWithPath: "/missing-open-\(UUID().uuidString)")
+    ))
   }
 }
 

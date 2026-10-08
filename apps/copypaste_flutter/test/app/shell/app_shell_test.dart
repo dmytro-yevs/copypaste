@@ -111,7 +111,7 @@ void main() {
     expect(_bottomNavigationItem('Devices'), findsOneWidget);
     expect(_bottomNavigationItem('Settings'), findsOneWidget);
     await tester.tap(_bottomNavigationItem('Devices'));
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(find.text('Devices body'), findsOneWidget);
   });
 
@@ -141,7 +141,12 @@ void main() {
     expect(navigationBar.alignment, NavigationBarAlignment.center);
     expect(navigationBar.backgroundColor, Colors.transparent);
     expect(navigationBar.padding, AppTheme.mobileNavigationPadding);
-    expect(navigationBar.spacing, AppSpacing.xs);
+    expect(navigationBar.spacing, AppSpacing.zero);
+    final surfaceBounds = tester.getRect(
+      find.byKey(const ValueKey('mobile-navigation-surface')),
+    );
+    expect(surfaceBounds.width, AppLayoutSize.mobileNavigationMaxWidth);
+    expect(surfaceBounds.height, AppControlSize.navigation);
     expect(dockBounds.left, 0);
     expect(dockBounds.width, 639);
     expect(bounds.width, lessThan(639 - AppSpacing.lg * 2));
@@ -150,8 +155,11 @@ void main() {
       find.descendant(of: dock, matching: find.byType(Card)),
       findsNothing,
     );
-    final items = navigationBar.children.whereType<Flexible>().map(
-      (item) => item.child as NavigationItem,
+    final items = tester.widgetList<NavigationItem>(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.byType(NavigationItem),
+      ),
     );
     expect(items, hasLength(3));
     expect(items.map((item) => (item.label! as Text).data), [
@@ -159,24 +167,37 @@ void main() {
       'Devices',
       'Settings',
     ]);
-    expect(items.map((item) => (item.child as Icon).icon), [
-      LucideIcons.history,
-      DevicePresentation.collectionIcon,
-      LucideIcons.settings,
-    ]);
+    expect(
+      tester
+          .widgetList<Icon>(
+            find.descendant(
+              of: find.byType(NavigationBar),
+              matching: find.byType(Icon),
+            ),
+          )
+          .map((item) => item.icon),
+      [
+        LucideIcons.history,
+        DevicePresentation.collectionIcon,
+        LucideIcons.settings,
+      ],
+    );
     final selectedItem = find.descendant(
       of: dock,
       matching: find.byKey(
         const ValueKey<AppDestination>(AppDestination.history),
       ),
     );
-    final selectedDecoration = items.first.selectedStyle!.decoration(
-      tester.element(selectedItem),
-      const {WidgetState.selected},
-    );
+    final selectedDecoration = tester
+        .widget<DecoratedBox>(
+          find.byKey(const ValueKey('mobile-navigation-selection-0')),
+        )
+        .decoration;
     expect(
       (selectedDecoration as BoxDecoration).color,
-      AppTheme.navigationAccent.withValues(alpha: 0.12),
+      AppTheme.navigationAccent.withValues(
+        alpha: AppTheme.mobileNavigationSelectionOpacity,
+      ),
     );
     expect(
       items.first.selectedStyle!.iconTheme(tester.element(selectedItem), const {
@@ -344,8 +365,8 @@ void main() {
             expect(find.text('${destination.label} body'), findsOneWidget);
             final bar = find.byKey(const ValueKey<String>('bottom-navigation'));
             final barBounds = tester.getRect(bar);
-            expect(barBounds.left, greaterThanOrEqualTo(AppSpacing.lg));
-            expect(barBounds.right, lessThanOrEqualTo(320 - AppSpacing.lg));
+            expect(barBounds.left, greaterThanOrEqualTo(AppSpacing.sm));
+            expect(barBounds.right, lessThanOrEqualTo(320 - AppSpacing.sm));
             expect(barBounds.center.dx, closeTo(160, 0.5));
             expect(
               barBounds.bottom,
@@ -791,12 +812,15 @@ void main() {
         ),
       );
 
-      final navigationBar = tester.widget<NavigationBar>(
-        find.byKey(const ValueKey<String>('bottom-navigation')),
-      );
       expect(
-        ((navigationBar.children.whereType<Flexible>().last.child
-                        as NavigationItem)
+        (tester
+                    .widgetList<NavigationItem>(
+                      find.descendant(
+                        of: find.byType(NavigationBar),
+                        matching: find.byType(NavigationItem),
+                      ),
+                    )
+                    .last
                     .label!
                 as Text)
             .data,

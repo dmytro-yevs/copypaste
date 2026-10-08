@@ -161,7 +161,7 @@ void main() {
     expect(AppTheme.light.density.baseContentPadding, AppSpacing.md);
   });
 
-  testWidgets('installs borderless component themes for every state', (
+  testWidgets('installs shared component themes for every state', (
     tester,
   ) async {
     FocusOutlineTheme? focusTheme;
@@ -337,6 +337,88 @@ void main() {
     }
     expect(cardTheme?.duration, AppMotion.quick);
   });
+
+  testWidgets(
+    'borders every button consistently without changing navigation',
+    (tester) async {
+      for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+        late BuildContext context;
+        await tester.pumpWidget(
+          ShadcnApp(
+            theme: AppTheme.light,
+            darkTheme: AppTheme.dark,
+            themeMode: mode,
+            builder: AppTheme.builder,
+            home: Builder(
+              builder: (value) {
+                context = value;
+                return const SizedBox.shrink();
+              },
+            ),
+          ),
+        );
+        final buttonStyles = <AbstractButtonStyle>[
+          ButtonVariance.primary,
+          ButtonVariance.secondary,
+          ButtonVariance.outline,
+          ButtonVariance.ghost,
+          ButtonVariance.link,
+          ButtonVariance.text,
+          ButtonVariance.destructive,
+          ButtonVariance.fixed,
+          ButtonVariance.menu,
+          ButtonVariance.menubar,
+          ButtonVariance.muted,
+          ButtonVariance.card,
+          const ButtonStyle.secondaryIcon(),
+          const ButtonStyle.ghostIcon(),
+          AppTheme.historyToolbarIconStyle,
+          AppTheme.historyClipButtonStyle(selected: false),
+          AppTheme.historyClipButtonStyle(selected: true),
+          AppTheme.clipboardMenuButtonStyle(),
+        ];
+        final navigationStyles = <AbstractButtonStyle>[
+          AppTheme.navigationIconButtonStyle,
+          AppTheme.navigationRailButtonStyle(context, selected: false),
+          AppTheme.navigationRailButtonStyle(context, selected: true),
+          AppTheme.mobileNavigationButtonStyle(selected: false),
+          AppTheme.mobileNavigationButtonStyle(selected: true),
+          AppTheme.settingsCategoryButtonStyle,
+          AppTheme.settingsNavigationButtonStyle,
+          AppTheme.settingsNavigationSelectedButtonStyle,
+        ];
+        for (final states in <Set<WidgetState>>[
+          const {},
+          const {WidgetState.hovered},
+          const {WidgetState.focused},
+          const {WidgetState.pressed},
+          const {WidgetState.disabled},
+        ]) {
+          for (final style in buttonStyles) {
+            final decoration =
+                style.decoration(context, states) as BoxDecoration;
+            expect(
+              decoration.border,
+              Border.all(
+                color: Theme.of(context).colorScheme.border,
+                strokeAlign: BorderSide.strokeAlignCenter,
+              ),
+            );
+          }
+          for (final style in navigationStyles) {
+            final decoration =
+                style.decoration(context, states) as BoxDecoration;
+            expect(decoration.border?.top.style, BorderStyle.none);
+          }
+        }
+      }
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
 
   testWidgets('removes shared component motion when animations are disabled', (
     tester,

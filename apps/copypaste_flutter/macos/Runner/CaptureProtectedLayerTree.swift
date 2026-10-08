@@ -117,8 +117,40 @@ final class CaptureProtectedPixelBufferPool {
   }
 }
 
-private final class ProtectedLayerNode {
+/// Preserves Flutter's color space when converting frames for the video renderer.
+final class CaptureProtectedFrameConverter {
   private static let context = CIContext(options: [.cacheIntermediates: false])
+  private static let outputColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+
+  static func render(_ source: CVPixelBuffer, to destination: CVPixelBuffer) {
+    let image = CIImage(cvPixelBuffer: source, options: [.colorSpace: colorSpace(of: source)])
+    context.render(image, to: destination, bounds: image.extent, colorSpace: outputColorSpace)
+    // The video renderer needs the same transfer function as the encoded pixels.
+    // Untagged RGB samples leave it to choose a video color space and gamma.
+    CVBufferSetAttachment(destination, kCVImageBufferCGColorSpaceKey,
+                          outputColorSpace, .shouldPropagate)
+    CVBufferSetAttachment(destination, kCVImageBufferColorPrimariesKey,
+                          kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
+    CVBufferSetAttachment(destination, kCVImageBufferTransferFunctionKey,
+                          kCVImageBufferTransferFunction_sRGB, .shouldPropagate)
+    if let surface = CVPixelBufferGetIOSurface(destination)?.takeUnretainedValue() {
+      IOSurfaceSetValue(surface, kIOSurfaceColorSpace, CGColorSpace.sRGB)
+    }
+  }
+
+  private static func colorSpace(of buffer: CVPixelBuffer) -> CGColorSpace {
+    if let surface = CVPixelBufferGetIOSurface(buffer)?.takeUnretainedValue(),
+       let profile = IOSurfaceCopyValue(surface, kIOSurfaceColorSpace),
+       let colorSpace = CGColorSpace(propertyListPlist: profile) {
+      return colorSpace
+    }
+    return CVImageBufferGetColorSpace(buffer)?.takeUnretainedValue() ?? CGColorSpace(name:
+      CVPixelBufferGetPixelFormatType(buffer) == kCVPixelFormatType_40ARGBLEWideGamut
+        ? CGColorSpace.extendedSRGB : CGColorSpace.sRGB)!
+  }
+}
+
+private final class ProtectedLayerNode {
   private let source: CALayer
   private var children: [ObjectIdentifier: ProtectedLayerNode] = [:]
   private var observations: [NSKeyValueObservation] = []
@@ -317,7 +349,7 @@ private final class ProtectedLayerNode {
     // Flutter uses a wide-gamut IOSurface format that the video renderer cannot
     // display directly. Core Image converts it on the GPU; off uses Flutter's
     // original compositor without this pass.
-    Self.context.render(CIImage(cvPixelBuffer: buffer), to: rendered)
+    CaptureProtectedFrameConverter.render(buffer, to: rendered)
     var format: CMVideoFormatDescription?
     guard CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault,
       imageBuffer: rendered, formatDescriptionOut: &format) == noErr,

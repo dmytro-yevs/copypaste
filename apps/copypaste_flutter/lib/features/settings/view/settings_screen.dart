@@ -31,7 +31,6 @@ class SettingsScreen extends StatefulWidget {
     this.quickPaste,
     this.appUpdate,
     this.modules,
-    this.onQuitForUpdate,
     this.onOpenAndroidCaptureSetup,
   });
 
@@ -39,7 +38,6 @@ class SettingsScreen extends StatefulWidget {
   final QuickPasteSettingsController? quickPaste;
   final AppUpdateController? appUpdate;
   final ModulesController? modules;
-  final Future<void> Function()? onQuitForUpdate;
   final Future<void> Function()? onOpenAndroidCaptureSetup;
 
   @override
@@ -196,6 +194,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             for (final target in targets)
                               NavigationItem(
                                 key: ValueKey<String>(target.widgetKey),
+                                style: AppTheme.settingsNavigationButtonStyle,
+                                selectedStyle: AppTheme
+                                    .settingsNavigationSelectedButtonStyle,
                                 label: _navigationTargetLabel(target),
                                 child: Icon(
                                   target.section.icon,
@@ -338,6 +339,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   ) {
     return ListView.separated(
       key: const ValueKey<String>('settings-category-list'),
+      controller: PrimaryScrollController.maybeOf(context),
+      primary: false,
       padding: const EdgeInsets.fromLTRB(
         AppSpacing.lg,
         AppSpacing.zero,
@@ -386,7 +389,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   label: 'Back to Settings',
                   child: Button.ghost(
                     key: const ValueKey<String>('settings-back'),
-                    style: const ButtonStyle.ghostIcon(),
+                    style: AppTheme.navigationIconButtonStyle,
                     onPressed: () => Navigator.of(context).pop(),
                     child: const Icon(LucideIcons.arrowLeft),
                   ),
@@ -1161,10 +1164,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Text('Installing'),
       ),
       AppUpdatePhase.restartRequired => Button.primary(
-        key: const ValueKey<String>('quit-after-app-update'),
-        onPressed: widget.onQuitForUpdate,
-        leading: const Icon(LucideIcons.logOut),
-        child: const Text('Quit CopyPaste'),
+        key: const ValueKey<String>('restart-after-app-update'),
+        onPressed: controller.busy || !controller.canRestart
+            ? null
+            : controller.restartApplication,
+        leading: const Icon(LucideIcons.refreshCw),
+        child: const Text('Restart CopyPaste'),
       ),
       AppUpdatePhase.idle ||
       AppUpdatePhase.upToDate ||

@@ -25,6 +25,9 @@ abstract final class AppSpacing {
   static const double xxxl = 32;
   static const double huge = 40;
   static const double massive = 48;
+  static const double navigationIconLabelGap = 1 / 3;
+  static const double navigationShadowBlur = 8 / 3;
+  static const double navigationShadowOffset = 0.85;
 }
 
 /// Standard Lucide icon sizes for CopyPaste UI.
@@ -45,6 +48,7 @@ abstract final class AppRadius {
   static const double md = 8;
   static const double lg = 12;
   static const double xl = 16;
+  static const double navigation = 28;
   static const double full = 999;
 }
 
@@ -54,6 +58,12 @@ abstract final class AppControlSize {
   static const double regular = 36;
   static const double large = 40;
   static const double touch = 48;
+  static const double navigation = 56;
+  static const double navigationLabelHeight =
+      touch -
+      AppSpacing.xs * 2 -
+      AppIconSize.lg -
+      AppSpacing.navigationIconLabelGap;
 }
 
 /// Shared compact metadata and desktop menu typography.
@@ -61,6 +71,8 @@ abstract final class AppTypographySize {
   static const double historyMetadata = 12;
   static const double menu = 13;
   static const double menuMetadata = menu - 2;
+  static const double navigation = 12;
+  static const double navigationCompact = 10;
 }
 
 /// Shared dimensions for application layouts.
@@ -75,6 +87,7 @@ abstract final class AppLayoutSize {
   static const double settingsStackedControlWidth = 420;
   static const double settingsNavigationWidth = 240;
   static const double settingsContentMaxWidth = 900;
+  static const double mobileNavigationMaxWidth = 328;
 }
 
 /// Shared dimensions for application-owned overlays.

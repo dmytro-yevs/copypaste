@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:copypaste_flutter/app/navigation/navigation.dart';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -6,6 +8,8 @@ import '../theme/app_motion.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import 'macos_window_header.dart';
+import 'app_mobile_navigation.dart';
+import '../navigation/app_destination_viewport.dart';
 
 /// Hosts persistent primary destinations inside the adaptive shadcn navigation.
 class AppShell extends StatefulWidget {
@@ -59,6 +63,7 @@ class _AppShellState extends State<AppShell> {
         _desktopRailExpanded = false;
       }
       widget.controller.addListener(_handleNavigationChange);
+      _destinationChildren = _childrenFor(widget.destinations);
     }
     if (!identical(oldWidget.destinations, widget.destinations)) {
       _destinationChildren = _childrenFor(widget.destinations);
@@ -86,7 +91,11 @@ class _AppShellState extends State<AppShell> {
         .map(
           (destination) => KeyedSubtree(
             key: ValueKey<AppDestination>(destination),
-            child: destinations[destination]!,
+            child: PrimaryScrollController(
+              controller: widget.controller.scrollControllerFor(destination),
+              automaticallyInheritForPlatforms: const {},
+              child: destinations[destination]!,
+            ),
           ),
         )
         .toList(growable: false);
@@ -105,6 +114,11 @@ class _AppShellState extends State<AppShell> {
               widget.controller.selectedDestination,
             );
             final selectedDestination = widget.controller.selectedDestination;
+            final mobileNavigationVisible =
+                mode == _ShellNavigationMode.bottom &&
+                MediaQuery.viewInsetsOf(context).bottom == 0 &&
+                !widget.controller.bottomOverlayOpen;
+            final systemBottomPadding = MediaQuery.paddingOf(context).bottom;
             final railExpanded = mode == _ShellNavigationMode.wide
                 ? (_desktopRailExpanded ?? true)
                 : false;
@@ -125,7 +139,7 @@ class _AppShellState extends State<AppShell> {
                     ),
                     child: Button.ghost(
                       key: const ValueKey<String>('navigation-rail-toggle'),
-                      style: const ButtonStyle.ghostIcon(),
+                      style: AppTheme.navigationIconButtonStyle,
                       onPressed: _toggleDesktopRail,
                       child: const Icon(LucideIcons.panelLeft),
                     ),
@@ -139,10 +153,8 @@ class _AppShellState extends State<AppShell> {
                   MediaQuery.viewInsetsOf(context).bottom > 0,
               floatingFooter: mode == _ShellNavigationMode.bottom,
               footers: [
-                if (mode == _ShellNavigationMode.bottom &&
-                    MediaQuery.viewInsetsOf(context).bottom == 0 &&
-                    !widget.controller.bottomOverlayOpen)
-                  _mobileNavigationDock(context, selectedKey),
+                if (mobileNavigationVisible)
+                  AppMobileNavigation(controller: widget.controller),
               ],
               headers: widget.unifiedTitleBar
                   ? const []
@@ -167,13 +179,32 @@ class _AppShellState extends State<AppShell> {
                       ),
                       const Divider(),
                     ],
-              child: AppNavigationHost(
-                key: _navigationHostKey,
-                controller: widget.controller,
-                child: IndexedStack(
-                  index: widget.controller.selectedDestination.index,
-                  children: _destinationChildren,
-                ),
+              child: Builder(
+                builder: (context) {
+                  final media = MediaQuery.of(context);
+                  // The floating footer already includes the system safe area.
+                  final bottom =
+                      (media.padding.bottom -
+                              (mobileNavigationVisible
+                                  ? systemBottomPadding
+                                  : 0))
+                          .clamp(0.0, double.infinity)
+                          .toDouble();
+                  return MediaQuery(
+                    data: media.copyWith(
+                      padding: media.padding.copyWith(bottom: bottom),
+                    ),
+                    child: AppNavigationHost(
+                      key: _navigationHostKey,
+                      controller: widget.controller,
+                      child: AppDestinationViewport(
+                        controller: widget.controller,
+                        swipeEnabled: mode == _ShellNavigationMode.bottom,
+                        children: _destinationChildren,
+                      ),
+                    ),
+                  );
+                },
               ),
             );
 
@@ -241,37 +272,6 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  Widget _mobileNavigationDock(BuildContext context, Key selectedKey) {
-    return SafeArea(
-      key: const ValueKey<String>('mobile-navigation-dock'),
-      top: false,
-      child: Padding(
-        padding: AppTheme.mobileNavigationMargin,
-        child: Center(
-          heightFactor: 1,
-          child: IntrinsicWidth(
-            child: OutlinedContainer(
-              theme: AppTheme.mobileNavigationSurfaceTheme(context),
-              child: NavigationBar(
-                key: const ValueKey<String>('bottom-navigation'),
-                alignment: NavigationBarAlignment.center,
-                labelType: NavigationLabelType.all,
-                labelPosition: NavigationLabelPosition.bottom,
-                labelSize: NavigationLabelSize.small,
-                selectedKey: selectedKey,
-                onSelected: _selectDestination,
-                backgroundColor: Colors.transparent,
-                padding: AppTheme.mobileNavigationPadding,
-                spacing: AppSpacing.xs,
-                children: _bottomNavigationItems(),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   List<Widget> _navigationItems({
     required BuildContext context,
     required ThemeData theme,
@@ -282,15 +282,11 @@ class _AppShellState extends State<AppShell> {
         .map((destination) {
           Widget item = NavigationItem(
             key: ValueKey<AppDestination>(destination.destination),
-            style: const ButtonStyle.ghost(density: ButtonDensity.icon),
-            selectedStyle:
-                const ButtonStyle.secondary(
-                  density: ButtonDensity.icon,
-                ).withBackgroundColor(
-                  color: theme.colorScheme.accent,
-                  hoverColor: theme.colorScheme.accent,
-                  focusColor: theme.colorScheme.accent,
-                ),
+            style: AppTheme.navigationRailButtonStyle(context, selected: false),
+            selectedStyle: AppTheme.navigationRailButtonStyle(
+              context,
+              selected: true,
+            ),
             alignment: expanded ? Alignment.centerLeft : Alignment.center,
             label: Text(
               destination.label,
@@ -352,38 +348,15 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  List<Widget> _bottomNavigationItems() {
-    final style = AppTheme.mobileNavigationButtonStyle(selected: false);
-    final selectedStyle = AppTheme.mobileNavigationButtonStyle(selected: true);
-    return [
-      for (final destination in appNavigationDestinations) ...[
-        if (destination != appNavigationDestinations.first)
-          const NavigationGap(AppSpacing.xs),
-        Flexible(
-          child: NavigationItem(
-            key: ValueKey<AppDestination>(destination.destination),
-            style: style,
-            selectedStyle: selectedStyle,
-            spacing: AppSpacing.xs,
-            overflow: NavigationOverflow.ellipsis,
-            label: Text(
-              destination.label,
-              style: AppTheme.mobileNavigationLabelStyle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-            ),
-            child: Icon(destination.icon, size: AppIconSize.lg),
-          ),
-        ),
-      ],
-    ];
-  }
-
   void _selectDestination(Key? key) {
     for (final destination in AppDestination.values) {
       if (key == ValueKey<AppDestination>(destination)) {
-        widget.controller.selectDestination(destination);
+        unawaited(
+          widget.controller.activateDestination(
+            destination,
+            disableAnimations: AppMotion.reducedMotionOf(context),
+          ),
+        );
         return;
       }
     }

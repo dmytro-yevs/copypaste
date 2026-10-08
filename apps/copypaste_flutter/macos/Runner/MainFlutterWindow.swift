@@ -19,6 +19,7 @@ class MainFlutterWindow: NSWindow {
   private var macosSetupChannel: MacosSetupChannel?
   private var securityChannel: FlutterMethodChannel?
   private var appUpdateChannel: MacosAppUpdateChannel?
+  private var applicationLifecycle: MacosApplicationLifecycle?
   private var trayMenuChannel: MacosTrayMenuChannel?
   private var protectedPresentation: ProtectedPairingPresentationWindow?
   private var quickPastePresentation: QuickPastePresentationWindow?
@@ -54,6 +55,9 @@ class MainFlutterWindow: NSWindow {
       default: result(FlutterMethodNotImplemented)
       }
     }
+    applicationLifecycle = MacosApplicationLifecycle(
+      binaryMessenger: flutterViewController.engine.binaryMessenger
+    )
     appUpdateChannel = MacosAppUpdateChannel(
       binaryMessenger: flutterViewController.engine.binaryMessenger
     )

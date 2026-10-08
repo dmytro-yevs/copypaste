@@ -43,19 +43,26 @@ class SystemHistoryFilePicker implements HistoryFilePicker {
   static HistoryImportFile fromDesktopFile(
     XFile file, {
     bool temporary = false,
-  }) => HistoryImportFile(
-    name: file.name,
-    mimeType:
-        file.mimeType ??
-        lookupMimeType(file.name) ??
-        'application/octet-stream',
-    sourceReference: temporary ? null : file.path,
-    prepare: (_) async {
-      if (await FileSystemEntity.type(file.path) != FileSystemEntityType.file) {
-        throw const FileSystemException('Only regular files can be imported.');
-      }
-      return file.path;
-    },
-    dispose: () async {},
-  );
+  }) {
+    // Windows accepts both separators, while cross_file splits on '\\' only.
+    final name = Platform.isWindows
+        ? file.name.replaceAll('\\', '/').split('/').last
+        : file.name;
+    return HistoryImportFile(
+      name: name,
+      mimeType:
+          file.mimeType ?? lookupMimeType(name) ?? 'application/octet-stream',
+      sourceReference: temporary ? null : file.path,
+      prepare: (_) async {
+        if (await FileSystemEntity.type(file.path) !=
+            FileSystemEntityType.file) {
+          throw const FileSystemException(
+            'Only regular files can be imported.',
+          );
+        }
+        return file.path;
+      },
+      dispose: () async {},
+    );
+  }
 }

@@ -191,6 +191,8 @@ class _DevicesScreenState extends State<DevicesScreen> {
     required EdgeInsets padding,
   }) {
     return ListView(
+      controller: PrimaryScrollController.maybeOf(context),
+      primary: false,
       padding: padding.add(
         EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
       ),
