@@ -6,6 +6,8 @@ import 'package:copypaste_flutter/features/history/repository/history_file_impor
 import 'package:flutter/gestures.dart';
 
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
+import 'package:copypaste_flutter/app/navigation/navigation.dart';
+import 'package:copypaste_flutter/app/shell/app_shell.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/features/devices/device_label.dart';
@@ -21,6 +23,100 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as raster;
 
 void main() {
+  testWidgets(
+    'mobile history rows and errors clear the floating navigation',
+    (tester) async {
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.binding.setSurfaceSize(const Size(320, 720));
+      for (final textScale in [1.0, 2.0]) {
+        final repository = _ScreenRepository()
+          ..failPinUpdate = true
+          ..page = HistoryClipPage(
+            items: [
+              for (var index = 0; index < 30; index++)
+                HistoryClip(
+                  id: 'clearance-$index',
+                  contentType: 'text',
+                  preview: 'Clearance clip $index',
+                  createdAt: DateTime.utc(2026, 10, 8, 0, 0, 30 - index),
+                  pinned: false,
+                ),
+            ],
+          );
+        final controller = HistoryController(repository);
+        final navigation = AppNavigationController();
+        addTearDown(controller.dispose);
+        addTearDown(navigation.dispose);
+        await controller.initialize();
+        await tester.pumpWidget(
+          ShadcnApp(
+            theme: AppTheme.light,
+            builder: (context, child) => AppTheme.builder(
+              context,
+              MediaQuery(
+                data: MediaQuery.of(context).copyWith(
+                  padding: const EdgeInsets.only(bottom: 24),
+                  viewPadding: const EdgeInsets.only(bottom: 24),
+                  textScaler: TextScaler.linear(textScale),
+                ),
+                child: child!,
+              ),
+            ),
+            home: AppShell(
+              controller: navigation,
+              destinations: {
+                AppDestination.history: HistoryScreen(controller: controller),
+                AppDestination.devices: const SizedBox.expand(),
+                AppDestination.settings: const SizedBox.expand(),
+              },
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final list = find.byType(ListView);
+        await tester.drag(list, const Offset(0, -10000));
+        await tester.pumpAndSettle();
+        final position = navigation
+            .scrollControllerFor(AppDestination.history)
+            .position;
+        position.jumpTo(position.maxScrollExtent);
+        await tester.pumpAndSettle();
+        final dockTop = tester
+            .getRect(find.byKey(const ValueKey('mobile-navigation-dock')))
+            .top;
+        expect(
+          tester.getRect(find.text('Clearance clip 29')).bottom,
+          lessThan(dockTop),
+        );
+        await controller.togglePin(controller.items.last);
+        await tester.pumpAndSettle();
+        position.jumpTo(position.maxScrollExtent);
+        await tester.pumpAndSettle();
+        expect(tester.getRect(find.byType(Alert)).bottom, lessThan(dockTop));
+        await tester.scrollUntilVisible(
+          find.text('Clearance clip 29'),
+          -200,
+          scrollable: find
+              .descendant(of: list, matching: find.byType(Scrollable))
+              .first,
+        );
+        await tester.pumpAndSettle();
+        expect(
+          tester.getCenter(find.text('Clearance clip 29')).dy,
+          lessThan(dockTop),
+        );
+        expect(find.text('Clearance clip 29').hitTestable(), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
   testWidgets(
     'overlays compact pin and delete actions on mouse hover',
     (tester) async {
@@ -1315,11 +1411,13 @@ void main() {
         .first;
     final selectContext = tester.element(firstSelectFinder);
     final selectTheme = ComponentTheme.maybeOf<SelectTheme>(selectContext)!;
-    final selectDecoration = selectTheme.decoration!(
-      tester.element(firstSelectFinder),
-      const {},
-      const BoxDecoration(),
-    ) as BoxDecoration;
+    final selectDecoration =
+        selectTheme.decoration!(
+              tester.element(firstSelectFinder),
+              const {},
+              const BoxDecoration(),
+            )
+            as BoxDecoration;
     expect(searchDecoration.color, selectDecoration.color);
     expect(searchDecoration.borderRadius, selectDecoration.borderRadius);
   });
@@ -1363,8 +1461,9 @@ void main() {
             builder: (context, child) => AppTheme.builder(
               context,
               MediaQuery(
-                data: MediaQuery.of(context)
-                    .copyWith(textScaler: TextScaler.linear(textScale)),
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: TextScaler.linear(textScale)),
                 child: child!,
               ),
             ),
@@ -1651,11 +1750,13 @@ void main() {
         const {WidgetState.pressed},
       ]) {
         final selectTheme = ComponentTheme.maybeOf<SelectTheme>(selectContext)!;
-        final decoration = selectTheme.decoration!(
-          selectContext,
-          states,
-          const BoxDecoration(),
-        ) as BoxDecoration;
+        final decoration =
+            selectTheme.decoration!(
+                  selectContext,
+                  states,
+                  const BoxDecoration(),
+                )
+                as BoxDecoration;
         expect(decoration.border?.top.style, BorderStyle.none);
       }
     }
@@ -1845,6 +1946,7 @@ class _ScreenRepository implements HistoryRepository {
   final List<String> plainTextCopiedIds = [];
   final List<String> deletedIds = [];
   final List<(String, bool)> pinnedUpdates = [];
+  bool failPinUpdate = false;
   HistoryImagePreview? availableImagePreview;
   bool fitImagePreviewBounds = false;
   final List<int?> requestedImageEdges = [];
@@ -1923,8 +2025,10 @@ class _ScreenRepository implements HistoryRepository {
   Future<void> reorderPinned(List<String> ids) async {}
 
   @override
-  Future<void> setPinned(String id, bool pinned) async =>
-      pinnedUpdates.add((id, pinned));
+  Future<void> setPinned(String id, bool pinned) async {
+    if (failPinUpdate) throw StateError('Pin update failed');
+    pinnedUpdates.add((id, pinned));
+  }
 }
 
 class _ScreenFileDownloader implements HistoryFileDownloader {

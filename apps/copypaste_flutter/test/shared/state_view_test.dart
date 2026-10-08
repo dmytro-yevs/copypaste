@@ -1,9 +1,92 @@
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
+import 'package:copypaste_flutter/app/navigation/navigation.dart';
+import 'package:copypaste_flutter/app/shell/app_shell.dart';
 import 'package:copypaste_flutter/shared/state_view.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
+  testWidgets(
+    'mobile state views keep their final content above floating navigation',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(320, 400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      var retries = 0;
+      for (final state in [
+        const StateView.loading(),
+        StateView.empty(
+          title: 'No clips',
+          actionLabel: 'Capture',
+          onAction: () => retries++,
+        ),
+        StateView.error(
+          title: 'History is unavailable',
+          message: 'Check the connection and try again.',
+          actionLabel: 'Try again',
+          onAction: () => retries++,
+        ),
+      ]) {
+        final navigation = AppNavigationController();
+        addTearDown(navigation.dispose);
+        await tester.pumpWidget(
+          ShadcnApp(
+            theme: AppTheme.light,
+            builder: (context, child) => AppTheme.builder(
+              context,
+              MediaQuery(
+                data: MediaQuery.of(context).copyWith(
+                  padding: const EdgeInsets.only(bottom: 24),
+                  viewPadding: const EdgeInsets.only(bottom: 24),
+                  textScaler: const TextScaler.linear(2),
+                ),
+                child: child!,
+              ),
+            ),
+            home: AppShell(
+              controller: navigation,
+              destinations: {
+                AppDestination.history: state,
+                AppDestination.devices: const SizedBox.expand(),
+                AppDestination.settings: const SizedBox.expand(),
+              },
+            ),
+          ),
+        );
+        await tester.pump();
+        final position = tester
+            .state<ScrollableState>(
+              find.descendant(
+                of: find.byType(StateView),
+                matching: find.byType(Scrollable),
+              ),
+            )
+            .position;
+        position.jumpTo(position.maxScrollExtent);
+        await tester.pump();
+        final content = state.kind == StateViewKind.loading
+            ? find.text('Loading')
+            : find.widgetWithText(Button, state.actionLabel!);
+        expect(
+          tester.getRect(content).bottom,
+          lessThan(
+            tester
+                .getRect(find.byKey(const ValueKey('mobile-navigation-dock')))
+                .top,
+          ),
+        );
+        if (state.kind != StateViewKind.loading) await tester.tap(content);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
+      expect(retries, 2);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
   Widget buildSubject(Widget child) {
     return ShadcnApp(
       theme: AppTheme.light,

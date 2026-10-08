@@ -58,9 +58,16 @@ class StateView extends StatelessWidget {
           child: Center(child: child),
         );
         if (!constraints.hasBoundedHeight) return paddedChild;
+        final bottomPadding = MediaQuery.paddingOf(context).bottom;
         return SingleChildScrollView(
+          padding: EdgeInsets.only(bottom: bottomPadding),
           child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            constraints: BoxConstraints(
+              minHeight: (constraints.maxHeight - bottomPadding).clamp(
+                0.0,
+                double.infinity,
+              ),
+            ),
             child: paddedChild,
           ),
         );

@@ -177,11 +177,7 @@ abstract final class AppTheme {
                   AppIconSize.md) /
               2,
         ),
-        decoration: (context, states, value) => _buttonDecoration(
-          context,
-          states,
-          softSelectDecoration(context, states, value),
-        ),
+        decoration: softSelectDecoration,
       );
 
   static double controlHeight(
@@ -388,7 +384,7 @@ abstract final class AppTheme {
   }
 
   static SelectTheme primarySelectTheme(BuildContext context) {
-    final style = controlButtonStyle(const ButtonStyle.primaryIcon());
+    final style = actionButtonStyle(const ButtonStyle.primaryIcon());
     return SelectTheme(
       adaptiveOverlay: false,
       overlayConfiguration: AppOverlays.selectPopoverConfiguration(
@@ -557,7 +553,6 @@ abstract final class AppTheme {
   );
 
   static const _primaryButtonTheme = PrimaryButtonTheme(
-    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -565,7 +560,6 @@ abstract final class AppTheme {
   );
 
   static const _secondaryButtonTheme = SecondaryButtonTheme(
-    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -573,7 +567,6 @@ abstract final class AppTheme {
   );
 
   static const _outlineButtonTheme = OutlineButtonTheme(
-    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -581,7 +574,6 @@ abstract final class AppTheme {
   );
 
   static const _ghostButtonTheme = GhostButtonTheme(
-    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -589,7 +581,6 @@ abstract final class AppTheme {
   );
 
   static const _linkButtonTheme = LinkButtonTheme(
-    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -597,7 +588,6 @@ abstract final class AppTheme {
   );
 
   static const _textButtonTheme = TextButtonTheme(
-    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -605,7 +595,6 @@ abstract final class AppTheme {
   );
 
   static const _destructiveButtonTheme = DestructiveButtonTheme(
-    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -613,7 +602,6 @@ abstract final class AppTheme {
   );
 
   static const _fixedButtonTheme = FixedButtonTheme(
-    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -621,7 +609,6 @@ abstract final class AppTheme {
   );
 
   static const _menuButtonTheme = MenuButtonTheme(
-    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -629,7 +616,6 @@ abstract final class AppTheme {
   );
 
   static const _menubarButtonTheme = MenubarButtonTheme(
-    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -637,7 +623,6 @@ abstract final class AppTheme {
   );
 
   static const _mutedButtonTheme = MutedButtonTheme(
-    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -645,7 +630,6 @@ abstract final class AppTheme {
   );
 
   static const _cardButtonTheme = CardButtonTheme(
-    decoration: _buttonDecoration,
     padding: _buttonPadding,
     textStyle: _buttonTextStyle,
     iconTheme: _buttonIconTheme,
@@ -827,7 +811,11 @@ abstract final class AppTheme {
     return value.copyWith(size: AppIconSize.sm);
   }
 
-  static Decoration _buttonDecoration(
+  /// Adds the shared border only to an explicitly marked action button.
+  static AbstractButtonStyle actionButtonStyle(ButtonStyle style) =>
+      controlButtonStyle(style).copyWith(decoration: actionButtonDecoration);
+
+  static Decoration actionButtonDecoration(
     BuildContext context,
     Set<WidgetState> states,
     Decoration value,

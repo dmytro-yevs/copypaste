@@ -2,10 +2,14 @@
 from pathlib import Path
 from copy import deepcopy
 import hashlib
+import json
 import re
 import runpy
+import subprocess
+import sys
 import tempfile
 import unittest
+from zipfile import ZipFile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -208,22 +212,117 @@ class ReleaseSafetyTest(unittest.TestCase):
                 for name in (
                     f"CopyPaste-v{version}-macos-arm64.dmg",
                     f"CopyPaste-v{version}-android.apk",
+                    f"CopyPaste-v{version}-android-arm64.apk",
+                    f"CopyPaste-v{version}-android-armv7.apk",
                     f"CopyPaste-v{version}-windows-x86_64-setup.exe",
                 ):
                     (artifacts / name).touch()
                 notes = render(version, "dmytro-yevs/copypaste", artifacts)
                 links = re.findall(r"https://github.com/[^\s)]+", notes)
-                self.assertEqual(len(links), 3)
+                self.assertEqual(len(links), 5)
                 self.assertTrue(all(f"/download/v{version}/" in link for link in links))
                 self.assertNotIn("{{", notes)
                 rows = [line for line in notes.splitlines() if line.startswith("|")]
-                self.assertEqual(len(rows), 3)
-                self.assertEqual(rows[0], "| macOS / arm64 | Android / Universal | Windows / x86_64 |")
-                self.assertEqual(rows[2].count("[Download]("), 3)
+                self.assertEqual(len(rows), 6)
+                self.assertEqual(rows[0], "| Architecture | macOS | Android | Windows |")
+                self.assertEqual(rows[2].count("[Download]("), 2)
+                self.assertEqual(rows[3].count("[Download]("), 1)
+                self.assertEqual(rows[4].count("[Download]("), 1)
+                self.assertEqual(rows[5].count("[Download]("), 1)
                 self.assertTrue(all(link.endswith((".dmg", ".apk", ".exe")) for link in links))
-                (artifacts / f"CopyPaste-v{version}-android.apk").unlink()
+                for suffix in ("", "-arm64", "-armv7"):
+                    artifact = artifacts / f"CopyPaste-v{version}-android{suffix}.apk"
+                    artifact.unlink()
+                    with self.assertRaisesRegex(ValueError, "artifact is missing"):
+                        render(version, "dmytro-yevs/copypaste", artifacts)
+                    artifact.touch()
+
+
+class AndroidReleaseArtifactsTest(unittest.TestCase):
+    def test_apk_variants_require_exact_abis_and_complete_runtime_libraries(self):
+        module = runpy.run_path(str(ROOT / "scripts/release/verify-android-abis.py"))
+        verify = module["verify"]
+        with tempfile.TemporaryDirectory() as directory:
+            apk = Path(directory) / "app.apk"
+            for architecture, abis in module["ARCHITECTURES"].items():
+                with self.subTest(architecture=architecture):
+                    names = [
+                        f"lib/{abi}/{library}"
+                        for abi in abis for library in module["REQUIRED_LIBRARIES"]
+                    ]
+                    with ZipFile(apk, "w") as archive:
+                        for name in names:
+                            archive.writestr(name, b"native library")
+                    verify(apk, architecture)
+                    with ZipFile(apk, "w") as archive:
+                        for name in names[1:]:
+                            archive.writestr(name, b"native library")
+                    with self.assertRaisesRegex(ValueError, "missing"):
+                        verify(apk, architecture)
+            with ZipFile(apk, "w") as archive:
+                archive.writestr("lib/x86_64/libflutter.so", b"wrong ABI")
+            for architecture in ("arm64", "armv7"):
+                with self.assertRaisesRegex(ValueError, "architectures differ"):
+                    verify(apk, architecture)
+
+    def write_receipts(self, root, *, legacy=False):
+        for platform, names in (
+            ("macos", ["app.dmg"]),
+            ("windows", ["app.exe"]),
+            ("android", [f"CopyPaste-v1.2.3-android{suffix}.apk"
+                         for suffix in (("",) if legacy else ("", "-arm64", "-armv7"))]),
+        ):
+            directory = root / platform
+            directory.mkdir()
+            command = [sys.executable, str(ROOT / "scripts/release/write-artifact-receipt.py"),
+                       "--platform", platform, "--version", "1.2.3", "--commit", "a" * 40,
+                       "--run-id", "123", "--output", str(directory / "production-receipt.json")]
+            for name in names:
+                artifact = directory / name
+                artifact.write_bytes(b"qualified")
+                command.extend(["--artifact", str(artifact)])
+            subprocess.run(command, check=True, capture_output=True)
+
+    def test_every_android_variant_is_bound_to_qualification(self):
+        verify = runpy.run_path(str(ROOT / "scripts/release/verify-artifact-receipts.py"))["verify"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_receipts(root)
+            verify(root, "1.2.3", "a" * 40, "123")
+            for suffix in ("", "-arm64", "-armv7"):
+                artifact = root / "android" / f"CopyPaste-v1.2.3-android{suffix}.apk"
+                artifact.write_bytes(b"corrupted")
+                with self.assertRaisesRegex(ValueError, "digest changed"):
+                    verify(root, "1.2.3", "a" * 40, "123")
+                artifact.unlink()
                 with self.assertRaisesRegex(ValueError, "artifact is missing"):
-                    render(version, "dmytro-yevs/copypaste", artifacts)
+                    verify(root, "1.2.3", "a" * 40, "123")
+                artifact.write_bytes(b"qualified")
+
+    def test_legacy_receipts_remain_valid_for_release_recovery(self):
+        verify = runpy.run_path(str(ROOT / "scripts/release/verify-artifact-receipts.py"))["verify"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_receipts(root, legacy=True)
+            verify(root, "1.2.3", "a" * 40, "123")
+
+    def test_android_receipts_reject_omitted_and_unqualified_variants(self):
+        verify = runpy.run_path(str(ROOT / "scripts/release/verify-artifact-receipts.py"))["verify"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_receipts(root)
+            receipt_path = root / "android" / "production-receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["artifacts"].pop()
+            receipt_path.write_text(json.dumps(receipt))
+            with self.assertRaisesRegex(ValueError, "does not cover every APK"):
+                verify(root, "1.2.3", "a" * 40, "123")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_receipts(root, legacy=True)
+            (root / "android" / "extra.apk").write_bytes(b"unqualified")
+            with self.assertRaisesRegex(ValueError, "does not cover every APK"):
+                verify(root, "1.2.3", "a" * 40, "123")
 
 
 if __name__ == "__main__":
