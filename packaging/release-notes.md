@@ -1,9 +1,9 @@
-This update keeps History controls consistent across macOS, Android, and Windows.
+This update improves shared controls and Android update downloads.
 
-- Show Search first and move file import to the end of the compact History toolbar.
-- Hide file import while compact search is open and restore it when search closes.
-- Match the height of buttons, inputs, and selects within each control group, including OCR and enlarged text.
-- Refresh select sizing when text scale changes.
+- Keep controls and overlays consistent across History, Devices, Settings, Quick Paste, and module setup.
+- Publish signed universal, arm64, and armv7 Android APKs with the same version code.
+- Select the matching ARM update package when available, with a signed universal fallback.
+- Verify Android ABI contents and all release artifact receipts before publication.
 
 Optional modules remain available from Settings. OCR engines and models are not bundled with the application.
 
