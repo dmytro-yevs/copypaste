@@ -1,0 +1,206 @@
+{
+  "schema_version": 3,
+  "api_version": 1,
+  "id": "copypaste.semantic-search",
+  "title": "Semantic Search",
+  "description": "Find clips by meaning with a local model selected for your languages.",
+  "version": "0.1.0",
+  "app_versions": ">=1.0.11, <2.0.0",
+  "supported_platforms": [
+    "macos",
+    "windows",
+    "android"
+  ],
+  "unload_policy": "process",
+  "search_provider": {
+    "command": "embed-text",
+    "language_field": "languages",
+    "models": [
+      {
+        "id": "minilm-en-v1",
+        "title": "English",
+        "languages": [
+          "en"
+        ],
+        "dimensions": 384,
+        "max_tokens": 256,
+        "query_prefix": "",
+        "passage_prefix": "",
+        "minimum_similarity": 0.3,
+        "files": [
+          {
+            "path": "model.onnx",
+            "url": "https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/751bff37182d3f1213fa05d7196b954e230abad9/onnx/model_quantized.onnx",
+            "sha256": "afdb6f1a0e45b715d0bb9b11772f032c399babd23bfc31fed1c170afc848bdb1",
+            "size_bytes": 22972370
+          },
+          {
+            "path": "tokenizer.json",
+            "url": "https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/751bff37182d3f1213fa05d7196b954e230abad9/tokenizer.json",
+            "sha256": "da0e79933b9ed51798a3ae27893d3c5fa4a201126cef75586296df9b4d2c62a0",
+            "size_bytes": 711661
+          }
+        ]
+      },
+      {
+        "id": "e5-multilingual-v1",
+        "title": "Multilingual",
+        "languages": [
+          "en",
+          "uk",
+          "de",
+          "fr",
+          "es",
+          "it",
+          "pt",
+          "pl",
+          "cs",
+          "ru",
+          "ar",
+          "zh",
+          "ja",
+          "ko",
+          "tr",
+          "nl",
+          "sv",
+          "fi",
+          "el",
+          "hi"
+        ],
+        "dimensions": 384,
+        "max_tokens": 512,
+        "query_prefix": "query: ",
+        "passage_prefix": "passage: ",
+        "minimum_similarity": 0.8,
+        "files": [
+          {
+            "path": "model.onnx",
+            "url": "https://huggingface.co/Xenova/multilingual-e5-small/resolve/761b726dd34fb83930e26aab4e9ac3899aa1fa78/onnx/model_quantized.onnx",
+            "sha256": "f80102d3f2a1229f387d3c81909990d8945513e347b0eab049f7de3c6f98c193",
+            "size_bytes": 118308185
+          },
+          {
+            "path": "tokenizer.json",
+            "url": "https://huggingface.co/Xenova/multilingual-e5-small/resolve/761b726dd34fb83930e26aab4e9ac3899aa1fa78/tokenizer.json",
+            "sha256": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39",
+            "size_bytes": 17082730
+          }
+        ]
+      }
+    ]
+  },
+  "commands": [
+    {
+      "id": "embed-text",
+      "title": "Search embedding",
+      "description": "Internal host-owned search embedding provider.",
+      "arguments": [
+        {
+          "id": "text",
+          "title": "Text",
+          "kind": "text",
+          "default": "",
+          "required": true
+        },
+        {
+          "id": "role",
+          "title": "Role",
+          "kind": "text",
+          "default": "query",
+          "required": true
+        }
+      ]
+    }
+  ],
+  "preferences": [
+    {
+      "id": "languages",
+      "title": "Search languages",
+      "kind": "choices",
+      "options": [
+        {
+          "id": "en",
+          "title": "English"
+        },
+        {
+          "id": "uk",
+          "title": "Ukrainian"
+        },
+        {
+          "id": "de",
+          "title": "German"
+        },
+        {
+          "id": "fr",
+          "title": "French"
+        },
+        {
+          "id": "es",
+          "title": "Spanish"
+        },
+        {
+          "id": "it",
+          "title": "Italian"
+        },
+        {
+          "id": "pt",
+          "title": "Portuguese"
+        },
+        {
+          "id": "pl",
+          "title": "Polish"
+        },
+        {
+          "id": "cs",
+          "title": "Czech"
+        },
+        {
+          "id": "ru",
+          "title": "Russian"
+        },
+        {
+          "id": "ar",
+          "title": "Arabic"
+        },
+        {
+          "id": "zh",
+          "title": "Chinese"
+        },
+        {
+          "id": "ja",
+          "title": "Japanese"
+        },
+        {
+          "id": "ko",
+          "title": "Korean"
+        },
+        {
+          "id": "tr",
+          "title": "Turkish"
+        },
+        {
+          "id": "nl",
+          "title": "Dutch"
+        },
+        {
+          "id": "sv",
+          "title": "Swedish"
+        },
+        {
+          "id": "fi",
+          "title": "Finnish"
+        },
+        {
+          "id": "el",
+          "title": "Greek"
+        },
+        {
+          "id": "hi",
+          "title": "Hindi"
+        }
+      ],
+      "default": [],
+      "required": true
+    }
+  ]
+}

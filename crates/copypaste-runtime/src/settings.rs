@@ -114,6 +114,17 @@ impl RuntimeSettings {
         Ok(Applying { settings: self })
     }
 
+    /// A confirmed settings change waits for an already admitted native write.
+    /// Serial ownership crosses the callback, while metadata locks do not.
+    pub(crate) fn with_clipboard_settings(
+        &self,
+        write: impl FnOnce(ConfigData),
+    ) -> Result<(), SettingsError> {
+        let _serialised = self.enter_apply()?;
+        write(self.config());
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(crate) fn apply(&self, patch: &ConfigPatch) -> Result<SettingsApplied, SettingsError> {
         self.apply_with_effects(patch, |_| {})
@@ -238,6 +249,53 @@ mod tests {
             })
             .is_err());
         assert_eq!(settings.config(), before);
+    }
+
+    #[test]
+    fn disabling_instant_clipboard_waits_for_an_admitted_native_write() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let (settings, _directory) = settings();
+        let settings = Arc::new(settings);
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let writer = std::thread::spawn({
+            let settings = Arc::clone(&settings);
+            move || {
+                settings
+                    .with_clipboard_settings(|config| {
+                        assert!(config.instant_clipboard);
+                        entered_tx.send(()).unwrap();
+                        release_rx.recv().unwrap();
+                    })
+                    .unwrap()
+            }
+        });
+        entered_rx.recv().unwrap();
+        let (updated_tx, updated_rx) = mpsc::channel();
+        let update = std::thread::spawn({
+            let settings = Arc::clone(&settings);
+            move || {
+                settings
+                    .apply(&ConfigPatch {
+                        instant_clipboard: Some(false),
+                        ..Default::default()
+                    })
+                    .unwrap();
+                updated_tx.send(()).unwrap();
+            }
+        });
+        assert!(matches!(
+            updated_rx.recv_timeout(Duration::from_millis(50)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        release_tx.send(()).unwrap();
+        writer.join().unwrap();
+        update.join().unwrap();
+        updated_rx.recv().unwrap();
+        settings
+            .with_clipboard_settings(|config| assert!(!config.instant_clipboard))
+            .unwrap();
     }
     #[test]
     fn poisoned_settings_close_admission_and_refuse_policy_acknowledgement() {

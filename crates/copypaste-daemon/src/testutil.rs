@@ -9,7 +9,6 @@ use copypaste_p2p::discovery::Discovery;
 use copypaste_p2p::peers::PeerStore;
 
 use crate::clipboard::{Capture, ClipboardSource};
-use crate::cloud::Cloud;
 use crate::meta::Meta;
 use crate::p2p::P2p;
 use crate::AppState;
@@ -93,6 +92,7 @@ impl ClipboardSource for FakeClipboard {
         &mut self,
         _item_id: &str,
         payload: &copypaste_core::ClipboardPayload,
+        _content_type: &str,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::{ClipboardPayload, ClipboardWriteError};
 
@@ -135,19 +135,14 @@ impl ClipboardSource for FakeClipboard {
 /// different secrets, which is what makes "re-encrypted under the local key" a
 /// meaningful assertion.
 pub fn test_state(name: &str) -> (Arc<AppState>, tempfile::TempDir) {
-    test_state_with_cloud(name, Cloud::new(None))
+    reopen(tempfile::tempdir().expect("tempdir"), name)
 }
 
 pub fn test_state_with_clipboard(
     name: &str,
     clipboard: Box<dyn ClipboardSource>,
 ) -> (Arc<AppState>, tempfile::TempDir) {
-    reopen_with(
-        tempfile::tempdir().expect("tempdir"),
-        Cloud::new(None),
-        name,
-        clipboard,
-    )
+    reopen_with(tempfile::tempdir().expect("tempdir"), name, clipboard)
 }
 
 /// A state plus the log of everything written to its clipboard.
@@ -155,7 +150,6 @@ pub fn test_state_watching_clipboard(name: &str) -> (Arc<AppState>, tempfile::Te
     let writes = WriteLog::default();
     let (state, dir) = reopen_with(
         tempfile::tempdir().expect("tempdir"),
-        Cloud::new(None),
         name,
         Box::new(FakeClipboard {
             writes: writes.clone(),
@@ -165,22 +159,13 @@ pub fn test_state_watching_clipboard(name: &str) -> (Arc<AppState>, tempfile::Te
     (state, dir, writes)
 }
 
-pub fn test_state_with_cloud(name: &str, cloud: Cloud) -> (Arc<AppState>, tempfile::TempDir) {
-    reopen(tempfile::tempdir().expect("tempdir"), cloud, name)
-}
-
 /// A second daemon over an existing data directory — a restart, in other words.
 ///
 /// The keyring is derived from `name`, so passing the same name is what makes
 /// the database openable again.
-pub fn reopen(
-    dir: tempfile::TempDir,
-    cloud: Cloud,
-    name: &str,
-) -> (Arc<AppState>, tempfile::TempDir) {
+pub fn reopen(dir: tempfile::TempDir, name: &str) -> (Arc<AppState>, tempfile::TempDir) {
     reopen_with(
         dir,
-        cloud,
         name,
         Box::new(FakeClipboard {
             writes: WriteLog::default(),
@@ -191,7 +176,6 @@ pub fn reopen(
 
 fn reopen_with(
     dir: tempfile::TempDir,
-    cloud: Cloud,
     name: &str,
     clipboard: Box<dyn ClipboardSource>,
 ) -> (Arc<AppState>, tempfile::TempDir) {
@@ -219,12 +203,13 @@ fn reopen_with(
         clipboard,
         meta,
         P2p::new(peers, Some(discovery), 0, true),
-        cloud,
         settings,
         db_path,
     );
     state.set_ready(true);
-    (Arc::new(state), dir)
+    let state = Arc::new(state);
+    crate::sync::install_module_services(&state).expect("module sync host");
+    (state, dir)
 }
 
 /// Ingest one item as if it had been captured locally, returning its id.

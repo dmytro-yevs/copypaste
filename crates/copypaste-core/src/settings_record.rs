@@ -32,6 +32,10 @@ fn fail_closed(field: &str) -> ConfigPatch {
             sync_enabled: Some(false),
             ..Default::default()
         },
+        "instant_clipboard" => ConfigPatch {
+            instant_clipboard: Some(false),
+            ..Default::default()
+        },
         "lan_visibility" => ConfigPatch {
             lan_visibility: Some(false),
             ..Default::default()
@@ -50,6 +54,7 @@ pub fn all_closed() -> ConfigData {
         private_mode: true,
         lan_visibility: false,
         sync_enabled: false,
+        instant_clipboard: false,
         notification_preview: false,
         excluded_app_bundle_ids: Vec::new(),
         ..ConfigData::default()
@@ -130,6 +135,21 @@ fn decode_field(field: &str, value: &Value) -> Option<ConfigPatch> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn instant_clipboard_defaults_on_and_preserves_a_persisted_opt_out() {
+        assert!(read("{}").0.instant_clipboard);
+        let disabled = ConfigPatch {
+            instant_clipboard: Some(false),
+            ..Default::default()
+        }
+        .apply(&ConfigData::default())
+        .unwrap();
+        assert!(!read(&stored(&disabled)).0.instant_clipboard);
+        let (corrupt, health) = read(r#"{"instant_clipboard":"invalid"}"#);
+        assert!(!corrupt.instant_clipboard);
+        assert_eq!(health.unreadable_fields, ["instant_clipboard"]);
+    }
 
     #[test]
     fn feedback_defaults_preserve_explicit_existing_choices() {

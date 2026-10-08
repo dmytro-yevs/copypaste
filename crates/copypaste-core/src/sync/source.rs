@@ -34,6 +34,8 @@ use crate::retention::{RetentionGate, RETENTION_DEBOUNCE};
 use crate::storage::{origin_or, Store, StoredItem};
 use crate::Keyring;
 
+type ClipReceivedHook = Arc<dyn Fn(&StoredItem) + Send + Sync>;
+
 const MSG_SYNC_DISABLED: &str = "sync is disabled";
 
 const MAX_SUMMARIES_PER_SESSION: i64 =
@@ -51,6 +53,7 @@ pub struct StoreSource {
     retention_settings: Arc<dyn Fn() -> copypaste_ipc::ConfigData + Send + Sync>,
     retention: Arc<RetentionGate>,
     on_applied: Option<Arc<dyn Fn(i64) + Send + Sync>>,
+    on_clip_received: Option<ClipReceivedHook>,
 }
 
 impl std::fmt::Debug for StoreSource {
@@ -94,6 +97,7 @@ impl StoreSource {
             retention_settings: Arc::new(settings),
             retention: Arc::default(),
             on_applied: None,
+            on_clip_received: None,
         }
     }
 
@@ -108,6 +112,62 @@ impl StoreSource {
     pub fn on_applied(mut self, f: impl Fn(i64) + Send + Sync + 'static) -> Self {
         self.on_applied = Some(Arc::new(f));
         self
+    }
+
+    /// Notify the platform about the newest content version accepted in a page.
+    /// Pin-only changes, tombstones and replays never reach this hook.
+    #[must_use]
+    pub fn on_clip_received(mut self, f: impl Fn(&StoredItem) + Send + Sync + 'static) -> Self {
+        self.on_clip_received = Some(Arc::new(f));
+        self
+    }
+
+    fn clipboard_floor(&self) -> i64 {
+        if self.on_clip_received.is_none() {
+            return i64::MAX;
+        }
+        match self.store.newest_live_key() {
+            Ok(row) => row.map_or(i64::MIN, |(_, stamp)| stamp),
+            Err(_) => i64::MAX,
+        }
+    }
+
+    fn notify_clip_received<'a>(
+        &self,
+        floor: i64,
+        versions: impl Iterator<Item = &'a RemoteVersion<'a>>,
+    ) {
+        let Some(hook) = &self.on_clip_received else {
+            return;
+        };
+        let Some(newest) = versions
+            .filter(|item| {
+                !item.deleted && item.origin_device_id != self.device_id && item.created_at > floor
+            })
+            .max_by_key(|item| (item.created_at, item.item_id))
+        else {
+            return;
+        };
+        if let Ok(Some(row)) = self.store.get(newest.item_id) {
+            if !row.deleted && row.created_at == newest.created_at {
+                hook(&row);
+            }
+        }
+    }
+
+    /// Reuse history, retention and clipboard behavior without a peer egress hook.
+    #[must_use]
+    pub fn without_version_hook(&self) -> Self {
+        Self {
+            store: self.store.clone(),
+            keyring: Arc::clone(&self.keyring),
+            device_id: self.device_id.clone(),
+            device_name: self.device_name.clone(),
+            retention_settings: Arc::clone(&self.retention_settings),
+            retention: Arc::clone(&self.retention),
+            on_applied: None,
+            on_clip_received: self.on_clip_received.clone(),
+        }
     }
 
     #[must_use]
@@ -133,12 +193,14 @@ impl StoreSource {
 
     /// Merge one remote version in, whichever transport carried it.
     pub fn apply_version(&self, incoming: &RemoteVersion<'_>) -> Result<bool, MergeError> {
+        let clipboard_floor = self.clipboard_floor();
         let applied = apply_remote_version(&self.store, &self.keyring, &self.device_id, incoming)?;
         if applied {
             self.enforce_retention();
             if let Some(hook) = &self.on_applied {
                 hook(incoming.created_at);
             }
+            self.notify_clip_received(clipboard_floor, std::iter::once(incoming));
         }
         Ok(applied)
     }
@@ -157,6 +219,7 @@ impl StoreSource {
     /// [`MergeError`] if the store or the seal fails. A version this device
     /// declines is `false`.
     pub fn apply_versions(&self, incoming: &[RemoteVersion<'_>]) -> Result<Vec<bool>, MergeError> {
+        let clipboard_floor = self.clipboard_floor();
         let applied = super::batch::apply_remote_versions(
             &self.store,
             &self.keyring,
@@ -174,6 +237,14 @@ impl StoreSource {
             if let Some(hook) = &self.on_applied {
                 hook(floor);
             }
+            self.notify_clip_received(
+                clipboard_floor,
+                incoming
+                    .iter()
+                    .zip(&applied)
+                    .filter(|(_, applied)| **applied)
+                    .map(|(item, _)| item),
+            );
         }
         Ok(applied)
     }
@@ -351,6 +422,7 @@ impl SyncSource for StoreSource {
                     pin_updated_at: item.pin_updated_at,
                 })
                 .collect();
+            let clipboard_floor = self.clipboard_floor();
             let outcomes = apply_remote_p2p_versions(
                 &self.store,
                 &self.keyring,
@@ -370,6 +442,14 @@ impl SyncSource for StoreSource {
                 if let Some(hook) = &self.on_applied {
                     hook(floor);
                 }
+                self.notify_clip_received(
+                    clipboard_floor,
+                    versions
+                        .iter()
+                        .zip(&outcomes)
+                        .filter(|(_, outcome)| outcome.content)
+                        .map(|(item, _)| item),
+                );
             }
             Ok(outcomes.into_iter().map(|outcome| outcome.any()).collect())
         })

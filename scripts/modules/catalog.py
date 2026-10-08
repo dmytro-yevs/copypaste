@@ -97,7 +97,7 @@ def read_package(path, public_key=PUBLIC_KEY):
         manifest_bytes = archive.read("manifest.json")
         verify_signature(manifest_bytes, archive.read("manifest.json.sig"), "manifest.json", public_key)
         manifest = json.loads(manifest_bytes)
-        if manifest["schema_version"] not in (1, 2) or manifest["api_version"] != 1:
+        if manifest["schema_version"] not in (1, 2, 3, 4) or manifest["api_version"] != 1:
             raise ValueError("Unsupported module manifest")
         if not re.fullmatch(r"copypaste\.[a-z0-9][a-z0-9.-]*", manifest["id"]):
             raise ValueError("Invalid first-party module ID")

@@ -2,6 +2,7 @@
 
 use rusqlite::{params, Connection};
 
+use super::fuzzy_search;
 use super::model::{item_columns_ci, row_to_item, ItemColumns, StoreError, StoredItem};
 use super::store::Store;
 
@@ -16,7 +17,7 @@ const SEARCH_SQL: &str = concat!(
 );
 
 impl Store {
-    /// Full-text search over live items, best match first.
+    /// Prefix, infix and spelling-tolerant search, strongest match first.
     pub fn search(&self, query: &str, limit: u32) -> Result<Vec<StoredItem>, StoreError> {
         self.search_with_budget(query, limit, usize::MAX)
     }
@@ -38,13 +39,46 @@ impl Store {
         limit: u32,
         max_bytes: usize,
     ) -> Result<Vec<StoredItem>, StoreError> {
-        let Some(match_expr) = sanitize_fts5_query(query) else {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn()?;
+        let Some(expression) = fuzzy_search::compile(&conn, query)? else {
             return Ok(Vec::new());
         };
-        let conn = self.conn()?;
-        let mut stmt = conn.prepare_cached(SEARCH_SQL)?;
+        let expanded_sql;
+        let sql = if expression.exact == expression.expanded {
+            SEARCH_SQL
+        } else {
+            // Sort only ids/scores before loading bounded encrypted payloads.
+            expanded_sql = format!(
+                "WITH {} indexed AS MATERIALIZED (\
+                 SELECT ci.id, ci.created_at, clipboard_fts.rowid AS search_rowid, \
+                 bm25(clipboard_fts) AS search_rank \
+                 FROM clipboard_fts JOIN clipboard_items ci ON ci.id = clipboard_fts.id \
+                 WHERE clipboard_fts MATCH ?1 AND ci.deleted = 0 \
+                 AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%')), \
+                 matches AS MATERIALIZED (SELECT id, created_at, {} AS relevance FROM indexed \
+                 ORDER BY relevance, created_at DESC, id DESC LIMIT ?3) \
+                 SELECT {} FROM matches JOIN clipboard_items ci ON ci.id = matches.id \
+                 ORDER BY matches.relevance, matches.created_at DESC, matches.id DESC",
+                expression.exact_cte(2),
+                expression.relevance_sql(),
+                item_columns_ci!(),
+            );
+            &expanded_sql
+        };
+        let mut stmt = conn.prepare_cached(sql)?;
         let columns = ItemColumns::resolve(&stmt)?;
-        let mut rows = stmt.query(params![match_expr, i64::from(limit)])?;
+        let mut rows = if expression.exact == expression.expanded {
+            stmt.query(params![expression.exact, i64::from(limit)])?
+        } else {
+            stmt.query(params![
+                expression.expanded,
+                expression.exact,
+                i64::from(limit)
+            ])?
+        };
         let mut found = Vec::new();
         let mut bytes = 0usize;
         while let Some(row) = rows.next()? {
@@ -200,6 +234,93 @@ mod tests {
     use super::super::model::NewItem;
     use super::super::test_support::{fts_row_count, item, plan_of, plant_fts_row, store, T0};
     use super::*;
+
+    #[test]
+    fn fuzzy_search_finds_spelling_errors_infixes_and_unfinished_words() {
+        let s = store();
+        let hit = s.insert(item("meeting notes clipboard", T0)).unwrap();
+        s.insert(item("unrelated content", T0 + 1)).unwrap();
+        for query in [
+            "meetin",
+            "meting",
+            "meeeting",
+            "meetign",
+            "xeeting",
+            "meeyin",
+            "board",
+            "notes meting",
+            "clpiboard",
+        ] {
+            let found = s.search(query, 10).unwrap();
+            assert_eq!(
+                found.iter().map(|item| &item.id).collect::<Vec<_>>(),
+                [&hit.id],
+                "{query}"
+            );
+        }
+        assert!(s.search("\"meting notes\"", 10).unwrap().is_empty());
+        assert!(s.search("meting missingword", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn fuzzy_search_normalizes_unicode_and_keeps_exact_matches_first() {
+        let s = store();
+        let exact = s.insert(item("meeting café привіт", T0)).unwrap();
+        let fuzzy = s
+            .insert(item("meting meting meting cafeine привіти", T0 + 1))
+            .unwrap();
+        let infix = s.insert(item("premeeting cafeine", T0 + 2)).unwrap();
+        let found = s.search("meeting", 10).unwrap();
+        assert_eq!(found[0].id, exact.id);
+        assert_eq!(found.len(), 3);
+        assert!(found.iter().any(|item| item.id == fuzzy.id));
+        assert!(found.iter().any(|item| item.id == infix.id));
+        for query in ["ПРИВТІ", "CAFÉ", "cafe\u{301}", "CAFÉNE"] {
+            let found = s.search(query, 10).unwrap();
+            assert!(!found.is_empty(), "{query}");
+        }
+        // Short and numeric tokens keep predictable prefix behavior.
+        s.insert(item("12345678", T0 + 3)).unwrap();
+        assert!(s.search("12345679", 10).unwrap().is_empty());
+        assert!(s.search("xy", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn fuzzy_vocabulary_tracks_inserts_deletes_and_reopened_databases() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fuzzy.db");
+        let s = Store::open(&path, &super::super::test_support::KEY).unwrap();
+        assert!(s.search("meting", 10).unwrap().is_empty());
+        let hit = s.insert(item("meeting", T0)).unwrap();
+        assert_eq!(s.search("meting", 10).unwrap()[0].id, hit.id);
+        drop(s);
+        let s = Store::open(&path, &super::super::test_support::KEY).unwrap();
+        assert_eq!(s.search("meting", 10).unwrap()[0].id, hit.id);
+        s.delete(&hit.id).unwrap();
+        assert!(s.search("meting", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn expanded_search_preserves_byte_budget_and_live_text_guards() {
+        let s = store();
+        let hit = s.insert(item("meeting", T0)).unwrap();
+        s.insert(item("meting", T0 + 1)).unwrap();
+        let image = s
+            .insert(NewItem {
+                content_type: "image/png".into(),
+                search_text: None,
+                ..item("image", T0 + 2)
+            })
+            .unwrap();
+        plant_fts_row(&s, &image.id, "meeting");
+        let deleted = s.insert(item("meeting deleted", T0 + 3)).unwrap();
+        s.delete(&deleted.id).unwrap();
+        plant_fts_row(&s, &deleted.id, "meeting");
+        let found = s.search_bounded("meeting", 10, 1).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, hit.id);
+        assert_eq!(s.search("meeting", 10).unwrap().len(), 2);
+    }
 
     #[test]
     fn search_finds_a_text_item() {

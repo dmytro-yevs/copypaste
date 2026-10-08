@@ -20,6 +20,11 @@ const MIGRATIONS: &[Migration] = &[
         transform: share_source_icons,
     },
     Migration {
+        version: 2,
+        sql: include_str!("migrations/002_semantic_search.sql"),
+        transform: |_| Ok(()),
+    },
+    Migration {
         version: 3,
         sql: include_str!("migrations/003_file_import.sql"),
         transform: |_| Ok(()),

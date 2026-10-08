@@ -58,7 +58,7 @@ fn expected(method: &Method) -> Expected {
         }
         Method::Export { .. } => Expected::Data(|data| matches!(data, ResponseData::Export(_))),
         Method::Backup { .. } => Expected::Data(|data| matches!(data, ResponseData::Backup(_))),
-        Method::CloudSignOut | Method::CloudStatus | Method::CloudSetEndpoint { .. } => {
+        Method::CloudSignOut | Method::CloudStatus => {
             Expected::Data(|data| matches!(data, ResponseData::CloudStatus(_)))
         }
         Method::GetConfig | Method::SetConfig { .. } => {
@@ -83,6 +83,7 @@ fn expected(method: &Method) -> Expected {
         Method::ImportFile { .. }
         | Method::Import { .. }
         | Method::Restore { .. }
+        | Method::CloudSetEndpoint { .. }
         | Method::CloudSignIn { .. }
         | Method::CloudSignUp { .. }
         | Method::CloudSyncNow => Expected::Error(ErrorCode::InvalidRequest),
