@@ -129,7 +129,9 @@ class HistoryInspector extends StatelessWidget {
                         key: const ValueKey<String>(
                           'history-detail-inspector-close',
                         ),
-                        style: const ButtonStyle.ghostIcon(),
+                        style: AppTheme.controlButtonStyle(
+                          const ButtonStyle.ghostIcon(),
+                        ),
                         onPressed: onClose ?? controller.clearSelection,
                         child: const Icon(LucideIcons.x),
                       ),
@@ -183,9 +185,11 @@ class HistoryInspector extends StatelessWidget {
                                 key: const ValueKey<String>(
                                   'history-detail-copy',
                                 ),
-                                style: iconOnly
-                                    ? const ButtonStyle.primaryIcon()
-                                    : const ButtonStyle.primary(),
+                                style: AppTheme.controlButtonStyle(
+                                  iconOnly
+                                      ? const ButtonStyle.primaryIcon()
+                                      : const ButtonStyle.primary(),
+                                ),
                                 onPressed: () =>
                                     _copy(context, plainText: false),
                                 leading: iconOnly
@@ -201,44 +205,49 @@ class HistoryInspector extends StatelessWidget {
                             Semantics(
                               label: 'Copy options',
                               button: true,
-                              child: Select<bool>(
-                                key: const ValueKey<String>(
-                                  'history-copy-options',
-                                ),
-                                value: false,
-                                expandIcon: null,
-                                theme: AppTheme.primarySelectTheme(context),
-                                itemBuilder: (context, _) => Icon(
-                                  LucideIcons.chevronDown,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.primaryForeground,
-                                ),
-                                onChanged: (plainText) {
-                                  if (plainText == true) {
-                                    unawaited(_copy(context, plainText: true));
-                                  }
-                                },
-                                popup: const SelectPopup<bool>.noVirtualization(
-                                  items: SelectItemList(
-                                    children: [
-                                      SelectItemButton<bool>(
-                                        value: true,
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
+                              child: ComponentTheme<SelectTheme>(
+                                data: AppTheme.primarySelectTheme(context),
+                                child: Select<bool>(
+                                  key: const ValueKey<String>(
+                                    'history-copy-options',
+                                  ),
+                                  value: false,
+                                  expandIcon: null,
+                                  itemBuilder: (context, _) => Icon(
+                                    LucideIcons.chevronDown,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primaryForeground,
+                                  ),
+                                  onChanged: (plainText) {
+                                    if (plainText == true) {
+                                      unawaited(
+                                        _copy(context, plainText: true),
+                                      );
+                                    }
+                                  },
+                                  popup:
+                                      const SelectPopup<bool>.noVirtualization(
+                                        items: SelectItemList(
                                           children: [
-                                            Icon(
-                                              LucideIcons.alignLeft,
-                                              size: AppIconSize.sm,
+                                            SelectItemButton<bool>(
+                                              value: true,
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    LucideIcons.alignLeft,
+                                                    size: AppIconSize.sm,
+                                                  ),
+                                                  Gap(AppSpacing.sm),
+                                                  Text('Copy plain text'),
+                                                ],
+                                              ),
                                             ),
-                                            Gap(AppSpacing.sm),
-                                            Text('Copy plain text'),
                                           ],
                                         ),
-                                      ),
-                                    ],
-                                  ),
-                                ).call,
+                                      ).call,
+                                ),
                               ),
                             ),
                         ],
@@ -254,9 +263,11 @@ class HistoryInspector extends StatelessWidget {
                               key: const ValueKey<String>(
                                 'history-detail-download',
                               ),
-                              style: iconOnly
-                                  ? const ButtonStyle.secondaryIcon()
-                                  : const ButtonStyle.secondary(),
+                              style: AppTheme.controlButtonStyle(
+                                iconOnly
+                                    ? const ButtonStyle.secondaryIcon()
+                                    : const ButtonStyle.secondary(),
+                              ),
                               onPressed: controller.isDownloadPending(clip.id)
                                   ? null
                                   : () => _download(context),
@@ -280,13 +291,15 @@ class HistoryInspector extends StatelessWidget {
                           toggled: clip.pinned,
                           child: Button(
                             key: ValueKey<String>('history-pin-${clip.id}'),
-                            style: ButtonStyle(
-                              variance: clip.pinned
-                                  ? ButtonVariance.secondary
-                                  : ButtonVariance.outline,
-                              density: iconOnly
-                                  ? ButtonDensity.icon
-                                  : ButtonDensity.normal,
+                            style: AppTheme.controlButtonStyle(
+                              ButtonStyle(
+                                variance: clip.pinned
+                                    ? ButtonVariance.secondary
+                                    : ButtonVariance.outline,
+                                density: iconOnly
+                                    ? ButtonDensity.icon
+                                    : ButtonDensity.normal,
+                              ),
                             ),
                             onPressed: controller.isPinPending(clip.id)
                                 ? null
@@ -311,7 +324,9 @@ class HistoryInspector extends StatelessWidget {
                             button: true,
                             child: Button.secondary(
                               key: const ValueKey<String>('history-ocr'),
-                              style: const ButtonStyle.secondaryIcon(),
+                              style: AppTheme.controlButtonStyle(
+                                const ButtonStyle.secondaryIcon(),
+                              ),
                               onPressed: controller.ocr!.canRun
                                   ? () => showHistoryOcrDialog(
                                       context,
@@ -333,9 +348,11 @@ class HistoryInspector extends StatelessWidget {
                             key: const ValueKey<String>(
                               'history-detail-delete',
                             ),
-                            style: iconOnly
-                                ? const ButtonStyle.destructiveIcon()
-                                : const ButtonStyle.destructive(),
+                            style: AppTheme.controlButtonStyle(
+                              iconOnly
+                                  ? const ButtonStyle.destructiveIcon()
+                                  : const ButtonStyle.destructive(),
+                            ),
                             onPressed: () => showHistoryDeleteDialog(
                               context,
                               controller: controller,
@@ -391,7 +408,7 @@ class HistoryInspector extends StatelessWidget {
             alignment: Alignment.centerRight,
             child: Button.ghost(
               key: const ValueKey<String>('history-detail-drawer-close'),
-              style: const ButtonStyle.ghostIcon(),
+              style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
               onPressed: () => closeDrawer(context),
               child: const Icon(LucideIcons.x),
             ),
@@ -408,7 +425,7 @@ class HistoryInspector extends StatelessWidget {
     HistoryClip clip,
     double availableWidth,
   ) {
-    final actions = <(AbstractButtonStyle, String?)>[
+    final actions = <(ButtonStyle, String?)>[
       (const ButtonStyle.primary(), 'Copy'),
       if (controller.canDownloadSelected)
         (const ButtonStyle.secondary(), 'Download'),
@@ -424,7 +441,8 @@ class HistoryInspector extends StatelessWidget {
       (const ButtonStyle.destructive(), 'Delete'),
     ];
     final theme = Theme.of(context);
-    double widthOf(AbstractButtonStyle style, String? label) {
+    double widthOf(ButtonStyle buttonStyle, String? label) {
+      final style = AppTheme.controlButtonStyle(buttonStyle);
       final iconWidth =
           style.iconTheme(context, const {}).size ?? AppIconSize.sm;
       final padding = style
