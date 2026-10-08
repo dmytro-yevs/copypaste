@@ -19,8 +19,9 @@ void main() {
           ShadcnApp(
             theme: AppTheme.light,
             builder: (context, child) => MediaQuery(
-              data: MediaQuery.of(context)
-                  .copyWith(textScaler: TextScaler.linear(scale)),
+              data: MediaQuery.of(
+                context,
+              ).copyWith(textScaler: TextScaler.linear(scale)),
               child: Builder(
                 builder: (context) => AppTheme.builder(context, child),
               ),
@@ -192,9 +193,9 @@ void main() {
         closeTo(tester.getRect(icon).center.dy, 0.01),
       );
       expect(
-        DefaultTextStyle.of(tester.element(buttonText))
-            .style
-            .leadingDistribution,
+        DefaultTextStyle.of(
+          tester.element(buttonText),
+        ).style.leadingDistribution,
         TextLeadingDistribution.even,
       );
     },
@@ -323,11 +324,9 @@ void main() {
       const {WidgetState.focused},
       const {WidgetState.pressed},
     ]) {
-      final decoration = selectTheme!.decoration!(
-        themedContext,
-        states,
-        const BoxDecoration(),
-      ) as BoxDecoration;
+      final decoration =
+          selectTheme!.decoration!(themedContext, states, const BoxDecoration())
+              as BoxDecoration;
       expect(decoration.border?.top.style, BorderStyle.none);
     }
     expect(inputOtpTheme?.spacing, AppSpacing.sm);
@@ -674,7 +673,8 @@ void main() {
     expect(
       offenders,
       isEmpty,
-      reason: 'All application buttons must use shadcn Button with a ButtonStyle modifier.',
+      reason:
+          'All application buttons must use shadcn Button with a ButtonStyle modifier.',
     );
   });
 
@@ -717,7 +717,8 @@ void main() {
     expect(
       offenders,
       isEmpty,
-      reason: 'Application-owned overlays must use AppOverlays instead of local visual configuration.',
+      reason:
+          'Application-owned overlays must use AppOverlays instead of local visual configuration.',
     );
   });
 
