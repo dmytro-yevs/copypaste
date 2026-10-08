@@ -11,6 +11,8 @@ import '../history/repository/history_repository.dart';
 import '../settings/repository/quick_paste_preferences_store.dart';
 
 class QuickPasteController extends ChangeNotifier {
+  static const _inspectorHoverDelay = Duration(milliseconds: 1500);
+
   QuickPasteController({
     required HistoryRepository repository,
     Future<void> Function()? disposeRepository,
@@ -47,6 +49,14 @@ class QuickPasteController extends ChangeNotifier {
   Map<String, String> _pinnedShortcuts = {};
   Future<void> _shortcutSync = Future<void>.value();
   Future<void>? _repositoryDisposal;
+  Future<void>? _pageLoad;
+  bool _paginationFailed = false;
+  int _focusGeneration = 0;
+  Timer? _inspectorHoverTimer;
+  String? _hoveredClipId;
+  bool _autoOpenSuppressed = false;
+  bool? _requestedInspectorVisible;
+  Future<void> _inspectorChanges = Future<void>.value();
 
   bool get autoPaste => _preferences.autoPaste;
   bool get accessibilityGranted => _accessibilityGranted;
@@ -54,6 +64,7 @@ class QuickPasteController extends ChangeNotifier {
   int get presentationGeneration => _presentationGeneration;
   HistoryClip? get focusedClip => _focusedClip;
   bool get inspectorOpen => _inspectorOpen;
+  bool get paginationFailed => _paginationFailed;
 
   List<HistoryClip> get items => [
     ...history.items.where((clip) => !clip.pinned),
@@ -96,9 +107,15 @@ class QuickPasteController extends ChangeNotifier {
     bool inspectorVisible = false,
   }) async {
     if (_disposed || presentationId <= 0) return;
+    _cancelInspectorHover();
+    _autoOpenSuppressed = false;
+    _requestedInspectorVisible = null;
     _presentationId = presentationId;
     _inspectorOpen = inspectorVisible;
     _focusedClip = null;
+    _focusGeneration += 1;
+    _pageLoad = null;
+    _paginationFailed = false;
     _presentationGeneration += 1;
     final preferences = await _preferencesStore.read();
     if (!_isCurrent(presentationId)) return;
@@ -118,37 +135,159 @@ class QuickPasteController extends ChangeNotifier {
       !_disposed && _presentationId == presentationId;
 
   Future<void> search(String query) {
+    _cancelInspectorHover();
+    _autoOpenSuppressed = false;
+    _focusedClip = null;
+    _focusGeneration += 1;
+    _pageLoad = null;
+    _paginationFailed = false;
     final sort = query.trim().isEmpty
         ? HistorySort.newest
         : HistorySort.relevance;
     return history.updateQuery(HistoryQuery(search: query, sort: sort));
   }
 
+  Future<void> loadMore() {
+    if (_disposed) return Future<void>.value();
+    final pending = _pageLoad;
+    if (pending != null) return pending;
+    final generation = _focusGeneration;
+    final count = history.items.length;
+    _paginationFailed = false;
+    late final Future<void> operation;
+    operation = history.loadMore().whenComplete(() {
+      if (identical(_pageLoad, operation)) _pageLoad = null;
+      if (!_disposed && generation == _focusGeneration) {
+        _paginationFailed =
+            history.items.length == count && history.canLoadMore;
+        notifyListeners();
+      }
+    });
+    _pageLoad = operation;
+    return operation;
+  }
+
+  /// Traverses data rather than mounted rows, including page boundaries.
+  Future<void> moveFocus(int offset) async {
+    final generation = _focusGeneration;
+    var current = _focusedClip;
+    final focusedId = current?.id;
+    for (var step = 0; step < offset.abs(); step++) {
+      if (_disposed || generation != _focusGeneration) return;
+      var visible = items;
+      final recent = visible.where((clip) => !clip.pinned).toList();
+      if (offset > 0 &&
+          history.canLoadMore &&
+          (visible.isEmpty ||
+              (current != null &&
+                  current.id == (recent.lastOrNull ?? visible.last).id))) {
+        final count = visible.length;
+        await loadMore();
+        if (_disposed || generation != _focusGeneration) return;
+        visible = items;
+        if (visible.length == count && history.canLoadMore) break;
+      }
+      if (visible.isEmpty) return;
+      final index = visible.indexWhere((clip) => clip.id == current?.id);
+      final next = index < 0 ? 0 : index + offset.sign;
+      if (next < 0 || next >= visible.length) break;
+      current = visible[next];
+    }
+    if (!_disposed &&
+        generation == _focusGeneration &&
+        _focusedClip?.id == focusedId &&
+        current != null) {
+      focus(current);
+    }
+  }
+
   void focus(HistoryClip clip) {
     if (_focusedClip?.id == clip.id) return;
+    _cancelInspectorHover();
+    _autoOpenSuppressed = false;
     _focusedClip = clip;
     if (_inspectorOpen) unawaited(history.select(clip.id));
     notifyListeners();
   }
 
-  Future<void> toggleInspector() async {
+  void hoverClip(HistoryClip clip, {required bool hovered}) {
+    if (_disposed) return;
+    if (!hovered) {
+      if (_hoveredClipId == clip.id) _cancelInspectorHover();
+      return;
+    }
+    focus(clip);
+    _hoveredClipId = clip.id;
     final id = _presentationId;
-    if (id == null || _disposed || _activating) return;
-    final visible = !_inspectorOpen;
-    try {
-      await _host.setInspectorVisible(presentationId: id, visible: visible);
-    } on PlatformException {
-      return;
-    } on MissingPluginException {
+    if (id == null ||
+        _activating ||
+        (_requestedInspectorVisible ?? _inspectorOpen) ||
+        _autoOpenSuppressed) {
       return;
     }
-    if (!_isCurrent(id)) return;
-    _inspectorOpen = visible;
-    if (visible) {
-      final clip = _focusedClip ?? items.firstOrNull;
-      if (clip != null) await history.select(clip.id);
-    }
-    if (_isCurrent(id)) notifyListeners();
+    _inspectorHoverTimer?.cancel();
+    _inspectorHoverTimer = Timer(_inspectorHoverDelay, () {
+      _inspectorHoverTimer = null;
+      if (_isCurrent(id) &&
+          !_activating &&
+          !_autoOpenSuppressed &&
+          _hoveredClipId == clip.id &&
+          _focusedClip?.id == clip.id) {
+        unawaited(_setInspectorVisible(true));
+      }
+    });
+  }
+
+  void _cancelInspectorHover() {
+    _inspectorHoverTimer?.cancel();
+    _inspectorHoverTimer = null;
+    _hoveredClipId = null;
+  }
+
+  Future<void> toggleInspector() {
+    final id = _presentationId;
+    if (id == null || _disposed || _activating) return Future<void>.value();
+    _cancelInspectorHover();
+    final visible = !(_requestedInspectorVisible ?? _inspectorOpen);
+    _autoOpenSuppressed = !visible;
+    return _setInspectorVisible(visible);
+  }
+
+  Future<void> _setInspectorVisible(bool visible) {
+    final id = _presentationId;
+    if (id == null || _disposed || _activating) return Future<void>.value();
+    _requestedInspectorVisible = visible;
+    late final Future<void> operation;
+    operation = _inspectorChanges
+        .then((_) async {
+          if (!_isCurrent(id) || _activating || _inspectorOpen == visible) {
+            return;
+          }
+          try {
+            await _host.setInspectorVisible(
+              presentationId: id,
+              visible: visible,
+            );
+          } on PlatformException {
+            return;
+          } on MissingPluginException {
+            return;
+          }
+          if (!_isCurrent(id)) return;
+          _inspectorOpen = visible;
+          if (visible) {
+            final clip = _focusedClip ?? items.firstOrNull;
+            if (clip != null) unawaited(history.select(clip.id));
+          }
+          if (_isCurrent(id)) notifyListeners();
+        })
+        .whenComplete(() {
+          if (identical(_inspectorChanges, operation)) {
+            _requestedInspectorVisible = null;
+          }
+        });
+    _inspectorChanges = operation;
+    return operation;
   }
 
   Future<void> activate(
@@ -159,6 +298,7 @@ class QuickPasteController extends ChangeNotifier {
   }) async {
     final presentationId = _presentationId;
     if (_disposed || _activating || presentationId == null) return;
+    _cancelInspectorHover();
     _activating = true;
     notifyListeners();
     try {
@@ -239,16 +379,19 @@ class QuickPasteController extends ChangeNotifier {
   Future<bool> clearUnpinned() => history.deleteAll();
 
   Future<void> openMainWindow() {
+    _cancelInspectorHover();
     _presentationId = null;
     return _disposed ? Future.value() : _host.openMainWindow();
   }
 
   Future<void> openSettings() {
+    _cancelInspectorHover();
     _presentationId = null;
     return _disposed ? Future.value() : _host.openSettings();
   }
 
   Future<void> close() async {
+    _cancelInspectorHover();
     final id = _presentationId;
     _presentationId = null;
     if (!_disposed && id != null) await _closePresentation(id);
@@ -266,6 +409,7 @@ class QuickPasteController extends ChangeNotifier {
   }
 
   Future<void> quit() {
+    _cancelInspectorHover();
     _presentationId = null;
     return _disposed ? Future.value() : _host.quit();
   }
@@ -293,6 +437,7 @@ class QuickPasteController extends ChangeNotifier {
       _focusedClip = history.items
           .where((clip) => clip.id == focusedId)
           .firstOrNull;
+      if (_focusedClip == null) _cancelInspectorHover();
     }
     unawaited(_reconcilePinnedShortcuts().catchError((Object error) {}));
     notifyListeners();
@@ -337,6 +482,7 @@ class QuickPasteController extends ChangeNotifier {
   @override
   void dispose() {
     if (_disposed) return;
+    _cancelInspectorHover();
     _disposed = true;
     _presentationId = null;
     _host.setOpenedHandler(null);
