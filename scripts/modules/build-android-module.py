@@ -38,7 +38,7 @@ def main():
     }
     subprocess.run(["cargo", "+1.96", "build", "--manifest-path", str(args.module_dir / "Cargo.toml"),
                     "--release", "--locked", "--target", target, "--lib"], env=environment, check=True)
-    if args.architecture == "x86_64" and args.module_dir.resolve() == (ROOT / "modules/ocr").resolve():
+    if args.architecture == "x86_64" and args.module_dir.resolve().name in {"ocr", "supabase", "semantic-search"}:
         subprocess.run(["cargo", "+1.96", "build", "--release", "--locked", "--target", target,
                         "-p", "copypaste-module-qualification", "--lib"], env=environment, check=True)
     library = args.module_dir / "target" / target / "release" / args.library_name
