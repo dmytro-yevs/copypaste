@@ -163,101 +163,100 @@ void main() {
     (TargetPlatform.windows, 1000.0),
   ]) {
     for (final scale in [1.0, 1.6]) {
-      testWidgets(
-        'module sizes and actions align at $width with scale $scale',
-        (tester) async {
-          await tester.binding.setSurfaceSize(Size(width, 1600));
-          addTearDown(() => tester.binding.setSurfaceSize(null));
-          final marketplace = MemoryModuleMarketplace()
-            ..modules = [
-              for (var index = 0; index < 4; index++)
-                MarketplaceModule(
-                  id: index == 0 ? testModule.id : 'module-$index',
-                  title: index == 0 ? testModule.title : 'Module $index',
-                  description: index == 1
-                      ? 'Automatically copy login, verification, and transaction codes from new SMS messages.'
-                      : testModule.description,
-                  version: testMarketplaceModule.version,
-                  artifact: index == 1 ? null : testMarketplaceModule.artifact,
-                  appVersions: VersionConstraint.parse('>=1.0.6 <2.0.0'),
-                  availability: index == 1
-                      ? ModuleAvailability.platform
-                      : ModuleAvailability.available,
-                  unavailableReason: index == 1
-                      ? 'Not available for this device.'
-                      : null,
-                ),
-            ];
-          final controller = ModulesController(
-            repository: MemoryModulesRepository()..modules = [testModule],
-            marketplace: marketplace,
-          );
-          addTearDown(controller.dispose);
-          await controller.initialize();
-          await tester.pumpWidget(
-            ShadcnApp(
-              theme: AppTheme.light,
-              builder: (context, child) => AppTheme.builder(
-                context,
-                MediaQuery(
-                  data: MediaQuery.of(context)
-                      .copyWith(textScaler: TextScaler.linear(scale)),
-                  child: child!,
-                ),
+      testWidgets('module sizes and actions align at $width with scale $scale', (
+        tester,
+      ) async {
+        await tester.binding.setSurfaceSize(Size(width, 1600));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final marketplace = MemoryModuleMarketplace()
+          ..modules = [
+            for (var index = 0; index < 4; index++)
+              MarketplaceModule(
+                id: index == 0 ? testModule.id : 'module-$index',
+                title: index == 0 ? testModule.title : 'Module $index',
+                description: index == 1
+                    ? 'Automatically copy login, verification, and transaction codes from new SMS messages.'
+                    : testModule.description,
+                version: testMarketplaceModule.version,
+                artifact: index == 1 ? null : testMarketplaceModule.artifact,
+                appVersions: VersionConstraint.parse('>=1.0.6 <2.0.0'),
+                availability: index == 1
+                    ? ModuleAvailability.platform
+                    : ModuleAvailability.available,
+                unavailableReason: index == 1
+                    ? 'Not available for this device.'
+                    : null,
               ),
-              home: Scaffold(
-                child: SingleChildScrollView(
-                  child: ModulesSettingsView(controller: controller),
-                ),
+          ];
+        final controller = ModulesController(
+          repository: MemoryModulesRepository()..modules = [testModule],
+          marketplace: marketplace,
+        );
+        addTearDown(controller.dispose);
+        await controller.initialize();
+        await tester.pumpWidget(
+          ShadcnApp(
+            theme: AppTheme.light,
+            builder: (context, child) => AppTheme.builder(
+              context,
+              MediaQuery(
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: TextScaler.linear(scale)),
+                child: child!,
               ),
             ),
-          );
-          await tester.pumpAndSettle();
-          final ids = [testModule.id, 'module-1', 'module-2', 'module-3'];
-          final size = tester.getSize(
-            find.byKey(ValueKey('module-${ids.first}')),
-          );
-          for (final id in ids) {
-            final card = find.byKey(ValueKey('module-$id'));
-            expect(tester.getSize(card), size);
-            final action = find.byKey(
-              ValueKey(
-                id == testModule.id
-                    ? 'module-settings-$id'
-                    : 'module-install-$id',
+            home: Scaffold(
+              child: SingleChildScrollView(
+                child: ModulesSettingsView(controller: controller),
               ),
-            );
-            expect(
-              tester.getBottomRight(card).dy - tester.getBottomRight(action).dy,
-              closeTo(
-                tester
-                        .getBottomRight(
-                          find.byKey(ValueKey('module-${ids.first}')),
-                        )
-                        .dy -
-                    tester
-                        .getBottomRight(
-                          find.byKey(ValueKey('module-settings-${ids.first}')),
-                        )
-                        .dy,
-                0.01,
-              ),
-            );
-          }
-          expect(find.text('Not available for this device.'), findsOneWidget);
-          expect(find.text('Unavailable'), findsNothing);
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final ids = [testModule.id, 'module-1', 'module-2', 'module-3'];
+        final size = tester.getSize(
+          find.byKey(ValueKey('module-${ids.first}')),
+        );
+        for (final id in ids) {
+          final card = find.byKey(ValueKey('module-$id'));
+          expect(tester.getSize(card), size);
+          final action = find.byKey(
+            ValueKey(
+              id == testModule.id
+                  ? 'module-settings-$id'
+                  : 'module-install-$id',
+            ),
+          );
           expect(
-            tester
-                .widget<Button>(
-                  find.byKey(const ValueKey('module-install-module-1')),
-                )
-                .onPressed,
-            isNull,
+            tester.getBottomRight(card).dy - tester.getBottomRight(action).dy,
+            closeTo(
+              tester
+                      .getBottomRight(
+                        find.byKey(ValueKey('module-${ids.first}')),
+                      )
+                      .dy -
+                  tester
+                      .getBottomRight(
+                        find.byKey(ValueKey('module-settings-${ids.first}')),
+                      )
+                      .dy,
+              0.01,
+            ),
           );
-          expect(tester.takeException(), isNull);
-        },
-        variant: TargetPlatformVariant({platform}),
-      );
+        }
+        expect(find.text('Not available for this device.'), findsOneWidget);
+        expect(find.text('Unavailable'), findsNothing);
+        expect(
+          tester
+              .widget<Button>(
+                find.byKey(const ValueKey('module-install-module-1')),
+              )
+              .onPressed,
+          isNull,
+        );
+        expect(tester.takeException(), isNull);
+      }, variant: TargetPlatformVariant({platform}));
     }
   }
 

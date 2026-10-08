@@ -98,11 +98,9 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - id: flutter
         run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+      - uses: ./.github/actions/setup-flutter
         with:
-          channel: stable
-          flutter-version: ${{ steps.flutter.outputs.version }}
-          cache: true
+          version: ${{ steps.flutter.outputs.version }}
       - uses: ./.github/actions/flutter-build-cache
         with:
           platform: macos
@@ -170,11 +168,9 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - id: flutter
         run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+      - uses: ./.github/actions/setup-flutter
         with:
-          channel: stable
-          flutter-version: ${{ steps.flutter.outputs.version }}
-          cache: true
+          version: ${{ steps.flutter.outputs.version }}
       - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
         with:
           distribution: temurin
@@ -247,11 +243,9 @@ jobs:
       - id: flutter
         shell: bash
         run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+      - uses: ./.github/actions/setup-flutter
         with:
-          channel: stable
-          flutter-version: ${{ steps.flutter.outputs.version }}
-          cache: true
+          version: ${{ steps.flutter.outputs.version }}
       - uses: ./.github/actions/flutter-build-cache
         with:
           platform: windows

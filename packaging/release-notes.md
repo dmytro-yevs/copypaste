@@ -1,9 +1,7 @@
-This update improves protected rendering memory, Quick Paste, and module settings.
+This update improves module access setup and build performance.
 
-- Bound macOS capture-protected frame buffers, coalesce pending frames, and release buffers when windows are hidden or closed.
-- Improve Quick Paste row actions, previews, and pinned keyboard shortcuts.
-- Open module-specific settings in a shared drawer and keep module cards aligned.
-- Keep image clipboard copies available as PNG while preserving original image data.
+- Open SMS module access setup in a drawer and refresh permission state when the application resumes.
+- Reuse build dependency caches across CI and release runs, and avoid the slow Windows Flutter SDK archive.
 
 Optional modules are selected and installed from the first-party marketplace in Settings. OCR engines and models are not bundled with the application.
 

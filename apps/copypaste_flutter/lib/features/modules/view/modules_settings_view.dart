@@ -191,9 +191,9 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
               const Gap(AppSpacing.lg),
               Text(installed?.title ?? marketplace!.title).semiBold(),
               const Gap(AppSpacing.sm),
-              Text(installed?.description ?? marketplace!.description)
-                  .small()
-                  .muted(),
+              Text(
+                installed?.description ?? marketplace!.description,
+              ).small().muted(),
               const Gap(AppSpacing.md),
               Text(
                 [

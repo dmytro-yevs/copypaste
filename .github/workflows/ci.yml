@@ -148,6 +148,8 @@ jobs:
             .
             modules/ocr
       - name: Module lifecycle and OCR contracts
+        env:
+          OPENSSL_SRC_PERL: ${{ matrix.platform == 'windows' && 'C:\Strawberry\perl\bin\perl.exe' || 'perl' }}
         run: |
           cargo test -p copypaste-modules --locked
           cargo test --manifest-path modules/ocr/Cargo.toml --locked
@@ -176,11 +178,9 @@ jobs:
           version="$(tr -d '[:space:]' < .flutter-version)"
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+      - uses: ./.github/actions/setup-flutter
         with:
-          channel: stable
-          flutter-version: ${{ steps.flutter.outputs.version }}
-          cache: true
+          version: ${{ steps.flutter.outputs.version }}
       - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
         if: matrix.platform == 'android'
         with:
