@@ -73,6 +73,38 @@ class HistoryController extends ChangeNotifier {
   Future<void>? _visibleItemsRefresh;
   int _queryEpoch = 0;
   bool _disposed = false;
+  bool _suspended = false;
+  int _mediaEpoch = 0;
+
+  bool get canSuspend =>
+      !_isImportingFiles &&
+      !_isReorderingPinned &&
+      !_isDeletingAll &&
+      _draggedPinnedId == null &&
+      _pinMutations.isEmpty &&
+      _deleteMutations.isEmpty &&
+      _downloadMutations.isEmpty &&
+      !(ocr?.busy ?? false);
+
+  /// Releases loaded payloads while retaining the query, section state, and
+  /// selection identity. The runtime watch remains connected but does no reads.
+  void suspend() {
+    if (_disposed || _suspended) return;
+    _suspended = true;
+    _queryEpoch++;
+    _mediaEpoch++;
+    _items.clear();
+    _facets = const HistoryFacets();
+    _selectedClip = null;
+    _nextCursor = null;
+    _isLoadingMore = false;
+    _visibleItemsRefresh = null;
+    _state = HistoryLoadState.initial;
+    _imagePreviews.clear();
+    _sourceIcons.clear();
+    _imagePreviewLoads.clear();
+    _sourceIconLoads.clear();
+  }
 
   HistoryQuery get query => _query;
   HistoryFacets get facets => _facets;
@@ -121,7 +153,11 @@ class HistoryController extends ChangeNotifier {
   }
 
   Future<void> initialize() async {
+    if (_disposed) return;
+    final mediaEpoch = _mediaEpoch;
+    _suspended = false;
     _watchSubscription ??= _repository.watch().listen((event) {
+      if (_suspended) return;
       if (event == HistoryRuntimeEvent.itemsChanged) {
         if (_isImportingFiles) {
           _refreshAfterFileImport = true;
@@ -135,6 +171,13 @@ class HistoryController extends ChangeNotifier {
       }
     });
     await _reloadItemsAndFacets();
+    final selectedId = _selectedId;
+    if (!_disposed &&
+        !_suspended &&
+        mediaEpoch == _mediaEpoch &&
+        selectedId != null) {
+      await select(selectedId);
+    }
   }
 
   Future<void> _reloadItemsAndFacets() async {
@@ -198,9 +241,12 @@ class HistoryController extends ChangeNotifier {
   }
 
   Future<void> refreshFacets() async {
+    if (_disposed || _suspended) return;
+    final epoch = _mediaEpoch;
     try {
-      _facets = await _repository.facets();
-      if (!_disposed) {
+      final facets = await _repository.facets();
+      if (!_disposed && !_suspended && epoch == _mediaEpoch) {
+        _facets = facets;
         _trimCachedMedia(_sourceIcons, retainedIds: _retainedSourceIconIds);
         notifyListeners();
       }
@@ -212,7 +258,13 @@ class HistoryController extends ChangeNotifier {
   void updateSearch(String value) {
     _searchTimer?.cancel();
     _searchTimer = Timer(_searchDebounce, () {
-      updateQuery(_query.copyWith(search: value));
+      final beginsSearch = !_query.hasSearch && value.trim().isNotEmpty;
+      updateQuery(
+        _query.copyWith(
+          search: value,
+          sort: beginsSearch ? HistorySort.relevance : _query.sort,
+        ),
+      );
     });
   }
 
@@ -226,6 +278,7 @@ class HistoryController extends ChangeNotifier {
   }
 
   Future<void> reload() async {
+    if (_disposed || _suspended) return;
     if (_draggedPinnedId != null || _isReorderingPinned) {
       _queryEpoch++;
       _refreshAfterPinnedInteraction = true;
@@ -717,6 +770,7 @@ class HistoryController extends ChangeNotifier {
     Set<String> Function()? retainedIds,
     bool queryBound = true,
   }) {
+    if (_disposed || _suspended) return SynchronousFuture<T?>(null);
     final hasCached = cache.containsKey(id);
     final cached = cache.remove(id);
     if (hasCached) {
@@ -726,11 +780,15 @@ class HistoryController extends ChangeNotifier {
     final existing = inFlight[id];
     if (existing != null) return existing;
     final epoch = _queryEpoch;
+    final mediaEpoch = _mediaEpoch;
     late final Future<T?> request;
     request = () async {
       try {
         final value = await loader();
-        if (_disposed || (queryBound && !_isCurrent(epoch))) {
+        if (_disposed ||
+            _suspended ||
+            mediaEpoch != _mediaEpoch ||
+            (queryBound && !_isCurrent(epoch))) {
           return null;
         }
         cache[id] = value;
@@ -738,13 +796,16 @@ class HistoryController extends ChangeNotifier {
         notifyListeners();
         return value;
       } catch (_) {
-        if (!_disposed && (!queryBound || _isCurrent(epoch))) {
+        if (!_disposed &&
+            !_suspended &&
+            mediaEpoch == _mediaEpoch &&
+            (!queryBound || _isCurrent(epoch))) {
           cache[id] = null;
           _trimCachedMedia(cache, retainedIds: retainedIds?.call() ?? const {});
         }
         return null;
       } finally {
-        inFlight.remove(id);
+        if (mediaEpoch == _mediaEpoch) inFlight.remove(id);
       }
     }();
     inFlight[id] = request;
@@ -758,7 +819,8 @@ class HistoryController extends ChangeNotifier {
     }
   }
 
-  bool _isCurrent(int epoch) => !_disposed && epoch == _queryEpoch;
+  bool _isCurrent(int epoch) =>
+      !_disposed && !_suspended && epoch == _queryEpoch;
 
   @override
   void dispose() {

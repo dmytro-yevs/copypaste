@@ -234,7 +234,7 @@ impl CloudItem {
         }
         if let Some(metadata) = &self.payload_metadata {
             if metadata.len() > copypaste_ipc::MAX_SYNC_METADATA_BYTES
-                || copypaste_core::PayloadMetadata::from_json(metadata, &self.content_type)
+                || copypaste_payload::PayloadMetadata::from_json(metadata, &self.content_type)
                     .is_none()
             {
                 return Err(RestError::InvalidItem {

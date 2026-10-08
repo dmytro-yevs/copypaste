@@ -14,6 +14,8 @@ const CURRENT_TABLES: &[&str] = &[
     "shared_binary_payloads",
     "history_file_payloads",
     "copypaste_schema_migrations",
+    "module_search_documents",
+    "module_search_vectors",
 ];
 
 #[derive(Debug, PartialEq)]

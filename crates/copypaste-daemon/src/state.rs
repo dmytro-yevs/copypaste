@@ -14,7 +14,6 @@ use copypaste_ipc::{DiagnosticCounters, EventData, EventKind};
 use tokio::sync::{broadcast, watch, OwnedRwLockReadGuard, RwLock};
 
 use crate::clipboard::ClipboardSource;
-use crate::cloud::Cloud;
 use crate::meta::Meta;
 use crate::p2p::P2p;
 use crate::settings::Settings;
@@ -23,6 +22,7 @@ use crate::settings::Settings;
 pub struct AppState {
     pub modules: Arc<copypaste_modules::ModuleHost>,
     pub store: Store,
+    pub instant_clipboard: copypaste_core::sync::InstantClipboard,
     /// `Arc` because `copypaste_core::StoreSource` holds one for as long as the
     /// peer listener runs, and the device secret is not `Clone` on purpose.
     pub keyring: Arc<Keyring>,
@@ -32,7 +32,6 @@ pub struct AppState {
     clipboard: Mutex<Box<dyn ClipboardSource>>,
     pub meta: Meta,
     pub p2p: P2p,
-    pub cloud: Cloud,
     pub settings: Settings,
     /// Never put in a client-visible string: it discloses the local username.
     db_path: PathBuf,
@@ -67,24 +66,39 @@ impl AppState {
         clipboard: Box<dyn ClipboardSource>,
         meta: Meta,
         p2p: P2p,
-        cloud: Cloud,
         settings: Settings,
         db_path: PathBuf,
     ) -> Self {
         let backend_name = clipboard.backend_name();
+        let events = broadcast::channel(EVENT_BUFFER).0;
+        let modules = Arc::new(copypaste_modules::ModuleHost::new(
+            db_path.parent().unwrap_or(std::path::Path::new(".")),
+        ));
+        let changed_events = events.clone();
+        let changed_store = store.clone();
+        modules.bind_search(
+            store.clone(),
+            Arc::new(move || {
+                let _ = changed_events.send(EventData {
+                    sync_status: None,
+                    event: EventKind::Items,
+                    item_count: changed_store.count().unwrap_or(0),
+                    captured: false,
+                    captured_item_id: None,
+                });
+            }),
+        );
         Self {
-            modules: Arc::new(copypaste_modules::ModuleHost::new(
-                db_path.parent().unwrap_or(std::path::Path::new(".")),
-            )),
+            modules,
             store,
+            instant_clipboard: Default::default(),
             keyring,
             clipboard: Mutex::new(clipboard),
             meta,
             p2p,
-            cloud,
             settings,
             db_path,
-            events: broadcast::channel(EVENT_BUFFER).0,
+            events,
             shutdown: watch::channel(false).0,
             drain_release: watch::channel(false).0,
             draining: AtomicBool::new(false),
@@ -153,7 +167,7 @@ impl AppState {
         self.p2p.node().note_local_version(copypaste_core::now_ms());
         self.publish(EventKind::Items, None);
         self.p2p.wake();
-        self.cloud.wake();
+        self.modules.note_version(copypaste_core::now_ms());
     }
 
     /// [`AppState::note_local_change`] plus the bit that separates a capture
@@ -163,10 +177,11 @@ impl AppState {
     /// what to do about it, and the surface that owns the notification reads
     /// it.
     pub fn note_capture(&self, floor_ms: i64, item_id: &str) {
+        self.instant_clipboard.note_local(&self.store, floor_ms);
         self.p2p.node().note_local_version(floor_ms);
         self.publish(EventKind::Items, Some(item_id));
         self.p2p.wake();
-        self.cloud.wake();
+        self.modules.note_version(copypaste_core::now_ms());
     }
 
     /// History changed because a peer or the cloud delivered something.
@@ -193,6 +208,9 @@ impl AppState {
     }
 
     fn publish(&self, event: EventKind, captured_item_id: Option<&str>) {
+        if event == EventKind::Items {
+            self.modules.history_changed();
+        }
         // Having no subscriber is the ordinary case: the CLI does not subscribe
         // and the app may not be running. `item_count` costs a `SELECT COUNT(*)`
         // over the live set, so it is not built for nobody. Safe against the

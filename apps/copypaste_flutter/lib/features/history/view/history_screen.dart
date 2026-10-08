@@ -176,12 +176,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
       await showOverlay<void>(
         context,
         AppOverlays.bottomDrawerConfiguration,
-        builder: (context) => SizedBox(
+        builder: (context) => ConstrainedBox(
           key: const ValueKey<String>('history-detail-drawer'),
-          width: double.infinity,
-          height:
-              MediaQuery.sizeOf(context).height *
-              AppOverlaySize.drawerHeightFactor,
+          constraints: AppOverlays.drawerContentConstraints(context),
           child: AnimatedBuilder(
             animation: widget.controller,
             builder: (context, child) =>
@@ -800,12 +797,12 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
     ];
 
     return [
-      Select<_HistoryFilterOption<HistoryClipKind?>>(
-        filled: true,
-        constraints: _selectConstraints(compact),
-        value: _selectedOption(kindOptions, query.kind),
+      _filterSelect(
+        context,
+        compact: compact,
+        options: kindOptions,
+        value: query.kind,
         onChanged: (option) {
-          if (option == null) return;
           final current = widget.controller.query;
           unawaited(
             widget.controller.updateQuery(
@@ -815,34 +812,26 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
             ),
           );
         },
-        expandIcon: compact ? null : const SelectExpandIcon(),
-        theme: _selectThemeFor(context, kindOptions, compact),
-        popup: _selectPopup(kindOptions).call,
-        itemBuilder: (context, option) => _selectValue(option, compact),
       ),
-      Select<_HistoryFilterOption<bool>>(
-        filled: true,
-        constraints: _selectConstraints(compact),
-        value: _selectedOption(pinnedOptions, query.pinnedOnly),
+      _filterSelect(
+        context,
+        compact: compact,
+        options: pinnedOptions,
+        value: query.pinnedOnly,
         onChanged: (option) {
-          if (option == null) return;
           unawaited(
             widget.controller.updateQuery(
               widget.controller.query.copyWith(pinnedOnly: option.value),
             ),
           );
         },
-        expandIcon: compact ? null : const SelectExpandIcon(),
-        theme: _selectThemeFor(context, pinnedOptions, compact),
-        popup: _selectPopup(pinnedOptions).call,
-        itemBuilder: (context, option) => _selectValue(option, compact),
       ),
-      Select<_HistoryFilterOption<String?>>(
-        filled: true,
-        constraints: _selectConstraints(compact),
-        value: _selectedOption(originOptions, query.origin),
+      _filterSelect(
+        context,
+        compact: compact,
+        options: originOptions,
+        value: query.origin,
         onChanged: (option) {
-          if (option == null) return;
           final current = widget.controller.query;
           unawaited(
             widget.controller.updateQuery(
@@ -852,17 +841,13 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
             ),
           );
         },
-        expandIcon: compact ? null : const SelectExpandIcon(),
-        theme: _selectThemeFor(context, originOptions, compact),
-        popup: _selectPopup(originOptions).call,
-        itemBuilder: (context, option) => _selectValue(option, compact),
       ),
-      Select<_HistoryFilterOption<String?>>(
-        filled: true,
-        constraints: _selectConstraints(compact),
-        value: _selectedOption(sourceOptions, query.sourceApp),
+      _filterSelect(
+        context,
+        compact: compact,
+        options: sourceOptions,
+        value: query.sourceApp,
         onChanged: (option) {
-          if (option == null) return;
           final current = widget.controller.query;
           unawaited(
             widget.controller.updateQuery(
@@ -872,30 +857,41 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
             ),
           );
         },
-        expandIcon: compact ? null : const SelectExpandIcon(),
-        theme: _selectThemeFor(context, sourceOptions, compact),
-        popup: _selectPopup(sourceOptions).call,
-        itemBuilder: (context, option) => _selectValue(option, compact),
       ),
-      Select<_HistoryFilterOption<HistorySort>>(
-        filled: true,
-        constraints: _selectConstraints(compact),
-        value: _selectedOption(sortOptions, query.sort),
+      _filterSelect(
+        context,
+        compact: compact,
+        options: sortOptions,
+        value: query.sort,
         onChanged: (option) {
-          if (option == null) return;
           unawaited(
             widget.controller.updateQuery(
               widget.controller.query.copyWith(sort: option.value),
             ),
           );
         },
-        expandIcon: compact ? null : const SelectExpandIcon(),
-        theme: _selectThemeFor(context, sortOptions, compact),
-        popup: _selectPopup(sortOptions).call,
-        itemBuilder: (context, option) => _selectValue(option, compact),
       ),
     ];
   }
+
+  Widget _filterSelect<T>(
+    BuildContext context, {
+    required bool compact,
+    required List<_HistoryFilterOption<T>> options,
+    required T value,
+    required ValueChanged<_HistoryFilterOption<T>> onChanged,
+  }) => Select<_HistoryFilterOption<T>>(
+    filled: true,
+    constraints: _selectConstraints(compact),
+    value: _selectedOption(options, value),
+    onChanged: (option) {
+      if (option != null) onChanged(option);
+    },
+    expandIcon: compact ? null : const SelectExpandIcon(),
+    theme: _selectThemeFor(context, options, compact),
+    popup: _selectPopup(options).call,
+    itemBuilder: (context, option) => option.build(compact: compact),
+  );
 
   BoxConstraints? _selectConstraints(bool compact) => compact
       ? const BoxConstraints.tightFor(
@@ -1025,10 +1021,6 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
         ],
       ),
     );
-  }
-
-  Widget _selectValue<T>(_HistoryFilterOption<T> option, bool compact) {
-    return option.build(compact: compact);
   }
 }
 
