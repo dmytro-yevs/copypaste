@@ -3,6 +3,7 @@ import 'package:copypaste_flutter/app/shell/shell.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/features/devices/device_presentation.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -201,6 +202,10 @@ void main() {
         final icon = find.descendant(of: target, matching: find.byType(Icon));
         expect(label.hitTestable(), findsOneWidget);
         expect(
+          tester.renderObject<RenderParagraph>(label).text.style!.fontSize,
+          12,
+        );
+        expect(
           tester.getRect(label).top,
           greaterThan(tester.getRect(icon).bottom),
         );
@@ -381,8 +386,16 @@ void main() {
                 closeTo(targetBounds.center.dx, 0.5),
               );
               expect(
-                MediaQuery.textScalerOf(tester.element(label)).scale(14),
-                28,
+                tester
+                    .renderObject<RenderParagraph>(label)
+                    .text
+                    .style!
+                    .fontSize,
+                12,
+              );
+              expect(
+                MediaQuery.textScalerOf(tester.element(label)).scale(12),
+                24,
               );
             }
             expect(tester.takeException(), isNull);
