@@ -1,5 +1,6 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../app/theme/app_theme.dart';
 import '../app/theme/app_tokens.dart';
 import '../platform/android/android_shizuku_state.dart';
 import 'setup_setting_row.dart';
@@ -37,17 +38,7 @@ class AndroidAccessSetup extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      Tabs(
-        index: methodIndex,
-        expand: true,
-        onChanged: (index) {
-          if (!busy) onMethodChanged(index);
-        },
-        children: const [
-          TabItem(child: Text('Shizuku')),
-          TabItem(child: Text('ADB')),
-        ],
-      ),
+      _methodTabs(context),
       const Gap(AppSpacing.lg),
       if (methodIndex == 0)
         _ShizukuSetup(setup: this)
@@ -55,6 +46,54 @@ class AndroidAccessSetup extends StatelessWidget {
         _AdbSetup(setup: this),
     ],
   );
+
+  Widget _methodTabs(BuildContext context) {
+    final theme = Theme.of(context);
+    final tabsTheme = ComponentTheme.maybeOf<TabsTheme>(context);
+    final direction = Directionality.of(context);
+    final style = DefaultTextStyle.of(context).style
+        .merge(theme.typography.small)
+        .merge(theme.typography.medium);
+    var labelWidth = 0.0;
+    for (final label in ['Shizuku', 'ADB']) {
+      final painter = TextPainter(
+        text: TextSpan(text: label, style: style),
+        textDirection: direction,
+        textScaler: MediaQuery.textScalerOf(context),
+        maxLines: 1,
+      )..layout();
+      if (painter.width > labelWidth) labelWidth = painter.width;
+      painter.dispose();
+    }
+    final tabPadding = tabsTheme?.tabPadding ?? AppTheme.tabsTheme.tabPadding!;
+    final containerPadding =
+        tabsTheme?.containerPadding ?? AppTheme.tabsTheme.containerPadding!;
+    final minimumWidth =
+        (labelWidth.ceilToDouble() + tabPadding.resolve(direction).horizontal) *
+            2 +
+        containerPadding.resolve(direction).horizontal;
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: SizedBox(
+          width: constraints.maxWidth < minimumWidth
+              ? minimumWidth
+              : constraints.maxWidth,
+          child: Tabs(
+            index: methodIndex,
+            expand: true,
+            onChanged: (index) {
+              if (!busy) onMethodChanged(index);
+            },
+            children: const [
+              TabItem(child: Text('Shizuku', softWrap: false)),
+              TabItem(child: Text('ADB', softWrap: false)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _ShizukuSetup extends StatelessWidget {
@@ -171,9 +210,8 @@ class _AdbSetupState extends State<_AdbSetup> {
         const Gap(AppSpacing.md),
         SelectableText(
           widget.setup.adbCommands,
-          style: Theme.of(
-            context,
-          ).typography.inlineCode.copyWith(fontWeight: FontWeight.normal),
+          style: Theme.of(context).typography.inlineCode
+              .copyWith(fontWeight: FontWeight.normal),
         ),
       ],
     ),

@@ -160,9 +160,8 @@ abstract final class AppTheme {
       );
 
   static TextStyle clipboardMetadataTextStyle(BuildContext context) =>
-      clipboardMenuTextStyle(
-        context,
-      ).copyWith(fontSize: AppTypographySize.menuMetadata);
+      clipboardMenuTextStyle(context)
+          .copyWith(fontSize: AppTypographySize.menuMetadata);
 
   static TextStyle inspectorTextStyle(
     BuildContext context, {
@@ -206,6 +205,15 @@ abstract final class AppTheme {
     ),
   );
 
+  static const tabsTheme = TabsTheme(
+    containerPadding: EdgeInsets.all(AppSpacing.xs),
+    tabPadding: EdgeInsets.symmetric(
+      horizontal: AppSpacing.md,
+      vertical: AppSpacing.sm,
+    ),
+    borderRadius: BorderRadius.all(Radius.circular(AppRadius.md)),
+  );
+
   static const clipboardInspectorCardTheme = CardTheme(
     borderRadius: BorderRadius.all(Radius.circular(AppRadius.lg)),
   );
@@ -241,8 +249,8 @@ abstract final class AppTheme {
         horizontal: AppSpacing.xs,
         vertical: AppSpacing.xs,
       ),
-      textStyle: (context, states, value) =>
-          clipboardMenuTextStyle(context).copyWith(
+      textStyle: (context, states, value) => clipboardMenuTextStyle(context)
+          .copyWith(
             color: value.color,
             leadingDistribution: TextLeadingDistribution.even,
           ),
@@ -632,7 +640,10 @@ abstract final class AppTheme {
                 spacing: AppSpacing.sm,
                 height: AppControlSize.regular,
               ),
-              child: buttonThemedChild,
+              child: ComponentTheme<TabsTheme>(
+                data: tabsTheme,
+                child: buttonThemedChild,
+              ),
             ),
           ),
         ),
