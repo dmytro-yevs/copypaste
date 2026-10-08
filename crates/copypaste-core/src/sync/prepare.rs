@@ -142,13 +142,18 @@ pub(super) fn prepare_remote_version(
     } else {
         let key = keyring.item_key();
         if let Some(digest) = &digest {
-            let ciphertext =
-                crate::binary::seal_with_digest(content, digest, &key, incoming.item_id).map_err(
-                    |e| {
-                        warn!(error = ?e, "could not seal incoming binary item");
-                        MergeError::Encrypt
-                    },
-                )?;
+            let ciphertext = (if incoming
+                .item_id
+                .starts_with(crate::binary_reference::IMPORT_ID_PREFIX)
+            {
+                crate::binary_reference::seal(content, digest, &key, incoming.item_id)
+            } else {
+                crate::binary::seal_with_digest(content, digest, &key, incoming.item_id)
+            })
+            .map_err(|e| {
+                warn!(error = ?e, "could not seal incoming binary item");
+                MergeError::Encrypt
+            })?;
             Some((Vec::new(), ciphertext))
         } else {
             Some(

@@ -210,6 +210,21 @@ Future<Clip> copyClipAsPlainText({required String id}) =>
 Future<void> saveClipFile({required String id, required String destPath}) =>
     RustLib.instance.api.crateApiSaveClipFile(id: id, destPath: destPath);
 
+Future<BigInt> historyFileImportMaxBytes() =>
+    RustLib.instance.api.crateApiHistoryFileImportMaxBytes();
+
+Future<void> importClipFile({
+  required String path,
+  required String filename,
+  required String mimeType,
+  String? sourceReference,
+}) => RustLib.instance.api.crateApiImportClipFile(
+  path: path,
+  filename: filename,
+  mimeType: mimeType,
+  sourceReference: sourceReference,
+);
+
 Future<void> deleteClip({required String id}) =>
     RustLib.instance.api.crateApiDeleteClip(id: id);
 

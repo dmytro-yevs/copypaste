@@ -166,6 +166,13 @@ pub enum Method {
     Add {
         content: String,
     },
+    /// Import one selected regular file into encrypted History.
+    ImportFile {
+        path: String,
+        filename: String,
+        mime_type: String,
+        source_reference: Option<String>,
+    },
     Delete {
         id: String,
     },

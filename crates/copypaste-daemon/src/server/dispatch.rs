@@ -135,6 +135,7 @@ fn requires_ready(method: &Method) -> bool {
         | Method::SourceAppIcon { .. }
         | Method::SaveFile { .. }
         | Method::Add { .. }
+        | Method::ImportFile { .. }
         | Method::Delete { .. }
         | Method::DeleteAll { .. }
         | Method::HistoryCeiling
@@ -280,6 +281,19 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
             dest_path,
         } => items::save_file(state, id, &item_id, &dest_path),
         Method::Add { content } => items::add(state, id, &content),
+        Method::ImportFile {
+            path,
+            filename,
+            mime_type,
+            source_reference,
+        } => items::import_file(
+            state,
+            id,
+            &path,
+            &filename,
+            &mime_type,
+            source_reference.as_deref(),
+        ),
         Method::Delete { id: item_id } => items::delete(state, id, &item_id),
         Method::DeleteAll { through } => items::delete_all(state, id, through),
         Method::HistoryCeiling => items::history_ceiling(state, id),

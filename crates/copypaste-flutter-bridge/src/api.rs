@@ -905,6 +905,25 @@ pub async fn save_clip_file(id: String, dest_path: String) -> Result<(), Runtime
     empty_response(Method::SaveFile { id, dest_path }).await
 }
 
+pub fn history_file_import_max_bytes() -> u64 {
+    copypaste_ipc::MAX_CONTENT_BYTES as u64
+}
+
+pub async fn import_clip_file(
+    path: String,
+    filename: String,
+    mime_type: String,
+    source_reference: Option<String>,
+) -> Result<(), RuntimeError> {
+    empty_response(Method::ImportFile {
+        path,
+        filename,
+        mime_type,
+        source_reference,
+    })
+    .await
+}
+
 pub async fn delete_clip(id: String) -> Result<(), RuntimeError> {
     empty_response(Method::Delete { id }).await
 }

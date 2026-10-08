@@ -98,6 +98,7 @@ class MainActivity : FlutterActivity() {
     private var androidCaptureChannel: AndroidCaptureChannel? = null
     private var pairingScannerChannel: PairingScannerChannel? = null
     private var appUpdateChannel: AppUpdateChannel? = null
+    private var historyFilesChannel: HistoryFilesChannel? = null
     private var smsModuleChannel: AndroidSmsModuleChannel? = null
     private var pendingNotificationPermission: ((Boolean) -> Unit)? = null
     private var pendingScreenshotPermission: (() -> Unit)? = null
@@ -117,6 +118,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        historyFilesChannel = HistoryFilesChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.copypaste.app/lifecycle")
             .setMethodCallHandler { call, result ->
                 if (call.method == "restart") {
@@ -437,7 +439,14 @@ class MainActivity : FlutterActivity() {
         AndroidClipboardReader.captureForeground(this, foregroundCaptureHost)
     }
 
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (historyFilesChannel?.onActivityResult(requestCode, resultCode, data) == true) return
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
     override fun onDestroy() {
+        historyFilesChannel?.dispose()
+        historyFilesChannel = null
         foregroundCaptureEligible = false
         AndroidClipboardReader.retireForeground(foregroundCaptureHost)
         foregroundCaptureHost = null

@@ -296,6 +296,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn imported_file_identities_cross_the_cloud_identifier_contract() {
+        let keyring = copypaste_core::Keyring::from_secret(&[39; 32]);
+        let store = copypaste_core::Store::open_in_memory(&keyring.db_key()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("source.pdf");
+        std::fs::write(&path, b"%PDF original").unwrap();
+        let mut ids = Vec::new();
+        for name in ["a.pdf", "b.pdf"] {
+            let item = copypaste_core::file_import::import_file(
+                &store,
+                &keyring,
+                &path,
+                name,
+                "application/pdf",
+                None,
+                &Default::default(),
+            )
+            .unwrap();
+            validate_item_id(&item.id).unwrap();
+            assert!(item.id.len() <= 128);
+            ids.push(item.id);
+        }
+        assert_ne!(ids[0], ids[1]);
+    }
+
+    #[test]
     fn sealed_bytes_round_trip_through_base64() {
         let ciphertext: Vec<u8> = (0u8..=255).collect();
         let nonce = [7u8; 12];

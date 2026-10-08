@@ -8,9 +8,11 @@ use rusqlite::{ErrorCode, Row};
 /// The projection every read uses. Bound by *name*, never by position;
 /// maintained three parallel positional column lists and an off-by-one panic in
 /// the row mapper was the result (`CopyPaste-crh3.85`).
+/// Imported rows hydrate their authenticated reference with the shared encrypted
+/// blob inside this read; consumers keep the same StoredItem/decryption API.
 macro_rules! item_columns {
     () => {
-        "id, content_ciphertext, nonce, content_type, content_hash, created_at, \
+        "id, CAST(content_ciphertext || COALESCE((SELECT p.ciphertext FROM shared_binary_payloads p JOIN history_file_payloads f ON f.blob_id = p.id WHERE f.item_id = clipboard_items.id), X'') AS BLOB) AS content_ciphertext, nonce, content_type, content_hash, created_at, \
          pinned, pin_order, pin_updated_at, deleted, origin_device_id, \
          app_bundle_id, app_name, payload_metadata, source_icon_id"
     };
@@ -20,7 +22,7 @@ macro_rules! item_columns {
 /// to the bare names so one row mapper serves both.
 macro_rules! item_columns_ci {
     () => {
-        "ci.id AS id, ci.content_ciphertext AS content_ciphertext, ci.nonce AS nonce, \
+        "ci.id AS id, CAST(ci.content_ciphertext || COALESCE((SELECT p.ciphertext FROM shared_binary_payloads p JOIN history_file_payloads f ON f.blob_id = p.id WHERE f.item_id = ci.id), X'') AS BLOB) AS content_ciphertext, ci.nonce AS nonce, \
          ci.content_type AS content_type, ci.content_hash AS content_hash, \
          ci.created_at AS created_at, ci.pinned AS pinned, ci.pin_order AS pin_order, \
          ci.pin_updated_at AS pin_updated_at, ci.deleted AS deleted, \
@@ -63,7 +65,7 @@ pub struct NewItem {
     pub app_bundle_id: Option<String>,
     /// Human-readable label resolved by the platform alongside the app id.
     pub app_name: Option<String>,
-    /// JSON-encoded [`crate::FileMetadata`], only for file payloads.
+    /// JSON-encoded source metadata; imported images also retain file attributes.
     pub payload_metadata: Option<String>,
 }
 
@@ -189,7 +191,23 @@ pub(super) struct ItemColumns([usize; ITEM_COLUMN_COUNT]);
 impl ItemColumns {
     pub(super) fn resolve(stmt: &rusqlite::Statement<'_>) -> rusqlite::Result<Self> {
         let mut at = [0usize; ITEM_COLUMN_COUNT];
-        for (slot, name) in (0..ITEM_COLUMN_COUNT).zip(item_columns!().split(',')) {
+        for (slot, name) in (0..ITEM_COLUMN_COUNT).zip([
+            "id",
+            "content_ciphertext",
+            "nonce",
+            "content_type",
+            "content_hash",
+            "created_at",
+            "pinned",
+            "pin_order",
+            "pin_updated_at",
+            "deleted",
+            "origin_device_id",
+            "app_bundle_id",
+            "app_name",
+            "payload_metadata",
+            "source_icon_id",
+        ]) {
             at[slot] = stmt.column_index(name.trim())?;
         }
         Ok(Self(at))
@@ -244,12 +262,26 @@ mod tests {
     #[test]
     fn the_resolved_indices_match_the_projection_and_follow_the_names() {
         assert_eq!(
-            item_columns!().split(',').count(),
+            store()
+                .conn()
+                .unwrap()
+                .prepare(concat!("SELECT ", item_columns!(), " FROM clipboard_items"))
+                .unwrap()
+                .column_count(),
             ITEM_COLUMN_COUNT,
             "the projection and the resolved width must agree"
         );
         assert_eq!(
-            item_columns_ci!().split(',').count(),
+            store()
+                .conn()
+                .unwrap()
+                .prepare(concat!(
+                    "SELECT ",
+                    item_columns_ci!(),
+                    " FROM clipboard_items ci"
+                ))
+                .unwrap()
+                .column_count(),
             ITEM_COLUMN_COUNT,
             "the aliased projection must list the same columns"
         );

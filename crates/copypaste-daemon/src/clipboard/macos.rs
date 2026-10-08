@@ -468,6 +468,10 @@ impl ClipboardSource for MacOsClipboard {
         let uti = match content_type {
             copypaste_ipc::content_type::IMAGE_PNG => UTI_PNG,
             copypaste_ipc::content_type::IMAGE_TIFF => UTI_TIFF,
+            "image/jpeg" => "public.jpeg",
+            "image/gif" => "com.compuserve.gif",
+            "image/bmp" => "com.microsoft.bmp",
+            "image/webp" => "org.webmproject.webp",
             copypaste_ipc::content_type::FILE => UTI_FILE_URL,
             _ => {
                 return Err(ClipboardWriteError::UnsupportedContent);

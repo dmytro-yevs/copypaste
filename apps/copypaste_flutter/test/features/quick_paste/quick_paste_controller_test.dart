@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:copypaste_flutter/features/history/repository/history_file_importer.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
@@ -1514,6 +1515,9 @@ void main() {
 }
 
 class _Repository implements HistoryRepository {
+  @override
+  Future<void> importFile(HistoryImportFile file) async {}
+
   HistorySourceAppIcon? sourceIcon;
   int sourceIconCalls = 0;
   final clips = <HistoryClip>[

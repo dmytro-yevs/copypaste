@@ -99,6 +99,21 @@ abstract final class AppTheme {
     );
   }
 
+  static final AbstractButtonStyle historyToolbarIconStyle =
+      const ButtonStyle.secondaryIcon().copyWith(
+        padding: (context, states, value) =>
+            const EdgeInsets.all((AppControlSize.large - AppIconSize.md) / 2),
+        decoration: softSelectDecoration,
+      );
+
+  static BoxDecoration historyFileDropDecoration(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return BoxDecoration(
+      border: Border.all(color: colors.primary),
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+    );
+  }
+
   static BoxDecoration historyPinnedDragDecoration(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return BoxDecoration(

@@ -22,6 +22,8 @@ use super::model::{stored_item_columns, StoreError};
 
 // The live counter is derived by the target database's item triggers.
 const RESTORED_TABLES: &[&str] = &[
+    "history_file_payloads",
+    "shared_binary_payloads",
     "clipboard_fts",
     "clipboard_items",
     "source_app_icons",
@@ -176,6 +178,12 @@ impl super::Store {
                 ),
                 [],
             )?;
+            tx.execute("INSERT INTO shared_binary_payloads SELECT * FROM restore_src.shared_binary_payloads", [])?;
+            tx.execute(
+                "INSERT INTO history_file_payloads SELECT * FROM restore_src.history_file_payloads",
+                [],
+            )?;
+            tx.execute("UPDATE clipboard_items SET content_bytes = content_bytes + COALESCE((SELECT LENGTH(p.ciphertext) FROM shared_binary_payloads p JOIN history_file_payloads f ON f.blob_id = p.id WHERE f.item_id = clipboard_items.id), 0)", [])?;
             tx.execute(
                 "INSERT INTO clipboard_fts (rowid, id, content_text) \
                  SELECT ci.fts_rowid, fts.id, fts.content_text FROM restore_src.clipboard_fts fts \

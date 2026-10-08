@@ -192,7 +192,10 @@ impl PayloadMetadata {
             && if content_type == copypaste_ipc::content_type::FILE {
                 self.file.is_some()
             } else {
-                self.file.is_none() && self.source_app_icon.is_some()
+                (copypaste_ipc::content_type::classify(content_type)
+                    == copypaste_ipc::ContentClass::Image
+                    && self.file.is_some())
+                    || (self.file.is_none() && self.source_app_icon.is_some())
             }
     }
 
@@ -410,6 +413,9 @@ pub fn seal_with_digest(
 
 /// Open and verify a binary chunk envelope.
 pub fn open(envelope: &[u8], key: &ItemKey, id: &str) -> Result<Zeroizing<Vec<u8>>, CryptoError> {
+    if crate::binary_reference::is_reference(envelope) {
+        return crate::binary_reference::open(envelope, key, id);
+    }
     if envelope.len() < HEADER_BYTES || &envelope[..4] != MAGIC || envelope[4] != VERSION {
         return Err(CryptoError::AuthFailed);
     }

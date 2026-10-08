@@ -39,7 +39,7 @@ thiserror.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 hex.workspace = true
-image.workspace = true
+image = { workspace = true, features = ["jpeg", "gif", "webp", "bmp"] }
 url.workspace = true
 csscolorparser.workspace = true
 # Owner-only staging files close the restore validation/swap race. This crate
@@ -53,6 +53,10 @@ tempfile.workspace = true
 # which is the mistake the macOS keychain shipped for a year.
 keyring-core = { version = "1", optional = true }
 android-native-keyring-store = { version = "1", optional = true }
+
+# Local import descriptors must not block while rejecting FIFOs and devices.
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
 
 # Windows has no system OpenSSL to link SQLCipher against and no third branch
 # in libsqlite3-sys's build.rs to fall into — it panics on a missing

@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   camera_desktop
+  desktop_drop
   file_selector_windows
   hotkey_manager_windows
   screen_retriever_windows

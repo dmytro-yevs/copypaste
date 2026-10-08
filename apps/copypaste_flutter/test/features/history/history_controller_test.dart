@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:copypaste_flutter/features/history/repository/history_file_importer.dart';
 import 'package:copypaste_flutter/features/devices/devices_gateway.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
@@ -477,6 +478,9 @@ class _QueryRequest {
 }
 
 class _HistoryRepository implements HistoryRepository {
+  @override
+  Future<void> importFile(HistoryImportFile file) async {}
+
   final List<Future<HistoryClipPage>> pages = [];
   final List<_QueryRequest> requests = [];
   final StreamController<HistoryRuntimeEvent> events =

@@ -13,11 +13,18 @@ struct Migration {
     transform: fn(&Connection) -> Result<(), StoreError>,
 }
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    sql: include_str!("migrations/001_source_icons.sql"),
-    transform: share_source_icons,
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        sql: include_str!("migrations/001_source_icons.sql"),
+        transform: share_source_icons,
+    },
+    Migration {
+        version: 2,
+        sql: include_str!("migrations/002_file_import.sql"),
+        transform: |_| Ok(()),
+    },
+];
 
 pub(super) fn upgrade(conn: &mut Connection) -> Result<(), StoreError> {
     run_registered(conn, MIGRATIONS)

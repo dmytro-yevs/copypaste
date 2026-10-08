@@ -70,8 +70,20 @@ fn to_wire_with(
     } else {
         (payload.display_text(), false)
     };
+    let imported_image_metadata = row
+        .payload_metadata
+        .as_deref()
+        .and_then(|value| copypaste_core::PayloadMetadata::from_json(value, &row.content_type))
+        .and_then(|value| value.file);
     let file_details = match &payload {
-        ClipboardPayload::File { bytes, metadata } => {
+        ClipboardPayload::File { bytes, .. } | ClipboardPayload::Image { bytes, .. }
+            if imported_image_metadata.is_some()
+                || matches!(&payload, ClipboardPayload::File { .. }) =>
+        {
+            let metadata = match &payload {
+                ClipboardPayload::File { metadata, .. } => metadata,
+                _ => &imported_image_metadata,
+            };
             let source_reference = metadata
                 .as_ref()
                 .and_then(|metadata| metadata.source_reference.clone());
@@ -87,7 +99,8 @@ fn to_wire_with(
                 file_count: 1,
             })
         }
-        ClipboardPayload::Text(_)
+        ClipboardPayload::File { .. }
+        | ClipboardPayload::Text(_)
         | ClipboardPayload::Image { .. }
         | ClipboardPayload::Unsupported { .. } => None,
     };
