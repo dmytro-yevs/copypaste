@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:pub_semver/pub_semver.dart';
 
+import '../../../platform/update/app_update_architecture.dart';
 import '../models/app_update_models.dart';
 import 'app_update_repository.dart';
 import 'minisign_verifier.dart';
@@ -16,7 +17,10 @@ class GitHubAppUpdateRepository implements AppUpdateRepository {
     required UpdateTemporaryDirectoryProvider temporaryDirectory,
     HttpClient? client,
     Uri? releasesUri,
+    AndroidAppUpdateArchitecture? Function()? androidArchitecture,
   }) : _temporaryDirectory = temporaryDirectory,
+       _androidArchitecture =
+           androidArchitecture ?? currentAndroidUpdateArchitecture,
        _client = client ?? HttpClient(),
        _releasesUri =
            releasesUri ??
@@ -32,6 +36,7 @@ class GitHubAppUpdateRepository implements AppUpdateRepository {
   static const _requestTimeout = Duration(seconds: 30);
 
   final UpdateTemporaryDirectoryProvider _temporaryDirectory;
+  final AndroidAppUpdateArchitecture? Function() _androidArchitecture;
   final HttpClient _client;
   final Uri _releasesUri;
   final MinisignVerifier _signatureVerifier = MinisignVerifier(
@@ -61,6 +66,9 @@ class GitHubAppUpdateRepository implements AppUpdateRepository {
       body,
       currentVersion: currentVersion,
       target: target,
+      androidArchitecture: target == AppUpdateTarget.android
+          ? _androidArchitecture()
+          : null,
     );
   }
 
@@ -284,6 +292,7 @@ class GitHubReleaseParser {
     String body, {
     required Version currentVersion,
     required AppUpdateTarget target,
+    AndroidAppUpdateArchitecture? androidArchitecture,
   }) {
     final Object? decoded;
     try {
@@ -318,6 +327,7 @@ class GitHubReleaseParser {
               rawRelease['assets'],
               target: target,
               version: versionText,
+              androidArchitecture: androidArchitecture,
             );
       if (target != AppUpdateTarget.macos && asset == null) continue;
       final candidate = AppRelease(
@@ -340,6 +350,7 @@ class GitHubReleaseParser {
     Object? rawAssets, {
     required AppUpdateTarget target,
     required String version,
+    AndroidAppUpdateArchitecture? androidArchitecture,
   }) {
     if (rawAssets is! List<Object?>) return null;
     final expectedName = switch (target) {
@@ -352,24 +363,32 @@ class GitHubReleaseParser {
         if (rawAsset is Map<String, Object?> && rawAsset['name'] is String)
           rawAsset['name']! as String: rawAsset,
     };
-    final package = _assetMetadata(
-      byName[expectedName],
-      maximumBytes: _maximumArtifactBytes,
-    );
-    final signature = _assetMetadata(
-      byName['$expectedName.sig'],
-      maximumBytes: 64 * 1024,
-    );
-    if (package == null || signature == null) return null;
-    return AppReleaseAsset(
-      name: expectedName,
-      downloadUri: package.$1,
-      sha256: package.$2,
-      sizeBytes: package.$3,
-      signatureUri: signature.$1,
-      signatureSha256: signature.$2,
-      signatureSizeBytes: signature.$3,
-    );
+    final names = [
+      if (target == AppUpdateTarget.android && androidArchitecture != null)
+        'CopyPaste-v$version-android-${androidArchitecture.name}.apk',
+      expectedName,
+    ];
+    for (final name in names) {
+      final package = _assetMetadata(
+        byName[name],
+        maximumBytes: _maximumArtifactBytes,
+      );
+      final signature = _assetMetadata(
+        byName['$name.sig'],
+        maximumBytes: 64 * 1024,
+      );
+      if (package == null || signature == null) continue;
+      return AppReleaseAsset(
+        name: name,
+        downloadUri: package.$1,
+        sha256: package.$2,
+        sizeBytes: package.$3,
+        signatureUri: signature.$1,
+        signatureSha256: signature.$2,
+        signatureSizeBytes: signature.$3,
+      );
+    }
+    return null;
   }
 
   (Uri, String, int)? _assetMetadata(

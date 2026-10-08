@@ -151,7 +151,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 title: 'No settings found',
                 message: 'Try a different search.',
               )
-            : _sectionContent(settings, selectedSection);
+            : _sectionContent(context, settings, selectedSection);
 
         if (showSidebar) {
           return Row(
@@ -235,6 +235,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _sectionContent(
+    BuildContext context,
     RuntimeSettings settings,
     SettingsSectionId selectedSection, {
     bool showHeading = true,
@@ -247,7 +248,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         AppSpacing.lg,
         AppSpacing.lg,
         AppSpacing.huge,
-      ),
+      ).add(EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom)),
       child: Align(
         alignment: Alignment.topCenter,
         child: ConstrainedBox(
@@ -401,6 +402,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
           child: _loadedContent(
             () => _sectionContent(
+              context,
               widget.controller.settings!,
               target.section,
               showHeading: false,
@@ -1398,6 +1400,10 @@ class _SettingRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final actionControl = ButtonStyleOverride(
+      decoration: AppTheme.actionButtonDecoration,
+      child: trailing,
+    );
     final copy = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1424,7 +1430,7 @@ class _SettingRow extends StatelessWidget {
               children: [
                 copy,
                 const Gap(AppSpacing.md),
-                Align(alignment: Alignment.centerRight, child: trailing),
+                Align(alignment: Alignment.centerRight, child: actionControl),
               ],
             );
           }
@@ -1433,7 +1439,7 @@ class _SettingRow extends StatelessWidget {
             children: [
               Expanded(child: copy),
               const Gap(AppSpacing.lg),
-              trailing,
+              actionControl,
             ],
           );
         },
