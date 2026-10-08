@@ -1,9 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/services.dart';
+
 import 'dart:async';
+
 import 'package:copypaste_flutter/platform/android/android_shizuku_state.dart';
 import 'package:copypaste_flutter/features/modules/controller/sms_access_setup_controller.dart';
-import 'package:copypaste_flutter/features/modules/view/sms_access_setup_dialog.dart';
+import 'package:copypaste_flutter/features/modules/view/sms_access_setup_drawer.dart';
 import 'package:copypaste_flutter/shared/android_access_setup.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
@@ -13,6 +15,7 @@ import 'package:copypaste_flutter/features/modules/models/module_models.dart';
 import 'package:copypaste_flutter/features/modules/repository/module_access_repository.dart';
 import 'package:copypaste_flutter/features/modules/models/module_marketplace_models.dart';
 import 'package:copypaste_flutter/features/modules/view/modules_settings_view.dart';
+
 import 'modules_test_support.dart';
 
 const sms = InstalledModule(
@@ -93,80 +96,142 @@ class Access implements ModuleAccessRepository {
 }
 
 void main() {
-  for (final width in [360.0, 1000.0]) {
-    testWidgets('SMS setup and enable use shared controls at width $width', (
-      tester,
-    ) async {
-      await tester.binding.setSurfaceSize(Size(width, 900));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      final repository = MemoryModulesRepository()..modules = [sms];
-      final controller = ModulesController(
-        repository: repository,
-        marketplace: MemoryModuleMarketplace(),
-        access: Access(),
-      );
-      addTearDown(controller.dispose);
-      await controller.initialize();
-      controller.selectSection(ModulesSection.installed);
-      await tester.pumpWidget(
-        ShadcnApp(
-          theme: AppTheme.light,
-          builder: AppTheme.builder,
-          home: Scaffold(
-            child: SingleChildScrollView(
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.lg),
-                child: ModulesSettingsView(controller: controller),
+  for (final (platform, width, height, scale) in [
+    (TargetPlatform.android, 320.0, 640.0, 2.0),
+    (TargetPlatform.android, 640.0, 360.0, 1.0),
+    (TargetPlatform.macOS, 1000.0, 700.0, 1.0),
+    (TargetPlatform.windows, 1000.0, 700.0, 1.0),
+  ]) {
+    testWidgets(
+      'SMS setup drawer and enable work on $platform at width $width',
+      (tester) async {
+        await tester.binding.setSurfaceSize(Size(width, height));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final repository = MemoryModulesRepository()..modules = [sms];
+        final controller = ModulesController(
+          repository: repository,
+          marketplace: MemoryModuleMarketplace(),
+          access: Access(),
+        );
+        addTearDown(controller.dispose);
+        await controller.initialize();
+        controller.selectSection(ModulesSection.installed);
+        await tester.pumpWidget(
+          ShadcnApp(
+            theme: AppTheme.light.copyWith(platform: () => platform),
+            builder: (context, child) => AppTheme.builder(
+              context,
+              MediaQuery(
+                data: MediaQuery.of(context)
+                    .copyWith(textScaler: TextScaler.linear(scale)),
+                child: child!,
+              ),
+            ),
+            home: Scaffold(
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.lg),
+                  child: ModulesSettingsView(controller: controller),
+                ),
               ),
             ),
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(
-        find.byKey(const ValueKey('module-settings-copypaste.sms-codes')),
-      );
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(
-        find.widgetWithText(Button, 'Set up SMS access'),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(Button, 'Set up SMS access'));
-      await tester.pumpAndSettle();
-      expect(find.byType(AndroidAccessSetup), findsOneWidget);
-      expect(find.byType(SelectableText), findsNothing);
-      await tester.ensureVisible(find.text('ADB'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('ADB'));
-      await tester.pumpAndSettle();
-      expect(find.text('adb shell test\nadb shell otp'), findsOneWidget);
-      await tester.ensureVisible(find.text('Shizuku'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Shizuku'));
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(
-        find.widgetWithText(Button, 'Allow CopyPaste'),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(Button, 'Allow CopyPaste'));
-      await tester.pumpAndSettle();
-      expect(
-        find.text(
-          'Access is ready. Enable SMS Codes to start copying new codes.',
-        ),
-        findsOneWidget,
-      );
-      await tester.ensureVisible(find.widgetWithText(Button, 'Done').last);
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(Button, 'Done').last);
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(find.byType(Switch));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byType(Switch));
-      await tester.pumpAndSettle();
-      expect(repository.calls, ['enabled:true']);
-      expect(tester.takeException(), isNull);
-    });
+        );
+        await tester.pumpAndSettle();
+        final settings = find.byKey(
+          const ValueKey('module-settings-copypaste.sms-codes'),
+        );
+        await tester.ensureVisible(settings);
+        await tester.pumpAndSettle();
+        await tester.tap(settings);
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(
+          find.widgetWithText(Button, 'Set up SMS access'),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(Button, 'Set up SMS access'));
+        await tester.pumpAndSettle();
+        final drawer = find.byKey(const ValueKey('sms-access-setup-drawer'));
+        expect(drawer, findsOneWidget);
+        expect(tester.getSize(drawer).width, closeTo(width, 2));
+        expect(
+          tester.getSize(drawer).height,
+          lessThanOrEqualTo(
+            MediaQuery.sizeOf(tester.element(drawer)).height *
+                AppOverlaySize.drawerHeightFactor,
+          ),
+        );
+        expect(tester.getTopLeft(drawer).dy, greaterThanOrEqualTo(0));
+        expect(tester.getBottomRight(drawer).dy, lessThanOrEqualTo(height));
+        final title = find.byKey(const ValueKey('sms-access-setup-title'));
+        final icon = find.byKey(const ValueKey('sms-access-setup-icon'));
+        expect(
+          tester.getCenter(icon).dy,
+          closeTo(tester.getCenter(title).dy, 0.01),
+        );
+        final headerPosition = tester.getTopLeft(title);
+        final done = find.byKey(const ValueKey('sms-access-setup-done'));
+        expect(tester.getBottomRight(done).dy, lessThan(height));
+        expect(find.byType(AndroidAccessSetup), findsOneWidget);
+        expect(find.byType(SelectableText), findsNothing);
+        await tester.ensureVisible(find.text('ADB'));
+        await tester.pumpAndSettle();
+        expect(tester.getTopLeft(title), headerPosition);
+        expect(tester.getBottomRight(done).dy, lessThan(height));
+        final methodTabs = find.descendant(
+          of: find.byType(AndroidAccessSetup),
+          matching: find.byType(TabItem),
+        );
+        final shizukuTab = methodTabs.first;
+        final adbTab = methodTabs.last;
+        expect(
+          tester.getSize(shizukuTab).width,
+          closeTo(tester.getSize(adbTab).width, 0.01),
+        );
+        expect(
+          tester.getCenter(find.text('Shizuku')).dy,
+          closeTo(tester.getCenter(find.text('ADB')).dy, 0.01),
+        );
+        expect(
+          tester.getSize(find.text('Shizuku')).height,
+          closeTo(tester.getSize(find.text('ADB')).height, 0.01),
+        );
+        await tester.tap(find.text('ADB'));
+        await tester.pumpAndSettle();
+        expect(find.text('adb shell test\nadb shell otp'), findsOneWidget);
+        await tester.ensureVisible(find.text('Shizuku'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Shizuku'));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(
+          find.widgetWithText(Button, 'Allow CopyPaste'),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(Button, 'Allow CopyPaste'));
+        await tester.pumpAndSettle();
+        expect(
+          find.text(
+            'Access is ready. Enable SMS Codes to start copying new codes.',
+          ),
+          findsOneWidget,
+        );
+        await tester.tap(done);
+        await tester.pumpAndSettle();
+        expect(drawer, findsNothing);
+        expect(
+          find.byKey(
+            const ValueKey('module-settings-drawer-copypaste.sms-codes'),
+          ),
+          findsOneWidget,
+        );
+        await tester.ensureVisible(find.byType(Switch));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byType(Switch));
+        await tester.pumpAndSettle();
+        expect(repository.calls, ['enabled:true']);
+        expect(tester.takeException(), isNull);
+      },
+    );
   }
   for (final state in ['missing', 'stopped', 'unsupported', 'ready']) {
     testWidgets('SMS setup handles Shizuku $state', (tester) async {
@@ -181,7 +246,7 @@ void main() {
         ShadcnApp(
           theme: AppTheme.light,
           builder: AppTheme.builder,
-          home: SmsAccessSetupDialog(controller: setup),
+          home: SmsAccessSetupDrawer(controller: setup),
         ),
       );
       await tester.pumpAndSettle();
@@ -229,7 +294,7 @@ void main() {
       ShadcnApp(
         theme: AppTheme.light,
         builder: AppTheme.builder,
-        home: SmsAccessSetupDialog(controller: setup),
+        home: SmsAccessSetupDrawer(controller: setup),
       ),
     );
     await tester.pumpAndSettle();
@@ -269,7 +334,7 @@ void main() {
         ShadcnApp(
           theme: AppTheme.light,
           builder: AppTheme.builder,
-          home: SmsAccessSetupDialog(controller: setup),
+          home: SmsAccessSetupDrawer(controller: setup),
         ),
       );
       await tester.pumpAndSettle();
@@ -300,7 +365,7 @@ void main() {
       ShadcnApp(
         theme: AppTheme.light,
         builder: AppTheme.builder,
-        home: SmsAccessSetupDialog(controller: setup),
+        home: SmsAccessSetupDrawer(controller: setup),
       ),
     );
     await tester.pumpAndSettle();
@@ -331,7 +396,7 @@ void main() {
     final setup = SmsAccessSetupController(access: access);
     addTearDown(setup.dispose);
     await tester.pumpWidget(
-      ShadcnApp(home: SmsAccessSetupDialog(controller: setup)),
+      ShadcnApp(home: SmsAccessSetupDrawer(controller: setup)),
     );
     await tester.pumpAndSettle();
     expect(access.grants, 1);
@@ -403,33 +468,30 @@ void main() {
     expect(setup.errorMessage, contains('Allow notifications'));
   });
 
-  test(
-    'requires verified SMS access before enabling and synchronizes disable and removal',
-    () async {
-      final repository = MemoryModulesRepository()..modules = [sms];
-      final access = Access();
-      final controller = ModulesController(
-        repository: repository,
-        marketplace: MemoryModuleMarketplace(),
-        access: access,
-      );
-      addTearDown(controller.dispose);
-      await controller.initialize();
-      await controller.setEnabled(sms.id, true);
-      expect(repository.calls, isEmpty);
-      expect(controller.errorMessage, contains('Set up SMS access'));
-      final setup = controller.smsAccessSetup();
-      addTearDown(setup.dispose);
-      await setup.applyAccess();
-      await controller.setEnabled(sms.id, true);
-      expect(controller.modules.single.enabled, isTrue);
-      await controller.setEnabled(sms.id, false);
-      expect(controller.modules.single.enabled, isFalse);
-      await controller.remove(sms.id);
-      expect(controller.modules, isEmpty);
-      expect(access.synchronizations, greaterThanOrEqualTo(4));
-    },
-  );
+  test('requires verified SMS access before enabling and synchronizes disable and removal', () async {
+    final repository = MemoryModulesRepository()..modules = [sms];
+    final access = Access();
+    final controller = ModulesController(
+      repository: repository,
+      marketplace: MemoryModuleMarketplace(),
+      access: access,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.setEnabled(sms.id, true);
+    expect(repository.calls, isEmpty);
+    expect(controller.errorMessage, contains('Set up SMS access'));
+    final setup = controller.smsAccessSetup();
+    addTearDown(setup.dispose);
+    await setup.applyAccess();
+    await controller.setEnabled(sms.id, true);
+    expect(controller.modules.single.enabled, isTrue);
+    await controller.setEnabled(sms.id, false);
+    expect(controller.modules.single.enabled, isFalse);
+    await controller.remove(sms.id);
+    expect(controller.modules, isEmpty);
+    expect(access.synchronizations, greaterThanOrEqualTo(4));
+  });
   test('SMS grants without notifications cannot enable monitoring', () async {
     final repository = MemoryModulesRepository()..modules = [sms];
     final access = Access()
