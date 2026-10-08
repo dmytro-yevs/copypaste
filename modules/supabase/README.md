@@ -29,8 +29,13 @@ cargo +1.96 build --manifest-path modules/supabase/Cargo.toml --locked --release
 ```
 
 Package it with `scripts/modules/package.py` and the existing release signer.
-`.github/workflows/supabase-module.yml` builds and signs all five targets;
-publication to the signed Marketplace remains a separate operation.
+`.github/workflows/supabase-module.yml` builds and signs all five targets.
+To publish, dispatch `provider-module.yml` with `module=supabase` and
+`publish=true`. Publication requires production-package native receipts on
+macOS, Windows, and Android, plus the encrypted synchronization fixture on both
+desktop platforms. The exact production-package scenario verifies host
+callbacks, HTTPS enforcement, signed-out configuration, sign-out, disabling,
+and removal after restart; it does not claim a live Supabase account round trip.
 
 The signed native integration scenario uses temporary encrypted histories,
 a temporary signing identity, and a local HTTP fixture:

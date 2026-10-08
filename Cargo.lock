@@ -767,7 +767,10 @@ dependencies = [
 name = "copypaste-module-qualification"
 version = "0.1.0"
 dependencies = [
+ "copypaste-core",
+ "copypaste-module-sdk",
  "copypaste-modules",
+ "copypaste-sync",
  "hex",
  "jni",
  "serde",

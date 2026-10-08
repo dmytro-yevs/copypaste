@@ -11,6 +11,9 @@ crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 copypaste-modules = { path = "../copypaste-modules" }
+copypaste-core = { path = "../copypaste-core" }
+copypaste-sync = { path = "../copypaste-sync" }
+copypaste-module-sdk = { path = "../copypaste-module-sdk" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

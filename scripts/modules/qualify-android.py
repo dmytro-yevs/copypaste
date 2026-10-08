@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Qualify the exact signed OCR package inside an Android app process."""
+"""Qualify the exact signed module package inside an Android app process."""
 import argparse
 import json
 from pathlib import Path
@@ -50,10 +50,10 @@ def main():
             time.sleep(2)
         if "failure" in receipt:
             print(adb("logcat", "-d", "-s", "CopyPasteQualification:E", check=False))
-            raise ValueError("The signed OCR package failed inside the Android app process")
+            raise ValueError("The signed module package failed inside the Android app process")
         if phase == "execute":
             if receipt["cases_passed"] != 3 or not receipt["signature_verified"]:
-                raise ValueError("Android native OCR qualification is incomplete")
+                raise ValueError("Android native module qualification is incomplete")
             args.receipt.write_text(json.dumps({
                 **receipt, "environment": "android-emulator", "api": adb("shell", "getprop", "ro.build.version.sdk"),
                 "internet_permission": False,
@@ -63,7 +63,7 @@ def main():
     receipt = json.loads(args.receipt.read_text())
     receipt["removal_completed_after_restart"] = True
     args.receipt.write_text(json.dumps(receipt), encoding="utf-8")
-    print("Verified production-signed OCR installation, inference, disable/enable, and removal on Android")
+    print("Verified production-signed module scenarios, disable/enable, and removal on Android")
 
 
 if __name__ == "__main__":

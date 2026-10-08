@@ -30,13 +30,14 @@ def main():
     parser.add_argument("--commit", required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--receipt", required=True, type=Path)
+    parser.add_argument("--fixtures", type=Path, default=ROOT / "scripts/modules/fixtures")
     args = parser.parse_args()
     expected_system = {"macos": "Darwin", "windows": "Windows"}[args.platform]
     expected_architecture = {"macos": {"arm64", "aarch64"}, "windows": {"AMD64", "x86_64"}}
     if platform.system() != expected_system or platform.machine() not in expected_architecture[args.platform]:
         raise ValueError("Native package qualification requires the exact shipped desktop target")
     prefix = ["/usr/bin/sandbox-exec", "-p", "(version 1)(allow default)(deny network*)"] if args.platform == "macos" else []
-    rule = "CopyPaste-OCR-qualification-" + uuid.uuid4().hex
+    rule = "CopyPaste-module-qualification-" + uuid.uuid4().hex
     environment = {
         **os.environ, "COPYPASTE_QUALIFICATION_RULE": rule,
         "COPYPASTE_QUALIFICATION_PROGRAM": str(args.program.resolve()),
@@ -48,10 +49,10 @@ def main():
             "if ($rule.Enabled -ne 'True' -or $rule.Action -ne 'Block') { throw 'Offline qualification firewall policy is inactive' }"
         ], check=True, env=environment)
     try:
-        with tempfile.TemporaryDirectory(prefix="ocr-native-qualification-") as data:
+        with tempfile.TemporaryDirectory(prefix="module-native-qualification-") as data:
             result = native_run([
                 *prefix, str(args.program.resolve()), str(args.package.resolve()),
-                str(ROOT / "scripts/modules/fixtures"), data, args.app_version,
+                str(args.fixtures.resolve()), data, args.app_version,
                 args.commit, args.run_id,
             ])
             receipt = json.loads(result.stdout)
@@ -72,7 +73,7 @@ def main():
         if args.platform == "windows":
             subprocess.run(["powershell", "-NoProfile", "-Command",
                 "Remove-NetFirewallRule -Name $env:COPYPASTE_QUALIFICATION_RULE"], check=True, env=environment)
-    print("Verified production-signed OCR installation, inference, disable/enable, and removal on " + args.platform)
+    print("Verified production-signed module scenarios and lifecycle on " + args.platform)
 
 
 if __name__ == "__main__":

@@ -1,9 +1,11 @@
-//! Native qualification of a production-signed OCR package in an isolated host.
+//! Native qualification of production-signed packages in an isolated host.
 #![deny(unsafe_code)]
 
 #[cfg(target_os = "android")]
 #[allow(unsafe_code)]
 mod android;
+mod semantic;
+mod supabase;
 
 use copypaste_modules::{ModuleManager, ModuleOutput, ModuleTarget, MODULE_RELEASE_PUBLIC_KEY};
 use serde::{Deserialize, Serialize};
@@ -54,55 +56,18 @@ pub fn qualify(
     let installed = manager
         .install(package)
         .map_err(|error| error.to_string())?;
-    if installed.id != "copypaste.ocr" {
-        return Err("Qualification requires the first-party OCR package.".into());
-    }
-    manager
-        .set_enabled(&installed.id, false)
-        .map_err(|error| error.to_string())?;
-    manager
-        .set_enabled(&installed.id, true)
-        .map_err(|error| error.to_string())?;
-    let cases: Vec<Fixture> = serde_json::from_slice(
-        &fs::read(fixtures.join("fixtures.json")).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())?;
-    if cases.len() != 3 {
-        return Err(
-            "English, separate Ukrainian/English, and mixed-line fixtures are required.".into(),
-        );
-    }
-    for case in &cases {
-        if case.file.contains('/') || case.file.contains('\\') || case.expected.is_empty() {
-            return Err("Invalid qualification fixture.".into());
-        }
-        let image =
-            fs::canonicalize(fixtures.join(&case.file)).map_err(|error| error.to_string())?;
-        let output = manager
-            .invoke(
-                &installed.id,
-                "recognize-image",
-                BTreeMap::from([("image_path".into(), json!(image.to_string_lossy()))]),
-            )
-            .map_err(|error| error.to_string())?;
-        let ModuleOutput::Text { text } = output else {
-            return Err("The OCR package did not return text.".into());
-        };
-        if !text.contains(&case.expected) {
-            return Err(format!(
-                "OCR fixture {} did not contain {:?}; output: {:?}",
-                case.file, case.expected, text
-            ));
-        }
-    }
+    let cases_passed = match installed.id.as_str() {
+        "copypaste.ocr" => qualify_ocr(&manager, fixtures, &installed.id)?,
+        "copypaste.semantic-search" => semantic::qualify(&manager, fixtures, data, &installed.id)?,
+        "copypaste.supabase" => supabase::qualify(&manager, &installed.id)?,
+        _ => return Err("No native qualification scenario exists for this module.".into()),
+    };
     manager
         .remove(&installed.id)
         .map_err(|error| error.to_string())?;
     let pending = manager.list().map_err(|error| error.to_string())?;
     if pending.len() != 1 || !pending[0].restart_required || pending[0].enabled {
-        return Err(
-            "Loaded OCR removal must disable the module and require process restart.".into(),
-        );
+        return Err("Loaded module removal must disable it and require process restart.".into());
     }
     let mut source = fs::File::open(package).map_err(|error| error.to_string())?;
     let mut hash = Sha256::new();
@@ -128,10 +93,52 @@ pub fn qualify(
         package_size_bytes: fs::metadata(package)
             .map_err(|error| error.to_string())?
             .len(),
-        cases_passed: cases.len(),
+        cases_passed,
         signature_verified: true,
         restart_required: true,
     })
+}
+
+fn qualify_ocr(manager: &ModuleManager, fixtures: &Path, id: &str) -> Result<usize, String> {
+    manager
+        .set_enabled(id, false)
+        .map_err(|error| error.to_string())?;
+    manager
+        .set_enabled(id, true)
+        .map_err(|error| error.to_string())?;
+    let cases: Vec<Fixture> = serde_json::from_slice(
+        &fs::read(fixtures.join("fixtures.json")).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
+    if cases.len() != 3 {
+        return Err(
+            "English, separate Ukrainian/English, and mixed-line fixtures are required.".into(),
+        );
+    }
+    for case in &cases {
+        if case.file.contains('/') || case.file.contains('\\') || case.expected.is_empty() {
+            return Err("Invalid qualification fixture.".into());
+        }
+        let image =
+            fs::canonicalize(fixtures.join(&case.file)).map_err(|error| error.to_string())?;
+        let output = manager
+            .invoke(
+                id,
+                "recognize-image",
+                BTreeMap::from([("image_path".into(), json!(image.to_string_lossy()))]),
+            )
+            .map_err(|error| error.to_string())?;
+        let ModuleOutput::Text { text } = output else {
+            return Err("The OCR package did not return text.".into());
+        };
+        if !text.contains(&case.expected) {
+            return Err(format!(
+                "OCR fixture {} did not contain {:?}; output: {:?}",
+                case.file, case.expected, text
+            ));
+        }
+    }
+    Ok(cases.len())
 }
 
 pub fn finish_after_restart(data: &Path, app_version: &str) -> Result<(), String> {
@@ -143,7 +150,7 @@ pub fn finish_after_restart(data: &Path, app_version: &str) -> Result<(), String
         .map_err(|error| error.to_string())?
         .is_empty()
     {
-        return Err("OCR removal did not finish after process restart.".into());
+        return Err("Module removal did not finish after process restart.".into());
     }
     Ok(())
 }

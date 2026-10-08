@@ -78,6 +78,9 @@ signed resource descriptions, and license notices belong in the package.
 Packaging requires the existing production signer. Publication and signed
 marketplace availability require target-specific native qualification; source
 checks or a local artifact do not establish release availability.
+Dispatch `provider-module.yml` with `module=semantic-search` and `publish=true`
+to build all five targets, qualify the production-signed packages on macOS,
+Windows, and Android with both pinned models, and publish the signed catalog.
 
 ## Validation
 

@@ -1,0 +1,237 @@
+name: Build and publish provider module
+
+on:
+  workflow_dispatch:
+    inputs:
+      module:
+        description: First-party module to publish
+        required: true
+        type: choice
+        options: [supabase, semantic-search]
+      publish:
+        description: Publish qualified packages and update the signed marketplace
+        required: true
+        type: boolean
+        default: false
+
+concurrency:
+  group: provider-module-${{ inputs.module }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      app_version: ${{ steps.metadata.outputs.app_version }}
+      library: ${{ steps.metadata.outputs.library }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - id: metadata
+        env:
+          MODULE: ${{ inputs.module }}
+        run: |
+          python3 - <<'PY'
+          import json, os, tomllib
+          from pathlib import Path
+          name = os.environ["MODULE"]
+          if name not in {"supabase", "semantic-search"}:
+              raise ValueError("Unknown first-party provider module")
+          module = json.loads(Path(f"modules/{name}/module.json").read_text())
+          application = tomllib.loads(Path("Cargo.toml").read_text())["workspace"]["package"]["version"]
+          if module["id"] != f"copypaste.{name}":
+              raise ValueError("Module directory and signed identity must match")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"version={module['version']}\napp_version={application}\nlibrary=copypaste_module_{name.replace(chr(45), chr(95))}\n")
+          PY
+  desktop:
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: macos, architecture: aarch64, runner: macos-14, prefix: lib, suffix: dylib, program: copypaste-module-qualification }
+          - { platform: windows, architecture: x86_64, runner: windows-2022, prefix: '', suffix: dll, program: copypaste-module-qualification.exe }
+    runs-on: ${{ matrix.runner }}
+    env:
+      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: "1.96"
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: |
+            .
+            modules/${{ inputs.module }}
+      - name: Prepare checksum-pinned semantic runtime and models
+        if: inputs.module == 'semantic-search'
+        run: |
+          python3 modules/ocr/scripts/prepare-runtime.py --platform ${{ matrix.platform }} --architecture ${{ matrix.architecture }} --destination modules/semantic-search/native --cache "$RUNNER_TEMP/module-runtime"
+          python3 scripts/modules/fetch-search-models.py --sources modules/semantic-search/assets/search-models.json --destination "$RUNNER_TEMP/module-fixtures"
+      - name: Build native module and qualification host
+        run: |
+          cargo +1.96 build --manifest-path modules/${{ inputs.module }}/Cargo.toml --release --locked --lib
+          cargo +1.96 build --release --locked -p copypaste-module-qualification
+          cargo +1.96 test --manifest-path modules/${{ inputs.module }}/Cargo.toml --locked --lib
+      - name: Qualify encrypted synchronization boundary
+        if: inputs.module == 'supabase'
+        run: cargo +1.96 test --locked -p copypaste-modules --test supabase
+      - name: Qualify real-model encrypted indexing
+        if: inputs.module == 'semantic-search'
+        env:
+          COPYPASTE_SEMANTIC_MODELS: ${{ runner.temp }}/module-fixtures
+          COPYPASTE_SEMANTIC_LIBRARY: modules/semantic-search/target/release/${{ matrix.prefix }}${{ needs.preflight.outputs.library }}.${{ matrix.suffix }}
+          COPYPASTE_SEMANTIC_RUNTIME: modules/semantic-search/native/${{ matrix.platform }}/${{ matrix.architecture }}/${{ matrix.platform == 'windows' && 'onnxruntime.dll' || 'libonnxruntime.dylib' }}
+        run: cargo +1.96 test --locked -p copypaste-modules signed_semantic_package -- --ignored --nocapture
+      - name: Sign target package
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          mkdir -p dist
+          python3 scripts/modules/package.py --module-dir modules/${{ inputs.module }} --library modules/${{ inputs.module }}/target/release/${{ matrix.prefix }}${{ needs.preflight.outputs.library }}.${{ matrix.suffix }} --platform ${{ matrix.platform }} --architecture ${{ matrix.architecture }} --output dist/CopyPasteModule-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}-${{ matrix.platform }}-${{ matrix.architecture }}.cpmodule
+      - name: Qualify exact production package
+        run: |
+          fixtures="scripts/modules/fixtures"
+          if [[ "${{ inputs.module }}" == "semantic-search" ]]; then fixtures="$RUNNER_TEMP/module-fixtures"; fi
+          version="$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{gsub(/["[:space:]]/, "", $3); print $3; exit}' Cargo.toml)"
+          python3 scripts/modules/qualify-desktop.py --platform ${{ matrix.platform }} --fixtures "$fixtures" --package dist/CopyPasteModule-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}-${{ matrix.platform }}-${{ matrix.architecture }}.cpmodule --program target/release/${{ matrix.program }} --app-version "$version" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --receipt dist/CopyPasteModule-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}-${{ matrix.platform }}-${{ matrix.architecture }}.cpmodule.receipt.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: provider-${{ inputs.module }}-${{ matrix.platform }}
+          if-no-files-found: error
+          path: dist/*
+
+  android:
+    needs: preflight
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { architecture: arm, target: armv7-linux-androideabi }
+          - { architecture: aarch64, target: aarch64-linux-android }
+          - { architecture: x86_64, target: x86_64-linux-android }
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: "1.96"
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: |
+            .
+            modules/${{ inputs.module }}
+      - name: Prepare Android toolchain
+        run: |
+          python3 - <<'PYTHON'
+          import os, subprocess
+          subprocess.run([os.environ["ANDROID_HOME"] + "/cmdline-tools/latest/bin/sdkmanager", "--licenses"], input="y\n" * 100, text=True, check=True)
+          PYTHON
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.13846066" "platforms;android-36" "build-tools;36.0.0"
+      - name: Prepare checksum-pinned semantic runtime
+        if: inputs.module == 'semantic-search'
+        run: |
+          bash scripts/ci/use-ubuntu-https-archive.sh
+          sudo apt-get update
+          sudo apt-get install -y patchelf
+          python3 modules/ocr/scripts/prepare-runtime.py --platform android --architecture ${{ matrix.architecture }} --destination modules/semantic-search/native --cache "$RUNNER_TEMP/module-runtime" --ndk "$ANDROID_HOME/ndk/29.0.13846066"
+      - name: Stage both real models for offline Android inference
+        if: inputs.module == 'semantic-search' && matrix.architecture == 'x86_64'
+        run: python3 scripts/modules/fetch-search-models.py --sources modules/semantic-search/assets/search-models.json --destination "$RUNNER_TEMP/module-fixtures"
+      - name: Build and verify target ABI
+        run: python3 scripts/modules/build-android-module.py --module-dir modules/${{ inputs.module }} --library-name lib${{ needs.preflight.outputs.library }}.so --architecture ${{ matrix.architecture }} --ndk "$ANDROID_HOME/ndk/29.0.13846066"
+      - name: Sign target package
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          mkdir -p dist
+          python3 scripts/modules/package.py --module-dir modules/${{ inputs.module }} --library modules/${{ inputs.module }}/target/${{ matrix.target }}/release/lib${{ needs.preflight.outputs.library }}.so --platform android --architecture ${{ matrix.architecture }} --output dist/CopyPasteModule-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}-android-${{ matrix.architecture }}.cpmodule
+      - name: Build app-private native qualification APK
+        if: matrix.architecture == 'x86_64'
+        run: |
+          fixtures="scripts/modules/fixtures"
+          if [[ "${{ inputs.module }}" == "semantic-search" ]]; then fixtures="$RUNNER_TEMP/module-fixtures"; fi
+          python3 scripts/modules/build-android-qualification.py --fixtures "$fixtures" --sdk "$ANDROID_HOME" --library target/x86_64-linux-android/release/libcopypaste_module_qualification.so --package dist/CopyPasteModule-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}-android-x86_64.cpmodule --output dist/provider-qualification.apk
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: provider-${{ inputs.module }}-android-${{ matrix.architecture }}
+          if-no-files-found: error
+          path: dist/*
+
+  android-native:
+    needs: [preflight, android]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: provider-${{ inputs.module }}-android-x86_64
+          path: dist
+      - name: Enable emulator acceleration
+        run: sudo chmod 666 /dev/kvm
+      - uses: ReactiveCircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2
+        with:
+          api-level: 36
+          arch: x86_64
+          target: default
+          disable-animations: true
+          script: python3 scripts/modules/qualify-android.py --apk dist/provider-qualification.apk --app-version "$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{gsub(/["[:space:]]/, "", $3); print $3; exit}' Cargo.toml)" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --receipt dist/CopyPasteModule-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}-android-x86_64.cpmodule.receipt.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: provider-${{ inputs.module }}-android-native
+          if-no-files-found: error
+          path: dist/*.receipt.json
+
+  publish:
+    needs: [preflight, desktop, android, android-native]
+    if: inputs.publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: provider-${{ inputs.module }}-*
+          merge-multiple: true
+          path: dist
+      - name: Verify authenticated packages and native receipts
+        run: python3 scripts/modules/verify-release-packages.py --directory dist --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --release-tag module-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}
+      - name: Publish qualified module release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create module-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }} dist/*.cpmodule dist/*.receipt.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false --title "CopyPaste ${{ inputs.module }} ${{ needs.preflight.outputs.version }}" --notes "Optional first-party ${{ inputs.module }} module. Production-signed packages and exact native qualification receipts for macOS, Windows, and Android."
+          gh workflow run module-marketplace.yml --repo "$GITHUB_REPOSITORY" --ref module-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }} -f module_release_tag=module-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}

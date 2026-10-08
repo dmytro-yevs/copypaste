@@ -22,6 +22,7 @@ def main():
     parser.add_argument("--library", type=Path, required=True)
     parser.add_argument("--package", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--fixtures", type=Path, default=ROOT / "scripts/modules/fixtures")
     args = parser.parse_args()
     tools = args.sdk / "build-tools/36.0.0"
     android = args.sdk / "platforms/android-36/android.jar"
@@ -43,9 +44,10 @@ def main():
         with zipfile.ZipFile(staged, "a", compression=zipfile.ZIP_STORED) as archive:
             archive.write(dex / "classes.dex", "classes.dex")
             archive.write(args.library, "lib/x86_64/libcopypaste_module_qualification.so")
-            archive.write(args.package, "assets/ocr.cpmodule")
-            for fixture in sorted((ROOT / "scripts/modules/fixtures").iterdir()):
-                archive.write(fixture, "assets/fixtures/" + fixture.name)
+            archive.write(args.package, "assets/module.cpmodule")
+            for fixture in sorted(args.fixtures.rglob("*")):
+                if fixture.is_file():
+                    archive.write(fixture, "assets/fixtures/" + fixture.relative_to(args.fixtures).as_posix())
         aligned = directory / "aligned.apk"
         run([tools / "zipalign", "-P", "16", "-f", "4", staged, aligned])
         key = directory / "qualification.jks"

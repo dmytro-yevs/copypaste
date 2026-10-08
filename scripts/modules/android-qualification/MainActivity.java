@@ -27,14 +27,11 @@ public final class MainActivity extends Activity {
             if (phase == null) phase = "execute";
             File result = new File(getFilesDir(), phase + ".json");
             try {
-                File packageFile = new File(getFilesDir(), "ocr.cpmodule");
+                File packageFile = new File(getFilesDir(), "module.cpmodule");
                 File fixtures = new File(getFilesDir(), "fixtures");
                 if (!"cleanup".equals(phase)) {
-                    copyAsset("ocr.cpmodule", packageFile);
-                    if (!fixtures.mkdir()) throw new IllegalStateException("Fixture storage already exists.");
-                    for (String name : getAssets().list("fixtures")) {
-                        copyAsset("fixtures/" + name, new File(fixtures, name));
-                    }
+                    copyAsset("module.cpmodule", packageFile);
+                    copyDirectory("fixtures", fixtures);
                 }
                 String receipt = qualify(
                     packageFile.getAbsolutePath(), fixtures.getAbsolutePath(),
@@ -65,5 +62,15 @@ public final class MainActivity extends Activity {
             int count;
             while ((count = source.read(buffer)) != -1) output.write(buffer, 0, count);
         }
+    }
+
+    private void copyDirectory(String name, File destination) throws Exception {
+        String[] children = getAssets().list(name);
+        if (children.length == 0) {
+            copyAsset(name, destination);
+            return;
+        }
+        if (!destination.mkdir()) throw new IllegalStateException("Fixture storage already exists.");
+        for (String child : children) copyDirectory(name + "/" + child, new File(destination, child));
     }
 }
