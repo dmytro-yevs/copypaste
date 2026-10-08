@@ -106,6 +106,8 @@ class FakeSettingsRepository implements SettingsRepository {
       excludedAppIds: change.excludedAppIds ?? currentSettings.excludedAppIds,
       lanVisibility: change.lanVisibility ?? currentSettings.lanVisibility,
       syncEnabled: change.syncEnabled ?? currentSettings.syncEnabled,
+      instantClipboard:
+          change.instantClipboard ?? currentSettings.instantClipboard,
       notifyOnCopy: change.notifyOnCopy ?? currentSettings.notifyOnCopy,
       notificationPreview:
           change.notificationPreview ?? currentSettings.notificationPreview,

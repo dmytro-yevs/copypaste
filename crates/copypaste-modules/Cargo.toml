@@ -6,8 +6,13 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+copypaste-sync = { path = "../copypaste-sync" }
+copypaste-ipc = { path = "../copypaste-ipc" }
+zeroize.workspace = true
 copypaste-module-sdk = { path = "../copypaste-module-sdk" }
 copypaste-fs = { path = "../copypaste-fs" }
+copypaste-core = { path = "../copypaste-core" }
+reqwest = { workspace = true, features = ["blocking"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -21,4 +26,5 @@ minisign-verify = "0.3"
 zip = { version = "8", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
+wiremock = "=0.6.5"
 minisign = "0.9"

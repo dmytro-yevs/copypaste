@@ -1,4 +1,4 @@
-//! The command line, and the cloud deployment it resolves.
+//! The standalone daemon command line.
 
 use std::path::PathBuf;
 
@@ -51,86 +51,16 @@ pub struct Args {
     /// Without an override, the name follows the operating system.
     #[arg(long, value_name = "NAME")]
     pub device_name: Option<String>,
-
-    /// Supabase project URL for cloud sync, e.g. `https://abc.supabase.co`.
-    ///
-    /// Falls back to `COPYPASTE_CLOUD_URL`. Without both this and the anon key
-    /// the daemon runs with cloud sync unconfigured, which is a supported
-    /// state: peer sync and local history do not depend on it.
-    #[arg(long, value_name = "URL")]
-    pub cloud_url: Option<String>,
-
-    /// Supabase publishable anon key. Falls back to `COPYPASTE_CLOUD_ANON_KEY`.
-    ///
-    /// Not a secret in the usual sense — row-level security is what restricts
-    /// access — so it is ordinary configuration rather than a credential.
-    #[arg(long, value_name = "KEY")]
-    pub cloud_anon_key: Option<String>,
-}
-
-/// Resolve the deployment from flags, then the environment.
-///
-/// Both halves are required: a URL with no key cannot authenticate and a key
-/// with no URL has nothing to talk to, so a half-configuration is reported as
-/// unconfigured rather than failing at the first request.
-pub fn cloud_config(
-    args: &Args,
-) -> Result<Option<copypaste_cloud::CloudConfig>, copypaste_cloud::CloudConfigError> {
-    fn resolve(flag: Option<&String>, var: &str) -> Option<String> {
-        flag.cloned()
-            .or_else(|| std::env::var(var).ok())
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty())
-    }
-    let Some(url) = resolve(args.cloud_url.as_ref(), "COPYPASTE_CLOUD_URL") else {
-        return Ok(None);
-    };
-    let Some(anon_key) = resolve(args.cloud_anon_key.as_ref(), "COPYPASTE_CLOUD_ANON_KEY") else {
-        return Ok(None);
-    };
-    #[cfg(feature = "cloud-evidence")]
-    {
-        copypaste_cloud::CloudConfig::new_loopback(url, anon_key).map(Some)
-    }
-    #[cfg(not(feature = "cloud-evidence"))]
-    {
-        copypaste_cloud::CloudConfig::new(url, anon_key).map(Some)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn hosted(url: &str, key: &str) -> Args {
-        Args {
-            data_dir: None,
-            foreground: false,
-            app_parent: false,
-            port: 0,
-            device_name: None,
-            cloud_url: Some(url.to_string()),
-            cloud_anon_key: Some(key.to_string()),
-        }
-    }
-
     #[test]
     fn standalone_daemon_does_not_require_an_app_parent() {
         let args = Args::try_parse_from(["copypaste-daemon"])
             .expect("the ordinary CLI invocation remains valid");
         assert!(!args.app_parent);
-    }
-
-    #[cfg(not(feature = "cloud-evidence"))]
-    #[test]
-    fn production_configuration_rejects_plaintext_loopback() {
-        assert!(cloud_config(&hosted("http://127.0.0.1:47800", "key")).is_err());
-    }
-
-    #[cfg(feature = "cloud-evidence")]
-    #[test]
-    fn evidence_configuration_accepts_only_plaintext_loopback() {
-        assert!(cloud_config(&hosted("http://127.0.0.1:47800", "key")).is_ok());
-        assert!(cloud_config(&hosted("http://example.com:47800", "key")).is_err());
     }
 }

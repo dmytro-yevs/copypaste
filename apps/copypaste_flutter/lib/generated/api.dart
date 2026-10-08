@@ -1207,6 +1207,7 @@ class RuntimeSettingsData {
   final List<String> excludedAppIds;
   final bool lanVisibility;
   final bool syncEnabled;
+  final bool instantClipboard;
   final bool notifyOnCopy;
   final bool notificationPreview;
   final bool soundOnCopy;
@@ -1217,6 +1218,7 @@ class RuntimeSettingsData {
     required this.excludedAppIds,
     required this.lanVisibility,
     required this.syncEnabled,
+    required this.instantClipboard,
     required this.notifyOnCopy,
     required this.notificationPreview,
     required this.soundOnCopy,
@@ -1229,6 +1231,7 @@ class RuntimeSettingsData {
       excludedAppIds.hashCode ^
       lanVisibility.hashCode ^
       syncEnabled.hashCode ^
+      instantClipboard.hashCode ^
       notifyOnCopy.hashCode ^
       notificationPreview.hashCode ^
       soundOnCopy.hashCode;
@@ -1243,6 +1246,7 @@ class RuntimeSettingsData {
           excludedAppIds == other.excludedAppIds &&
           lanVisibility == other.lanVisibility &&
           syncEnabled == other.syncEnabled &&
+          instantClipboard == other.instantClipboard &&
           notifyOnCopy == other.notifyOnCopy &&
           notificationPreview == other.notificationPreview &&
           soundOnCopy == other.soundOnCopy;
@@ -1254,6 +1258,7 @@ class RuntimeSettingsPatch {
   final List<String>? excludedAppIds;
   final bool? lanVisibility;
   final bool? syncEnabled;
+  final bool? instantClipboard;
   final bool? notifyOnCopy;
   final bool? notificationPreview;
   final bool? soundOnCopy;
@@ -1264,6 +1269,7 @@ class RuntimeSettingsPatch {
     this.excludedAppIds,
     this.lanVisibility,
     this.syncEnabled,
+    this.instantClipboard,
     this.notifyOnCopy,
     this.notificationPreview,
     this.soundOnCopy,
@@ -1279,6 +1285,7 @@ class RuntimeSettingsPatch {
       excludedAppIds.hashCode ^
       lanVisibility.hashCode ^
       syncEnabled.hashCode ^
+      instantClipboard.hashCode ^
       notifyOnCopy.hashCode ^
       notificationPreview.hashCode ^
       soundOnCopy.hashCode;
@@ -1293,6 +1300,7 @@ class RuntimeSettingsPatch {
           excludedAppIds == other.excludedAppIds &&
           lanVisibility == other.lanVisibility &&
           syncEnabled == other.syncEnabled &&
+          instantClipboard == other.instantClipboard &&
           notifyOnCopy == other.notifyOnCopy &&
           notificationPreview == other.notificationPreview &&
           soundOnCopy == other.soundOnCopy;

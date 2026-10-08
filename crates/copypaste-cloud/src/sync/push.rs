@@ -147,10 +147,7 @@ fn over_size_limit(item: &LocalItem) -> Option<usize> {
 /// This is the same gate [`CloudSync::push`] applies before encryption. History
 /// presenters call it so an item that can never upload is marked before the
 /// first round, on every platform.
-#[must_use]
-pub fn too_large_to_sync(content_type: &str, byte_len: usize) -> bool {
-    byte_len > upload_limit(content_type)
-}
+pub use copypaste_sync::too_large_to_sync;
 
 fn upload_limit(content_type: &str) -> usize {
     if copypaste_ipc::content_type::is_text(content_type) {

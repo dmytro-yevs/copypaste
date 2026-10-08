@@ -290,7 +290,9 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
     );
   }
 
-  String _installationLabel() => controller.installing
+  String _installationLabel() => controller.configuringModel
+      ? 'Downloading language model…'
+      : controller.installing
       ? 'Installing…'
       : 'Downloading ${((controller.downloadProgress ?? 0) * 100).floor()}%';
 
@@ -317,6 +319,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
       fields: module.preferenceFields,
       values: module.preferences,
       action: 'Save',
+      module: module,
     );
     if (draft == null) return;
     try {
@@ -410,8 +413,9 @@ Future<ModuleFormDraft?> _fieldsDialog(
   required List<ModuleField> fields,
   required Map<String, Object> values,
   required String action,
+  InstalledModule? module,
 }) async {
-  final draft = controller.form(fields, values);
+  final draft = controller.form(fields, values, module: module);
   final confirmed = await AppOverlays.showDialog<bool>(
     context,
     builder: (_) =>
@@ -459,13 +463,49 @@ class _ModuleFieldsDialog extends StatelessWidget {
               else ...[
                 Text(field.title).small(),
                 const Gap(AppSpacing.xs),
-                if (field.kind == ModuleFieldKind.file)
+                if (field.kind == ModuleFieldKind.choices)
+                  MultiSelect<String>(
+                    key: ValueKey('module-choices-${field.id}'),
+                    value: (draft.values[field.id] as List).cast<String>(),
+                    placeholder: const Text('Choose languages'),
+                    onChanged: (values) => draft.setValue(
+                      field.id,
+                      (values ?? const <String>[]).toList(),
+                    ),
+                    itemBuilder: (context, id) => Text(
+                      field.options
+                          .firstWhere((option) => option.id == id)
+                          .title,
+                    ),
+                    popup: SelectPopup<String>(
+                      items: SelectItemList(
+                        children: [
+                          for (final option in field.options)
+                            SelectItemButton<String>(
+                              value: option.id,
+                              child: Text(option.title),
+                            ),
+                        ],
+                      ),
+                    ).call,
+                  )
+                else if (field.kind == ModuleFieldKind.file)
                   Button.secondary(
                     onPressed: draft.busy
                         ? null
                         : () => draft.chooseFile(field),
                     leading: const Icon(LucideIcons.file, size: AppIconSize.sm),
                     child: Text(draft.fileName(field.id) ?? 'Choose file'),
+                  )
+                else if (field.secret)
+                  TextField(
+                    key: ValueKey(field.id),
+                    initialValue: draft.values[field.id] as String,
+                    obscureText: true,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    decoration: AppOverlays.dialogFieldDecoration(context),
+                    onChanged: (value) => draft.setValue(field.id, value),
                   )
                 else
                   TextArea(
@@ -477,6 +517,12 @@ class _ModuleFieldsDialog extends StatelessWidget {
               ],
               const Gap(AppSpacing.md),
             ],
+            if (draft.selectedModel case final model?)
+              Text(
+                model.available
+                    ? '${model.title} model is ready'
+                    : '${model.title} model · ${(model.sizeBytes / (1024 * 1024)).toStringAsFixed(1)} MiB download',
+              ).small().muted(),
           ],
         ),
       ),

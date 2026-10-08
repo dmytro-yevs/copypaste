@@ -592,6 +592,8 @@ dependencies = [
  "copypaste-core",
  "copypaste-ipc",
  "copypaste-p2p",
+ "copypaste-payload",
+ "copypaste-sync",
  "futures-util",
  "hex",
  "hkdf",
@@ -622,6 +624,7 @@ dependencies = [
  "copypaste-clock",
  "copypaste-ipc",
  "copypaste-p2p",
+ "copypaste-payload",
  "criterion",
  "csscolorparser",
  "hex",
@@ -665,7 +668,6 @@ dependencies = [
  "clap",
  "clipboard-win",
  "copypaste-clock",
- "copypaste-cloud",
  "copypaste-core",
  "copypaste-feedback",
  "copypaste-ipc",
@@ -674,6 +676,7 @@ dependencies = [
  "copypaste-retry",
  "copypaste-runtime-log",
  "copypaste-source-app",
+ "copypaste-sync",
  "core-foundation",
  "directories",
  "futures-util",
@@ -776,9 +779,11 @@ dependencies = [
 name = "copypaste-module-sdk"
 version = "1.0.0"
 dependencies = [
+ "hex",
  "semver",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -792,12 +797,16 @@ dependencies = [
 name = "copypaste-modules"
 version = "1.0.10"
 dependencies = [
+ "copypaste-core",
  "copypaste-fs",
+ "copypaste-ipc",
  "copypaste-module-sdk",
+ "copypaste-sync",
  "hex",
  "libloading",
  "minisign",
  "minisign-verify",
+ "reqwest",
  "semver",
  "serde",
  "serde_json",
@@ -805,6 +814,8 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "wiremock",
+ "zeroize",
  "zip",
 ]
 
@@ -843,6 +854,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "copypaste-payload"
+version = "1.0.10"
+dependencies = [
+ "base64",
+ "copypaste-ipc",
+ "image",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "copypaste-retry"
 version = "1.0.10"
 dependencies = [
@@ -858,6 +880,7 @@ dependencies = [
  "copypaste-ipc",
  "copypaste-modules",
  "copypaste-p2p",
+ "copypaste-sync",
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
@@ -891,6 +914,20 @@ dependencies = [
  "objc2-foundation 0.2.2",
  "winreg",
  "winsafe",
+]
+
+[[package]]
+name = "copypaste-sync"
+version = "1.0.10"
+dependencies = [
+ "base64",
+ "copypaste-core",
+ "copypaste-ipc",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
+ "zeroize",
 ]
 
 [[package]]
@@ -3058,7 +3095,9 @@ checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
  "base64",
  "bytes",
+ "futures-channel",
  "futures-core",
+ "futures-util",
  "http",
  "http-body",
  "http-body-util",
@@ -4645,6 +4684,7 @@ version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
 dependencies = [
+ "serde",
  "zeroize_derive",
 ]
 

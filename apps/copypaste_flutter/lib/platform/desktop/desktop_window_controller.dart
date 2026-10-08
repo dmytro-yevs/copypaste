@@ -56,6 +56,8 @@ abstract interface class DesktopWindowHost {
 
   void setBoundsChangedHandler(Future<void> Function() onBoundsChanged);
 
+  void setVisibilityChangedHandler(ValueChanged<bool>? onVisibilityChanged);
+
   Future<void> dispose();
 }
 
@@ -75,6 +77,9 @@ class DesktopWindowController {
   );
 
   ValueListenable<bool> get isUnifiedTitleBarReady => _isUnifiedTitleBarReady;
+
+  final ValueNotifier<bool> _isVisible = ValueNotifier(true);
+  ValueListenable<bool> get isVisible => _isVisible;
 
   bool _trayReady = false;
   bool _isQuitting = false;
@@ -140,6 +145,7 @@ class DesktopWindowController {
       return;
     }
     _host.setBoundsChangedHandler(_saveCurrentBounds);
+    _host.setVisibilityChangedHandler(_visibilityChanged);
 
     if (!_windowReady) {
       try {
@@ -195,6 +201,7 @@ class DesktopWindowController {
     if (_trayReady) {
       try {
         await _host.hide();
+        _visibilityChanged(false);
       } catch (_) {
         _setIssue(DesktopWindowSetupIssue.windowUnavailable);
       }
@@ -211,11 +218,16 @@ class DesktopWindowController {
 
   Future<void> showFromTrayOrDock() async {
     try {
+      _visibilityChanged(true);
       await _host.showAndFocus();
       _clearIssue();
     } catch (_) {
       _setIssue(DesktopWindowSetupIssue.windowUnavailable);
     }
+  }
+
+  void _visibilityChanged(bool visible) {
+    if (!_disposed) _isVisible.value = visible;
   }
 
   Future<void> _openSettingsFromTray() async {
@@ -357,6 +369,7 @@ class DesktopWindowController {
     } finally {
       setupIssue.dispose();
       _isUnifiedTitleBarReady.dispose();
+      _isVisible.dispose();
     }
   }
 }

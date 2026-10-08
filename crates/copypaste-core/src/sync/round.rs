@@ -6,9 +6,9 @@
 //! each compares against the floor *its own* scan started from.
 //!
 //! The two callers want different things from a busy gate, which is the whole
-//! API here. A poll loop **skips** ([`RoundGate::try_enter`]): it will tick
-//! again. An explicit request **queues** ([`RoundGate::enter`]), because the
-//! user asked after the running round read its scan.
+//! API here. A timer tick **skips** ([`RoundGate::try_enter`]): it will tick
+//! again. An explicit request or a new capture **queues** ([`RoundGate::enter`]),
+//! because it arrived after the running round may have read its scan.
 
 use std::sync::Arc;
 

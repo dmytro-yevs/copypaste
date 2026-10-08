@@ -1,0 +1,88 @@
+name: Build Supabase Sync module
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-14, platform: macos, architecture: aarch64, target: aarch64-apple-darwin, library: libcopypaste_module_supabase.dylib }
+          - { runner: windows-2022, platform: windows, architecture: x86_64, target: x86_64-pc-windows-msvc, library: copypaste_module_supabase.dll }
+    runs-on: ${{ matrix.runner }}
+    env:
+      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: "1.96"
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: |
+            .
+            modules/supabase
+      - name: Qualify the signed native boundary with isolated histories
+        run: cargo +1.96 test --locked -p copypaste-modules --test supabase
+      - name: Build production library
+        run: cargo +1.96 build --manifest-path modules/supabase/Cargo.toml --locked --release --target ${{ matrix.target }} --lib
+      - name: Sign independent package
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          version="$(python3 -c 'import json; print(json.load(open("modules/supabase/module.json"))["version"])')"
+          python3 scripts/modules/package.py --module-dir modules/supabase --library modules/supabase/target/${{ matrix.target }}/release/${{ matrix.library }} --platform ${{ matrix.platform }} --architecture ${{ matrix.architecture }} --output dist/CopyPasteModule-copypaste.supabase-v${version}-${{ matrix.platform }}-${{ matrix.architecture }}.cpmodule
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: supabase-${{ matrix.platform }}-${{ matrix.architecture }}
+          if-no-files-found: error
+          path: dist/*.cpmodule
+
+  android:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { architecture: arm, target: armv7-linux-androideabi }
+          - { architecture: aarch64, target: aarch64-linux-android }
+          - { architecture: x86_64, target: x86_64-linux-android }
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: "1.96"
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: modules/supabase
+      - name: Build Android native library
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.13846066"
+          python3 scripts/modules/build-android-module.py --module-dir modules/supabase --library-name libcopypaste_module_supabase.so --architecture ${{ matrix.architecture }} --ndk "$ANDROID_HOME/ndk/29.0.13846066"
+      - name: Sign independent package
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          version="$(python3 -c 'import json; print(json.load(open("modules/supabase/module.json"))["version"])')"
+          python3 scripts/modules/package.py --module-dir modules/supabase --library modules/supabase/target/${{ matrix.target }}/release/libcopypaste_module_supabase.so --platform android --architecture ${{ matrix.architecture }} --output dist/CopyPasteModule-copypaste.supabase-v${version}-android-${{ matrix.architecture }}.cpmodule
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: supabase-android-${{ matrix.architecture }}
+          if-no-files-found: error
+          path: dist/*.cpmodule
