@@ -25,6 +25,7 @@ class ReleaseReceiptsTest(unittest.TestCase):
                 "module_id": module_id, "module_version": "0.1.0",
                 "package_sha256": hashlib.sha256(package.read_bytes()).hexdigest(), "package_size_bytes": package.stat().st_size,
                 "cases_passed": 3, "signature_verified": True, "removal_completed_after_restart": True,
+                "restart_required": module_id != "copypaste.supabase",
             }))
             paths.append(receipt)
         return module, paths
@@ -40,6 +41,7 @@ class ReleaseReceiptsTest(unittest.TestCase):
         mutations = {"commit": "b" * 40, "run_id": "124", "module_id": "copypaste.ocr", "module_version": "0.2.0",
                      "package_sha256": "0" * 64, "package_size_bytes": 1, "cases_passed": 2,
                      "signature_verified": False, "removal_completed_after_restart": False,
+                     "restart_required": False,
                      "target": {"platform": "windows", "architecture": "aarch64"}}
         for field, value in mutations.items():
             with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:

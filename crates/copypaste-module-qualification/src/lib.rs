@@ -66,8 +66,21 @@ pub fn qualify(
         .remove(&installed.id)
         .map_err(|error| error.to_string())?;
     let pending = manager.list().map_err(|error| error.to_string())?;
-    if pending.len() != 1 || !pending[0].restart_required || pending[0].enabled {
-        return Err("Loaded module removal must disable it and require process restart.".into());
+    let restart_required = installed.id != "copypaste.supabase";
+    if restart_required {
+        if pending.len() != 1 || !pending[0].restart_required || pending[0].enabled {
+            return Err(
+                "Process-scoped module removal must disable it and require restart.".into(),
+            );
+        }
+    } else if !pending.is_empty()
+        || data.join("packages").join(&installed.id).exists()
+        || data.join("data").join(&installed.id).exists()
+        || manager
+            .invoke(&installed.id, "status", BTreeMap::new())
+            .is_ok()
+    {
+        return Err("Instance-scoped sync module removal must finish immediately.".into());
     }
     let mut source = fs::File::open(package).map_err(|error| error.to_string())?;
     let mut hash = Sha256::new();
@@ -95,7 +108,7 @@ pub fn qualify(
             .len(),
         cases_passed,
         signature_verified: true,
-        restart_required: true,
+        restart_required,
     })
 }
 
