@@ -137,8 +137,66 @@ void main() {
 
     expect(repository.downloadCalls, 0);
     expect(controller.phase, AppUpdatePhase.restartRequired);
-    expect(controller.message, contains('Quit and reopen'));
+    expect(
+      controller.message,
+      'The update is installed. Restart CopyPaste to use it.',
+    );
   });
+
+  test('restart waits for completion and ignores duplicate requests', () async {
+    final completion = Completer<void>();
+    var restartCalls = 0;
+    final controller = AppUpdateController(
+      repository: _FakeUpdateRepository(release: _release()),
+      platform: _FakeUpdatePlatform(
+        target: AppUpdateTarget.macos,
+        installResults: [AppUpdateInstallResult.restartRequired],
+      ),
+      restart: () {
+        restartCalls++;
+        return completion.future;
+      },
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.restartApplication();
+    expect(restartCalls, 0);
+    await controller.install();
+    final restart = controller.restartApplication();
+    expect(controller.busy, isTrue);
+    await controller.restartApplication();
+    expect(restartCalls, 1);
+    completion.complete();
+    await restart;
+  });
+
+  test(
+    'failed restart preserves the installed update and can be retried',
+    () async {
+      var restartCalls = 0;
+      final controller = AppUpdateController(
+        repository: _FakeUpdateRepository(release: _release()),
+        platform: _FakeUpdatePlatform(
+          target: AppUpdateTarget.macos,
+          installResults: [AppUpdateInstallResult.restartRequired],
+        ),
+        restart: () async {
+          if (++restartCalls == 1) {
+            throw PlatformException(code: 'restart_failed');
+          }
+        },
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await controller.install();
+      await controller.restartApplication();
+      expect(controller.phase, AppUpdatePhase.restartRequired);
+      expect(controller.busy, isFalse);
+      expect(controller.message, 'CopyPaste could not restart. Try again.');
+      await controller.restartApplication();
+      expect(restartCalls, 2);
+    },
+  );
 
   test(
     'reports an up-to-date installation without offering a package',
