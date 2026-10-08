@@ -3,6 +3,67 @@ import FlutterMacOS
 import XCTest
 @testable import CopyPaste_Dev
 
+final class MacosAppUpdateTests: XCTestCase {
+  private func install(
+    updateStatus: Int = 0,
+    upgradeStatus: Int = 0,
+    installedVersion: String = "1.0.8",
+    listStatus: Int = 0
+  ) throws -> (Bool, [String]) {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("copypaste-update-test-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let brew = directory.appendingPathComponent("brew")
+    let script = """
+    #!/bin/sh
+    cd "$(dirname "$0")" || exit 2
+    printf '%s\\n' "$*" >> calls
+    case "$1" in
+      update-if-needed) exit \(updateStatus) ;;
+      outdated) printf '%s\\n' '{"casks":[{"current_version":"1.0.8"}]}'; exit 1 ;;
+      upgrade) exit \(upgradeStatus) ;;
+      list) printf '%s\\n' 'copypaste \(installedVersion)'; exit \(listStatus) ;;
+      *) exit 2 ;;
+    esac
+    """
+    try script.write(to: brew, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: brew.path)
+
+    let installed = MacosAppUpdateChannel.installUpdate(using: brew, expectedVersion: "1.0.8")
+    let calls = try String(contentsOf: directory.appendingPathComponent("calls"), encoding: .utf8)
+      .split(separator: "\n").map(String.init)
+    return (installed, calls)
+  }
+
+  func testAvailableUpdateReachesUpgradeAndVerifiesInstalledVersion() throws {
+    let (installed, calls) = try install()
+    XCTAssertTrue(installed)
+    XCTAssertEqual(calls, [
+      "update-if-needed",
+      "upgrade --cask --no-ask --no-quit --require-sha dmytro-yevs/copypaste/copypaste",
+      "list --cask --versions copypaste",
+    ])
+  }
+
+  func testFailedTapUpdateStopsBeforeUpgrade() throws {
+    let (installed, calls) = try install(updateStatus: 1)
+    XCTAssertFalse(installed)
+    XCTAssertEqual(calls, ["update-if-needed"])
+  }
+
+  func testFailedUpgradeDoesNotReportSuccess() throws {
+    let (installed, calls) = try install(upgradeStatus: 1)
+    XCTAssertFalse(installed)
+    XCTAssertEqual(calls.count, 2)
+  }
+
+  func testSuccessRequiresExpectedVersionAndSuccessfulVersionCheck() throws {
+    XCTAssertFalse(try install(installedVersion: "1.0.7").0)
+    XCTAssertFalse(try install(listStatus: 1).0)
+  }
+}
+
 class RunnerTests: XCTestCase {
 
   func testTrayMenuOptsIntoAppKitImageVisibility() {
