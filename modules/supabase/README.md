@@ -35,7 +35,8 @@ To publish, dispatch `provider-module.yml` with `module=supabase` and
 macOS, Windows, and Android, plus the encrypted synchronization fixture on both
 desktop platforms. The exact production-package scenario verifies host
 callbacks, HTTPS enforcement, signed-out configuration, sign-out, disabling,
-and removal after restart; it does not claim a live Supabase account round trip.
+and immediate removal with absence after restart; it does not claim a live
+Supabase account round trip.
 
 The signed native integration scenario uses temporary encrypted histories,
 a temporary signing identity, and a local HTTP fixture:
