@@ -123,8 +123,8 @@ pub(super) fn list(state: &AppState, id: u64, limit: u32, cursor: Option<&str>) 
 pub(super) fn search(state: &AppState, id: u64, query: &str, limit: u32) -> Response {
     let limit = clamp_page(limit, DEFAULT_SEARCH_PAGE);
     match state
-        .store
-        .search_bounded(query, limit, MAX_PAGE_CONTENT_BYTES)
+        .modules
+        .search(&state.store, query, limit, MAX_PAGE_CONTENT_BYTES)
     {
         Ok(rows) => Response::ok(id, ResponseData::Page(decrypt_rows(state, rows))),
         Err(e) => storage_error(id, "search", &e),
@@ -153,7 +153,8 @@ pub(super) fn history_query(
         }
         Err(_) => return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_HISTORY_QUERY),
     };
-    let page = match state.store.query_history_bounded_for_device(
+    let page = match state.modules.query_history(
+        &state.store,
         query,
         after.as_ref(),
         limit,
@@ -334,7 +335,7 @@ pub(super) fn delete(state: &AppState, id: u64, item_id: &str) -> Response {
     let mutation_started = copypaste_core::now_ms();
     match state.store.delete(item_id) {
         Ok(_) => {
-            crate::cloud::note_version_written(state, mutation_started);
+            state.modules.note_version(mutation_started);
             state.note_local_change();
             Response::ok(id, ResponseData::Empty {})
         }
@@ -355,7 +356,7 @@ pub(super) fn delete_all(state: &AppState, id: u64, through: Option<i64>) -> Res
     match result {
         Ok(deleted) => {
             if deleted > 0 {
-                crate::cloud::note_version_written(state, mutation_started);
+                state.modules.note_version(mutation_started);
                 state.note_local_change();
             }
             Response::ok(id, ResponseData::Count(deleted))
@@ -1543,14 +1544,23 @@ mod tests {
         state
             .meta
             .set_state_all(&[
-                (crate::cloud::KEY_UPLOAD_FLOOR, &ahead.to_string()),
-                (crate::cloud::KEY_UPLOAD_FLOOR_ITEM, "zzzz"),
+                (
+                    "module:copypaste.supabase:cloud_upload_floor_ms",
+                    &ahead.to_string(),
+                ),
+                (
+                    "module:copypaste.supabase:cloud_upload_floor_item_id",
+                    "zzzz",
+                ),
             ])
             .unwrap();
 
         assert!(delete(&state, 2, &added.id).ok);
 
-        let floor = state.meta.state_ms(crate::cloud::KEY_UPLOAD_FLOOR).unwrap();
+        let floor = state
+            .meta
+            .state_ms("module:copypaste.supabase:cloud_upload_floor_ms")
+            .unwrap();
         assert!(
             floor <= ahead,
             "delete left the upload floor ahead of the tombstone"
@@ -1569,12 +1579,15 @@ mod tests {
         let ahead = copypaste_core::now_ms().saturating_add(60_000);
         state
             .meta
-            .set_state_ms(crate::cloud::KEY_UPLOAD_FLOOR, ahead)
+            .set_state_ms("module:copypaste.supabase:cloud_upload_floor_ms", ahead)
             .unwrap();
 
         assert!(delete_all(&state, 2, None).ok);
 
-        let floor = state.meta.state_ms(crate::cloud::KEY_UPLOAD_FLOOR).unwrap();
+        let floor = state
+            .meta
+            .state_ms("module:copypaste.supabase:cloud_upload_floor_ms")
+            .unwrap();
         assert!(floor < ahead, "delete_all left the upload floor ahead");
         assert!(
             !state.store.versions_since(floor, 100).unwrap().is_empty(),

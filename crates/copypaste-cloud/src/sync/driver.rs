@@ -1,5 +1,5 @@
 use std::sync::atomic::AtomicBool;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use super::cadence::AdaptiveCadence;
@@ -10,6 +10,8 @@ use crate::auth::Session;
 use crate::crypto::SyncKey;
 use crate::CloudConfig;
 use zeroize::Zeroizing;
+
+type SessionPersistence = Arc<dyn Fn(&Session) -> Result<(), SyncError> + Send + Sync>;
 
 pub struct CloudSync<R: RestApi, A: AuthApi> {
     pub(super) rest: R,
@@ -23,6 +25,7 @@ pub struct CloudSync<R: RestApi, A: AuthApi> {
     pub(super) push_channel: AtomicBool,
     // Tests set this to zero; retry duration math is exercised separately.
     delay_scale: f64,
+    session_persistence: Option<SessionPersistence>,
 }
 
 struct SessionState {
@@ -60,6 +63,23 @@ impl<R: RestApi, A: AuthApi> CloudSync<R, A> {
             cadence: AdaptiveCadence::default(),
             push_channel: AtomicBool::new(false),
             delay_scale: 1.0,
+            session_persistence: None,
+        }
+    }
+
+    /// Save a rotated refresh token before any later data request can be cancelled.
+    pub fn with_session_persistence(
+        mut self,
+        persist: impl Fn(&Session) -> Result<(), SyncError> + Send + Sync + 'static,
+    ) -> Self {
+        self.session_persistence = Some(Arc::new(persist));
+        self
+    }
+    pub(super) fn persist_current_session(&self) -> Result<(), SyncError> {
+        if let Some(persist) = &self.session_persistence {
+            self.inspect_session(|session| persist(session))
+        } else {
+            Ok(())
         }
     }
 

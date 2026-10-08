@@ -17,6 +17,23 @@ class RuntimeModulesRepository implements ModulesRepository {
           version: module['version'] as String,
           enabled: module['enabled'] as bool,
           sizeBytes: module['size_bytes'] as int,
+          searchLanguageField: module['search_language_field'] as String?,
+          searchModels: List.unmodifiable(
+            (module['search_models'] as List<dynamic>? ?? const []).map((
+              value,
+            ) {
+              final model = value as Map<String, dynamic>;
+              return ModuleSearchModel(
+                id: model['id'] as String,
+                title: model['title'] as String,
+                languages: List.unmodifiable(
+                  (model['languages'] as List).cast<String>(),
+                ),
+                sizeBytes: model['size_bytes'] as int,
+                available: model['available'] as bool,
+              );
+            }),
+          ),
           error: module['error'] as String?,
           restartRequired: module['restart_required'] as bool? ?? false,
           events: List.unmodifiable(
@@ -81,6 +98,10 @@ class RuntimeModulesRepository implements ModulesRepository {
     return switch (result['kind']) {
       'text' => ModuleResult(result['text'] as String),
       'message' => ModuleResult(result['message'] as String),
+      'data'
+          when result['data'] is Map &&
+              (result['data'] as Map)['message'] is String =>
+        ModuleResult((result['data'] as Map)['message'] as String),
       _ => throw const ModulesException(
         'The module returned an unsupported result.',
       ),
@@ -95,6 +116,7 @@ List<ModuleField> _fields(dynamic value) => List.unmodifiable(
       'text' => ModuleFieldKind.text,
       'boolean' => ModuleFieldKind.boolean,
       'file' => ModuleFieldKind.file,
+      'choices' => ModuleFieldKind.choices,
       _ => throw const ModulesException(
         'The module uses an unsupported field.',
       ),
@@ -102,7 +124,17 @@ List<ModuleField> _fields(dynamic value) => List.unmodifiable(
     return ModuleField(
       id: field['id'] as String,
       title: field['title'] as String,
+      options: List.unmodifiable(
+        (field['options'] as List<dynamic>? ?? const []).map((value) {
+          final option = value as Map<String, dynamic>;
+          return ModuleChoice(
+            id: option['id'] as String,
+            title: option['title'] as String,
+          );
+        }),
+      ),
       kind: kind,
+      secret: field['secret'] as bool? ?? false,
       defaultValue: kind == ModuleFieldKind.file
           ? ''
           : field['default'] as Object,

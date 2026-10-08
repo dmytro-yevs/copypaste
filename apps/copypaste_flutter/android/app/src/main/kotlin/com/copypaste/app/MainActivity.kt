@@ -3,7 +3,6 @@ package com.copypaste.app
 import android.Manifest
 import android.net.Uri
 import android.content.Context
-import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.pm.PackageManager
 import androidx.core.content.FileProvider
@@ -48,24 +47,19 @@ class MainActivity : FlutterActivity() {
 
         @Keep
         @JvmStatic
-        fun writeClipboardText(text: String): Boolean = runCatching {
-            val context = requireNotNull(instance)
-            (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
-                .setPrimaryClip(ClipData.newPlainText("CopyPaste", text))
-        }.isSuccess
+        fun writeClipboardText(text: String, contentType: String): Boolean {
+            val context = instance ?: return false
+            return AndroidClipboardWriter.writeText(context, text, contentType)
+        }
 
+        @Keep
         @JvmStatic
-        fun writeClipboardBinary(bytes: ByteArray, filename: String, mimeType: String): Boolean = runCatching {
-            val context = requireNotNull(instance)
-            val directory = File(context.cacheDir, "clipboard").also { it.mkdirs() }
-            val safeName = filename.replace(Regex("[^A-Za-z0-9._-]"), "_").take(100)
-            val file = File(directory, safeName.ifBlank { "copypaste" })
-            file.writeBytes(bytes)
-            val uri = FileProvider.getUriForFile(context, "${context.packageName}.clipboard", file)
-            (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
-                .setPrimaryClip(ClipData.newUri(context.contentResolver, "CopyPaste", uri))
-        }.isSuccess
+        fun writeClipboardBinary(bytes: ByteArray, filename: String, mimeType: String): Boolean {
+            val context = instance ?: return false
+            return AndroidClipboardWriter.writeBinary(context, bytes, filename, mimeType)
+        }
 
+        @Volatile
         private var instance: Context? = null
 
         @Synchronized

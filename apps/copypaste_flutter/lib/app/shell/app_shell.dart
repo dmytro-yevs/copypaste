@@ -132,7 +132,18 @@ class _AppShellState extends State<AppShell> {
                   )
                 : null;
             final content = Scaffold(
-              resizeToAvoidBottomInset: true,
+              // Keep floating-footer padding visible to scrollables when the
+              // scaffold does not need to consume keyboard insets.
+              resizeToAvoidBottomInset:
+                  mode != _ShellNavigationMode.bottom ||
+                  MediaQuery.viewInsetsOf(context).bottom > 0,
+              floatingFooter: mode == _ShellNavigationMode.bottom,
+              footers: [
+                if (mode == _ShellNavigationMode.bottom &&
+                    MediaQuery.viewInsetsOf(context).bottom == 0 &&
+                    !widget.controller.bottomOverlayOpen)
+                  _mobileNavigationDock(context, selectedKey),
+              ],
               headers: widget.unifiedTitleBar
                   ? const []
                   : [
@@ -193,14 +204,7 @@ class _AppShellState extends State<AppShell> {
                   Expanded(child: content),
                 ],
               ),
-              _ShellNavigationMode.bottom => Column(
-                children: [
-                  Expanded(child: content),
-                  if (MediaQuery.viewInsetsOf(context).bottom == 0 &&
-                      !widget.controller.bottomOverlayOpen)
-                    _mobileNavigationDock(context, selectedKey),
-                ],
-              ),
+              _ShellNavigationMode.bottom => content,
             };
 
             return CallbackShortcuts(
@@ -238,31 +242,28 @@ class _AppShellState extends State<AppShell> {
   }
 
   Widget _mobileNavigationDock(BuildContext context, Key selectedKey) {
-    return ColoredBox(
-      color: Theme.of(context).colorScheme.background,
-      child: SafeArea(
-        key: const ValueKey<String>('mobile-navigation-dock'),
-        top: false,
-        child: Padding(
-          padding: AppTheme.mobileNavigationMargin,
-          child: Center(
-            heightFactor: 1,
-            child: IntrinsicWidth(
-              child: OutlinedContainer(
-                theme: AppTheme.mobileNavigationSurfaceTheme(context),
-                child: NavigationBar(
-                  key: const ValueKey<String>('bottom-navigation'),
-                  alignment: NavigationBarAlignment.center,
-                  labelType: NavigationLabelType.selected,
-                  labelPosition: NavigationLabelPosition.end,
-                  labelSize: NavigationLabelSize.large,
-                  selectedKey: selectedKey,
-                  onSelected: _selectDestination,
-                  backgroundColor: Colors.transparent,
-                  padding: AppTheme.mobileNavigationPadding,
-                  spacing: AppSpacing.xs,
-                  children: _bottomNavigationItems(),
-                ),
+    return SafeArea(
+      key: const ValueKey<String>('mobile-navigation-dock'),
+      top: false,
+      child: Padding(
+        padding: AppTheme.mobileNavigationMargin,
+        child: Center(
+          heightFactor: 1,
+          child: IntrinsicWidth(
+            child: OutlinedContainer(
+              theme: AppTheme.mobileNavigationSurfaceTheme(context),
+              child: NavigationBar(
+                key: const ValueKey<String>('bottom-navigation'),
+                alignment: NavigationBarAlignment.center,
+                labelType: NavigationLabelType.all,
+                labelPosition: NavigationLabelPosition.bottom,
+                labelSize: NavigationLabelSize.large,
+                selectedKey: selectedKey,
+                onSelected: _selectDestination,
+                backgroundColor: Colors.transparent,
+                padding: AppTheme.mobileNavigationPadding,
+                spacing: AppSpacing.xs,
+                children: _bottomNavigationItems(),
               ),
             ),
           ),
@@ -359,9 +360,6 @@ class _AppShellState extends State<AppShell> {
         if (destination != appNavigationDestinations.first)
           const NavigationGap(AppSpacing.xs),
         Flexible(
-          flex: widget.controller.selectedDestination == destination.destination
-              ? 1
-              : 0,
           child: NavigationItem(
             key: ValueKey<AppDestination>(destination.destination),
             style: style,
@@ -374,15 +372,7 @@ class _AppShellState extends State<AppShell> {
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.center,
             ),
-            child: Icon(
-              destination.icon,
-              size: AppIconSize.md,
-              semanticLabel:
-                  widget.controller.selectedDestination ==
-                      destination.destination
-                  ? null
-                  : destination.label,
-            ),
+            child: Icon(destination.icon, size: AppIconSize.lg),
           ),
         ),
       ],

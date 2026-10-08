@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use rusqlite::{params_from_iter, types::Value};
 use sha2::{Digest, Sha256};
 
+use super::fuzzy_search;
 use super::model::{item_columns_ci, row_to_item, ItemColumns, StoreError, StoredItem};
 use super::search::sanitize_fts5_query;
 use super::store::Store;
@@ -28,6 +29,8 @@ pub struct HistoryCursor {
     created_at: i64,
     id: String,
     relevance: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    semantic_scope: Option<String>,
 }
 
 impl HistoryCursor {
@@ -62,6 +65,8 @@ pub struct HistoryPage {
 #[derive(serde::Serialize)]
 struct FingerprintQuery<'a> {
     search: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    search_version: Option<u8>,
     content_classes: Vec<&'static str>,
     semantic_kinds: Vec<&'static str>,
     pinned_only: bool,
@@ -104,12 +109,18 @@ fn normalized_semantic_kinds(query: &HistoryQuery) -> Vec<&'static str> {
 }
 
 fn normalized_search(query: &HistoryQuery) -> Option<String> {
-    query.search.as_deref().and_then(sanitize_fts5_query)
+    query.search.as_deref().and_then(|raw| {
+        sanitize_fts5_query(raw).or_else(|| (!raw.trim().is_empty()).then(String::new))
+    })
 }
 
 fn query_fingerprint(query: &HistoryQuery) -> String {
+    let search = normalized_search(query);
+    // Cursors from prefix-only releases must not resume changed ranking tiers.
+    let search_version = search.as_ref().map(|_| 1);
     let normalized = FingerprintQuery {
-        search: normalized_search(query),
+        search,
+        search_version,
         content_classes: normalized_classes(query),
         semantic_kinds: normalized_semantic_kinds(query),
         pinned_only: query.pinned_only,
@@ -172,6 +183,7 @@ fn cursor_of(
         created_at: item.created_at,
         id: item.id.clone(),
         relevance,
+        semantic_scope: None,
     }
 }
 
@@ -332,6 +344,19 @@ impl Store {
         budget: usize,
         local_device_id: Option<&str>,
     ) -> Result<HistoryPage, StoreError> {
+        self.query_history_with_semantic(query, after, limit, budget, local_device_id, None)
+    }
+
+    /// Optional model results are filtered and paged with lexical matches.
+    pub fn query_history_with_semantic(
+        &self,
+        query: &HistoryQuery,
+        after: Option<&HistoryCursor>,
+        limit: u32,
+        budget: usize,
+        local_device_id: Option<&str>,
+        semantic: Option<&super::SemanticMatches>,
+    ) -> Result<HistoryPage, StoreError> {
         if limit == 0 {
             return Ok(HistoryPage {
                 items: Vec::new(),
@@ -339,12 +364,32 @@ impl Store {
             });
         }
         if after.is_some_and(|cursor| {
-            cursor.fingerprint != query_fingerprint(query) || cursor.sort != query.sort
+            cursor.fingerprint != query_fingerprint(query)
+                || cursor.sort != query.sort
+                || cursor.semantic_scope.as_deref()
+                    != semantic.map(|matches| matches.scope.as_str())
         }) {
             return Err(StoreError::InvalidCursor);
         }
 
-        let search = normalized_search(query);
+        let mut conn = self.conn()?;
+        let search = query
+            .search
+            .as_deref()
+            .map(|raw| fuzzy_search::compile(&conn, raw))
+            .transpose()?
+            .flatten();
+        if search.is_none()
+            && query
+                .search
+                .as_deref()
+                .is_some_and(|raw| !raw.trim().is_empty())
+        {
+            return Ok(HistoryPage {
+                items: Vec::new(),
+                next: None,
+            });
+        }
         if query.sort == HistorySort::Relevance && search.is_none() {
             return Err(StoreError::InvalidHistoryQuery);
         }
@@ -352,18 +397,22 @@ impl Store {
         let semantic_kinds = normalized_semantic_kinds(query);
         let fingerprint = query_fingerprint(query);
         let mut values = Vec::<Value>::new();
-        let mut filters = String::from("ci.deleted = 0");
-        if let Some(search) = &search {
-            // The FTS table is maintained only for text captures, but an
-            // existing database can carry a stale legacy row. Keep this guard
-            // aligned with `Store::search`: a text query must never surface an
-            // image, file, or future binary merely because it has an index row.
-            filters.push_str(
-                " AND clipboard_fts MATCH ? \
-                 AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%')",
-            );
-            values.push(Value::Text(search.clone()));
+        if query.sort == HistorySort::Relevance {
+            if let Some(expression) = &search {
+                if expression.exact != expression.expanded {
+                    // The score's parameter appears before WHERE parameters.
+                    values.push(Value::Text(expression.exact.clone()));
+                }
+            }
         }
+        let mut filters = String::from("ci.deleted = 0");
+        let match_parameter = if let Some(search) = &search {
+            filters.push_str(" AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%')");
+            values.push(Value::Text(search.expanded.clone()));
+            Some(values.len())
+        } else {
+            None
+        };
         push_class_clause(&mut filters, &classes);
         if !semantic_kinds.is_empty() {
             filters.push_str(
@@ -373,8 +422,8 @@ impl Store {
                 if index != 0 {
                     filters.push_str(", ");
                 }
-                filters.push('?');
                 values.push(Value::Text((*kind).to_owned()));
+                filters.push_str(&format!("?{}", values.len()));
             }
             filters.push(')');
         }
@@ -385,22 +434,53 @@ impl Store {
             if Some(origin.as_str()) == local_device_id {
                 filters.push_str(" AND ci.origin_device_id = ''");
             } else {
-                filters.push_str(" AND ci.origin_device_id = ?");
                 values.push(Value::Text(origin.clone()));
+                filters.push_str(&format!(" AND ci.origin_device_id = ?{}", values.len()));
             }
         }
         if let Some(source) = &query.source_app_bundle_id {
-            filters.push_str(" AND ci.app_bundle_id = ?");
             values.push(Value::Text(source.clone()));
+            filters.push_str(&format!(" AND ci.app_bundle_id = ?{}", values.len()));
         }
 
+        let common_filters = filters.clone();
+        if let Some(parameter) = match_parameter {
+            if semantic.is_some() && query.sort != HistorySort::Relevance {
+                filters.push_str(&format!(" AND (ci.fts_rowid IN (SELECT rowid FROM clipboard_fts WHERE clipboard_fts MATCH ?{parameter}) OR ci.id IN (SELECT id FROM temp.copypaste_semantic_hits))"));
+            } else {
+                filters.push_str(&format!(" AND clipboard_fts MATCH ?{parameter}"));
+            }
+        }
+        if let Some(semantic) = semantic {
+            conn.execute_batch("CREATE TEMP TABLE IF NOT EXISTS copypaste_semantic_hits(id TEXT PRIMARY KEY, relevance REAL NOT NULL); DELETE FROM temp.copypaste_semantic_hits;")?;
+            let tx = super::connection::write_tx(&mut conn)?;
+            for (id, score) in &semantic.scores {
+                if !score.is_finite() || !(0.0..=1.0).contains(score) {
+                    return Err(StoreError::InvalidHistoryQuery);
+                }
+                tx.execute("INSERT INTO temp.copypaste_semantic_hits VALUES (?1, ?2) ON CONFLICT(id) DO UPDATE SET relevance = min(relevance, excluded.relevance)", rusqlite::params![id, 1.0 - score])?;
+            }
+            tx.commit()?;
+        }
         let mut sql = String::new();
         if query.sort == HistorySort::Relevance {
-            sql.push_str("SELECT * FROM (SELECT ");
-            sql.push_str(item_columns_ci!());
-            sql.push_str(", bm25(clipboard_fts) AS relevance FROM clipboard_fts JOIN clipboard_items ci ON ci.id = clipboard_fts.id WHERE ");
+            // Rank ids and cursor fields, not potentially huge clip bodies.
+            let expression = search.as_ref().expect("relevance requires search");
+            sql.push_str("WITH ");
+            sql.push_str(&expression.exact_cte(1));
+            sql.push_str(
+                "indexed AS MATERIALIZED (SELECT ci.id, ci.pinned, ci.pin_order, ci.created_at, \
+                clipboard_fts.rowid AS search_rowid, bm25(clipboard_fts) AS search_rank \
+                FROM clipboard_fts JOIN clipboard_items ci ON ci.id = clipboard_fts.id WHERE ",
+            );
             sql.push_str(&filters);
-            sql.push_str(") ranked WHERE 1 = 1");
+            sql.push_str(&format!("), lexical AS (SELECT id, pinned, pin_order, created_at, {} AS relevance FROM indexed), ranked AS (SELECT * FROM lexical", expression.relevance_sql()));
+            if semantic.is_some() {
+                sql.push_str(" UNION ALL SELECT ci.id, ci.pinned, ci.pin_order, ci.created_at, hits.relevance FROM temp.copypaste_semantic_hits hits JOIN clipboard_items ci ON ci.id = hits.id JOIN clipboard_fts ON clipboard_fts.rowid = ci.fts_rowid WHERE ");
+                sql.push_str(&common_filters);
+                sql.push_str(" AND ci.id NOT IN (SELECT id FROM lexical)");
+            }
+            sql.push_str("), matches AS MATERIALIZED (SELECT * FROM ranked WHERE 1 = 1");
             if let Some(cursor) = after {
                 if cursor.pinned {
                     push_after_pinned(&mut sql, &mut values, cursor, "");
@@ -420,6 +500,14 @@ impl Store {
                 " ORDER BY pinned DESC, pin_order ASC, \
                  CASE WHEN pinned = 0 THEN relevance END ASC, \
                  created_at DESC, id DESC LIMIT ?",
+            );
+            sql.push_str(") SELECT ");
+            sql.push_str(item_columns_ci!());
+            sql.push_str(
+                ", matches.relevance FROM matches JOIN clipboard_items ci ON ci.id = matches.id \
+                ORDER BY matches.pinned DESC, matches.pin_order ASC, \
+                CASE WHEN matches.pinned = 0 THEN matches.relevance END ASC, \
+                matches.created_at DESC, matches.id DESC",
             );
         } else {
             sql.push_str("SELECT ");
@@ -471,7 +559,6 @@ impl Store {
         }
         values.push(Value::Integer(i64::from(limit).saturating_add(1)));
 
-        let conn = self.conn()?;
         let mut stmt = conn.prepare(&sql)?;
         let columns = ItemColumns::resolve(&stmt)?;
         let mut rows = stmt.query(params_from_iter(values.iter()))?;
@@ -499,13 +586,21 @@ impl Store {
             }
             items.push(item);
         }
-        let next = more
+        let mut next = more
             .then(|| {
                 items
                     .last()
                     .map(|item| cursor_of(item, fingerprint, query.sort, last_relevance))
             })
             .flatten();
+        if let Some(cursor) = &mut next {
+            cursor.semantic_scope = semantic.map(|matches| matches.scope.clone());
+        }
+        drop(rows);
+        drop(stmt);
+        if semantic.is_some() {
+            conn.execute("DELETE FROM temp.copypaste_semantic_hits", [])?;
+        }
         Ok(HistoryPage { items, next })
     }
 }
@@ -516,6 +611,112 @@ mod tests {
 
     use super::*;
     use crate::storage::test_support::{item, store, T0};
+
+    #[test]
+    fn module_matches_merge_before_filters_and_paging_without_duplicates() {
+        let s = store();
+        let exact = s.insert(item("housing payment", T0)).unwrap();
+        let mut clip = item("Apartment lease for October", T0 + 1);
+        clip.app_bundle_id = Some("com.example.editor".into());
+        let meaning = s.insert(clip).unwrap();
+        let unrelated = s.insert(item("rent in another app", T0 + 2)).unwrap();
+        let semantic = super::super::SemanticMatches {
+            scope: "model-a".into(),
+            scores: vec![
+                (exact.id.clone(), 0.99),
+                (meaning.id.clone(), 0.95),
+                (unrelated.id.clone(), 0.9),
+            ],
+        };
+        for sort in [
+            HistorySort::Relevance,
+            HistorySort::Newest,
+            HistorySort::Oldest,
+        ] {
+            let query = HistoryQuery {
+                search: Some("housing payment".into()),
+                sort,
+                ..Default::default()
+            };
+            let mut ids = Vec::new();
+            let mut after = None;
+            loop {
+                let page = s
+                    .query_history_with_semantic(
+                        &query,
+                        after.as_ref(),
+                        1,
+                        1,
+                        None,
+                        Some(&semantic),
+                    )
+                    .unwrap();
+                ids.extend(page.items.into_iter().map(|item| item.id));
+                after = page.next;
+                if after.is_none() {
+                    break;
+                }
+            }
+            assert_eq!(ids.len(), 3);
+            assert_eq!(
+                ids.iter().collect::<std::collections::HashSet<_>>().len(),
+                3
+            );
+            if sort == HistorySort::Relevance {
+                assert_eq!(ids[0], exact.id);
+            }
+            let filtered = HistoryQuery {
+                source_app_bundle_id: Some("com.example.editor".into()),
+                ..query
+            };
+            let page = s
+                .query_history_with_semantic(&filtered, None, 10, usize::MAX, None, Some(&semantic))
+                .unwrap();
+            assert_eq!(page.items.len(), 1);
+            assert_eq!(page.items[0].id, meaning.id);
+        }
+    }
+
+    #[test]
+    fn semantic_cursor_is_invalid_after_provider_changes_or_disabling() {
+        let s = store();
+        s.insert(item("needle one", T0)).unwrap();
+        s.insert(item("needle two", T0 + 1)).unwrap();
+        let query = HistoryQuery {
+            search: Some("needle".into()),
+            sort: HistorySort::Relevance,
+            ..Default::default()
+        };
+        let semantic = super::super::SemanticMatches {
+            scope: "model-a".into(),
+            scores: vec![],
+        };
+        let cursor = s
+            .query_history_with_semantic(&query, None, 1, usize::MAX, None, Some(&semantic))
+            .unwrap()
+            .next
+            .unwrap();
+        let cursor = HistoryCursor::parse_for(&cursor.token(), &query).unwrap();
+        assert!(matches!(
+            s.query_history_with_semantic(&query, Some(&cursor), 1, usize::MAX, None, None),
+            Err(StoreError::InvalidCursor)
+        ));
+        let different = super::super::SemanticMatches {
+            scope: "model-b".into(),
+            scores: vec![],
+        };
+        assert!(matches!(
+            s.query_history_with_semantic(
+                &query,
+                Some(&cursor),
+                1,
+                usize::MAX,
+                None,
+                Some(&different)
+            ),
+            Err(StoreError::InvalidCursor)
+        ));
+    }
 
     fn walk(store: &Store, query: &HistoryQuery) -> Vec<String> {
         walk_with_page_size(store, query, 2)
@@ -680,6 +881,104 @@ mod tests {
             store.query_history_bounded(&other, Some(&cursor), 2, usize::MAX),
             Err(StoreError::InvalidCursor)
         ));
+    }
+
+    #[test]
+    fn fuzzy_history_orders_exact_before_approximate_across_all_pages() {
+        let store = store();
+        let exact = store.insert(item("meeting notes", T0)).unwrap();
+        let typo = store.insert(item("meting notes", T0 + 1)).unwrap();
+        let infix = store.insert(item("premeeting notes", T0 + 2)).unwrap();
+        let pin = store.insert(item("meetign notes", T0 + 3)).unwrap();
+        store.set_pinned(&pin.id, true).unwrap();
+        let query = HistoryQuery {
+            search: Some("meeting notes".into()),
+            sort: HistorySort::Relevance,
+            ..HistoryQuery::default()
+        };
+        let ids = walk_with_page_size(&store, &query, 1);
+        assert_eq!(&ids[..2], &[pin.id.clone(), exact.id.clone()]);
+        assert_eq!(ids.len(), 4);
+        assert!(ids.contains(&typo.id));
+        assert!(ids.contains(&infix.id));
+        assert_eq!(
+            ids.iter().collect::<std::collections::HashSet<_>>().len(),
+            4
+        );
+        for sort in [HistorySort::Newest, HistorySort::Oldest] {
+            assert_eq!(
+                walk_with_page_size(
+                    &store,
+                    &HistoryQuery {
+                        sort,
+                        ..query.clone()
+                    },
+                    1
+                )
+                .len(),
+                4
+            );
+        }
+    }
+
+    #[test]
+    fn fuzzy_history_applies_filters_and_budget_before_pagination() {
+        let store = store();
+        let mut matching = item("meeting notes", T0);
+        matching.app_bundle_id = Some("com.example.editor".into());
+        let exact = store.insert(matching).unwrap();
+        let mut matching = item("meting notes", T0 + 1);
+        matching.app_bundle_id = Some("com.example.editor".into());
+        let typo = store.insert(matching).unwrap();
+        store.insert(item("premeeting notes", T0 + 2)).unwrap();
+        let query = HistoryQuery {
+            search: Some("meeting notes".into()),
+            sort: HistorySort::Relevance,
+            source_app_bundle_id: Some("com.example.editor".into()),
+            content_classes: vec![copypaste_ipc::ContentClass::Text],
+            semantic_kinds: vec![copypaste_ipc::SemanticKind::PlainText],
+            ..HistoryQuery::default()
+        };
+        let page = store.query_history_bounded(&query, None, 10, 1).unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].id, exact.id);
+        let cursor = page.next.unwrap();
+        let page = store
+            .query_history_bounded(&query, Some(&cursor), 10, 1)
+            .unwrap();
+        assert_eq!(page.items[0].id, typo.id);
+        assert!(page.next.is_none());
+    }
+
+    #[test]
+    fn tokenless_search_returns_no_results_instead_of_an_error_or_unfiltered_history() {
+        let store = store();
+        store.insert(item("meeting", T0)).unwrap();
+        for sort in [
+            HistorySort::Newest,
+            HistorySort::Oldest,
+            HistorySort::Relevance,
+        ] {
+            for search in ["^:;", "***", "OR AND"] {
+                let query = HistoryQuery {
+                    search: Some(search.into()),
+                    sort,
+                    ..Default::default()
+                };
+                let page = store
+                    .query_history_bounded(&query, None, 10, usize::MAX)
+                    .unwrap();
+                assert!(page.items.is_empty(), "{sort:?}: {search}");
+                assert!(page.next.is_none());
+                assert_ne!(
+                    query_fingerprint(&query),
+                    query_fingerprint(&HistoryQuery {
+                        sort,
+                        ..Default::default()
+                    })
+                );
+            }
+        }
     }
 
     #[test]

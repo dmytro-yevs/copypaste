@@ -2,6 +2,8 @@
 #![deny(unsafe_code)]
 
 mod manifest;
+mod search;
+pub use search::*;
 #[allow(unsafe_code)]
 pub mod native;
 pub use manifest::*;
@@ -58,8 +60,19 @@ pub struct ModuleInvocation {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ModuleOutput {
-    Text { text: String },
-    Message { message: String },
+    Text {
+        text: String,
+    },
+    Message {
+        message: String,
+    },
+    Data {
+        data: serde_json::Value,
+    },
+    Embeddings {
+        model_id: String,
+        vectors: Vec<Vec<f32>>,
+    },
 }
 
 /// Native modules must finish owned workers before being dropped.
@@ -67,6 +80,15 @@ pub trait Module: Send + 'static {
     fn create(environment: ModuleEnvironment) -> Result<Self, String>
     where
         Self: Sized;
+    fn create_with_host(
+        environment: ModuleEnvironment,
+        _host: native::HostClient,
+    ) -> Result<Self, String>
+    where
+        Self: Sized,
+    {
+        Self::create(environment)
+    }
     fn invoke(&mut self, invocation: ModuleInvocation) -> Result<ModuleOutput, String>;
 }
 
@@ -78,6 +100,24 @@ macro_rules! export_module {
         #[no_mangle]
         pub extern "C" fn copypaste_module_v1() -> *const $crate::native::NativeApi {
             &$crate::native::Export::<$module>::API
+        }
+    };
+}
+
+/// Export a module that consumes authenticated host services, preserving ABI v1.
+#[macro_export]
+macro_rules! export_host_module {
+    ($module:ty) => {
+        $crate::export_module!($module);
+        #[allow(unsafe_code)]
+        #[no_mangle]
+        pub unsafe extern "C" fn copypaste_module_with_host_v1(
+            data: *const u8,
+            len: usize,
+            host: *const $crate::native::NativeHostApi,
+        ) -> *mut std::ffi::c_void {
+            // SAFETY: the module host retains these buffers and callbacks through destruction.
+            unsafe { $crate::native::create_with_host::<$module>(data, len, host) }
         }
     };
 }

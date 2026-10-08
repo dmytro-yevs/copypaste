@@ -1,8 +1,9 @@
 //! All native loading and pointer ownership are confined to this boundary.
 use crate::ModuleError;
 use copypaste_module_sdk::{
-    native::NativeApi, ModuleEnvironment, ModuleInvocation, ModuleOutput, ModuleUnloadPolicy,
-    MAX_INVOCATION_BYTES, MODULE_API_VERSION,
+    native::{NativeApi, NativeBuffer, NativeHostApi, NativeReply, MAX_HOST_BYTES},
+    ModuleEnvironment, ModuleInvocation, ModuleOutput, ModuleUnloadPolicy, MAX_INVOCATION_BYTES,
+    MODULE_API_VERSION,
 };
 use libloading::Library;
 use std::{
@@ -19,14 +20,14 @@ use std::{
 /// lock or serialize commands in other modules. Lifecycle changes close admission
 /// first and wait for already running work before releasing code and assets.
 pub(crate) struct ModuleInstance {
-    accepting: AtomicBool,
+    accepting: Arc<AtomicBool>,
     module: Mutex<Option<NativeModule>>,
 }
 
 impl ModuleInstance {
     pub(crate) fn new() -> Self {
         Self {
-            accepting: AtomicBool::new(true),
+            accepting: Arc::new(AtomicBool::new(true)),
             module: Mutex::new(None),
         }
     }
@@ -37,6 +38,8 @@ impl ModuleInstance {
         package_dir: &Path,
         data_dir: &Path,
         invocation: &ModuleInvocation,
+        services: Option<Arc<crate::SyncServices>>,
+        id: &str,
     ) -> Result<ModuleOutput, ModuleError> {
         let mut module = self.module.lock().map_err(|_| ModuleError::State)?;
         if !self.accepting.load(Ordering::Acquire) {
@@ -45,6 +48,18 @@ impl ModuleInstance {
         if module.is_none() {
             let manifest = verifier.installed(package_dir, true)?;
             std::fs::create_dir_all(data_dir)?;
+            if let Some(provider) = &manifest.search_provider {
+                let languages = invocation
+                    .preferences
+                    .get(&provider.language_field)
+                    .and_then(serde_json::Value::as_array)
+                    .ok_or(ModuleError::State)?
+                    .iter()
+                    .map(|value| value.as_str().map(str::to_owned).ok_or(ModuleError::State))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let model = provider.model_for(&languages).ok_or(ModuleError::State)?;
+                crate::resources::verify(data_dir, model)?;
+            }
             let environment = ModuleEnvironment {
                 package_dir: package_dir.to_string_lossy().into_owned(),
                 data_dir: data_dir.to_string_lossy().into_owned(),
@@ -53,6 +68,13 @@ impl ModuleInstance {
                 &package_dir.join(manifest.entrypoint),
                 &environment,
                 manifest.unload_policy,
+                services.map(|services| {
+                    Box::new(HostBridge {
+                        id: id.into(),
+                        services,
+                        accepting: Arc::clone(&self.accepting),
+                    })
+                }),
             )?);
         }
         module.as_mut().ok_or(ModuleError::Load)?.invoke(invocation)
@@ -72,16 +94,18 @@ pub(crate) struct NativeModule {
     api: NativeApi,
     context: *mut c_void,
     _library: Arc<Library>,
+    _host: Option<Box<HostBridge>>,
 }
 
 // SAFETY: SDK modules are Send; the per-instance mutex serializes calls and drop.
 unsafe impl Send for NativeModule {}
 
 impl NativeModule {
-    pub(crate) fn load(
+    fn load(
         path: &Path,
         environment: &ModuleEnvironment,
         policy: ModuleUnloadPolicy,
+        host: Option<Box<HostBridge>>,
     ) -> Result<Self, ModuleError> {
         // SAFETY: only authenticated first-party code reaches this boundary. Its ABI must
         // implement the SDK ownership contract; native code is trusted, not sandboxed.
@@ -107,7 +131,23 @@ impl NativeModule {
             }
             let api = *api;
             let bytes = serde_json::to_vec(environment).map_err(|_| ModuleError::State)?;
-            let context = (api.create)(bytes.as_ptr(), bytes.len());
+            let context = if let Some(bridge) = host.as_deref() {
+                let create: libloading::Symbol<
+                    unsafe extern "C" fn(*const u8, usize, *const NativeHostApi) -> *mut c_void,
+                > = library
+                    .get(b"copypaste_module_with_host_v1\0")
+                    .map_err(|_| ModuleError::Load)?;
+                let host_api = NativeHostApi {
+                    api_version: MODULE_API_VERSION,
+                    struct_size: std::mem::size_of::<NativeHostApi>(),
+                    context: (bridge as *const HostBridge).cast_mut().cast(),
+                    request: host_request,
+                    release: host_release,
+                };
+                create(bytes.as_ptr(), bytes.len(), &host_api)
+            } else {
+                (api.create)(bytes.as_ptr(), bytes.len())
+            };
             if context.is_null() {
                 return Err(ModuleError::Load);
             }
@@ -115,6 +155,7 @@ impl NativeModule {
                 api,
                 context,
                 _library: library,
+                _host: host,
             })
         }
     }
@@ -123,7 +164,9 @@ impl NativeModule {
         &mut self,
         invocation: &ModuleInvocation,
     ) -> Result<ModuleOutput, ModuleError> {
-        let bytes = serde_json::to_vec(invocation).map_err(|_| ModuleError::State)?;
+        let bytes = zeroize::Zeroizing::new(
+            serde_json::to_vec(invocation).map_err(|_| ModuleError::State)?,
+        );
         if bytes.len() > MAX_INVOCATION_BYTES {
             return Err(ModuleError::Invalid(
                 "The module input exceeds its size limit.".into(),
@@ -210,5 +253,67 @@ impl Drop for NativeModule {
         unsafe {
             (self.api.destroy)(self.context);
         }
+    }
+}
+
+struct HostBridge {
+    id: String,
+    services: Arc<crate::SyncServices>,
+    accepting: Arc<AtomicBool>,
+}
+unsafe extern "C" fn host_request(
+    context: *mut c_void,
+    data: *const u8,
+    len: usize,
+) -> NativeReply {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if context.is_null() || data.is_null() || len == 0 || len > MAX_HOST_BYTES {
+            return Err(ModuleError::State);
+        }
+        // SAFETY: NativeModule retains the bridge until its module and all workers are destroyed.
+        let bridge = unsafe { &*context.cast::<HostBridge>() };
+        // SAFETY: the caller lends this bounded input for the callback duration.
+        let input: serde_json::Value =
+            serde_json::from_slice(unsafe { std::slice::from_raw_parts(data, len) })
+                .map_err(|_| ModuleError::State)?;
+        // Already admitted token rotations may finish saving encrypted metadata
+        // during teardown. History access and the live lease close immediately.
+        if !bridge.accepting.load(Ordering::Acquire)
+            && !matches!(
+                input.get("operation").and_then(serde_json::Value::as_str),
+                Some("read_state" | "write_state" | "clear_state")
+            )
+        {
+            return Err(ModuleError::Disabled);
+        }
+        let output = bridge.services.request(&bridge.id, input)?;
+        let bytes = serde_json::to_vec(&output).map_err(|_| ModuleError::State)?;
+        if bytes.len() > MAX_HOST_BYTES {
+            return Err(ModuleError::State);
+        }
+        Ok(bytes)
+    }))
+    .unwrap_or(Err(ModuleError::State));
+    let (status, bytes) = match result {
+        Ok(bytes) => (0, bytes),
+        Err(_) => (1, b"The sync host service is unavailable.".to_vec()),
+    };
+    let bytes = bytes.into_boxed_slice();
+    let len = bytes.len();
+    NativeReply {
+        status,
+        buffer: NativeBuffer {
+            data: Box::into_raw(bytes).cast(),
+            len,
+        },
+    }
+}
+unsafe extern "C" fn host_release(buffer: NativeBuffer) {
+    if !buffer.data.is_null() {
+        // SAFETY: the caller releases exactly the host allocation returned by host_request.
+        let mut bytes =
+            unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(buffer.data, buffer.len)) };
+        use zeroize::Zeroize;
+        bytes.zeroize();
     }
 }
