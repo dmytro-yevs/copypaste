@@ -71,7 +71,13 @@ void main() {
         );
         final decoration = scanButton.style.decoration(scanContext, const {});
         expect(decoration, isA<BoxDecoration>());
-        expect((decoration as BoxDecoration).border, isNull);
+        expect(
+          (decoration as BoxDecoration).border,
+          Border.all(
+            color: Theme.of(scanContext).colorScheme.border,
+            strokeAlign: BorderSide.strokeAlignCenter,
+          ),
+        );
         expect(decoration.color, anyOf(isNull, Colors.transparent));
         expect(
           tester.getCenter(scan).dy,

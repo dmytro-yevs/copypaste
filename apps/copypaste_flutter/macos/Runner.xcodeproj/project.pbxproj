@@ -38,6 +38,7 @@
 		C922558FEA48D196BDBA66CE /* Pods_RunnerTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 080832A983AB3161AF782AF8 /* Pods_RunnerTests.framework */; };
 		C0DE0E112610060000000002 /* CaptureProtectedLayerTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE0E112610060000000001 /* CaptureProtectedLayerTree.swift */; };
 		C0DE0F112610060000000002 /* MacosScreenshotProtection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE0F112610060000000001 /* MacosScreenshotProtection.swift */; };
+		C0DE10112610080000000002 /* MacosApplicationLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE10112610080000000001 /* MacosApplicationLifecycle.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -108,6 +109,7 @@
 		F86AA5EDEED671B6B20DAFC3 /* Pods-Runner.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.release.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"; sourceTree = "<group>"; };
 		C0DE0E112610060000000001 /* CaptureProtectedLayerTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureProtectedLayerTree.swift; sourceTree = "<group>"; };
 		C0DE0F112610060000000001 /* MacosScreenshotProtection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacosScreenshotProtection.swift; sourceTree = "<group>"; };
+		C0DE10112610080000000001 /* MacosApplicationLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacosApplicationLifecycle.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -205,6 +207,7 @@
 				C0DE0A112610030000000001 /* MacosSetupChannel.swift */,
 				C0DE0B112610040000000001 /* QuickPasteGeometry.swift */,
 				C0DE0C112610050000000001 /* MacosAppUpdateChannel.swift */,
+				C0DE10112610080000000001 /* MacosApplicationLifecycle.swift */,
 				F1A47B2E96CD4D49B3A77101 /* MacosTrayMenuChannel.swift */,
 				A1B2C3D10102030405060708 /* ProtectedPairingBridge.h */,
 				A1B2C3D20102030405060708 /* Runner-Bridging-Header.h */,
@@ -484,6 +487,7 @@
 				C0DE0A112610030000000002 /* MacosSetupChannel.swift in Sources */,
 				C0DE0B112610040000000002 /* QuickPasteGeometry.swift in Sources */,
 				C0DE0C112610050000000002 /* MacosAppUpdateChannel.swift in Sources */,
+				C0DE10112610080000000002 /* MacosApplicationLifecycle.swift in Sources */,
 				F1A47B2E96CD4D49B3A77102 /* MacosTrayMenuChannel.swift in Sources */,
 				A1B2C3D40102030405060708 /* ProtectedPairingBridge.mm in Sources */,
 				33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */,

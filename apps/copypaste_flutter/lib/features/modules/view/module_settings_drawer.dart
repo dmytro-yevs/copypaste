@@ -162,27 +162,6 @@ class ModuleSettingsDrawer extends StatelessWidget {
                               ),
                             ),
                           ],
-                          for (final command in controller.settingsCommands(
-                            module,
-                          )) ...[
-                            const Gap(AppSpacing.md),
-                            Button.secondary(
-                              alignment: AppTheme.moduleSettingsActionAlignment,
-                              leading: const Center(
-                                child: Icon(LucideIcons.play),
-                              ),
-                              onPressed:
-                                  controller.busy ||
-                                      !module.enabled ||
-                                      module.error != null
-                                  ? null
-                                  : () => onInvoke(module, command),
-                              child: Text(
-                                command.title,
-                                textAlign: TextAlign.center,
-                              ),
-                            ),
-                          ],
                           if (update != null) ...[
                             const Gap(AppSpacing.md),
                             Button.secondary(
@@ -217,6 +196,27 @@ class ModuleSettingsDrawer extends StatelessWidget {
                                   : controller.restartApplication,
                               child: const Text(
                                 'Restart CopyPaste',
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ],
+                          for (final command in controller.settingsCommands(
+                            module,
+                          )) ...[
+                            const Gap(AppSpacing.md),
+                            Button.secondary(
+                              alignment: AppTheme.moduleSettingsActionAlignment,
+                              leading: const Center(
+                                child: Icon(LucideIcons.play),
+                              ),
+                              onPressed:
+                                  controller.busy ||
+                                      !module.enabled ||
+                                      module.error != null
+                                  ? null
+                                  : () => onInvoke(module, command),
+                              child: Text(
+                                command.title,
                                 textAlign: TextAlign.center,
                               ),
                             ),

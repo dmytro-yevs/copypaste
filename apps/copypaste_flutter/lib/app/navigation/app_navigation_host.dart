@@ -1,5 +1,6 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import 'app_destination.dart';
 import 'app_navigation_controller.dart';
 import 'app_page_route.dart';
 
@@ -20,6 +21,7 @@ class AppNavigationHost extends StatefulWidget {
 
 class _AppNavigationHostState extends State<AppNavigationHost> {
   late final ValueNotifier<Widget> _child = ValueNotifier<Widget>(widget.child);
+  bool _nestedCanPop = false;
 
   @override
   void didUpdateWidget(covariant AppNavigationHost oldWidget) {
@@ -37,26 +39,51 @@ class _AppNavigationHostState extends State<AppNavigationHost> {
 
   @override
   Widget build(BuildContext context) {
-    return NavigatorPopHandler<Object?>(
-      onPopWithResult: (Object? result) {
-        widget.controller.maybePop<Object?>(result);
+    return ListenableBuilder(
+      listenable: widget.controller,
+      builder: (context, child) {
+        final interceptRootBack =
+            !_nestedCanPop &&
+            widget.controller.selectedDestination != AppDestination.history;
+        return PopScope<Object?>(
+          canPop: !interceptRootBack,
+          onPopInvokedWithResult: (didPop, result) {
+            if (!didPop && interceptRootBack) {
+              widget.controller.selectDestination(AppDestination.history);
+            }
+          },
+          child: child!,
+        );
       },
-      child: Navigator(
-        key: widget.controller.navigatorKey,
-        onGenerateRoute: (RouteSettings settings) {
-          return AppPageRoute<void>(
-            settings: settings,
-            disableAnimations: MediaQuery.disableAnimationsOf(context),
-            builder: (BuildContext context) {
-              return ValueListenableBuilder<Widget>(
-                valueListenable: _child,
-                builder: (BuildContext context, Widget child, Widget? _) {
-                  return child;
+      child: NavigatorPopHandler<Object?>(
+        onPopWithResult: (Object? result) {
+          widget.controller.maybePop<Object?>(result);
+        },
+        child: NotificationListener<NavigationNotification>(
+          onNotification: (notification) {
+            if (_nestedCanPop != notification.canHandlePop) {
+              setState(() => _nestedCanPop = notification.canHandlePop);
+            }
+            return false;
+          },
+          child: Navigator(
+            key: widget.controller.navigatorKey,
+            onGenerateRoute: (RouteSettings settings) {
+              return AppPageRoute<void>(
+                settings: settings,
+                disableAnimations: MediaQuery.disableAnimationsOf(context),
+                builder: (BuildContext context) {
+                  return ValueListenableBuilder<Widget>(
+                    valueListenable: _child,
+                    builder: (BuildContext context, Widget child, Widget? _) {
+                      return child;
+                    },
+                  );
                 },
               );
             },
-          );
-        },
+          ),
+        ),
       ),
     );
   }
