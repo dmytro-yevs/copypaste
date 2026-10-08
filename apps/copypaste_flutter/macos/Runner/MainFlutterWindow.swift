@@ -72,7 +72,9 @@ class MainFlutterWindow: NSWindow {
   }
 
   override func order(_ place: NSWindow.OrderingMode, relativeTo otherWin: Int) {
+    if place != .out { MacosScreenshotProtection.shared.resume(window: self) }
     super.order(place, relativeTo: otherWin)
+    if place == .out { MacosScreenshotProtection.shared.suspend(window: self) }
     if place != .out {
       scheduleTrafficLightLayout()
     }
@@ -633,6 +635,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
       },
       show: {
         // A global shortcut must order the panel while another app is active.
+        MacosScreenshotProtection.shared.resume(window: self.window)
         self.window.orderFrontRegardless()
         self.window.makeKey()
         NSLog("QuickPaste shown: visible=%d key=%d", self.window.isVisible ? 1 : 0, self.window.isKeyWindow ? 1 : 0)
@@ -688,6 +691,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     let wasPerformingAction = performingAction
     performingAction = true
     window.orderOut(nil)
+    MacosScreenshotProtection.shared.suspend(window: window)
     performingAction = wasPerformingAction
     retireWhenHidden()
   }
@@ -813,6 +817,7 @@ private final class ProtectedPairingPresentationWindow: NSObject, NSWindowDelega
 
   func show() {
     window.center()
+    MacosScreenshotProtection.shared.resume(window: window)
     window.makeKeyAndOrderFront(nil)
     NSApplication.shared.activate(ignoringOtherApps: true)
   }

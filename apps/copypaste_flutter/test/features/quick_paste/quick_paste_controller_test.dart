@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/services.dart';
+import 'package:flutter/gestures.dart';
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
 import 'package:copypaste_flutter/features/history/presentation/source_app_label.dart';
 import 'package:copypaste_flutter/features/history/repository/history_repository.dart';
@@ -72,6 +73,310 @@ void main() {
       expect(disposals, 1);
     },
   );
+
+  testWidgets(
+    'loads history pages on scroll and builds only nearby rows',
+    (tester) async {
+      final repository = _PagedRepository();
+      _populateHistory(repository, 125);
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: _ContextHost(),
+      );
+      await tester.binding.setSurfaceSize(const Size(448, 500));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(QuickPasteApp(controller: controller));
+      await tester.pumpAndSettle();
+
+      final historyScroll = find.byKey(
+        const ValueKey('quick-paste-history-scroll'),
+      );
+      ScrollController scroll() =>
+          tester.widget<ListView>(historyScroll).controller!;
+      expect(controller.items, hasLength(50));
+      expect(repository.requests, hasLength(1));
+      expect(find.byKey(const ValueKey('quick-paste-clip-49')), findsNothing);
+      scroll().jumpTo(scroll().position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      expect(controller.items, hasLength(100));
+      expect(repository.requests.map((request) => request.cursor), [
+        null,
+        '50',
+      ]);
+      scroll().jumpTo(scroll().position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      expect(controller.items, hasLength(125));
+      expect(controller.items.map((clip) => clip.id).toSet(), hasLength(125));
+      expect(
+        repository.requests.map((request) => request.limit),
+        everyElement(50),
+      );
+      expect(controller.history.canLoadMore, isFalse);
+      scroll().jumpTo(scroll().position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('quick-paste-clip-124')),
+        findsOneWidget,
+      );
+      expect(repository.requests, hasLength(3));
+
+      await controller.search('Clip 1');
+      await tester.pumpAndSettle();
+      expect(scroll().offset, 0);
+      expect(controller.items, hasLength(36));
+      expect(repository.requests.last.cursor, isNull);
+      expect(repository.requests.last.search, 'Clip 1');
+      await controller.opened(1);
+      await tester.pumpAndSettle();
+      expect(scroll().offset, 0);
+      expect(controller.items, hasLength(50));
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+      TargetPlatform.android,
+    }),
+  );
+
+  for (final pinned in [false, true]) {
+    testWidgets(
+      'defers offscreen image previews (pinned: $pinned)',
+      (tester) async {
+        final repository = _PagedRepository();
+        _populateHistory(
+          repository,
+          80,
+          pinnedCount: pinned ? 80 : 0,
+          images: true,
+        );
+        final controller = QuickPasteController(
+          repository: repository,
+          preferencesStore: MemoryQuickPastePreferencesStore(),
+          host: _ContextHost(),
+        );
+        await tester.binding.setSurfaceSize(const Size(448, 500));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        await tester.pumpWidget(QuickPasteApp(controller: controller));
+        await tester.pumpAndSettle();
+        expect(controller.items, hasLength(50));
+        expect(repository.imagePreviewIds.length, lessThan(50));
+        expect(repository.imagePreviewIds, isNot(contains('clip-49')));
+        expect(find.byKey(const ValueKey('quick-paste-clip-49')), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+      variant: TargetPlatformVariant({
+        TargetPlatform.macOS,
+        TargetPlatform.windows,
+        TargetPlatform.android,
+      }),
+    );
+  }
+
+  testWidgets(
+    'paginates a pinned-only page into the recent history',
+    (tester) async {
+      final repository = _PagedRepository();
+      _populateHistory(repository, 125, pinnedCount: 70);
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: _ContextHost(),
+      );
+      await tester.binding.setSurfaceSize(const Size(448, 500));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(QuickPasteApp(controller: controller));
+      await tester.pumpAndSettle();
+      expect(controller.items, hasLength(50));
+      expect(controller.items.every((clip) => clip.pinned), isTrue);
+      final pinnedScroll = tester
+          .widget<ListView>(
+            find.byKey(const ValueKey('quick-paste-pinned-scroll')),
+          )
+          .controller!;
+      pinnedScroll.jumpTo(pinnedScroll.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      expect(controller.items, hasLength(100));
+      expect(find.byKey(const ValueKey('quick-paste-clip-70')), findsOneWidget);
+      final recentScroll = tester
+          .widget<ListView>(
+            find.byKey(const ValueKey('quick-paste-history-scroll')),
+          )
+          .controller!;
+      recentScroll.jumpTo(recentScroll.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      expect(controller.items, hasLength(125));
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+      TargetPlatform.android,
+    }),
+  );
+
+  testWidgets(
+    'keyboard traverses offscreen rows and page boundaries',
+    (tester) async {
+      final repository = _PagedRepository();
+      _populateHistory(repository, 81, pinnedCount: 1);
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: _ContextHost(),
+      );
+      await tester.binding.setSurfaceSize(const Size(448, 500));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(QuickPasteApp(controller: controller));
+      await tester.pumpAndSettle();
+      await controller.opened(1);
+      await tester.pumpAndSettle();
+      final pinned = find.byKey(const ValueKey('quick-paste-clip-0'));
+      final pinnedRect = tester.getRect(pinned);
+      for (var page = 0; page < 12; page++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.pageDown);
+        await tester.pumpAndSettle();
+      }
+      expect(controller.focusedClip?.id, 'clip-60');
+      expect(controller.items, hasLength(81));
+      final focused = find.byKey(const ValueKey('quick-paste-clip-60'));
+      expect(focused, findsOneWidget);
+      final historyRect = tester.getRect(
+        find.byKey(const ValueKey('quick-paste-history-scroll')),
+      );
+      final focusedRect = tester.getRect(focused);
+      expect(focusedRect.top, greaterThanOrEqualTo(historyRect.top));
+      expect(focusedRect.bottom, lessThanOrEqualTo(historyRect.bottom));
+      expect(tester.getRect(pinned), pinnedRect);
+      await tester.sendKeyEvent(LogicalKeyboardKey.pageUp);
+      await tester.pumpAndSettle();
+      expect(controller.focusedClip?.id, 'clip-55');
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pumpAndSettle();
+      expect(controller.focusedClip?.id, 'clip-54');
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('quick-paste-search')))
+            .focusNode
+            ?.hasFocus,
+        isTrue,
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(repository.copied, ['clip-54']);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+      TargetPlatform.android,
+    }),
+  );
+
+  testWidgets(
+    'failed pages wait for retry and can continue paginating',
+    (tester) async {
+      final repository = _PagedRepository()..failNextPage = true;
+      _populateHistory(repository, 125);
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: _ContextHost(),
+      );
+      await tester.binding.setSurfaceSize(const Size(448, 500));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(QuickPasteApp(controller: controller));
+      await tester.pumpAndSettle();
+      final historyScroll = find.byKey(
+        const ValueKey('quick-paste-history-scroll'),
+      );
+      final scroll = tester.widget<ListView>(historyScroll).controller!;
+      scroll.jumpTo(scroll.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      expect(controller.items, hasLength(50));
+      expect(repository.requests, hasLength(2));
+      expect(controller.paginationFailed, isTrue);
+      await tester.pumpAndSettle();
+      expect(repository.requests, hasLength(2));
+      await tester.tap(find.text('Try again'));
+      await tester.pumpAndSettle();
+      expect(controller.items, hasLength(100));
+      expect(controller.paginationFailed, isFalse);
+      scroll.jumpTo(scroll.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      expect(controller.items, hasLength(125));
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+      TargetPlatform.android,
+    }),
+  );
+
+  test('scroll and keyboard share the pending page request', () async {
+    final repository = _PagedRepository();
+    _populateHistory(repository, 125);
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: _ContextHost(),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.focus(controller.items.last);
+    repository.pageGate = Completer<void>();
+    final page = controller.loadMore();
+    await repository.pageStarted.future;
+    final navigation = controller.moveFocus(1);
+    expect(repository.requests, hasLength(2));
+    repository.pageGate!.complete();
+    await Future.wait([page, navigation]);
+    expect(repository.requests, hasLength(2));
+    expect(controller.items, hasLength(100));
+    expect(controller.focusedClip?.id, 'clip-50');
+  });
+
+  test('page navigation loads only the final inspector selection', () async {
+    final repository = _PagedRepository();
+    _populateHistory(repository, 125);
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: _ContextHost(),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.opened(1, inspectorVisible: true);
+    expect(repository.getCalls, 1);
+    await controller.moveFocus(5);
+    expect(controller.focusedClip?.id, 'clip-4');
+    expect(controller.history.selectedClip?.id, 'clip-4');
+    expect(repository.getCalls, 2);
+  });
+
+  test('search cancels pending keyboard pagination', () async {
+    final repository = _PagedRepository();
+    _populateHistory(repository, 125);
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: _ContextHost(),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.focus(controller.items.last);
+    repository.pageGate = Completer<void>();
+    final navigation = controller.moveFocus(1);
+    await repository.pageStarted.future;
+    await controller.search('Clip 124');
+    repository.pageGate!.complete();
+    await navigation;
+    expect(controller.items.map((clip) => clip.id), ['clip-124']);
+    expect(controller.focusedClip, isNull);
+    expect(controller.paginationFailed, isFalse);
+  });
 
   testWidgets('renders the keyboard-first popup and footer actions', (
     tester,
@@ -173,7 +478,7 @@ void main() {
 
     await tester.drag(historyScroll, const Offset(0, -300));
     await tester.pumpAndSettle();
-    final scroll = tester.widget<SingleChildScrollView>(historyScroll);
+    final scroll = tester.widget<ListView>(historyScroll);
     expect(scroll.controller!.offset, greaterThan(0));
     expect(tester.getRect(pinned), pinnedRect);
     expect(tester.getRect(find.text('Clear')), footerRect);
@@ -345,6 +650,360 @@ void main() {
     expect(repository.copied, ['pinned']);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'hover opens the inspector after the Maccy delay and follows selection',
+    (tester) async {
+      final repository = _Repository();
+      final host = _ContextHost()..openWhenReady = true;
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: host,
+      );
+      await tester.binding.setSurfaceSize(const Size(816, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(QuickPasteApp(controller: controller));
+      await tester.pumpAndSettle();
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+      final recent = find.byKey(const ValueKey('quick-paste-recent'));
+      final pinned = find.byKey(const ValueKey('quick-paste-pinned'));
+      await mouse.moveTo(tester.getCenter(recent));
+      await tester.pump(const Duration(milliseconds: 1499));
+      expect(controller.focusedClip?.id, 'recent');
+      expect(controller.inspectorOpen, isFalse);
+      expect(repository.getCalls, 0);
+      await tester.pump(const Duration(milliseconds: 1));
+      await tester.pumpAndSettle();
+      expect(host.inspectorChanges, [true]);
+      expect(host.inspectorPresentationIds, [1]);
+      expect(controller.inspectorOpen, isTrue);
+      expect(controller.history.selectedClip?.id, 'recent');
+      expect(
+        find.byKey(const ValueKey('history-detail-inspector')),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('quick-paste-search')))
+            .focusNode
+            ?.hasFocus,
+        isTrue,
+      );
+      await mouse.moveTo(tester.getCenter(pinned));
+      await tester.pumpAndSettle();
+      expect(controller.history.selectedClip?.id, 'pinned');
+      expect(host.inspectorChanges, [true]);
+      await mouse.moveTo(
+        tester.getCenter(
+          find.byKey(const ValueKey('history-detail-inspector')),
+        ),
+      );
+      await tester.pump(const Duration(seconds: 2));
+      expect(controller.inspectorOpen, isTrue);
+      expect(repository.copied, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+      TargetPlatform.android,
+    }),
+  );
+
+  testWidgets('leaving and changing hovered rows cancel the previous delay', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    final host = _ContextHost()..openWhenReady = true;
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: host,
+    );
+    await tester.binding.setSurfaceSize(const Size(816, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(QuickPasteApp(controller: controller));
+    await tester.pumpAndSettle();
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    final recent = find.byKey(const ValueKey('quick-paste-recent'));
+    final pinned = find.byKey(const ValueKey('quick-paste-pinned'));
+    await mouse.moveTo(tester.getCenter(recent));
+    await tester.pump(const Duration(milliseconds: 1000));
+    await mouse.moveTo(
+      tester.getCenter(find.byKey(const ValueKey('quick-paste-search'))),
+    );
+    await tester.pump(const Duration(seconds: 2));
+    expect(controller.inspectorOpen, isFalse);
+    expect(host.inspectorChanges, isEmpty);
+    await mouse.moveTo(tester.getCenter(recent));
+    await tester.pump(const Duration(milliseconds: 1000));
+    await mouse.moveTo(tester.getCenter(pinned));
+    await tester.pump(const Duration(milliseconds: 1000));
+    expect(controller.inspectorOpen, isFalse);
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
+    expect(controller.history.selectedClip?.id, 'pinned');
+    expect(repository.getCalls, 1);
+    expect(host.inspectorChanges, [true]);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('scrolling cancels hover on a row that leaves the lazy list', (
+    tester,
+  ) async {
+    final repository = _PagedRepository();
+    _populateHistory(repository, 125);
+    final host = _ContextHost()..openWhenReady = true;
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: host,
+    );
+    await tester.binding.setSurfaceSize(const Size(816, 500));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(QuickPasteApp(controller: controller));
+    await tester.pumpAndSettle();
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(
+      tester.getCenter(find.byKey(const ValueKey('quick-paste-clip-0'))),
+    );
+    await tester.pump(const Duration(milliseconds: 1000));
+    final scroll = tester
+        .widget<ListView>(
+          find.byKey(const ValueKey('quick-paste-history-scroll')),
+        )
+        .controller!;
+    scroll.jumpTo(scroll.position.maxScrollExtent);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.byKey(const ValueKey('quick-paste-clip-0')), findsNothing);
+    expect(controller.inspectorOpen, isFalse);
+    expect(host.inspectorChanges, isEmpty);
+    await mouse.moveTo(Offset.zero);
+    await tester.pump(const Duration(seconds: 2));
+    expect(host.inspectorChanges, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'manual close suppresses the hovered clip until selection changes',
+    (tester) async {
+      final repository = _Repository();
+      final host = _ContextHost();
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: host,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await controller.opened(1);
+      final recent = repository.clips.last;
+      controller.hoverClip(recent, hovered: true);
+      await tester.pump(const Duration(milliseconds: 1500));
+      expect(controller.inspectorOpen, isTrue);
+      await controller.toggleInspector();
+      controller.hoverClip(recent, hovered: false);
+      controller.hoverClip(recent, hovered: true);
+      await tester.pump(const Duration(seconds: 2));
+      expect(controller.inspectorOpen, isFalse);
+      expect(host.inspectorChanges, [true, false]);
+      controller.hoverClip(repository.clips.first, hovered: true);
+      await tester.pump(const Duration(milliseconds: 1500));
+      expect(controller.inspectorOpen, isTrue);
+      expect(controller.history.selectedClip?.id, 'pinned');
+      expect(host.inspectorChanges, [true, false, true]);
+    },
+  );
+
+  for (final action in [
+    'search',
+    'keyboard',
+    'close',
+    'reopen',
+    'paste',
+    'main',
+    'settings',
+    'quit',
+    'shutdown',
+    'delete',
+  ]) {
+    testWidgets('$action cancels a pending hover inspector', (tester) async {
+      final repository = _Repository();
+      final host = _ContextHost();
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: host,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await controller.opened(1);
+      final recent = repository.clips.last;
+      controller.hoverClip(recent, hovered: true);
+      await tester.pump(const Duration(milliseconds: 1000));
+      switch (action) {
+        case 'search':
+          await controller.search('new');
+        case 'keyboard':
+          await controller.moveFocus(1);
+        case 'close':
+          await controller.close();
+        case 'reopen':
+          await controller.opened(2);
+        case 'paste':
+          await controller.activate(recent);
+        case 'main':
+          await controller.openMainWindow();
+        case 'settings':
+          await controller.openSettings();
+        case 'quit':
+          await controller.quit();
+        case 'shutdown':
+          await controller.shutdown();
+        case 'delete':
+          await controller.history.deleteClip(recent.id);
+        default:
+          throw StateError('Unknown cancellation action: $action');
+      }
+      await tester.pump(const Duration(seconds: 2));
+      expect(host.inspectorChanges, isEmpty);
+    });
+  }
+
+  testWidgets('manual close wins over a pending automatic native open', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    final host = _ContextHost()..inspectorGate = Completer<void>();
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: host,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.opened(1);
+    controller.hoverClip(repository.clips.last, hovered: true);
+    await tester.pump(const Duration(milliseconds: 1500));
+    expect(host.inspectorChanges, [true]);
+    final close = controller.toggleInspector();
+    host.inspectorGate!.complete();
+    await tester.pump();
+    await close;
+    expect(controller.inspectorOpen, isFalse);
+    expect(host.inspectorChanges, [true, false]);
+    expect(host.inspectorPresentationIds, [1, 1]);
+    await tester.pump(const Duration(seconds: 2));
+    expect(host.inspectorChanges, [true, false]);
+  });
+
+  testWidgets('hovering another clip can reopen after a pending manual close', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    final host = _ContextHost();
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: host,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.opened(1);
+    controller.hoverClip(repository.clips.last, hovered: true);
+    await tester.pump(const Duration(milliseconds: 1500));
+    host.inspectorGate = Completer<void>();
+    final close = controller.toggleInspector();
+    await tester.pump();
+    controller.hoverClip(repository.clips.first, hovered: true);
+    await tester.pump(const Duration(milliseconds: 1500));
+    expect(host.inspectorChanges, [true, false]);
+    host.inspectorGate!.complete();
+    await tester.pump();
+    await close;
+    expect(host.inspectorChanges, [true, false, true]);
+    expect(controller.inspectorOpen, isTrue);
+    expect(controller.history.selectedClip?.id, 'pinned');
+  });
+
+  testWidgets('a reopened popup ignores completion of an old hover open', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    final host = _ContextHost()..inspectorGate = Completer<void>();
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: host,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.opened(1);
+    controller.hoverClip(repository.clips.last, hovered: true);
+    await tester.pump(const Duration(milliseconds: 1500));
+    await controller.opened(2);
+    host.inspectorGate!.complete();
+    await tester.pump();
+    expect(controller.inspectorOpen, isFalse);
+    expect(repository.getCalls, 0);
+    expect(host.inspectorPresentationIds, [1]);
+  });
+
+  testWidgets('slow inspector content never blocks manual closing', (
+    tester,
+  ) async {
+    final repository = _Repository()..selectGate = Completer<HistoryClip>();
+    final host = _ContextHost();
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: host,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.opened(1);
+    controller.hoverClip(repository.clips.last, hovered: true);
+    await tester.pump(const Duration(milliseconds: 1500));
+    expect(controller.inspectorOpen, isTrue);
+    await controller.toggleInspector();
+    expect(controller.inspectorOpen, isFalse);
+    expect(host.inspectorChanges, [true, false]);
+    repository.selectGate!.complete(repository.clips.last);
+    await tester.pump();
+    expect(controller.inspectorOpen, isFalse);
+  });
+
+  for (final failure in [
+    PlatformException(code: 'window_unavailable'),
+    MissingPluginException(),
+  ]) {
+    testWidgets('hover tolerates an unavailable native inspector: $failure', (
+      tester,
+    ) async {
+      final repository = _Repository();
+      final host = _ContextHost()..inspectorFailure = failure;
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: host,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await controller.opened(1);
+      controller.hoverClip(repository.clips.last, hovered: true);
+      await tester.pump(const Duration(milliseconds: 1500));
+      expect(controller.inspectorOpen, isFalse);
+      expect(repository.getCalls, 0);
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   test('number shortcuts activate the visible menu order', () async {
     final repository = _Repository();
@@ -879,7 +1538,9 @@ class _Repository implements HistoryRepository {
   ];
   final copied = <String>[];
   final imagePreviewEdges = <int?>[];
+  final imagePreviewIds = <String>[];
   int deleteAllCalls = 0;
+  int getCalls = 0;
   Completer<void>? copyGate;
   Completer<void> copyStarted = Completer<void>();
   Completer<HistoryClip>? selectGate;
@@ -914,6 +1575,7 @@ class _Repository implements HistoryRepository {
 
   @override
   Future<HistoryClip> get(String id) async {
+    getCalls += 1;
     if (!selectStarted.isCompleted) selectStarted.complete();
     return await selectGate?.future ??
         clips.singleWhere((clip) => clip.id == id);
@@ -926,6 +1588,7 @@ class _Repository implements HistoryRepository {
     HistoryImagePreviewBounds? bounds,
   }) async {
     imagePreviewEdges.add(maxEdge);
+    imagePreviewIds.add(id);
     if (id != 'image') return null;
     final preview = image.Image(width: 240, height: 180);
     return HistoryImagePreview(
@@ -960,6 +1623,62 @@ class _Repository implements HistoryRepository {
   Stream<HistoryRuntimeEvent> watch() => const Stream.empty();
 }
 
+void _populateHistory(
+  _Repository repository,
+  int count, {
+  int pinnedCount = 0,
+  bool images = false,
+}) {
+  repository.clips
+    ..clear()
+    ..addAll([
+      for (var index = 0; index < count; index++)
+        HistoryClip(
+          id: 'clip-$index',
+          contentType: images ? 'image/png' : 'text/plain',
+          preview: 'Clip $index',
+          createdAt: DateTime.utc(2026),
+          pinned: index < pinnedCount,
+        ),
+    ]);
+}
+
+class _PagedRepository extends _Repository {
+  final requests = <({int limit, String? cursor, String search})>[];
+  bool failNextPage = false;
+  Completer<void>? pageGate;
+  final pageStarted = Completer<void>();
+
+  @override
+  Future<HistoryClipPage> query({
+    required HistoryQuery query,
+    required int limit,
+    String? cursor,
+  }) async {
+    requests.add((limit: limit, cursor: cursor, search: query.search));
+    if (cursor != null) {
+      if (!pageStarted.isCompleted) pageStarted.complete();
+      await pageGate?.future;
+      if (failNextPage) {
+        failNextPage = false;
+        throw StateError('Page unavailable');
+      }
+    }
+    final matches = clips.where((clip) => clip.preview.contains(query.search));
+    final ordered = [
+      ...matches.where((clip) => clip.pinned),
+      ...matches.where((clip) => !clip.pinned),
+    ];
+    final offset = cursor == null ? 0 : int.parse(cursor);
+    final page = ordered.skip(offset).take(limit).toList();
+    final next = offset + page.length;
+    return HistoryClipPage(
+      items: page,
+      nextCursor: next < ordered.length ? '$next' : null,
+    );
+  }
+}
+
 class _ContextHost implements QuickPasteContextHost {
   @override
   void setShutdownHandler(Future<void> Function()? handler) {
@@ -979,6 +1698,9 @@ class _ContextHost implements QuickPasteContextHost {
   bool openWhenReady = false;
   bool initialInspectorVisible = false;
   final inspectorChanges = <bool>[];
+  final inspectorPresentationIds = <int>[];
+  Completer<void>? inspectorGate;
+  Object? inspectorFailure;
 
   @override
   Future<void> setInspectorVisible({
@@ -986,6 +1708,10 @@ class _ContextHost implements QuickPasteContextHost {
     required bool visible,
   }) async {
     inspectorChanges.add(visible);
+    inspectorPresentationIds.add(presentationId);
+    final failure = inspectorFailure;
+    if (failure != null) throw failure;
+    await inspectorGate?.future;
   }
 
   bool permissionGranted = false;

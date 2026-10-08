@@ -225,17 +225,26 @@ class HistoryInspector extends StatelessWidget {
                     ),
                   if (clip.contentKind == HistoryClipKind.image &&
                       controller.ocr?.available == true)
-                    Button.secondary(
-                      key: const ValueKey<String>('history-ocr'),
-                      onPressed: controller.ocr!.canRun
-                          ? () => showHistoryOcrDialog(
-                              context,
-                              controller: controller.ocr!,
-                              clip: clip,
-                            )
-                          : null,
-                      leading: const Icon(LucideIcons.scanText),
-                      child: const Text('OCR'),
+                    Tooltip(
+                      tooltip: (_) => const TooltipContainer(
+                        child: Text('Recognize image text'),
+                      ),
+                      child: Semantics(
+                        label: 'Recognize image text',
+                        button: true,
+                        child: Button.secondary(
+                          key: const ValueKey<String>('history-ocr'),
+                          style: const ButtonStyle.secondaryIcon(),
+                          onPressed: controller.ocr!.canRun
+                              ? () => showHistoryOcrDialog(
+                                  context,
+                                  controller: controller.ocr!,
+                                  clip: clip,
+                                )
+                              : null,
+                          child: const Icon(LucideIcons.scanText),
+                        ),
+                      ),
                     ),
                   Semantics(
                     toggled: clip.pinned,

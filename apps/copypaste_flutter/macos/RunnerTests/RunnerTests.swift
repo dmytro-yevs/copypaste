@@ -1,7 +1,140 @@
 import Cocoa
+import AVFoundation
+import CoreVideo
+import IOSurface
 import FlutterMacOS
 import XCTest
 @testable import CopyPaste_Dev
+
+final class CaptureProtectedRenderingTests: XCTestCase {
+  func testPoolNeverAllocatesMoreThanThreeRetainedFrames() throws {
+    let pool = CaptureProtectedPixelBufferPool(available: {})
+    var frames: [CVPixelBuffer] = []
+    for _ in 0..<CaptureProtectedPixelBufferPool.maximumBufferCount {
+      let (status, frame) = pool.buffer(width: 128, height: 64)
+      XCTAssertEqual(status, kCVReturnSuccess)
+      frames.append(try XCTUnwrap(frame))
+    }
+    for _ in 0..<100 {
+      let (status, frame) = pool.buffer(width: 128, height: 64)
+      XCTAssertEqual(status, kCVReturnWouldExceedAllocationThreshold)
+      XCTAssertNil(frame)
+    }
+    frames.removeLast()
+    let (status, recycled) = pool.buffer(width: 128, height: 64)
+    XCTAssertEqual(status, kCVReturnSuccess)
+    XCTAssertNotNil(recycled)
+  }
+
+  func testReleasedBufferWakesAProducerAfterPoolPressure() throws {
+    let freed = expectation(description: "The pool signals newly available capacity")
+    freed.assertForOverFulfill = false
+    let pool = CaptureProtectedPixelBufferPool(available: { freed.fulfill() })
+    var frames: [CVPixelBuffer] = []
+    for _ in 0..<CaptureProtectedPixelBufferPool.maximumBufferCount {
+      frames.append(try XCTUnwrap(pool.buffer(width: 64, height: 64).1))
+    }
+    XCTAssertEqual(pool.buffer(width: 64, height: 64).0, kCVReturnWouldExceedAllocationThreshold)
+    frames.removeLast()
+    wait(for: [freed], timeout: 1)
+  }
+
+  func testPoolCanChangeSizeAndResetAfterPressure() throws {
+    let pool = CaptureProtectedPixelBufferPool(available: {})
+    var frames: [CVPixelBuffer] = []
+    for _ in 0..<CaptureProtectedPixelBufferPool.maximumBufferCount {
+      frames.append(try XCTUnwrap(pool.buffer(width: 64, height: 64).1))
+    }
+    XCTAssertEqual(pool.buffer(width: 64, height: 64).0, kCVReturnWouldExceedAllocationThreshold)
+    frames.removeAll()
+    let resized = try XCTUnwrap(pool.buffer(width: 128, height: 32).1)
+    XCTAssertEqual(CVPixelBufferGetWidth(resized), 128)
+    XCTAssertEqual(CVPixelBufferGetHeight(resized), 32)
+    pool.reset()
+    XCTAssertEqual(pool.buffer(width: 64, height: 64).0, kCVReturnSuccess)
+  }
+
+  func testDeliveryCoalescesChangesAndResumesWithTheLatestFrame() {
+    var queued: [() -> Void] = []
+    var latest = 0
+    var ready = false
+    var rendered: [Int] = []
+    let delivery = CaptureProtectedFrameDelivery(enqueue: { queued.append($0) }) {
+      guard ready else { return false }
+      rendered.append(latest)
+      return true
+    }
+    for frame in 1...100 { latest = frame; delivery.request() }
+    XCTAssertEqual(queued.count, 1)
+    queued.removeFirst()()
+    XCTAssertTrue(rendered.isEmpty)
+    XCTAssertTrue(queued.isEmpty)
+    latest = 101
+    ready = true
+    delivery.request()
+    queued.removeFirst()()
+    XCTAssertEqual(rendered, [101])
+  }
+
+  func testSuspensionCancelsPendingWorkEvenAfterReopening() {
+    var queued: [() -> Void] = []
+    var rendered = 0
+    let delivery = CaptureProtectedFrameDelivery(enqueue: { queued.append($0) }) {
+      rendered += 1
+      return true
+    }
+    delivery.request()
+    delivery.suspend()
+    delivery.request()
+    XCTAssertEqual(queued.count, 1)
+    delivery.resume()
+    queued.removeFirst()()
+    XCTAssertEqual(rendered, 0)
+    queued.removeFirst()()
+    XCTAssertEqual(rendered, 1)
+  }
+
+  func testAFrameChangeDuringDeliveryIsNotLost() {
+    var queued: [() -> Void] = []
+    var rendered = 0
+    var delivery: CaptureProtectedFrameDelivery!
+    delivery = CaptureProtectedFrameDelivery(enqueue: { queued.append($0) }) {
+      rendered += 1
+      if rendered == 1 { delivery.request() }
+      return true
+    }
+    delivery.request()
+    queued.removeFirst()()
+    queued.removeFirst()()
+    XCTAssertEqual(rendered, 2)
+    delivery = nil
+  }
+
+  func testSuspensionKeepsTheOriginalHiddenAndDetachRestoresIt() throws {
+    var buffer: CVPixelBuffer?
+    XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, 64, 64, kCVPixelFormatType_32BGRA,
+      [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &buffer), kCVReturnSuccess)
+    let frame = try XCTUnwrap(buffer)
+    let surface = try XCTUnwrap(CVPixelBufferGetIOSurface(frame)?.takeUnretainedValue())
+    let root = CALayer()
+    let source = CALayer()
+    source.opacity = 0.75
+    source.contents = surface
+    root.addSublayer(source)
+    let protection = CaptureProtectedLayerTree(layer: root)
+    let display = try XCTUnwrap(root.sublayers?.compactMap { $0 as? AVSampleBufferDisplayLayer }.first)
+    XCTAssertTrue(display.preventsCapture)
+    XCTAssertEqual(source.opacity, 0)
+    protection.suspend()
+    XCTAssertEqual(source.opacity, 0)
+    protection.resume()
+    XCTAssertEqual(source.opacity, 0)
+    protection.detach()
+    XCTAssertEqual(source.opacity, 0.75)
+    XCTAssertEqual(root.sublayers?.count, 1)
+    XCTAssertTrue(root.sublayers?.first === source)
+  }
+}
 
 final class MacosAppUpdateTests: XCTestCase {
   private func install(
