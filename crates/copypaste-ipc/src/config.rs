@@ -67,8 +67,7 @@ pub enum Liveness {
 ///
 /// Every field is live and user-settable. Excluded settings and why:
 ///
-/// * `auto_apply_synced_clip`, `paste_as_plain_text` — neither behavior is
-///   implemented by the v2 capture contract.
+/// * `paste_as_plain_text` — not implemented by the v2 capture contract.
 /// * `relay_url`, `sync_on_wifi_only`, `max_bandwidth_kbps`, `collect_public_ip`
 ///   — no relay and no STUN in v2.
 /// * `sqlite_cache_mb`, `config_version` — implementation detail, dead, and
@@ -114,6 +113,8 @@ pub struct ConfigData {
     pub lan_visibility: bool,
     /// Master switch for every sync transport. **Live.**
     pub sync_enabled: bool,
+    /// Copy newer received clips into this device's system clipboard. **Live.**
+    pub instant_clipboard: bool,
 
     /// Post a notification when something is captured while the app is in the
     /// background. **Live.**
@@ -165,6 +166,7 @@ impl Default for ConfigData {
             excluded_app_bundle_ids: Vec::new(),
             lan_visibility: true,
             sync_enabled: true,
+            instant_clipboard: true,
             notify_on_copy: false,
             notification_preview: true,
             sound_on_copy: true,
@@ -250,6 +252,8 @@ pub struct ConfigPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync_enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instant_clipboard: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notify_on_copy: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notification_preview: Option<bool>,
@@ -318,6 +322,9 @@ impl ConfigPatch {
         if let Some(v) = self.sync_enabled {
             next.sync_enabled = v;
         }
+        if let Some(v) = self.instant_clipboard {
+            next.instant_clipboard = v;
+        }
         if let Some(v) = self.notify_on_copy {
             next.notify_on_copy = v;
         }
@@ -347,6 +354,7 @@ impl From<&ConfigData> for ConfigPatch {
             excluded_app_bundle_ids: Some(c.excluded_app_bundle_ids.clone()),
             lan_visibility: Some(c.lan_visibility),
             sync_enabled: Some(c.sync_enabled),
+            instant_clipboard: Some(c.instant_clipboard),
             notify_on_copy: Some(c.notify_on_copy),
             notification_preview: Some(c.notification_preview),
             sound_on_copy: Some(c.sound_on_copy),
@@ -385,6 +393,7 @@ impl ConfigData {
             ("excluded_app_bundle_ids", Liveness::Live),
             ("lan_visibility", Liveness::Live),
             ("sync_enabled", Liveness::Live),
+            ("instant_clipboard", Liveness::Live),
             // Both are read at the moment a capture lands, so a change takes
             // effect on the next copy.
             ("notify_on_copy", Liveness::Live),

@@ -20,6 +20,9 @@ use jni::{
 /// Keystore or other context-backed services.
 static APPLICATION_CONTEXT: OnceLock<GlobalRef> = OnceLock::new();
 static JAVA_VM: OnceLock<JavaVM> = OnceLock::new();
+// Retain the app class while Java supplies its loader. Native sync workers
+// cannot resolve application classes through FindClass on attached threads.
+static CLIPBOARD_HOST_CLASS: OnceLock<GlobalRef> = OnceLock::new();
 static RUNTIME: OnceLock<Arc<copypaste_runtime::Runtime>> = OnceLock::new();
 static SMS_NETWORK_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
@@ -33,9 +36,15 @@ static SMS_NETWORK_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_copypaste_app_MainActivity_initializeNdkContext(
     mut env: JNIEnv,
-    _class: JClass,
+    class: JClass,
     context: JObject,
 ) {
+    if CLIPBOARD_HOST_CLASS.get().is_none() {
+        let Ok(class) = env.new_global_ref(class) else {
+            return;
+        };
+        let _ = CLIPBOARD_HOST_CLASS.set(class);
+    }
     if APPLICATION_CONTEXT.get().is_some() {
         return;
     }
@@ -525,6 +534,7 @@ impl copypaste_runtime::ClipboardWriter for AndroidClipboard {
     fn write(
         &self,
         payload: &copypaste_core::ClipboardPayload,
+        content_type: &str,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         let vm = JAVA_VM
             .get()
@@ -533,17 +543,26 @@ impl copypaste_runtime::ClipboardWriter for AndroidClipboard {
             .attach_current_thread()
             .map_err(|_| copypaste_core::ClipboardWriteError::Failed)?;
         let ok = match payload {
-            copypaste_core::ClipboardPayload::Text(text) => call_text(&mut env, text),
+            copypaste_core::ClipboardPayload::Text(text) => call_text(&mut env, text, content_type),
             copypaste_core::ClipboardPayload::Image {
                 content_type,
                 bytes,
-            } => call_binary(&mut env, bytes, "copypaste-image", content_type),
+            } => call_binary(
+                &mut env,
+                bytes,
+                match content_type.as_str() {
+                    "image/png" => "copypaste-image.png",
+                    "image/tiff" => "copypaste-image.tiff",
+                    _ => "copypaste-image",
+                },
+                content_type,
+            ),
             copypaste_core::ClipboardPayload::File { bytes, metadata } => {
                 if let Some(source_reference) = metadata
                     .as_ref()
                     .and_then(|file| file.source_reference.as_deref())
                 {
-                    call_text(&mut env, source_reference)
+                    call_text(&mut env, source_reference, "text/plain")
                 } else {
                     call_binary(
                         &mut env,
@@ -566,15 +585,21 @@ impl copypaste_runtime::ClipboardWriter for AndroidClipboard {
     }
 }
 
-fn call_text(env: &mut JNIEnv, text: &str) -> bool {
-    let Ok(text) = env.new_string(text) else {
+fn call_text(env: &mut JNIEnv, text: &str, content_type: &str) -> bool {
+    let (Ok(text), Ok(content_type)) = (env.new_string(text), env.new_string(content_type)) else {
+        return false;
+    };
+    let Some(class) = CLIPBOARD_HOST_CLASS.get() else {
         return false;
     };
     env.call_static_method(
-        "com/copypaste/app/MainActivity",
+        class,
         "writeClipboardText",
-        "(Ljava/lang/String;)Z",
-        &[JValue::Object(&text.into())],
+        "(Ljava/lang/String;Ljava/lang/String;)Z",
+        &[
+            JValue::Object(&text.into()),
+            JValue::Object(&content_type.into()),
+        ],
     )
     .ok()
     .and_then(|value| value.z().ok())
@@ -589,8 +614,11 @@ fn call_binary(env: &mut JNIEnv, bytes: &[u8], filename: &str, mime_type: &str) 
     ) else {
         return false;
     };
+    let Some(class) = CLIPBOARD_HOST_CLASS.get() else {
+        return false;
+    };
     env.call_static_method(
-        "com/copypaste/app/MainActivity",
+        class,
         "writeClipboardBinary",
         "([BLjava/lang/String;Ljava/lang/String;)Z",
         &[

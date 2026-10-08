@@ -247,10 +247,19 @@ pub trait ClipboardSource: Send {
         &mut self,
         item_id: &str,
         payload: &copypaste_core::ClipboardPayload,
+        content_type: &str,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
         use copypaste_core::{ClipboardPayload, ClipboardWriteError};
 
         match payload {
+            ClipboardPayload::Text(text)
+                if matches!(
+                    content_type,
+                    copypaste_ipc::content_type::HTML | copypaste_ipc::content_type::RICH_TEXT
+                ) =>
+            {
+                self.set_binary_contents(item_id, content_type, text.as_bytes(), None)
+            }
             ClipboardPayload::Text(text) => self
                 .set_contents(text)
                 .map_err(|_| ClipboardWriteError::Failed),
@@ -522,6 +531,7 @@ mod tests {
                         "/old/deleted/file",
                     ),
                 },
+                copypaste_ipc::content_type::FILE,
             )
             .unwrap();
         assert_eq!(writes.text.as_deref(), Some("/old/deleted/file"));
@@ -533,6 +543,7 @@ mod tests {
                     bytes: vec![8].into(),
                     metadata: copypaste_core::FileMetadata::new("file", "application/octet-stream"),
                 },
+                copypaste_ipc::content_type::FILE,
             )
             .unwrap();
         assert_eq!(writes.binary, Some(vec![8]));

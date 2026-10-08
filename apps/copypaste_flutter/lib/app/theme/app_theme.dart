@@ -57,7 +57,10 @@ abstract final class AppTheme {
   static AbstractButtonStyle mobileNavigationButtonStyle({
     required bool selected,
   }) {
-    const padding = EdgeInsets.all((AppControlSize.touch - AppIconSize.md) / 2);
+    const padding = EdgeInsets.symmetric(
+      horizontal: AppSpacing.xl,
+      vertical: AppSpacing.md,
+    );
     return (selected
             ? const ButtonStyle.secondary()
             : const ButtonStyle.ghost())
@@ -68,7 +71,9 @@ abstract final class AppTheme {
         .copyWith(
           decoration: (context, states, value) {
             if (!selected || value is! BoxDecoration) return value;
-            return value.copyWith(color: Theme.of(context).colorScheme.accent);
+            return value.copyWith(
+              color: navigationAccent.withValues(alpha: 0.12),
+            );
           },
           textStyle: (context, states, value) => value.copyWith(
             color: selected
@@ -79,7 +84,7 @@ abstract final class AppTheme {
                 : Theme.of(context).colorScheme.mutedForeground,
           ),
           iconTheme: (context, states, value) => value.copyWith(
-            size: AppIconSize.md,
+            size: AppIconSize.lg,
             color: selected
                 ? navigationAccent
                 : states.contains(WidgetState.hovered) ||

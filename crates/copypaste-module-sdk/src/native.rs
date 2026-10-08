@@ -114,3 +114,83 @@ unsafe extern "C" fn release(buffer: NativeBuffer) {
         drop(unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(buffer.data, buffer.len)) });
     }
 }
+
+/// Host callbacks remain valid until the native module finishes destruction.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct NativeHostApi {
+    pub api_version: u32,
+    pub struct_size: usize,
+    pub context: *mut c_void,
+    pub request: unsafe extern "C" fn(*mut c_void, *const u8, usize) -> NativeReply,
+    pub release: unsafe extern "C" fn(NativeBuffer),
+}
+
+/// Large clipboard payloads use a separately bounded host channel; ordinary
+/// module commands retain their existing 1 MiB limit.
+pub const MAX_HOST_BYTES: usize = 32 * 1024 * 1024;
+
+#[derive(Clone)]
+pub struct HostClient(NativeHostApi);
+// SAFETY: the host supplies thread-safe callbacks and retains their context
+// until every module-owned worker has joined during destruction.
+unsafe impl Send for HostClient {}
+unsafe impl Sync for HostClient {}
+impl HostClient {
+    pub fn request<I: serde::Serialize, O: serde::de::DeserializeOwned>(
+        &self,
+        input: &I,
+    ) -> Result<O, String> {
+        let mut bytes = serde_json::to_vec(input).map_err(|_| "Invalid host request.")?;
+        if bytes.len() > MAX_HOST_BYTES {
+            return Err("The host request exceeds its limit.".into());
+        }
+        // SAFETY: callback ownership is established by create_with_host.
+        unsafe {
+            let reply = (self.0.request)(self.0.context, bytes.as_ptr(), bytes.len());
+            bytes.fill(0);
+            let result = if reply.buffer.data.is_null() || reply.buffer.len > MAX_HOST_BYTES {
+                Err("Invalid host response.".into())
+            } else {
+                let bytes = std::slice::from_raw_parts(reply.buffer.data, reply.buffer.len);
+                if reply.status == 0 {
+                    serde_json::from_slice(bytes).map_err(|_| "Invalid host response.".into())
+                } else {
+                    Err("The sync host service is unavailable.".into())
+                }
+            };
+            (self.0.release)(reply.buffer);
+            result
+        }
+    }
+}
+
+/// # Safety
+/// The host must retain a valid thread-safe API and context until the returned
+/// module is destroyed. Module-owned workers must join before destruction ends.
+pub unsafe fn create_with_host<T: Module>(
+    data: *const u8,
+    len: usize,
+    host: *const NativeHostApi,
+) -> *mut c_void {
+    catch_unwind(AssertUnwindSafe(|| {
+        if host.is_null() {
+            return Err("The host is missing.".into());
+        }
+        // SAFETY: checked non-null; the caller promises a readable API record.
+        let host = unsafe { *host };
+        if host.api_version != MODULE_API_VERSION
+            || host.struct_size != std::mem::size_of::<NativeHostApi>()
+            || host.context.is_null()
+        {
+            return Err("The host API is incompatible.".into());
+        }
+        // SAFETY: environment bytes are borrowed for this call.
+        let environment = unsafe { decode(data, len) }?;
+        T::create_with_host(environment, HostClient(host))
+            .map(|module| Box::into_raw(Box::new(module)).cast())
+    }))
+    .ok()
+    .and_then(Result::ok)
+    .unwrap_or(std::ptr::null_mut())
+}

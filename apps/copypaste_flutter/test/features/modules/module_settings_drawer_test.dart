@@ -1,19 +1,27 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
+import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/features/modules/controller/modules_controller.dart';
 import 'package:copypaste_flutter/features/modules/models/module_models.dart';
 import 'package:copypaste_flutter/features/modules/models/module_marketplace_models.dart';
 import 'package:copypaste_flutter/features/modules/view/modules_settings_view.dart';
+
 import 'modules_test_support.dart';
 
 void main() {
-  for (final (width, height, scale, many) in [
-    (1000.0, 700.0, 1.0, false),
-    (320.0, 600.0, 1.6, true),
+  for (final (platform, width, height, scale, many) in [
+    for (final platform in [
+      TargetPlatform.macOS,
+      TargetPlatform.android,
+      TargetPlatform.windows,
+    ]) ...[
+      (platform, 1000.0, 700.0, 1.0, false),
+      (platform, 320.0, 600.0, 1.6, true),
+    ],
   ]) {
     testWidgets(
-      'drawer keeps actions visible at width $width and text scale $scale',
+      'drawer keeps actions visible on $platform at width $width and text scale $scale',
       (tester) async {
         await tester.binding.setSurfaceSize(Size(width, height));
         addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -46,13 +54,12 @@ void main() {
         controller.selectSection(ModulesSection.installed);
         await tester.pumpWidget(
           ShadcnApp(
-            theme: AppTheme.dark,
+            theme: AppTheme.dark.copyWith(platform: () => platform),
             builder: (context, child) => AppTheme.builder(
               context,
               MediaQuery(
-                data: MediaQuery.of(
-                  context,
-                ).copyWith(textScaler: TextScaler.linear(scale)),
+                data: MediaQuery.of(context)
+                    .copyWith(textScaler: TextScaler.linear(scale)),
                 child: child!,
               ),
             ),
@@ -71,6 +78,23 @@ void main() {
         await tester.tap(find.byKey(const ValueKey('module-settings-preview')));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
+        final drawer = find.byKey(
+          const ValueKey('module-settings-drawer-preview'),
+        );
+        final drawerSize = tester.getSize(drawer);
+        expect(drawerSize.width, closeTo(width, 2));
+        expect(
+          drawerSize.height,
+          closeTo(
+            MediaQuery.sizeOf(tester.element(drawer)).height *
+                AppOverlaySize.drawerHeightFactor,
+            2,
+          ),
+        );
+        final close = find.byKey(
+          const ValueKey('module-settings-close-preview'),
+        );
+        final headerPosition = tester.getTopLeft(close);
         final done = find.byKey(const ValueKey('module-settings-done-preview'));
         expect(tester.getBottomRight(done).dy, lessThan(height));
         expect(
@@ -80,6 +104,7 @@ void main() {
         if (many) {
           await tester.ensureVisible(find.text('Module command 7'));
           await tester.pumpAndSettle();
+          expect(tester.getTopLeft(close), headerPosition);
           expect(tester.getBottomRight(done).dy, lessThan(height));
           final command = find.widgetWithText(Button, 'Module command 7');
           final icon = find.descendant(
@@ -91,7 +116,7 @@ void main() {
             closeTo(tester.getCenter(find.text('Module command 7')).dy, 0.01),
           );
         }
-        await tester.tap(done);
+        await tester.tap(many ? close : done);
         await tester.pumpAndSettle();
         expect(
           find.byKey(const ValueKey('module-settings-drawer-preview')),

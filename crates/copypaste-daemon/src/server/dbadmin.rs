@@ -66,7 +66,7 @@ pub(super) fn restore(state: &AppState, id: u64, src_path: &str, confirm: bool) 
             // so without this the restored history would never leave the device
             // again.
             if let Ok(Some(oldest)) = state.store.oldest_version_ms() {
-                crate::cloud::note_version_written(state, oldest);
+                state.modules.note_version(oldest);
                 state.p2p.node().note_local_version(oldest);
             }
             state.note_local_change();

@@ -8,6 +8,27 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
+  testWidgets(
+    'unmounting a screen preserves its app-owned devices controller',
+    (tester) async {
+      final gateway = _ScreenGateway(peers: const [], discovered: const []);
+      final controller = DevicesController(
+        gateway: gateway,
+        captureProtection: _CaptureProtection(),
+      );
+      addTearDown(controller.dispose);
+      await _pumpDevices(tester, controller);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await controller.refresh();
+      await _pumpDevices(tester, controller);
+      await controller.openCodeEntry();
+      expect(controller.pairingEntryMode, PairingEntryMode.enterCode);
+      await controller.closePairing();
+      await tester.pumpWidget(const SizedBox.shrink());
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   for (final size in [const Size(320, 640), const Size(1400, 900)]) {
     testWidgets(
       'keeps nearby discovery compact and excludes paired devices at $size',

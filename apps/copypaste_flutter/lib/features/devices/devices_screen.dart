@@ -54,7 +54,6 @@ class _DevicesScreenState extends State<DevicesScreen> {
     HardwareKeyboard.instance.removeHandler(_handleHardwareKey);
     if (_pairingDrawer?.isCompleted == false) _pairingDrawer!.remove();
     if (_deviceDrawer?.isCompleted == false) _deviceDrawer!.remove();
-    widget.controller.dispose();
     super.dispose();
   }
 
@@ -192,7 +191,9 @@ class _DevicesScreenState extends State<DevicesScreen> {
     required EdgeInsets padding,
   }) {
     return ListView(
-      padding: padding,
+      padding: padding.add(
+        EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
+      ),
       children: [
         if (controller.errorMessage case final errorMessage?) ...[
           Alert.destructive(
@@ -302,12 +303,9 @@ class _DevicesScreenState extends State<DevicesScreen> {
       final drawer = _pairingDrawer = showOverlay<void>(
         context,
         AppOverlays.bottomDrawerConfiguration,
-        builder: (context) => SizedBox(
+        builder: (context) => ConstrainedBox(
           key: const ValueKey<String>('devices-pairing-drawer'),
-          width: double.infinity,
-          height:
-              MediaQuery.sizeOf(context).height *
-              AppOverlaySize.drawerHeightFactor,
+          constraints: AppOverlays.drawerContentConstraints(context),
           child: Focus(
             autofocus: true,
             child: CallbackShortcuts(
@@ -375,12 +373,9 @@ class _DevicesScreenState extends State<DevicesScreen> {
       final drawer = _deviceDrawer = showOverlay<void>(
         context,
         AppOverlays.bottomDrawerConfiguration,
-        builder: (context) => SizedBox(
+        builder: (context) => ConstrainedBox(
           key: const ValueKey<String>('devices-details-drawer'),
-          width: double.infinity,
-          height:
-              MediaQuery.sizeOf(context).height *
-              AppOverlaySize.drawerHeightFactor,
+          constraints: AppOverlays.drawerContentConstraints(context),
           child: Focus(
             autofocus: true,
             child: CallbackShortcuts(

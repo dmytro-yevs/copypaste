@@ -35,7 +35,7 @@ class CatalogTest(unittest.TestCase):
         return ("untrusted comment: test\n" + base64.b64encode(b"ED" + self.key_id + signed).decode()
                 + "\ntrusted comment: " + comment + "\n" + base64.b64encode(global_signature).decode()).encode()
 
-    def packages(self, version="0.1.0", omit=None, inconsistent=False, tamper=False, platforms=None):
+    def packages(self, version="0.1.0", omit=None, inconsistent=False, tamper=False, platforms=None, schema=1):
         paths = []
         for platform, architecture in sorted(catalog.REQUIRED_TARGETS):
             if platforms is not None and platform not in platforms:
@@ -46,7 +46,7 @@ class CatalogTest(unittest.TestCase):
             entrypoint = "bin/module" + suffix
             code = b"test-native-library"
             manifest = {
-                "schema_version": 1, "api_version": 1, "id": "copypaste.ocr", "title": "OCR",
+                "schema_version": schema, "api_version": 1, "id": "copypaste.ocr", "title": "OCR",
                 "description": "Offline recognition.", "version": version, "app_versions": ">=1.0.0, <2.0.0",
                 "target": {"platform": platform, "architecture": architecture}, "entrypoint": entrypoint,
                 "files": [{"path": entrypoint, "size_bytes": len(code), "sha256": hashlib.sha256(code).hexdigest()}],
@@ -55,7 +55,7 @@ class CatalogTest(unittest.TestCase):
             if inconsistent and platform == "windows":
                 manifest["description"] = "Different module contract."
             if platforms is not None:
-                manifest["schema_version"] = 2
+                manifest["schema_version"] = max(2, schema)
                 manifest["supported_platforms"] = platforms
             body = json.dumps(manifest).encode()
             path = self.root / f"ocr-{platform}-{architecture}.cpmodule"
@@ -65,6 +65,13 @@ class CatalogTest(unittest.TestCase):
                 archive.writestr(entrypoint, b"tampered" if tamper else code)
             paths.append(path)
         return paths
+
+    def test_signed_schema_four_sync_packages_are_supported_and_future_schemas_fail_closed(self):
+        packages = self.packages(schema=4, platforms=["macos", "windows", "android"])
+        value = catalog.build_catalog(packages, "module-copypaste.ocr-v0.1.0", public_key=self.public_key)
+        self.assertEqual(len(value["modules"][0]["artifacts"]), 5)
+        with self.assertRaises(ValueError):
+            catalog.read_package(self.packages(schema=5)[0], self.public_key)
 
     def test_signed_package_catalog_retains_other_modules_and_exact_targets(self):
         paths = self.packages()

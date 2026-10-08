@@ -323,8 +323,7 @@ mod tests {
 
         let id = a.meta.device_id().to_string();
         drop(a);
-        let (restarted, _dir) =
-            crate::testutil::reopen(dir, crate::cloud::Cloud::new(None), "alpha");
+        let (restarted, _dir) = crate::testutil::reopen(dir, "alpha");
         assert_eq!(restarted.meta.device_id(), id);
     }
 }

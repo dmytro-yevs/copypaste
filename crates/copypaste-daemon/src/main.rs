@@ -7,7 +7,6 @@ mod cadence;
 mod capture;
 mod cli;
 mod clipboard;
-mod cloud;
 #[cfg(target_os = "macos")]
 mod macos_workspace;
 mod meta;
@@ -34,8 +33,7 @@ use copypaste_core::{Keyring, Store};
 use copypaste_p2p::discovery::Discovery;
 use tracing::{info, warn};
 
-use crate::cli::{cloud_config, Args};
-use crate::cloud::Cloud;
+use crate::cli::Args;
 use crate::meta::Meta;
 use crate::p2p::P2p;
 #[cfg(not(target_os = "macos"))]
@@ -148,33 +146,23 @@ async fn run() -> anyhow::Result<()> {
     let device_id = meta.device_id().to_string();
     let p2p = P2p::new(peers, discovery, args.port, lan_visibility);
 
-    // Cloud sync. Unconfigured is a supported state, and so is configured but
-    // signed out: `Cloud::restore` reads back an account only if a previous run
-    // signed in, and reports nothing when it did not.
-    let config = cloud_config(&args).context("validate cloud configuration")?;
-    let cloud_configured = config.is_some();
-    let cloud = Cloud::new(config);
-
     let state = Arc::new(AppState::new(
         store,
         keyring,
         source,
         meta,
         p2p,
-        cloud,
         settings,
         db_path.clone(),
     ));
     state.set_ready(true);
-    let cloud_signed_in = state.cloud.restore(&state);
+    sync::install_module_services(&state)?;
     info!(
         version = DAEMON_VERSION,
         backend = state.backend_name(),
         %device_id,
         %device_name,
         peer_port = args.port,
-        cloud_configured,
-        cloud_signed_in,
         "daemon starting"
     );
 
@@ -208,16 +196,11 @@ async fn run() -> anyhow::Result<()> {
             shutdown_rx.clone(),
         ))
     });
-    let cloud_task = tokio::spawn(cloud::run(Arc::clone(&state), shutdown_rx.clone()));
-    let refresh_task = tokio::spawn(cloud::refresh::run(Arc::clone(&state), shutdown_rx.clone()));
-    // The push half of cloud sync. Without it the five-minute idle ceiling in
-    // `copypaste_cloud::sync::cadence` has nothing behind it: that ceiling is
-    // justified in its own doc comment by realtime existing, and the poll is
-    // only allowed to be slow because something else is fast.
-    let realtime_task = tokio::spawn(cloud::realtime::run(
-        Arc::clone(&state),
-        shutdown_rx.clone(),
-    ));
+    let modules = Arc::clone(&state.modules);
+    let module_shutdown = shutdown_rx.clone();
+    let module_sync = tokio::spawn(async move {
+        modules.run_sync(module_shutdown).await;
+    });
     // Peer sync on a cadence. Without it a paired device only ever syncs when
     // the *other* side dials in or a human runs `copypaste sync`.
     let peer_sync = tokio::spawn(p2p::poll::run(Arc::clone(&state), shutdown_rx.clone()));
@@ -237,9 +220,7 @@ async fn run() -> anyhow::Result<()> {
     // removal below are what a killed daemon never reaches.
     let loops = vec![
         ("device names", device_names),
-        ("cloud sync", cloud_task),
-        ("cloud refresh", refresh_task),
-        ("cloud realtime", realtime_task),
+        ("module sync", module_sync),
         ("peer sync", peer_sync),
         ("pairing events", pairing_events),
     ];

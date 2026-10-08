@@ -29,6 +29,7 @@ class RuntimeSettings {
     required this.excludedAppIds,
     required this.lanVisibility,
     required this.syncEnabled,
+    this.instantClipboard = true,
     required this.notifyOnCopy,
     this.notificationPreview = true,
     required this.soundOnCopy,
@@ -39,6 +40,7 @@ class RuntimeSettings {
   final List<String> excludedAppIds;
   final bool lanVisibility;
   final bool syncEnabled;
+  final bool instantClipboard;
   final bool notifyOnCopy;
   final bool notificationPreview;
   final bool soundOnCopy;
@@ -51,6 +53,7 @@ class RuntimeSettingsChange {
     this.excludedAppIds,
     this.lanVisibility,
     this.syncEnabled,
+    this.instantClipboard,
     this.notifyOnCopy,
     this.notificationPreview,
     this.soundOnCopy,
@@ -61,6 +64,7 @@ class RuntimeSettingsChange {
   final List<String>? excludedAppIds;
   final bool? lanVisibility;
   final bool? syncEnabled;
+  final bool? instantClipboard;
   final bool? notifyOnCopy;
   final bool? notificationPreview;
   final bool? soundOnCopy;
