@@ -9,6 +9,7 @@ import 'package:copypaste_flutter/features/history/repository/history_image_inpu
 import 'package:copypaste_flutter/features/history/repository/history_repository.dart';
 import 'package:copypaste_flutter/features/history/repository/temporary_history_image_input.dart';
 import 'package:copypaste_flutter/features/history/view/history_screen.dart';
+import 'package:copypaste_flutter/features/history/view/history_inspector.dart';
 import 'package:copypaste_flutter/features/modules/controller/modules_controller.dart';
 import 'package:copypaste_flutter/features/modules/models/module_models.dart';
 import 'package:copypaste_flutter/features/modules/repository/modules_repository.dart';
@@ -255,6 +256,108 @@ void main() {
     }, variant: TargetPlatformVariant({platform}));
   }
 
+  testWidgets(
+    'inspector hides labels only when the action row cannot fit',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1000, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final fixture = await _fixture();
+      addTearDown(fixture.modules.dispose);
+      final controller = HistoryController(
+        _HistoryRepository(),
+        ocr: fixture.ocr,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await controller.select(_image.id);
+      Future<void> render(double width, double textScale) async {
+        await tester.pumpWidget(
+          ShadcnApp(
+            theme: AppTheme.light,
+            builder: AppTheme.builder,
+            home: Scaffold(
+              child: Center(
+                child: SizedBox(
+                  width: width,
+                  height: 800,
+                  child: MediaQuery(
+                    data: MediaQueryData(
+                      textScaler: TextScaler.linear(textScale),
+                    ),
+                    child: HistoryInspector(
+                      controller: controller,
+                      inDrawer: false,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      final keys = [
+        'history-detail-copy',
+        'history-pin-screenshot',
+        'history-ocr',
+        'history-detail-delete',
+      ];
+      await render(520, 1);
+      expect(find.widgetWithText(Button, 'Copy'), findsOneWidget);
+      expect(find.widgetWithText(Button, 'Pin'), findsOneWidget);
+      expect(find.widgetWithText(Button, 'Delete'), findsOneWidget);
+      await render(220, 1);
+      final first = tester.getRect(find.byKey(ValueKey<String>(keys.first)));
+      for (final key in keys) {
+        final finder = find.byKey(ValueKey<String>(key));
+        expect(tester.widget<Button>(finder).child, isA<Icon>());
+        expect(
+          tester.getRect(finder).center.dy,
+          closeTo(first.center.dy, 0.01),
+        );
+        expect(finder.hitTestable(), findsOneWidget);
+      }
+      for (final label in ['Copy', 'Pin', 'Delete']) {
+        expect(find.bySemanticsLabel(label), findsOneWidget);
+        expect(find.widgetWithText(Button, label), findsNothing);
+      }
+      for (var index = 1; index < keys.length; index++) {
+        expect(
+          tester.getRect(find.byKey(ValueKey<String>(keys[index]))).left,
+          greaterThan(
+            tester.getRect(find.byKey(ValueKey<String>(keys[index - 1]))).right,
+          ),
+        );
+      }
+      await tester.tap(
+        find.byKey(const ValueKey<String>('history-pin-screenshot')),
+      );
+      await tester.pumpAndSettle();
+      expect(controller.selectedClip?.pinned, isTrue);
+      await render(220, 1);
+      expect(find.bySemanticsLabel('Pinned'), findsOneWidget);
+      await render(520, 2);
+      expect(
+        tester
+            .widget<Button>(
+              find.byKey(const ValueKey<String>('history-detail-copy')),
+            )
+            .child,
+        isA<Icon>(),
+      );
+      await render(720, 1);
+      expect(find.widgetWithText(Button, 'Copy'), findsOneWidget);
+      expect(find.widgetWithText(Button, 'Pinned'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+      TargetPlatform.android,
+    }),
+  );
+
   testWidgets('OCR failure can retry to an empty result', (tester) async {
     final f = await _fixture();
     addTearDown(f.modules.dispose);
@@ -335,6 +438,7 @@ class _Clipboard implements ClipboardWriter {
 class _HistoryRepository implements HistoryRepository {
   final savedIds = <String>[];
   bool exportFails = false;
+  HistoryClip clip = _image;
 
   @override
   Stream<HistoryRuntimeEvent> watch() => const Stream.empty();
@@ -345,9 +449,14 @@ class _HistoryRepository implements HistoryRepository {
     required HistoryQuery query,
     required int limit,
     String? cursor,
-  }) async => HistoryClipPage(items: [_image]);
+  }) async => HistoryClipPage(items: [clip]);
   @override
-  Future<HistoryClip> get(String id) async => _image;
+  Future<HistoryClip> get(String id) async => clip;
+  @override
+  Future<void> setPinned(String id, bool pinned) async {
+    clip = clip.copyWith(pinned: pinned);
+  }
+
   @override
   Future<HistoryImagePreview?> imagePreview(
     String id, {

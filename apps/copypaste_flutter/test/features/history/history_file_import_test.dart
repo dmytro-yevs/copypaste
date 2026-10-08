@@ -7,11 +7,31 @@ import 'package:copypaste_flutter/features/history/repository/history_repository
 import 'package:copypaste_flutter/features/history/repository/history_file_importer.dart';
 import 'package:copypaste_flutter/features/history/view/history_screen.dart';
 import 'package:copypaste_flutter/platform/files/history_file_drop_target.dart';
+import 'package:copypaste_flutter/platform/files/history_file_picker.dart';
+import 'package:file_selector/file_selector.dart';
 import 'package:desktop_drop/desktop_drop.dart' as native;
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test(
+    'desktop import preserves the leaf filename for either Windows separator',
+    () {
+      final input = SystemHistoryFilePicker.fromDesktopFile(
+        XFile('/drop/a.pdf'),
+      );
+      expect(input.name, 'a.pdf');
+      expect(input.mimeType, 'application/pdf');
+      expect(input.sourceReference, '/drop/a.pdf');
+      if (Platform.isWindows) {
+        final windows = SystemHistoryFilePicker.fromDesktopFile(
+          XFile(r'C:\drop\a.pdf'),
+        );
+        expect(windows.name, 'a.pdf');
+        expect(windows.mimeType, 'application/pdf');
+      }
+    },
+  );
   test(
     'imports every selection sequentially with no selection-count cap',
     () async {
