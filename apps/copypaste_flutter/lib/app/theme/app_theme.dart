@@ -33,6 +33,8 @@ abstract final class AppTheme {
 
   static const mobileNavigationPadding = EdgeInsets.all(AppSpacing.xs);
 
+  static final mobileNavigationLabelStyle = _typography.xSmall;
+
   static OutlinedContainerTheme mobileNavigationSurfaceTheme(
     BuildContext context,
   ) {
