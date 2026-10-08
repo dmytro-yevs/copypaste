@@ -34,6 +34,7 @@ def main():
         "CC_" + target.replace("-", "_"): str(tools / linker),
         "CXX_" + target.replace("-", "_"): str(tools / linker.replace("-clang", "-clang++")),
         "AR_" + target.replace("-", "_"): str(tools / "llvm-ar"),
+        "RANLIB_" + target.replace("-", "_"): str(tools / "llvm-ranlib"),
         "RUSTFLAGS": "-C link-arg=-Wl,-z,max-page-size=16384 -C link-arg=-Wl,-rpath,$ORIGIN",
     }
     subprocess.run(["cargo", "+1.96", "build", "--manifest-path", str(args.module_dir / "Cargo.toml"),
