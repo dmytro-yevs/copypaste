@@ -94,8 +94,8 @@ jobs:
         if: inputs.module == 'semantic-search'
         env:
           COPYPASTE_SEMANTIC_MODELS: ${{ runner.temp }}/module-fixtures
-          COPYPASTE_SEMANTIC_LIBRARY: modules/semantic-search/target/release/${{ matrix.prefix }}${{ needs.preflight.outputs.library }}.${{ matrix.suffix }}
-          COPYPASTE_SEMANTIC_RUNTIME: modules/semantic-search/native/${{ matrix.platform }}/${{ matrix.architecture }}/${{ matrix.platform == 'windows' && 'onnxruntime.dll' || 'libonnxruntime.dylib' }}
+          COPYPASTE_SEMANTIC_LIBRARY: ${{ github.workspace }}/modules/semantic-search/target/release/${{ matrix.prefix }}${{ needs.preflight.outputs.library }}.${{ matrix.suffix }}
+          COPYPASTE_SEMANTIC_RUNTIME: ${{ github.workspace }}/modules/semantic-search/native/${{ matrix.platform }}/${{ matrix.architecture }}/${{ matrix.platform == 'windows' && 'onnxruntime.dll' || 'libonnxruntime.dylib' }}
         run: cargo +1.96 test --locked -p copypaste-modules signed_semantic_package -- --ignored --nocapture
       - name: Sign target package
         env:
