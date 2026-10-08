@@ -6,7 +6,7 @@ import '../../../platform/clipboard/clipboard_writer.dart';
 import '../models/module_models.dart';
 import '../repository/module_access_repository.dart';
 
-/// Owns permission setup only while its dialog is visible and resumed.
+/// Owns permission setup only while its drawer is visible and resumed.
 class SmsAccessSetupController extends ChangeNotifier {
   SmsAccessSetupController({
     required ModuleAccessRepository access,
