@@ -26,3 +26,9 @@ BEGIN
     DELETE FROM shared_binary_payloads WHERE id = OLD.blob_id
       AND NOT EXISTS (SELECT 1 FROM history_file_payloads WHERE blob_id = OLD.blob_id);
 END;
+
+-- Keep applied steps independently of the highest schema version. A lower
+-- numbered feature may be registered after this migration has already run.
+CREATE TABLE copypaste_schema_migrations (
+    version INTEGER PRIMARY KEY NOT NULL
+);

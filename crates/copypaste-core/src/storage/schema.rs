@@ -13,6 +13,7 @@ pub(super) const SCHEMA: &str = concat!(
 pub(super) fn create(conn: &mut Connection) -> Result<(), StoreError> {
     let tx = conn.transaction()?;
     tx.execute_batch(SCHEMA)?;
+    super::migrations::record_current(&tx)?;
     tx.pragma_update(None, "user_version", super::migrations::LATEST_VERSION)?;
     tx.commit()?;
     super::schema_verify::verify_schema(conn)
