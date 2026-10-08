@@ -53,7 +53,7 @@ class _SyncHeaderActionState extends State<SyncHeaderAction> {
         tooltip: (context) => TooltipContainer(child: Text(phase.label)),
         child: Button.secondary(
           key: const ValueKey<String>('sync-header-open'),
-          style: const ButtonStyle.secondaryIcon(),
+          style: AppTheme.controlButtonStyle(const ButtonStyle.secondaryIcon()),
           onPressed: widget.devices?.pairingInspectorOpen == true
               ? null
               : _open,
@@ -159,7 +159,9 @@ class _SyncDetails extends StatelessWidget {
               button: true,
               child: Button.ghost(
                 key: const ValueKey<String>('close-sync-details'),
-                style: const ButtonStyle.ghostIcon(),
+                style: AppTheme.controlButtonStyle(
+                  const ButtonStyle.ghostIcon(),
+                ),
                 onPressed: onClose,
                 child: const Icon(LucideIcons.x),
               ),

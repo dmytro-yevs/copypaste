@@ -600,7 +600,8 @@ class _HistoryToolbar extends StatefulWidget {
 }
 
 class _HistoryToolbarState extends State<_HistoryToolbar> {
-  static const double _compactControlExtent = AppControlSize.large;
+  double _controlExtent(BuildContext context) =>
+      AppTheme.controlHeight(context, minimum: AppControlSize.large);
   static const double _minimumExpandedSearchWidth =
       AppLayoutSize.historySearchMinWidth;
   static const double _toolbarGap = AppSpacing.sm;
@@ -616,18 +617,12 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
         final collapseSearch =
             constraints.maxWidth <
             _minimumExpandedSearchWidth +
-                (_compactControlExtent * (_filterCount + 1)) +
+                (_controlExtent(context) * (_filterCount + 1)) +
                 (_toolbarGap * (_filterCount + 1));
         if (collapseSearch && _searchExpanded) {
           return SizedBox(
             width: constraints.maxWidth,
-            child: Row(
-              spacing: _toolbarGap,
-              children: [
-                Expanded(child: _searchField(compact: true)),
-                _importButton(),
-              ],
-            ),
+            child: _searchField(compact: true),
           );
         }
 
@@ -637,7 +632,6 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
             spacing: _toolbarGap,
             runSpacing: _toolbarGap,
             children: [
-              _importButton(),
               Semantics(
                 label: 'Search history',
                 button: true,
@@ -649,6 +643,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
                 ),
               ),
               ...filters,
+              _importButton(),
             ],
           );
         }
@@ -694,6 +689,10 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
 
   Widget _searchField({required bool compact}) {
     return TextField(
+      padding: AppTheme.controlFieldPadding(
+        context,
+        minimum: AppControlSize.large,
+      ),
       controller: widget.searchController,
       autofocus: compact,
       placeholder: const Text('Search history'),
@@ -894,23 +893,26 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
     required List<_HistoryFilterOption<T>> options,
     required T value,
     required ValueChanged<_HistoryFilterOption<T>> onChanged,
-  }) => Select<_HistoryFilterOption<T>>(
-    filled: true,
-    constraints: _selectConstraints(compact),
-    value: _selectedOption(options, value),
-    onChanged: (option) {
-      if (option != null) onChanged(option);
-    },
-    expandIcon: compact ? null : const SelectExpandIcon(),
-    theme: _selectThemeFor(context, options, compact),
-    popup: _selectPopup(options).call,
-    itemBuilder: (context, option) => option.build(compact: compact),
+  }) => ComponentTheme<SelectTheme>(
+    data: _selectThemeFor(context, options, compact),
+    child: Select<_HistoryFilterOption<T>>(
+      filled: true,
+      constraints: _selectConstraints(context, compact),
+      value: _selectedOption(options, value),
+      onChanged: (option) {
+        if (option != null) onChanged(option);
+      },
+      expandIcon: compact ? null : const SelectExpandIcon(),
+      popup: _selectPopup(options).call,
+      itemBuilder: (context, option) => option.build(compact: compact),
+    ),
   );
 
-  BoxConstraints? _selectConstraints(bool compact) => compact
-      ? const BoxConstraints.tightFor(
-          width: _compactControlExtent,
-          height: _compactControlExtent,
+  BoxConstraints? _selectConstraints(BuildContext context, bool compact) =>
+      compact
+      ? BoxConstraints.tightFor(
+          width: _controlExtent(context),
+          height: _controlExtent(context),
         )
       : null;
 
@@ -932,9 +934,8 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
       query.sort.label,
     ];
     final theme = Theme.of(context);
-    final style = DefaultTextStyle.of(
-      context,
-    ).style.merge(const ButtonStyle.secondary().textStyle(context, const {}));
+    final style = DefaultTextStyle.of(context).style
+        .merge(const ButtonStyle.secondary().textStyle(context, const {}));
     final textScaler = MediaQuery.textScalerOf(context);
     final filterChromeWidth =
         (AppSpacing.sm * 3) +
@@ -943,7 +944,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
         theme.iconTheme.small.size!;
     var width =
         _minimumExpandedSearchWidth +
-        _compactControlExtent +
+        _controlExtent(context) +
         (_toolbarGap * (_filterCount + 1));
     for (final label in labels) {
       final painter = TextPainter(
@@ -993,15 +994,11 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
     return SelectTheme(
       adaptiveOverlay: false,
       decoration: AppTheme.softSelectDecoration,
-      padding: compact
-          ? const EdgeInsets.symmetric(
-              horizontal: AppSpacing.xs,
-              vertical: AppSpacing.sm,
-            )
-          : const EdgeInsets.symmetric(
-              horizontal: AppSpacing.sm,
-              vertical: AppSpacing.sm,
-            ),
+      padding: AppTheme.controlFieldPadding(
+        context,
+        horizontal: compact ? AppSpacing.xs : AppSpacing.sm,
+        minimum: AppControlSize.large,
+      ),
       popupConstraints: BoxConstraints(
         minWidth: popupWidth,
         maxWidth: popupWidth,
