@@ -55,12 +55,13 @@ mod cf_html;
 mod change;
 mod fake;
 pub(crate) mod file_capture;
+#[cfg(any(target_os = "macos", test))]
 pub(crate) mod source_coverage;
 // `test` so the module is exercised off macOS, but only where it compiles:
 // every syscall in it is `rustix::fs`, which has no Windows implementation.
 #[cfg(all(
     not(feature = "dev-fake-clipboard"),
-    any(target_os = "macos", all(test, unix))
+    any(target_os = "macos", target_os = "linux", all(test, unix))
 ))]
 mod file_materialize;
 pub(crate) mod format;
@@ -142,7 +143,12 @@ mod macos;
 #[cfg(all(target_os = "windows", not(feature = "dev-fake-clipboard")))]
 mod windows;
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(all(target_os = "linux", not(feature = "dev-fake-clipboard")))]
+mod linux;
+#[cfg(all(target_os = "linux", not(feature = "dev-fake-clipboard")))]
+mod linux_attribution;
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 pub use fake::FakeClipboard;
 
 /// Current storage and transport hard bound, in bytes.
@@ -153,11 +159,13 @@ const MAX_CAPTURE_BYTES: usize = copypaste_ipc::MAX_CONTENT_BYTES;
 pub(crate) enum SourcePolicyEvidence {
     #[default]
     Legacy,
+    #[cfg(any(target_os = "macos", test))]
     MacOs(source_coverage::Coverage),
 }
 impl SourcePolicyEvidence {
     fn allows(&self, excluded: &[String], owner: Option<&str>) -> bool {
         match self {
+            #[cfg(any(target_os = "macos", test))]
             Self::MacOs(coverage) => {
                 coverage.allows(excluded)
                     && !owner.is_some_and(|id| excluded.iter().any(|excluded| excluded == id))
@@ -351,9 +359,13 @@ pub fn new_source(data_dir: &std::path::Path) -> std::io::Result<Box<dyn Clipboa
             data_dir,
         )?))
     }
+    #[cfg(all(target_os = "linux", not(feature = "dev-fake-clipboard")))]
+    {
+        Ok(Box::new(linux::LinuxClipboard::new(data_dir)?))
+    }
     #[cfg(all(
         not(feature = "dev-fake-clipboard"),
-        not(any(target_os = "macos", target_os = "windows"))
+        not(any(target_os = "macos", target_os = "windows", target_os = "linux"))
     ))]
     {
         let _ = data_dir;
