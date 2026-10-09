@@ -97,10 +97,13 @@ class ReleaseSafetyTest(unittest.TestCase):
         verify = runpy.run_path(str(ROOT / "scripts/release/verify-capture-jni.py"))["verify"]
         callback = ".method public abstract run(J)V"
         text = ".method public static final native ingestText(JLjava/lang/String;)Z"
-        binary = ".method public static final native ingestBinary(J[BLjava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z"
+        binary = ".method public static final native ingestBinary(J[BLjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[B)Z"
         verify(callback, text + "\n" + binary)
         with self.assertRaisesRegex(ValueError, "ingestBinary"):
             verify(callback, text)
+        legacy = ".method public static final native ingestBinary(J[BLjava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z"
+        with self.assertRaisesRegex(ValueError, "ingestBinary"):
+            verify(callback, text + "\n" + legacy)
 
     def qualification(self):
         return (

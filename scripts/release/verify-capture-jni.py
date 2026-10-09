@@ -12,7 +12,7 @@ def verify(callback: str, runtime: str) -> None:
     native = [line for line in runtime.splitlines() if line.startswith(".method public ") and " native " in line]
     for signature in (
         "ingestText(JLjava/lang/String;)Z",
-        "ingestBinary(J[BLjava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+        "ingestBinary(J[BLjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[B)Z",
     ):
         if not any(line.endswith(" " + signature) for line in native):
             raise ValueError(f"optimized APK is missing the JNI capture method {signature}")
