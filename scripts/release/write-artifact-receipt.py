@@ -15,7 +15,7 @@ def sha256(path: Path) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--platform", required=True, choices=("macos", "android", "windows"))
+    parser.add_argument("--platform", required=True, choices=("macos", "android", "windows", "linux"))
     parser.add_argument("--artifact", required=True, type=Path, action="append")
     parser.add_argument("--version", required=True)
     parser.add_argument("--commit", required=True)
