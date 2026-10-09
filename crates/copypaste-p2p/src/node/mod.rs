@@ -1002,8 +1002,10 @@ mod tests {
         assert!(!pairing.code.is_empty());
         assert_ne!(pairing.code, pairing.pairing_id);
 
-        let token = crate::transport::PairingToken::parse(&pairing.code).expect("a valid code");
-        assert_eq!(token.pairing_id(), pairing.pairing_id);
+        let code = crate::transport::PairingCode::parse(&pairing.code).expect("a valid short code");
+        assert_eq!(code.to_code().len(), 8);
+        let candidate = node.pairing_candidate().expect("active invitation");
+        assert_eq!(candidate.token.pairing_id, pairing.pairing_id);
         assert!(node.peers().get(&pairing.pairing_id).is_none());
         assert!(node.peers().psks().is_empty());
         assert_eq!(node.pair_progress().phase, PairingPhase::WaitingForPeer);

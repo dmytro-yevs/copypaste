@@ -31,8 +31,13 @@ void main() {
                     child: SecretSpoiler(
                       reveal: (_) {
                         reads++;
-                        return const Text('SYNTHETIC SECRET FIXTURE',
-                          style: TextStyle(fontFamily: 'GeistSans', package: 'shadcn_flutter'));
+                        return const Text(
+                          'SYNTHETIC SECRET FIXTURE',
+                          style: TextStyle(
+                            fontFamily: 'GeistSans',
+                            package: 'shadcn_flutter',
+                          ),
+                        );
                       },
                     ),
                   ),
@@ -118,11 +123,12 @@ Future<void> _capture(GlobalKey boundary, String filename) async {
   image.dispose();
 }
 
-
 Future<void> _loadFonts(WidgetTester tester) async {
   await tester.runAsync(() async {
     final font = FontLoader('packages/shadcn_flutter/GeistSans');
-    font.addFont(rootBundle.load('packages/shadcn_flutter/lib/fonts/Geist-Regular.otf'));
+    font.addFont(
+      rootBundle.load('packages/shadcn_flutter/lib/fonts/Geist-Regular.otf'),
+    );
     await font.load();
   });
 }

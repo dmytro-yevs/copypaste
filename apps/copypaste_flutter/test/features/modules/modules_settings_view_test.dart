@@ -20,8 +20,10 @@ void main() {
     testWidgets('OCR uses the same management card in both sections', (
       tester,
     ) async {
-      await tester.binding.setSurfaceSize(Size(width, 900));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = Size(width, 900);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       const ocr = InstalledModule(
         id: 'copypaste.ocr',
         title: 'OCR',
@@ -29,6 +31,7 @@ void main() {
         version: '0.1.0',
         enabled: true,
         sizeBytes: 10,
+        supportedPlatforms: ModulePlatform.values,
         commands: [
           ModuleCommand(
             id: 'recognize-image',
@@ -49,6 +52,7 @@ void main() {
             description: ocr.description,
             version: Version.parse(ocr.version),
             artifact: testMarketplaceModule.artifact,
+            supportedPlatforms: ModulePlatform.values,
           ),
         ];
       final controller = ModulesController(
@@ -99,12 +103,15 @@ void main() {
       final drawer = find.byKey(
         const ValueKey('module-settings-drawer-copypaste.ocr'),
       );
-      expect(tester.getSize(drawer).width, closeTo(width, 2));
+      expect(
+        tester.getSize(drawer).width,
+        closeTo(width >= 800 ? AppOverlaySize.drawerPanelWidth : width, 2),
+      );
       expect(
         tester.getSize(drawer).height,
         closeTo(
           MediaQuery.sizeOf(tester.element(drawer)).height *
-              AppOverlaySize.drawerHeightFactor,
+              (width >= 800 ? 1 : AppOverlaySize.drawerHeightFactor),
           2,
         ),
       );
@@ -162,7 +169,7 @@ void main() {
     (TargetPlatform.macOS, 650.0),
     (TargetPlatform.windows, 1000.0),
   ]) {
-    for (final scale in [1.0, 1.6]) {
+    for (final scale in [1.0, 1.6, 2.0]) {
       testWidgets('module sizes and actions align at $width with scale $scale', (
         tester,
       ) async {
@@ -179,6 +186,9 @@ void main() {
                     : testModule.description,
                 version: testMarketplaceModule.version,
                 artifact: index == 1 ? null : testMarketplaceModule.artifact,
+                supportedPlatforms: index == 1
+                    ? [ModulePlatform.android]
+                    : ModulePlatform.values,
                 appVersions: VersionConstraint.parse('>=1.0.6 <2.0.0'),
                 availability: index == 1
                     ? ModuleAvailability.platform
@@ -221,6 +231,24 @@ void main() {
         for (final id in ids) {
           final card = find.byKey(ValueKey('module-$id'));
           expect(tester.getSize(card), size);
+          if (id == 'module-1') {
+            expect(find.byKey(ValueKey('module-install-$id')), findsNothing);
+            expect(
+              find.descendant(
+                of: card,
+                matching: find.text('Platforms: Android'),
+              ),
+              findsOneWidget,
+            );
+            continue;
+          }
+          expect(
+            find.descendant(
+              of: card,
+              matching: find.text('Platforms: macOS · Windows · Android'),
+            ),
+            findsOneWidget,
+          );
           final action = find.byKey(
             ValueKey(
               id == testModule.id
@@ -248,12 +276,8 @@ void main() {
         expect(find.text('Not available for this device.'), findsOneWidget);
         expect(find.text('Unavailable'), findsNothing);
         expect(
-          tester
-              .widget<Button>(
-                find.byKey(const ValueKey('module-install-module-1')),
-              )
-              .onPressed,
-          isNull,
+          find.byKey(const ValueKey('module-install-module-1')),
+          findsNothing,
         );
         expect(tester.takeException(), isNull);
       }, variant: TargetPlatformVariant({platform}));
@@ -359,7 +383,7 @@ void main() {
   });
 
   testWidgets(
-    'unsupported versions render a normal module card with installation disabled',
+    'unsupported versions retain requirements and omit installation',
     (tester) async {
       final marketplace = MemoryModuleMarketplace()
         ..modules = [
@@ -369,6 +393,7 @@ void main() {
             description: testMarketplaceModule.description,
             version: testMarketplaceModule.version,
             artifact: testMarketplaceModule.artifact,
+            supportedPlatforms: ModulePlatform.values,
             appVersions: VersionConstraint.parse('>=1.0.6 <2.0.0'),
             availability: ModuleAvailability.systemVersion,
             unavailableReason: 'Requires macOS 14 or newer.',
@@ -399,10 +424,7 @@ void main() {
       expect(find.text('CopyPaste ≥1.0.6, <2.0.0'), findsOneWidget);
       expect(find.text('Unavailable'), findsNothing);
       expect(find.text('Marketplace is unavailable'), findsNothing);
-      expect(
-        tester.widget<Button>(find.widgetWithText(Button, 'Install')).onPressed,
-        isNull,
-      );
+      expect(find.widgetWithText(Button, 'Install'), findsNothing);
       expect(tester.takeException(), isNull);
     },
   );
@@ -511,11 +533,14 @@ void main() {
     await tester.tap(find.text('Installed'));
     await tester.pumpAndSettle();
     expect(find.text('Text Tools'), findsOneWidget);
+    expect(find.text('Platforms: macOS · Windows · Android'), findsOneWidget);
     await tester.tap(
       find.byKey(const ValueKey('module-settings-copypaste.text-tools')),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byType(Switch));
+    await tester.tap(
+      find.byKey(const ValueKey('module-enabled-copypaste.text-tools')),
+    );
     await tester.pumpAndSettle();
     expect(repository.calls, ['enabled:false']);
     expect(tester.takeException(), isNull);
@@ -553,9 +578,9 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Text Tools settings'), findsOneWidget);
-      await tester.tap(find.text('Preferences'));
-      await tester.pumpAndSettle();
-      expect(find.text('Text Tools preferences'), findsOneWidget);
+      expect(find.text('Uppercase'), findsOneWidget);
+      expect(find.widgetWithText(Button, 'Preferences'), findsNothing);
+      expect(find.byType(AlertDialog), findsNothing);
       await tester.tap(find.byType(Switch).last);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Save'));

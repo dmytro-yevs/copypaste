@@ -4,6 +4,20 @@ enum ModuleFieldKind { text, boolean, file, choices }
 
 enum ModuleEventKind { smsReceived }
 
+enum ModulePlatform {
+  macos('macOS'),
+  windows('Windows'),
+  android('Android');
+
+  const ModulePlatform(this.label);
+  final String label;
+}
+
+String formatModulePlatforms(List<ModulePlatform> platforms) =>
+    platforms.isEmpty
+    ? 'Platforms: Unknown'
+    : 'Platforms: ${ModulePlatform.values.where(platforms.contains).map((platform) => platform.label).join(' · ')}';
+
 class ModuleField {
   const ModuleField({
     required this.id,
@@ -87,6 +101,7 @@ class InstalledModule {
     required this.commands,
     required this.preferenceFields,
     required this.preferences,
+    this.supportedPlatforms = const [],
     this.searchModels = const [],
     this.searchLanguageField,
     this.error,
@@ -102,6 +117,7 @@ class InstalledModule {
   final List<ModuleCommand> commands;
   final List<ModuleField> preferenceFields;
   final Map<String, Object> preferences;
+  final List<ModulePlatform> supportedPlatforms;
   final List<ModuleSearchModel> searchModels;
   final String? searchLanguageField;
   final String? error;

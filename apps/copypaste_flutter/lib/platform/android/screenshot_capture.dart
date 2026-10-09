@@ -8,12 +8,14 @@ class ScreenshotCaptureStatus {
     this.mediaGranted = false,
     this.notificationGranted = false,
     this.running = false,
+    this.sourceAccessGranted = false,
   });
 
   final bool enabled;
   final bool mediaGranted;
   final bool notificationGranted;
   final bool running;
+  final bool sourceAccessGranted;
 
   bool get needsPermission => !mediaGranted || !notificationGranted;
 }
@@ -23,6 +25,7 @@ abstract interface class ScreenshotCapture {
   Future<ScreenshotCaptureStatus> status();
   Future<ScreenshotCaptureStatus> setEnabled(bool enabled);
   Future<ScreenshotCaptureStatus> requestPermission();
+  Future<bool> openSourceAccess();
 }
 
 class MethodChannelScreenshotCapture implements ScreenshotCapture {
@@ -48,6 +51,10 @@ class MethodChannelScreenshotCapture implements ScreenshotCapture {
   Future<ScreenshotCaptureStatus> requestPermission() =>
       _invoke('requestScreenshotPermission');
 
+  @override
+  Future<bool> openSourceAccess() async =>
+      await _channel.invokeMethod<bool>('openScreenshotSourceAccess') ?? false;
+
   Future<ScreenshotCaptureStatus> _invoke(
     String method, [
     Map<String, Object?>? arguments,
@@ -64,6 +71,7 @@ class MethodChannelScreenshotCapture implements ScreenshotCapture {
       mediaGranted: raw['mediaGranted'] as bool? ?? false,
       notificationGranted: raw['notificationGranted'] as bool? ?? false,
       running: raw['running'] as bool? ?? false,
+      sourceAccessGranted: raw['sourceAccessGranted'] as bool? ?? false,
     );
   }
 }

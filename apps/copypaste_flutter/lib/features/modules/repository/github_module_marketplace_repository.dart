@@ -253,6 +253,7 @@ class ModuleCatalogParser {
         }
         ModuleArtifact? selected;
         final targets = <String>{};
+        final artifactPlatforms = <String>{};
         for (final rawArtifact in entry['artifacts'] as List<dynamic>) {
           final artifact = rawArtifact as Map<String, dynamic>;
           final platform = artifact['platform'] as String;
@@ -274,6 +275,7 @@ class ModuleCatalogParser {
               !RegExp(r'^[a-f0-9]{64}$').hasMatch(digest)) {
             throw const FormatException();
           }
+          artifactPlatforms.add(platform);
           if (platform == target.platform &&
               architecture == target.architecture) {
             selected = ModuleArtifact(
@@ -284,6 +286,25 @@ class ModuleCatalogParser {
             );
           }
         }
+        final rawPlatforms = entry['supported_platforms'];
+        final platformNames = rawPlatforms == null
+            ? artifactPlatforms.toList()
+            : (rawPlatforms as List<dynamic>).cast<String>();
+        if (rawPlatforms != null &&
+            (platformNames.isEmpty ||
+                platformNames.length != platformNames.toSet().length ||
+                platformNames
+                    .toSet()
+                    .difference(artifactPlatforms)
+                    .isNotEmpty ||
+                artifactPlatforms
+                    .difference(platformNames.toSet())
+                    .isNotEmpty)) {
+          throw const FormatException();
+        }
+        final supportedPlatforms = List<ModulePlatform>.unmodifiable(
+          platformNames.map(ModulePlatform.values.byName),
+        );
         var availability = ModuleAvailability.available;
         String? reason;
         final minimum = selected?.minimumSystemVersion;
@@ -321,6 +342,7 @@ class ModuleCatalogParser {
             description: description,
             version: version,
             artifact: selected,
+            supportedPlatforms: supportedPlatforms,
             appVersions: compatibility,
             availability: availability,
             unavailableReason: reason,
