@@ -736,8 +736,16 @@ class _DeviceDetailsInspector extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(device.name).h3(),
-                    Text(DevicePresentation.summary(device.details)).muted(),
+                    Text(
+                      device.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ).h3(),
+                    Text(
+                      DevicePresentation.summary(device.details),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ).muted(),
                   ],
                 ),
               ),
@@ -1076,7 +1084,13 @@ class _PairingInspectorState extends State<_PairingInspector> {
             children: [
               Icon(DevicePresentation.pairingEntryIcon(mode)),
               const Gap(AppSpacing.md),
-              Expanded(child: Text(_modeTitle(mode)).h3()),
+              Expanded(
+                child: Text(
+                  _modeTitle(mode),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ).h3(),
+              ),
               Button.ghost(
                 key: const ValueKey<String>('close-pairing-inspector'),
                 style: AppTheme.controlButtonStyle(
