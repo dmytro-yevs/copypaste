@@ -80,7 +80,7 @@ std::string RecordHandler::DetectAudioEncoder() {
 }
 
 bool RecordHandler::Setup(GstElement* pipeline, GstElement* tee,
-                          int width, int height, int fps, int video_bitrate,
+                          int, int, int, int video_bitrate,
                           int audio_bitrate, bool enable_audio,
                           GError** error) {
   if (is_setup_) return true;
@@ -341,7 +341,7 @@ struct StopRecordingData {
   std::string audio_codec;
 };
 
-GstPadProbeReturn RecordHandler::OnEosEvent(GstPad* pad,
+GstPadProbeReturn RecordHandler::OnEosEvent(GstPad*,
                                             GstPadProbeInfo* info,
                                             gpointer user_data) {
   if (GST_EVENT_TYPE(GST_PAD_PROBE_INFO_EVENT(info)) != GST_EVENT_EOS) {

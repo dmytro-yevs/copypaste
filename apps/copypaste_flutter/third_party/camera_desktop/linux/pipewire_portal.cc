@@ -174,10 +174,10 @@ void PipeWirePortal::OnAccessCameraReply(GObject* source, GAsyncResult* res,
 }
 
 void PipeWirePortal::OnPortalResponse(GDBusConnection* connection,
-                                       const gchar* sender_name,
-                                       const gchar* object_path,
-                                       const gchar* interface_name,
-                                       const gchar* signal_name,
+                                       const gchar*,
+                                       const gchar*,
+                                       const gchar*,
+                                       const gchar*,
                                        GVariant* parameters,
                                        gpointer user_data) {
   auto* self = static_cast<PipeWirePortal*>(user_data);

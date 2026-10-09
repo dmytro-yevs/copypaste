@@ -441,7 +441,7 @@ GstFlowReturn Camera::OnNewSample(GstAppSink* sink, gpointer user_data) {
   return GST_FLOW_OK;
 }
 
-gboolean Camera::OnBusMessage(GstBus* bus, GstMessage* msg,
+gboolean Camera::OnBusMessage(GstBus*, GstMessage* msg,
                               gpointer user_data) {
   Camera* self = static_cast<Camera*>(user_data);
 
