@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 from pathlib import Path
 from copy import deepcopy
 import hashlib
@@ -129,6 +130,45 @@ class ReleaseSafetyTest(unittest.TestCase):
                 with self.subTest(index=index, conclusion=conclusion), self.assertRaises(ValueError):
                     verify(*evidence, "owner/repo", "commit")
 
+    def test_linux_recovery_binds_skipped_builds_to_the_exact_origin(self):
+        verify = runpy.run_path(str(ROOT / "scripts/release/verify-qualified-run.py"))["verify"]
+        evidence = self.qualification()
+        evidence[1]["jobs"].extend([
+            {"name": "Linux full parity evidence gate", "status": "completed", "conclusion": "success"},
+            *({"name": f"Linux build ({arch})", "status": "completed", "conclusion": "skipped"}
+              for arch in ("x86_64", "aarch64")),
+        ])
+        evidence[1]["total_count"] = len(evidence[1]["jobs"])
+        origin_run = {**deepcopy(evidence[0]), "id": 456}
+        origin_jobs = {"total_count": 3, "jobs": [
+            {"name": name, "status": "completed", "conclusion": "success"}
+            for name in ("preflight", "Linux build (x86_64)", "Linux build (aarch64)")
+        ]}
+        origin_artifacts = {"artifacts": [
+            {"name": f"production-linux-{arch}", "expired": False,
+             "workflow_run": {"id": 456, "head_sha": "commit"}}
+            for arch in ("x86_64", "aarch64")
+        ]}
+        origin = (origin_run, origin_jobs, origin_artifacts, {"platform": "linux", "run_id": "456"})
+        verify(*evidence, "owner/repo", "commit", require_linux=True, linux_origin=origin)
+        with self.assertRaises(ValueError):
+            verify(*evidence, "owner/repo", "commit", require_linux=True)
+        for index, key, value in (
+            (0, "head_sha", "stale"),
+            (0, "path", ".github/workflows/untrusted.yml"),
+            (0, "head_repository", {"full_name": "fork/repo"}),
+            (3, "run_id", "999"),
+        ):
+            broken = deepcopy(origin)
+            broken[index][key] = value
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                verify(*evidence, "owner/repo", "commit", require_linux=True, linux_origin=broken)
+        for index in (5, 6, 7):
+            broken = deepcopy(evidence)
+            broken[1]["jobs"][index]["conclusion"] = "failure"
+            with self.subTest(job=index), self.assertRaises(ValueError):
+                verify(*broken, "owner/repo", "commit", require_linux=True, linux_origin=origin)
+
     def test_recovery_refuses_other_commits_forks_and_expired_artifacts(self):
         verify = runpy.run_path(str(ROOT / "scripts/release/verify-qualified-run.py"))["verify"]
         for target, key, value in (
@@ -143,6 +183,44 @@ class ReleaseSafetyTest(unittest.TestCase):
             item[key] = value
             with self.subTest(key=key), self.assertRaises(ValueError):
                 verify(*evidence, "owner/repo", "commit")
+
+    def test_linux_recovery_requires_every_native_desktop_session(self):
+        verify = runpy.run_path(str(ROOT / "scripts/release/verify-qualified-run.py"))["verify"]
+        evidence = self.qualification()
+        linux_jobs = [
+            {"name": f"Linux build ({architecture})", "status": "completed", "conclusion": "success"}
+            for architecture in ("x86_64", "aarch64")
+        ]
+        linux_jobs.append({
+            "name": "Linux full parity evidence gate",
+            "status": "completed",
+            "conclusion": "success",
+        })
+        evidence[1]["jobs"].extend(linux_jobs)
+        evidence[1]["total_count"] += len(linux_jobs)
+        verify(*evidence, "owner/repo", "commit", require_linux=True)
+        evidence[1]["jobs"].pop()
+        evidence[1]["total_count"] -= 1
+        with self.assertRaisesRegex(ValueError, "Linux qualification jobs"):
+            verify(*evidence, "owner/repo", "commit", require_linux=True)
+
+    def test_linux_artifact_source_requires_both_exact_native_builds(self):
+        verify = runpy.run_path(str(ROOT / "scripts/release/verify-linux-artifact-source-run.py"))["verify"]
+        run = {"id": 123, "head_sha": "commit", "head_repository": {"full_name": "owner/repo"},
+               "path": ".github/workflows/release.yml", "event": "workflow_dispatch", "status": "completed"}
+        jobs = {"total_count": 3, "jobs": [
+            {"name": name, "status": "completed", "conclusion": "success"}
+            for name in ("preflight", "Linux build (x86_64)", "Linux build (aarch64)")
+        ]}
+        artifacts = {"artifacts": [
+            {"name": name, "expired": False, "workflow_run": {"id": 123, "head_sha": "commit"}}
+            for name in ("production-linux-x86_64", "production-linux-aarch64")
+        ]}
+        verify(run, jobs, artifacts, "owner/repo", "commit")
+        jobs["jobs"].pop()
+        jobs["total_count"] -= 1
+        with self.assertRaisesRegex(ValueError, "native build jobs"):
+            verify(run, jobs, artifacts, "owner/repo", "commit")
 
     def test_publication_preserves_existing_bytes_and_uploads_only_missing_files(self):
         missing = runpy.run_path(str(ROOT / "scripts/release/publish-release.py"))["missing_assets"]
@@ -191,6 +269,61 @@ class ReleaseSafetyTest(unittest.TestCase):
         self.assertNotIn("flutter build apk --debug", workflow)
         self.assertNotIn("flutter build windows --debug", workflow)
 
+    def test_linux_release_contract_requires_native_artifacts_and_sessions(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        build = (ROOT / "scripts/release/build-linux-flutter.sh").read_text(encoding="utf-8")
+        packages = (ROOT / "scripts/release/build-linux-packages.sh").read_text(encoding="utf-8")
+        smoke = (ROOT / "scripts/release/smoke-linux-production.sh").read_text(encoding="utf-8")
+        contract = json.loads((ROOT / "packaging/linux/release-contract.json").read_text(encoding="utf-8"))
+        self.assertEqual(contract["maximum_glibc"], "2.39")
+        self.assertEqual(set(contract["architectures"]), {"x86_64", "aarch64"})
+        self.assertEqual(contract["formats"], ["AppImage", "deb", "rpm"])
+        self.assertIn("flutter build linux --release", build)
+        self.assertIn("copypaste-daemon", build)
+        self.assertIn("copypaste-cli", build)
+        self.assertIn("dpkg-deb --root-owner-group --build", packages)
+        self.assertIn("rm -rf \"$STAGE/DEBIAN\"", packages)
+        self.assertIn("rpmbuild -bb", packages)
+        self.assertIn("APPIMAGETOOL", packages)
+        self.assertIn("package-metadata.json", packages)
+        self.assertIn("copypaste-cli", packages)
+        self.assertNotIn("/etc/xdg/autostart", packages)
+        desktop = (ROOT / "packaging/linux/com.copypaste.CopyPaste.desktop").read_text(encoding="utf-8")
+        self.assertIn("x-scheme-handler/copypaste", desktop)
+        self.assertIn("X-GNOME-Autostart-enabled=true", desktop)
+        self.assertIn("gnome-keyring-daemon", smoke)
+        self.assertIn("XDG_SESSION_TYPE", smoke)
+        self.assertIn("XVFB_RUN", smoke)
+        self.assertIn("GLIBC_", smoke)
+        self.assertIn('ARTIFACT="$(cd', smoke)
+        self.assertIn('rpm2cpio "$ARTIFACT"', smoke)
+        self.assertIn("Linux full parity evidence gate", workflow)
+        qualification = (ROOT / "packaging/linux/native-qualification.md").read_text(encoding="utf-8")
+        self.assertIn("GNOME", qualification)
+        self.assertIn("KDE", qualification)
+        self.assertIn("Wayland", qualification)
+        self.assertIn("AppImage deb rpm", workflow)
+        native_workflow = (ROOT / ".github/workflows/linux-native-qualification.yml").read_text(encoding="utf-8")
+        self.assertIn("linux-native-qualification", native_workflow)
+        self.assertIn("ubuntu-24.04-arm", native_workflow)
+        self.assertIn("previous_artifact_run_id", native_workflow)
+        self.assertNotIn("self-hosted", native_workflow)
+        producer = (ROOT / "scripts/release/produce-linux-native-qualification.py").read_text(encoding="utf-8")
+        self.assertIn("COPYPASTE_QUALIFICATION_COMMAND", producer)
+        self.assertIn("artifact_run_id", producer)
+        fixture = (ROOT / "scripts/release/linux-native-fixture-driver.py").read_text(encoding="utf-8")
+        self.assertIn("set_private_mode", fixture)
+        self.assertIn("encrypted_restart_persistence", fixture)
+        self.assertIn("WaylandIntegration", fixture)
+
+    def test_linux_arm64_flutter_bootstrap_uses_the_pinned_source_revision(self):
+        action = (ROOT / ".github/actions/setup-flutter/action.yml").read_text(encoding="utf-8")
+        self.assertIn("runner.arch == 'ARM64'", action)
+        self.assertIn("FLUTTER_SOURCE_COMMIT", action)
+        self.assertIn("git -C \"$root\" fetch --depth=1 origin \"$FLUTTER_SOURCE_COMMIT\"", action)
+        self.assertIn("copypaste-flutter-${FLUTTER_VERSION}-linux-arm64", action)
+        self.assertIn('[[ "$FLUTTER_VERSION" == 3.47.6 ]]', action)
+
     def test_stable_version_and_no_cloud_release_configuration(self):
         cargo = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
         pubspec = (ROOT / "apps/copypaste_flutter/pubspec.yaml").read_text(encoding="utf-8")
@@ -218,21 +351,26 @@ class ReleaseSafetyTest(unittest.TestCase):
                     f"CopyPaste-v{version}-android-arm64.apk",
                     f"CopyPaste-v{version}-android-armv7.apk",
                     f"CopyPaste-v{version}-windows-x86_64-setup.exe",
+                    *(f"CopyPaste-v{version}-linux-{architecture}.{extension}"
+                      for architecture in ("x86_64", "aarch64")
+                      for extension in ("AppImage", "deb", "rpm")),
                 ):
                     (artifacts / name).touch()
                 notes = render(version, "dmytro-yevs/copypaste", artifacts)
                 links = re.findall(r"https://github.com/[^\s)]+", notes)
-                self.assertEqual(len(links), 5)
+                self.assertEqual(len(links), 11)
                 self.assertTrue(all(f"/download/v{version}/" in link for link in links))
                 self.assertNotIn("{{", notes)
                 rows = [line for line in notes.splitlines() if line.startswith("|")]
                 self.assertEqual(len(rows), 6)
-                self.assertEqual(rows[0], "| Architecture | macOS | Android | Windows |")
+                self.assertEqual(rows[0], "| Architecture | macOS | Android | Windows | Linux |")
                 self.assertEqual(rows[2].count("[Download]("), 2)
+                self.assertEqual(rows[2].count("[AppImage](") + rows[2].count("[deb](") + rows[2].count("[rpm]("), 3)
                 self.assertEqual(rows[3].count("[Download]("), 1)
                 self.assertEqual(rows[4].count("[Download]("), 1)
+                self.assertEqual(rows[4].count("[AppImage](") + rows[4].count("[deb](") + rows[4].count("[rpm]("), 3)
                 self.assertEqual(rows[5].count("[Download]("), 1)
-                self.assertTrue(all(link.endswith((".dmg", ".apk", ".exe")) for link in links))
+                self.assertTrue(all(link.endswith((".dmg", ".apk", ".exe", ".AppImage", ".deb", ".rpm")) for link in links))
                 for suffix in ("", "-arm64", "-armv7"):
                     artifact = artifacts / f"CopyPaste-v{version}-android{suffix}.apk"
                     artifact.unlink()
@@ -326,6 +464,129 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
             (root / "android" / "extra.apk").write_bytes(b"unqualified")
             with self.assertRaisesRegex(ValueError, "does not cover every APK"):
                 verify(root, "1.2.3", "a" * 40, "123")
+
+    def test_linux_receipts_bind_every_signed_native_package(self):
+        verify = runpy.run_path(str(ROOT / "scripts/release/verify-artifact-receipts.py"))["verify"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_receipts(root)
+            linux = root / "linux"
+            linux.mkdir()
+            command = [sys.executable, str(ROOT / "scripts/release/write-artifact-receipt.py"),
+                       "--platform", "linux", "--version", "1.2.3", "--commit", "a" * 40,
+                       "--run-id", "123", "--output", str(linux / "production-receipt.json")]
+            for architecture in ("x86_64", "aarch64"):
+                for extension in ("AppImage", "deb", "rpm"):
+                    package = linux / f"CopyPaste-v1.2.3-linux-{architecture}.{extension}"
+                    package.write_bytes(b"qualified package")
+                    signature = linux / f"{package.name}.sig"
+                    signature.write_bytes(b"signature")
+                    receipt = linux / f"{package.name}.sha256"
+                    receipt.write_bytes(b"digest receipt")
+                    for artifact in (package, signature, receipt):
+                        command.extend(["--artifact", str(artifact)])
+                baseline = linux / f"CopyPaste-v1.2.3-linux-{architecture}.runtime-baseline.json"
+                baseline.write_text('{"glibc_minimum":"2.39"}')
+                command.extend(["--artifact", str(baseline)])
+            subprocess.run(command, check=True, capture_output=True)
+            verify(root, "1.2.3", "a" * 40, "123", require_linux=True)
+            missing_signature = linux / "CopyPaste-v1.2.3-linux-x86_64.deb.sig"
+            missing_signature.unlink()
+            with self.assertRaisesRegex(ValueError, "qualified artifact is missing"):
+                verify(root, "1.2.3", "a" * 40, "123", require_linux=True)
+
+    def test_linux_architecture_receipts_merge_only_when_their_identity_matches(self):
+        merge = runpy.run_path(str(ROOT / "scripts/release/merge-linux-artifact-receipts.py"))["merge"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            receipts = []
+            for architecture in ("x86_64", "aarch64"):
+                path = root / f"{architecture}.json"
+                path.write_text(json.dumps({
+                    "schema": 2,
+                    "platform": "linux",
+                    "version": "1.2.3",
+                    "commit": "a" * 40,
+                    "run_id": "123",
+                    "artifacts": [{"name": f"CopyPaste-v1.2.3-linux-{architecture}.deb"}],
+                }))
+                receipts.append(path)
+            self.assertEqual(len(merge(receipts)["artifacts"]), 2)
+            invalid = json.loads(receipts[1].read_text())
+            invalid["run_id"] = "124"
+            receipts[1].write_text(json.dumps(invalid))
+            with self.assertRaisesRegex(ValueError, "identity differs"):
+                merge(receipts)
+
+    def test_linux_native_evidence_binds_all_formats_and_desktop_sessions(self):
+        verifier = runpy.run_path(str(ROOT / "scripts/release/verify-linux-native-qualification.py"))
+        verify = verifier["verify"]
+        assertions = verifier["ASSERTIONS"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifacts = root / "artifacts"
+            artifacts.mkdir()
+            for architecture in ("x86_64", "aarch64"):
+                for extension in ("AppImage", "deb", "rpm"):
+                    (artifacts / f"CopyPaste-v1.2.3-linux-{architecture}.{extension}").write_bytes(b"package")
+            package_rows = lambda architecture: [{
+                "name": f"CopyPaste-v1.2.3-linux-{architecture}.{extension}",
+                "sha256": hashlib.sha256(b"package").hexdigest(), "size_bytes": len(b"package"),
+            } for extension in ("AppImage", "deb", "rpm")]
+            for architecture in ("x86_64", "aarch64"):
+                for desktop in ("GNOME", "KDE"):
+                    for session in ("x11", "wayland"):
+                        trace_name = f"linux-native-{architecture}-{desktop.lower()}-{session}.trace.json"
+                        trace = {
+                            "schema": 1, "version": "1.2.3", "commit": "a" * 40,
+                            "source_run_id": "123", "artifact_run_id": "456",
+                            "architecture": architecture, "desktop": desktop, "session": session,
+                            "upgrade_mode": "prior_release",
+                            "commands": [{"argv": ["native-probe"], "returncode": 0, "assertions": sorted(assertions)}],
+                        }
+                        (root / trace_name).write_text(json.dumps(trace), encoding="utf-8")
+                        trace_digest = hashlib.sha256((root / trace_name).read_bytes()).hexdigest()
+                        (root / f"linux-native-{architecture}-{desktop.lower()}-{session}.json").write_text(json.dumps({
+                            "schema": 1, "version": "1.2.3", "commit": "a" * 40,
+                            "source_run_id": "123", "artifact_run_id": "456", "architecture": architecture,
+                            "desktop": desktop, "session": session,
+                            "upgrade_mode": "prior_release",
+                            "assertions": {name: True for name in assertions},
+                            "packages": package_rows(architecture),
+                            "trace": {"name": trace_name, "sha256": trace_digest, "size_bytes": (root / trace_name).stat().st_size},
+                            "evidence": [{"name": trace_name, "sha256": trace_digest, "size_bytes": (root / trace_name).stat().st_size}],
+                        }))
+            verify(root, artifacts, "1.2.3", "a" * 40, "123", "456")
+            broken = root / "linux-native-x86_64-gnome-x11.json"
+            receipt = json.loads(broken.read_text())
+            receipt["assertions"]["package_upgrade"] = "true"
+            broken.write_text(json.dumps(receipt))
+            with self.assertRaisesRegex(ValueError, "assertions are incomplete"):
+                verify(root, artifacts, "1.2.3", "a" * 40, "123", "456")
+
+    def test_linux_native_producer_owns_trace_and_artifact_digests(self):
+        producer = runpy.run_path(str(ROOT / "scripts/release/produce-linux-native-qualification.py"))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("current", "previous"):
+                (root / name).mkdir()
+                for extension in ("AppImage", "deb", "rpm"):
+                    version = "1.2.3" if name == "current" else "1.2.2"
+                    (root / name / f"CopyPaste-v{version}-linux-x86_64.{extension}").write_bytes(name.encode())
+            driver = root / "driver.py"
+            driver.write_text("#!/usr/bin/env python3\nimport json\nprint('COPYPASTE_QUALIFICATION_COMMAND ' + json.dumps({'argv': ['probe'], 'returncode': 0, 'assertions': " + repr(sorted(producer["ASSERTIONS"])) + "}))\n", encoding="utf-8")
+            driver.chmod(0o755)
+            receipt_path = producer["produce"](argparse.Namespace(
+                artifacts=root / "current", previous_artifacts=root / "previous",
+                version="1.2.3", previous_version="1.2.2", architecture="x86_64",
+                desktop="GNOME", session="wayland", commit="a" * 40,
+                source_run_id="123", artifact_run_id="456", driver=driver, output=root / "evidence",
+            ))
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            self.assertEqual(receipt["artifact_run_id"], "456")
+            self.assertEqual(len(receipt["packages"]), 3)
+            self.assertTrue(all(item["size_bytes"] == len(b"current") for item in receipt["packages"]))
+            self.assertEqual(receipt["trace"]["name"], "linux-native-x86_64-gnome-wayland.trace.json")
 
 
 if __name__ == "__main__":
