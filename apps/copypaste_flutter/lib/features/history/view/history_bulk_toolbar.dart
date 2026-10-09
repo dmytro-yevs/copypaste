@@ -17,15 +17,13 @@ class HistoryBulkToolbar extends StatelessWidget {
   Widget build(BuildContext context) {
     final busy = controller.isBulkMutating;
     final hasSelection = controller.bulkSelectedIds.isNotEmpty;
-    return Wrap(
+    final canApply = hasSelection && !busy && !controller.isBulkDragSelecting;
+    final actions = Wrap(
+      alignment: WrapAlignment.end,
       spacing: AppSpacing.sm,
       runSpacing: AppSpacing.sm,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        Semantics(
-          liveRegion: true,
-          child: Text('${controller.bulkSelectedIds.length} selected'),
-        ),
         Tooltip(
           tooltip: (_) => const TooltipContainer(child: Text('Exit selection')),
           child: Semantics(
@@ -47,7 +45,7 @@ class HistoryBulkToolbar extends StatelessWidget {
             child: Button.secondary(
               key: const ValueKey('history-bulk-pin'),
               style: AppTheme.historyToolbarIconStyle,
-              onPressed: busy || !hasSelection
+              onPressed: !canApply
                   ? null
                   : () => unawaited(controller.setBulkPinned(true)),
               child: const Icon(LucideIcons.pin, size: AppIconSize.md),
@@ -62,7 +60,7 @@ class HistoryBulkToolbar extends StatelessWidget {
             child: Button.secondary(
               key: const ValueKey('history-bulk-unpin'),
               style: AppTheme.historyToolbarIconStyle,
-              onPressed: busy || !hasSelection
+              onPressed: !canApply
                   ? null
                   : () => unawaited(controller.setBulkPinned(false)),
               child: const Icon(LucideIcons.pinOff, size: AppIconSize.md),
@@ -78,7 +76,7 @@ class HistoryBulkToolbar extends StatelessWidget {
             child: Button.destructive(
               key: const ValueKey('history-bulk-delete'),
               style: AppTheme.historyToolbarDestructiveIconStyle,
-              onPressed: busy || !hasSelection
+              onPressed: !canApply
                   ? null
                   : () => showHistoryBulkDeleteDialog(
                       context,
@@ -91,6 +89,39 @@ class HistoryBulkToolbar extends StatelessWidget {
           ),
         ),
       ],
+    );
+    final label = '${controller.bulkSelectedIds.length} selected';
+    final count = Semantics(liveRegion: true, child: Text(label));
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final text = TextPainter(
+          text: TextSpan(
+            text: label,
+            style: DefaultTextStyle.of(context).style,
+          ),
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout();
+        final extent = AppTheme.controlHeight(
+          context,
+          minimum: AppControlSize.large,
+        );
+        final minimumWidth = text.width + extent * 4 + AppSpacing.sm * 4;
+        text.dispose();
+        if (constraints.maxWidth >= minimumWidth) {
+          return Row(
+            children: [
+              Expanded(child: count),
+              const Gap(AppSpacing.sm),
+              actions,
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [count, const Gap(AppSpacing.sm), actions],
+        );
+      },
     );
   }
 }
