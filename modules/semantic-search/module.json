@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 5,
   "api_version": 1,
   "id": "copypaste.semantic-search",
   "title": "Semantic Search",
@@ -9,6 +9,7 @@
   "supported_platforms": [
     "macos",
     "windows",
+    "linux",
     "android"
   ],
   "unload_policy": "process",

@@ -1,7 +1,7 @@
 # Supabase Sync
 
-An optional first-party `copypaste.supabase` module for macOS, Android, and
-Windows. CopyPaste works locally and over P2P without this package. The native module
+An optional first-party `copypaste.supabase` module for macOS, Android, Windows,
+and Linux. CopyPaste works locally and over P2P without this package. The native module
 contains no local database or OS keystore implementation; the application
 provides those services through bounded callbacks.
 
@@ -29,10 +29,10 @@ cargo +1.96 build --manifest-path modules/supabase/Cargo.toml --locked --release
 ```
 
 Package it with `scripts/modules/package.py` and the existing release signer.
-`.github/workflows/supabase-module.yml` builds and signs all five targets.
+`.github/workflows/supabase-module.yml` builds and signs all seven targets.
 To publish, dispatch `provider-module.yml` with `module=supabase` and
 `publish=true`. Publication requires production-package native receipts on
-macOS, Windows, and Android, plus the encrypted synchronization fixture on both
+macOS, Windows, Linux x86_64/aarch64, and Android, plus the encrypted synchronization fixture on all
 desktop platforms. The exact production-package scenario verifies host
 callbacks, HTTPS enforcement, signed-out configuration, sign-out, disabling,
 and immediate removal with absence after restart; it does not claim a live
