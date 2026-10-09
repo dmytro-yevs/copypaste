@@ -117,7 +117,14 @@ fn read_png(path: &Path) -> Option<AppIcon> {
 /// The final `take` check is still required because a mutable or virtual file
 /// can change after `metadata` has reported a smaller size.
 fn read_bounded(path: &Path, cap: u64) -> Option<Vec<u8>> {
-    let file = std::fs::File::open(path).ok()?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(rustix::fs::OFlags::NONBLOCK.bits() as i32);
+    }
+    let file = options.open(path).ok()?;
     let metadata = file.metadata().ok()?;
     if !metadata.is_file() || metadata.len() == 0 || metadata.len() > cap {
         return None;
@@ -174,5 +181,39 @@ mod tests {
         .unwrap();
 
         assert!(resolve_from_roots("org.example.Writer", &[root.path().into()]).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn icon_lookup_rejects_a_fifo_without_waiting_for_a_writer() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let root = tempfile::tempdir().unwrap();
+        let pipe = root.path().join("icon.png");
+        assert!(std::process::Command::new("mkfifo")
+            .arg(&pipe)
+            .status()
+            .unwrap()
+            .success());
+        let (sender, receiver) = mpsc::channel();
+        let path = pipe.clone();
+        let reader = std::thread::spawn(move || {
+            sender.send(read_bounded(&path, 64)).unwrap();
+        });
+        let result = receiver.recv_timeout(Duration::from_secs(1));
+        if result.is_err() {
+            // Release a regressed blocking reader so the test never leaves a
+            // worker parked in open(2), even when its assertion fails.
+            use std::os::unix::fs::OpenOptionsExt;
+            let _writer = std::fs::OpenOptions::new()
+                .write(true)
+                .custom_flags(rustix::fs::OFlags::NONBLOCK.bits() as i32)
+                .open(&pipe);
+            reader.join().unwrap();
+        } else {
+            reader.join().unwrap();
+        }
+        assert_eq!(result.unwrap(), None);
     }
 }
