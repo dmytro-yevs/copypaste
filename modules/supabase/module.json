@@ -1,5 +1,5 @@
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "api_version": 1,
   "id": "copypaste.supabase",
   "title": "Supabase Sync",
@@ -9,7 +9,8 @@
   "supported_platforms": [
     "macos",
     "android",
-    "windows"
+    "windows",
+    "linux"
   ],
   "sync_provider": {
     "command": "provider-tick"
