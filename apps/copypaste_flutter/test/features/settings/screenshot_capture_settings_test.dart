@@ -100,17 +100,11 @@ void main() {
         await tester.pump(const Duration(milliseconds: 500));
         expect(port.permissionRequests, 1);
         expect(permission, findsNothing);
-        final sourceAccess = find.byKey(
-          const ValueKey('screenshot-source-access'),
-        );
-        expect(sourceAccess, findsOneWidget);
         expect(settings.screenshotCapture.needsPermission, isFalse);
-        await tester.ensureVisible(sourceAccess);
-        await tester.tap(sourceAccess);
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 500));
-        expect(port.sourceAccessRequests, 1);
-        expect(settings.screenshotCapture.enabled, isTrue);
+        expect(
+          find.byKey(const ValueKey('screenshot-source-access')),
+          findsNothing,
+        );
         await tester.ensureVisible(toggle);
         await tester.tap(toggle);
         await tester.pump();
@@ -145,39 +139,11 @@ void main() {
     expect(calls.last.method, 'setScreenshotCaptureEnabled');
     expect(calls.last.arguments, {'enabled': false});
   });
-
-  test(
-    'optional source access is independent of screenshot permissions',
-    () async {
-      const channel = MethodChannel('test/screenshot-source-access');
-      final messenger =
-          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-      messenger.setMockMethodCallHandler(channel, (call) async {
-        if (call.method == 'openScreenshotSourceAccess') return false;
-        return {
-          'enabled': true,
-          'mediaGranted': true,
-          'notificationGranted': true,
-          'running': true,
-          'sourceAccessGranted': false,
-        };
-      });
-      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
-      const port = MethodChannelScreenshotCapture(channel: channel);
-      expect(await port.openSourceAccess(), isFalse);
-      final status = await port.status();
-      expect(status.sourceAccessGranted, isFalse);
-      expect(status.needsPermission, isFalse);
-      expect(status.enabled, isTrue);
-      expect(status.running, isTrue);
-    },
-  );
 }
 
 class _Capture implements ScreenshotCapture {
   ScreenshotCaptureStatus current = const ScreenshotCaptureStatus();
   int permissionRequests = 0;
-  int sourceAccessRequests = 0;
   bool fail = false;
   @override
   bool get supported => true;
@@ -190,7 +156,6 @@ class _Capture implements ScreenshotCapture {
       enabled: enabled,
       mediaGranted: current.mediaGranted,
       notificationGranted: current.notificationGranted,
-      sourceAccessGranted: current.sourceAccessGranted,
     );
     return current;
   }
@@ -205,11 +170,5 @@ class _Capture implements ScreenshotCapture {
       running: true,
     );
     return current;
-  }
-
-  @override
-  Future<bool> openSourceAccess() async {
-    sourceAccessRequests++;
-    return false;
   }
 }
