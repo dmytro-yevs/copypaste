@@ -20,7 +20,7 @@ def main():
                         help="A locally downloaded ONNX Runtime CPU library.")
     parser.add_argument("--sha256", required=True,
                         help="The published SHA-256 for this exact library file.")
-    parser.add_argument("--platform", required=True, choices=["macos", "windows", "android"])
+    parser.add_argument("--platform", required=True, choices=["macos", "windows", "linux", "android"])
     parser.add_argument("--architecture", required=True, choices=["x86", "x86_64", "arm", "aarch64"])
     parser.add_argument("--destination", type=Path, default=Path("native"))
     args = parser.parse_args()
@@ -30,7 +30,7 @@ def main():
         raise ValueError("--sha256 must be a lowercase SHA-256 digest")
     if sha256(source) != expected:
         raise ValueError("ONNX Runtime checksum mismatch")
-    names = {"macos": "libonnxruntime.dylib", "windows": "onnxruntime.dll", "android": "libonnxruntime.so"}
+    names = {"macos": "libonnxruntime.dylib", "windows": "onnxruntime.dll", "linux": "libonnxruntime.so", "android": "libonnxruntime.so"}
     target = args.destination / args.platform / args.architecture / names[args.platform]
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, target)

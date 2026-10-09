@@ -11,6 +11,14 @@
       "sha256": "abef733dacbe2f571547a7150b479b5cb9cc0df22f96c24983a42cadb1b4f8bc",
       "member": "onnxruntime-win-x64-1.28.0/lib/onnxruntime.dll"
     },
+    "linux": {
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.28.0/onnxruntime-linux-{architecture}-1.28.0.tgz",
+      "sha256": {
+        "x86_64": "a3e1b79d7bb1bf09696ce675f49e4064e6c81f6202b8225624fff0e93f8d6407",
+        "aarch64": "e15ff8b5d85afe6c144d97c6fd432254bf76a219daaf17658087d6ecb3e8f0bb"
+      },
+      "member": "onnxruntime-linux-{architecture}-1.28.0/lib/libonnxruntime.so.1.28.0"
+    },
     "android": {
       "url": "https://repo.maven.apache.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/1.28.0/onnxruntime-android-1.28.0.aar",
       "sha256": "f351a0638696f54b35184290dbc001d66daae17281ad0b548d2c70347d53b8a9"
