@@ -266,7 +266,7 @@ class ModuleCatalogParser {
               ? null
               : Version.parse(artifact['minimum_system_version'] as String);
           validateModuleAssetUri(uri);
-          if (!{'macos', 'windows', 'android'}.contains(platform) ||
+          if (!{'macos', 'windows', 'android', 'linux'}.contains(platform) ||
               !{'x86', 'x86_64', 'arm', 'aarch64'}.contains(architecture) ||
               !targets.add('$platform/$architecture') ||
               !uri.path.endsWith('.cpmodule') ||
@@ -312,6 +312,7 @@ class ModuleCatalogParser {
           'macos' => 'macOS',
           'windows' => 'Windows',
           'android' => 'Android',
+          'linux' => 'Linux',
           _ => 'this system',
         };
         final systemRequirement = minimum == null

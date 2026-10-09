@@ -7,7 +7,8 @@ enum ModuleEventKind { smsReceived }
 enum ModulePlatform {
   macos('macOS'),
   windows('Windows'),
-  android('Android');
+  android('Android'),
+  linux('Linux');
 
   const ModulePlatform(this.label);
   final String label;

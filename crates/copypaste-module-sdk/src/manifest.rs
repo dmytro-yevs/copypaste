@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const MANIFEST_VERSION: u32 = 4;
+pub const MANIFEST_VERSION: u32 = 5;
 
 /// Events are delivered by the host only to explicitly enabled modules.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -35,6 +35,18 @@ pub enum ModulePlatform {
     Macos,
     Windows,
     Android,
+    Linux,
+}
+
+impl ModulePlatform {
+    #[must_use]
+    pub const fn dynamic_library_extension(self) -> &'static str {
+        match self {
+            Self::Macos => "dylib",
+            Self::Windows => "dll",
+            Self::Android | Self::Linux => "so",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -59,6 +71,7 @@ impl ModuleTarget {
             "macos" => ModulePlatform::Macos,
             "windows" => ModulePlatform::Windows,
             "android" => ModulePlatform::Android,
+            "linux" => ModulePlatform::Linux,
             _ => return None,
         };
         let architecture = match std::env::consts::ARCH {
@@ -255,7 +268,9 @@ impl ModuleManifest {
             || self.target != target
             || (self.schema_version >= 2
                 && (self.supported_platforms.is_empty()
-                    || self.supported_platforms.len() > 3
+                    || self.supported_platforms.len() > 4
+                    || (self.schema_version < 5
+                        && self.supported_platforms.contains(&ModulePlatform::Linux))
                     || !self.supported_platforms.contains(&target.platform)
                     || self
                         .supported_platforms
@@ -295,6 +310,10 @@ impl ModuleManifest {
         }
         if !files.contains(&self.entrypoint) {
             return Err("The module entrypoint is missing.".into());
+        }
+        let expected_extension = format!(".{}", self.target.platform.dynamic_library_extension());
+        if !self.entrypoint.ends_with(&expected_extension) {
+            return Err("The module entrypoint does not match its target platform.".into());
         }
         validate_fields(&self.preferences)?;
         if self
@@ -618,5 +637,28 @@ mod tests {
             }
             assert!(module.validate("1.0.6", module.target).is_err());
         }
+    }
+
+    #[test]
+    fn validates_linux_module_targets_and_native_suffixes_from_schema_five() {
+        let mut module = manifest();
+        module.event_handlers.clear();
+        module.schema_version = 5;
+        module.target = ModuleTarget {
+            platform: ModulePlatform::Linux,
+            architecture: ModuleArchitecture::X86_64,
+        };
+        module.supported_platforms = vec![ModulePlatform::Linux];
+        assert!(module.validate("1.0.6", module.target).is_ok());
+        assert_eq!(ModulePlatform::Linux.dynamic_library_extension(), "so");
+
+        module.entrypoint = "bin/module.dylib".into();
+        module.files[0].path = module.entrypoint.clone();
+        assert!(module.validate("1.0.6", module.target).is_err());
+
+        module.entrypoint = "bin/module.so".into();
+        module.files[0].path = module.entrypoint.clone();
+        module.schema_version = 4;
+        assert!(module.validate("1.0.6", module.target).is_err());
     }
 }

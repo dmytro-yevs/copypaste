@@ -26,6 +26,7 @@ pub enum DevicePlatform {
     Android,
     #[default]
     Unknown,
+    Linux,
 }
 
 impl DevicePlatform {
@@ -37,6 +38,8 @@ impl DevicePlatform {
             Self::Windows
         } else if cfg!(target_os = "android") {
             Self::Android
+        } else if cfg!(target_os = "linux") {
+            Self::Linux
         } else {
             Self::Unknown
         }
@@ -49,6 +52,7 @@ impl DevicePlatform {
             Self::Windows => "windows",
             Self::Android => "android",
             Self::Unknown => "unknown",
+            Self::Linux => "linux",
         }
     }
 
@@ -58,6 +62,7 @@ impl DevicePlatform {
             "macos" => Self::Macos,
             "windows" => Self::Windows,
             "android" => Self::Android,
+            "linux" => Self::Linux,
             _ => Self::Unknown,
         }
     }
@@ -290,5 +295,18 @@ mod tests {
         assert!(!presence(DevicePresence::Online, None).is_current_online_at(20));
         assert!(!presence(DevicePresence::Offline, Some(20)).is_current_online_at(20));
         assert!(!presence(DevicePresence::Unknown, Some(20)).is_current_online_at(20));
+    }
+
+    #[test]
+    fn linux_platform_has_a_stable_wire_name_and_unknown_values_stay_unknown() {
+        assert_eq!(DevicePlatform::Linux.wire_name(), "linux");
+        assert_eq!(
+            DevicePlatform::from_wire_name("linux"),
+            DevicePlatform::Linux
+        );
+        assert_eq!(
+            DevicePlatform::from_wire_name("future_platform"),
+            DevicePlatform::Unknown
+        );
     }
 }
