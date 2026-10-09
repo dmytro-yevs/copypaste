@@ -10,10 +10,6 @@ internal fun captureGrantCommands(packageName: String): List<List<String>> = lis
 )
 
 internal fun adbCaptureGrantCommands(packageName: String): List<String> =
-    (captureGrantCommands(packageName) + screenshotSourceGrantCommands(packageName)).map { command ->
+    captureGrantCommands(packageName).map { command ->
         (listOf("adb", "shell") + command).joinToString(" ")
     }
-
-internal fun screenshotSourceGrantCommands(packageName: String): List<List<String>> = listOf(
-    listOf("cmd", "appops", "set", packageName, "GET_USAGE_STATS", "allow"),
-)

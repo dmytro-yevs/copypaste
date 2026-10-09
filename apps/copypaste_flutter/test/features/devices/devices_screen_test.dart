@@ -1042,6 +1042,12 @@ void main() {
       'enter-pairing-code',
     ]) {
       expect(find.byKey(ValueKey<String>(key)), findsOneWidget);
+      final size = tester.getSize(find.byKey(ValueKey<String>(key)));
+      expect(
+        size.width,
+        closeTo(size.height, 0.01),
+        reason: '$key must be square',
+      );
     }
     expect(find.text('Pair device'), findsNothing);
     expect(

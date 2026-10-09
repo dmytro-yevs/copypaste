@@ -289,11 +289,11 @@ internal object AndroidClipboardReader {
         return try { pending.read("image/png") { action() } } finally { pending.cleanup() }
     }
 
-    fun captureScreenshot(context: Context, host: Host, uri: Uri, type: String, takenAt: Long): Boolean {
+    fun captureScreenshot(context: Context, host: Host, uri: Uri, type: String, displayName: String): Boolean {
         if (!ScreenshotCaptureState.enabled(context) || !ScreenshotCaptureState.mediaGranted(context)) return false
         val pending = begin(host) ?: return false
         return try {
-            val saved = binary(context, pending, uri, type, mediaAccess = true, takenAt = takenAt)
+            val saved = binary(context, pending, uri, type, mediaAccess = true, sourceDisplayName = displayName)
             if (saved) NativeRuntimeCapture.scoped(pending.token, true, "image/png") {
                 AndroidCaptureFeedback.onCaptured(context, null)
             }
@@ -319,7 +319,7 @@ internal object AndroidClipboardReader {
         return null
     }
 
-    private fun binary(context: Context, pending: Pending, uri: Uri, declaredType: String, mediaAccess: Boolean = false, takenAt: Long = 0): Boolean {
+    private fun binary(context: Context, pending: Pending, uri: Uri, declaredType: String, mediaAccess: Boolean = false, sourceDisplayName: String = ""): Boolean {
         if (uri.scheme != "content" || !mimeType.matches(declaredType) || declaredType.startsWith("text/")) return false
         var bytes: ByteArray? = null
         var sourceApp: ScreenshotSourceApp? = null
@@ -338,7 +338,7 @@ internal object AndroidClipboardReader {
             } ?: return@read
             if (!pending.reading()) return@read
             bytes = if (declaredType.startsWith("image/")) normaliseImage(source, cap, pending) else source
-            if (mediaAccess) sourceApp = ScreenshotSourceApps.resolve(context, takenAt)
+            if (mediaAccess) sourceApp = ScreenshotSourceApps.resolve(context, sourceDisplayName)
         }
         val payload = bytes ?: return false
         if (!read) return false
