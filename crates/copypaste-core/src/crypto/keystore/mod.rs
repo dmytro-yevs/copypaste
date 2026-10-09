@@ -1,6 +1,6 @@
 //! Where the device secret lives, per platform.
 //!
-//! Four backends — `macos.rs`, `android.rs`, `windows.rs`, `file.rs` — selected
+//! Five backends — `macos.rs`, `linux.rs`, `android.rs`, `windows.rs`, `file.rs` — selected
 //! by platform and build mode, behind the load/create policy in this module.
 //!
 //! # The rule every backend obeys
@@ -71,6 +71,13 @@ pub(super) enum Lookup {
 #[path = "macos.rs"]
 mod backend;
 
+// Debug Linux uses the durable development file backend, as debug macOS does.
+// A release Linux build must have a session Secret Service: falling back to a
+// plaintext file would silently weaken a package installed by the user.
+#[cfg(all(target_os = "linux", not(debug_assertions)))]
+#[path = "linux.rs"]
+mod backend;
+
 #[cfg(target_os = "android")]
 #[path = "android.rs"]
 mod backend;
@@ -81,7 +88,13 @@ mod backend;
 
 #[cfg(any(
     all(target_os = "macos", debug_assertions),
-    not(any(target_os = "macos", target_os = "android", target_os = "windows"))
+    all(target_os = "linux", debug_assertions),
+    not(any(
+        target_os = "macos",
+        target_os = "linux",
+        target_os = "android",
+        target_os = "windows"
+    ))
 ))]
 #[path = "file.rs"]
 mod backend;
@@ -93,6 +106,15 @@ mod backend;
 #[path = "android.rs"]
 #[allow(dead_code)]
 mod android;
+
+/// The Linux backend again, compiled but *not selected*, so a macOS developer
+/// can type-check the exact Secret Service calls without a Linux toolchain or
+/// a connection to their own keyring. The feature only adds code to a local
+/// validation build; shipped Linux packages use `backend` above.
+#[cfg(all(not(target_os = "linux"), feature = "linux-keystore-typecheck"))]
+#[path = "linux.rs"]
+#[allow(dead_code)]
+mod linux;
 
 /// Read the backend without making a mint decision.
 pub(super) fn lookup_secret(data_dir: &Path) -> Result<Lookup, CryptoError> {
@@ -163,7 +185,13 @@ mod tests {
     /// on disk is sealed.
     #[cfg(any(
         all(target_os = "macos", debug_assertions),
-        not(any(target_os = "macos", target_os = "android", target_os = "windows"))
+        all(target_os = "linux", debug_assertions),
+        not(any(
+            target_os = "macos",
+            target_os = "linux",
+            target_os = "android",
+            target_os = "windows"
+        ))
     ))]
     mod mint_authorisation {
         use super::*;

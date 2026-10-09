@@ -54,6 +54,10 @@ tempfile.workspace = true
 # which is the mistake the macOS keychain shipped for a year.
 keyring-core = { version = "1", optional = true }
 android-native-keyring-store = { version = "1", optional = true }
+# Kept optional here solely so `--features linux-keystore-typecheck` can
+# compile the production Linux backend on a macOS development host. Linux
+# packages select the target-table dependency below unconditionally.
+secret-service = { version = "5.2", default-features = false, features = ["rt-tokio-crypto-rust"], optional = true }
 
 # Local import descriptors must not block while rejecting FIFOs and devices.
 [target.'cfg(unix)'.dependencies]
@@ -96,6 +100,13 @@ objc2.workspace = true
 security-framework.workspace = true
 sysctl = "0.7"
 
+# Linux desktop secret backend.  GNOME Keyring and KWallet both implement the
+# FreeDesktop Secret Service API; this maintained Rust client talks to it over
+# the session bus without a libdbus system dependency.  The blocking module
+# matches the synchronous startup contract in `crypto::keys`.
+[target.'cfg(target_os = "linux")'.dependencies]
+secret-service = { version = "5.2", default-features = false, features = ["rt-tokio-crypto-rust"] }
+
 # Android Keystore backend for the device secret, target-gated for the same
 # reason. `android-native-keyring-store` wraps the secret with an AES-GCM key
 # held in the Android Keystore and keeps the blob in app-private
@@ -132,6 +143,10 @@ dev-ephemeral-key = []
 # exists so that code is type-checked somewhere rather than being dead text on
 # every machine this project is built on.
 android-keystore-typecheck = ["dep:keyring-core", "dep:android-native-keyring-store"]
+# Compile `crypto/keystore/linux.rs` on a non-Linux host without selecting it
+# as the active backend. This makes the Secret Service API contract testable
+# without ever connecting to the developer's actual session keyring.
+linux-keystore-typecheck = ["dep:secret-service"]
 
 [dev-dependencies]
 # Benchmark harness (AGENTS.md rule 1 — the alternative was a hand-rolled timing
