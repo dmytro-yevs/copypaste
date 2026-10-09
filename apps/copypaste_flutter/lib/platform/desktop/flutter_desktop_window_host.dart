@@ -229,7 +229,7 @@ class FlutterDesktopWindowHost
         }
       });
       trayListener = icon.addListener((event) {
-        if (Platform.isWindows &&
+        if ((Platform.isWindows || Platform.isLinux) &&
             (event is TrayIconClickedEvent ||
                 event is TrayIconDoubleClickedEvent)) {
           unawaited(onOpenRequested());

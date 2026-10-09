@@ -40,6 +40,7 @@ class PlatformCaptureNotificationPort implements CaptureNotificationPort {
           appUserModelId: 'com.copypaste.app',
           guid: 'f112c130-c009-4a8c-b95a-16608410ce76',
         ),
+        linux: LinuxInitializationSettings(defaultActionName: 'Open'),
       ),
     );
     _initialized = true;
@@ -62,7 +63,7 @@ class PlatformCaptureNotificationPort implements CaptureNotificationPort {
               ?.requestPermissions(alert: true, badge: false, sound: false) ??
           false;
     }
-    return Platform.isWindows;
+    return Platform.isWindows || Platform.isLinux;
   }
 
   @override
@@ -100,6 +101,10 @@ class PlatformCaptureNotificationPort implements CaptureNotificationPort {
           images: imagePath == null
               ? const []
               : [WindowsImage(Uri.file(imagePath), altText: preview!.text)],
+        ),
+        linux: LinuxNotificationDetails(
+          icon: imagePath == null ? null : FilePathLinuxIcon(imagePath),
+          suppressSound: true,
         ),
       ),
     );
