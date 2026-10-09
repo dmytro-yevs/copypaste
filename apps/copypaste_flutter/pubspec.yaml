@@ -35,8 +35,6 @@ dependencies:
   mime: 2.1.0
 
 dependency_overrides:
-  camera_desktop:
-    path: third_party/camera_desktop
   hotkey_manager_windows:
     path: third_party/hotkey_manager_windows
   hotkey_manager_macos:
