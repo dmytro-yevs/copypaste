@@ -57,6 +57,13 @@ pub trait ClipboardWriter: Send + Sync {
     ) -> Result<(), ClipboardWriteError>;
 }
 
+/// Optional application identity captured by a native host with the payload.
+pub struct CaptureSourceApp {
+    pub bundle_id: String,
+    pub name: Option<String>,
+    pub icon: Option<copypaste_core::SourceAppIconMetadata>,
+}
+
 #[derive(Clone)]
 struct ItemOrigin {
     device_id: String,
@@ -772,6 +779,7 @@ impl Runtime {
                     content_type,
                     filename,
                     source_reference,
+                    None,
                 );
                 self.capture_admission().abandon(token);
                 result
@@ -787,6 +795,7 @@ impl Runtime {
         content_type: &str,
         filename: Option<&str>,
         source_reference: Option<&str>,
+        source_app: Option<&CaptureSourceApp>,
     ) -> Result<(), RuntimeError> {
         let mut permit = self
             .capture_admission()
@@ -809,18 +818,20 @@ impl Runtime {
         let metadata = copypaste_core::PayloadMetadata {
             privacy: permit.privacy,
             file: metadata,
-            source_app_icon: None,
+            source_app_icon: source_app.and_then(|source| source.icon.clone()),
         };
-        let metadata =
-            (!metadata.privacy.is_empty() || metadata.file.is_some()).then_some(metadata);
+        let metadata = (!metadata.privacy.is_empty()
+            || metadata.file.is_some()
+            || metadata.source_app_icon.is_some())
+        .then_some(metadata);
         let ingested = copypaste_core::ingest_binary_into_with_capture_source_metadata(
             &self.store,
             &self.keyring,
             bytes,
             stored_type,
             now_ms(),
-            None,
-            None,
+            source_app.map(|source| source.bundle_id.as_str()),
+            source_app.and_then(|source| source.name.as_deref()),
             metadata.as_ref(),
             settings,
         )
@@ -2282,6 +2293,67 @@ mod tests {
     }
 
     #[test]
+    fn screenshot_capture_saves_available_source_fields_and_allows_missing_attribution() {
+        let png = STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=").unwrap();
+        for source in [
+            None,
+            Some(CaptureSourceApp {
+                bundle_id: "com.example.editor".into(),
+                name: None,
+                icon: None,
+            }),
+            Some(CaptureSourceApp {
+                bundle_id: "com.example.editor".into(),
+                name: Some("Editor".into()),
+                icon: copypaste_core::SourceAppIconMetadata::new(&png, 1, 1),
+            }),
+        ] {
+            let (runtime, _dir) = fixture();
+            let host = runtime
+                .capture_admission()
+                .open_host(CaptureKind::Implicit)
+                .unwrap();
+            let token = runtime
+                .capture_admission()
+                .begin(host, Arc::new(|| {}))
+                .unwrap();
+            runtime
+                .capture_binary_operation(token, &png, "image/png", None, None, source.as_ref())
+                .unwrap();
+            let row = runtime.store.list(1, 0).unwrap().pop().unwrap();
+            assert_eq!(
+                row.app_bundle_id.as_deref(),
+                source.as_ref().map(|source| source.bundle_id.as_str())
+            );
+            assert_eq!(
+                row.app_name.as_deref(),
+                source.as_ref().and_then(|source| source.name.as_deref())
+            );
+            assert_eq!(&*runtime.source.open_bytes(&row).unwrap(), &png);
+            let item = match runtime.item(1, &row.id).data {
+                Some(ResponseData::Item(item)) => item,
+                other => panic!("{other:?}"),
+            };
+            assert_eq!(
+                item.source_app_icon_id.is_some(),
+                source.as_ref().is_some_and(|source| source.icon.is_some())
+            );
+            if let Some(icon_id) = item.source_app_icon_id {
+                assert_eq!(
+                    runtime
+                        .store
+                        .source_app_icon_by_id(&icon_id)
+                        .unwrap()
+                        .unwrap()
+                        .png()
+                        .unwrap(),
+                    png
+                );
+            }
+        }
+    }
+
+    #[test]
     fn a_captured_file_keeps_its_uri_and_copy_writes_that_reference() {
         let clipboard = Arc::new(RecordingClipboard::default());
         let (runtime, dir) = fixture_with(clipboard.clone());
@@ -2336,6 +2408,7 @@ mod tests {
                                 "application/pdf",
                                 Some("paper.pdf"),
                                 Some("content://documents/paper.pdf"),
+                                None,
                             )
                         } else {
                             runtime.capture_text_operation(token, "barrier text")
@@ -2379,6 +2452,7 @@ mod tests {
                                 "application/pdf",
                                 Some("paper.pdf"),
                                 Some("content://documents/paper.pdf"),
+                                None,
                             )
                         } else {
                             worker_runtime.capture_text_operation(token, "barrier text")
@@ -2438,7 +2512,7 @@ mod tests {
             .begin(host, Arc::new(|| {}))
             .unwrap();
         assert!(runtime
-            .capture_binary_operation(failed, b"file", "application/pdf", None, None)
+            .capture_binary_operation(failed, b"file", "application/pdf", None, None, None)
             .is_err());
         assert!(runtime
             .capture_admission()
@@ -2597,8 +2671,21 @@ mod tests {
         let running_manual_round = sender.peer_sync.rounds.enter().await;
         sender.capture_text("automatic clipboard text").unwrap();
         let png = STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=").unwrap();
+        let source = CaptureSourceApp {
+            bundle_id: "com.example.editor".into(),
+            name: Some("Editor".into()),
+            icon: copypaste_core::SourceAppIconMetadata::new(&png, 1, 1),
+        };
+        let host = sender
+            .capture_admission()
+            .open_host(CaptureKind::Implicit)
+            .unwrap();
+        let capture = sender
+            .capture_admission()
+            .begin(host, Arc::new(|| {}))
+            .unwrap();
         sender
-            .capture_binary(&png, "image/png", None, None)
+            .capture_binary_operation(capture, &png, "image/png", None, None, Some(&source))
             .unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
         drop(running_manual_round);
@@ -2617,6 +2704,18 @@ mod tests {
             .find(|row| row.content_type == "image/png")
             .unwrap();
         assert_eq!(&*receiver.source.open_bytes(&row).unwrap(), &png);
+        assert_eq!(row.app_bundle_id.as_deref(), Some("com.example.editor"));
+        assert_eq!(row.app_name.as_deref(), Some("Editor"));
+        assert_eq!(
+            receiver
+                .store
+                .source_app_icon_by_id(row.source_icon_id.as_deref().unwrap())
+                .unwrap()
+                .unwrap()
+                .png()
+                .unwrap(),
+            png
+        );
         assert_eq!(
             receiver.store.count().unwrap(),
             sender.store.count().unwrap()

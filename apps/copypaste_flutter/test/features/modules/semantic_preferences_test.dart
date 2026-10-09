@@ -83,8 +83,13 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Preferences'));
-        await tester.pumpAndSettle();
+        expect(find.text('Search languages'), findsOneWidget);
+        expect(find.widgetWithText(Button, 'Preferences'), findsNothing);
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(
+          tester.widget<Button>(find.widgetWithText(Button, 'Save')).onPressed,
+          isNull,
+        );
         await tester.tap(
           find.byKey(const ValueKey('module-choices-languages')),
         );
@@ -106,6 +111,13 @@ void main() {
         await tester.tap(find.text('Save'));
         await tester.pumpAndSettle();
         expect(repository.lastPreferences?['languages'], ['en', 'uk']);
+        expect(
+          find.byKey(
+            const ValueKey('module-settings-drawer-copypaste.semantic-search'),
+          ),
+          findsOneWidget,
+        );
+        expect(find.byType(AlertDialog), findsNothing);
         expect(tester.takeException(), isNull);
       },
       variant: TargetPlatformVariant({platform}),

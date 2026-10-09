@@ -1261,8 +1261,10 @@ void main() {
   testWidgets('opens a selected clip in a full-width bottom drawer', (
     tester,
   ) async {
-    await tester.binding.setSurfaceSize(const Size(480, 800));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(480, 800);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final repository = _ScreenRepository()
       ..page = HistoryClipPage(
         items: [
@@ -1683,8 +1685,10 @@ void main() {
     expect(searchButton, findsOneWidget);
     expect(
       find.byWidgetPredicate((widget) => widget is Select),
-      findsNWidgets(5),
+      findsNWidgets(4),
     );
+    expect(find.bySemanticsLabel('All pins'), findsNothing);
+    expect(find.bySemanticsLabel('Pinned only'), findsNothing);
     final controlHeight = tester.getSize(searchButton).height;
     expect(controlHeight, greaterThanOrEqualTo(AppControlSize.large));
     for (final control in controls) {
@@ -1713,16 +1717,95 @@ void main() {
   });
 
   testWidgets(
+    'compact search replaces all actions and keeps their height',
+    (tester) async {
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      for (final width in [320.0, 390.0]) {
+        await tester.binding.setSurfaceSize(Size(width, 800));
+        for (final scale in [1.0, 1.5, 2.0]) {
+          final controller = HistoryController(_ScreenRepository());
+          addTearDown(controller.dispose);
+          await tester.pumpWidget(
+            ShadcnApp(
+              theme: AppTheme.light,
+              builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: TextScaler.linear(scale)),
+                child: Builder(
+                  builder: (context) => AppTheme.builder(context, child),
+                ),
+              ),
+              home: HistoryScreen(key: UniqueKey(), controller: controller),
+            ),
+          );
+          await tester.pumpAndSettle();
+
+          final searchToggle = find.byKey(
+            const ValueKey<String>('history-search-toggle'),
+          );
+          final actionHeight = tester.getSize(searchToggle).height;
+          final selection = find.byKey(const ValueKey('history-select-clips'));
+          expect(
+            tester.getRect(selection).right,
+            lessThan(tester.getRect(searchToggle).left),
+          );
+          final toolbarWidth = width - AppSpacing.lg * 2;
+          await tester.tap(searchToggle);
+          await tester.pumpAndSettle();
+
+          final searchField = find.byType(TextField);
+          expect(
+            tester.getSize(searchField).height,
+            closeTo(actionHeight, 0.01),
+            reason: 'Width $width, text scale $scale',
+          );
+          expect(tester.getSize(searchField).width, toolbarWidth);
+          expect(selection, findsNothing);
+          expect(
+            find.byKey(const ValueKey<String>('history-import-files')),
+            findsNothing,
+          );
+          expect(
+            find.byWidgetPredicate((widget) => widget is Select),
+            findsNothing,
+          );
+          await tester.enterText(searchField, 'Example');
+          await tester.pump(const Duration(milliseconds: 300));
+          expect(controller.query.search, 'Example');
+          await tester.tap(find.bySemanticsLabel('Close search'));
+          await tester.pump(const Duration(milliseconds: 300));
+          await tester.pumpAndSettle();
+
+          expect(controller.query.search, isEmpty);
+          expect(searchToggle, findsOneWidget);
+          expect(selection, findsOneWidget);
+          expect(
+            find.byWidgetPredicate((widget) => widget is Select),
+            findsNWidgets(4),
+          );
+          expect(tester.takeException(), isNull);
+        }
+      }
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+      TargetPlatform.android,
+    }),
+  );
+
+  testWidgets(
     'keeps the expanded search field at least 160 pixels wide beside all toolbar actions',
     (tester) async {
-      await tester.binding.setSurfaceSize(const Size(528, 800));
+      await tester.binding.setSurfaceSize(const Size(480, 800));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final controller = HistoryController(_ScreenRepository());
       addTearDown(controller.dispose);
       await tester.pumpWidget(
         ShadcnApp(
           home: SizedBox(
-            width: 528,
+            width: 480,
             height: 800,
             child: HistoryScreen(controller: controller),
           ),
@@ -1733,7 +1816,18 @@ void main() {
       final searchField = find.byType(TextField);
       expect(searchField, findsOneWidget);
       expect(tester.getSize(searchField).width, 160);
+      expect(
+        tester
+            .getRect(find.byKey(const ValueKey('history-select-clips')))
+            .right,
+        lessThan(tester.getRect(searchField).left),
+      );
     },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+      TargetPlatform.android,
+    }),
   );
 
   testWidgets(
@@ -1786,7 +1880,7 @@ void main() {
             tester
                 .getSize(find.byKey(const ValueKey('history-select-clips')))
                 .width +
-            (AppSpacing.sm * 7) +
+            (AppSpacing.sm * 6) +
             (AppSpacing.lg * 2);
         for (final width in [breakpoint + 1, breakpoint, breakpoint - 1]) {
           await tester.binding.setSurfaceSize(Size(width, 800));
@@ -2033,7 +2127,9 @@ void main() {
     final selectFinder = find.byWidgetPredicate(
       (widget) => widget is Select<dynamic>,
     );
-    expect(selectFinder, findsNWidgets(5));
+    expect(selectFinder, findsNWidgets(4));
+    expect(find.bySemanticsLabel('All pins'), findsNothing);
+    expect(find.bySemanticsLabel('Pinned only'), findsNothing);
     for (final select in tester.widgetList<Select<dynamic>>(selectFinder)) {
       expect(select.filled, isTrue);
       final selectContext = tester.element(find.byWidget(select));

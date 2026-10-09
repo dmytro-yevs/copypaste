@@ -1,5 +1,7 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../../shared/adaptive_breakpoints.dart';
+
 import 'app_motion.dart';
 import 'app_theme.dart';
 import 'app_tokens.dart';
@@ -10,7 +12,7 @@ import 'app_tokens.dart';
 abstract final class AppOverlays {
   static const Color scrimColor = Color(0x99000000);
 
-  static const DrawerConfiguration bottomDrawerConfiguration =
+  static const DrawerConfiguration _bottomDrawerConfiguration =
       DrawerConfiguration(
         position: OverlayPosition.bottom,
         expands: true,
@@ -28,13 +30,39 @@ abstract final class AppOverlays {
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
       );
 
-  static BoxConstraints drawerContentConstraints(BuildContext context) =>
-      BoxConstraints.tightFor(
-        width: double.infinity,
-        height:
-            MediaQuery.sizeOf(context).height *
-            AppOverlaySize.drawerHeightFactor,
+  static const DrawerConfiguration _sideDrawerConfiguration =
+      DrawerConfiguration(
+        position: OverlayPosition.right,
+        expands: true,
+        draggable: false,
+        barrierDismissible: true,
+        transformBackdrop: false,
+        showDragHandle: false,
+        surfaceOpacity: 1,
+        surfaceBlur: 0,
+        barrierColor: scrimColor,
+        borderRadius: BorderRadius.horizontal(
+          left: Radius.circular(AppRadius.xl),
+        ),
       );
+
+  static DrawerConfiguration drawerConfiguration(BuildContext context) =>
+      MediaQuery.sizeOf(context).width >= AdaptiveBreakpoints.inspector
+      ? _sideDrawerConfiguration
+      : _bottomDrawerConfiguration;
+
+  static BoxConstraints drawerContentConstraints(BuildContext context) =>
+      MediaQuery.sizeOf(context).width >= AdaptiveBreakpoints.inspector
+      ? const BoxConstraints.tightFor(
+          width: AppOverlaySize.drawerPanelWidth,
+          height: double.infinity,
+        )
+      : BoxConstraints.tightFor(
+          width: double.infinity,
+          height:
+              MediaQuery.sizeOf(context).height *
+              AppOverlaySize.drawerHeightFactor,
+        );
 
   static PopoverConfiguration selectPopoverConfiguration(
     BuildContext context, {

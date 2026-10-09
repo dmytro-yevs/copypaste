@@ -61,5 +61,6 @@ internal object ScreenshotCaptureState {
         "mediaGranted" to mediaGranted(context),
         "notificationGranted" to AndroidCaptureState.notificationGranted(context),
         "running" to ScreenshotCaptureService.isRunning(),
+        "sourceAccessGranted" to ScreenshotSourceApps.accessGranted(context),
     )
 }

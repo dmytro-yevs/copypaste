@@ -11,6 +11,7 @@ copypaste-fs = { path = "../copypaste-fs" }
 copypaste-ipc = { path = "../copypaste-ipc" }
 chacha20poly1305.workspace = true
 snow.workspace = true
+spake2 = "0.4"
 mdns-sd.workspace = true
 os_info.workspace = true
 data-encoding.workspace = true

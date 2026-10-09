@@ -355,6 +355,9 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestBinary(
     content_type: JObject,
     filename: JObject,
     source_reference: JObject,
+    source_package_name: JObject,
+    source_name: JObject,
+    source_icon: JByteArray,
 ) -> jboolean {
     if token <= 0 {
         return JNI_FALSE;
@@ -379,6 +382,37 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestBinary(
     let content_type = content_type.to_string_lossy().into_owned();
     let filename = filename.to_string_lossy().into_owned();
     let source_reference = source_reference.to_string_lossy().into_owned();
+    // Optional metadata cannot prevent the image from being saved.
+    let source_app = (|| {
+        let package_name = env.get_string((&source_package_name).into()).ok()?;
+        let package_name = package_name.to_string_lossy().into_owned();
+        if package_name.is_empty()
+            || package_name.len() > 255
+            || !package_name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"._".contains(&byte))
+        {
+            return None;
+        }
+        let name = env
+            .get_string((&source_name).into())
+            .ok()
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| !name.is_empty() && name.len() <= 1024 && !name.contains('\0'));
+        let icon = env
+            .get_array_length(&source_icon)
+            .ok()
+            .filter(|length| {
+                *length > 0 && *length as usize <= copypaste_ipc::MAX_SOURCE_APP_ICON_BYTES
+            })
+            .and_then(|_| env.convert_byte_array(&source_icon).ok())
+            .and_then(|png| copypaste_core::SourceAppIconMetadata::new(&png, 64, 64));
+        Some(copypaste_runtime::CaptureSourceApp {
+            bundle_id: package_name,
+            name,
+            icon,
+        })
+    })();
     drop(read);
     if runtime
         .capture_binary_operation(
@@ -387,6 +421,7 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestBinary(
             &content_type,
             (!filename.is_empty()).then_some(filename.as_str()),
             (!source_reference.is_empty()).then_some(source_reference.as_str()),
+            source_app.as_ref(),
         )
         .is_ok()
     {
