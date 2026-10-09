@@ -360,7 +360,7 @@ void main() {
     TargetPlatform.iOS:
         'Application exclusions are supported on macOS, Windows, and Android.',
     TargetPlatform.linux:
-        'Application exclusions are supported on macOS, Windows, and Android.',
+        'Skip automatic capture from identified clipboard owners. Capture is paused when exclusions are set and the source cannot be identified.',
     TargetPlatform.fuchsia:
         'Application exclusions are supported on macOS, Windows, and Android.',
   }.entries) {
