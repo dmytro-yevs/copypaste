@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 /// Platform claimed by the device profile.
-enum DevicePlatform { macos, windows, android, unknown }
+enum DevicePlatform { macos, windows, android, unknown, linux }
 
 /// Device form factor claimed by the device profile.
 enum DeviceClass { desktop, laptop, phone, tablet, unknown }

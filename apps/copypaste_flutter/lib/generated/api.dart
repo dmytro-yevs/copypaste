@@ -797,7 +797,7 @@ enum DeviceObservationProvenance { selfReported, observed, measured }
 
 enum DeviceObservationTrust { local, unverified, authenticated }
 
-enum DevicePlatform { macos, windows, android, unknown }
+enum DevicePlatform { macos, windows, android, unknown, linux }
 
 class DevicePresence {
   final DevicePresenceState state;
