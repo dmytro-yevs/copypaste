@@ -79,7 +79,7 @@ void main() {
       'pairing drawer pins ${confirm ? 'confirmation' : 'join'} actions while scrolling',
       (tester) async {
         if (confirm) {
-          tester.platformDispatcher.textScaleFactorTestValue = 1.6;
+          tester.platformDispatcher.textScaleFactorTestValue = 2.0;
           addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
         }
         final gateway = _ScreenGateway();
