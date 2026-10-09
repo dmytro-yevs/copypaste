@@ -1,6 +1,7 @@
 //! The secure channel between two paired devices: mutually authenticated,
 //! forward secret and message oriented, over TCP, built from a 256-bit pairing
-//! token. Why `NNpsk0` rather than TLS or a PAKE is argued in [`handshake`].
+//! token. Short invitation codes authenticate a separate SPAKE2 bootstrap
+//! before the full token is transferred inside a Noise channel.
 //!
 //! Rules this module holds itself to:
 //!
@@ -20,6 +21,8 @@
 
 mod error;
 mod handshake;
+mod pairing_bootstrap;
+mod pairing_code;
 mod session;
 mod token;
 
@@ -28,5 +31,7 @@ mod testutil;
 
 pub use error::TransportError;
 pub use handshake::{HANDSHAKE_TIMEOUT, NOISE_PARAMS};
+pub(crate) use pairing_bootstrap::PairingCandidate;
+pub use pairing_code::PairingCode;
 pub use session::{Session, MAX_MESSAGE_BYTES, MAX_NOISE_MESSAGE};
 pub use token::{PairingToken, PskCandidate, TOKEN_LEN};

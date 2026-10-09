@@ -6,8 +6,12 @@ import kotlin.system.exitProcess
 // Shizuku instantiates this service through reflection in its privileged process.
 @Keep
 class ShizukuGrantService : IShizukuGrantService.Stub() {
-    override fun applyCaptureGrants(packageName: String): Boolean =
-        captureGrantCommands(packageName).all(::runCommand)
+    override fun applyCaptureGrants(packageName: String): Boolean {
+        val applied = captureGrantCommands(packageName).all(::runCommand)
+        // Source attribution is optional and cannot invalidate capture setup.
+        if (applied) screenshotSourceGrantCommands(packageName).forEach { runCommand(it) }
+        return applied
+    }
 
     override fun applySmsGrants(packageName: String, userId: Int, otpSupported: Boolean): Boolean =
         smsGrantCommands(packageName, userId, otpSupported).all(::runCommand)

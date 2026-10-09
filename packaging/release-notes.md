@@ -1,11 +1,10 @@
-This hotfix completes History bulk selection across macOS, Android, and Windows.
+Improve pairing, History controls, Android screenshot capture, and module settings.
 
-- Use Shift to select a visible range and Ctrl or Cmd to toggle individual clips.
-- Press Delete or Backspace to delete selected clips with confirmation.
-- Hold and drag to select ranges, with mouse-wheel scrolling, edge auto-scroll, and continued selection across loaded pages.
-- Keep selection actions aligned to the right on mobile, including at larger text sizes.
-- Keep screenshot and image previews inside their own rows in selection mode.
-- Preserve pinned reordering, confidential spoilers, and the mobile navigation clearance.
+- Use eight-character pairing codes and automatically refresh expired invitations.
+- Open drawers on the right on large screens and keep compact search full-width at the action-button height.
+- Simplify History filters and synchronization details, with device-type icons and clearer pairing actions.
+- Improve Android screenshot capture and source application metadata.
+- Edit module preferences, language selection, and model setup through shared settings controls.
 
 Optional modules remain available from Settings. OCR engines and models are not bundled with the application.
 

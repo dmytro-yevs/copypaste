@@ -14,7 +14,8 @@ use super::{placeholder_name, Node, NodeError};
 use crate::peers::{Peer, MAX_PAIRINGS};
 use crate::protocol::{MAX_DEVICE_NAME_BYTES, MAX_ID_BYTES, MAX_LISTEN_ADDR_BYTES};
 use crate::sync::SyncSource;
-use crate::transport::{PairingToken, PskCandidate, Session, TOKEN_LEN};
+use crate::transport::{PairingCandidate, PairingCode};
+use crate::transport::{PairingToken, Session, TOKEN_LEN};
 use crate::DeviceProfile;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -53,14 +54,30 @@ impl Node {
         addr: &str,
         source: &S,
     ) -> Result<PairingStatus, NodeError> {
-        let token = PairingToken::parse(code).map_err(|_| NodeError::BadCode)?;
-        let pairing_id = token.pairing_id();
+        let short_code = PairingCode::parse(code).ok();
+        let legacy_token = if short_code.is_none() {
+            Some(PairingToken::parse(code).map_err(|_| NodeError::BadCode)?)
+        } else {
+            None
+        };
+        let pairing_id = legacy_token
+            .as_ref()
+            .map(PairingToken::pairing_id)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
         if self.peers.get(&pairing_id).is_none() && self.peers.len() >= MAX_PAIRINGS {
             return Err(NodeError::TooManyPairings);
         }
         let addr = resolve(addr).await.ok_or(NodeError::BadAddress)?;
         let control = self.pairing.begin_join(pairing_id.clone())?;
-        let session = Session::connect(addr, &token.psk()).await.map_err(|_| {
+        let connected = if let Some(code) = short_code {
+            Session::connect_pairing(addr, &code).await
+        } else {
+            let token = legacy_token.ok_or(NodeError::BadCode)?;
+            Session::connect(addr, &token.psk())
+                .await
+                .map(|session| (session, token))
+        };
+        let (session, token) = connected.map_err(|_| {
             self.pairing.finish(
                 &pairing_id,
                 PairingPhase::Failed,
@@ -68,6 +85,9 @@ impl Node {
             );
             NodeError::Handshake
         })?;
+        let actual_id = token.pairing_id();
+        self.pairing.bind_join_id(&pairing_id, &actual_id)?;
+        let pairing_id = actual_id;
         let identity = local_identity(self, source, session.local_addr());
         let (session, peer, shown) = match establish(
             session,
@@ -129,9 +149,9 @@ impl Node {
         status
     }
 
-    pub(super) fn pairing_candidate(&self) -> Option<PskCandidate> {
+    pub(super) fn pairing_candidate(&self) -> Option<PairingCandidate> {
         let was_active = self.pairing.is_active();
-        let candidate = self.pairing.candidate();
+        let candidate = self.pairing.invitation_candidate();
         if was_active && candidate.is_none() && !self.pairing.is_active() {
             self.republish();
         }
@@ -523,8 +543,8 @@ mod tests {
     /// are a handful of bytes and sit in the socket buffer, and a read would
     /// make this a peer that is still answering.
     async fn handshake_by_hand(addr: SocketAddr, code: &str) -> Session {
-        let token = PairingToken::parse(code).unwrap();
-        let mut session = Session::connect(addr, &token.psk()).await.unwrap();
+        let code = PairingCode::parse(code).unwrap();
+        let (mut session, _) = Session::connect_pairing(addr, &code).await.unwrap();
         session
             .send(&PairingMessage::Hello {
                 protocol_version: PAIRING_PROTOCOL_VERSION,
@@ -546,8 +566,8 @@ mod tests {
         let source = Arc::new(TestSource::new("responder-id", Vec::new()));
         let (addr, shutdown) = start_listener(Arc::clone(&responder), source).await;
         let invite = responder.pair_create_invite().unwrap();
-        let token = PairingToken::parse(&invite.code).unwrap();
-        let mut session = Session::connect(addr, &token.psk()).await.unwrap();
+        let code = PairingCode::parse(&invite.code).unwrap();
+        let (mut session, _) = Session::connect_pairing(addr, &code).await.unwrap();
         session
             .send(&PairingMessage::Hello {
                 protocol_version: PAIRING_PROTOCOL_VERSION,

@@ -7,25 +7,85 @@ import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_overlays.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../shared/state_view.dart';
+import '../controller/module_form_draft.dart';
 import '../controller/modules_controller.dart';
 import '../models/module_models.dart';
+import 'module_form_fields.dart';
 
 /// Shared module management layout for desktop and mobile drawers.
-class ModuleSettingsDrawer extends StatelessWidget {
+class ModuleSettingsDrawer extends StatefulWidget {
   const ModuleSettingsDrawer({
     super.key,
     required this.controller,
     required this.moduleId,
-    required this.onPreferences,
     required this.onInvoke,
     required this.onSmsSetup,
   });
 
   final ModulesController controller;
   final String moduleId;
-  final ValueChanged<InstalledModule> onPreferences;
   final void Function(InstalledModule, ModuleCommand) onInvoke;
   final VoidCallback onSmsSetup;
+
+  @override
+  State<ModuleSettingsDrawer> createState() => _ModuleSettingsDrawerState();
+}
+
+class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
+  ModuleFormDraft? _draft;
+
+  ModulesController get controller => widget.controller;
+  String get moduleId => widget.moduleId;
+
+  @override
+  void initState() {
+    super.initState();
+    _createDraft();
+  }
+
+  void _createDraft() {
+    final module = controller.installedModule(moduleId);
+    if (module != null && module.preferenceFields.isNotEmpty) {
+      _draft = controller.form(
+        module.preferenceFields,
+        module.preferences,
+        module: module,
+      );
+    }
+  }
+
+  @override
+  void didUpdateWidget(ModuleSettingsDrawer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != controller || oldWidget.moduleId != moduleId) {
+      unawaited(_draft?.close());
+      _draft = null;
+      _createDraft();
+    }
+  }
+
+  Future<void> _savePreferences() async {
+    final draft = _draft;
+    if (draft == null || !draft.valid || draft.busy || controller.busy) return;
+    await controller.setPreferences(moduleId, draft.values);
+    if (!mounted || controller.errorMessage != null) return;
+    final module = controller.installedModule(moduleId);
+    if (module == null) return;
+    setState(() {
+      _draft = controller.form(
+        module.preferenceFields,
+        draft.values,
+        module: module,
+      );
+    });
+    await draft.close();
+  }
+
+  @override
+  void dispose() {
+    unawaited(_draft?.close());
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => ButtonStyleOverride(
@@ -38,7 +98,7 @@ class ModuleSettingsDrawer extends StatelessWidget {
       child: Focus(
         autofocus: true,
         child: AnimatedBuilder(
-          animation: controller,
+          animation: Listenable.merge([controller, _draft]),
           builder: (context, _) {
             final module = controller.installedModule(moduleId);
             final update = module == null ? null : controller.updateFor(module);
@@ -144,27 +204,38 @@ class ModuleSettingsDrawer extends StatelessWidget {
                                 leading: const Center(
                                   child: Icon(LucideIcons.messageSquare),
                                 ),
-                                onPressed: controller.busy ? null : onSmsSetup,
+                                onPressed: controller.busy
+                                    ? null
+                                    : widget.onSmsSetup,
                                 child: const Text(
                                   'Set up SMS access',
                                   textAlign: TextAlign.center,
                                 ),
                               ),
                             ],
-                            if (module.preferenceFields.isNotEmpty) ...[
+                            if (_draft case final draft?) ...[
                               const Gap(AppSpacing.md),
-                              Button.secondary(
+                              ModuleFormFields(
+                                draft: draft,
+                                enabled:
+                                    !controller.busy && module.error == null,
+                              ),
+                              const Gap(AppSpacing.md),
+                              Button.primary(
+                                key: ValueKey(
+                                  'module-preferences-save-$moduleId',
+                                ),
                                 alignment:
                                     AppTheme.moduleSettingsActionAlignment,
-                                leading: const Center(
-                                  child: Icon(LucideIcons.slidersHorizontal),
-                                ),
                                 onPressed:
-                                    controller.busy || module.error != null
+                                    controller.busy ||
+                                        module.error != null ||
+                                        draft.busy ||
+                                        !draft.valid
                                     ? null
-                                    : () => onPreferences(module),
+                                    : _savePreferences,
                                 child: const Text(
-                                  'Preferences',
+                                  'Save',
                                   textAlign: TextAlign.center,
                                 ),
                               ),
@@ -224,7 +295,7 @@ class ModuleSettingsDrawer extends StatelessWidget {
                                         !module.enabled ||
                                         module.error != null
                                     ? null
-                                    : () => onInvoke(module, command),
+                                    : () => widget.onInvoke(module, command),
                                 child: Text(
                                   command.title,
                                   textAlign: TextAlign.center,
