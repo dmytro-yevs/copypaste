@@ -105,9 +105,11 @@ impl Sender {
     }
 
     fn has_commands(&self) -> bool {
-        self.commands
-            .lock()
-            .is_ok_and(|commands| !commands.is_empty())
+        match self.commands.try_lock() {
+            Ok(commands) => !commands.is_empty(),
+            Err(std::sync::TryLockError::WouldBlock) => true,
+            Err(std::sync::TryLockError::Poisoned(_)) => false,
+        }
     }
 
     fn shutdown(&self) {
