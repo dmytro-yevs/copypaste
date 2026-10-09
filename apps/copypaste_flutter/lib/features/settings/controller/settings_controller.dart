@@ -144,6 +144,11 @@ class SettingsController extends ChangeNotifier {
     });
   }
 
+  Future<bool> setSkipSecret(bool value) =>
+      _update(RuntimeSettingsChange(skipSecret: value));
+  Future<bool> setSkipTransient(bool value) =>
+      _update(RuntimeSettingsChange(skipTransient: value));
+
   Future<bool> setRetentionDays(int value) =>
       _update(RuntimeSettingsChange(retentionDays: value));
 

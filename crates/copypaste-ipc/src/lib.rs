@@ -2,7 +2,9 @@
 
 #![forbid(unsafe_code)]
 
+mod clipboard_privacy;
 pub mod config;
+pub use clipboard_privacy::ClipboardPrivacy;
 pub mod content_type;
 pub use content_type::ContentClass;
 pub mod semantic_kind;
