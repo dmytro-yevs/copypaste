@@ -55,6 +55,7 @@ import 'platform/desktop/quick_paste_host.dart';
 import 'platform/android/android_capture_setup_gateway.dart';
 import 'platform/macos/macos_setup_gateway.dart';
 import 'platform/pairing/pairing_presentation.dart';
+import 'platform/permissions/linux_integration.dart';
 import 'platform/update/app_update_platform.dart';
 import 'shared/state_view.dart';
 
@@ -102,7 +103,7 @@ Future<void> _startRuntimeProcess() async {
     await runtime.runtimeStatus();
     return;
   }
-  if (!Platform.isMacOS && !Platform.isWindows) return;
+  if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) return;
   final daemonName = Platform.isWindows
       ? 'copypaste-daemon.exe'
       : 'copypaste-daemon';
@@ -304,7 +305,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     try {
       await _startRuntimeProcess();
       if (!mounted) {
-        if (Platform.isMacOS || Platform.isWindows) {
+        if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
           await runtime.stopDesktopRuntime();
         }
         return;
@@ -452,7 +453,8 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     unawaited(
       _desktopWindow?.updateCaptureState(available: false, paused: true),
     );
-    if (widget.runtimeEnabled && (Platform.isMacOS || Platform.isWindows)) {
+    if (widget.runtimeEnabled &&
+        (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
       await runtime.stopDesktopRuntime();
     }
     if (historyRepository != null) {
@@ -489,7 +491,8 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     );
     await historyRepository?.dispose();
     await devicesGateway?.dispose();
-    if (widget.runtimeEnabled && (Platform.isMacOS || Platform.isWindows)) {
+    if (widget.runtimeEnabled &&
+        (Platform.isMacOS || Platform.isWindows || Platform.isLinux)) {
       await runtime.stopDesktopRuntime();
     }
   }
@@ -592,15 +595,20 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   }
 
   Future<void> _initializeQuickPaste() async {
-    if (!Platform.isMacOS && !Platform.isWindows) return;
+    if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) return;
     final host = MethodChannelQuickPasteWindowHost();
     host.setOpenSettingsHandler(() {
       _navigation.selectDestination(AppDestination.settings);
     });
     final controller = QuickPasteSettingsController(
       store: SharedPreferencesQuickPastePreferencesStore(),
-      registrar: HotKeyManagerDesktopShortcutRegistrar(),
+      registrar: Platform.isLinux
+          ? LinuxPortalDesktopShortcutRegistrar()
+          : HotKeyManagerDesktopShortcutRegistrar(),
       windowHost: host,
+      linuxIntegration: Platform.isLinux
+          ? MethodChannelLinuxIntegrationPort()
+          : null,
     );
     _quickPasteSettings = controller;
     await controller.initialize();
