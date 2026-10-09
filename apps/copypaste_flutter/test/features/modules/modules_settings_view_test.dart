@@ -16,6 +16,7 @@ void main() {
     (TargetPlatform.android, 320.0),
     (TargetPlatform.macOS, 1000.0),
     (TargetPlatform.windows, 1000.0),
+    (TargetPlatform.linux, 1000.0),
   ]) {
     testWidgets('OCR uses the same management card in both sections', (
       tester,
@@ -168,6 +169,7 @@ void main() {
     (TargetPlatform.android, 320.0),
     (TargetPlatform.macOS, 650.0),
     (TargetPlatform.windows, 1000.0),
+    (TargetPlatform.linux, 1000.0),
   ]) {
     for (final scale in [1.0, 1.6, 2.0]) {
       testWidgets('module sizes and actions align at $width with scale $scale', (
@@ -245,7 +247,9 @@ void main() {
           expect(
             find.descendant(
               of: card,
-              matching: find.text('Platforms: macOS · Windows · Android'),
+              matching: find.text(
+                'Platforms: macOS · Windows · Android · Linux',
+              ),
             ),
             findsOneWidget,
           );
@@ -533,7 +537,10 @@ void main() {
     await tester.tap(find.text('Installed'));
     await tester.pumpAndSettle();
     expect(find.text('Text Tools'), findsOneWidget);
-    expect(find.text('Platforms: macOS · Windows · Android'), findsOneWidget);
+    expect(
+      find.text('Platforms: macOS · Windows · Android · Linux'),
+      findsOneWidget,
+    );
     await tester.tap(
       find.byKey(const ValueKey('module-settings-copypaste.text-tools')),
     );
