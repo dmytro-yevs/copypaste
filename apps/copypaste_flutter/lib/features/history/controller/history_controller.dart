@@ -56,6 +56,9 @@ class HistoryController extends ChangeNotifier {
   final Set<String> _downloadMutations = <String>{};
   final Set<String> _collapsedSections = <String>{};
   final Set<String> _bulkSelectedIds = <String>{};
+  String? _bulkAnchorId;
+  Set<String>? _bulkDragBaseline;
+  bool _refreshAfterBulkDrag = false;
   bool _isBulkSelecting = false;
   bool _isBulkMutating = false;
   bool _refreshAfterBulkMutation = false;
@@ -83,6 +86,7 @@ class HistoryController extends ChangeNotifier {
   int _mediaEpoch = 0;
 
   bool get canSuspend =>
+      !isBulkDragSelecting &&
       !_isBulkMutating &&
       !_isImportingFiles &&
       !_isReorderingPinned &&
@@ -100,6 +104,8 @@ class HistoryController extends ChangeNotifier {
     _suspended = true;
     _isBulkSelecting = false;
     _bulkSelectedIds.clear();
+    _bulkAnchorId = null;
+    _bulkDragBaseline = null;
     _queryEpoch++;
     _mediaEpoch++;
     _items.clear();
@@ -129,6 +135,7 @@ class HistoryController extends ChangeNotifier {
   bool get isReorderingPinned => _isReorderingPinned;
   bool get isBulkSelecting => _isBulkSelecting;
   bool get isBulkMutating => _isBulkMutating;
+  bool get isBulkDragSelecting => _bulkDragBaseline != null;
   Set<String> get bulkSelectedIds => Set.unmodifiable(_bulkSelectedIds);
   bool isBulkSelected(String id) => _bulkSelectedIds.contains(id);
   bool get canBeginBulkSelection =>
@@ -179,7 +186,10 @@ class HistoryController extends ChangeNotifier {
     _isBulkSelecting = true;
     _selectedId = null;
     _selectedClip = null;
-    if (id != null) _bulkSelectedIds.add(id);
+    if (id != null) {
+      _bulkSelectedIds.add(id);
+      _bulkAnchorId = id;
+    }
     notifyListeners();
   }
 
@@ -190,13 +200,99 @@ class HistoryController extends ChangeNotifier {
       return;
     }
     if (!_bulkSelectedIds.add(id)) _bulkSelectedIds.remove(id);
+    _bulkAnchorId = id;
     notifyListeners();
   }
 
+  /// Range order comes from the rendered list, including its active section
+  /// expansion and sort order, rather than the repository's page order.
+  void selectBulkClip(
+    String id, {
+    required List<String> orderedIds,
+    bool range = false,
+    bool additive = false,
+  }) {
+    if (_disposed || _isBulkMutating || !orderedIds.contains(id)) return;
+    final anchor = _bulkAnchorId ?? _selectedId ?? id;
+    final previousSingle = _selectedId;
+    if (!_isBulkSelecting) {
+      beginBulkSelection();
+      if (!_isBulkSelecting) return;
+      if (additive &&
+          previousSingle != null &&
+          orderedIds.contains(previousSingle)) {
+        _bulkSelectedIds.add(previousSingle);
+      }
+    }
+    if (!range) {
+      toggleBulkSelection(id);
+      return;
+    }
+    final ids = _bulkRange(anchor, id, orderedIds);
+    if (!additive) _bulkSelectedIds.clear();
+    _bulkSelectedIds.addAll(ids);
+    _bulkAnchorId = anchor;
+    notifyListeners();
+  }
+
+  List<String> _bulkRange(String anchor, String id, List<String> orderedIds) {
+    var start = orderedIds.indexOf(anchor);
+    final end = orderedIds.indexOf(id);
+    if (end < 0) return const [];
+    if (start < 0) start = end;
+    final loaded = _items.map((clip) => clip.id).toSet();
+    return orderedIds
+        .sublist(start < end ? start : end, (start > end ? start : end) + 1)
+        .where(loaded.contains)
+        .toList(growable: false);
+  }
+
+  bool beginBulkDragSelection(String id) {
+    if (!canBeginBulkSelection || !_items.any((clip) => clip.id == id)) {
+      return false;
+    }
+    if (_visibleItemsRefresh != null) {
+      _queryEpoch++;
+      _refreshAfterBulkDrag = true;
+    }
+    final baseline = Set<String>.of(_bulkSelectedIds);
+    beginBulkSelection(id);
+    if (!_isBulkSelecting || _bulkAnchorId != id) return false;
+    _bulkDragBaseline = baseline;
+    notifyListeners();
+    return true;
+  }
+
+  void updateBulkDragSelection(String id, {required List<String> orderedIds}) {
+    final baseline = _bulkDragBaseline;
+    final anchor = _bulkAnchorId;
+    if (_disposed || baseline == null || anchor == null || _isBulkMutating) {
+      return;
+    }
+    final ids = {...baseline, ..._bulkRange(anchor, id, orderedIds)};
+    if (setEquals(ids, _bulkSelectedIds)) return;
+    _bulkSelectedIds
+      ..clear()
+      ..addAll(ids);
+    notifyListeners();
+  }
+
+  void endBulkDragSelection() {
+    if (_disposed || _bulkDragBaseline == null) return;
+    _bulkDragBaseline = null;
+    notifyListeners();
+    if (_refreshAfterBulkDrag) {
+      _refreshAfterBulkDrag = false;
+      unawaited(_refreshItemsAndFacets());
+    }
+  }
+
   void endBulkSelection() {
-    if (_isBulkMutating) return;
+    if (_disposed || _isBulkMutating) return;
+    endBulkDragSelection();
     _isBulkSelecting = false;
     _bulkSelectedIds.clear();
+    _bulkAnchorId = null;
     notifyListeners();
   }
 
@@ -208,7 +304,10 @@ class HistoryController extends ChangeNotifier {
   );
 
   Future<bool> _mutateBulkSelection(_HistoryBulkMutation action) async {
-    if (!_isBulkSelecting || _isBulkMutating || _bulkSelectedIds.isEmpty) {
+    if (!_isBulkSelecting ||
+        _isBulkMutating ||
+        isBulkDragSelecting ||
+        _bulkSelectedIds.isEmpty) {
       return false;
     }
     _isBulkMutating = true;
@@ -274,6 +373,7 @@ class HistoryController extends ChangeNotifier {
   void _pruneBulkSelection() {
     final ids = _items.map((clip) => clip.id).toSet();
     _bulkSelectedIds.removeWhere((id) => !ids.contains(id));
+    if (!ids.contains(_bulkAnchorId)) _bulkAnchorId = null;
   }
 
   bool get canDownloadSelected {
@@ -290,6 +390,10 @@ class HistoryController extends ChangeNotifier {
       if (event == HistoryRuntimeEvent.itemsChanged) {
         if (_isBulkMutating) {
           _refreshAfterBulkMutation = true;
+          return;
+        }
+        if (isBulkDragSelecting) {
+          _refreshAfterBulkDrag = true;
           return;
         }
         if (_isImportingFiles) {

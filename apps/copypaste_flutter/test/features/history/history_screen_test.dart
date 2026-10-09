@@ -50,11 +50,15 @@ void main() {
         ),
       );
       await tester.pump();
+      expect(
+        find.semantics.byLabel(RegExp('Confidential content')),
+        findsWidgets,
+      );
       await tester.tap(find.byKey(const ValueKey('history-select-clips')));
       await tester.pump();
       final spoiler = find.byKey(const ValueKey('history-spoiler-bulk-secret'));
       expect(
-        find.bySemanticsLabel('Confidential content. Reveal spoiler'),
+        find.semantics.byLabel(RegExp('Confidential content')),
         findsNothing,
       );
       await tester.tapAt(tester.getCenter(spoiler));

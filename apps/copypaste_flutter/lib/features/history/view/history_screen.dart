@@ -12,6 +12,9 @@ import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/features/devices/device_label.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
+
+import '../controller/history_selection_gesture.dart';
+
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
 import 'package:copypaste_flutter/features/history/presentation/history_code_highlighter.dart';
 import 'package:copypaste_flutter/features/history/presentation/history_clip_presentation.dart';
@@ -45,6 +48,13 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
+  final _listKey = GlobalKey<_HistoryListState>();
+  final _selectionFocus = FocusNode(
+    debugLabel: 'History selection',
+    skipTraversal: true,
+  );
+  late final HistorySelectionGesture _selectionGesture;
+  bool _wasSelecting = false;
   late final TextEditingController _searchController;
   ScrollController? _scrollController;
   ScrollController? _fallbackScrollController;
@@ -57,6 +67,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
     _searchController = TextEditingController(
       text: widget.controller.query.search,
     );
+    _selectionGesture = HistorySelectionGesture(
+      controller: widget.controller,
+      clipAt: (position) => _listKey.currentState?.clipAt(position),
+      orderedIds: () => _listKey.currentState?.orderedIds ?? const [],
+      viewportBounds: () => _listKey.currentState?.viewportBounds,
+    );
+    widget.controller.addListener(_selectionChanged);
     unawaited(widget.controller.initialize());
   }
 
@@ -74,13 +91,34 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   @override
   void dispose() {
+    widget.controller.removeListener(_selectionChanged);
+    _selectionGesture.dispose();
+    _selectionFocus.dispose();
     _searchController.dispose();
     _scrollController?.removeListener(_loadMoreWhenNeeded);
     _fallbackScrollController?.dispose();
     super.dispose();
   }
 
+  void _selectionChanged() {
+    final selecting = widget.controller.isBulkSelecting;
+    if (selecting && !_wasSelecting) _selectionFocus.requestFocus();
+    _wasSelecting = selecting;
+  }
+
+  void _deleteBulkSelection() {
+    if (widget.controller.isBulkMutating ||
+        widget.controller.bulkSelectedIds.isEmpty) {
+      return;
+    }
+    _selectionGesture.end();
+    unawaited(
+      showHistoryBulkDeleteDialog(context, controller: widget.controller),
+    );
+  }
+
   void _loadMoreWhenNeeded() {
+    _selectionGesture.updateAfterScroll();
     final controller = _scrollController;
     if (controller == null || !controller.hasClients) return;
     final position = controller.position;
@@ -120,11 +158,22 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         ? {
                             const SingleActivator(LogicalKeyboardKey.escape):
                                 widget.controller.endBulkSelection,
+                            const SingleActivator(LogicalKeyboardKey.delete):
+                                _deleteBulkSelection,
+                            const SingleActivator(LogicalKeyboardKey.backspace):
+                                _deleteBulkSelection,
                           }
                         : const {},
-                    child: widget.controller.isBulkSelecting
-                        ? Focus(autofocus: true, child: body)
-                        : body,
+                    child: Focus(
+                      focusNode: _selectionFocus,
+                      child: Listener(
+                        onPointerDown: _selectionGesture.pointerDown,
+                        onPointerMove: _selectionGesture.pointerMove,
+                        onPointerUp: _selectionGesture.pointerUp,
+                        onPointerCancel: _selectionGesture.pointerCancel,
+                        child: body,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -150,11 +199,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
 
     final list = _HistoryList(
+      key: _listKey,
       controller: widget.controller,
       scrollController: _scrollController!,
       searchController: _searchController,
       showKindLabel: wide,
       onSelected: (clip) => _select(context, clip, wide: wide),
+      onDragSelection: _selectionGesture.begin,
     );
     if (!wide) return list;
     if (widget.controller.selectedClip == null) {
@@ -225,11 +276,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
 class _HistoryList extends StatefulWidget {
   const _HistoryList({
+    super.key,
     required this.controller,
     required this.scrollController,
     required this.searchController,
     required this.showKindLabel,
     required this.onSelected,
+    required this.onDragSelection,
   });
 
   final HistoryController controller;
@@ -237,6 +290,7 @@ class _HistoryList extends StatefulWidget {
   final TextEditingController searchController;
   final bool showKindLabel;
   final ValueChanged<HistoryClip> onSelected;
+  final void Function(String, Offset, ScrollableState) onDragSelection;
 
   @override
   State<_HistoryList> createState() => _HistoryListState();
@@ -244,6 +298,47 @@ class _HistoryList extends StatefulWidget {
 
 class _HistoryListState extends State<_HistoryList> {
   final Map<String, SortableData<String>> _sortableData = {};
+  final Map<String, GlobalKey> _clipKeys = {};
+  final _viewportKey = GlobalKey();
+  List<String> orderedIds = const [];
+  double _bottomClearance = 0;
+
+  Rect? get viewportBounds {
+    final viewport = _viewportKey.currentContext?.findRenderObject();
+    if (viewport is! RenderBox || !viewport.hasSize || !viewport.attached) {
+      return null;
+    }
+    final rect = viewport.localToGlobal(Offset.zero) & viewport.size;
+    final visible = Rect.fromLTRB(
+      rect.left,
+      rect.top,
+      rect.right,
+      math.max(rect.top, rect.bottom - _bottomClearance),
+    );
+    return visible.height <= AppSpacing.xs ? null : visible;
+  }
+
+  String? clipAt(Offset position) {
+    final rect = viewportBounds;
+    if (rect == null) return null;
+    final point = Offset(
+      rect.center.dx,
+      position.dy.clamp(
+        rect.top + AppSpacing.xxs,
+        rect.bottom - AppSpacing.xxs,
+      ),
+    );
+    for (final entry in _clipKeys.entries) {
+      final box = entry.value.currentContext?.findRenderObject();
+      if (box is RenderBox &&
+          box.attached &&
+          box.hasSize &&
+          (box.localToGlobal(Offset.zero) & box.size).contains(point)) {
+        return entry.key;
+      }
+    }
+    return null;
+  }
 
   HistoryController get controller => widget.controller;
   ScrollController get scrollController => widget.scrollController;
@@ -294,6 +389,10 @@ class _HistoryListState extends State<_HistoryList> {
       now: DateTime.now(),
       isSectionCollapsed: controller.isSectionCollapsed,
     );
+    orderedIds = rows
+        .whereType<_HistoryClipRow>()
+        .map((row) => row.clip.id)
+        .toList();
     final rowIndices = <Key, int>{
       for (var index = 0; index < rows.length; index++)
         _rowKey(rows[index]): index,
@@ -307,7 +406,9 @@ class _HistoryListState extends State<_HistoryList> {
         );
     final retainedIds = controller.items.map((item) => item.id).toSet();
     _sortableData.removeWhere((id, _) => !retainedIds.contains(id));
+    _clipKeys.removeWhere((id, _) => !retainedIds.contains(id));
     final bottomPadding = MediaQuery.paddingOf(context).bottom;
+    _bottomClearance = bottomPadding;
     final hasError = controller.errorMessage != null;
     final hasLoadMore = controller.isLoadingMore || showLoadMore;
     return Column(
@@ -331,6 +432,7 @@ class _HistoryListState extends State<_HistoryList> {
               controller: scrollController,
               scrollThreshold: AppControlSize.touch,
               child: ListView.builder(
+                key: _viewportKey,
                 controller: scrollController,
                 padding: EdgeInsets.only(bottom: bottomPadding),
                 findChildIndexCallback: (key) => rowIndices[key],
@@ -398,44 +500,66 @@ class _HistoryListState extends State<_HistoryList> {
             ? controller.isBulkSelected(clip.id)
             : controller.selectedId == clip.id,
         showKindLabel: showKindLabel,
-        onPressed: () => controller.isBulkSelecting
-            ? controller.toggleBulkSelection(clip.id)
-            : onSelected(clip),
+        onPressed: () {
+          final keys = HardwareKeyboard.instance;
+          final range = keys.isShiftPressed;
+          final additive = keys.isControlPressed || keys.isMetaPressed;
+          if (controller.isBulkSelecting || range || additive) {
+            controller.selectBulkClip(
+              clip.id,
+              orderedIds: orderedIds,
+              range: range,
+              additive: additive,
+            );
+          } else {
+            onSelected(clip);
+          }
+        },
+        onDragSelection: (position, scrollable) =>
+            widget.onDragSelection(clip.id, position, scrollable),
       ),
     );
     final key = ValueKey<String>('history-row-${clip.id}');
-    if (!clip.pinned) return KeyedSubtree(key: key, child: child);
-    return Sortable<String>(
-      key: key,
-      data: _sortableData.putIfAbsent(clip.id, () => SortableData(clip.id)),
-      // Only the library-owned drag handle can initiate a gesture.
-      enabled: false,
-      canAcceptTop: (data) =>
-          controller.canReorderPinned && data.data != clip.id,
-      canAcceptBottom: (data) =>
-          controller.canReorderPinned && data.data != clip.id,
-      onAcceptTop: (data) =>
-          unawaited(controller.movePinned(data.data, clip.id, before: true)),
-      onAcceptBottom: (data) =>
-          unawaited(controller.movePinned(data.data, clip.id, before: false)),
-      onDragStart: () => controller.beginPinnedDrag(clip.id),
-      onDragEnd: controller.endPinnedDrag,
-      onDragCancel: controller.endPinnedDrag,
-      placeholder: Padding(
-        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-        child: DecoratedBox(
-          key: const ValueKey<String>('history-pin-drop-placeholder'),
-          decoration: AppTheme.historyPinnedDropDecoration(context),
-          child: Center(
-            child: Icon(
-              LucideIcons.moveVertical,
-              size: AppIconSize.md,
-              color: Theme.of(context).colorScheme.primary,
+    final boundsKey = _clipKeys.putIfAbsent(clip.id, GlobalKey.new);
+    Widget content = child;
+    if (clip.pinned) {
+      content = Sortable<String>(
+        data: _sortableData.putIfAbsent(clip.id, () => SortableData(clip.id)),
+        // Only the library-owned drag handle can initiate a gesture.
+        enabled: false,
+        canAcceptTop: (data) =>
+            controller.canReorderPinned && data.data != clip.id,
+        canAcceptBottom: (data) =>
+            controller.canReorderPinned && data.data != clip.id,
+        onAcceptTop: (data) =>
+            unawaited(controller.movePinned(data.data, clip.id, before: true)),
+        onAcceptBottom: (data) =>
+            unawaited(controller.movePinned(data.data, clip.id, before: false)),
+        onDragStart: () => controller.beginPinnedDrag(clip.id),
+        onDragEnd: controller.endPinnedDrag,
+        onDragCancel: controller.endPinnedDrag,
+        placeholder: Padding(
+          padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+          child: DecoratedBox(
+            key: const ValueKey<String>('history-pin-drop-placeholder'),
+            decoration: AppTheme.historyPinnedDropDecoration(context),
+            child: Center(
+              child: Icon(
+                LucideIcons.moveVertical,
+                size: AppIconSize.md,
+                color: Theme.of(context).colorScheme.primary,
+              ),
             ),
           ),
         ),
-      ),
-      child: child,
+        child: child,
+      );
+    }
+    // Sortable duplicates its child into drag feedback. The geometry key must
+    // belong to the list row, outside that copied subtree.
+    return KeyedSubtree(
+      key: key,
+      child: SizedBox(key: boundsKey, child: content),
     );
   }
 }
@@ -1140,6 +1264,7 @@ class _HistoryClipCard extends StatefulWidget {
     required this.selected,
     required this.showKindLabel,
     required this.onPressed,
+    required this.onDragSelection,
   });
 
   final HistoryClip clip;
@@ -1147,6 +1272,7 @@ class _HistoryClipCard extends StatefulWidget {
   final bool selected;
   final bool showKindLabel;
   final VoidCallback onPressed;
+  final void Function(Offset, ScrollableState) onDragSelection;
 
   @override
   State<_HistoryClipCard> createState() => _HistoryClipCardState();
@@ -1197,9 +1323,18 @@ class _HistoryClipCardState extends State<_HistoryClipCard> {
                       : widget.onPressed,
                   onLongPressStart: controller.isBulkMutating
                       ? null
-                      : (_) => controller.beginBulkSelection(clip.id),
-                  leading: controller.isBulkSelecting
-                      ? IgnorePointer(
+                      : (details) => widget.onDragSelection(
+                          details.globalPosition,
+                          Scrollable.of(context),
+                        ),
+                  alignment: Alignment.centerLeft,
+                  style: AppTheme.historyClipButtonStyle(
+                    selected: widget.selected,
+                  ),
+                  child: Row(
+                    children: [
+                      if (controller.isBulkSelecting) ...[
+                        IgnorePointer(
                           child: ExcludeSemantics(
                             child: Checkbox(
                               state: widget.selected
@@ -1209,49 +1344,50 @@ class _HistoryClipCardState extends State<_HistoryClipCard> {
                               onChanged: (_) {},
                             ),
                           ),
-                        )
-                      : null,
-                  alignment: Alignment.centerLeft,
-                  style: AppTheme.historyClipButtonStyle(
-                    selected: widget.selected,
-                  ),
-                  child: Padding(
-                    padding: EdgeInsets.only(
-                      right: touch && showHandle
-                          ? AppControlSize.touch + AppSpacing.sm
-                          : AppSpacing.zero,
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ExcludeFocus(
-                          excluding: controller.isBulkSelecting,
-                          child: ExcludeSemantics(
-                            excluding: controller.isBulkSelecting,
-                            child: IgnorePointer(
-                              ignoring: controller.isBulkSelecting,
-                              child: _ClipContent(
-                                clip: clip,
-                                controller: controller,
+                        ),
+                        const Gap(AppSpacing.sm),
+                      ],
+                      Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.only(
+                            right: touch && showHandle
+                                ? AppControlSize.touch + AppSpacing.sm
+                                : AppSpacing.zero,
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              ExcludeFocus(
+                                excluding: controller.isBulkSelecting,
+                                child: ExcludeSemantics(
+                                  excluding: controller.isBulkSelecting,
+                                  child: IgnorePointer(
+                                    ignoring: controller.isBulkSelecting,
+                                    child: _ClipContent(
+                                      clip: clip,
+                                      controller: controller,
+                                    ),
+                                  ),
+                                ),
                               ),
-                            ),
+                              const Gap(AppSpacing.xxs),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _ClipMeta(
+                                      clip: clip,
+                                      controller: controller,
+                                      showKindLabel: widget.showKindLabel,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
                         ),
-                        const Gap(AppSpacing.xxs),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _ClipMeta(
-                                clip: clip,
-                                controller: controller,
-                                showKindLabel: widget.showKindLabel,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),

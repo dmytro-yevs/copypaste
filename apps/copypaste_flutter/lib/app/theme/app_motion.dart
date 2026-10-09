@@ -14,6 +14,7 @@ abstract final class AppMotion {
   static const Duration instant = Duration.zero;
   static const Duration quick = Duration(milliseconds: 100);
   static const Duration standard = Duration(milliseconds: 200);
+  static const double selectionScrollVelocityScalar = 50;
   static const Duration emphasized = Duration(milliseconds: 300);
   static const Duration spoilerDust = Duration(seconds: 3);
   static const Duration spoilerReveal = Duration(milliseconds: 350);
