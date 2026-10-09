@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "integrationVersion": 1,
+  "quickPasteBridge": {
+    "busName": "app.copypaste.CopyPaste",
+    "objectPath": "/app/copypaste/WaylandIntegration",
+    "interface": "app.copypaste.WaylandIntegration"
+  },
+  "integrations": [
+    {
+      "id": "gnome-shell",
+      "source": "gnome-shell-extension",
+      "kind": "gnome-shell-extension",
+      "extensionId": "copypaste-quick-paste@copypaste.app",
+      "systemInstallPath": "/usr/share/gnome-shell/extensions/copypaste-quick-paste@copypaste.app",
+      "userInstallPath": "$XDG_DATA_HOME/gnome-shell/extensions/copypaste-quick-paste@copypaste.app",
+      "supportedShellVersions": ["46", "47", "48"],
+      "nativeBuild": "make -C native",
+      "nativeArtifacts": ["native/lib/libcopypaste_clipboard_source.so", "native/typelib/CopyPasteClipboard-1.0.typelib"],
+      "enable": "user"
+    },
+    {
+      "id": "kde-kwin",
+      "source": "kde-kwin-script",
+      "kind": "kwin-script",
+      "packageId": "copypaste-quick-paste",
+      "hostDesktopFileName": "com.copypaste.CopyPaste",
+      "systemInstallPath": "/usr/share/kwin/scripts/copypaste-quick-paste",
+      "userInstallPath": "$XDG_DATA_HOME/kwin/scripts/copypaste-quick-paste",
+      "installer": "kpackagetool6 --type KWin/Script --install",
+      "supportedPlasmaVersions": ["6"],
+      "enable": "user"
+    }
+  ]
+}
