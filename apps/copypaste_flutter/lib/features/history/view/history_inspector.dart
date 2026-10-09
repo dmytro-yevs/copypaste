@@ -30,6 +30,7 @@ class HistoryInspector extends StatelessWidget {
     this.onClose,
     this.showActions = true,
     this.compact = false,
+    this.presentationRevision = 0,
   });
 
   final HistoryController controller;
@@ -37,6 +38,7 @@ class HistoryInspector extends StatelessWidget {
   final VoidCallback? onClose;
   final bool showActions;
   final bool compact;
+  final int presentationRevision;
 
   @override
   Widget build(BuildContext context) {
@@ -148,7 +150,9 @@ class HistoryInspector extends StatelessWidget {
             fit: inDrawer || compact ? FlexFit.tight : FlexFit.loose,
             child: clip.secret
                 ? SecretSpoiler(
-                    key: ValueKey('inspector-spoiler-${clip.id}'),
+                    key: ValueKey(
+                      'inspector-spoiler-${clip.id}-$presentationRevision',
+                    ),
                     reveal: (_) => _HistoryDetailContent(
                       clip: clip,
                       controller: controller,

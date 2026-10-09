@@ -1225,7 +1225,19 @@ class _HistoryClipCardState extends State<_HistoryClipCard> {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _ClipContent(clip: clip, controller: controller),
+                        ExcludeFocus(
+                          excluding: controller.isBulkSelecting,
+                          child: ExcludeSemantics(
+                            excluding: controller.isBulkSelecting,
+                            child: IgnorePointer(
+                              ignoring: controller.isBulkSelecting,
+                              child: _ClipContent(
+                                clip: clip,
+                                controller: controller,
+                              ),
+                            ),
+                          ),
+                        ),
                         const Gap(AppSpacing.xxs),
                         Row(
                           children: [
