@@ -2265,6 +2265,8 @@ impl SseDecode for crate::api::CaptureState {
 impl SseDecode for crate::api::Clip {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_secret = <bool>::sse_decode(deserializer);
+        let mut var_transient = <bool>::sse_decode(deserializer);
         let mut var_id = <String>::sse_decode(deserializer);
         let mut var_content = <String>::sse_decode(deserializer);
         let mut var_contentType = <String>::sse_decode(deserializer);
@@ -2282,6 +2284,8 @@ impl SseDecode for crate::api::Clip {
         let mut var_fileDetails = <Option<crate::api::ClipFileDetails>>::sse_decode(deserializer);
         let mut var_imageDetails = <Option<crate::api::ClipImageDetails>>::sse_decode(deserializer);
         return crate::api::Clip {
+            secret: var_secret,
+            transient: var_transient,
             id: var_id,
             content: var_content,
             content_type: var_contentType,
@@ -3173,6 +3177,8 @@ impl SseDecode for crate::api::RuntimePeerSyncStatus {
 impl SseDecode for crate::api::RuntimeSettingsData {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_skipSecret = <bool>::sse_decode(deserializer);
+        let mut var_skipTransient = <bool>::sse_decode(deserializer);
         let mut var_retentionDays = <u32>::sse_decode(deserializer);
         let mut var_storageQuotaBytes = <u64>::sse_decode(deserializer);
         let mut var_excludedAppIds = <Vec<String>>::sse_decode(deserializer);
@@ -3183,6 +3189,8 @@ impl SseDecode for crate::api::RuntimeSettingsData {
         let mut var_notificationPreview = <bool>::sse_decode(deserializer);
         let mut var_soundOnCopy = <bool>::sse_decode(deserializer);
         return crate::api::RuntimeSettingsData {
+            skip_secret: var_skipSecret,
+            skip_transient: var_skipTransient,
             retention_days: var_retentionDays,
             storage_quota_bytes: var_storageQuotaBytes,
             excluded_app_ids: var_excludedAppIds,
@@ -3199,6 +3207,8 @@ impl SseDecode for crate::api::RuntimeSettingsData {
 impl SseDecode for crate::api::RuntimeSettingsPatch {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_skipSecret = <Option<bool>>::sse_decode(deserializer);
+        let mut var_skipTransient = <Option<bool>>::sse_decode(deserializer);
         let mut var_retentionDays = <Option<u32>>::sse_decode(deserializer);
         let mut var_storageQuotaBytes = <Option<u64>>::sse_decode(deserializer);
         let mut var_excludedAppIds = <Option<Vec<String>>>::sse_decode(deserializer);
@@ -3209,6 +3219,8 @@ impl SseDecode for crate::api::RuntimeSettingsPatch {
         let mut var_notificationPreview = <Option<bool>>::sse_decode(deserializer);
         let mut var_soundOnCopy = <Option<bool>>::sse_decode(deserializer);
         return crate::api::RuntimeSettingsPatch {
+            skip_secret: var_skipSecret,
+            skip_transient: var_skipTransient,
             retention_days: var_retentionDays,
             storage_quota_bytes: var_storageQuotaBytes,
             excluded_app_ids: var_excludedAppIds,
@@ -3454,6 +3466,8 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::CaptureState> for crate::api:
 impl flutter_rust_bridge::IntoDart for crate::api::Clip {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.secret.into_into_dart().into_dart(),
+            self.transient.into_into_dart().into_dart(),
             self.id.into_into_dart().into_dart(),
             self.content.into_into_dart().into_dart(),
             self.content_type.into_into_dart().into_dart(),
@@ -4123,6 +4137,8 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::RuntimePeerSyncStatus>
 impl flutter_rust_bridge::IntoDart for crate::api::RuntimeSettingsData {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.skip_secret.into_into_dart().into_dart(),
+            self.skip_transient.into_into_dart().into_dart(),
             self.retention_days.into_into_dart().into_dart(),
             self.storage_quota_bytes.into_into_dart().into_dart(),
             self.excluded_app_ids.into_into_dart().into_dart(),
@@ -4151,6 +4167,8 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::RuntimeSettingsData>
 impl flutter_rust_bridge::IntoDart for crate::api::RuntimeSettingsPatch {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.skip_secret.into_into_dart().into_dart(),
+            self.skip_transient.into_into_dart().into_dart(),
             self.retention_days.into_into_dart().into_dart(),
             self.storage_quota_bytes.into_into_dart().into_dart(),
             self.excluded_app_ids.into_into_dart().into_dart(),
@@ -4323,6 +4341,8 @@ impl SseEncode for crate::api::CaptureState {
 impl SseEncode for crate::api::Clip {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.secret, serializer);
+        <bool>::sse_encode(self.transient, serializer);
         <String>::sse_encode(self.id, serializer);
         <String>::sse_encode(self.content, serializer);
         <String>::sse_encode(self.content_type, serializer);
@@ -5036,6 +5056,8 @@ impl SseEncode for crate::api::RuntimePeerSyncStatus {
 impl SseEncode for crate::api::RuntimeSettingsData {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.skip_secret, serializer);
+        <bool>::sse_encode(self.skip_transient, serializer);
         <u32>::sse_encode(self.retention_days, serializer);
         <u64>::sse_encode(self.storage_quota_bytes, serializer);
         <Vec<String>>::sse_encode(self.excluded_app_ids, serializer);
@@ -5051,6 +5073,8 @@ impl SseEncode for crate::api::RuntimeSettingsData {
 impl SseEncode for crate::api::RuntimeSettingsPatch {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Option<bool>>::sse_encode(self.skip_secret, serializer);
+        <Option<bool>>::sse_encode(self.skip_transient, serializer);
         <Option<u32>>::sse_encode(self.retention_days, serializer);
         <Option<u64>>::sse_encode(self.storage_quota_bytes, serializer);
         <Option<Vec<String>>>::sse_encode(self.excluded_app_ids, serializer);

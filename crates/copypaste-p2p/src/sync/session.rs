@@ -137,6 +137,14 @@ fn local_hello<S: SyncSource>(source: &S, listen_addr: Option<&str>, since_ms: i
     }
 }
 
+type PeerHello = (
+    String,
+    String,
+    Option<crate::DeviceProfile>,
+    Option<std::net::SocketAddr>,
+    i64,
+);
+
 /// Reads the peer's hello and fails closed on anything unexpected. The version
 /// check lives in [`SyncMessage::validate`] so it covers every ingress path;
 /// repeating it here also covers a channel that skipped decode-time
@@ -144,33 +152,12 @@ fn local_hello<S: SyncSource>(source: &S, listen_addr: Option<&str>, since_ms: i
 async fn recv_hello<C: SyncChannel, S: SyncSource>(
     chan: &mut C,
     source: &S,
-) -> Result<
-    (
-        String,
-        String,
-        Option<crate::DeviceProfile>,
-        Option<std::net::SocketAddr>,
-        i64,
-    ),
-    SyncError,
-> {
+) -> Result<PeerHello, SyncError> {
     let msg = chan.recv().await?;
     parse_hello(msg, source)
 }
 
-fn parse_hello<S: SyncSource>(
-    msg: SyncMessage,
-    source: &S,
-) -> Result<
-    (
-        String,
-        String,
-        Option<crate::DeviceProfile>,
-        Option<std::net::SocketAddr>,
-        i64,
-    ),
-    SyncError,
-> {
+fn parse_hello<S: SyncSource>(msg: SyncMessage, source: &S) -> Result<PeerHello, SyncError> {
     msg.validate()?;
     match msg {
         SyncMessage::Hello {

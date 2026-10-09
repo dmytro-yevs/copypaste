@@ -1,225 +1,139 @@
 # Security
 
-> Foundation status: the React/Tauri application and its release artifacts have
-> been removed. Rust security controls and the local Supabase harness remain;
-> no Flutter product, Rust bridge, platform host, updater or release is
-> qualified. The sections below record the retained backend security model.
+This document describes the current Flutter/Rust product for macOS, Android,
+and Windows. Security claims are bounded by the platform and artifact actually
+exercised. The isolated macOS assessment of release v1.0.14 on 8–9 October 2026
+confirmed clipboard privacy-marker handling as a vulnerability. It did not
+establish that every other surface is vulnerability-free.
 
 ## Reporting a vulnerability
 
-**Do not open a public GitHub issue for anything exploitable.** Open a private
-security advisory on GitHub instead.
+Do not publish exploitable details in a public GitHub issue. Use the repository's
+private security advisory channel. Include the affected version and platform,
+prerequisites, a synthetic reproduction, and the observed impact.
 
-Useful in a report: the affected component (`core`, `daemon`, `cli`, `p2p`,
-`cloud`), what an attacker must already have, and what they gain.
+## Encrypted storage and keys
 
----
+- SQLCipher encrypts the history database with a raw 32-byte device-derived key.
+  The key is supplied before schema access. SQLite temporary storage is in memory.
+- Item content uses XChaCha20-Poly1305 with the item ID as associated data.
+  Moving ciphertext to another row fails authentication.
+- HKDF-SHA256 derives separate database, item, and LAN peer-store keys from the
+  device secret. Derived keys do not replace the stored device secret.
+- Production macOS uses Keychain; Windows uses same-user DPAPI; Android uses an
+  Android Keystore AES-GCM key to wrap the device secret in app-private storage.
+  Debug macOS deliberately uses a development-only owner-readable secret file.
+- Key material is zeroized where its ownership permits. Wrong keys, damaged
+  ciphertext, and ambiguous keystore failures fail closed. An inaccessible key
+  must not silently create a new identity or orphan existing history.
+- Desktop data directories and files use owner-only access. Backup and restore
+  validate the candidate before replacing history and refuse overwriting an
+  existing backup destination.
 
-## Status
+## Capture privacy
 
-**v2 is alpha and has not been audited.** Parts of it have never executed on a
-platform we ship to — [Unverified](#unverified) is the section to read before
-trusting anything else here.
+Private mode gates capture before reading clipboard content. Application
+exclusions apply when the platform has sufficient source evidence. Attribution
+is best effort: a foreground application is not proof of the producer of every
+background copy. The product does not universally exclude password managers by
+name, and an empty exclusion list is not a password-manager protection policy.
 
-This document describes the current CopyPaste security model.
+Settings exposes two independent live options, both enabled by default:
 
-## At rest
+- **Skip confidential clipboard:** reject producer-marked confidential content.
+- **Skip temporary clipboard:** reject producer-marked temporary/history-excluded
+  content.
 
-- **Content** is sealed with XChaCha20-Poly1305, with the item id bound as
-  associated data: a row's ciphertext cannot be moved to another row, it fails
-  authentication instead.
-- **The database** is SQLCipher keyed with a raw 32-byte key — the page key is
-  supplied directly, so there is no passphrase KDF pass and no cipher parameter
-  is set.
-- **Key derivation** is HKDF-SHA256 from a device secret, with separate labels
-  for SQLCipher, item content and the LAN pairing store (`copypaste/v2/sqlcipher-db-key`,
-  `copypaste/v2/item-content-key`, `copypaste/v2/peer-store-key`). None is the stored secret.
-- **Crypto fails closed.** A wrong key, a wrong AAD or a tampered ciphertext
-  gives an authentication error with no detail and no fallback read.
-- Key material is zeroized on drop; secret comparisons are constant-time.
+Older settings records acquire these safe defaults on upgrade. Unreadable
+privacy settings also fail closed. Native adapters inspect producer hints before
+materializing a payload and preserve accepted classification through storage and
+synchronization. macOS uses ConcealedType and TransientType; Android uses the
+clipboard description's IS_SENSITIVE hint; Windows uses monitor-exclusion and
+clipboard-history opt-out formats. Android has no equivalent general transient
+marker in this contract. These hints depend on the producer publishing them;
+ordinary-looking text cannot reliably be identified as a password.
 
-### Where the device secret lives
+If the user allows confidential captures, the content stays encrypted and its
+classification remains attached. History, the inspector, and Quick Paste present
+a dust spoiler until explicitly revealed. Hidden spoilers expose no content to
+accessibility. Confidential content does not enter the text or semantic search
+index, notification previews, or automatic received-clipboard writes. Explicit
+copy, full-item IPC reads, and deliberately initiated exports are still content
+access; a spoiler is a display control, not a separate authentication boundary.
+Existing unclassified history cannot retrospectively recover missing producer
+hints and is not automatically deleted.
 
-`crypto/keystore/` selects the production backend by platform. Debug macOS
-deliberately retains a development-only `0600` plaintext device-secret file;
-its database and pairing encryption do not protect against theft of that file.
+## Local process boundary
 
-| Platform | Store | State |
-|---|---|---|
-| macOS | Keychain, via `security-framework` | CI runs isolated-Keychain Rust tests; execution remains unverified until that job has passed on this foundation |
-| Android | Android Keystore. It holds keys, not blobs, so an AES-GCM key that never leaves it wraps the secret, and the wrapped blob sits in app-private storage | **Never compiled** — no NDK on any host here |
-| Windows | Device secret sealed with DPAPI under the user's login | Same-device and same-user protection |
-| Linux | `0600` file under the data directory | Development fallback, **not a shipping posture** |
+macOS desktop IPC uses a private Unix socket; Windows uses a user-restricted
+named pipe. Same-user clients are intentionally trusted to read history. Android
+hosts the runtime in the application process and exposes platform integration
+through typed adapters. There is no privileged CopyPaste helper.
 
-Minting a fresh secret needs both an unambiguous "no entry" *and* a data
-directory with no history database in it. Any other keystore error is surfaced
-rather than minted over, and a database sitting next to a missing secret means
-we looked in the wrong place — either way, replacing the secret would orphan the
-history.
+Requests, frames, content, cursors, and watcher counts are bounded. HTML clipboard
+content is rendered as content, not executed as a webpage. File materialization
+validates paths and refuses traversal and unintended overwrites. User-facing
+errors must not disclose filesystem paths or secrets.
 
-## Local IPC
+## Pairing and synchronization
 
-The daemon listens on a Unix domain socket at mode `0600`, owned by the running
-user. There is no network listener for IPC and no auth token: the filesystem
-permission is the boundary, so any process running as the same user can read the
-whole history. That is the trust boundary the system clipboard already has.
+LAN sessions use an authenticated Noise NNpsk0 channel. Invitations use random
+256-bit tokens, expire after two minutes, and display their versioned QR URI
+immediately. Scanning alone does not pair: both devices must confirm the common
+handshake-bound SAS before peer persistence. Failed authentication is terminal.
 
-**No user-facing error may contain a filesystem path**, because the socket path
-discloses the local username. Enforced in the daemon and again by a redaction
-pass shared by every client, with tests asserting it.
+Peer keys and revocations are stored in an authenticated encrypted envelope with
+owner-only atomic replacement. A wrong key or damaged envelope refuses startup
+instead of resetting trust. Revoking a peer locally refuses its subsequent sync;
+it does not erase history already delivered to another device or rotate all keys.
+The sender opens item content inside the authenticated transport, and the
+receiver encrypts it with its own device key. Source metadata, including privacy
+classification, is carried with the synchronized version.
 
-## Peer-to-peer sync
+Cloud synchronization is provided by an optional signed Supabase module. Content
+is encrypted client-side under a passphrase-derived key. Metadata used for merge
+ordering is authenticated; the backend still observes account and traffic
+metadata. Credentials and derived sync keys use application-owned encrypted
+state, not plaintext preference files. Never infer deployed row-level security
+from repository SQL or local stubs: the actual deployment requires separate
+qualification. See [cloud privacy](docs/cloud-privacy.md).
 
-- The channel is Noise `NNpsk0` (`snow`): mutual authentication and forward
-  secrecy from the pairing key alone.
-- The pairing token is 256 bits from the OS CSPRNG. Manual entry uses its
-  Crockford base32 code; the automatically displayed QR wraps the same token and
-  LAN address in the versioned `copypaste://pair/v1` URI. Possession is the
-  authentication — there is no password, so there is no dictionary to attack.
-  Treat either form like a password. The invite stays redeemable for two minutes,
-  and the first session that completes burns it.
-- A wrong key fails the handshake on the first message. There is no
-  unauthenticated mode to fall back to.
-- A session poisons itself after any authentication failure rather than
-  continuing with a desynchronised nonce.
-- Peer keys and revocations live in an XChaCha20-Poly1305 encrypted envelope in
-  `peers.json`, under the device-derived pairing-store key. Every replacement
-  uses a fresh nonce and retains owner-only atomic writes. Existing plaintext
-  state is converted once, without a plaintext backup, before startup completes.
-  A marker in SQLCipher then disables plaintext import; a wrong key or damaged
-  envelope refuses to open instead of resetting trust or retrying as JSON.
-- **Content crosses the wire as plaintext inside the Noise channel**, and the
-  receiver re-encrypts under its own key. Confidentiality comes from the
-  transport, not a second envelope — the sender's ciphertext is bound to a key
-  the receiver does not have.
-- mDNS advertises a `pairing_id`: a domain-separated BLAKE2s of the token,
-  truncated to 128 bits. One-way, so not a credential — but derived from the
-  token rather than independent of it, which buys an attacker two things we
-  accept: a candidate code can be matched to a device on the LAN offline, and
-  the ids are stable identifiers broadcast on every network the device joins.
-- The pairing list is capped, and the cap refuses a *new* pairing rather than
-  evicting an old one. Nobody can push a real pairing out by making more.
+## Modules and updates
 
-A peer's item stamped more than 24 hours in the future is skipped, so a broken
-clock cannot censor an item *permanently*. It can for a day: `now + 24 h − ε`
-still wins every comparison until real time catches up. That is the accepted
-trade, and the ceiling lives in each transport rather than at the merge they
-share.
+Modules are trusted first-party native code loaded in the runtime process.
+Publisher signatures, strict package inventories, path checks, and file hashes
+protect admission. They do not sandbox publisher-authorized native code or limit
+it to declared application services. Process and permission isolation are not
+implemented and must not be advertised.
 
-## Cloud sync
+Windows and Android updater assets use the embedded publisher key and independent
+artifact signatures, in addition to integrity checks and platform signer checks.
+macOS distribution uses DMG and the project's Homebrew tap. Homebrew checks the
+required cask digest; the current macOS DMG has no independent publisher artifact
+signature. HTTPS, release/tap control, and the cask checksum remain its trust
+chain. The project has no Apple Developer ID and does not claim notarization.
+Local re-signing supports installation and stable local permissions; it does not
+authenticate the publisher.
 
-**Wired into the daemon and the CLI, and never once spoken to a real Supabase
-project.** `scripts/demo-cloud.sh` drives two real daemons against a local stub
-(`scripts/cloud-stub.py`) imitating GoTrue and PostgREST, asserting convergence
-and that only ciphertext reaches the backend. It cannot tell you a real
-deployment accepts any of it.
+## Screenshots and native permissions
 
-Rows are sealed client-side under an Argon2id key derived from a passphrase that
-never leaves the device, so the server holds ciphertext and metadata only.
-Row-level security is the second layer — a misconfigured policy would expose
-rows that remain unreadable.
+**Block screenshots** is a device-local option, off by default. It applies to the
+main application, Quick Paste, pairing QR/code/SAS, and application-owned windows.
+With the option off, those surfaces can be captured. Pairing cannot override the
+user's saved choice. Windows uses WDA_EXCLUDEFROMCAPTURE, Android uses FLAG_SECURE,
+and macOS presents protected Flutter surfaces through a capture-protected native
+layer. OS permission dialogs and file pickers are separate system surfaces.
 
-The fields sync *orders* on travel in the clear, because the backend pages on
-them, so each row carries an HMAC over them plus the ciphertext and the nonce,
-under a second key from the same passphrase. A device verifies before the row
-reaches the merge. Without that, someone holding the account password but not
-the passphrase could stamp a competing version that outranks the real one, or a
-tombstone that makes an item disappear everywhere.
-[`docs/cloud-privacy.md`](docs/cloud-privacy.md) is the full disclosure page.
+The macOS app requests Accessibility when automatic pasting needs it. Ordinary
+capture, history, pairing, and copying do not require that grant. Clipboard-read
+and screen-recording consent remain subject to the OS. A passing screenshot test
+does not qualify every recording API, transition frame, external camera, or GPU.
 
-The daemon stores the access token, the rotated refresh token and the derived
-sync key in the SQLCipher database, under the device key from the OS keystore —
-never the account password and never the passphrase. A stolen database yields a
-session that expires and a key for one account, not the means to re-derive it.
-Sign-out clears all three and keeps the deployment URL and anon key, which are
-configuration rather than credentials.
+## Qualification limits
 
-Sign-in carries three secrets over the `0600` IPC socket, which is the only
-authentication boundary. The CLI takes the password and passphrase from the
-environment or stdin and has no flag for either, because process arguments are
-readable by every process running as the same user. The passphrase is zeroized
-once the key is derived; the request frame it arrived in is not, so it is "not
-persisted" rather than "not in memory".
-
-The backend sees an account email, device ids, content types, payload sizes and
-timestamps. Content stays end-to-end encrypted.
-
-## Unverified
-
-Every security control on a shipping platform is written, reviewed, and never
-observed working. `README.md`'s Unverified table is the full list; the three
-that decide whether anything above holds:
-
-- The **macOS Keychain** store and the **NSPasteboard** capture path. CI is
-  configured to execute isolated-Keychain and pasteboard Rust tests; they remain
-  unverified until those jobs have passed on this foundation.
-- The **Android Keystore** store and capture behavior. Their Flutter host and
-  Rust bridge are not implemented yet, so no product claim is qualified.
-- **Cloud sync against a live Supabase project.** No deployment has ever had
-  `supabase/`'s schema and RLS policies applied to it, so the second layer under
-  the row encryption is unproven.
-
-## Controls that are weaker than their names suggest
-
-Two limitations change what the rest is worth:
-
-- **`unpair` is local and unilateral.** It removes this device's half; the other
-  device keeps its half until it also unpairs. Nothing revokes a lost device
-  from here, and there is no sync-key rotation.
-- **Application attribution is necessarily best effort.** The macOS capture
-  path caches the frontmost bundle id briefly, applies the persisted exclusion
-  list and always skips known password managers before reading a representation.
-  If exclusions are configured but attribution is unavailable, it fails closed.
-  Private mode is persisted and gates capture before any representation read.
-
-## macOS permissions
-
-**The app requests no TCC permission** — not Accessibility, not Input
-Monitoring. Reading `NSPasteboard` needs none, and selecting an item puts it on
-the clipboard instead of synthesising Cmd+V. The global hotkey goes through
-Carbon `RegisterEventHotKey`; `shell::hotkey::is_permission_free` refuses the
-media keys, which `global-hotkey` binds with an event tap instead and which
-would therefore cost an Accessibility grant. That no prompt appears is inferred
-from documentation, not observed.
-
-This is a security property and a distribution constraint at once: the app is
-ad-hoc signed, so macOS would tie any grant to a code hash that changes on every
-build and revoke it on every update. See
-[ADR-0001](docs/adr/0001-macos-distribution-without-a-developer-id.md).
-
-## Known limitations
-
-- Android restricts clipboard reads to foreground apps. The new product must
-  define and qualify its capture behavior before release.
-- Linux desktop is a test surface, not a shipping target.
-
-## Dependency auditing
-
-`cargo deny check` and `cargo audit`, both run in CI by
-`.github/workflows/supply-chain.yml` on every push and weekly on a schedule.
-
-Rust advisory exceptions remain versioned and checked by
-`scripts/check_rustsec_policy.py`. Flutter, Gradle and platform-host
-dependency policy is required before an application release.
-
-## Secret scanning
-
-`gitleaks`, run in CI by `.github/workflows/secret-scan.yml` from
-`supply-chain.yml` on every push and pull request and from `release.yml` before
-a release publishes. Push and pull request scan the tree; the weekly cron scans
-every commit, because a secret that was committed and then deleted is still in
-every clone.
-
-With `gitleaks` on `PATH`, the same checks run locally:
-
-```sh
-./scripts/check-secret-scan.sh --self-test   # prove the scan can still fail
-./scripts/check-secret-scan.sh --scan        # tree; add --history for commits
-```
-
-`.gitleaks.toml` extends the upstream default ruleset and allowlists reviewed
-synthetic fixtures by rule id and literal, never by path — a path entry makes
-gitleaks skip the whole file, which would stop it scanning a fixture's
-neighbours. `.gitleaksignore` pins reviewed pre-v2 history findings by commit.
-This repository scan is separate from the application and has no runtime effect
-on captured clipboard items.
+The v1.0.14 assessment exercised the released application in an isolated macOS
+VM with synthetic data. Android and Windows source review is not physical Android
+or installed Windows runtime evidence. Production Supabase policies, unresolved
+native dependencies, every recording path, and unbounded resource-exhaustion
+attacks require additional evidence. Each subsequent fix must be tested against
+its actual source snapshot and shipping artifacts before being claimed as shipped.

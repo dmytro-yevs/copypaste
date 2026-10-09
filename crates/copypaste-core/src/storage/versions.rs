@@ -391,7 +391,7 @@ pub(super) fn upsert_in_tx(
     // Before the write below clears `fts_rowid`, and rolled back with it if
     // the dedup index refuses the version.
     delete_fts_row_in_tx(tx, incoming.id)?;
-    let (metadata, source_icon_id) = if incoming.deleted {
+    let (mut metadata, source_icon_id) = if incoming.deleted {
         (None, None)
     } else {
         super::source_icons::normalise(
@@ -402,6 +402,43 @@ pub(super) fn upsert_in_tx(
             incoming.payload_metadata,
         )?
     };
+    if !incoming.deleted {
+        let existing: Option<String> = tx
+            .query_row(
+                "SELECT payload_metadata FROM clipboard_items WHERE id = ?1 AND content_hash = ?2",
+                params![incoming.id, incoming.content_hash],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        let previous = existing
+            .as_deref()
+            .and_then(|json| crate::PayloadMetadata::from_json(json, incoming.content_type))
+            .map(|value| value.privacy)
+            .unwrap_or_default();
+        if !previous.is_empty() {
+            let mut value = metadata
+                .as_deref()
+                .and_then(|json| crate::PayloadMetadata::from_json(json, incoming.content_type))
+                .unwrap_or_default();
+            value.privacy = value.privacy.union(previous);
+            metadata = value.to_json(incoming.content_type);
+        }
+    }
+    let secret = metadata
+        .as_deref()
+        .and_then(|json| crate::PayloadMetadata::from_json(json, incoming.content_type))
+        .is_some_and(|value| value.privacy.secret);
+    if secret {
+        tx.execute(
+            "DELETE FROM module_search_documents WHERE item_id = ?1",
+            [incoming.id],
+        )?;
+        tx.execute(
+            "DELETE FROM module_search_vectors WHERE item_id = ?1",
+            [incoming.id],
+        )?;
+    }
     let (pinned, pin_order, pin_updated_at) = if incoming.deleted {
         (false, None, 0)
     } else {
@@ -410,7 +447,7 @@ pub(super) fn upsert_in_tx(
 
     let indexable = incoming
         .search_text
-        .filter(|t| !incoming.deleted && !t.trim().is_empty());
+        .filter(|t| !secret && !incoming.deleted && !t.trim().is_empty());
     let fts_rowid = match indexable {
         Some(text) => insert_fts_in_tx(tx, incoming.id, text, incoming.content_type)?,
         None => None,

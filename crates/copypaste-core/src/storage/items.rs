@@ -15,6 +15,46 @@ use super::retention::{bump_in_tx, find_in_bucket, live_count, newest_live_with_
 use super::search::{delete_fts_row_in_tx, insert_fts_in_tx};
 use super::store::Store;
 
+fn restrict_privacy(
+    conn: &rusqlite::Connection,
+    item: &mut StoredItem,
+    privacy: copypaste_ipc::ClipboardPrivacy,
+) -> rusqlite::Result<()> {
+    let previous = item.clipboard_privacy();
+    let combined = previous.union(privacy);
+    if combined.is_empty() {
+        return Ok(());
+    }
+    let mut metadata = item
+        .payload_metadata
+        .as_deref()
+        .and_then(|json| crate::PayloadMetadata::from_json(json, &item.content_type))
+        .unwrap_or_default();
+    metadata.privacy = combined;
+    item.payload_metadata = metadata.to_json(&item.content_type);
+    // Classification is versioned too: even a same-tick recopy must reach peers.
+    if combined != previous {
+        item.created_at = item.created_at.saturating_add(1);
+    }
+    conn.execute("UPDATE clipboard_items SET payload_metadata = ?2, created_at = ?3, content_bytes = LENGTH(content_ciphertext) + LENGTH(COALESCE(?2, '')) WHERE id = ?1", rusqlite::params![item.id, item.payload_metadata, item.created_at])?;
+    if combined.secret {
+        delete_fts_row_in_tx(conn, &item.id)?;
+        conn.execute(
+            "UPDATE clipboard_items SET fts_rowid = NULL WHERE id = ?1",
+            [&item.id],
+        )?;
+        conn.execute(
+            "DELETE FROM module_search_documents WHERE item_id = ?1",
+            [&item.id],
+        )?;
+        conn.execute(
+            "DELETE FROM module_search_vectors WHERE item_id = ?1",
+            [&item.id],
+        )?;
+    }
+    Ok(())
+}
+
 const LIVE_ITEMS_SQL: &str = concat!(
     "SELECT ",
     item_columns!(),
@@ -78,7 +118,13 @@ impl Store {
         E: From<StoreError>,
         F: FnOnce() -> Result<(Vec<u8>, Vec<u8>, Option<String>), E>,
     {
-        let indexable = copypaste_ipc::content_type::is_text(&item.content_type);
+        let privacy = item
+            .payload_metadata
+            .as_deref()
+            .and_then(|json| crate::PayloadMetadata::from_json(json, &item.content_type))
+            .map(|metadata| metadata.privacy)
+            .unwrap_or_default();
+        let indexable = copypaste_ipc::content_type::is_text(&item.content_type) && !privacy.secret;
 
         // The caller's id, not a fresh one: the ciphertext is already sealed
         // against it (see `NewItem::id`).
@@ -100,7 +146,7 @@ impl Store {
         if let Some(existing) =
             newest_live_with_hash(&tx, &item.content_hash, i64::MIN).map_err(StoreError::from)?
         {
-            let bumped = bump_in_tx(
+            let mut bumped = bump_in_tx(
                 &tx,
                 &existing,
                 item.created_at,
@@ -109,6 +155,7 @@ impl Store {
                 &source_icon_id,
             )
             .map_err(StoreError::from)?;
+            restrict_privacy(&tx, &mut bumped, privacy).map_err(StoreError::from)?;
             super::source_icons::release_unused(&tx, source_icon_id.as_deref())
                 .map_err(StoreError::from)?;
             tx.commit().map_err(StoreError::from)?;
@@ -166,7 +213,7 @@ impl Store {
                     .map_err(StoreError::from)?;
                 return match existing {
                     Some(existing) => {
-                        let bumped = bump_in_tx(
+                        let mut bumped = bump_in_tx(
                             &tx,
                             &existing,
                             item.created_at,
@@ -177,6 +224,7 @@ impl Store {
                         .map_err(StoreError::from)?;
                         super::source_icons::release_unused(&tx, source_icon_id.as_deref())
                             .map_err(StoreError::from)?;
+                        restrict_privacy(&tx, &mut bumped, privacy).map_err(StoreError::from)?;
                         tx.commit().map_err(StoreError::from)?;
                         Ok(Ingest::Bumped(bumped))
                     }
@@ -412,6 +460,7 @@ mod tests {
         let mut candidate = item("not read", T0);
         let icon = source_icon();
         let metadata = crate::PayloadMetadata {
+            privacy: Default::default(),
             file: None,
             source_app_icon: Some(icon.clone()),
         }

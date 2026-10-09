@@ -43,6 +43,10 @@ pub const POLL_INTERVAL_MIN_MS: u64 = 100;
 /// Slowest supported clipboard polling interval.
 pub const POLL_INTERVAL_MAX_MS: u64 = 5_000;
 
+const fn default_privacy_gate() -> bool {
+    true
+}
+
 const fn default_storage_quota_bytes() -> u64 {
     DEFAULT_STORAGE_QUOTA_BYTES
 }
@@ -81,6 +85,11 @@ pub struct ConfigData {
     /// Stop recording clipboard changes. Persisted so a restart cannot
     /// accidentally resume capture after the user explicitly paused it.
     pub private_mode: bool,
+    /// Skip producer-marked secrets and temporary records, including after upgrades.
+    #[serde(default = "default_privacy_gate")]
+    pub skip_secret: bool,
+    #[serde(default = "default_privacy_gate")]
+    pub skip_transient: bool,
     /// How often the clipboard is polled, in milliseconds. **Live.**
     pub poll_interval_ms: u64,
     /// How many live items are kept before the oldest unpinned ones are
@@ -154,6 +163,8 @@ impl Default for ConfigData {
     fn default() -> Self {
         Self {
             private_mode: false,
+            skip_secret: true,
+            skip_transient: true,
             poll_interval_ms: 500,
             history_limit: 10_000,
             storage_quota_bytes: DEFAULT_STORAGE_QUOTA_BYTES,
@@ -228,6 +239,10 @@ pub struct ConfigPatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub private_mode: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skip_secret: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skip_transient: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub poll_interval_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub history_limit: Option<u32>,
@@ -268,6 +283,12 @@ impl ConfigPatch {
     /// caller cannot half-apply a patch. `base` is untouched either way.
     pub fn apply(&self, base: &ConfigData) -> Result<ConfigData, ConfigError> {
         let mut next = base.clone();
+        if let Some(value) = self.skip_secret {
+            next.skip_secret = value;
+        }
+        if let Some(value) = self.skip_transient {
+            next.skip_transient = value;
+        }
         if let Some(v) = self.private_mode {
             next.private_mode = v;
         }
@@ -342,6 +363,8 @@ impl From<&ConfigData> for ConfigPatch {
     fn from(c: &ConfigData) -> Self {
         Self {
             private_mode: Some(c.private_mode),
+            skip_secret: Some(c.skip_secret),
+            skip_transient: Some(c.skip_transient),
             poll_interval_ms: Some(c.poll_interval_ms),
             history_limit: Some(c.history_limit),
             storage_quota_bytes: Some(c.storage_quota_bytes),
@@ -381,6 +404,8 @@ impl ConfigData {
     pub fn field_liveness() -> &'static [(&'static str, Liveness)] {
         &[
             ("private_mode", Liveness::Live),
+            ("skip_secret", Liveness::Live),
+            ("skip_transient", Liveness::Live),
             ("poll_interval_ms", Liveness::Live),
             ("history_limit", Liveness::Live),
             ("storage_quota_bytes", Liveness::Live),
