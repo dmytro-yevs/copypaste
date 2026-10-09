@@ -1,11 +1,11 @@
 package com.copypaste.app
 
 import android.app.Application
-import android.app.AppOpsManager
-import android.app.usage.UsageEvents
-import android.app.usage.UsageStatsManager
+import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
+import android.content.pm.ResolveInfo
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -14,113 +14,77 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
-import org.robolectric.annotation.Implementation
-import org.robolectric.annotation.Implements
-import org.robolectric.shadows.ShadowUsageStatsManager.EventBuilder
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class ScreenshotSourceAppTest {
     private lateinit var app: Application
-    private val takenAt = System.currentTimeMillis() - 10_000
 
-    @Before fun setup() {
-        app = RuntimeEnvironment.getApplication()
-        access(AppOpsManager.MODE_ALLOWED)
-    }
+    @Before fun setup() { app = RuntimeEnvironment.getApplication() }
 
-    @Test fun delayedImportUsesScreenshotTimeInsteadOfTheCurrentlyOpenApp() {
-        install("com.example.editor", "Editor")
-        event(UsageEvents.Event.ACTIVITY_RESUMED, "com.example.editor", takenAt - 1000)
-        event(UsageEvents.Event.ACTIVITY_PAUSED, "com.example.editor", takenAt + 100)
-        event(UsageEvents.Event.ACTIVITY_RESUMED, "com.example.other", takenAt + 200)
-        val source = ScreenshotSourceApps.resolve(app, takenAt)!!
-        assertEquals("com.example.editor", source.packageName)
-        assertEquals("Editor", source.name)
-        assertNotNull(source.icon)
-    }
-
-    @Test fun permissionDeniedOrRevokedLeavesAttributionOptional() {
-        event(UsageEvents.Event.ACTIVITY_RESUMED, "com.example.editor", takenAt - 1000)
-        assertNotNull(ScreenshotSourceApps.resolve(app, takenAt))
-        access(AppOpsManager.MODE_IGNORED)
-        assertFalse(ScreenshotSourceApps.accessGranted(app))
-        assertNull(ScreenshotSourceApps.resolve(app, takenAt))
-        assertTrue(ScreenshotCaptureState.asMap(app)["enabled"]!!)
-    }
-
-    @Test fun invisiblePackageKeepsTheKnownPackageWithoutInventingNameOrIcon() {
-        event(UsageEvents.Event.ACTIVITY_RESUMED, "com.example.uninstalled", takenAt - 1000)
-        val source = ScreenshotSourceApps.resolve(app, takenAt)!!
-        assertEquals("com.example.uninstalled", source.packageName)
-        assertNull(source.name)
-        assertNull(source.icon)
-    }
-
-    @Test fun missingOrFutureScreenshotTimeAndEmptyEventsReturnNoSource() {
-        assertNull(ScreenshotSourceApps.resolve(app, 0))
-        assertNull(ScreenshotSourceApps.resolve(app, Long.MAX_VALUE))
-        assertNull(ScreenshotSourceApps.resolve(app, takenAt))
-    }
-
-    @Test @Config(shadows = [FailingUsageStats::class]) fun usageProviderFailureReturnsNoSource() {
-        assertNull(ScreenshotSourceApps.resolve(app, takenAt))
-    }
-
-    @Test fun backgroundedAppsAndSystemScreenshotUiAreNotAttributed() {
-        val foreground = ScreenshotForegroundApps()
-        foreground.accept(UsageEvents.Event.ACTIVITY_RESUMED, "com.example.editor", "Editor")
-        foreground.accept(UsageEvents.Event.ACTIVITY_PAUSED, "com.example.editor", "Editor")
-        assertNull(foreground.packageName())
-        foreground.accept(UsageEvents.Event.ACTIVITY_RESUMED, "com.android.systemui", "Screenshot")
-        assertNull(foreground.packageName())
-    }
-
-    @Test fun multipleActivitiesOfOneAppAreAcceptedButSplitScreenIsAmbiguous() {
-        val foreground = ScreenshotForegroundApps()
-        foreground.accept(UsageEvents.Event.ACTIVITY_RESUMED, "com.example.editor", "First")
-        foreground.accept(UsageEvents.Event.ACTIVITY_RESUMED, "com.example.editor", "Second")
-        foreground.accept(UsageEvents.Event.ACTIVITY_PAUSED, "com.example.editor", "First")
-        assertEquals("com.example.editor", foreground.packageName())
-        foreground.accept(UsageEvents.Event.ACTIVITY_RESUMED, "com.example.other", "Other")
-        assertNull(foreground.packageName())
-        foreground.accept(UsageEvents.Event.ACTIVITY_STOPPED, "com.example.other", "Other")
-        assertEquals("com.example.editor", foreground.packageName())
-    }
-
-    @Test fun lockScreenAndShutdownClearStaleApps() {
-        for (type in listOf(UsageEvents.Event.KEYGUARD_SHOWN, UsageEvents.Event.SCREEN_NON_INTERACTIVE, UsageEvents.Event.DEVICE_SHUTDOWN)) {
-            val foreground = ScreenshotForegroundApps()
-            foreground.accept(UsageEvents.Event.ACTIVITY_RESUMED, "com.example.editor", "Editor")
-            foreground.accept(type, null, null)
-            assertNull(foreground.packageName())
+    @Test fun observedColorOsFilenamesResolveWithoutUsageAccess() {
+        // Regression fixtures from a physical OPPO CPH2305 on Android 16.
+        val fixtures = listOf(
+            Triple("org.telegram.messenger", "Telegram", "Screenshot_2026-10-09-20-04-02-75_948cd9899890cbd5c2798760b2b95377.jpg"),
+            Triple("com.anthropic.claude", "Claude", "Screenshot_2026-10-09-20-04-53-77_ae33c6f1cf6771e633bcb779de95c7e0.jpg"),
+            Triple("com.vivaldi.browser", "Vivaldi", "Screenshot_2026-10-09-20-05-03-71_d365b52accad0f47adbc08c16219827d.jpg"),
+            Triple("com.clipcascade", "ClipCascade", "Screenshot_2026-10-09-20-07-51-31_6c78667ca2d2c60cb40e19d783b314e9.jpg"),
+            Triple("com.android.launcher", "Launcher", "Screenshot_2026-10-09-20-08-44-25_b783bf344239542886fee7b48fa4b892.jpg"),
+        )
+        for ((packageName, name, _) in fixtures) install(packageName, name,
+            if (packageName == "com.android.launcher") Intent.CATEGORY_HOME else Intent.CATEGORY_LAUNCHER)
+        for ((packageName, name, filename) in fixtures) {
+            val source = ScreenshotSourceApps.resolve(app, filename)!!
+            assertEquals(packageName, source.packageName)
+            assertEquals(name, source.name)
+            assertNotNull(source.icon)
         }
     }
 
-    private fun access(mode: Int) {
-        shadowOf(app.getSystemService(AppOpsManager::class.java)).setMode(
-            AppOpsManager.OPSTR_GET_USAGE_STATS, app.applicationInfo.uid, app.packageName, mode,
-        )
+    @Test fun repeatedLauncherActivitiesDoNotMakeThePackageAmbiguous() {
+        install("org.telegram.messenger", "Telegram")
+        install("org.telegram.messenger", "Telegram")
+        assertEquals("org.telegram.messenger", ScreenshotSourceApps.resolve(app,
+            "Screenshot_2026-10-09-20-04-02-75_948cd9899890cbd5c2798760b2b95377.jpg")?.packageName)
     }
 
-    private fun install(packageName: String, label: String) {
+    @Test fun unsupportedOrUnknownFilenamesReturnNoSourceInsteadOfGuessing() {
+        install("org.telegram.messenger", "Telegram")
+        for (filename in listOf("Screenshot.png", "", "IMG_948cd9899890cbd5c2798760b2b95377.jpg",
+            "Screenshot_2026-10-09-20-04-02-75_00000000000000000000000000000000.jpg")) {
+            assertNull(ScreenshotSourceApps.resolve(app, filename))
+        }
+    }
+
+    @Test fun uninstalledSourceDoesNotPreventScreenshotCapture() {
+        assertNull(ScreenshotSourceApps.resolve(app,
+            "Screenshot_2026-10-09-20-04-02-75_948cd9899890cbd5c2798760b2b95377.jpg"))
+        assertTrue(ScreenshotCaptureState.asMap(app)["enabled"]!!)
+    }
+
+    @Test fun uppercaseFilenameMetadataIsAccepted() {
+        install("org.telegram.messenger", "Telegram")
+        assertEquals("org.telegram.messenger", ScreenshotSourceApps.resolve(app,
+            "SCREENSHOT_2026-10-09-20-04-02-75_948CD9899890CBD5C2798760B2B95377.JPG")?.packageName)
+    }
+
+    private fun install(packageName: String, label: String, category: String = Intent.CATEGORY_LAUNCHER) {
+        val info = ApplicationInfo().apply {
+            this.packageName = packageName
+            nonLocalizedLabel = label
+            icon = android.R.drawable.ic_menu_edit
+        }
         shadowOf(app.packageManager).installPackage(PackageInfo().apply {
             this.packageName = packageName
-            applicationInfo = ApplicationInfo().apply {
-                this.packageName = packageName
-                nonLocalizedLabel = label
-                icon = android.R.drawable.ic_menu_edit
-            }
+            applicationInfo = info
         })
-    }
-
-    private fun event(type: Int, packageName: String, at: Long) {
-        shadowOf(app.getSystemService(UsageStatsManager::class.java)).addEvent(EventBuilder.buildEvent()
-            .setEventType(type).setPackage(packageName).setClass("Main").setTimeStamp(at).build())
-    }
-
-    @Implements(UsageStatsManager::class)
-    class FailingUsageStats {
-        @Implementation fun queryEvents(beginTime: Long, endTime: Long): UsageEvents? = throw SecurityException("Revoked")
+        shadowOf(app.packageManager).addResolveInfoForIntent(
+            Intent(Intent.ACTION_MAIN).addCategory(category),
+            ResolveInfo().apply { activityInfo = ActivityInfo().apply {
+                this.packageName = packageName
+                name = "$packageName.Main"
+                applicationInfo = info
+            } },
+        )
     }
 }

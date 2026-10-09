@@ -773,20 +773,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: const Text('Allow access'),
               ),
             ),
-          if (widget.controller.screenshotCapture.enabled &&
-              !widget.controller.screenshotCapture.sourceAccessGranted)
-            _SettingRow(
-              title: 'Screenshot source apps',
-              description:
-                  'Optional. Save the app name and icon with screenshots.',
-              trailing: Button.secondary(
-                key: const ValueKey<String>('screenshot-source-access'),
-                onPressed: widget.controller.busy
-                    ? null
-                    : widget.controller.openScreenshotSourceAccess,
-                child: const Text('Allow access'),
-              ),
-            ),
         ],
         _SettingRow(
           key: _clipboardCaptureKey,

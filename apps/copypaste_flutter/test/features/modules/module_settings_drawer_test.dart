@@ -200,6 +200,10 @@ void main() {
           closeTo(tester.getCenter(done).dx, 0.01),
         );
         if (many) {
+          final save = find.widgetWithText(Button, 'Save');
+          final savePosition = tester.getRect(save);
+          final donePosition = tester.getRect(done);
+          expect(save.hitTestable(), findsOneWidget);
           expect(find.text('Uppercase'), findsOneWidget);
           expect(find.widgetWithText(Button, 'Preferences'), findsNothing);
           expect(find.byType(AlertDialog), findsNothing);
@@ -208,6 +212,8 @@ void main() {
           expect(tester.getBottomRight(done).dy, lessThan(height));
           await tester.ensureVisible(find.text('Module command 7'));
           await tester.pumpAndSettle();
+          expect(tester.getRect(save), savePosition);
+          expect(tester.getRect(done), donePosition);
           expect(tester.getTopLeft(close), headerPosition);
           expect(tester.getBottomRight(done).dy, lessThan(height));
           final command = find.widgetWithText(Button, 'Module command 7');
