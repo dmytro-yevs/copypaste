@@ -16,7 +16,10 @@ class ReleaseReceiptsTest(unittest.TestCase):
     def fixtures(self, root, module_id):
         module = {"id": module_id, "version": "0.1.0"}
         paths = []
-        for platform, architecture in [("macos", "aarch64"), ("windows", "x86_64"), ("android", "x86_64")]:
+        for platform, architecture in [
+            ("macos", "aarch64"), ("windows", "x86_64"),
+            ("linux", "x86_64"), ("linux", "aarch64"), ("android", "x86_64"),
+        ]:
             package = root / f"CopyPasteModule-{module_id}-v0.1.0-{platform}-{architecture}.cpmodule"
             package.write_bytes(b"exact-production-package")
             receipt = package.with_name(package.name + ".receipt.json")
@@ -30,7 +33,7 @@ class ReleaseReceiptsTest(unittest.TestCase):
             paths.append(receipt)
         return module, paths
 
-    def test_accepts_all_three_native_receipts_for_each_provider(self):
+    def test_accepts_all_required_native_receipts_for_each_provider(self):
         for module_id in ["copypaste.supabase", "copypaste.semantic-search", "copypaste.ocr"]:
             with self.subTest(module=module_id), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)

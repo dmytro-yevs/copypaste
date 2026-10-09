@@ -23,7 +23,7 @@ def native_run(arguments):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--platform", required=True, choices=["macos", "windows"])
+    parser.add_argument("--platform", required=True, choices=["macos", "windows", "linux"])
     parser.add_argument("--package", required=True, type=Path)
     parser.add_argument("--program", required=True, type=Path)
     parser.add_argument("--app-version", required=True)
@@ -32,11 +32,21 @@ def main():
     parser.add_argument("--receipt", required=True, type=Path)
     parser.add_argument("--fixtures", type=Path, default=ROOT / "scripts/modules/fixtures")
     args = parser.parse_args()
-    expected_system = {"macos": "Darwin", "windows": "Windows"}[args.platform]
-    expected_architecture = {"macos": {"arm64", "aarch64"}, "windows": {"AMD64", "x86_64"}}
+    expected_system = {"macos": "Darwin", "windows": "Windows", "linux": "Linux"}[args.platform]
+    expected_architecture = {
+        "macos": {"arm64", "aarch64"},
+        "windows": {"AMD64", "x86_64"},
+        "linux": {"x86_64", "aarch64"},
+    }
     if platform.system() != expected_system or platform.machine() not in expected_architecture[args.platform]:
         raise ValueError("Native package qualification requires the exact shipped desktop target")
-    prefix = ["/usr/bin/sandbox-exec", "-p", "(version 1)(allow default)(deny network*)"] if args.platform == "macos" else []
+    prefix = []
+    if args.platform == "macos":
+        prefix = ["/usr/bin/sandbox-exec", "-p", "(version 1)(allow default)(deny network*)"]
+    elif args.platform == "linux":
+        # The GitHub-hosted Linux runner grants sudo. A new network namespace
+        # binds the exact signed artifact test without ambient network access.
+        prefix = ["sudo", "unshare", "--net", "--"]
     rule = "CopyPaste-module-qualification-" + uuid.uuid4().hex
     environment = {
         **os.environ, "COPYPASTE_QUALIFICATION_RULE": rule,

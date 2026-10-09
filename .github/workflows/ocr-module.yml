@@ -44,6 +44,8 @@ jobs:
         include:
           - { platform: macos, architecture: aarch64, runner: macos-14, library: libcopypaste_module_ocr.dylib, program: copypaste-module-qualification }
           - { platform: windows, architecture: x86_64, runner: windows-2022, library: copypaste_module_ocr.dll, program: copypaste-module-qualification.exe }
+          - { platform: linux, architecture: x86_64, runner: ubuntu-24.04, library: libcopypaste_module_ocr.so, program: copypaste-module-qualification }
+          - { platform: linux, architecture: aarch64, runner: ubuntu-24.04-arm, library: libcopypaste_module_ocr.so, program: copypaste-module-qualification }
     runs-on: ${{ matrix.runner }}
     defaults:
       run:
@@ -204,5 +206,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create module-copypaste.ocr-v${{ needs.preflight.outputs.version }} dist/*.cpmodule dist/*.receipt.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false --title "CopyPaste OCR ${{ needs.preflight.outputs.version }}" --notes "Optional first-party OCR. Signed packages for macOS, Windows, and all shipped Android ABIs. Recognition works offline."
+          gh release create module-copypaste.ocr-v${{ needs.preflight.outputs.version }} dist/*.cpmodule dist/*.receipt.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false --title "CopyPaste OCR ${{ needs.preflight.outputs.version }}" --notes "Optional first-party OCR. Signed packages for macOS, Windows, Linux x86_64/aarch64, and all shipped Android ABIs. Recognition works offline."
           gh workflow run module-marketplace.yml --repo "$GITHUB_REPOSITORY" --ref module-copypaste.ocr-v${{ needs.preflight.outputs.version }} -f module_release_tag=module-copypaste.ocr-v${{ needs.preflight.outputs.version }}

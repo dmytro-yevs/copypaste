@@ -53,8 +53,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { platform: macos, architecture: aarch64, runner: macos-14, prefix: lib, suffix: dylib, program: copypaste-module-qualification }
-          - { platform: windows, architecture: x86_64, runner: windows-2022, prefix: '', suffix: dll, program: copypaste-module-qualification.exe }
+          - { platform: macos, architecture: aarch64, runner: macos-14, prefix: lib, suffix: dylib, runtime: libonnxruntime.dylib, program: copypaste-module-qualification }
+          - { platform: windows, architecture: x86_64, runner: windows-2022, prefix: '', suffix: dll, runtime: onnxruntime.dll, program: copypaste-module-qualification.exe }
+          - { platform: linux, architecture: x86_64, runner: ubuntu-24.04, prefix: lib, suffix: so, runtime: libonnxruntime.so, program: copypaste-module-qualification }
+          - { platform: linux, architecture: aarch64, runner: ubuntu-24.04-arm, prefix: lib, suffix: so, runtime: libonnxruntime.so, program: copypaste-module-qualification }
     runs-on: ${{ matrix.runner }}
     env:
       OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
@@ -95,7 +97,7 @@ jobs:
         env:
           COPYPASTE_SEMANTIC_MODELS: ${{ runner.temp }}/module-fixtures
           COPYPASTE_SEMANTIC_LIBRARY: ${{ github.workspace }}/modules/semantic-search/target/release/${{ matrix.prefix }}${{ needs.preflight.outputs.library }}.${{ matrix.suffix }}
-          COPYPASTE_SEMANTIC_RUNTIME: ${{ github.workspace }}/modules/semantic-search/native/${{ matrix.platform }}/${{ matrix.architecture }}/${{ matrix.platform == 'windows' && 'onnxruntime.dll' || 'libonnxruntime.dylib' }}
+          COPYPASTE_SEMANTIC_RUNTIME: ${{ github.workspace }}/modules/semantic-search/native/${{ matrix.platform }}/${{ matrix.architecture }}/${{ matrix.runtime }}
         run: cargo +1.96 test --locked -p copypaste-modules signed_semantic_package -- --ignored --nocapture
       - name: Sign target package
         env:
@@ -233,5 +235,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create module-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }} dist/*.cpmodule dist/*.receipt.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false --title "CopyPaste ${{ inputs.module }} ${{ needs.preflight.outputs.version }}" --notes "Optional first-party ${{ inputs.module }} module. Production-signed packages and exact native qualification receipts for macOS, Windows, and Android."
+          gh release create module-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }} dist/*.cpmodule dist/*.receipt.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false --title "CopyPaste ${{ inputs.module }} ${{ needs.preflight.outputs.version }}" --notes "Optional first-party ${{ inputs.module }} module. Production-signed packages and exact native qualification receipts for macOS, Windows, Linux x86_64/aarch64, and Android."
           gh workflow run module-marketplace.yml --repo "$GITHUB_REPOSITORY" --ref module-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }} -f module_release_tag=module-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}

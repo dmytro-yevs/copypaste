@@ -6,10 +6,10 @@ The base application has no OCR model or ONNX Runtime dependency.
 
 ## Package preparation
 
-The catalog declares macOS 14+, Windows 10+, and Android 7+ for this runtime.
+The catalog declares macOS 14+, Windows 10+, Linux with glibc 2.35+, and Android 7+ for this runtime.
 CopyPaste 1.0.6+ displays these requirements and keeps incompatible modules
 visible with installation disabled. The **Build and publish OCR module**
-workflow prepares all five shipped packages, signs them, performs native
+workflow prepares all seven shipped packages, signs them, performs native
 qualification, and publishes the module release and signed marketplace.
 
 Run `python3 scripts/fetch-models.py` from this directory. It downloads only
@@ -23,9 +23,9 @@ the module staging tree, for example:
 
 ```sh
 python3 scripts/fetch-runtime.py \
-  --library /tmp/onnxruntime/lib/libonnxruntime.dylib \
+  --library /tmp/onnxruntime/lib/libonnxruntime.so \
   --sha256 <published-sha256> \
-  --platform macos --architecture aarch64
+  --platform linux --architecture x86_64
 ```
 
 The package tool places `native/<platform>/<architecture>` beside the module

@@ -21,8 +21,11 @@ PUBLIC_KEY = re.search(
 REPOSITORY = "https://github.com/dmytro-yevs/copypaste/releases/download"
 REQUIRED_TARGETS = {
     ("macos", "aarch64"), ("windows", "x86_64"),
+    ("linux", "x86_64"), ("linux", "aarch64"),
     ("android", "aarch64"), ("android", "arm"), ("android", "x86_64"),
 }
+LEGACY_PLATFORMS = {"macos", "windows", "android"}
+SUPPORTED_PLATFORMS = LEGACY_PLATFORMS | {"linux"}
 MAXIMUM_BYTES = 2 * 1024 * 1024 * 1024
 
 
@@ -97,7 +100,7 @@ def read_package(path, public_key=PUBLIC_KEY):
         manifest_bytes = archive.read("manifest.json")
         verify_signature(manifest_bytes, archive.read("manifest.json.sig"), "manifest.json", public_key)
         manifest = json.loads(manifest_bytes)
-        if manifest["schema_version"] not in (1, 2, 3, 4) or manifest["api_version"] != 1:
+        if manifest["schema_version"] not in (1, 2, 3, 4, 5) or manifest["api_version"] != 1:
             raise ValueError("Unsupported module manifest")
         if not re.fullmatch(r"copypaste\.[a-z0-9][a-z0-9.-]*", manifest["id"]):
             raise ValueError("Invalid first-party module ID")
@@ -122,7 +125,7 @@ def read_package(path, public_key=PUBLIC_KEY):
                 raise ValueError("Module file checksum mismatch")
         platform = manifest["target"]["platform"]
         architecture = manifest["target"]["architecture"]
-        suffix = {"macos": ".dylib", "windows": ".dll", "android": ".so"}[platform]
+        suffix = {"macos": ".dylib", "windows": ".dll", "linux": ".so", "android": ".so"}[platform]
         if architecture not in {"x86", "x86_64", "arm", "aarch64"} or manifest["entrypoint"] != "bin/module" + suffix:
             raise ValueError("Invalid module target or entrypoint")
         if manifest["entrypoint"] not in inventory:
@@ -144,14 +147,21 @@ def version_tuple(version):
 
 
 def supported_platforms(manifest):
-    platforms = manifest.get("supported_platforms", ["macos", "windows", "android"])
+    # Schema 1 packages predate Linux.  Keep their implicit platform set frozen
+    # so a signed historical catalog remains valid without an invented target.
+    platforms = manifest.get("supported_platforms", sorted(LEGACY_PLATFORMS))
     if (not isinstance(platforms, list) or not platforms
             or len(platforms) != len(set(platforms))
-            or not set(platforms) <= {"macos", "windows", "android"}
+            or not set(platforms) <= SUPPORTED_PLATFORMS
             or manifest["target"]["platform"] not in platforms
-            or (manifest["schema_version"] == 1 and "supported_platforms" in manifest)):
+            or (manifest["schema_version"] == 1 and "supported_platforms" in manifest)
+            or ("linux" in platforms and manifest["schema_version"] < 5)):
         raise ValueError("Invalid supported module platforms")
     return sorted(platforms)
+
+
+def required_targets(manifest):
+    return {target for target in REQUIRED_TARGETS if target[0] in supported_platforms(manifest)}
 
 
 def build_catalog(packages, release_tag, previous=None, public_key=PUBLIC_KEY):
@@ -161,9 +171,16 @@ def build_catalog(packages, release_tag, previous=None, public_key=PUBLIC_KEY):
     records = {}
     targets = set()
     module = None
+    release_schema = None
+    expected_targets = None
     for path in sorted(map(Path, packages)):
         verified = read_package(path, public_key)
         manifest = verified.manifest
+        if release_schema is None:
+            release_schema = manifest["schema_version"]
+            expected_targets = required_targets(manifest)
+        elif manifest["schema_version"] != release_schema:
+            raise ValueError("All release packages must use the same module schema")
         metadata = {key: manifest[key] for key in ("id", "title", "description", "version", "app_versions")}
         metadata["supported_platforms"] = supported_platforms(manifest)
         if not metadata["title"].strip() or len(metadata["title"]) > 200 or not metadata["description"].strip() or len(metadata["description"]) > 4000:
@@ -184,7 +201,7 @@ def build_catalog(packages, release_tag, previous=None, public_key=PUBLIC_KEY):
             "size_bytes": path.stat().st_size, "sha256": digest,
             **({"minimum_system_version": verified.minimum_system_version} if verified.minimum_system_version else {}),
         })
-    if module is None or targets != {target for target in REQUIRED_TARGETS if target[0] in module["supported_platforms"]}:
+    if module is None or targets != expected_targets:
         raise ValueError("Qualified packages are required for every shipped platform and Android ABI")
     if release_tag != f"module-{module['id']}-v{module['version']}":
         raise ValueError("Release tag must identify the exact module ID and version")

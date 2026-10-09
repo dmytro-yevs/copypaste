@@ -38,11 +38,13 @@ class CatalogTest(unittest.TestCase):
     def packages(self, version="0.1.0", omit=None, inconsistent=False, tamper=False, platforms=None, schema=1):
         paths = []
         for platform, architecture in sorted(catalog.REQUIRED_TARGETS):
+            if platforms is None and platform not in catalog.LEGACY_PLATFORMS:
+                continue
             if platforms is not None and platform not in platforms:
                 continue
             if (platform, architecture) == omit:
                 continue
-            suffix = {"macos": ".dylib", "windows": ".dll", "android": ".so"}[platform]
+            suffix = {"macos": ".dylib", "windows": ".dll", "linux": ".so", "android": ".so"}[platform]
             entrypoint = "bin/module" + suffix
             code = b"test-native-library"
             manifest = {
@@ -71,10 +73,36 @@ class CatalogTest(unittest.TestCase):
         value = catalog.build_catalog(packages, "module-copypaste.ocr-v0.1.0", public_key=self.public_key)
         self.assertEqual(len(value["modules"][0]["artifacts"]), 5)
         with self.assertRaises(ValueError):
-            catalog.read_package(self.packages(schema=5)[0], self.public_key)
+            catalog.read_package(self.packages(schema=6)[0], self.public_key)
+
+    def test_linux_targets_preserve_published_legacy_catalog_entries(self):
+        previous = {
+            "schema_version": 1,
+            "modules": [{
+                "id": "copypaste.published", "version": "0.1.0",
+                "artifacts": [{"platform": "macos", "architecture": "aarch64"}],
+            }],
+        }
+        paths = self.packages(platforms=["macos", "windows", "linux", "android"], schema=5)
+        value = catalog.build_catalog(paths, "module-copypaste.ocr-v0.1.0", previous, self.public_key)
+        current = next(module for module in value["modules"] if module["id"] == "copypaste.ocr")
+        self.assertEqual(
+            {(artifact["platform"], artifact["architecture"]) for artifact in current["artifacts"]},
+            catalog.REQUIRED_TARGETS,
+        )
+        self.assertEqual(
+            {artifact["architecture"] for artifact in current["artifacts"] if artifact["platform"] == "linux"},
+            {"x86_64", "aarch64"},
+        )
+        with self.assertRaises(ValueError):
+            catalog.build_catalog(
+                self.packages(platforms=["macos", "windows", "linux", "android"], schema=4),
+                "module-copypaste.ocr-v0.1.0",
+                public_key=self.public_key,
+            )
 
     def test_signed_package_catalog_retains_other_modules_and_exact_targets(self):
-        paths = self.packages()
+        paths = self.packages(platforms=["macos", "windows", "linux", "android"], schema=5)
         previous = {"schema_version": 1, "modules": [
             {"id": "copypaste.other", "version": "1.0.0", "artifacts": []},
             {"id": "copypaste.ocr", "version": "0.0.9", "artifacts": []},
