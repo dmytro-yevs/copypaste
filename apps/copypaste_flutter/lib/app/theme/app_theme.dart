@@ -181,6 +181,9 @@ abstract final class AppTheme {
         padding: _historyToolbarIconPadding,
       );
 
+  static final AbstractButtonStyle inputFeatureButtonStyle =
+      const ButtonStyle.ghostIcon().withPadding(padding: EdgeInsets.zero);
+
   static EdgeInsetsGeometry _historyToolbarIconPadding(
     BuildContext context,
     Set<WidgetState> states,

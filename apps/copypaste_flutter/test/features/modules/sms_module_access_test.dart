@@ -105,8 +105,10 @@ void main() {
     testWidgets(
       'SMS setup drawer and enable work on $platform at width $width',
       (tester) async {
-        await tester.binding.setSurfaceSize(Size(width, height));
-        addTearDown(() => tester.binding.setSurfaceSize(null));
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = Size(width, height);
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
         final repository = MemoryModulesRepository()..modules = [sms];
         final controller = ModulesController(
           repository: repository,
@@ -154,12 +156,15 @@ void main() {
         await tester.pumpAndSettle();
         final drawer = find.byKey(const ValueKey('sms-access-setup-drawer'));
         expect(drawer, findsOneWidget);
-        expect(tester.getSize(drawer).width, closeTo(width, 2));
+        expect(
+          tester.getSize(drawer).width,
+          closeTo(width >= 800 ? AppOverlaySize.drawerPanelWidth : width, 2),
+        );
         expect(
           tester.getSize(drawer).height,
           lessThanOrEqualTo(
             MediaQuery.sizeOf(tester.element(drawer)).height *
-                AppOverlaySize.drawerHeightFactor,
+                (width >= 800 ? 1 : AppOverlaySize.drawerHeightFactor),
           ),
         );
         expect(tester.getTopLeft(drawer).dy, greaterThanOrEqualTo(0));

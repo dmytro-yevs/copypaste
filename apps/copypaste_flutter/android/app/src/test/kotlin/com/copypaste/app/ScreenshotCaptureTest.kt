@@ -87,6 +87,7 @@ class ScreenshotCaptureTest {
         monitor.scan()
         monitor.scan()
         assertEquals(listOf(2L), first.ids)
+        assertEquals(listOf(since + 1000), first.takenAt)
         monitor.close()
         val resumed = Reader()
         val next = ScreenshotCaptureMonitor(app, resumed)
@@ -105,6 +106,18 @@ class ScreenshotCaptureTest {
         reader.allowed = true
         monitor.scan()
         assertTrue(reader.ids.isEmpty())
+        monitor.close()
+    }
+
+    @Test fun missingScreenshotTimeStillImportsUsingTheAvailableMediaData() {
+        provider.rows = listOf(row(1, "Screenshot_no_time.png", 0).toMutableMap().apply {
+            put(MediaStore.Images.Media.DATE_ADDED, (since + 1000) / 1000)
+        })
+        val reader = Reader()
+        val monitor = ScreenshotCaptureMonitor(app, reader)
+        monitor.scan()
+        assertEquals(listOf(1L), reader.ids)
+        assertEquals(listOf(0L), reader.takenAt)
         monitor.close()
     }
 
@@ -163,13 +176,17 @@ class ScreenshotCaptureTest {
         var saves = true
         var busy = false
         val ids = mutableListOf<Long>()
+        val takenAt = mutableListOf<Long>()
         override fun policyAllowsCapture(): Boolean = allowed
         override fun readMetadata(action: () -> Unit): Boolean {
             if (allowed && !busy) action()
             return allowed && !busy
         }
-        override fun capture(uri: Uri, type: String): Boolean {
-            if (saves) ids.add(uri.lastPathSegment!!.toLong())
+        override fun capture(uri: Uri, type: String, takenAt: Long): Boolean {
+            if (saves) {
+                ids.add(uri.lastPathSegment!!.toLong())
+                this.takenAt.add(takenAt)
+            }
             return saves
         }
         override fun close(completion: (Boolean) -> Unit) { completion(true) }

@@ -11,7 +11,8 @@
 
 namespace {
 
-constexpr char kPairingUriPrefix[] = "copypaste://pair/v1?";
+constexpr char kLegacyPairingUriPrefix[] = "copypaste://pair/v1?";
+constexpr char kPairingUriPrefix[] = "copypaste://pair/v2?";
 
 void RegisterPairingProtocol() {
   wchar_t executable[MAX_PATH] = {};
@@ -59,7 +60,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   const auto pairing_argument = std::find_if(
       command_line_arguments.begin(), command_line_arguments.end(),
       [](const std::string& argument) {
-        return argument.rfind(kPairingUriPrefix, 0) == 0;
+        return argument.rfind(kPairingUriPrefix, 0) == 0 ||
+               argument.rfind(kLegacyPairingUriPrefix, 0) == 0;
       });
   if (pairing_argument != command_line_arguments.end()) {
     pending_pairing_uri = *pairing_argument;

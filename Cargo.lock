@@ -561,7 +561,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-cli"
-version = "1.0.18"
+version = "1.0.19"
 dependencies = [
  "backon",
  "clap",
@@ -578,11 +578,11 @@ dependencies = [
 
 [[package]]
 name = "copypaste-clock"
-version = "1.0.18"
+version = "1.0.19"
 
 [[package]]
 name = "copypaste-cloud"
-version = "1.0.18"
+version = "1.0.19"
 dependencies = [
  "argon2",
  "backon",
@@ -616,7 +616,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-core"
-version = "1.0.18"
+version = "1.0.19"
 dependencies = [
  "android-native-keyring-store",
  "base64",
@@ -659,7 +659,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-daemon"
-version = "1.0.18"
+version = "1.0.19"
 dependencies = [
  "anyhow",
  "backon",
@@ -709,7 +709,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-feedback"
-version = "1.0.18"
+version = "1.0.19"
 dependencies = [
  "tracing",
  "winsafe",
@@ -717,7 +717,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-flutter-bridge"
-version = "1.0.18"
+version = "1.0.19"
 dependencies = [
  "copypaste-core",
  "copypaste-ipc",
@@ -741,14 +741,14 @@ dependencies = [
 
 [[package]]
 name = "copypaste-fs"
-version = "1.0.18"
+version = "1.0.19"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "copypaste-ipc"
-version = "1.0.18"
+version = "1.0.19"
 dependencies = [
  "copypaste-module-sdk",
  "directories",
@@ -798,7 +798,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-modules"
-version = "1.0.18"
+version = "1.0.19"
 dependencies = [
  "copypaste-core",
  "copypaste-fs",
@@ -824,7 +824,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-p2p"
-version = "1.0.18"
+version = "1.0.19"
 dependencies = [
  "chacha20poly1305",
  "copypaste-clock",
@@ -842,6 +842,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "snow",
+ "spake2",
  "subtle",
  "sysctl",
  "tempfile",
@@ -858,7 +859,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-payload"
-version = "1.0.18"
+version = "1.0.19"
 dependencies = [
  "base64",
  "copypaste-ipc",
@@ -869,14 +870,14 @@ dependencies = [
 
 [[package]]
 name = "copypaste-retry"
-version = "1.0.18"
+version = "1.0.19"
 dependencies = [
  "backon",
 ]
 
 [[package]]
 name = "copypaste-runtime"
-version = "1.0.18"
+version = "1.0.19"
 dependencies = [
  "base64",
  "copypaste-core",
@@ -893,7 +894,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-runtime-log"
-version = "1.0.18"
+version = "1.0.19"
 dependencies = [
  "anyhow",
  "copypaste-clock",
@@ -908,7 +909,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-source-app"
-version = "1.0.18"
+version = "1.0.19"
 dependencies = [
  "base64",
  "image",
@@ -921,7 +922,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-sync"
-version = "1.0.18"
+version = "1.0.19"
 dependencies = [
  "base64",
  "copypaste-core",
@@ -1100,6 +1101,7 @@ dependencies = [
  "cpufeatures 0.2.17",
  "curve25519-dalek-derive",
  "fiat-crypto",
+ "rand_core 0.6.4",
  "rustc_version",
  "subtle",
 ]
@@ -3505,6 +3507,18 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "spake2"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5482afe85a0b6ce956c945401598dbc527593c77ba51d0a87a586938b1b893a"
+dependencies = [
+ "curve25519-dalek",
+ "hkdf",
+ "rand_core 0.6.4",
+ "sha2",
 ]
 
 [[package]]

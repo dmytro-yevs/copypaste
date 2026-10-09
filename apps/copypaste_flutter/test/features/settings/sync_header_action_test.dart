@@ -6,6 +6,7 @@ import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/shared/inspector_table.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/features/devices/devices.dart';
+import 'package:copypaste_flutter/features/devices/device_label.dart';
 import 'package:copypaste_flutter/features/settings/controller/settings_controller.dart';
 import 'package:copypaste_flutter/features/settings/models/settings_models.dart';
 import 'package:copypaste_flutter/features/settings/models/sync_status.dart';
@@ -68,6 +69,16 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(drawer, findsOneWidget);
       expect(navigation.bottomOverlayOpen, isTrue);
+      final drawerRect = tester.getRect(drawer);
+      if (layout.size.width >= 800) {
+        expect(drawerRect.width, closeTo(AppOverlaySize.drawerPanelWidth, 2));
+        expect(drawerRect.right, closeTo(layout.size.width, 2));
+        expect(drawerRect.top, closeTo(0, 2));
+        expect(drawerRect.height, closeTo(layout.size.height, 2));
+      } else {
+        expect(drawerRect.width, closeTo(layout.size.width, 2));
+        expect(drawerRect.bottom, closeTo(layout.size.height, 2));
+      }
 
       await tester.tap(
         find.byKey(const ValueKey<String>('close-sync-details')),
@@ -173,14 +184,31 @@ void main() {
         find.byKey(const ValueKey<String>('sync-details-drawer')),
         findsOneWidget,
       );
-      expect(find.text('Android phone'), findsOneWidget);
+      final phoneLabel = find.byWidgetPredicate(
+        (widget) => widget is DeviceLabel && widget.name == 'Android phone',
+      );
+      expect(phoneLabel, findsOneWidget);
+      expect(
+        tester.widget<DeviceLabel>(phoneLabel).deviceClass,
+        DeviceClass.phone,
+      );
+      expect(
+        find.descendant(
+          of: phoneLabel,
+          matching: find.byIcon(LucideIcons.smartphone),
+        ),
+        findsOneWidget,
+      );
       expect(find.text('17 ms'), findsOneWidget);
       expect(find.byType(InspectorTable), findsWidgets);
-      expect(find.text('Clips sent'), findsWidgets);
-      expect(find.text('Clips received'), findsWidgets);
+      expect(find.text('Clips sent'), findsNothing);
+      expect(find.text('Clips received'), findsNothing);
       expect(find.text('192.168.1.2:47654'), findsOneWidget);
+      final desktopLabel = find.byWidgetPredicate(
+        (widget) => widget is DeviceLabel && widget.name == 'Windows desktop',
+      );
       await tester.scrollUntilVisible(
-        find.text('Windows desktop'),
+        desktopLabel,
         200,
         scrollable: find
             .descendant(
@@ -189,7 +217,18 @@ void main() {
             )
             .first,
       );
-      expect(find.text('Windows desktop'), findsOneWidget);
+      expect(desktopLabel, findsOneWidget);
+      expect(
+        tester.widget<DeviceLabel>(desktopLabel).deviceClass,
+        DeviceClass.desktop,
+      );
+      expect(
+        find.descendant(
+          of: desktopLabel,
+          matching: find.byIcon(LucideIcons.monitor),
+        ),
+        findsOneWidget,
+      );
       expect(find.text('The device stopped responding.'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.tap(
@@ -203,6 +242,11 @@ void main() {
         findsNothing,
       );
     },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+      TargetPlatform.android,
+    }),
   );
 
   testWidgets('sync details fit a narrow phone with enlarged text', (
@@ -309,6 +353,14 @@ class _Devices implements DevicesGateway {
         lastSeen: now,
         online: true,
         details: DeviceDetails(
+          profile: DeviceProfile(
+            displayName: 'Android phone',
+            platform: DevicePlatform.android,
+            deviceClass: DeviceClass.phone,
+            provenance: DeviceObservationProvenance.selfReported,
+            trust: DeviceObservationTrust.authenticated,
+            observedAt: now,
+          ),
           endpoint: DeviceEndpoint(
             lanEndpoint: '192.168.1.2:47654',
             provenance: DeviceObservationProvenance.observed,
@@ -321,6 +373,22 @@ class _Devices implements DevicesGateway {
             trust: DeviceObservationTrust.authenticated,
             observedAt: now,
             freshUntil: now.add(const Duration(minutes: 1)),
+          ),
+        ),
+      ),
+      DevicePeer(
+        id: 'windows',
+        name: 'Windows desktop',
+        lastSeen: now,
+        online: false,
+        details: DeviceDetails(
+          profile: DeviceProfile(
+            displayName: 'Windows desktop',
+            platform: DevicePlatform.windows,
+            deviceClass: DeviceClass.desktop,
+            provenance: DeviceObservationProvenance.selfReported,
+            trust: DeviceObservationTrust.authenticated,
+            observedAt: now,
           ),
         ),
       ),

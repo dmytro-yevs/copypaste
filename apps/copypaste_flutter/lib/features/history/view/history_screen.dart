@@ -256,7 +256,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       if (!context.mounted) return;
       await showOverlay<void>(
         context,
-        AppOverlays.bottomDrawerConfiguration,
+        AppOverlays.drawerConfiguration(context),
         builder: (context) => ConstrainedBox(
           key: const ValueKey<String>('history-detail-drawer'),
           constraints: AppOverlays.drawerContentConstraints(context),
@@ -753,7 +753,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
   static const double _minimumExpandedSearchWidth =
       AppLayoutSize.historySearchMinWidth;
   static const double _toolbarGap = AppSpacing.sm;
-  static const int _filterCount = 5;
+  static const int _filterCount = 4;
   bool _searchExpanded = false;
 
   @override
@@ -773,13 +773,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
         if (collapseSearch && _searchExpanded) {
           return SizedBox(
             width: constraints.maxWidth,
-            child: Row(
-              spacing: _toolbarGap,
-              children: [
-                Expanded(child: _searchField(compact: true)),
-                _selectionButton(),
-              ],
-            ),
+            child: _searchField(compact: true),
           );
         }
 
@@ -789,6 +783,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
             spacing: _toolbarGap,
             runSpacing: _toolbarGap,
             children: [
+              _selectionButton(),
               Semantics(
                 label: 'Search history',
                 button: true,
@@ -801,7 +796,6 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
               ),
               ...filters,
               _importButton(),
-              _selectionButton(),
             ],
           );
         }
@@ -809,6 +803,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
         return Row(
           spacing: _toolbarGap,
           children: [
+            _selectionButton(),
             Expanded(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(
@@ -819,7 +814,6 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
             ),
             ...filters,
             _importButton(),
-            _selectionButton(),
           ],
         );
       },
@@ -879,10 +873,14 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
           ? [
               const InputFeature.leading(Icon(LucideIcons.search)),
               InputFeature.trailing(
-                Button.ghost(
-                  style: const ButtonStyle.ghostIcon(),
-                  onPressed: _closeCompactSearch,
-                  child: const Icon(LucideIcons.x),
+                Semantics(
+                  label: 'Close search',
+                  button: true,
+                  child: Button.ghost(
+                    style: AppTheme.inputFeatureButtonStyle,
+                    onPressed: _closeCompactSearch,
+                    child: const Icon(LucideIcons.x),
+                  ),
                 ),
               ),
             ]
@@ -915,20 +913,6 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
           value: kind,
           icon: HistoryClipPresentation.icon(kind),
         ),
-    ];
-    final pinnedOptions = <_HistoryFilterOption<bool>>[
-      const _HistoryFilterOption(
-        id: 'all',
-        label: 'All pins',
-        value: false,
-        icon: LucideIcons.pinOff,
-      ),
-      const _HistoryFilterOption(
-        id: 'pinned',
-        label: 'Pinned only',
-        value: true,
-        icon: LucideIcons.pin,
-      ),
     ];
     final originOptions = <_HistoryFilterOption<String?>>[
       const _HistoryFilterOption(
@@ -1000,19 +984,6 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
               option.value == null
                   ? current.copyWith(clearKind: true)
                   : current.copyWith(kind: option.value),
-            ),
-          );
-        },
-      ),
-      _filterSelect(
-        context,
-        compact: compact,
-        options: pinnedOptions,
-        value: query.pinnedOnly,
-        onChanged: (option) {
-          unawaited(
-            widget.controller.updateQuery(
-              widget.controller.query.copyWith(pinnedOnly: option.value),
             ),
           );
         },
@@ -1098,7 +1069,6 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
     final query = widget.controller.query;
     final labels = [
       query.kind?.label ?? 'All clips',
-      query.pinnedOnly ? 'Pinned only' : 'All pins',
       _facetLabel(
         widget.controller.facets.originDevices,
         query.origin,

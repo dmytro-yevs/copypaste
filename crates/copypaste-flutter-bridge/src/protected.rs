@@ -57,19 +57,29 @@ pub(crate) async fn create() -> Result<PairingCeremony, RuntimeError> {
 }
 
 pub(crate) async fn join(code: String, addr: String) -> Result<PairingCeremony, RuntimeError> {
-    let token = copypaste_p2p::PairingToken::parse(&code).map_err(|_| {
-        RuntimeError::from_daemon(
-            "pairing_invalid_code".into(),
-            "That pairing code is not valid.".into(),
-        )
-    })?;
-    let pairing_id = token.pairing_id();
-    drop(token);
+    let expected_pairing_id = if copypaste_p2p::PairingCode::parse(&code).is_ok() {
+        None
+    } else {
+        let token = copypaste_p2p::PairingToken::parse(&code).map_err(|_| {
+            RuntimeError::from_daemon(
+                "pairing_invalid_code".into(),
+                "That pairing code is not valid.".into(),
+            )
+        })?;
+        Some(token.pairing_id())
+    };
     let response = crate::client::request(Method::PairJoin { code, addr }).await?;
     let Some(ResponseData::PairingProgress(progress)) = response.data else {
         return Err(RuntimeError::internal());
     };
-    if progress.pairing_id.as_deref() != Some(pairing_id.as_str()) {
+    let pairing_id = progress
+        .pairing_id
+        .clone()
+        .ok_or_else(RuntimeError::internal)?;
+    if expected_pairing_id
+        .as_ref()
+        .is_some_and(|expected| expected != &pairing_id)
+    {
         return Err(RuntimeError::internal());
     }
     let ceremony_id = Uuid::new_v4().to_string();
@@ -705,7 +715,7 @@ mod tests {
         let payload = invitation_uri(&invitation).unwrap();
         let parsed = copypaste_p2p::PairingLink::parse(&payload).unwrap();
 
-        assert_eq!(parsed.pairing_id(), invitation.pairing_id);
+        assert_eq!(parsed.pairing_id(), Some(invitation.pairing_id.as_str()));
         assert_eq!(parsed.address().unwrap().to_string(), "192.0.2.10:47654");
     }
 

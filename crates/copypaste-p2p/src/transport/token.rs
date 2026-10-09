@@ -193,7 +193,7 @@ impl fmt::Debug for PairingToken {
 /// `-`, `_` and whitespace ignored so grouping and line wrapping survive a chat
 /// window; no padding and `check_trailing_bits` left `true`, so a given token
 /// has exactly one valid encoding.
-fn code_encoding() -> &'static Encoding {
+pub(super) fn code_encoding() -> &'static Encoding {
     static ENCODING: OnceLock<Encoding> = OnceLock::new();
     ENCODING.get_or_init(|| {
         let mut spec = Specification::new();

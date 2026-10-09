@@ -103,7 +103,7 @@ internal class PairingScannerChannel(
                     val raw = barcode.rawValue
                     val uri = raw?.let(Uri::parse)
                     if (raw != null && raw.length <= 4096 && uri?.scheme == "copypaste" &&
-                        uri.host == "pair" && uri.path == "/v1"
+                        uri.host == "pair" && uri.path in setOf("/v1", "/v2")
                     ) {
                         completion.success(raw)
                     } else {

@@ -13,6 +13,7 @@ import '../models/module_models.dart';
 import '../models/module_marketplace_models.dart';
 import 'sms_access_setup_drawer.dart';
 import 'module_settings_drawer.dart';
+import 'module_form_fields.dart';
 
 /// Marketplace and installed modules share the host's components and state.
 class ModulesSettingsView extends StatefulWidget {
@@ -171,6 +172,10 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
   }) {
     final id = installed?.id ?? marketplace!.id;
     final active = controller.activeModuleId == id;
+    final platforms =
+        installed != null && installed.supportedPlatforms.isNotEmpty
+        ? installed.supportedPlatforms
+        : marketplace?.supportedPlatforms ?? const <ModulePlatform>[];
     final size = installed == null
         ? marketplace!.downloadSize
         : formatModuleSize(installed.sizeBytes);
@@ -202,6 +207,8 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                   ?size,
                 ].join(' · '),
               ).small().muted(),
+              const Gap(AppSpacing.sm),
+              Text(formatModulePlatforms(platforms)).small().muted(),
               if (marketplace?.appRequirement case final requirement?) ...[
                 const Gap(AppSpacing.sm),
                 Text(requirement).small().muted(),
@@ -220,77 +227,78 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
               ],
             ],
           ),
-          Padding(
-            padding: const EdgeInsets.only(top: AppSpacing.lg),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (active) ...[
-                  LinearProgressIndicator(
-                    value: controller.installing
-                        ? null
-                        : controller.downloadProgress,
-                  ),
-                  const Gap(AppSpacing.sm),
+          if (installed != null || marketplace!.canInstall)
+            Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.lg),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (active) ...[
+                    LinearProgressIndicator(
+                      value: controller.installing
+                          ? null
+                          : controller.downloadProgress,
+                    ),
+                    const Gap(AppSpacing.sm),
+                  ],
+                  if (installed == null)
+                    Button.primary(
+                      key: ValueKey('module-install-$id'),
+                      onPressed: controller.busy || !marketplace!.canInstall
+                          ? null
+                          : () => controller.install(marketplace),
+                      child: Text(active ? _installationLabel() : 'Install'),
+                    )
+                  else
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        Tooltip(
+                          tooltip: (_) => const TooltipContainer(
+                            child: Text('Remove module'),
+                          ),
+                          child: Semantics(
+                            label: 'Remove module',
+                            button: true,
+                            child: Button.ghost(
+                              key: ValueKey('module-remove-$id'),
+                              style: AppTheme.controlButtonStyle(
+                                const ButtonStyle.ghostIcon(),
+                              ),
+                              onPressed:
+                                  controller.busy || installed.restartRequired
+                                  ? null
+                                  : () => _remove(context, installed),
+                              child: const Icon(LucideIcons.trash2),
+                            ),
+                          ),
+                        ),
+                        const Gap(AppSpacing.sm),
+                        Tooltip(
+                          tooltip: (_) => const TooltipContainer(
+                            child: Text('Module settings'),
+                          ),
+                          child: Semantics(
+                            label: 'Module settings',
+                            button: true,
+                            child: Button.secondary(
+                              key: ValueKey('module-settings-$id'),
+                              style: AppTheme.controlButtonStyle(
+                                const ButtonStyle.secondaryIcon(),
+                              ),
+                              onPressed: controller.busy
+                                  ? null
+                                  : () => _settings(context, id),
+                              child: const Icon(LucideIcons.settings),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                 ],
-                if (installed == null)
-                  Button.primary(
-                    key: ValueKey('module-install-$id'),
-                    onPressed: controller.busy || !marketplace!.canInstall
-                        ? null
-                        : () => controller.install(marketplace),
-                    child: Text(active ? _installationLabel() : 'Install'),
-                  )
-                else
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      Tooltip(
-                        tooltip: (_) => const TooltipContainer(
-                          child: Text('Remove module'),
-                        ),
-                        child: Semantics(
-                          label: 'Remove module',
-                          button: true,
-                          child: Button.ghost(
-                            key: ValueKey('module-remove-$id'),
-                            style: AppTheme.controlButtonStyle(
-                              const ButtonStyle.ghostIcon(),
-                            ),
-                            onPressed:
-                                controller.busy || installed.restartRequired
-                                ? null
-                                : () => _remove(context, installed),
-                            child: const Icon(LucideIcons.trash2),
-                          ),
-                        ),
-                      ),
-                      const Gap(AppSpacing.sm),
-                      Tooltip(
-                        tooltip: (_) => const TooltipContainer(
-                          child: Text('Module settings'),
-                        ),
-                        child: Semantics(
-                          label: 'Module settings',
-                          button: true,
-                          child: Button.secondary(
-                            key: ValueKey('module-settings-$id'),
-                            style: AppTheme.controlButtonStyle(
-                              const ButtonStyle.secondaryIcon(),
-                            ),
-                            onPressed: controller.busy
-                                ? null
-                                : () => _settings(context, id),
-                            child: const Icon(LucideIcons.settings),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-              ],
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -304,43 +312,21 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
 
   Future<void> _settings(BuildContext context, String id) => showOverlay<void>(
     context,
-    AppOverlays.bottomDrawerConfiguration,
+    AppOverlays.drawerConfiguration(context),
     builder: (context) => ModuleSettingsDrawer(
       controller: controller,
       moduleId: id,
-      onPreferences: (module) => _preferences(context, module),
       onInvoke: (module, command) => _invoke(context, module, command),
       onSmsSetup: () => _smsSetup(context),
     ),
   ).future;
-
-  Future<void> _preferences(
-    BuildContext context,
-    InstalledModule module,
-  ) async {
-    final draft = await _fieldsDialog(
-      context,
-      controller: controller,
-      title: '${module.title} preferences',
-      fields: module.preferenceFields,
-      values: module.preferences,
-      action: 'Save',
-      module: module,
-    );
-    if (draft == null) return;
-    try {
-      await controller.setPreferences(module.id, draft.values);
-    } finally {
-      await draft.close();
-    }
-  }
 
   Future<void> _smsSetup(BuildContext context) async {
     final setup = controller.smsAccessSetup();
     try {
       await showOverlay<void>(
         context,
-        AppOverlays.bottomDrawerConfiguration,
+        AppOverlays.drawerConfiguration(context),
         builder: (_) => SmsAccessSetupDrawer(controller: setup),
       ).future;
     } finally {
@@ -420,9 +406,8 @@ Future<ModuleFormDraft?> _fieldsDialog(
   required List<ModuleField> fields,
   required Map<String, Object> values,
   required String action,
-  InstalledModule? module,
 }) async {
-  final draft = controller.form(fields, values, module: module);
+  final draft = controller.form(fields, values);
   final confirmed = await AppOverlays.showDialog<bool>(
     context,
     builder: (_) =>
@@ -448,91 +433,7 @@ class _ModuleFieldsDialog extends StatelessWidget {
     builder: (context, _) => AppOverlays.alertDialog(
       icon: LucideIcons.puzzle,
       title: Text(title),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (draft.errorMessage != null) ...[
-              StateView.error(
-                title: 'File selection failed',
-                message: draft.errorMessage!,
-              ),
-              const Gap(AppSpacing.md),
-            ],
-            for (final field in draft.fields) ...[
-              if (field.kind == ModuleFieldKind.boolean)
-                Switch(
-                  value: draft.values[field.id] as bool,
-                  leading: Text(field.title),
-                  onChanged: (value) => draft.setValue(field.id, value),
-                )
-              else ...[
-                Text(field.title).small(),
-                const Gap(AppSpacing.xs),
-                if (field.kind == ModuleFieldKind.choices)
-                  MultiSelect<String>(
-                    key: ValueKey('module-choices-${field.id}'),
-                    value: (draft.values[field.id] as List).cast<String>(),
-                    placeholder: const Text('Choose languages'),
-                    onChanged: (values) => draft.setValue(
-                      field.id,
-                      (values ?? const <String>[]).toList(),
-                    ),
-                    itemBuilder: (context, id) => Text(
-                      field.options
-                          .firstWhere((option) => option.id == id)
-                          .title,
-                    ),
-                    popup: SelectPopup<String>(
-                      items: SelectItemList(
-                        children: [
-                          for (final option in field.options)
-                            SelectItemButton<String>(
-                              value: option.id,
-                              child: Text(option.title),
-                            ),
-                        ],
-                      ),
-                    ).call,
-                  )
-                else if (field.kind == ModuleFieldKind.file)
-                  Button.secondary(
-                    onPressed: draft.busy
-                        ? null
-                        : () => draft.chooseFile(field),
-                    leading: const Icon(LucideIcons.file, size: AppIconSize.sm),
-                    child: Text(draft.fileName(field.id) ?? 'Choose file'),
-                  )
-                else if (field.secret)
-                  TextField(
-                    key: ValueKey(field.id),
-                    initialValue: draft.values[field.id] as String,
-                    obscureText: true,
-                    autocorrect: false,
-                    enableSuggestions: false,
-                    decoration: AppOverlays.dialogFieldDecoration(context),
-                    onChanged: (value) => draft.setValue(field.id, value),
-                  )
-                else
-                  TextArea(
-                    key: ValueKey(field.id),
-                    initialValue: draft.values[field.id] as String,
-                    decoration: AppOverlays.dialogFieldDecoration(context),
-                    onChanged: (value) => draft.setValue(field.id, value),
-                  ),
-              ],
-              const Gap(AppSpacing.md),
-            ],
-            if (draft.selectedModel case final model?)
-              Text(
-                model.available
-                    ? '${model.title} model is ready'
-                    : '${model.title} model · ${(model.sizeBytes / (1024 * 1024)).toStringAsFixed(1)} MiB download',
-              ).small().muted(),
-          ],
-        ),
-      ),
+      content: SingleChildScrollView(child: ModuleFormFields(draft: draft)),
       actions: [
         Button.ghost(
           onPressed: () => Navigator.pop(context, false),

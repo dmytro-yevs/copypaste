@@ -351,7 +351,7 @@ class MainActivity : FlutterActivity() {
     private fun pairingUri(intent: Intent?): String? {
         val uri = intent?.data ?: return null
         return uri.toString().takeIf {
-            uri.scheme == "copypaste" && uri.host == "pair" && uri.path == "/v1"
+            uri.scheme == "copypaste" && uri.host == "pair" && uri.path in setOf("/v1", "/v2")
         }
     }
 

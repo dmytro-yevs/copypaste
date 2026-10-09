@@ -206,6 +206,10 @@ void main() {
     final pending = Completer<void>();
     gateway.rescanPending = pending;
     final scan = find.byKey(const ValueKey('rescan-devices'));
+    expect(
+      find.descendant(of: scan, matching: find.byIcon(LucideIcons.radar)),
+      findsOneWidget,
+    );
     await tester.tap(scan);
     await tester.pump();
     expect(gateway.rescanCalls, 1);
@@ -282,6 +286,17 @@ void main() {
         final code = find.byKey(const ValueKey('pairing-invite-code'));
         final address = find.byKey(const ValueKey('pairing-invite-address'));
         expect(qr, findsOneWidget);
+        expect(controller.invitation!.code.length, 8);
+        final detailsTitle = find.text('Pairing details');
+        expect(detailsTitle, findsOneWidget);
+        expect(
+          tester.getTopLeft(detailsTitle).dy,
+          greaterThan(tester.getBottomLeft(qr).dy),
+        );
+        expect(
+          tester.getBottomLeft(detailsTitle).dy,
+          lessThan(tester.getTopLeft(code).dy),
+        );
         expect(
           tester.widget<SelectableText>(code).data,
           controller.invitation!.code,
@@ -662,7 +677,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byKey(const ValueKey<String>('pair-device')),
-        matching: find.byIcon(LucideIcons.qrCode),
+        matching: find.byIcon(LucideIcons.plus),
       ),
       findsOneWidget,
     );
@@ -1032,7 +1047,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byKey(const ValueKey<String>('pair-device')),
-        matching: find.byIcon(LucideIcons.qrCode),
+        matching: find.byIcon(LucideIcons.plus),
       ),
       findsOneWidget,
     );
@@ -1378,7 +1393,7 @@ class _ScreenSession implements DevicesPairingSession {
     revealInviteCalls += 1;
     return PairingInvitation(
       qrPng: _testPng(),
-      code: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRST',
+      code: 'A1B2C3D4',
       address: '192.168.50.232:62951',
     );
   }

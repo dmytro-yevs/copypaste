@@ -177,6 +177,15 @@ fn sms_event_is_opt_in_and_disable_restart_remove_stop_publication() {
         None,
     );
     let installed = manager.install(&package).unwrap();
+    assert_eq!(installed.supported_platforms, vec![ModulePlatform::Android]);
+    assert_eq!(
+        serde_json::to_value(&installed).unwrap()["supported_platforms"],
+        json!(["android"])
+    );
+    assert_eq!(
+        manager.list().unwrap()[0].supported_platforms,
+        vec![ModulePlatform::Android]
+    );
     assert!(!installed.enabled);
     assert!(installed.commands.is_empty());
     let mut published = Vec::new();
@@ -221,6 +230,19 @@ fn signed_native_module_runs_offline_and_survives_restart_update_disable_and_rem
     let library = fs::read(native_library()).unwrap();
     let package = fixture.package("1.0.0", &library, |_| {}, None);
     let installed = manager.install(&package).unwrap();
+    assert_eq!(
+        installed.supported_platforms,
+        vec![
+            ModulePlatform::Macos,
+            ModulePlatform::Windows,
+            ModulePlatform::Android
+        ]
+    );
+    assert_eq!(
+        serde_json::to_value(&installed).unwrap()["supported_platforms"],
+        json!(["macos", "windows", "android"])
+    );
+
     assert!(installed.enabled);
     let input = BTreeMap::from([("text".into(), json!("  Україна ї ґ є і  "))]);
     assert_eq!(

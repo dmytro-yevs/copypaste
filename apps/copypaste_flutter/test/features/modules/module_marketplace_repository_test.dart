@@ -61,6 +61,10 @@ void main() {
             ),
           );
           expect(
+            modules.single.supportedPlatforms,
+            unorderedEquals(ModulePlatform.values),
+          );
+          expect(
             modules.single.artifact!.downloadUri.path,
             endsWith('ocr-$platform-$architecture.cpmodule'),
           );
@@ -90,6 +94,57 @@ void main() {
         ),
         hasLength(1),
       );
+    },
+  );
+
+  test(
+    'preserves Android-only support on every target including unavailable ABIs',
+    () {
+      final body = catalog();
+      final entry = (body['modules'] as List).single as Map;
+      entry['supported_platforms'] = ['android'];
+      entry['artifacts'] = (entry['artifacts'] as List)
+          .where((artifact) => artifact['platform'] == 'android')
+          .toList();
+      for (final platform in ['macos', 'windows', 'android']) {
+        for (final architecture in ['aarch64', 'x86']) {
+          final module = const ModuleCatalogParser()
+              .parse(
+                jsonEncode(body),
+                ModuleMarketplaceTarget(
+                  platform: platform,
+                  architecture: architecture,
+                  appVersion: target.appVersion,
+                ),
+              )
+              .single;
+          expect(module.supportedPlatforms, [ModulePlatform.android]);
+          expect(
+            module.canInstall,
+            platform == 'android' && architecture == 'aarch64',
+          );
+        }
+      }
+    },
+  );
+
+  test(
+    'rejects platform declarations that disagree with published artifacts',
+    () {
+      for (final platforms in [
+        <String>[],
+        ['android', 'android'],
+        ['ios'],
+        ['android'],
+      ]) {
+        final body = catalog();
+        ((body['modules'] as List).single as Map)['supported_platforms'] =
+            platforms;
+        expect(
+          () => const ModuleCatalogParser().parse(jsonEncode(body), target),
+          throwsA(isA<ModulesException>()),
+        );
+      }
     },
   );
 

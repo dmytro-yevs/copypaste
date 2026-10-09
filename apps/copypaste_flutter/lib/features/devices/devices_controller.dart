@@ -84,6 +84,7 @@ class DevicesController extends ChangeNotifier {
   StreamSubscription<void>? _changesSubscription;
   StreamSubscription<PairingCeremony>? _pairingSubscription;
   DevicesFreshnessTimer? _freshnessTimer;
+  DevicesFreshnessTimer? _invitationExpiryTimer;
   Future<void>? _refreshInFlight;
   bool _refreshQueued = false;
   DevicesPairingSession? _pairingSession;
@@ -416,6 +417,8 @@ class DevicesController extends ChangeNotifier {
       }
     }
     if (_pairingEntryMode != mode) {
+      _invitationExpiryTimer?.cancel();
+      _invitationExpiryTimer = null;
       _pairingEpoch++;
       final session = _pairingSession;
       final subscription = _pairingSubscription;
@@ -552,6 +555,8 @@ class DevicesController extends ChangeNotifier {
   /// Cancels active Rust pairing and clears the local opaque session.
   Future<void> closePairing() async {
     if (!canClosePairing) return;
+    _invitationExpiryTimer?.cancel();
+    _invitationExpiryTimer = null;
     _systemScanError = null;
     final closingEpoch = ++_pairingEpoch;
     _pairingInspectorVisible = false;
@@ -633,6 +638,7 @@ class DevicesController extends ChangeNotifier {
             identical(_pairingSession, session) &&
             _pairingCeremony?.state == PairingState.waitingForPeer) {
           _invitation = qr;
+          _scheduleInvitationRenewal(session);
         }
       }
       _notify();
@@ -651,7 +657,19 @@ class DevicesController extends ChangeNotifier {
 
   void _onPairingUpdate(PairingCeremony ceremony) {
     if (_disposed) return;
+    final session = _pairingSession;
+    if (session != null &&
+        _pairingEntryMode == PairingEntryMode.invite &&
+        ceremony.state == PairingState.timedOut) {
+      unawaited(_renewInvitation(session));
+      return;
+    }
     _pairingCeremony = ceremony;
+    _invitationExpiryTimer?.cancel();
+    _invitationExpiryTimer = null;
+    if (session != null && ceremony.state == PairingState.waitingForPeer) {
+      _scheduleInvitationRenewal(session);
+    }
     if (ceremony.state != PairingState.waitingForPeer) {
       _invitation = null;
     }
@@ -664,6 +682,63 @@ class DevicesController extends ChangeNotifier {
       unawaited(_disposeTerminalPairing());
     }
     _notify();
+  }
+
+  void _scheduleInvitationRenewal(DevicesPairingSession session) {
+    _invitationExpiryTimer?.cancel();
+    _invitationExpiryTimer = null;
+    final remaining = _pairingCeremony?.expiresIn;
+    if (_pairingEntryMode != PairingEntryMode.invite || remaining == null) {
+      return;
+    }
+    final delay = remaining - const Duration(seconds: 1);
+    _invitationExpiryTimer = _freshnessTimerFactory(
+      delay.isNegative ? Duration.zero : delay,
+      () => unawaited(_renewInvitation(session)),
+    );
+  }
+
+  Future<void> _renewInvitation(DevicesPairingSession session) async {
+    if (_disposed ||
+        !identical(_pairingSession, session) ||
+        _pairingEntryMode != PairingEntryMode.invite ||
+        (session.ceremony.state != PairingState.timedOut &&
+            (_pairingCeremony?.state != PairingState.waitingForPeer ||
+                session.ceremony.state != PairingState.waitingForPeer))) {
+      return;
+    }
+    final epoch = ++_pairingEpoch;
+    _invitationExpiryTimer?.cancel();
+    _invitationExpiryTimer = null;
+    final subscription = _pairingSubscription;
+    _pairingSubscription = null;
+    _pairingSession = null;
+    _pairingCeremony = null;
+    _invitation = null;
+    _clearVerificationCode();
+    _pairingInFlight = true;
+    _notify();
+    try {
+      await subscription?.cancel();
+      try {
+        if (!session.ceremony.state.isTerminal) await session.cancel();
+      } finally {
+        await session.dispose();
+      }
+      if (_disposed ||
+          epoch != _pairingEpoch ||
+          _pairingEntryMode != PairingEntryMode.invite) {
+        return;
+      }
+      _pairingInFlight = false;
+      await _startPairing(_gateway.createInvitation);
+    } catch (error) {
+      if (!_disposed && epoch == _pairingEpoch) {
+        _errorMessage = devicesErrorMessage(error);
+        _pairingInFlight = false;
+        _notify();
+      }
+    }
   }
 
   Future<void> _disposeTerminalPairing() async {
@@ -715,6 +790,8 @@ class DevicesController extends ChangeNotifier {
     }
     _freshnessTimer?.cancel();
     _freshnessTimer = null;
+    _invitationExpiryTimer?.cancel();
+    _invitationExpiryTimer = null;
     _refreshQueued = false;
     unawaited(_changesSubscription?.cancel());
     unawaited(_pairingSubscription?.cancel());

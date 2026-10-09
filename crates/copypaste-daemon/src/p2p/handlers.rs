@@ -316,8 +316,9 @@ mod tests {
         assert!(!pairing.code.is_empty());
         assert_ne!(pairing.code, pairing.pairing_id);
 
-        let token = PairingToken::parse(&pairing.code).expect("a valid code");
-        assert_eq!(token.pairing_id(), pairing.pairing_id);
+        let code = copypaste_p2p::PairingCode::parse(&pairing.code).expect("a valid short code");
+        assert_eq!(code.to_code().len(), 8);
+        assert_eq!(pairing.pairing_id.len(), 32);
         assert!(state.p2p.peers().get(&pairing.pairing_id).is_none());
         assert!(state.p2p.peers().psks().is_empty());
 
@@ -401,7 +402,7 @@ mod tests {
     #[tokio::test]
     async fn a_malformed_code_is_rejected_without_touching_the_peer_list() {
         let (state, _dir) = test_state("alpha");
-        let response = pair_join(&state, 1, "not-a-code", "127.0.0.1:1").await;
+        let response = pair_join(&state, 1, "not-a-code!", "127.0.0.1:1").await;
         assert!(!response.ok);
         assert_eq!(response.error_code, Some(ErrorCode::PairingCode));
         assert_eq!(

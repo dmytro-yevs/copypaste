@@ -10,6 +10,7 @@ import '../../../app/theme/app_tokens.dart';
 import '../../../shared/inspector_table.dart';
 import '../../../shared/state_view.dart';
 import '../../../shared/system_date_time.dart';
+import '../../devices/device_label.dart';
 import '../../devices/devices_controller.dart';
 import '../../devices/devices_gateway.dart';
 import '../controller/settings_controller.dart';
@@ -77,7 +78,7 @@ class _SyncHeaderActionState extends State<SyncHeaderAction> {
       unawaited(widget.devices?.start());
       final drawer = _drawer = showOverlay<void>(
         context,
-        AppOverlays.bottomDrawerConfiguration,
+        AppOverlays.drawerConfiguration(context),
         builder: (context) => ButtonStyleOverride(
           decoration: AppTheme.actionButtonDecoration,
           child: ConstrainedBox(
@@ -197,6 +198,9 @@ class _SyncDetails extends StatelessWidget {
               }
               return _SyncPeerCard(
                 peer: peer,
+                deviceClass:
+                    device?.details?.profile?.deviceClass ??
+                    DeviceClass.unknown,
                 phase: status.phase == SyncPhase.unavailable
                     ? SyncPhase.unavailable
                     : peer.phase,
@@ -216,6 +220,7 @@ class _SyncDetails extends StatelessWidget {
 class _SyncPeerCard extends StatelessWidget {
   const _SyncPeerCard({
     required this.peer,
+    required this.deviceClass,
     required this.phase,
     required this.ping,
     required this.presence,
@@ -223,6 +228,7 @@ class _SyncPeerCard extends StatelessWidget {
   });
 
   final PeerSyncStatus peer;
+  final DeviceClass deviceClass;
   final SyncPhase phase;
   final String ping;
   final String presence;
@@ -242,8 +248,6 @@ class _SyncPeerCard extends StatelessWidget {
           label: 'Last successful sync',
           value: formatSystemDateTime(context, value),
         ),
-      (label: 'Clips sent', value: '${peer.sent}'),
-      (label: 'Clips received', value: '${peer.received}'),
       if (peer.skippedTooLarge > 0)
         (label: 'Items over the size limit', value: '${peer.skippedTooLarge}'),
     ];
@@ -251,17 +255,7 @@ class _SyncPeerCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Icon(
-                LucideIcons.network,
-                color: _phaseColor(context, phase),
-                size: AppIconSize.sm,
-              ),
-              const Gap(AppSpacing.sm),
-              Expanded(child: Text(peer.name).semiBold()),
-            ],
-          ),
+          DeviceLabel(name: peer.name, deviceClass: deviceClass).semiBold(),
           const Gap(AppSpacing.md),
           if (peer.error case final error?) ...[
             Alert.destructive(

@@ -333,9 +333,17 @@ void main() {
   });
 
   test(
-    'preserves a terminal status until dismissed and cleans the session',
+    'preserves a joined ceremony timeout until dismissed and cleans the session',
     () async {
-      await controller.openInvitation();
+      await controller.openCodeEntry();
+      await controller.joinFromProtectedInput(
+        code: 'A1B2C3D4',
+        address: '192.0.2.1:47654',
+      );
+      gateway.session.emit(
+        const PairingCeremony(state: PairingState.awaitingConfirmation),
+      );
+      await Future<void>.delayed(Duration.zero);
       gateway.session.emit(const PairingCeremony(state: PairingState.timedOut));
       await Future<void>.delayed(Duration.zero);
 
@@ -344,6 +352,89 @@ void main() {
 
       await controller.closePairing();
       expect(controller.pairing, isNull);
+    },
+  );
+
+  test(
+    'an expired invitation confirmation starts fresh without reusing its SAS',
+    () async {
+      final replacement = _FakePairingSession();
+      gateway.nextInvitations.addAll([gateway.session, replacement]);
+      await controller.openInvitation();
+      gateway.session.emit(
+        const PairingCeremony(state: PairingState.awaitingConfirmation),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.verificationCode, '123456');
+      gateway.session.emit(const PairingCeremony(state: PairingState.timedOut));
+      await Future<void>.delayed(Duration.zero);
+      expect(gateway.createInvitationCalls, 2);
+      expect(controller.pairing?.state, PairingState.waitingForPeer);
+      expect(controller.verificationCode, isNull);
+      expect(controller.canConfirmPairing, isFalse);
+      expect(gateway.session.confirmations, isEmpty);
+    },
+  );
+
+  test(
+    'renews an expired waiting invitation without exposing a timeout',
+    () async {
+      final replacement = _FakePairingSession();
+      gateway.nextInvitations.add(replacement);
+      // The first request uses the original session.
+      gateway.nextInvitations.insert(0, gateway.session);
+      final states = <PairingState?>[];
+      controller.addListener(() => states.add(controller.pairing?.state));
+      await controller.openInvitation();
+      gateway.session.emit(const PairingCeremony(state: PairingState.timedOut));
+      await Future<void>.delayed(Duration.zero);
+      expect(gateway.createInvitationCalls, 2);
+      expect(gateway.session.disposeCalls, 1);
+      expect(controller.pairing?.state, PairingState.waitingForPeer);
+      expect(controller.invitation, isNotNull);
+      expect(states, isNot(contains(PairingState.timedOut)));
+      expect(captureProtection.values, [true]);
+    },
+  );
+
+  test(
+    'renews before expiry and cancels renewal when the inspector closes',
+    () async {
+      controller.dispose();
+      final timers = _FreshnessTimerFactory();
+      controller = DevicesController(
+        gateway: gateway,
+        captureProtection: captureProtection,
+        freshnessTimerFactory: timers.schedule,
+      );
+      gateway.session.emit(
+        const PairingCeremony(
+          state: PairingState.waitingForPeer,
+          expiresIn: Duration(seconds: 120),
+        ),
+      );
+      final replacement = _FakePairingSession();
+      gateway.nextInvitations.addAll([gateway.session, replacement]);
+      await controller.openInvitation();
+      expect(timers.timers.last.delay, const Duration(seconds: 119));
+      timers.timers.last.fire();
+      await Future<void>.delayed(Duration.zero);
+      expect(gateway.createInvitationCalls, 2);
+      expect(gateway.session.cancelCalls, 1);
+      expect(controller.invitation, isNotNull);
+      replacement.emit(
+        const PairingCeremony(
+          state: PairingState.waitingForPeer,
+          expiresIn: Duration(seconds: 120),
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      final pending = timers.timers.last;
+      await controller.closePairing();
+      pending.fire();
+      await Future<void>.delayed(Duration.zero);
+      expect(gateway.createInvitationCalls, 2);
+      expect(controller.pairingInspectorOpen, isFalse);
     },
   );
 
@@ -356,6 +447,29 @@ void main() {
     expect(gateway.session.cancelCalls, 1);
     expect(gateway.session.disposeCalls, 1);
   });
+
+  test(
+    'closing during invitation renewal prevents a replacement session',
+    () async {
+      await controller.openInvitation();
+      final cancellation = Completer<void>();
+      gateway.session.cancelPending = cancellation;
+      gateway.session.emit(
+        const PairingCeremony(
+          state: PairingState.waitingForPeer,
+          expiresIn: Duration.zero,
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      await controller.closePairing();
+      cancellation.complete();
+      await Future<void>.delayed(Duration.zero);
+      expect(gateway.createInvitationCalls, 1);
+      expect(controller.invitation, isNull);
+      expect(controller.pairingInspectorOpen, isFalse);
+    },
+  );
 
   test(
     'keeps unpair and permanent revoke as distinct backend actions',
@@ -666,6 +780,8 @@ class _ManualFreshnessTimer implements DevicesFreshnessTimer {
 class _FakeDevicesGateway implements DevicesGateway {
   final StreamController<void> _changes = StreamController<void>.broadcast();
   final _FakePairingSession session = _FakePairingSession();
+  final List<_FakePairingSession> nextInvitations = [];
+  int createInvitationCalls = 0;
   final List<String> unpairedIds = [];
   final List<String> revokedIds = [];
   final List<String> joinedCodes = [];
@@ -682,7 +798,10 @@ class _FakeDevicesGateway implements DevicesGateway {
   Stream<void> get changes => _changes.stream;
 
   @override
-  Future<DevicesPairingSession> createInvitation() async => session;
+  Future<DevicesPairingSession> createInvitation() async {
+    createInvitationCalls++;
+    return nextInvitations.isEmpty ? session : nextInvitations.removeAt(0);
+  }
 
   void emitChange() => _changes.add(null);
 
@@ -774,7 +893,7 @@ class _FakePairingSession implements DevicesPairingSession {
     revealInviteCalls += 1;
     return PairingInvitation(
       qrPng: _testPng(),
-      code: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRST',
+      code: 'A1B2C3D4',
       address: '192.168.50.232:62951',
     );
   }

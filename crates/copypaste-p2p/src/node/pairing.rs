@@ -6,6 +6,7 @@ use tokio::sync::watch;
 use zeroize::Zeroizing;
 
 use super::NodeError;
+use crate::transport::{PairingCandidate, PairingCode};
 use crate::transport::{PairingToken, PskCandidate, TOKEN_LEN};
 
 pub const PAIRING_INVITE_TTL: Duration = Duration::from_secs(120);
@@ -92,6 +93,7 @@ pub(super) enum LocalDecision {
 struct Invitation {
     status: PairingStatus,
     token: PairingToken,
+    code: PairingCode,
     expires_at: Instant,
     control: watch::Sender<LocalDecision>,
 }
@@ -152,7 +154,8 @@ impl PairingManager {
         }
         let token = PairingToken::generate();
         let pairing_id = token.pairing_id();
-        let code = token.to_code();
+        let short_code = PairingCode::generate();
+        let code = short_code.to_code();
         let (control, _) = watch::channel(LocalDecision::Pending);
         *state = PairingState::Invited(Invitation {
             status: PairingStatus {
@@ -165,6 +168,7 @@ impl PairingManager {
                 expires_in_ms: None,
             },
             token,
+            code: short_code,
             expires_at: self.now() + PAIRING_INVITE_TTL,
             control,
         });
@@ -178,6 +182,7 @@ impl PairingManager {
         })
     }
 
+    #[cfg(test)]
     pub(super) fn candidate(&self) -> Option<PskCandidate> {
         let mut state = self.lock();
         expire_due(&mut state, self.now());
@@ -187,6 +192,38 @@ impl PairingManager {
                 psk: invite.token.psk(),
             }),
             _ => None,
+        }
+    }
+
+    pub(super) fn invitation_candidate(&self) -> Option<PairingCandidate> {
+        let mut state = self.lock();
+        expire_due(&mut state, self.now());
+        match &*state {
+            PairingState::Invited(invite) => Some(PairingCandidate {
+                code: invite.code.copy_secret(),
+                token: PskCandidate {
+                    pairing_id: invite.status.pairing_id.clone().unwrap_or_default(),
+                    psk: invite.token.psk(),
+                },
+            }),
+            _ => None,
+        }
+    }
+
+    pub(super) fn bind_join_id(&self, previous: &str, pairing_id: &str) -> Result<(), NodeError> {
+        let mut state = self.lock();
+        match &mut *state {
+            PairingState::Active(active)
+                if active.status.role == Some(PairingRole::Initiator)
+                    && active.status.phase == PairingPhase::Handshaking
+                    && active.status.pairing_id.as_deref() == Some(previous) =>
+            {
+                active.status.pairing_id = Some(pairing_id.to_string());
+                drop(state);
+                self.changed();
+                Ok(())
+            }
+            _ => Err(NodeError::NoPairing),
         }
     }
 

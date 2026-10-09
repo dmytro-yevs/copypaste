@@ -17,6 +17,8 @@ pub struct InstalledModule {
     pub search_language_field: Option<String>,
     pub search_models: Vec<copypaste_module_sdk::SearchModelInfo>,
     pub events: Vec<ModuleEvent>,
+    #[serde(default)]
+    pub supported_platforms: Vec<copypaste_module_sdk::ModulePlatform>,
     pub restart_required: bool,
     pub id: String,
     pub title: String,
@@ -797,6 +799,15 @@ fn summary(manifest: ModuleManifest, record: &Record) -> InstalledModule {
             .map(|provider| provider.language_field.clone()),
         search_models: Vec::new(),
         events,
+        supported_platforms: if manifest.schema_version == 1 {
+            vec![
+                copypaste_module_sdk::ModulePlatform::Macos,
+                copypaste_module_sdk::ModulePlatform::Windows,
+                copypaste_module_sdk::ModulePlatform::Android,
+            ]
+        } else {
+            manifest.supported_platforms
+        },
         restart_required: false,
         id: manifest.id,
         title: manifest.title,
@@ -816,6 +827,7 @@ fn failed_summary(id: &str, record: &Record, error: String) -> InstalledModule {
         search_language_field: None,
         search_models: Vec::new(),
         events: Vec::new(),
+        supported_platforms: Vec::new(),
         restart_required: false,
         id: id.into(),
         title: id.into(),

@@ -11,7 +11,7 @@ use thiserror::Error;
 use url::Url;
 use zeroize::Zeroizing;
 
-use crate::PairingToken;
+use crate::{PairingCode, PairingToken};
 
 pub const PAIRING_URI_SCHEME: &str = "copypaste";
 pub const PAIRING_URI_HOST: &str = "pair";
@@ -28,16 +28,21 @@ pub enum PairingLinkError {
 /// A validated invite URI whose secret code is wiped on drop.
 pub struct PairingLink {
     code: Zeroizing<String>,
-    pairing_id: String,
+    pairing_id: Option<String>,
     address: Option<SocketAddr>,
 }
 
 impl PairingLink {
     pub fn new(code: &str, address: Option<SocketAddr>) -> Result<Self, PairingLinkError> {
-        let token = PairingToken::parse(code).map_err(|_| PairingLinkError::Invalid)?;
+        let (code, pairing_id) = if let Ok(short) = PairingCode::parse(code) {
+            (short.to_code(), None)
+        } else {
+            let token = PairingToken::parse(code).map_err(|_| PairingLinkError::Invalid)?;
+            (token.to_code(), Some(token.pairing_id()))
+        };
         Ok(Self {
-            code: Zeroizing::new(token.to_code()),
-            pairing_id: token.pairing_id(),
+            code: Zeroizing::new(code),
+            pairing_id,
             address,
         })
     }
@@ -46,7 +51,7 @@ impl PairingLink {
         let url = Url::parse(value).map_err(|_| PairingLinkError::Invalid)?;
         if url.scheme() != PAIRING_URI_SCHEME
             || url.host_str() != Some(PAIRING_URI_HOST)
-            || url.path() != PAIRING_URI_PATH
+            || !matches!(url.path(), PAIRING_URI_PATH | "/v2")
             || !url.username().is_empty()
             || url.password().is_some()
             || url.port().is_some()
@@ -71,12 +76,19 @@ impl PairingLink {
                 _ => {}
             }
         }
-        Self::new(code.as_deref().ok_or(PairingLinkError::Invalid)?, address)
+        let link = Self::new(code.as_deref().ok_or(PairingLinkError::Invalid)?, address)?;
+        if (url.path() == "/v2") != link.pairing_id.is_none() {
+            return Err(PairingLinkError::Invalid);
+        }
+        Ok(link)
     }
 
     #[must_use]
     pub fn to_uri(&self) -> String {
         let mut url = Url::parse("copypaste://pair/v1").expect("static pairing URI is valid");
+        if self.pairing_id.is_none() {
+            url.set_path("/v2");
+        }
         {
             let mut query = url.query_pairs_mut();
             query.append_pair("code", self.code.as_str());
@@ -88,8 +100,8 @@ impl PairingLink {
     }
 
     #[must_use]
-    pub fn pairing_id(&self) -> &str {
-        &self.pairing_id
+    pub fn pairing_id(&self) -> Option<&str> {
+        self.pairing_id.as_deref()
     }
 
     #[must_use]
@@ -118,6 +130,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn short_codes_use_v2_without_publishing_a_password_derived_identity() {
+        let code = PairingCode::generate().to_code();
+        let link = PairingLink::new(&code, Some("192.0.2.1:47654".parse().unwrap())).unwrap();
+        let uri = link.to_uri();
+        assert!(uri.starts_with("copypaste://pair/v2?"));
+        let parsed = PairingLink::parse(&uri).unwrap();
+        assert_eq!(parsed.code(), code);
+        assert_eq!(parsed.code().len(), 8);
+        assert!(parsed.pairing_id().is_none());
+        assert!(PairingLink::parse(&uri.replace("/v2", "/v1")).is_err());
+    }
+
+    #[test]
     fn a_pairing_link_round_trips_the_secret_and_ipv6_address() {
         let token = PairingToken::generate();
         let address = "[fd00::42]:47654".parse().unwrap();
@@ -126,7 +151,7 @@ mod tests {
         let parsed = PairingLink::parse(&link.to_uri()).unwrap();
 
         assert_eq!(parsed.code(), token.to_code());
-        assert_eq!(parsed.pairing_id(), token.pairing_id());
+        assert_eq!(parsed.pairing_id(), Some(token.pairing_id().as_str()));
         assert_eq!(parsed.address().unwrap(), address);
     }
 

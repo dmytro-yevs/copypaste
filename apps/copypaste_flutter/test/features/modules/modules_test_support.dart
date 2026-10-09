@@ -24,6 +24,7 @@ const testModule = InstalledModule(
   version: '1.0.0',
   enabled: true,
   sizeBytes: 10,
+  supportedPlatforms: ModulePlatform.values,
   commands: [
     ModuleCommand(
       id: 'transform',
@@ -69,6 +70,7 @@ class MemoryModulesRepository implements ModulesRepository {
         enabled: enabled,
         sizeBytes: module.sizeBytes,
         commands: module.commands,
+        supportedPlatforms: module.supportedPlatforms,
         preferenceFields: module.preferenceFields,
         preferences: module.preferences,
         events: module.events,
@@ -108,6 +110,7 @@ final testMarketplaceModule = MarketplaceModule(
   title: testModule.title,
   description: testModule.description,
   version: Version.parse(testModule.version),
+  supportedPlatforms: ModulePlatform.values,
   artifact: ModuleArtifact(
     downloadUri: Uri.parse(
       'https://github.com/dmytro-yevs/copypaste/releases/download/module-text-tools-v1.0.0/text-tools.cpmodule',

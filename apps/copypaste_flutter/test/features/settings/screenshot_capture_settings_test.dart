@@ -47,53 +47,78 @@ void main() {
     expect(settings.errorMessage, isNotNull);
   });
 
-  for (final width in [390.0, 1000.0]) {
-    testWidgets('Clipboard screenshot controls at width $width', (
-      tester,
-    ) async {
-      await tester.binding.setSurfaceSize(Size(width, 900));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      final port = _Capture();
-      final settings = controller(port);
-      addTearDown(settings.dispose);
-      await settings.initialize();
-      await tester.pumpWidget(
-        ShadcnApp(
-          theme: AppTheme.light,
-          darkTheme: AppTheme.dark,
-          themeMode: AppTheme.mode,
-          builder: AppTheme.builder,
-          home: Scaffold(child: SettingsScreen(controller: settings)),
-        ),
-      );
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 500));
-      if (width < 1000) {
-        await tester.tap(
-          find.byKey(
-            const ValueKey<String>('mobile-settings-section-clipboard'),
+  for (final (width, textScale) in [
+    (390.0, 1.0),
+    (1000.0, 1.0),
+    (320.0, 2.0),
+  ]) {
+    testWidgets(
+      'Clipboard screenshot controls at width $width and scale $textScale',
+      (tester) async {
+        await tester.binding.setSurfaceSize(Size(width, 900));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final port = _Capture();
+        final settings = controller(port);
+        addTearDown(settings.dispose);
+        await settings.initialize();
+        await tester.pumpWidget(
+          ShadcnApp(
+            theme: AppTheme.light,
+            darkTheme: AppTheme.dark,
+            themeMode: AppTheme.mode,
+            builder: AppTheme.builder,
+            home: Builder(
+              builder: (context) => MediaQuery(
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: TextScaler.linear(textScale)),
+                child: Scaffold(child: SettingsScreen(controller: settings)),
+              ),
+            ),
           ),
         );
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 500));
-      }
-      final toggle = find.byKey(const ValueKey('save-screenshots-switch'));
-      expect(tester.widget<Switch>(toggle).value, isTrue);
-      final permission = find.byKey(
-        const ValueKey('screenshot-capture-permission'),
-      );
-      expect(permission, findsOneWidget);
-      await tester.tap(permission);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 500));
-      expect(port.permissionRequests, 1);
-      expect(permission, findsNothing);
-      await tester.tap(toggle);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 500));
-      expect(port.current.enabled, isFalse);
-      expect(tester.widget<Switch>(toggle).value, isFalse);
-    });
+        if (width < 1000) {
+          await tester.tap(
+            find.byKey(
+              const ValueKey<String>('mobile-settings-section-clipboard'),
+            ),
+          );
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 500));
+        }
+        final toggle = find.byKey(const ValueKey('save-screenshots-switch'));
+        expect(tester.widget<Switch>(toggle).value, isTrue);
+        final permission = find.byKey(
+          const ValueKey('screenshot-capture-permission'),
+        );
+        expect(permission, findsOneWidget);
+        await tester.ensureVisible(permission);
+        await tester.tap(permission);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(port.permissionRequests, 1);
+        expect(permission, findsNothing);
+        final sourceAccess = find.byKey(
+          const ValueKey('screenshot-source-access'),
+        );
+        expect(sourceAccess, findsOneWidget);
+        expect(settings.screenshotCapture.needsPermission, isFalse);
+        await tester.ensureVisible(sourceAccess);
+        await tester.tap(sourceAccess);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(port.sourceAccessRequests, 1);
+        expect(settings.screenshotCapture.enabled, isTrue);
+        await tester.ensureVisible(toggle);
+        await tester.tap(toggle);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(port.current.enabled, isFalse);
+        expect(tester.widget<Switch>(toggle).value, isFalse);
+      },
+    );
   }
 
   test('typed channel preserves permission denial and native state', () async {
@@ -120,11 +145,39 @@ void main() {
     expect(calls.last.method, 'setScreenshotCaptureEnabled');
     expect(calls.last.arguments, {'enabled': false});
   });
+
+  test(
+    'optional source access is independent of screenshot permissions',
+    () async {
+      const channel = MethodChannel('test/screenshot-source-access');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'openScreenshotSourceAccess') return false;
+        return {
+          'enabled': true,
+          'mediaGranted': true,
+          'notificationGranted': true,
+          'running': true,
+          'sourceAccessGranted': false,
+        };
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      const port = MethodChannelScreenshotCapture(channel: channel);
+      expect(await port.openSourceAccess(), isFalse);
+      final status = await port.status();
+      expect(status.sourceAccessGranted, isFalse);
+      expect(status.needsPermission, isFalse);
+      expect(status.enabled, isTrue);
+      expect(status.running, isTrue);
+    },
+  );
 }
 
 class _Capture implements ScreenshotCapture {
   ScreenshotCaptureStatus current = const ScreenshotCaptureStatus();
   int permissionRequests = 0;
+  int sourceAccessRequests = 0;
   bool fail = false;
   @override
   bool get supported => true;
@@ -137,6 +190,7 @@ class _Capture implements ScreenshotCapture {
       enabled: enabled,
       mediaGranted: current.mediaGranted,
       notificationGranted: current.notificationGranted,
+      sourceAccessGranted: current.sourceAccessGranted,
     );
     return current;
   }
@@ -151,5 +205,11 @@ class _Capture implements ScreenshotCapture {
       running: true,
     );
     return current;
+  }
+
+  @override
+  Future<bool> openSourceAccess() async {
+    sourceAccessRequests++;
+    return false;
   }
 }

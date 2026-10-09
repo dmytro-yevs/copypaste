@@ -2,10 +2,9 @@
 //!
 //! Authentication is possession of the pairing token: it is the pre-shared key
 //! of a Noise `NNpsk0` channel ([`transport`]), so there are no certificates,
-//! no trust store and no pinning verifier — and no PAKE, because a PAKE
-//! protects a *low-entropy human secret* from an offline dictionary attack and
-//! a 256-bit CSPRNG token has no dictionary. The full library choice is in
-//! `transport/handshake.rs`.
+//! no trust store and no pinning verifier. New invitations use an eight-symbol
+//! one-time code with SPAKE2 to authenticate the channel that transfers the
+//! full random token. Both devices must still confirm the handshake-bound SAS.
 //!
 //! # What crosses the wire
 //!
@@ -41,6 +40,7 @@ pub use pairing_link::{PairingLink, PairingLinkError, PAIRING_URI_HOST, PAIRING_
 pub use peers::{Peer, PeerStore, PeerStoreError, RevokedDevice};
 pub use protocol::{ItemSummary, SyncItem, SyncMessage, PROTOCOL_VERSION};
 pub use sync::{merge_decision, MergeDecision, SyncOutcome, SyncStats};
+pub use transport::PairingCode;
 pub use transport::{PairingToken, PskCandidate, Session, TransportError};
 
 /// TCP port the daemon listens on for peers.

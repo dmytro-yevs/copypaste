@@ -4,8 +4,12 @@
 aligned on 9 October 2026.
 
 Pairing creates a memory-only invitation with a random 256-bit token and a
-120-second monotonic deadline. Its QR is displayed immediately and contains the
-shared `copypaste://pair/v1` URI. Rust owns URI validation, invitation lifetime,
+120-second monotonic deadline and an eight-symbol Crockford code. Its QR is
+displayed immediately and contains the shared `copypaste://pair/v2` URI. The
+short code authenticates a [SPAKE2 exchange](https://docs.rs/spake2/0.4.0/spake2/).
+Noise confirms the resulting key and transfers the full random token inside
+that authenticated channel. Established peers continue using their full tokens;
+joining legacy `/v1` invitations remains supported. Rust owns URI validation, invitation lifetime,
 handshake state, and peer persistence on macOS, Android, and Windows.
 
 Displaying or scanning the QR does not establish trust. The authenticated Noise
@@ -13,6 +17,12 @@ handshake derives one common SAS. Both peers must explicitly accept that bound
 SAS before persistence; the UI must not generate its own comparison code.
 Cancel, close, and expiration release an uncommitted ceremony. A decision already
 being committed cannot be undone by a concurrent close or cancellation.
+
+An open invitation renews one second before its deadline while waiting for a
+peer. Closing it stops renewal. An expired invitation ceremony also returns to a
+fresh QR without rendering a timeout error. Handshaking and live confirmation
+do not renew proactively; expiration clears the old SAS and both devices must
+make fresh explicit decisions for the replacement ceremony.
 
 ## Screenshot policy
 

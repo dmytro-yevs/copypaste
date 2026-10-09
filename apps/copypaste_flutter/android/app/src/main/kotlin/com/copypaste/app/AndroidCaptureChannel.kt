@@ -68,6 +68,7 @@ internal class AndroidCaptureChannel(
         when (call.method) {
             "state" -> result.success(state())
             "screenshotState" -> result.success(ScreenshotCaptureState.asMap(activity))
+            "openScreenshotSourceAccess" -> result.success(launch(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)))
             "requestScreenshotPermission" -> activity.requestScreenshotPermission {
                 result.success(ScreenshotCaptureState.asMap(activity))
             }

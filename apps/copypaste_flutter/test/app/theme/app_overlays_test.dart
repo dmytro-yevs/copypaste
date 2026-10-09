@@ -5,6 +5,82 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
+  testWidgets(
+    'drawers use the right edge from 800 pixels and bottom edge below it',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      for (final width in [799.0, 800.0, 1200.0]) {
+        tester.view.physicalSize = Size(width, 800);
+        await tester.pumpWidget(
+          ShadcnApp(
+            theme: AppTheme.light,
+            builder: AppTheme.builder,
+            home: Scaffold(
+              child: Builder(
+                builder: (context) => Button.primary(
+                  onPressed: () => showOverlay<void>(
+                    context,
+                    AppOverlays.drawerConfiguration(context),
+                    builder: (context) => ConstrainedBox(
+                      key: const ValueKey('adaptive-drawer'),
+                      constraints: AppOverlays.drawerContentConstraints(
+                        context,
+                      ),
+                      child: Scaffold(
+                        child: Button.ghost(
+                          onPressed: () => closeDrawer(context),
+                          child: const Text('Close'),
+                        ),
+                      ),
+                    ),
+                  ),
+                  child: const Text('Open'),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('Open'));
+        await tester.pumpAndSettle();
+        final wrapper = tester.widget<DrawerWrapper>(
+          find.byType(DrawerWrapper),
+        );
+        final rect = tester.getRect(
+          find.byKey(const ValueKey('adaptive-drawer')),
+        );
+        if (width >= 800) {
+          expect(wrapper.position, OverlayPosition.right);
+          expect(wrapper.showDragHandle, isFalse);
+          expect(rect.width, closeTo(AppOverlaySize.drawerPanelWidth, 2));
+          expect(rect.height, closeTo(800, 2));
+          expect(rect.right, closeTo(width, 2));
+          expect(rect.top, closeTo(0, 2));
+        } else {
+          expect(wrapper.position, OverlayPosition.bottom);
+          expect(rect.width, closeTo(width, 2));
+          expect(
+            rect.height,
+            closeTo(800 * AppOverlaySize.drawerHeightFactor, 2),
+          );
+          expect(
+            tester.getRect(find.byType(DrawerWrapper)).bottom,
+            closeTo(800, 2),
+          );
+        }
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.text('Close'));
+        await tester.pumpAndSettle();
+      }
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+      TargetPlatform.android,
+    }),
+  );
+
   testWidgets('uses one compact dialog surface on wide layouts', (
     tester,
   ) async {

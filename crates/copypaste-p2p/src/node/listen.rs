@@ -105,22 +105,26 @@ async fn serve_peer<S, F, P>(
     let pending = node.pairing_candidate();
     let pending_pairing_id = pending
         .as_ref()
-        .map(|candidate| candidate.pairing_id.clone());
-    if let Some(candidate) = pending {
-        candidates.push(candidate);
+        .map(|candidate| candidate.token.pairing_id.clone());
+    if let Some(candidate) = &pending {
+        candidates.push(crate::PskCandidate {
+            pairing_id: candidate.token.pairing_id.clone(),
+            psk: candidate.token.psk,
+        });
     }
-    if candidates.is_empty() {
+    if candidates.is_empty() && pending.is_none() {
         debug!(%addr, "a peer connected but this device has no pairings");
         return;
     }
 
-    let (session, pairing_id) = match Session::accept_any(stream, &candidates).await {
-        Ok(accepted) => accepted,
-        Err(e) => {
-            debug!(%addr, error = %e, "inbound peer handshake failed");
-            return;
-        }
-    };
+    let (session, pairing_id) =
+        match Session::accept_with_pairing(stream, &candidates, pending.as_ref()).await {
+            Ok(accepted) => accepted,
+            Err(e) => {
+                debug!(%addr, error = %e, "inbound peer handshake failed");
+                return;
+            }
+        };
 
     if pending_pairing_id.as_deref() == Some(pairing_id.as_str()) {
         if let Err(error) = Arc::clone(node)
