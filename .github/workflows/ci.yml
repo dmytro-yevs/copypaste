@@ -170,6 +170,8 @@ jobs:
           - { platform: macos, runner: macos-14, target: macos }
           - { platform: android, runner: ubuntu-24.04, target: apk }
           - { platform: windows, runner: windows-2022, target: windows }
+          - { platform: linux, runner: ubuntu-22.04, target: linux }
+          - { platform: linux, runner: ubuntu-24.04-arm, target: linux }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - id: flutter
@@ -190,6 +192,30 @@ jobs:
         with:
           platform: ${{ matrix.platform }}
           profile: debug
+      - name: Install Linux Flutter build dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libgtk-3-dev libsecret-1-dev libssl-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libkeybinder-3.0-dev libxtst-dev libxi-dev ninja-build pkg-config
       - run: ./scripts/ci/verify-flutter-foundation.sh
         env:
           COPYPASTE_FLUTTER_BUILD_TARGET: ${{ matrix.target }}
+          CARGO_BUILD_JOBS: "2"
+          CMAKE_BUILD_PARALLEL_LEVEL: "2"
+
+  linux-package-fixtures:
+    name: Linux package fixtures (${{ matrix.architecture }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { architecture: x86_64, runner: ubuntu-24.04 }
+          - { architecture: aarch64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Build and extract every Linux package format
+        env:
+          COPYPASTE_LINUX_PACKAGE_TEST_ARCHITECTURES: ${{ matrix.architecture }}
+        run: scripts/release/test-linux-packages.sh

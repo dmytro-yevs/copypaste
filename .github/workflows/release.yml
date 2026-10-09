@@ -13,6 +13,16 @@ on:
         required: false
         type: string
         default: ""
+      linux_evidence_run_id:
+        description: Run containing exact-artifact Linux native qualification evidence
+        required: false
+        type: string
+        default: ""
+      linux_artifact_run_id:
+        description: Prior release run with exact signed Linux artifacts for this tag
+        required: false
+        type: string
+        default: ""
   push:
     tags: ["v*"]
 
@@ -35,6 +45,8 @@ jobs:
       release_commit: ${{ steps.version.outputs.release_commit }}
       artifact_run_id: ${{ steps.version.outputs.artifact_run_id }}
       reuse_qualified: ${{ steps.version.outputs.reuse_qualified }}
+      linux_required: ${{ steps.version.outputs.linux_required }}
+      linux_artifact_run_id: ${{ steps.version.outputs.linux_artifact_run_id }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -43,6 +55,7 @@ jobs:
         env:
           REQUESTED_PUBLISH: ${{ inputs.publish }}
           QUALIFIED_RUN_ID: ${{ inputs.qualified_run_id }}
+          LINUX_ARTIFACT_RUN_ID: ${{ inputs.linux_artifact_run_id }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -60,15 +73,38 @@ jobs:
           release_commit="$GITHUB_SHA"
           artifact_run_id="$GITHUB_RUN_ID"
           reuse_qualified=false
+          linux_artifact_run_id="$GITHUB_RUN_ID"
           if [[ -n "${QUALIFIED_RUN_ID:-}" ]]; then
             [[ "$QUALIFIED_RUN_ID" =~ ^[1-9][0-9]*$ ]]
             [[ "${REQUESTED_PUBLISH:-false}" == true ]]
             git fetch origin "refs/tags/v$version:refs/tags/v$version"
             release_commit="$(git rev-list -n 1 "v$version")"
+            linux_required=false
+            if git cat-file -e "$release_commit:packaging/linux/release-contract.json" 2>/dev/null; then
+              linux_required=true
+            fi
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFIED_RUN_ID" > "$RUNNER_TEMP/source-run.json"
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFIED_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/source-jobs.json"
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFIED_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/source-artifacts.json"
-            python3 scripts/release/verify-qualified-run.py --run "$RUNNER_TEMP/source-run.json" --jobs "$RUNNER_TEMP/source-jobs.json" --artifacts "$RUNNER_TEMP/source-artifacts.json" --repository "$GITHUB_REPOSITORY" --commit "$release_commit"
+            linux_required=false
+            if git cat-file -e "$release_commit:packaging/linux/release-contract.json" 2>/dev/null; then
+              linux_required=true
+              qualified_artifact_id="$(jq -r '[.artifacts[] | select(.name == "production-qualified" and .expired == false)] | if length == 1 then .[0].id else empty end' "$RUNNER_TEMP/source-artifacts.json")"
+              [[ "$qualified_artifact_id" =~ ^[1-9][0-9]*$ ]]
+              mkdir -p "$RUNNER_TEMP/qualified-source"
+              gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$qualified_artifact_id/zip" > "$RUNNER_TEMP/qualified-source.zip"
+              unzip -q "$RUNNER_TEMP/qualified-source.zip" -d "$RUNNER_TEMP/qualified-source"
+              cp "$RUNNER_TEMP/qualified-source/linux/production-receipt.json" "$RUNNER_TEMP/linux-origin-receipt.json"
+              linux_artifact_run_id="$(jq -r '.run_id' "$RUNNER_TEMP/linux-origin-receipt.json")"
+              [[ "$linux_artifact_run_id" =~ ^[1-9][0-9]*$ ]]
+              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$linux_artifact_run_id" > "$RUNNER_TEMP/linux-origin-run.json"
+              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$linux_artifact_run_id/jobs?per_page=100" > "$RUNNER_TEMP/linux-origin-jobs.json"
+              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$linux_artifact_run_id/artifacts?per_page=100" > "$RUNNER_TEMP/linux-origin-artifacts.json"
+            fi
+            qualified_args=(--run "$RUNNER_TEMP/source-run.json" --jobs "$RUNNER_TEMP/source-jobs.json" --artifacts "$RUNNER_TEMP/source-artifacts.json" --repository "$GITHUB_REPOSITORY" --commit "$release_commit")
+            if [[ "$linux_required" == true ]]; then qualified_args+=(--require-linux); fi
+            if [[ "$linux_required" == true ]]; then qualified_args+=(--linux-origin-run "$RUNNER_TEMP/linux-origin-run.json" --linux-origin-jobs "$RUNNER_TEMP/linux-origin-jobs.json" --linux-origin-artifacts "$RUNNER_TEMP/linux-origin-artifacts.json" --linux-receipt "$RUNNER_TEMP/linux-origin-receipt.json"); fi
+            python3 scripts/release/verify-qualified-run.py "${qualified_args[@]}"
             artifact_run_id="$QUALIFIED_RUN_ID"
             reuse_qualified=true
             publish=true
@@ -80,6 +116,21 @@ jobs:
             [[ "$(git rev-list -n 1 "v$version")" == "$GITHUB_SHA" ]]
             publish=true
           fi
+          if [[ -z "${linux_required+x}" ]]; then
+            linux_required=false
+            if git cat-file -e "$release_commit:packaging/linux/release-contract.json" 2>/dev/null; then
+              linux_required=true
+            fi
+          fi
+          if [[ -n "${LINUX_ARTIFACT_RUN_ID:-}" ]]; then
+            [[ "$LINUX_ARTIFACT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+            [[ "$linux_required" == true ]]
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$LINUX_ARTIFACT_RUN_ID" > "$RUNNER_TEMP/linux-source-run.json"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$LINUX_ARTIFACT_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/linux-source-jobs.json"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$LINUX_ARTIFACT_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/linux-source-artifacts.json"
+            python3 scripts/release/verify-linux-artifact-source-run.py --run "$RUNNER_TEMP/linux-source-run.json" --jobs "$RUNNER_TEMP/linux-source-jobs.json" --artifacts "$RUNNER_TEMP/linux-source-artifacts.json" --repository "$GITHUB_REPOSITORY" --commit "$release_commit"
+            linux_artifact_run_id="$LINUX_ARTIFACT_RUN_ID"
+          fi
           {
             echo "version=$version"
             echo "build_number=$build_number"
@@ -88,6 +139,8 @@ jobs:
             echo "release_commit=$release_commit"
             echo "artifact_run_id=$artifact_run_id"
             echo "reuse_qualified=$reuse_qualified"
+            echo "linux_required=$linux_required"
+            echo "linux_artifact_run_id=$linux_artifact_run_id"
           } >> "$GITHUB_OUTPUT"
 
   macos:
@@ -315,9 +368,163 @@ jobs:
             dist/*.exe.sha256
             dist/production-receipt.json
 
+  linux:
+    name: Linux build (${{ matrix.architecture }})
+    needs: preflight
+    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_required == 'true' && needs.preflight.outputs.linux_artifact_run_id == github.run_id
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x86_64
+            runner: ubuntu-24.04
+            appimagetool_url: https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+            appimagetool_sha256: 95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6
+          - architecture: aarch64
+            runner: ubuntu-24.04-arm
+            appimagetool_url: https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-aarch64.AppImage
+            appimagetool_sha256: a595ea34cd6136c7f595e9dcbb16f3e9725d7610efb9e43b38c3c6e86cafc270
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - id: flutter
+        run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-flutter
+        with:
+          version: ${{ steps.flutter.outputs.version }}
+      - uses: ./.github/actions/flutter-build-cache
+        with:
+          platform: linux
+          profile: release
+      - name: Install Linux release packaging tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            cpio desktop-file-utils libgtk-3-dev libsecret-1-dev libssl-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libkeybinder-3.0-dev libxtst-dev libxi-dev \
+            gobject-introspection libgirepository1.0-dev libmutter-14-dev ninja-build pkg-config rpm
+      - name: Fetch pinned upstream AppImageTool
+        run: |
+          set -euo pipefail
+          tool="$RUNNER_TEMP/appimagetool-${{ matrix.architecture }}.AppImage"
+          curl --fail --location --output "$tool" "${{ matrix.appimagetool_url }}"
+          printf '%s  %s\n' "${{ matrix.appimagetool_sha256 }}" "$tool" | sha256sum --check --status
+          chmod 755 "$tool"
+          APPIMAGE_EXTRACT_AND_RUN=1 "$tool" --version
+          echo "APPIMAGETOOL=$tool" >> "$GITHUB_ENV"
+          echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "$GITHUB_ENV"
+      - name: Build Linux packages
+        run: |
+          set -euo pipefail
+          chmod +x scripts/release/build-linux-flutter.sh scripts/release/build-linux-packages.sh
+          scripts/release/build-linux-flutter.sh "${{ needs.preflight.outputs.version }}" "${{ needs.preflight.outputs.build_number }}" "${{ matrix.architecture }}"
+          python3 scripts/release/verify-linux-runtime-baseline.py --bundle "dist/linux-${{ matrix.architecture }}/bundle" --architecture "${{ matrix.architecture }}" --maximum 2.39 --output "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.runtime-baseline.json"
+          scripts/release/build-linux-packages.sh "${{ needs.preflight.outputs.version }}" "${{ matrix.architecture }}"
+      - name: Sign Linux updater artifacts and write SHA-256 receipts
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/release/sign-update-artifact.sh
+          for extension in AppImage deb rpm; do
+            artifact="dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.$extension"
+            scripts/release/sign-update-artifact.sh "$artifact"
+            (cd apps/copypaste_flutter && dart --disable-dart-dev --packages=.dart_tool/package_config.json tool/verify_update_signature.dart "../../$artifact" "../../$artifact.sig")
+            (cd dist && sha256sum "$(basename "$artifact")" > "$(basename "$artifact").sha256")
+          done
+      - name: Write exact Linux artifact receipt
+        run: |
+          set -euo pipefail
+          args=(--platform linux --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --output "dist/production-receipt.json" --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.runtime-baseline.json")
+          for extension in AppImage deb rpm; do
+            artifact="dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.$extension"
+            args+=(--artifact "$artifact" --artifact "$artifact.sig" --artifact "$artifact.sha256")
+          done
+          python3 scripts/release/write-artifact-receipt.py "${args[@]}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: production-linux-${{ matrix.architecture }}
+          if-no-files-found: error
+          path: |
+            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.AppImage
+            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.AppImage.sig
+            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.AppImage.sha256
+            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.deb
+            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.deb.sig
+            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.deb.sha256
+            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.rpm
+            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.rpm.sig
+            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.rpm.sha256
+            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.runtime-baseline.json
+            dist/production-receipt.json
+
+  linux-full-parity-evidence:
+    name: Linux full parity evidence gate
+    needs: [preflight, linux]
+    if: ${{ always() && needs.preflight.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_required == 'true' && (needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require an evidence source run
+        env:
+          EVIDENCE_RUN_ID: ${{ inputs.linux_evidence_run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$EVIDENCE_RUN_ID" =~ ^[1-9][0-9]*$ ]] || {
+            echo "ERROR: provide linux_evidence_run_id from the real desktop qualification run described in packaging/linux/native-qualification.md" >&2
+            exit 1
+          }
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$EVIDENCE_RUN_ID" > "$RUNNER_TEMP/linux-evidence-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$EVIDENCE_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/linux-evidence-jobs.json"
+          jq -e --arg commit "$GITHUB_SHA" '
+            .head_sha == $commit and
+            .head_repository.full_name == env.GITHUB_REPOSITORY and
+            .path == ".github/workflows/linux-native-qualification.yml" and
+            .event == "workflow_dispatch" and .status == "completed" and .conclusion == "success"
+          ' "$RUNNER_TEMP/linux-evidence-run.json" >/dev/null
+          jq -e '
+            .total_count == (.jobs | length) and
+            ([.jobs[] | select(.status == "completed" and .conclusion == "success") | .name] | unique) as $passed |
+            ["Verify exact artifact sources", "Assemble verified Linux native qualification",
+             "x86_64 GNOME x11", "x86_64 GNOME wayland", "x86_64 KDE x11", "x86_64 KDE wayland",
+             "aarch64 GNOME x11", "aarch64 GNOME wayland", "aarch64 KDE x11", "aarch64 KDE wayland"] |
+            all(. as $name | $passed | index($name))
+          ' "$RUNNER_TEMP/linux-evidence-jobs.json" >/dev/null
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: linux-native-qualification
+          path: native-evidence
+          run-id: ${{ inputs.linux_evidence_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: production-linux-x86_64
+          path: exact-artifacts/x86_64
+          run-id: ${{ needs.preflight.outputs.linux_artifact_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: production-linux-aarch64
+          path: exact-artifacts/aarch64
+          run-id: ${{ needs.preflight.outputs.linux_artifact_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify full exact-artifact Linux desktop evidence
+        run: |
+          set -euo pipefail
+          mkdir exact-artifacts/all
+          find exact-artifacts -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) -exec cp {} exact-artifacts/all/ \;
+          python3 scripts/release/verify-linux-native-qualification.py \
+            --root native-evidence --artifacts exact-artifacts/all \
+            --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA" \
+            --source-run-id "${{ inputs.linux_evidence_run_id }}" \
+            --artifact-run-id "${{ needs.preflight.outputs.linux_artifact_run_id }}"
+
   qualify:
-    needs: [preflight, macos, android, windows]
-    if: ${{ always() && needs.preflight.result == 'success' && (needs.preflight.outputs.reuse_qualified == 'true' || (needs.macos.result == 'success' && needs.android.result == 'success' && needs.windows.result == 'success')) }}
+    needs: [preflight, macos, android, windows, linux, linux-full-parity-evidence]
+    if: ${{ always() && needs.preflight.result == 'success' && (needs.preflight.outputs.reuse_qualified == 'true' || (needs.macos.result == 'success' && needs.android.result == 'success' && needs.windows.result == 'success' && (needs.preflight.outputs.linux_required != 'true' || ((needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && needs.linux-full-parity-evidence.result == 'success')))) }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -344,8 +551,37 @@ jobs:
         with:
           name: production-windows
           path: qualified/windows
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_required == 'true'
+        with:
+          name: production-linux-x86_64
+          path: qualified/linux-x86_64
+          run-id: ${{ needs.preflight.outputs.linux_artifact_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_required == 'true'
+        with:
+          name: production-linux-aarch64
+          path: qualified/linux-aarch64
+          run-id: ${{ needs.preflight.outputs.linux_artifact_run_id }}
+          github-token: ${{ github.token }}
+      - name: Assemble one Linux qualification receipt
+        if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_required == 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p qualified/linux
+          find qualified/linux-x86_64 qualified/linux-aarch64 -type f ! -name production-receipt.json -exec cp {} qualified/linux/ \;
+          python3 scripts/release/merge-linux-artifact-receipts.py \
+            --receipt qualified/linux-x86_64/production-receipt.json \
+            --receipt qualified/linux-aarch64/production-receipt.json \
+            --output qualified/linux/production-receipt.json
       - name: Verify exact qualified artifacts
-        run: python3 scripts/release/verify-artifact-receipts.py --root qualified --version "${{ needs.preflight.outputs.version }}" --commit "${{ needs.preflight.outputs.release_commit }}" --run-id "${{ needs.preflight.outputs.artifact_run_id }}"
+        run: |
+          set -euo pipefail
+          args=(--root qualified --version "${{ needs.preflight.outputs.version }}" --commit "${{ needs.preflight.outputs.release_commit }}" --run-id "${{ needs.preflight.outputs.artifact_run_id }}")
+          if [[ "${{ needs.preflight.outputs.linux_required }}" == true ]]; then args+=(--require-linux); fi
+          if [[ "${{ needs.preflight.outputs.linux_artifact_run_id }}" != "$GITHUB_RUN_ID" ]]; then args+=(--linux-origin-run-id "${{ needs.preflight.outputs.linux_artifact_run_id }}"); fi
+          python3 scripts/release/verify-artifact-receipts.py "${args[@]}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: production-qualified

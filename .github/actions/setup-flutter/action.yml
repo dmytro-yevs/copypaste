@@ -5,44 +5,50 @@ inputs:
   version:
     description: Exact stable Flutter version
     required: true
+  linux-arm64-source-commit:
+    description: Exact Flutter source commit used to bootstrap Linux ARM64 without a nonexistent archive SDK.
+    required: false
+    default: 5fc346839b5d0eef006ed8404392afb4dfae428d
 
 runs:
   using: composite
   steps:
     - name: Locate Flutter and pub caches
       id: paths
+      if: runner.os != 'Linux' || runner.arch != 'ARM64'
       uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
       with:
         channel: stable
         flutter-version: ${{ inputs.version }}
         dry-run: true
     - name: Cache the Flutter SDK on the default branch
-      if: runner.os != 'Windows' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      if: (runner.os != 'Windows') && !(runner.os == 'Linux' && runner.arch == 'ARM64') && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ${{ steps.paths.outputs.CACHE-PATH }}
         key: ${{ steps.paths.outputs.CACHE-KEY }}
     - name: Restore the shared Flutter SDK
-      if: runner.os != 'Windows' && github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
+      if: (runner.os != 'Windows') && !(runner.os == 'Linux' && runner.arch == 'ARM64') && github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ${{ steps.paths.outputs.CACHE-PATH }}
         key: ${{ steps.paths.outputs.CACHE-KEY }}
     - name: Cache pub dependencies on the default branch
-      if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      if: ${{ !(runner.os == 'Linux' && runner.arch == 'ARM64') && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ${{ steps.paths.outputs.PUB-CACHE-PATH }}
         key: ${{ steps.paths.outputs.PUB-CACHE-KEY }}-${{ hashFiles('**/pubspec.lock') }}
         restore-keys: ${{ steps.paths.outputs.PUB-CACHE-KEY }}-
     - name: Restore shared pub dependencies
-      if: github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
+      if: ${{ !(runner.os == 'Linux' && runner.arch == 'ARM64') && github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ${{ steps.paths.outputs.PUB-CACHE-PATH }}
         key: ${{ steps.paths.outputs.PUB-CACHE-KEY }}-${{ hashFiles('**/pubspec.lock') }}
         restore-keys: ${{ steps.paths.outputs.PUB-CACHE-KEY }}-
     - name: Install Flutter
+      if: runner.os != 'Linux' || runner.arch != 'ARM64'
       uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
       with:
         channel: stable
@@ -51,3 +57,57 @@ runs:
         pub-cache-path: ${{ steps.paths.outputs.PUB-CACHE-PATH }}
         cache: false
         pub-cache: false
+    - name: Cache Linux ARM64 Flutter source on the default branch
+      if: runner.os == 'Linux' && runner.arch == 'ARM64' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ runner.tool_cache }}/copypaste-flutter-${{ inputs.version }}-linux-arm64
+        key: flutter-source-linux-arm64-${{ inputs.version }}-${{ inputs.linux-arm64-source-commit }}
+    - name: Restore Linux ARM64 Flutter source
+      if: runner.os == 'Linux' && runner.arch == 'ARM64' && github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ runner.tool_cache }}/copypaste-flutter-${{ inputs.version }}-linux-arm64
+        key: flutter-source-linux-arm64-${{ inputs.version }}-${{ inputs.linux-arm64-source-commit }}
+    - name: Cache Linux ARM64 pub dependencies on the default branch
+      if: runner.os == 'Linux' && runner.arch == 'ARM64' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ~/.pub-cache
+        key: flutter-pub-linux-arm64-${{ inputs.version }}-${{ hashFiles('**/pubspec.lock') }}
+        restore-keys: flutter-pub-linux-arm64-${{ inputs.version }}-
+    - name: Restore Linux ARM64 pub dependencies
+      if: runner.os == 'Linux' && runner.arch == 'ARM64' && github.ref != format('refs/heads/{0}', github.event.repository.default_branch)
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ~/.pub-cache
+        key: flutter-pub-linux-arm64-${{ inputs.version }}-${{ hashFiles('**/pubspec.lock') }}
+        restore-keys: flutter-pub-linux-arm64-${{ inputs.version }}-
+    - name: Bootstrap Flutter from the exact supported Linux ARM64 source revision
+      if: runner.os == 'Linux' && runner.arch == 'ARM64'
+      shell: bash
+      env:
+        FLUTTER_VERSION: ${{ inputs.version }}
+        FLUTTER_SOURCE_COMMIT: ${{ inputs.linux-arm64-source-commit }}
+      run: |
+        set -euo pipefail
+        [[ "$FLUTTER_VERSION" == 3.47.6 ]] || {
+          echo "ERROR: update the pinned Linux ARM64 Flutter source commit with the Flutter version" >&2
+          exit 1
+        }
+        [[ "$FLUTTER_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+        root="$RUNNER_TOOL_CACHE/copypaste-flutter-${FLUTTER_VERSION}-linux-arm64"
+        if [[ ! -d "$root/.git" ]]; then
+          rm -rf "$root"
+          git init "$root"
+          git -C "$root" remote add origin https://github.com/flutter/flutter.git
+          git -C "$root" fetch --depth=1 origin "$FLUTTER_SOURCE_COMMIT"
+          git -C "$root" checkout --detach FETCH_HEAD
+        fi
+        [[ "$(git -C "$root" rev-parse HEAD)" == "$FLUTTER_SOURCE_COMMIT" ]] || {
+          echo "ERROR: cached Flutter source revision is not the pinned 3.47.6 revision" >&2
+          exit 1
+        }
+        echo "FLUTTER_ROOT=$root" >> "$GITHUB_ENV"
+        echo "$root/bin" >> "$GITHUB_PATH"
+        "$root/bin/flutter" --version | grep -F "Flutter $FLUTTER_VERSION"
