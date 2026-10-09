@@ -1,0 +1,8 @@
+{
+  "uuid": "copypaste-quick-paste@copypaste.app",
+  "name": "CopyPaste Quick Paste",
+  "description": "Restores the focused window for CopyPaste Quick Paste on GNOME Wayland.",
+  "shell-version": ["46", "47", "48"],
+  "url": "https://github.com/copypaste/copy-paste",
+  "version": 1
+}
