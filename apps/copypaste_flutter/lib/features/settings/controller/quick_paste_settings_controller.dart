@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 
 import '../../../platform/desktop/global_shortcut.dart';
 import '../../../platform/desktop/quick_paste_host.dart';
+import '../../../platform/permissions/linux_integration.dart';
 import '../repository/quick_paste_preferences_store.dart';
 
 class QuickPasteSettingsController extends ChangeNotifier
@@ -12,16 +13,21 @@ class QuickPasteSettingsController extends ChangeNotifier
     required QuickPastePreferencesStore store,
     required DesktopShortcutRegistrar registrar,
     required QuickPasteWindowHost windowHost,
+    LinuxIntegrationPort? linuxIntegration,
   }) : _store = store,
        _registrar = registrar,
        _windowHost = windowHost,
+       _linuxIntegrationPort = linuxIntegration,
        _preferences = QuickPastePreferences.defaults();
 
   final QuickPastePreferencesStore _store;
   final DesktopShortcutRegistrar _registrar;
   final QuickPasteWindowHost _windowHost;
+  final LinuxIntegrationPort? _linuxIntegrationPort;
 
   QuickPastePreferences _preferences;
+  LinuxIntegrationStatus? _linuxIntegration;
+  bool _nativeQuickPasteSupported = false;
   bool _supported = false;
   bool _initialized = false;
   bool _busy = false;
@@ -38,6 +44,7 @@ class QuickPasteSettingsController extends ChangeNotifier
   bool get autoPaste => _preferences.autoPaste;
   DesktopShortcut get shortcut => _preferences.shortcut;
   bool get accessibilityGranted => _accessibilityGranted;
+  LinuxIntegrationStatus? get linuxIntegration => _linuxIntegration;
   String? get errorMessage => _errorMessage;
 
   Future<void> initialize() async {
@@ -45,13 +52,16 @@ class QuickPasteSettingsController extends ChangeNotifier
     _busy = true;
     notifyListeners();
     try {
-      _supported = await _windowHost.isSupported();
-      if (_disposed) return;
       _preferences = await _store.read();
       if (_disposed) return;
+      if (_linuxIntegrationPort == null) {
+        _nativeQuickPasteSupported = await _windowHost.isSupported();
+      } else {
+        await _refreshLinuxIntegration();
+      }
+      if (_disposed) return;
+      _supported = _quickPasteSupported;
       if (_supported) {
-        WidgetsBinding.instance.addObserver(this);
-        _observingLifecycle = true;
         if (!await _changeRegistration(_preferences.shortcut)) return;
         _accessibilityGranted = await _windowHost.accessibilityGranted();
         if (_disposed) return;
@@ -61,6 +71,9 @@ class QuickPasteSettingsController extends ChangeNotifier
       if (!_disposed) _errorMessage = 'Quick Paste could not be prepared.';
     } finally {
       _initialized = true;
+      if (!_disposed && (_supported || _linuxIntegrationPort != null)) {
+        _startObservingLifecycle();
+      }
       _busy = false;
       if (!_disposed) notifyListeners();
     }
@@ -229,10 +242,103 @@ class QuickPasteSettingsController extends ChangeNotifier
     }
   }
 
+  Future<void> refreshLinuxIntegration() async {
+    if (_linuxIntegrationPort == null || _disposed || _busy) return;
+    _busy = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      await _refreshLinuxIntegration();
+    } catch (_) {
+      _errorMessage = 'Linux integration status could not be refreshed.';
+    } finally {
+      _busy = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  Future<bool> requestLinuxRemoteDesktop() async {
+    final integration = _linuxIntegrationPort;
+    if (integration == null || _disposed || _busy) return false;
+    _busy = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      final granted = await integration.requestRemoteDesktop();
+      await _refreshLinuxIntegration();
+      if (!granted ||
+          _linuxIntegration?.remoteDesktop != LinuxRemoteDesktopState.active) {
+        _errorMessage = 'Clipboard input permission was not granted.';
+        return false;
+      }
+      return true;
+    } catch (_) {
+      _errorMessage = 'Clipboard input permission could not be requested.';
+      return false;
+    } finally {
+      _busy = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  Future<bool> openLinuxCompanionSetup() async {
+    final integration = _linuxIntegrationPort;
+    if (integration == null || _disposed || _busy) return false;
+    _busy = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      final opened = await integration.openCompanionSetup();
+      await _refreshLinuxIntegration();
+      if (!opened) {
+        _errorMessage = 'Desktop integration setup could not be opened.';
+      }
+      return opened;
+    } catch (_) {
+      _errorMessage = 'Desktop integration setup could not be opened.';
+      return false;
+    } finally {
+      _busy = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  bool get _quickPasteSupported =>
+      _nativeQuickPasteSupported &&
+      (_linuxIntegrationPort == null || _linuxIntegration?.quickPaste == true);
+
+  void _startObservingLifecycle() {
+    if (_observingLifecycle) return;
+    WidgetsBinding.instance.addObserver(this);
+    _observingLifecycle = true;
+  }
+
+  Future<void> _refreshLinuxIntegration() async {
+    final integration = _linuxIntegrationPort;
+    if (integration == null) return;
+    final wasSupported = _supported;
+    _linuxIntegration = await integration.status();
+    _nativeQuickPasteSupported = await _windowHost.isSupported();
+    final supported = _quickPasteSupported;
+    if (!_initialized || wasSupported == supported) {
+      _supported = supported;
+      return;
+    }
+    if (!supported) {
+      _supported = false;
+      await _changeRegistration(null);
+      return;
+    }
+    _supported = true;
+    await _changeRegistration(_preferences.shortcut);
+    _accessibilityGranted = await _windowHost.accessibilityGranted();
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       unawaited(refreshAccessibility());
+      unawaited(refreshLinuxIntegration());
     }
   }
 

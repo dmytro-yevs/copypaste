@@ -67,7 +67,11 @@ void main() {
     });
   }
 
-  for (final platform in [TargetPlatform.macOS, TargetPlatform.windows]) {
+  for (final platform in [
+    TargetPlatform.macOS,
+    TargetPlatform.windows,
+    TargetPlatform.linux,
+  ]) {
     test('$platform open requires native true', () async {
       debugDefaultTargetPlatformOverride = platform;
       await host.open();
