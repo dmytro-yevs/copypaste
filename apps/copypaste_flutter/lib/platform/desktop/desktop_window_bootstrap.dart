@@ -8,7 +8,7 @@ import 'desktop_window_controller.dart';
 import 'flutter_desktop_window_host.dart';
 
 Future<DesktopWindowController?> initializeDesktopWindow() async {
-  if (!Platform.isMacOS && !Platform.isWindows) {
+  if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) {
     return null;
   }
 
