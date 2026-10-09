@@ -11,40 +11,46 @@ void main() {
 
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
 
-  test('uses the native Linux package and matching process architecture', () async {
-    messenger.setMockMethodCallHandler(channel, (call) async {
-      expect(call.method, 'availability');
-      return {
-        'available': true,
-        'installationType': 'rpm',
-        'architecture': 'aarch64',
-      };
-    });
-    final platform = MethodChannelAppUpdatePlatform(
-      channel: channel,
-      target: AppUpdateTarget.linux,
-      linuxArchitecture: () => LinuxAppUpdateArchitecture.aarch64,
-    );
+  test(
+    'uses the native Linux package and matching process architecture',
+    () async {
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        expect(call.method, 'availability');
+        return {
+          'available': true,
+          'installationType': 'rpm',
+          'architecture': 'aarch64',
+        };
+      });
+      final platform = MethodChannelAppUpdatePlatform(
+        channel: channel,
+        target: AppUpdateTarget.linux,
+        linuxArchitecture: () => LinuxAppUpdateArchitecture.aarch64,
+      );
 
-    final availability = await platform.availability();
+      final availability = await platform.availability();
 
-    expect(availability.available, isTrue);
-    expect(
-      availability.linuxInstallation?.package,
-      LinuxAppUpdatePackage.rpm,
-    );
-    expect(
-      availability.linuxInstallation?.architecture,
-      LinuxAppUpdateArchitecture.aarch64,
-    );
-  });
+      expect(availability.available, isTrue);
+      expect(
+        availability.linuxInstallation?.package,
+        LinuxAppUpdatePackage.rpm,
+      );
+      expect(
+        availability.linuxInstallation?.architecture,
+        LinuxAppUpdateArchitecture.aarch64,
+      );
+    },
+  );
 
   test('rejects an unknown or mismatched native Linux capability', () async {
-    messenger.setMockMethodCallHandler(channel, (call) async => {
-      'available': true,
-      'installationType': 'deb',
-      'architecture': 'aarch64',
-    });
+    messenger.setMockMethodCallHandler(
+      channel,
+      (call) async => {
+        'available': true,
+        'installationType': 'deb',
+        'architecture': 'aarch64',
+      },
+    );
     final platform = MethodChannelAppUpdatePlatform(
       channel: channel,
       target: AppUpdateTarget.linux,
@@ -60,21 +66,23 @@ void main() {
     );
   });
 
-  test('restores a completed Linux package transaction when the host reports one',
-      () async {
-    messenger.setMockMethodCallHandler(channel, (call) async {
-      expect(call.method, 'restoreInstallation');
-      return 'installed';
-    });
-    final platform = MethodChannelAppUpdatePlatform(
-      channel: channel,
-      target: AppUpdateTarget.linux,
-      linuxArchitecture: () => LinuxAppUpdateArchitecture.x86_64,
-    );
+  test(
+    'restores a completed Linux package transaction when the host reports one',
+    () async {
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        expect(call.method, 'restoreInstallation');
+        return 'installed';
+      });
+      final platform = MethodChannelAppUpdatePlatform(
+        channel: channel,
+        target: AppUpdateTarget.linux,
+        linuxArchitecture: () => LinuxAppUpdateArchitecture.x86_64,
+      );
 
-    expect(
-      await platform.restoreInstallation(),
-      AppUpdateInstallResult.installed,
-    );
-  });
+      expect(
+        await platform.restoreInstallation(),
+        AppUpdateInstallResult.installed,
+      );
+    },
+  );
 }
