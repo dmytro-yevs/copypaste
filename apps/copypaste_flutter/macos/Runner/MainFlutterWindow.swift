@@ -248,7 +248,8 @@ class MainFlutterWindow: NSWindow {
   }
 
   func receivePairingURL(_ url: URL) {
-    guard url.scheme == "copypaste", url.host == "pair", url.path == "/v1" else {
+    guard url.scheme == "copypaste", url.host == "pair",
+          ["/v1", "/v2"].contains(url.path) else {
       return
     }
     pendingPairingURI = url.absoluteString

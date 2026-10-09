@@ -1,5 +1,7 @@
 import 'package:pub_semver/pub_semver.dart';
 
+import 'module_models.dart';
+
 enum ModulesSection { marketplace, installed }
 
 enum ModuleAvailability { available, appVersion, systemVersion, platform }
@@ -39,6 +41,7 @@ class MarketplaceModule {
     required this.description,
     required this.version,
     required this.artifact,
+    this.supportedPlatforms = const [],
     this.appVersions,
     this.availability = ModuleAvailability.available,
     this.unavailableReason,
@@ -50,6 +53,7 @@ class MarketplaceModule {
   final String description;
   final Version version;
   final ModuleArtifact? artifact;
+  final List<ModulePlatform> supportedPlatforms;
   final VersionConstraint? appVersions;
   final ModuleAvailability availability;
   final String? unavailableReason;
