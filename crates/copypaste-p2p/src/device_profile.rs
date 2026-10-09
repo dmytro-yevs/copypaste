@@ -1,6 +1,6 @@
 //! Bounded, non-secret device metadata shared through discovery and Noise.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use copypaste_ipc::{DeviceClass, DevicePlatform};
 
@@ -9,7 +9,7 @@ use crate::protocol::PROTOCOL_VERSION;
 /// Claims made by a device about itself. Trust comes from the channel carrying
 /// the value: mDNS is unverified, while the same value inside Noise is
 /// authenticated to the pairing key.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeviceProfile {
     pub app_version: Option<String>,
     pub protocol_version: Option<u32>,
@@ -18,6 +18,79 @@ pub struct DeviceProfile {
     pub os_name: Option<String>,
     pub os_version: Option<String>,
     pub model: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DeviceProfileWire<'a> {
+    app_version: &'a Option<String>,
+    protocol_version: &'a Option<u32>,
+    platform: DevicePlatform,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    platform_detail: Option<&'static str>,
+    device_class: DeviceClass,
+    os_name: &'a Option<String>,
+    os_version: &'a Option<String>,
+    model: &'a Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeviceProfileWireOwned {
+    app_version: Option<String>,
+    protocol_version: Option<u32>,
+    platform: DevicePlatform,
+    #[serde(default)]
+    platform_detail: Option<String>,
+    device_class: DeviceClass,
+    os_name: Option<String>,
+    os_version: Option<String>,
+    model: Option<String>,
+}
+
+impl Serialize for DeviceProfile {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let (platform, platform_detail) = match self.platform {
+            DevicePlatform::Linux => (DevicePlatform::Unknown, Some("linux")),
+            platform => (platform, None),
+        };
+        DeviceProfileWire {
+            app_version: &self.app_version,
+            protocol_version: &self.protocol_version,
+            platform,
+            platform_detail,
+            device_class: self.device_class,
+            os_name: &self.os_name,
+            os_version: &self.os_version,
+            model: &self.model,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for DeviceProfile {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DeviceProfileWireOwned::deserialize(deserializer)?;
+        let platform = match (wire.platform, wire.platform_detail.as_deref()) {
+            (DevicePlatform::Linux, _) | (DevicePlatform::Unknown, Some("linux")) => {
+                DevicePlatform::Linux
+            }
+            (platform, _) => platform,
+        };
+        Ok(Self {
+            app_version: wire.app_version,
+            protocol_version: wire.protocol_version,
+            platform,
+            device_class: wire.device_class,
+            os_name: wire.os_name,
+            os_version: wire.os_version,
+            model: wire.model,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
