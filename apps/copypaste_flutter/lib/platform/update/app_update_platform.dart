@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 import '../../features/update/models/app_update_models.dart';
+import 'app_update_architecture.dart';
 
 abstract interface class AppUpdatePlatform {
   AppUpdateTarget get target;
@@ -22,16 +23,26 @@ abstract interface class AppUpdatePlatform {
 }
 
 class MethodChannelAppUpdatePlatform implements AppUpdatePlatform {
-  MethodChannelAppUpdatePlatform({MethodChannel? channel})
-    : _channel = channel ?? const MethodChannel('com.copypaste.app/app_update');
+  MethodChannelAppUpdatePlatform({
+    MethodChannel? channel,
+    AppUpdateTarget? target,
+    LinuxAppUpdateArchitecture? Function()? linuxArchitecture,
+  }) : _channel = channel ?? const MethodChannel('com.copypaste.app/app_update'),
+       _target = target,
+       _linuxArchitecture = linuxArchitecture ?? currentLinuxUpdateArchitecture;
 
   final MethodChannel _channel;
+  final AppUpdateTarget? _target;
+  final LinuxAppUpdateArchitecture? Function() _linuxArchitecture;
 
   @override
   AppUpdateTarget get target {
+    final configuredTarget = _target;
+    if (configuredTarget != null) return configuredTarget;
     if (Platform.isMacOS) return AppUpdateTarget.macos;
     if (Platform.isWindows) return AppUpdateTarget.windows;
     if (Platform.isAndroid) return AppUpdateTarget.android;
+    if (Platform.isLinux) return AppUpdateTarget.linux;
     throw const AppUpdateException('Application updates are unavailable here.');
   }
 
@@ -54,12 +65,29 @@ class MethodChannelAppUpdatePlatform implements AppUpdatePlatform {
     }
     final available = raw['available'] == true;
     final reason = raw['reason'] as String?;
-    return available
-        ? const AppUpdateAvailability.available()
-        : AppUpdateAvailability.unavailable(
-            reason ??
-                'Application updates are unavailable on this installation.',
-          );
+    if (!available) {
+      return AppUpdateAvailability.unavailable(
+        reason ?? 'Application updates are unavailable on this installation.',
+      );
+    }
+    if (target == AppUpdateTarget.linux) {
+      final installation = LinuxAppUpdateInstallation.parse(
+        installationType: raw['installationType'] as String?,
+        architecture: raw['architecture'] as String?,
+      );
+      if (installation == null) {
+        return const AppUpdateAvailability.unavailable(
+          'This Linux installation cannot update automatically.',
+        );
+      }
+      if (_linuxArchitecture() != installation.architecture) {
+        return const AppUpdateAvailability.unavailable(
+          'This Linux update does not match the running architecture.',
+        );
+      }
+      return AppUpdateAvailability.available(linuxInstallation: installation);
+    }
+    return const AppUpdateAvailability.available();
   }
 
   @override
@@ -77,7 +105,9 @@ class MethodChannelAppUpdatePlatform implements AppUpdatePlatform {
 
   @override
   Future<AppUpdateInstallResult?> restoreInstallation() async {
-    if (!Platform.isAndroid) return null;
+    if (target != AppUpdateTarget.android && target != AppUpdateTarget.linux) {
+      return null;
+    }
     final result = await _channel.invokeMethod<String>('restoreInstallation');
     return result == null ? null : _installResult(result);
   }
