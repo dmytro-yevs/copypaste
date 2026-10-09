@@ -45,6 +45,11 @@ class QuickPasteSettingsController extends ChangeNotifier
   DesktopShortcut get shortcut => _preferences.shortcut;
   bool get accessibilityGranted => _accessibilityGranted;
   LinuxIntegrationStatus? get linuxIntegration => _linuxIntegration;
+  String? get registeredShortcutDescription => switch (_registrar) {
+    LinuxPortalDesktopShortcutRegistrar registrar =>
+      registrar.registeredTriggerDescription,
+    _ => null,
+  };
   String? get errorMessage => _errorMessage;
 
   Future<void> initialize() async {

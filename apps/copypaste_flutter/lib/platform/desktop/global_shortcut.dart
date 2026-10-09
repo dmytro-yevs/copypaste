@@ -181,6 +181,10 @@ class LinuxPortalDesktopShortcutRegistrar implements DesktopShortcutRegistrar {
   final MethodChannel _channel;
   Future<void> Function()? _callback;
   String? _registeredId;
+  String? _registeredTriggerDescription;
+
+  /// The trigger confirmed by the desktop portal, when it reports one.
+  String? get registeredTriggerDescription => _registeredTriggerDescription;
 
   @override
   Future<void> register(
@@ -199,6 +203,8 @@ class LinuxPortalDesktopShortcutRegistrar implements DesktopShortcutRegistrar {
       'id': _shortcutId,
       'description': 'Open Quick Paste',
       'preferredTrigger': shortcut.linuxPreferredTrigger,
+      'usage': shortcut.key.usbHidUsage,
+      'modifiers': shortcut.modifiers.map((modifier) => modifier.name).toList(),
     });
     if (result?['registered'] != true) {
       throw PlatformException(
@@ -207,6 +213,7 @@ class LinuxPortalDesktopShortcutRegistrar implements DesktopShortcutRegistrar {
       );
     }
     _registeredId = _shortcutId;
+    _registeredTriggerDescription = result?['triggerDescription'] as String?;
     _callback = callback;
   }
 
@@ -218,6 +225,7 @@ class LinuxPortalDesktopShortcutRegistrar implements DesktopShortcutRegistrar {
       throw const PlatformException(code: 'shortcut_unregistration_failed');
     }
     _registeredId = null;
+    _registeredTriggerDescription = null;
     _callback = null;
   }
 
@@ -240,11 +248,45 @@ class LinuxPortalDesktopShortcutRegistrar implements DesktopShortcutRegistrar {
 }
 
 extension LinuxDesktopShortcutPresentation on DesktopShortcut {
-  /// XDG GlobalShortcuts syntax accepted by both the X11 and Wayland paths.
+  /// A portable XDG/XKB hint; USB HID usage remains the binding source of truth.
   String get linuxPreferredTrigger => [
     for (final modifier in modifiers) modifier.linuxTriggerName,
-    HotKey(key: key).logicalKey.keyLabel.toUpperCase(),
+    _linuxKeySymbol,
   ].join('+');
+
+  String get _linuxKeySymbol {
+    final label = HotKey(key: key).logicalKey.keyLabel;
+    if (RegExp(r'^[A-Za-z0-9]+$').hasMatch(label)) return label.toUpperCase();
+    return switch (key) {
+      PhysicalKeyboardKey.escape => 'ESC',
+      PhysicalKeyboardKey.backspace => 'BACKSPACE',
+      PhysicalKeyboardKey.tab => 'TAB',
+      PhysicalKeyboardKey.space => 'SPACE',
+      PhysicalKeyboardKey.enter || PhysicalKeyboardKey.numpadEnter => 'ENTER',
+      PhysicalKeyboardKey.arrowUp => 'UP',
+      PhysicalKeyboardKey.arrowDown => 'DOWN',
+      PhysicalKeyboardKey.arrowLeft => 'LEFT',
+      PhysicalKeyboardKey.arrowRight => 'RIGHT',
+      PhysicalKeyboardKey.home => 'HOME',
+      PhysicalKeyboardKey.end => 'END',
+      PhysicalKeyboardKey.pageUp => 'PAGEUP',
+      PhysicalKeyboardKey.pageDown => 'PAGEDOWN',
+      PhysicalKeyboardKey.insert => 'INSERT',
+      PhysicalKeyboardKey.delete => 'DELETE',
+      PhysicalKeyboardKey.minus => 'MINUS',
+      PhysicalKeyboardKey.equal => 'EQUAL',
+      PhysicalKeyboardKey.bracketLeft => 'BRACKETLEFT',
+      PhysicalKeyboardKey.bracketRight => 'BRACKETRIGHT',
+      PhysicalKeyboardKey.backslash => 'BACKSLASH',
+      PhysicalKeyboardKey.semicolon => 'SEMICOLON',
+      PhysicalKeyboardKey.quote => 'APOSTROPHE',
+      PhysicalKeyboardKey.backquote => 'GRAVE',
+      PhysicalKeyboardKey.comma => 'COMMA',
+      PhysicalKeyboardKey.period => 'PERIOD',
+      PhysicalKeyboardKey.slash => 'SLASH',
+      _ => 'HID_${key.usbHidUsage.toRadixString(16).toUpperCase()}',
+    };
+  }
 }
 
 extension on DesktopShortcutModifier {
