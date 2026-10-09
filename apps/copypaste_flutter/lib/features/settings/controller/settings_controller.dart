@@ -63,6 +63,7 @@ class SettingsController extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   bool get busy => _busy;
   bool get blockScreenshots => _blockScreenshots;
+  bool get blockScreenshotsSupported => _screenshotProtection.supported;
   bool get screenshotCaptureSupported => _screenshotCapture.supported;
   ScreenshotCaptureStatus get screenshotCapture => _screenshotStatus;
 
@@ -87,7 +88,9 @@ class SettingsController extends ChangeNotifier {
       final values = await Future.wait<Object>([
         _repository.settings(),
         _repository.captureState(),
-        _screenshotProtection.blocked(),
+        _screenshotProtection.supported
+            ? _screenshotProtection.blocked()
+            : Future<bool>.value(false),
       ]);
       _settings = values[0] as RuntimeSettings;
       _capture = values[1] as CaptureSettingsState;
@@ -230,6 +233,9 @@ class SettingsController extends ChangeNotifier {
   }
 
   Future<bool> setBlockScreenshots(bool value) => _run(() async {
+    if (!_screenshotProtection.supported) {
+      throw UnsupportedError('Screenshot blocking is unavailable.');
+    }
     await _screenshotProtection.setBlocked(value);
     _blockScreenshots = await _screenshotProtection.blocked();
   });
