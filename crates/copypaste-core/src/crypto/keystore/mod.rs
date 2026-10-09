@@ -151,6 +151,18 @@ pub(super) fn load_or_create_secret(data_dir: &Path) -> Result<DeviceSecret, Cry
     finish_load_or_create_secret(data_dir, lookup)
 }
 
+/// Run every Linux Secret Service request off the daemon's Tokio thread.
+///
+/// `secret-service::blocking` drives its own runtime and therefore must not
+/// run from the application's async runtime. The backend owns one bounded
+/// worker over the complete lookup/create transaction, rather than merely its
+/// initial read: collection lookup, `CreateItem`, and the mandatory reread all
+/// have the same safe call boundary.
+#[cfg(all(target_os = "linux", not(debug_assertions)))]
+pub(super) fn load_or_create_linux_secret(data_dir: &Path) -> Result<DeviceSecret, CryptoError> {
+    backend::load_or_create(data_dir)
+}
+
 /// Whether `data_dir` already holds a v2 history database.
 ///
 /// The filename comes from `copypaste_ipc` rather than a literal here, because
