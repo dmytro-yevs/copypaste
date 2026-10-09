@@ -107,6 +107,8 @@ tokio = { workspace = true, features = ["test-util"] }
 # or decrypted bytes could reach a log, so the tests assert on what is emitted
 # rather than on a reading of the source. Capturing that needs a subscriber.
 tracing-subscriber.workspace = true
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
 wl-clipboard-rs = "0.9"
 
 [features]
