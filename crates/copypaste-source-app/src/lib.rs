@@ -4,6 +4,8 @@
 
 #[cfg(target_os = "windows")]
 mod gdi;
+#[cfg(any(target_os = "linux", test))]
+mod linux;
 #[cfg(target_os = "windows")]
 pub mod registry;
 #[cfg(target_os = "windows")]
@@ -64,6 +66,23 @@ impl AppIcon {
         }
         normalize(image)
     }
+}
+
+/// Decode and normalize a PNG whose dimensions are supplied by the image
+/// itself. Desktop-entry icons do not carry trusted out-of-band dimensions,
+/// unlike icons received through the IPC contract.
+#[cfg(any(target_os = "linux", test))]
+fn normalize_png(png: Vec<u8>) -> Option<AppIcon> {
+    if png.is_empty() || png.len() > MAX_SOURCE_ICON_BYTES {
+        return None;
+    }
+    let mut reader = ImageReader::with_format(Cursor::new(&png), ImageFormat::Png);
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(MAX_SOURCE_ICON_EDGE);
+    limits.max_image_height = Some(MAX_SOURCE_ICON_EDGE);
+    limits.max_alloc = Some(4 * 1024 * 1024);
+    reader.limits(limits);
+    normalize(reader.decode().ok()?)
 }
 
 fn normalize(image: DynamicImage) -> Option<AppIcon> {
@@ -271,7 +290,12 @@ fn resolve_desktop(app_id: &str) -> Option<AppIcon> {
     win_icon::resolve(app_id)
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(target_os = "linux")]
+fn resolve_desktop(app_id: &str) -> Option<AppIcon> {
+    linux::resolve(app_id)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 fn resolve_desktop(_app_id: &str) -> Option<AppIcon> {
     None
 }
