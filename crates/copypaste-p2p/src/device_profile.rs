@@ -97,9 +97,43 @@ fn bounded_text(value: String, max_bytes: usize) -> Option<String> {
     (!bounded.is_empty()).then_some(bounded)
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "android")))]
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "windows",
+    target_os = "android",
+    target_os = "linux"
+)))]
 fn native_metadata() -> NativeMetadata {
     NativeMetadata::default()
+}
+
+#[cfg(target_os = "linux")]
+fn native_metadata() -> NativeMetadata {
+    static HARDWARE: std::sync::OnceLock<NativeMetadata> = std::sync::OnceLock::new();
+    HARDWARE
+        .get_or_init(|| NativeMetadata {
+            device_class: std::fs::read_to_string("/sys/class/dmi/id/chassis_type")
+                .ok()
+                .map(|value| linux_chassis_class(&value))
+                .unwrap_or_default(),
+            model: std::fs::read_to_string("/sys/class/dmi/id/product_name")
+                .ok()
+                .and_then(|value| bounded_text(value, 128)),
+            ..NativeMetadata::default()
+        })
+        .clone()
+}
+
+/// SMBIOS chassis values from DMTF's system enclosure contract. Missing or
+/// unfamiliar firmware metadata remains unknown, including ARM systems without DMI.
+#[cfg(any(target_os = "linux", test))]
+fn linux_chassis_class(value: &str) -> DeviceClass {
+    match value.trim().parse::<u8>() {
+        Ok(3..=7 | 13 | 15 | 35 | 36) => DeviceClass::Desktop,
+        Ok(8..=10 | 14 | 31 | 32) => DeviceClass::Laptop,
+        Ok(30) => DeviceClass::Tablet,
+        _ => DeviceClass::Unknown,
+    }
 }
 
 #[cfg(target_os = "android")]
@@ -310,6 +344,17 @@ fn windows_device_class_from_chassis(types: impl Iterator<Item = u8>) -> DeviceC
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classifies_linux_firmware_without_guessing_missing_metadata() {
+        assert_eq!(linux_chassis_class("3\n"), DeviceClass::Desktop);
+        assert_eq!(linux_chassis_class("10"), DeviceClass::Laptop);
+        assert_eq!(linux_chassis_class("30"), DeviceClass::Tablet);
+        assert_eq!(linux_chassis_class("31"), DeviceClass::Laptop);
+        for value in ["", "unknown", "1", "2", "255", "256"] {
+            assert_eq!(linux_chassis_class(value), DeviceClass::Unknown);
+        }
+    }
 
     #[test]
     fn bounds_platform_text_without_splitting_unicode() {

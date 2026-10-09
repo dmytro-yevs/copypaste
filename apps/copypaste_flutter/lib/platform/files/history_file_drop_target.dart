@@ -21,7 +21,9 @@ class HistoryFileDropTarget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!Platform.isMacOS && !Platform.isWindows) return child;
+    if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) {
+      return child;
+    }
     return native.DropTarget(
       enable: enabled,
       onDragEntered: (_) => onHover(true),
