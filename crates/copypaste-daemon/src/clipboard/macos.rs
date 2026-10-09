@@ -69,6 +69,8 @@ const UTI_SOURCE: &str = "org.nspasteboard.source";
 /// form needs no `Send`/`Sync` claim about `NSString` from whichever
 /// binding revision is in the tree.
 struct Utis {
+    concealed_probe: Retained<NSArray<NSString>>,
+    transient_probe: Retained<NSArray<NSString>>,
     text: Retained<NSString>,
     text_probe: Retained<NSArray<NSString>>,
     rtf: Retained<NSString>,
@@ -98,6 +100,12 @@ impl Utis {
         // `NSString` is `ImmutableWithMutableSubclass<NSMutableString>`, which
         // is not. Taking owned `Retained`s is the supported path for it.
         Self {
+            concealed_probe: NSArray::from_vec(vec![NSString::from_str(
+                "org.nspasteboard.ConcealedType",
+            )]),
+            transient_probe: NSArray::from_vec(vec![NSString::from_str(
+                "org.nspasteboard.TransientType",
+            )]),
             text_probe: NSArray::from_vec(vec![text.clone()]),
             rtf_probe: NSArray::from_vec(vec![rtf.clone()]),
             html_probe: NSArray::from_vec(vec![html.clone()]),
@@ -193,6 +201,16 @@ impl ClipboardSource for MacOsClipboard {
             // acknowledge the change without reading either attribution or data.
             if policy.settings.private_mode {
                 self.source_coverage.consume(count, observation, None, true);
+                return None;
+            }
+
+            let privacy = UTIS.with(|utis| copypaste_ipc::ClipboardPrivacy {
+                secret: unsafe { pb.availableTypeFromArray(&utis.concealed_probe) }.is_some(),
+                transient: unsafe { pb.availableTypeFromArray(&utis.transient_probe) }.is_some(),
+            });
+            if unsafe { pb.changeCount() } as i64 != count || !privacy.allows(policy.settings) {
+                self.source_coverage
+                    .consume(count, observation, None, false);
                 return None;
             }
 
@@ -322,6 +340,7 @@ impl ClipboardSource for MacOsClipboard {
                         };
                         info!("file capture materialized");
                         let capture = Capture {
+                            privacy,
                             content: String::new(),
                             binary_content: Some(bytes),
                             file_path: None,
@@ -372,6 +391,7 @@ impl ClipboardSource for MacOsClipboard {
                             return None;
                         }
                         let capture = Capture {
+                            privacy,
                             content,
                             binary_content: None,
                             file_path: None,
@@ -386,6 +406,7 @@ impl ClipboardSource for MacOsClipboard {
                         return read_valid().then_some(capture);
                     }
                     let capture = Capture {
+                        privacy,
                         content: String::new(),
                         binary_content: Some(bytes),
                         file_path: None,
@@ -625,6 +646,49 @@ mod tests {
         autoreleasepool(|_| unsafe {
             let _ = NSPasteboard::generalPasteboard().clearContents();
         });
+    }
+
+    #[test]
+    #[ignore = "drives the real NSPasteboard; isolated audit VM only"]
+    fn privacy_markers_are_presence_based_and_independently_configurable() {
+        let _serial = serialised();
+        let (_data, mut clipboard) = test_clipboard();
+        let mut settings = copypaste_ipc::ConfigData::default();
+        for (marker, secret) in [
+            ("org.nspasteboard.ConcealedType", true),
+            ("org.nspasteboard.TransientType", false),
+        ] {
+            settings.skip_secret = true;
+            settings.skip_transient = true;
+            write_types(&[(UTI_TEXT, b"synthetic privacy fixture"), (marker, b"")]);
+            assert!(offers(marker));
+            assert!(clipboard
+                .poll_with_policy(CapturePolicy::new(&settings))
+                .is_none());
+            if secret {
+                settings.skip_secret = false;
+            } else {
+                settings.skip_transient = false;
+            }
+            // A rejected clipboard value must not replay merely because policy changed.
+            assert!(clipboard
+                .poll_with_policy(CapturePolicy::new(&settings))
+                .is_none());
+            write_types(&[(UTI_TEXT, b"synthetic privacy fixture"), (marker, b"")]);
+            let captured = clipboard
+                .poll_with_policy(CapturePolicy::new(&settings))
+                .expect("explicitly allowed capture");
+            assert_eq!(captured.privacy.secret, secret);
+            assert_eq!(captured.privacy.transient, !secret);
+            assert_eq!(captured.content, "synthetic privacy fixture");
+            settings.private_mode = true;
+            write_types(&[(UTI_TEXT, b"synthetic paused fixture"), (marker, b"")]);
+            assert!(clipboard
+                .poll_with_policy(CapturePolicy::new(&settings))
+                .is_none());
+            settings.private_mode = false;
+        }
+        clear();
     }
 
     #[test]

@@ -3,6 +3,43 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../../../app/theme/app_overlays.dart';
 import '../controller/history_controller.dart';
 
+Future<void> showHistoryBulkDeleteDialog(
+  BuildContext context, {
+  required HistoryController controller,
+}) => AppOverlays.showDialog<void>(
+  context,
+  builder: (context) => AnimatedBuilder(
+    animation: controller,
+    builder: (context, child) => AppOverlays.alertDialog(
+      icon: LucideIcons.trash2,
+      title: Text(
+        'Delete ${controller.bulkSelectedIds.length} selected clips?',
+      ),
+      content: controller.errorMessage == null
+          ? null
+          : Text(controller.errorMessage!),
+      actions: [
+        Button.ghost(
+          onPressed: controller.isBulkMutating
+              ? null
+              : () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        Button.destructive(
+          onPressed:
+              controller.isBulkMutating || controller.bulkSelectedIds.isEmpty
+              ? null
+              : () async {
+                  final deleted = await controller.deleteBulkSelection();
+                  if (deleted && context.mounted) Navigator.pop(context);
+                },
+          child: const Text('Delete'),
+        ),
+      ],
+    ),
+  ),
+);
+
 Future<void> showHistoryDeleteDialog(
   BuildContext context, {
   required HistoryController controller,

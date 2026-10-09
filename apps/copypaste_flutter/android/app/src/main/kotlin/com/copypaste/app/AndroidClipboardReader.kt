@@ -92,7 +92,7 @@ internal object AndroidClipboardReader {
         }
     }
 
-    internal data class Snapshot(val text: String? = null, val uri: Uri? = null, val type: String? = null, val capturedAt: Long = 0)
+    internal data class Snapshot(val text: String? = null, val uri: Uri? = null, val type: String? = null, val capturedAt: Long = 0, val secret: Boolean = false)
 
     internal interface PendingRuntime {
         fun enqueue(task: Runnable)
@@ -133,7 +133,9 @@ internal object AndroidClipboardReader {
         private val result = java.util.concurrent.atomic.AtomicReference(completion)
         private val payload = java.util.concurrent.atomic.AtomicReference<Snapshot?>(null)
         private val feedback = java.util.concurrent.atomic.AtomicReference<CaptureFeedbackPreview?>(null)
-        fun feedbackPreview(): CaptureFeedbackPreview? = feedback.get()
+        private val confidential = java.util.concurrent.atomic.AtomicBoolean(false)
+        fun confidential(value: Boolean) { if (value) confidential.set(true) }
+        fun feedbackPreview(): CaptureFeedbackPreview? = if (confidential.get()) null else feedback.get()
         fun feedbackPreview(preview: CaptureFeedbackPreview) { feedback.set(preview) }
         private val stream = java.util.concurrent.atomic.AtomicReference<java.io.InputStream?>(null)
         private val action = java.util.concurrent.atomic.AtomicReference<((Snapshot) -> Boolean)?>(null)
@@ -249,9 +251,17 @@ internal object AndroidClipboardReader {
         val clipboard = context.getSystemService(ClipboardManager::class.java)
         var snapshot: Snapshot? = null
         val read = runCatching { pending.read("text/plain") { limit ->
+            val description = clipboard?.primaryClipDescription
+            val secret = description?.extras?.getBoolean("android.content.extra.IS_SENSITIVE", false) == true
+            if (!NativeRuntimeCapture.classify(pending.token, secret, false)) return@read
             val primary = clipboard?.primaryClip
             if (primary != null && primary.description.label?.toString() != AndroidClipboardWriter.label) {
+                val currentSecret = primary.description.extras?.getBoolean("android.content.extra.IS_SENSITIVE", false) == true
+                if (currentSecret != secret || !NativeRuntimeCapture.classify(pending.token, currentSecret, false)) return@read
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && description?.timestamp != primary.description.timestamp) return@read
+                pending.confidential(currentSecret)
                 snapshot = Snapshot(
+                    secret = currentSecret,
                     text = text(primary, limit),
                     uri = primary.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri,
                     type = primary.description.takeIf { it.mimeTypeCount > 0 }?.getMimeType(0)?.lowercase(),
@@ -296,7 +306,7 @@ internal object AndroidClipboardReader {
         return if (snapshot.uri != null) binary(context, pending, snapshot.uri, snapshot.type ?: return false)
         else snapshot.text?.takeIf(String::isNotBlank)?.let {
             val saved = NativeRuntimeCapture.ingestText(pending.token, it)
-            if (saved) pending.feedbackPreview(CaptureFeedbackPreview(AndroidCaptureFeedback.textPreview(it)))
+            if (saved && !snapshot.secret) pending.feedbackPreview(CaptureFeedbackPreview(AndroidCaptureFeedback.textPreview(it)))
             saved
         } == true
     }

@@ -15,6 +15,9 @@ abstract final class AppMotion {
   static const Duration quick = Duration(milliseconds: 100);
   static const Duration standard = Duration(milliseconds: 200);
   static const Duration emphasized = Duration(milliseconds: 300);
+  static const Duration spoilerDust = Duration(seconds: 3);
+  static const Duration spoilerReveal = Duration(milliseconds: 350);
+  static const Curve spoilerRevealCurve = Curves.easeOut;
   static const Duration settingsHighlightHold = Duration(milliseconds: 1200);
   static const Duration navigation = Duration(milliseconds: 320);
   static const Duration navigationHold = Duration(milliseconds: 375);
@@ -170,5 +173,39 @@ class AppNavigationMotion {
   void dispose() {
     press.dispose();
     selector.dispose();
+  }
+}
+
+/// Owns the canonical dust and explicit reveal transitions for confidential clips.
+class AppSpoilerMotion {
+  AppSpoilerMotion({required TickerProvider vsync})
+    : dust = AnimationController(vsync: vsync, duration: AppMotion.spoilerDust),
+      reveal = AnimationController(
+        vsync: vsync,
+        duration: AppMotion.spoilerReveal,
+      );
+  final AnimationController dust;
+  final AnimationController reveal;
+  void conceal({required bool reducedMotion}) {
+    reveal.reset();
+    if (reducedMotion) {
+      dust.stop();
+    } else if (!dust.isAnimating) {
+      dust.repeat();
+    }
+  }
+
+  void open({required bool reducedMotion}) {
+    dust.stop();
+    if (reducedMotion) {
+      reveal.value = 1;
+    } else {
+      reveal.forward(from: 0);
+    }
+  }
+
+  void dispose() {
+    dust.dispose();
+    reveal.dispose();
   }
 }

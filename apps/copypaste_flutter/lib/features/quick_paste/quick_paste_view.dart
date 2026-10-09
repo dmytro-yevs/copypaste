@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../history/presentation/secret_spoiler.dart';
+
 import '../../app/theme/app_overlays.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_tokens.dart';
@@ -472,13 +474,40 @@ SingleActivator _desktopShortcut(LogicalKeyboardKey key) =>
     SingleActivator(key, meta: Platform.isMacOS, control: Platform.isWindows);
 
 class _ClipContent extends StatelessWidget {
-  const _ClipContent({required this.clip, required this.controller});
+  const _ClipContent({
+    required this.clip,
+    required this.controller,
+    this.revealed = false,
+  });
 
   final HistoryClip clip;
   final QuickPasteController controller;
+  final bool revealed;
 
   @override
   Widget build(BuildContext context) {
+    if (clip.secret && !revealed) {
+      return SecretSpoiler(
+        key: ValueKey(
+          'quick-spoiler-${clip.id}-${controller.presentationGeneration}',
+        ),
+        reveal: (_) => FutureBuilder<HistoryClip>(
+          future: controller.history.revealClip(clip.id),
+          builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return const StateView.error(title: 'Clip unavailable');
+            }
+            final full = snapshot.data;
+            if (full == null) return const StateView.loading();
+            return _ClipContent(
+              clip: full,
+              controller: controller,
+              revealed: true,
+            );
+          },
+        ),
+      );
+    }
     if (clip.contentKind != HistoryClipKind.image) {
       return Text(
         clip.preview.isEmpty ? clip.contentKind.label : clip.preview,

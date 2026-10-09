@@ -137,6 +137,11 @@ fn valid_icon_dimensions(png: &[u8], width: u32, height: u32) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct PayloadMetadata {
+    #[serde(
+        default,
+        skip_serializing_if = "copypaste_ipc::ClipboardPrivacy::is_empty"
+    )]
+    pub privacy: copypaste_ipc::ClipboardPrivacy,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<FileMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -150,6 +155,7 @@ impl PayloadMetadata {
         source_app_icon: Option<SourceAppIconMetadata>,
     ) -> Option<Self> {
         let metadata = Self {
+            privacy: Default::default(),
             file,
             source_app_icon,
         };
@@ -165,7 +171,8 @@ impl PayloadMetadata {
                 (copypaste_ipc::content_type::classify(content_type)
                     == copypaste_ipc::ContentClass::Image
                     && self.file.is_some())
-                    || (self.file.is_none() && self.source_app_icon.is_some())
+                    || (self.file.is_none()
+                        && (self.source_app_icon.is_some() || !self.privacy.is_empty()))
             }
     }
 
@@ -175,7 +182,9 @@ impl PayloadMetadata {
             .source_app_icon
             .as_ref()
             .is_none_or(|icon| icon.png().is_some());
-        file_is_valid && icon_is_valid && (self.file.is_some() || self.source_app_icon.is_some())
+        file_is_valid
+            && icon_is_valid
+            && (self.file.is_some() || self.source_app_icon.is_some() || !self.privacy.is_empty())
     }
 
     #[must_use]
@@ -192,6 +201,7 @@ impl PayloadMetadata {
         }
         if let Some(file) = FileMetadata::from_json(value) {
             return (content_type == copypaste_ipc::content_type::FILE).then_some(Self {
+                privacy: Default::default(),
                 file: Some(file),
                 source_app_icon: None,
             });
@@ -241,6 +251,7 @@ mod tests {
         let icon = SourceAppIconMetadata::new(&png(64, 128), 64, 128).expect("valid icon");
         let file = FileMetadata::new("report.pdf", "application/pdf").unwrap();
         let metadata = PayloadMetadata {
+            privacy: Default::default(),
             file: Some(file.clone()),
             source_app_icon: Some(icon.clone()),
         };
@@ -251,6 +262,7 @@ mod tests {
         );
 
         let icon_only = PayloadMetadata {
+            privacy: Default::default(),
             file: None,
             source_app_icon: Some(icon),
         };

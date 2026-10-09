@@ -67,6 +67,36 @@ pub fn peer_source(state: &Arc<AppState>) -> StoreSource {
     store_source(state).on_applied(move |created_at| hooked.modules.note_version(created_at))
 }
 
+/// Compose the same sync capabilities for production and isolated daemon tests.
+pub fn install_module_services(
+    state: &Arc<AppState>,
+) -> Result<(), copypaste_modules::ModuleError> {
+    let weak_state = Arc::downgrade(state);
+    let weak_settings = Arc::downgrade(state);
+    state
+        .modules
+        .set_sync_services(Arc::new(copypaste_modules::SyncServices::new(
+            state.store.clone(),
+            copypaste_sync::store::StoreView::new(
+                store_source(state),
+                state.meta.device_id().to_string(),
+            ),
+            move || {
+                weak_settings
+                    .upgrade()
+                    .is_some_and(|state| state.is_ready() && state.settings.get().sync_enabled)
+            },
+            move |stamp| {
+                if let Some(state) = weak_state.upgrade() {
+                    state.p2p.node().cursors().note_local(stamp);
+                    state.p2p.wake();
+                    state.note_remote_change();
+                }
+            },
+        )))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use copypaste_core::RemoteVersion;
@@ -125,34 +155,4 @@ mod tests {
         assert!(store_source(&state).apply_version(&remote(300)).unwrap());
         assert_eq!(writes.count(), 2);
     }
-}
-
-/// Compose the same sync capabilities for production and isolated daemon tests.
-pub fn install_module_services(
-    state: &Arc<AppState>,
-) -> Result<(), copypaste_modules::ModuleError> {
-    let weak_state = Arc::downgrade(state);
-    let weak_settings = Arc::downgrade(state);
-    state
-        .modules
-        .set_sync_services(Arc::new(copypaste_modules::SyncServices::new(
-            state.store.clone(),
-            copypaste_sync::store::StoreView::new(
-                store_source(state),
-                state.meta.device_id().to_string(),
-            ),
-            move || {
-                weak_settings
-                    .upgrade()
-                    .is_some_and(|state| state.is_ready() && state.settings.get().sync_enabled)
-            },
-            move |stamp| {
-                if let Some(state) = weak_state.upgrade() {
-                    state.p2p.node().cursors().note_local(stamp);
-                    state.p2p.wake();
-                    state.note_remote_change();
-                }
-            },
-        )))?;
-    Ok(())
 }

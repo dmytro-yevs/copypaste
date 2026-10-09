@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:copypaste_flutter/features/history/repository/history_file_importer.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/navigation/navigation.dart';
@@ -23,6 +23,233 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as raster;
 
 void main() {
+  testWidgets(
+    'bulk button selects multiple clips, pins and unpins, and confirms deletion',
+    (tester) async {
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      for (final width in [320.0, 1400.0]) {
+        await tester.binding.setSurfaceSize(Size(width, 900));
+        final repository = _ScreenRepository()
+          ..page = HistoryClipPage(
+            items: [
+              for (final id in ['bulk-one', 'bulk-two', 'bulk-keep'])
+                HistoryClip(
+                  id: id,
+                  contentType: 'text',
+                  preview: id,
+                  createdAt: DateTime.utc(2026),
+                  pinned: id == 'bulk-one',
+                ),
+            ],
+          );
+        final controller = HistoryController(repository);
+        await tester.pumpWidget(
+          ShadcnApp(
+            theme: AppTheme.light,
+            builder: AppTheme.builder,
+            home: Scaffold(child: HistoryScreen(controller: controller)),
+          ),
+        );
+        await _pumpHoverActions(tester);
+        final entry = find.byKey(const ValueKey('history-select-clips'));
+        final entrySize = tester.getSize(entry);
+        expect(entrySize.width, entrySize.height);
+        expect(
+          entrySize.height,
+          tester
+              .getSize(find.byKey(const ValueKey('history-import-files')))
+              .height,
+        );
+        await tester.tap(entry);
+        await _pumpHoverActions(tester);
+        expect(find.text('0 selected'), findsOneWidget);
+        for (final id in ['bulk-one', 'bulk-two']) {
+          await tester.tap(find.byKey(ValueKey('history-clip-$id')));
+          await _pumpHoverActions(tester);
+        }
+        expect(find.text('2 selected'), findsOneWidget);
+        expect(controller.selectedId, isNull);
+        expect(
+          find.byKey(const ValueKey('history-detail-drawer')),
+          findsNothing,
+        );
+        expect(find.byType(Checkbox), findsNWidgets(3));
+        expect(
+          find.byKey(const ValueKey('history-pin-handle-bulk-one')),
+          findsNothing,
+        );
+        await tester.tap(find.byKey(const ValueKey('history-bulk-pin')));
+        await _pumpHoverActions(tester);
+        expect(repository.pinnedUpdates, [('bulk-two', true)]);
+        await tester.tap(find.byKey(const ValueKey('history-bulk-unpin')));
+        await _pumpHoverActions(tester);
+        expect(repository.pinnedUpdates, [
+          ('bulk-two', true),
+          ('bulk-one', false),
+          ('bulk-two', false),
+        ]);
+        await tester.tap(find.byKey(const ValueKey('history-bulk-delete')));
+        await _pumpHoverActions(tester);
+        expect(find.text('Delete 2 selected clips?'), findsOneWidget);
+        expect(repository.deletedIds, isEmpty);
+        await tester.tap(find.widgetWithText(Button, 'Cancel'));
+        await _pumpHoverActions(tester);
+        expect(controller.bulkSelectedIds, {'bulk-one', 'bulk-two'});
+        await tester.tap(find.byKey(const ValueKey('history-bulk-delete')));
+        await _pumpHoverActions(tester);
+        await tester.tap(find.widgetWithText(Button, 'Delete'));
+        await _pumpHoverActions(tester);
+        expect(repository.deletedIds.toSet(), {'bulk-one', 'bulk-two'});
+        expect(controller.items.single.id, 'bulk-keep');
+        expect(controller.isBulkSelecting, isFalse);
+        await tester.tap(find.byKey(const ValueKey('history-select-clips')));
+        await _pumpHoverActions(tester);
+        await tester.tap(find.byKey(const ValueKey('history-clip-bulk-keep')));
+        await _pumpHoverActions(tester);
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await _pumpHoverActions(tester);
+        expect(controller.isBulkSelecting, isFalse);
+        expect(controller.bulkSelectedIds, isEmpty);
+        await tester.pumpWidget(const SizedBox.shrink());
+        controller.dispose();
+        expect(tester.takeException(), isNull);
+      }
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
+  testWidgets(
+    'touch and mouse holds enter bulk selection with square controls at 200 percent text',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(320, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final repository = _ScreenRepository()
+        ..page = HistoryClipPage(
+          items: [
+            HistoryClip(
+              id: 'hold',
+              contentType: 'text',
+              preview: 'Hold this clip',
+              createdAt: DateTime.utc(2026),
+              pinned: true,
+            ),
+          ],
+        );
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: (context, child) => AppTheme.builder(
+            context,
+            MediaQuery(
+              data: MediaQuery.of(
+                context,
+              ).copyWith(textScaler: TextScaler.linear(2)),
+              child: child!,
+            ),
+          ),
+          home: Scaffold(child: HistoryScreen(controller: controller)),
+        ),
+      );
+      await _pumpHoverActions(tester);
+      for (final kind in [PointerDeviceKind.touch, PointerDeviceKind.mouse]) {
+        await tester.longPress(
+          find.byKey(const ValueKey('history-clip-hold')),
+          kind: kind,
+        );
+        await _pumpHoverActions(tester);
+        expect(controller.bulkSelectedIds, {'hold'});
+        expect(controller.selectedId, isNull);
+        expect(find.text('1 selected'), findsOneWidget);
+        final sizes = [
+          for (final action in ['close', 'pin', 'unpin', 'delete'])
+            tester.getSize(find.byKey(ValueKey('history-bulk-$action'))),
+        ];
+        expect(sizes.toSet(), hasLength(1));
+        expect(sizes.first.width, sizes.first.height);
+        expect(
+          find.byKey(const ValueKey('history-row-pin-hold')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const ValueKey('history-row-delete-hold')),
+          findsNothing,
+        );
+        await tester.tap(find.byKey(const ValueKey('history-bulk-close')));
+        await _pumpHoverActions(tester);
+        expect(controller.isBulkSelecting, isFalse);
+        expect(
+          find.byKey(const ValueKey('history-select-clips')),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
+      }
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
+  testWidgets(
+    'History and inspector never display a secret before spoiler reveal',
+    (tester) async {
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.binding.setSurfaceSize(const Size(1280, 800));
+      final repository = _ScreenRepository()
+        ..page = HistoryClipPage(
+          items: [
+            HistoryClip(
+              id: 'secret-fixture',
+              contentType: 'text',
+              preview: 'SYNTHETIC HISTORY SECRET',
+              body: 'SYNTHETIC HISTORY SECRET',
+              secret: true,
+              createdAt: DateTime.utc(2026),
+              pinned: false,
+            ),
+          ],
+        );
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: Scaffold(child: HistoryScreen(controller: controller)),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('SYNTHETIC HISTORY SECRET'), findsNothing);
+      await controller.select('secret-fixture');
+      await tester.pump();
+      expect(find.text('SYNTHETIC HISTORY SECRET'), findsNothing);
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('inspector-spoiler-secret-fixture')),
+          matching: find.byType(Button),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(AppMotion.spoilerReveal);
+      expect(find.text('SYNTHETIC HISTORY SECRET'), findsOneWidget);
+      controller.clearSelection();
+      await tester.pump();
+      await controller.select('secret-fixture');
+      await tester.pump();
+      expect(find.text('SYNTHETIC HISTORY SECRET'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets(
     'mobile history rows and errors clear the floating navigation',
     (tester) async {
@@ -1422,28 +1649,29 @@ void main() {
     expect(searchDecoration.borderRadius, selectDecoration.borderRadius);
   });
 
-  testWidgets('keeps the expanded search field at least 160 pixels wide', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(480, 800));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    final controller = HistoryController(_ScreenRepository());
-    addTearDown(controller.dispose);
-    await tester.pumpWidget(
-      ShadcnApp(
-        home: SizedBox(
-          width: 480,
-          height: 800,
-          child: HistoryScreen(controller: controller),
+  testWidgets(
+    'keeps the expanded search field at least 160 pixels wide beside all toolbar actions',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(528, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final controller = HistoryController(_ScreenRepository());
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        ShadcnApp(
+          home: SizedBox(
+            width: 528,
+            height: 800,
+            child: HistoryScreen(controller: controller),
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    final searchField = find.byType(TextField);
-    expect(searchField, findsOneWidget);
-    expect(tester.getSize(searchField).width, 160);
-  });
+      final searchField = find.byType(TextField);
+      expect(searchField, findsOneWidget);
+      expect(tester.getSize(searchField).width, 160);
+    },
+  );
 
   testWidgets(
     'preserves the search minimum at the labeled filter breakpoint',
@@ -1492,7 +1720,10 @@ void main() {
                   find.byKey(const ValueKey<String>('history-import-files')),
                 )
                 .width +
-            (AppSpacing.sm * 6) +
+            tester
+                .getSize(find.byKey(const ValueKey('history-select-clips')))
+                .width +
+            (AppSpacing.sm * 7) +
             (AppSpacing.lg * 2);
         for (final width in [breakpoint + 1, breakpoint, breakpoint - 1]) {
           await tester.binding.setSurfaceSize(Size(width, 800));
@@ -1970,7 +2201,8 @@ class _ScreenRepository implements HistoryRepository {
   }
 
   @override
-  Future<HistoryClip> get(String id) async => page.items.single;
+  Future<HistoryClip> get(String id) async =>
+      page.items.firstWhere((clip) => clip.id == id);
 
   @override
   Future<HistoryImagePreview?> imagePreview(
@@ -2016,7 +2248,12 @@ class _ScreenRepository implements HistoryRepository {
   }
 
   @override
-  Future<void> delete(String id) async => deletedIds.add(id);
+  Future<void> delete(String id) async {
+    deletedIds.add(id);
+    page = HistoryClipPage(
+      items: page.items.where((clip) => clip.id != id).toList(),
+    );
+  }
 
   @override
   Future<void> deleteAll() async {}
@@ -2028,6 +2265,12 @@ class _ScreenRepository implements HistoryRepository {
   Future<void> setPinned(String id, bool pinned) async {
     if (failPinUpdate) throw StateError('Pin update failed');
     pinnedUpdates.add((id, pinned));
+    page = HistoryClipPage(
+      items: [
+        for (final clip in page.items)
+          clip.id == id ? clip.copyWith(pinned: pinned) : clip,
+      ],
+    );
   }
 }
 
