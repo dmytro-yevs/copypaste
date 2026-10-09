@@ -10,6 +10,138 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
+  for (final (size, scale) in [
+    (const Size(320, 640), 1.6),
+    (const Size(640, 480), 1.0),
+  ]) {
+    for (final thisDevice in [true, false]) {
+      testWidgets(
+        'device drawer pins all actions while metadata scrolls at $size/$scale, local=$thisDevice',
+        (tester) async {
+          tester.platformDispatcher.textScaleFactorTestValue = scale;
+          addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+          final controller = DevicesController(
+            gateway: _ScreenGateway(),
+            captureProtection: _CaptureProtection(),
+          );
+          addTearDown(controller.dispose);
+          await _pumpDevices(tester, controller, size: size);
+          if (thisDevice) {
+            controller.openThisDeviceDetails();
+          } else {
+            controller.openPeerDetails('peer');
+          }
+          await tester.pumpAndSettle();
+          final actions = find.byKey(const ValueKey('device-details-actions'));
+          final body = find.byKey(
+            const ValueKey('device-details-scroll-content'),
+          );
+          final card = find.byKey(
+            const ValueKey('devices-details-drawer-card'),
+          );
+          final actionsRect = tester.getRect(actions);
+          expect(actionsRect.bottom, lessThan(tester.getRect(card).bottom));
+          expect(tester.getRect(body).bottom, lessThan(actionsRect.top));
+          for (final label
+              in thisDevice
+                  ? ['Rename device']
+                  : ['Sync now', 'Unpair', 'Revoke pairing']) {
+            expect(
+              find.widgetWithText(Button, label).hitTestable(),
+              findsOneWidget,
+            );
+          }
+          final position = tester
+              .state<ScrollableState>(
+                find
+                    .descendant(of: body, matching: find.byType(Scrollable))
+                    .first,
+              )
+              .position;
+          expect(position.maxScrollExtent, greaterThan(0));
+          await tester.drag(body, const Offset(0, -300));
+          await tester.pumpAndSettle();
+          expect(position.pixels, greaterThan(0));
+          expect(tester.getRect(actions), actionsRect);
+          expect(tester.takeException(), isNull);
+        },
+        variant: TargetPlatformVariant({
+          TargetPlatform.android,
+          TargetPlatform.macOS,
+          TargetPlatform.windows,
+        }),
+      );
+    }
+  }
+
+  for (final confirm in [false, true]) {
+    testWidgets(
+      'pairing drawer pins ${confirm ? 'confirmation' : 'join'} actions while scrolling',
+      (tester) async {
+        if (confirm) {
+          tester.platformDispatcher.textScaleFactorTestValue = 1.6;
+          addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        }
+        final gateway = _ScreenGateway();
+        if (confirm) {
+          gateway.session.ceremony = const PairingCeremony(
+            state: PairingState.awaitingConfirmation,
+          );
+        }
+        final controller = DevicesController(
+          gateway: gateway,
+          captureProtection: _CaptureProtection(),
+        );
+        addTearDown(controller.dispose);
+        await _pumpDevices(tester, controller, size: const Size(320, 480));
+        if (confirm) {
+          await tester.runAsync(
+            () => controller.joinPairingUri(
+              'copypaste://pair/v1?test=invitation',
+            ),
+          );
+        } else {
+          await controller.openCodeEntry();
+        }
+        await tester.pumpAndSettle();
+        final body = find.byKey(const ValueKey('pairing-scroll-content'));
+        final actions = confirm
+            ? find.byKey(const ValueKey('pairing-actions'))
+            : find.byKey(const ValueKey('submit-pairing-code'));
+        final actionsRect = tester.getRect(actions);
+        expect(tester.getRect(body).bottom, lessThan(actionsRect.top));
+        expect(actionsRect.bottom, lessThan(480));
+        final position = tester
+            .state<ScrollableState>(
+              find
+                  .descendant(of: body, matching: find.byType(Scrollable))
+                  .first,
+            )
+            .position;
+        expect(position.maxScrollExtent, greaterThan(0));
+        await tester.drag(body, const Offset(0, -300));
+        await tester.pumpAndSettle();
+        expect(position.pixels, greaterThan(0));
+        expect(tester.getRect(actions), actionsRect);
+        if (confirm) {
+          await tester.tap(find.widgetWithText(Button, 'Accept'));
+        } else {
+          await tester.tap(actions);
+          await tester.pumpAndSettle();
+          expect(find.text('Check pairing details'), findsOneWidget);
+        }
+        await tester.runAsync(controller.closePairing);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      },
+      variant: TargetPlatformVariant({
+        TargetPlatform.android,
+        TargetPlatform.macOS,
+        TargetPlatform.windows,
+      }),
+    );
+  }
+
   testWidgets(
     'last nearby device remains actionable above floating navigation',
     (tester) async {
