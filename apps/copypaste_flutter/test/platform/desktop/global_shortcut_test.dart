@@ -93,7 +93,10 @@ void main() {
         linuxCalls.add(call);
         return switch (call.method) {
           'isSupported' => true,
-          'register' => {'registered': true},
+          'register' => {
+            'registered': true,
+            'triggerDescription': 'Ctrl+Shift+C',
+          },
           'unregister' => true,
           _ => null,
         };
@@ -130,7 +133,10 @@ void main() {
         'id': 'copypaste.quick-paste',
         'description': 'Open Quick Paste',
         'preferredTrigger': 'CTRL+SHIFT+C',
+        'usage': PhysicalKeyboardKey.keyC.usbHidUsage,
+        'modifiers': ['control', 'shift'],
       });
+      expect(linuxRegistrar.registeredTriggerDescription, 'Ctrl+Shift+C');
 
       Future<Object?> activate(Object? arguments) async {
         final completion = Completer<Object?>();
@@ -171,6 +177,44 @@ void main() {
       await expectLater(
         linuxRegistrar.register(shortcut, () async {}),
         throwsA(isA<PlatformException>()),
+      );
+    });
+
+    test('encodes non-letter keys without whitespace or layout text', () {
+      expect(
+        const DesktopShortcut(
+          key: PhysicalKeyboardKey.arrowDown,
+          modifiers: [DesktopShortcutModifier.control],
+        ).linuxPreferredTrigger,
+        'CTRL+DOWN',
+      );
+      expect(
+        const DesktopShortcut(
+          key: PhysicalKeyboardKey.space,
+          modifiers: [DesktopShortcutModifier.alt],
+        ).linuxPreferredTrigger,
+        'ALT+SPACE',
+      );
+      expect(
+        const DesktopShortcut(
+          key: PhysicalKeyboardKey.semicolon,
+          modifiers: [DesktopShortcutModifier.shift],
+        ).linuxPreferredTrigger,
+        'SHIFT+SEMICOLON',
+      );
+      expect(
+        const DesktopShortcut(
+          key: PhysicalKeyboardKey.f6,
+          modifiers: [DesktopShortcutModifier.meta],
+        ).linuxPreferredTrigger,
+        'META+F6',
+      );
+      expect(
+        const DesktopShortcut(
+          key: PhysicalKeyboardKey.audioVolumeUp,
+          modifiers: [DesktopShortcutModifier.alt],
+        ).linuxPreferredTrigger,
+        'ALT+HID_70080',
       );
     });
   });
