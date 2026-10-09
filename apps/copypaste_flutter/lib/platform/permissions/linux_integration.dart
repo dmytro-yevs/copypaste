@@ -25,10 +25,7 @@ class LinuxIntegrationStatus {
 
   factory LinuxIntegrationStatus.fromMap(Map<String, Object?> values) {
     return LinuxIntegrationStatus(
-      session: _enumValue(
-        LinuxDesktopSession.values,
-        values['session'],
-      ),
+      session: _enumValue(LinuxDesktopSession.values, values['session']),
       globalShortcuts: _boolValue(values, 'globalShortcuts'),
       remoteDesktop: _enumValue(
         LinuxRemoteDesktopState.values,

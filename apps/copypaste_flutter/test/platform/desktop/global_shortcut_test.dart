@@ -111,52 +111,56 @@ void main() {
       messenger.setMockMethodCallHandler(linuxChannel, null);
     });
 
-    test('uses the portal contract and runs only matching activations',
-        () async {
-      var activations = 0;
-      await linuxRegistrar.register(
-        const DesktopShortcut(
-          key: PhysicalKeyboardKey.keyC,
-          modifiers: [
-            DesktopShortcutModifier.control,
-            DesktopShortcutModifier.shift,
-          ],
-        ),
-        () async => activations += 1,
-      );
-
-      expect(
-        linuxCalls.map((call) => call.method),
-        ['isSupported', 'register'],
-      );
-      expect(linuxCalls.last.arguments, {
-        'id': 'copypaste.quick-paste',
-        'description': 'Open Quick Paste',
-        'preferredTrigger': 'CTRL+SHIFT+C',
-        'usage': PhysicalKeyboardKey.keyC.usbHidUsage,
-        'modifiers': ['control', 'shift'],
-      });
-      expect(linuxRegistrar.registeredTriggerDescription, 'Ctrl+Shift+C');
-
-      Future<Object?> activate(Object? arguments) async {
-        final completion = Completer<Object?>();
-        await messenger.handlePlatformMessage(
-          linuxChannel.name,
-          const StandardMethodCodec().encodeMethodCall(
-            MethodCall('activated', arguments),
+    test(
+      'uses the portal contract and runs only matching activations',
+      () async {
+        var activations = 0;
+        await linuxRegistrar.register(
+          const DesktopShortcut(
+            key: PhysicalKeyboardKey.keyC,
+            modifiers: [
+              DesktopShortcutModifier.control,
+              DesktopShortcutModifier.shift,
+            ],
           ),
-          (reply) => completion.complete(
-            reply == null ? null : const StandardMethodCodec().decodeEnvelope(reply),
-          ),
+          () async => activations += 1,
         );
-        return completion.future;
-      }
 
-      expect(await activate({'id': 'other'}), isFalse);
-      expect(await activate({'id': 'copypaste.quick-paste'}), isTrue);
-      await Future<void>.delayed(Duration.zero);
-      expect(activations, 1);
-    });
+        expect(linuxCalls.map((call) => call.method), [
+          'isSupported',
+          'register',
+        ]);
+        expect(linuxCalls.last.arguments, {
+          'id': 'copypaste.quick-paste',
+          'description': 'Open Quick Paste',
+          'preferredTrigger': 'CTRL+SHIFT+C',
+          'usage': PhysicalKeyboardKey.keyC.usbHidUsage,
+          'modifiers': ['control', 'shift'],
+        });
+        expect(linuxRegistrar.registeredTriggerDescription, 'Ctrl+Shift+C');
+
+        Future<Object?> activate(Object? arguments) async {
+          final completion = Completer<Object?>();
+          await messenger.handlePlatformMessage(
+            linuxChannel.name,
+            const StandardMethodCodec().encodeMethodCall(
+              MethodCall('activated', arguments),
+            ),
+            (reply) => completion.complete(
+              reply == null
+                  ? null
+                  : const StandardMethodCodec().decodeEnvelope(reply),
+            ),
+          );
+          return completion.future;
+        }
+
+        expect(await activate({'id': 'other'}), isFalse);
+        expect(await activate({'id': 'copypaste.quick-paste'}), isTrue);
+        await Future<void>.delayed(Duration.zero);
+        expect(activations, 1);
+      },
+    );
 
     test('rejects unavailable and refused portal registration', () async {
       messenger.setMockMethodCallHandler(linuxChannel, (call) async {

@@ -85,51 +85,57 @@ void main() {
     },
   );
 
-  test('Linux selects an update only for its installed package format', () async {
-    const installation = LinuxAppUpdateInstallation(
-      package: LinuxAppUpdatePackage.rpm,
-      architecture: LinuxAppUpdateArchitecture.aarch64,
-    );
-    final repository = _FakeLinuxUpdateRepository(release: _release());
-    final controller = AppUpdateController(
-      repository: repository,
-      platform: _FakeUpdatePlatform(
-        target: AppUpdateTarget.linux,
-        availabilityResult: const AppUpdateAvailability.available(
-          linuxInstallation: installation,
+  test(
+    'Linux selects an update only for its installed package format',
+    () async {
+      const installation = LinuxAppUpdateInstallation(
+        package: LinuxAppUpdatePackage.rpm,
+        architecture: LinuxAppUpdateArchitecture.aarch64,
+      );
+      final repository = _FakeLinuxUpdateRepository(release: _release());
+      final controller = AppUpdateController(
+        repository: repository,
+        platform: _FakeUpdatePlatform(
+          target: AppUpdateTarget.linux,
+          availabilityResult: const AppUpdateAvailability.available(
+            linuxInstallation: installation,
+          ),
         ),
-      ),
-    );
-    addTearDown(controller.dispose);
+      );
+      addTearDown(controller.dispose);
 
-    await controller.initialize();
+      await controller.initialize();
 
-    expect(controller.phase, AppUpdatePhase.available);
-    expect(repository.requestedInstallation, installation);
-    await controller.install();
-    expect(controller.phase, AppUpdatePhase.installing);
-    expect(controller.message, 'Continue in your system package manager.');
-  });
+      expect(controller.phase, AppUpdatePhase.available);
+      expect(repository.requestedInstallation, installation);
+      await controller.install();
+      expect(controller.phase, AppUpdatePhase.installing);
+      expect(controller.message, 'Continue in your system package manager.');
+    },
+  );
 
-  test('reports Linux host verification failures without claiming installation', () async {
-    final completion = Completer<AppUpdateInstallResult>();
-    final controller = AppUpdateController(
-      repository: _FakeUpdateRepository(release: _release()),
-      platform: _FakeUpdatePlatform(installCompletion: completion),
-    );
-    addTearDown(controller.dispose);
-    await controller.initialize();
+  test(
+    'reports Linux host verification failures without claiming installation',
+    () async {
+      final completion = Completer<AppUpdateInstallResult>();
+      final controller = AppUpdateController(
+        repository: _FakeUpdateRepository(release: _release()),
+        platform: _FakeUpdatePlatform(installCompletion: completion),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
 
-    final installation = controller.install();
-    completion.completeError(PlatformException(code: 'verification_failed'));
-    await installation;
+      final installation = controller.install();
+      completion.completeError(PlatformException(code: 'verification_failed'));
+      await installation;
 
-    expect(controller.phase, AppUpdatePhase.error);
-    expect(
-      controller.message,
-      'The downloaded update failed its integrity check.',
-    );
-  });
+      expect(controller.phase, AppUpdatePhase.error);
+      expect(
+        controller.message,
+        'The downloaded update failed its integrity check.',
+      );
+    },
+  );
 
   test(
     'reuses the verified download after Android grants permission',
@@ -361,8 +367,7 @@ class _FakeUpdatePlatform implements AppUpdatePlatform {
       restoreCompletion == null ? null : await restoreCompletion!.future;
 
   @override
-  Future<AppUpdateAvailability> availability() async =>
-      availabilityResult;
+  Future<AppUpdateAvailability> availability() async => availabilityResult;
 
   @override
   Future<String> currentVersion() async => version;

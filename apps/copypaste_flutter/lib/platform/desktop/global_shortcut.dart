@@ -197,7 +197,7 @@ class LinuxPortalDesktopShortcutRegistrar implements DesktopShortcutRegistrar {
     await unregister();
     final supported = await _channel.invokeMethod<bool>('isSupported');
     if (supported != true) {
-      throw const PlatformException(code: 'shortcut_unavailable');
+      throw PlatformException(code: 'shortcut_unavailable');
     }
     final result = await _channel.invokeMapMethod<String, Object?>('register', {
       'id': _shortcutId,
@@ -222,7 +222,7 @@ class LinuxPortalDesktopShortcutRegistrar implements DesktopShortcutRegistrar {
     final id = _registeredId;
     if (id == null) return;
     if (await _channel.invokeMethod<bool>('unregister', {'id': id}) != true) {
-      throw const PlatformException(code: 'shortcut_unregistration_failed');
+      throw PlatformException(code: 'shortcut_unregistration_failed');
     }
     _registeredId = null;
     _registeredTriggerDescription = null;

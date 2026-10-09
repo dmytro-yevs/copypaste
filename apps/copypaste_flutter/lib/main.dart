@@ -59,7 +59,11 @@ import 'platform/permissions/linux_integration.dart';
 import 'platform/update/app_update_platform.dart';
 import 'shared/state_view.dart';
 
-Future<void> main() async {
+Future<void> main([List<String> arguments = const []]) async {
+  if (Platform.isLinux && arguments.contains('--copypaste-quick-paste')) {
+    await quickPasteMain();
+    return;
+  }
   WidgetsFlutterBinding.ensureInitialized();
   AppMotion.configureLibrary();
   await RustLib.init();

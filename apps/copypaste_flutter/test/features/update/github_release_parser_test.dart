@@ -102,37 +102,40 @@ void main() {
 
   for (final package in LinuxAppUpdatePackage.values) {
     for (final architecture in LinuxAppUpdateArchitecture.values) {
-      test('Linux ${package.name} ${architecture.name} requires its signed artifact', () {
-        final installation = LinuxAppUpdateInstallation(
-          package: package,
-          architecture: architecture,
-        );
-        final raw = _linuxRelease('1.0.1', installation);
-        final release = parser.latestFor(
-          jsonEncode([raw]),
-          currentVersion: Version.parse('1.0.0'),
-          target: AppUpdateTarget.linux,
-          linuxInstallation: installation,
-        );
-        final extension = package == LinuxAppUpdatePackage.appImage
-            ? 'AppImage'
-            : package.name;
-        final name = 'CopyPaste-v1.0.1-linux-${architecture.name}.$extension';
-        expect(release?.asset?.name, name);
-        expect(release?.asset?.signatureUri.path, endsWith('/$name.sig'));
-
-        final assets = raw['assets']! as List<Map<String, Object?>>;
-        assets.removeWhere((asset) => asset['name'] == '$name.sig');
-        expect(
-          parser.latestFor(
+      test(
+        'Linux ${package.name} ${architecture.name} requires its signed artifact',
+        () {
+          final installation = LinuxAppUpdateInstallation(
+            package: package,
+            architecture: architecture,
+          );
+          final raw = _linuxRelease('1.0.1', installation);
+          final release = parser.latestFor(
             jsonEncode([raw]),
             currentVersion: Version.parse('1.0.0'),
             target: AppUpdateTarget.linux,
             linuxInstallation: installation,
-          ),
-          isNull,
-        );
-      });
+          );
+          final extension = package == LinuxAppUpdatePackage.appImage
+              ? 'AppImage'
+              : package.name;
+          final name = 'CopyPaste-v1.0.1-linux-${architecture.name}.$extension';
+          expect(release?.asset?.name, name);
+          expect(release?.asset?.signatureUri.path, endsWith('/$name.sig'));
+
+          final assets = raw['assets']! as List<Map<String, Object?>>;
+          assets.removeWhere((asset) => asset['name'] == '$name.sig');
+          expect(
+            parser.latestFor(
+              jsonEncode([raw]),
+              currentVersion: Version.parse('1.0.0'),
+              target: AppUpdateTarget.linux,
+              linuxInstallation: installation,
+            ),
+            isNull,
+          );
+        },
+      );
     }
   }
 
@@ -283,7 +286,8 @@ Map<String, Object?> _linuxRelease(
   final extension = installation.package == LinuxAppUpdatePackage.appImage
       ? 'AppImage'
       : installation.package.name;
-  final name = 'CopyPaste-v$version-linux-${installation.architecture.name}.$extension';
+  final name =
+      'CopyPaste-v$version-linux-${installation.architecture.name}.$extension';
   return {
     'tag_name': 'v$version',
     'html_url':
@@ -297,8 +301,7 @@ Map<String, Object?> _linuxRelease(
           'name': assetName,
           'browser_download_url':
               'https://github.com/dmytro-yevs/copypaste/releases/download/v$version/$assetName',
-          'digest':
-              'sha256:${assetName == name ? 'a' * 64 : 'b' * 64}',
+          'digest': 'sha256:${assetName == name ? 'a' * 64 : 'b' * 64}',
           'size': assetName == name ? 1024 : 512,
         },
     ],
