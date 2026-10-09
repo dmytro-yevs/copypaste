@@ -4,6 +4,7 @@
 //! that ID into the existing bounded [`AppIcon`](super::AppIcon) representation
 //! without executing a desktop-entry `Exec` value or invoking a shell tool.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use super::{normalize_png, valid_package_id, AppIcon};
@@ -23,11 +24,9 @@ fn resolve_from_roots(app_id: &str, roots: &[PathBuf]) -> Option<AppIcon> {
     if !valid_package_id(app_id) {
         return None;
     }
-    let desktop = roots
-        .iter()
-        .map(|root| root.join("applications").join(format!("{app_id}.desktop")))
-        .find(|path| is_small_regular_file(path))?;
-    let icon = desktop_icon(&desktop)?;
+    let icon = roots.iter().find_map(|root| {
+        desktop_icon(&root.join("applications").join(format!("{app_id}.desktop")))
+    })?;
 
     if Path::new(&icon).is_absolute() {
         return read_png(Path::new(&icon));
@@ -78,14 +77,8 @@ fn data_roots() -> Vec<PathBuf> {
     roots
 }
 
-fn is_small_regular_file(path: &Path) -> bool {
-    path.metadata()
-        .ok()
-        .is_some_and(|metadata| metadata.is_file() && metadata.len() <= MAX_DESKTOP_ENTRY_BYTES)
-}
-
 fn desktop_icon(path: &Path) -> Option<String> {
-    let entry = std::fs::read_to_string(path).ok()?;
+    let entry = String::from_utf8(read_bounded(path, MAX_DESKTOP_ENTRY_BYTES)?).ok()?;
     let mut in_desktop_entry = false;
     for raw_line in entry.lines() {
         let line = raw_line.trim();
@@ -117,14 +110,23 @@ fn valid_icon_name(value: &str) -> bool {
 }
 
 fn read_png(path: &Path) -> Option<AppIcon> {
-    let metadata = path.metadata().ok()?;
-    if !metadata.is_file()
-        || metadata.len() == 0
-        || metadata.len() > super::MAX_SOURCE_ICON_BYTES as u64
-    {
+    normalize_png(read_bounded(path, super::MAX_SOURCE_ICON_BYTES as u64)?)
+}
+
+/// Read a regular file through the same descriptor that supplied its metadata.
+/// The final `take` check is still required because a mutable or virtual file
+/// can change after `metadata` has reported a smaller size.
+fn read_bounded(path: &Path, cap: u64) -> Option<Vec<u8>> {
+    let file = std::fs::File::open(path).ok()?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > cap {
         return None;
     }
-    normalize_png(std::fs::read(path).ok()?)
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(cap.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (bytes.len() as u64 <= cap).then_some(bytes)
 }
 
 #[cfg(test)]
