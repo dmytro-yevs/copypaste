@@ -16,6 +16,8 @@ import 'package:copypaste_flutter/shared/state_view.dart';
 import 'package:copypaste_flutter/shared/system_date_time.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../presentation/secret_spoiler.dart';
+
 import '../presentation/history_color_swatch.dart';
 import 'history_delete_dialog.dart';
 import 'history_ocr_dialog.dart';
@@ -28,6 +30,7 @@ class HistoryInspector extends StatelessWidget {
     this.onClose,
     this.showActions = true,
     this.compact = false,
+    this.presentationRevision = 0,
   });
 
   final HistoryController controller;
@@ -35,6 +38,7 @@ class HistoryInspector extends StatelessWidget {
   final VoidCallback? onClose;
   final bool showActions;
   final bool compact;
+  final int presentationRevision;
 
   @override
   Widget build(BuildContext context) {
@@ -112,7 +116,7 @@ class HistoryInspector extends StatelessWidget {
                   const Gap(AppSpacing.sm),
                   SecondaryBadge(child: Text(highlighted.language)),
                 ],
-                if (!inDrawer) ...[
+                if (!inDrawer && !clip.secret) ...[
                   const Gap(AppSpacing.sm),
                   Tooltip(
                     showDuration: AppMotion.resolve(
@@ -144,13 +148,26 @@ class HistoryInspector extends StatelessWidget {
           Gap(inDrawer ? AppSpacing.sm : AppSpacing.lg),
           Flexible(
             fit: inDrawer || compact ? FlexFit.tight : FlexFit.loose,
-            child: _HistoryDetailContent(
-              clip: clip,
-              controller: controller,
-              body: body,
-              highlighted: highlighted,
-              desktop: !inDrawer,
-            ),
+            child: clip.secret
+                ? SecretSpoiler(
+                    key: ValueKey(
+                      'inspector-spoiler-${clip.id}-$presentationRevision',
+                    ),
+                    reveal: (_) => _HistoryDetailContent(
+                      clip: clip,
+                      controller: controller,
+                      body: body,
+                      highlighted: highlighted,
+                      desktop: false,
+                    ),
+                  )
+                : _HistoryDetailContent(
+                    clip: clip,
+                    controller: controller,
+                    body: body,
+                    highlighted: highlighted,
+                    desktop: !inDrawer,
+                  ),
           ),
           if (showActions) const Gap(AppSpacing.lg),
           if (showActions)
@@ -539,6 +556,7 @@ class _HistoryDetailContent extends StatelessWidget {
                   child: _HistoryMetadataTable(
                     clip: clip,
                     controller: controller,
+                    revealConfidential: true,
                   ),
                 ),
               ),
@@ -555,7 +573,11 @@ class _HistoryDetailContent extends StatelessWidget {
           children: [
             _body(context),
             const Gap(AppSpacing.lg),
-            _HistoryMetadataTable(clip: clip, controller: controller),
+            _HistoryMetadataTable(
+              clip: clip,
+              controller: controller,
+              revealConfidential: true,
+            ),
           ],
         ),
       );
@@ -623,17 +645,23 @@ class _HistoryMetadataTable extends StatelessWidget {
   const _HistoryMetadataTable({
     required this.clip,
     required this.controller,
+    this.revealConfidential = false,
     this.compact = false,
   });
 
   final HistoryClip clip;
   final HistoryController controller;
   final bool compact;
+  final bool revealConfidential;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final rows = _historyMetadataRows(context, clip);
+    final rows = _historyMetadataRows(
+      context,
+      clip,
+      revealConfidential: revealConfidential,
+    );
     final textStyle = AppTheme.inspectorTextStyle(context, compact: compact);
     return InspectorTable(
       tableKey: const ValueKey<String>('history-detail-metadata'),
@@ -691,8 +719,12 @@ Widget _historyMetadataIdentityLabel({
 
 List<_HistoryMetadataRow> _historyMetadataRows(
   BuildContext context,
-  HistoryClip clip,
-) {
+  HistoryClip clip, {
+  bool revealConfidential = false,
+}) {
+  if (clip.secret && !revealConfidential) {
+    return [(label: 'Privacy', value: 'Confidential', warning: false)];
+  }
   final type = clip.file?.mimeType ?? clip.contentType;
   final sizeBytes = clip.image?.sizeBytes ?? clip.file?.sizeBytes;
   return [

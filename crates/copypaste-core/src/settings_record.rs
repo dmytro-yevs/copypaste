@@ -28,6 +28,14 @@ fn fail_closed(field: &str) -> ConfigPatch {
             private_mode: Some(true),
             ..Default::default()
         },
+        "skip_secret" => ConfigPatch {
+            skip_secret: Some(true),
+            ..Default::default()
+        },
+        "skip_transient" => ConfigPatch {
+            skip_transient: Some(true),
+            ..Default::default()
+        },
         "sync_enabled" => ConfigPatch {
             sync_enabled: Some(false),
             ..Default::default()

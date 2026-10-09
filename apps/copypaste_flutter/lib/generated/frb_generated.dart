@@ -2221,25 +2221,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Clip dco_decode_clip(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 16)
-      throw Exception('unexpected arr length: expect 16 but see ${arr.length}');
+    if (arr.length != 18)
+      throw Exception('unexpected arr length: expect 18 but see ${arr.length}');
     return Clip(
-      id: dco_decode_String(arr[0]),
-      content: dco_decode_String(arr[1]),
-      contentType: dco_decode_String(arr[2]),
-      contentClass: dco_decode_clip_content_class(arr[3]),
-      semanticKind: dco_decode_opt_box_autoadd_clip_semantic_kind(arr[4]),
-      colorRgba: dco_decode_opt_box_autoadd_u_32(arr[5]),
-      createdAtMs: dco_decode_i_64(arr[6]),
-      pinned: dco_decode_bool(arr[7]),
-      originDeviceName: dco_decode_opt_String(arr[8]),
-      originDeviceClass: dco_decode_device_class(arr[9]),
-      sourceAppName: dco_decode_opt_String(arr[10]),
-      sourceAppIconId: dco_decode_opt_String(arr[11]),
-      truncated: dco_decode_bool(arr[12]),
-      tooLargeToSync: dco_decode_bool(arr[13]),
-      fileDetails: dco_decode_opt_box_autoadd_clip_file_details(arr[14]),
-      imageDetails: dco_decode_opt_box_autoadd_clip_image_details(arr[15]),
+      secret: dco_decode_bool(arr[0]),
+      transient: dco_decode_bool(arr[1]),
+      id: dco_decode_String(arr[2]),
+      content: dco_decode_String(arr[3]),
+      contentType: dco_decode_String(arr[4]),
+      contentClass: dco_decode_clip_content_class(arr[5]),
+      semanticKind: dco_decode_opt_box_autoadd_clip_semantic_kind(arr[6]),
+      colorRgba: dco_decode_opt_box_autoadd_u_32(arr[7]),
+      createdAtMs: dco_decode_i_64(arr[8]),
+      pinned: dco_decode_bool(arr[9]),
+      originDeviceName: dco_decode_opt_String(arr[10]),
+      originDeviceClass: dco_decode_device_class(arr[11]),
+      sourceAppName: dco_decode_opt_String(arr[12]),
+      sourceAppIconId: dco_decode_opt_String(arr[13]),
+      truncated: dco_decode_bool(arr[14]),
+      tooLargeToSync: dco_decode_bool(arr[15]),
+      fileDetails: dco_decode_opt_box_autoadd_clip_file_details(arr[16]),
+      imageDetails: dco_decode_opt_box_autoadd_clip_image_details(arr[17]),
     );
   }
 
@@ -2835,18 +2837,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   RuntimeSettingsData dco_decode_runtime_settings_data(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 9)
-      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
     return RuntimeSettingsData(
-      retentionDays: dco_decode_u_32(arr[0]),
-      storageQuotaBytes: dco_decode_u_64(arr[1]),
-      excludedAppIds: dco_decode_list_String(arr[2]),
-      lanVisibility: dco_decode_bool(arr[3]),
-      syncEnabled: dco_decode_bool(arr[4]),
-      instantClipboard: dco_decode_bool(arr[5]),
-      notifyOnCopy: dco_decode_bool(arr[6]),
-      notificationPreview: dco_decode_bool(arr[7]),
-      soundOnCopy: dco_decode_bool(arr[8]),
+      skipSecret: dco_decode_bool(arr[0]),
+      skipTransient: dco_decode_bool(arr[1]),
+      retentionDays: dco_decode_u_32(arr[2]),
+      storageQuotaBytes: dco_decode_u_64(arr[3]),
+      excludedAppIds: dco_decode_list_String(arr[4]),
+      lanVisibility: dco_decode_bool(arr[5]),
+      syncEnabled: dco_decode_bool(arr[6]),
+      instantClipboard: dco_decode_bool(arr[7]),
+      notifyOnCopy: dco_decode_bool(arr[8]),
+      notificationPreview: dco_decode_bool(arr[9]),
+      soundOnCopy: dco_decode_bool(arr[10]),
     );
   }
 
@@ -2854,18 +2858,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   RuntimeSettingsPatch dco_decode_runtime_settings_patch(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 9)
-      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
     return RuntimeSettingsPatch(
-      retentionDays: dco_decode_opt_box_autoadd_u_32(arr[0]),
-      storageQuotaBytes: dco_decode_opt_box_autoadd_u_64(arr[1]),
-      excludedAppIds: dco_decode_opt_list_String(arr[2]),
-      lanVisibility: dco_decode_opt_box_autoadd_bool(arr[3]),
-      syncEnabled: dco_decode_opt_box_autoadd_bool(arr[4]),
-      instantClipboard: dco_decode_opt_box_autoadd_bool(arr[5]),
-      notifyOnCopy: dco_decode_opt_box_autoadd_bool(arr[6]),
-      notificationPreview: dco_decode_opt_box_autoadd_bool(arr[7]),
-      soundOnCopy: dco_decode_opt_box_autoadd_bool(arr[8]),
+      skipSecret: dco_decode_opt_box_autoadd_bool(arr[0]),
+      skipTransient: dco_decode_opt_box_autoadd_bool(arr[1]),
+      retentionDays: dco_decode_opt_box_autoadd_u_32(arr[2]),
+      storageQuotaBytes: dco_decode_opt_box_autoadd_u_64(arr[3]),
+      excludedAppIds: dco_decode_opt_list_String(arr[4]),
+      lanVisibility: dco_decode_opt_box_autoadd_bool(arr[5]),
+      syncEnabled: dco_decode_opt_box_autoadd_bool(arr[6]),
+      instantClipboard: dco_decode_opt_box_autoadd_bool(arr[7]),
+      notifyOnCopy: dco_decode_opt_box_autoadd_bool(arr[8]),
+      notificationPreview: dco_decode_opt_box_autoadd_bool(arr[9]),
+      soundOnCopy: dco_decode_opt_box_autoadd_bool(arr[10]),
     );
   }
 
@@ -3135,6 +3141,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   Clip sse_decode_clip(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_secret = sse_decode_bool(deserializer);
+    var var_transient = sse_decode_bool(deserializer);
     var var_id = sse_decode_String(deserializer);
     var var_content = sse_decode_String(deserializer);
     var var_contentType = sse_decode_String(deserializer);
@@ -3158,6 +3166,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       deserializer,
     );
     return Clip(
+      secret: var_secret,
+      transient: var_transient,
       id: var_id,
       content: var_content,
       contentType: var_contentType,
@@ -4001,6 +4011,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_skipSecret = sse_decode_bool(deserializer);
+    var var_skipTransient = sse_decode_bool(deserializer);
     var var_retentionDays = sse_decode_u_32(deserializer);
     var var_storageQuotaBytes = sse_decode_u_64(deserializer);
     var var_excludedAppIds = sse_decode_list_String(deserializer);
@@ -4011,6 +4023,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_notificationPreview = sse_decode_bool(deserializer);
     var var_soundOnCopy = sse_decode_bool(deserializer);
     return RuntimeSettingsData(
+      skipSecret: var_skipSecret,
+      skipTransient: var_skipTransient,
       retentionDays: var_retentionDays,
       storageQuotaBytes: var_storageQuotaBytes,
       excludedAppIds: var_excludedAppIds,
@@ -4028,6 +4042,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_skipSecret = sse_decode_opt_box_autoadd_bool(deserializer);
+    var var_skipTransient = sse_decode_opt_box_autoadd_bool(deserializer);
     var var_retentionDays = sse_decode_opt_box_autoadd_u_32(deserializer);
     var var_storageQuotaBytes = sse_decode_opt_box_autoadd_u_64(deserializer);
     var var_excludedAppIds = sse_decode_opt_list_String(deserializer);
@@ -4038,6 +4054,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_notificationPreview = sse_decode_opt_box_autoadd_bool(deserializer);
     var var_soundOnCopy = sse_decode_opt_box_autoadd_bool(deserializer);
     return RuntimeSettingsPatch(
+      skipSecret: var_skipSecret,
+      skipTransient: var_skipTransient,
       retentionDays: var_retentionDays,
       storageQuotaBytes: var_storageQuotaBytes,
       excludedAppIds: var_excludedAppIds,
@@ -4346,6 +4364,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_clip(Clip self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.secret, serializer);
+    sse_encode_bool(self.transient, serializer);
     sse_encode_String(self.id, serializer);
     sse_encode_String(self.content, serializer);
     sse_encode_String(self.contentType, serializer);
@@ -5055,6 +5075,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.skipSecret, serializer);
+    sse_encode_bool(self.skipTransient, serializer);
     sse_encode_u_32(self.retentionDays, serializer);
     sse_encode_u_64(self.storageQuotaBytes, serializer);
     sse_encode_list_String(self.excludedAppIds, serializer);
@@ -5072,6 +5094,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_box_autoadd_bool(self.skipSecret, serializer);
+    sse_encode_opt_box_autoadd_bool(self.skipTransient, serializer);
     sse_encode_opt_box_autoadd_u_32(self.retentionDays, serializer);
     sse_encode_opt_box_autoadd_u_64(self.storageQuotaBytes, serializer);
     sse_encode_opt_list_String(self.excludedAppIds, serializer);

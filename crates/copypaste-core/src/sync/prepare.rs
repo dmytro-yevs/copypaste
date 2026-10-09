@@ -195,7 +195,11 @@ pub(super) fn prepare_remote_version(
         pinned,
         pin_order,
         pin_updated_at,
-        search_text: if incoming.deleted
+        search_text: if incoming
+            .payload_metadata
+            .and_then(|json| crate::PayloadMetadata::from_json(json, incoming.content_type))
+            .is_some_and(|metadata| metadata.privacy.secret)
+            || incoming.deleted
             || copypaste_ipc::content_type::is_binary(incoming.content_type)
         {
             None
