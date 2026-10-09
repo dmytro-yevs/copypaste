@@ -10,9 +10,10 @@ Windows ships, on the same footing as macOS and Android. Dependencies must
 work on all three or sit behind a platform cfg with **every** other side
 implemented.
 
-**Linux desktop is still not a shipped target.** The retired WebKit test host
-does not define a Flutter shipping platform. Windows becoming shippable does not
-promote Linux.
+The original decision did not promote Linux to a shipping target. Linux's
+separate platform and qualification contract is now defined in
+[ADR-0035](0035-linux-platform-and-release-contract.md). The retired WebKit test
+host does not qualify the current Flutter product.
 
 ## Consequences
 

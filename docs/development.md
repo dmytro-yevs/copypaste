@@ -1,14 +1,14 @@
 # Development
 
 The repository contains the Rust runtime and a shared Flutter product for
-macOS, Android, and Windows. History, devices, settings, onboarding, native
+macOS, Android, Windows, and Linux. History, devices, settings, onboarding, native
 capture, Quick Paste, and application updates use typed platform boundaries.
 
 Run retained backend checks with cargo test --workspace --locked and
 ./supabase/dev/verify-schema.sh.
 
 For the development gate, set
-COPYPASTE_FLUTTER_BUILD_TARGET to macos, apk, or windows and run
+COPYPASTE_FLUTTER_BUILD_TARGET to macos, apk, windows, or linux and run
 scripts/ci/verify-flutter-foundation.sh. It verifies the Flutter SDK and pinned
 shadcn_flutter dependency, resolves dependencies, checks formatting and
 analysis, runs widget and controller tests, and creates a debug build for the
@@ -20,7 +20,7 @@ run qualifies signed Release artifacts without publishing. See
 `docs/release-qualification.md` for the exact-artifact and Keychain rules.
 
 To run a desktop development build, enter `apps/copypaste_flutter` and run
-`flutter run -d macos` or `flutter run -d windows` on the corresponding host.
+`flutter run -d macos`, `flutter run -d windows`, or `flutter run -d linux` on the corresponding host.
 Press `r` for hot reload or `R` for hot restart. Native code and dependency changes
 require stopping and rebuilding the application. Android development uses
 `flutter run -d <device-id>` with an explicitly selected device or emulator.

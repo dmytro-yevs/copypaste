@@ -211,6 +211,70 @@ void main() {
     );
   }
 
+  testWidgets(
+    'Linux explains unavailable screenshot protection and disables its control',
+    (tester) async {
+      final protection = _Protection()..supported = false;
+      final settings = controller(protection);
+      addTearDown(settings.dispose);
+      await settings.initialize();
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: Scaffold(child: SettingsScreen(controller: settings)),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey<String>('settings-section-privacy')),
+          matching: find.text('Privacy'),
+        ),
+      );
+      await tester.pump();
+      final control = tester.widget<Switch>(
+        find.byKey(const ValueKey('block-screenshots-switch')),
+      );
+      expect(control.enabled, isFalse);
+      expect(control.onChanged, isNull);
+      expect(control.value, isFalse);
+      expect(
+        find.text('Screenshot blocking is unavailable on this platform.'),
+        findsOneWidget,
+      );
+      expect(await settings.setBlockScreenshots(true), isFalse);
+      expect(protection.value, isFalse);
+      expect(settings.settings!.skipSecret, isTrue);
+      expect(settings.settings!.skipTransient, isTrue);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.linux),
+  );
+
+  testWidgets(
+    'Linux refuses screenshot blocking without invoking a native policy',
+    (tester) async {
+      const channel = MethodChannel('test/linux-security');
+      var calls = 0;
+      final messenger = tester.binding.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (_) async {
+        calls++;
+        return true;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      final port = MethodChannelScreenshotProtection(channel: channel);
+      expect(port.supported, isFalse);
+      expect(await port.blocked(), isFalse);
+      await expectLater(
+        port.setBlocked(true),
+        throwsA(isA<PlatformException>()),
+      );
+      expect(calls, 0);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.linux),
+  );
+
   test('the channel sends the policy and rejects native failure', () async {
     const channel = MethodChannel('test/security');
     final messenger =
@@ -236,6 +300,8 @@ void main() {
 }
 
 class _Protection implements ScreenshotProtection {
+  @override
+  bool supported = true;
   bool value = false;
   bool fail = false;
   @override

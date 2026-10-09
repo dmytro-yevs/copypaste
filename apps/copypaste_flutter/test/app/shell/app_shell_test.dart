@@ -89,6 +89,7 @@ void main() {
       TargetPlatform.android,
       TargetPlatform.macOS,
       TargetPlatform.windows,
+      TargetPlatform.linux,
     }),
   );
 
@@ -429,6 +430,7 @@ void main() {
         TargetPlatform.android,
         TargetPlatform.macOS,
         TargetPlatform.windows,
+        TargetPlatform.linux,
       }),
     );
   }
@@ -486,6 +488,7 @@ void main() {
       TargetPlatform.android,
       TargetPlatform.macOS,
       TargetPlatform.windows,
+      TargetPlatform.linux,
     }),
   );
 

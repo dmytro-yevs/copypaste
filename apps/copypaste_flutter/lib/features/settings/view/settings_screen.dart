@@ -15,6 +15,7 @@ import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_toast.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../platform/desktop/global_shortcut.dart';
+import '../../../platform/permissions/linux_integration.dart';
 import '../../../shared/adaptive_breakpoints.dart';
 import '../../../shared/state_view.dart';
 import '../controller/quick_paste_settings_controller.dart';
@@ -45,6 +46,10 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  String get _screenshotProtectionDescription =>
+      widget.controller.blockScreenshotsSupported
+      ? 'Prevent screenshots and screen recording of CopyPaste.'
+      : 'Screenshot blocking is unavailable on this platform.';
   static const _retentionOptions = <int>[0, 7, 30, 90, 365];
   static const _quotaOptions = <int>[
     1024 * 1024 * 1024,
@@ -595,7 +600,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         id: _SettingsTargetId.blockScreenshots,
         section: SettingsSectionId.privacy,
         label: 'Block screenshots',
-        description: 'Prevent screenshots and screen recording of CopyPaste.',
+        description: _screenshotProtectionDescription,
         keywords: 'privacy screen capture protection pairing qr security code',
         targetKey: _blockScreenshotsKey,
       ),
@@ -962,9 +967,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             'Skip automatic capture from identified clipboard owners in this list.',
                           TargetPlatform.android =>
                             'Android skips automatic capture while exclusions are set because it cannot identify source apps.',
-                          TargetPlatform.iOS ||
-                          TargetPlatform.linux ||
-                          TargetPlatform.fuchsia =>
+                          TargetPlatform.linux =>
+                            'Skip automatic capture from identified clipboard owners. Capture is paused when exclusions are set and the source cannot be identified.',
+                          TargetPlatform.iOS || TargetPlatform.fuchsia =>
                             'Application exclusions are supported on macOS, Windows, and Android.',
                         }).muted().textSmall(),
                       ],
@@ -1059,12 +1064,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
           key: _blockScreenshotsKey,
           highlighted: _isHighlighted(_SettingsTargetId.blockScreenshots),
           title: 'Block screenshots',
-          description: 'Prevent screenshots and screen recording of CopyPaste.',
+          description: _screenshotProtectionDescription,
           trailing: Switch(
             key: const ValueKey('block-screenshots-switch'),
             value: widget.controller.blockScreenshots,
-            enabled: !widget.controller.busy,
-            onChanged: widget.controller.busy
+            enabled:
+                !widget.controller.busy &&
+                widget.controller.blockScreenshotsSupported,
+            onChanged:
+                widget.controller.busy ||
+                    !widget.controller.blockScreenshotsSupported
                 ? null
                 : widget.controller.setBlockScreenshots,
           ),
@@ -1524,6 +1533,53 @@ class _QuickPasteSection extends StatelessWidget {
           description:
               'Open clipboard history from anywhere without switching windows.',
           children: [
+            if (controller.linuxIntegration case final integration?)
+              if (integration.session == LinuxDesktopSession.wayland &&
+                  !integration.quickPaste)
+                Alert(
+                  leading: const Icon(LucideIcons.keyboard),
+                  title: const Text('Set up Quick Paste'),
+                  content: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Enable the GNOME or KDE integration and allow keyboard control to paste into the previous app.',
+                      ),
+                      const Gap(AppSpacing.sm),
+                      Wrap(
+                        spacing: AppSpacing.sm,
+                        runSpacing: AppSpacing.sm,
+                        children: [
+                          if (integration.companion !=
+                              LinuxCompanionState.active)
+                            Button.secondary(
+                              key: const ValueKey('linux-companion-setup'),
+                              onPressed: controller.busy
+                                  ? null
+                                  : controller.openLinuxCompanionSetup,
+                              child: const Text('Desktop integration'),
+                            ),
+                          if (integration.remoteDesktop ==
+                              LinuxRemoteDesktopState.consentRequired)
+                            Button.secondary(
+                              key: const ValueKey('linux-keyboard-permission'),
+                              onPressed: controller.busy
+                                  ? null
+                                  : controller.requestLinuxRemoteDesktop,
+                              child: const Text('Allow keyboard control'),
+                            ),
+                          Button.ghost(
+                            key: const ValueKey('linux-integration-refresh'),
+                            onPressed: controller.busy
+                                ? null
+                                : controller.refreshLinuxIntegration,
+                            child: const Text('Check again'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
             if (!controller.initialized && controller.busy)
               const StateView.loading(message: 'Loading Quick Paste settings.')
             else if (!controller.supported)

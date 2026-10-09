@@ -8,6 +8,8 @@ import 'package:copypaste_flutter/platform/notifications/capture_notification_pr
 import 'package:copypaste_flutter/platform/security/screenshot_protection.dart';
 
 class FakeScreenshotProtection implements ScreenshotProtection {
+  @override
+  bool get supported => true;
   bool value = false;
   @override
   Future<bool> blocked() async => value;
