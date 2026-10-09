@@ -152,6 +152,10 @@ void main() {
           find.widgetWithText(Button, 'Set up SMS access'),
         );
         await tester.pumpAndSettle();
+        expect(
+          find.widgetWithText(Button, 'Set up SMS access').hitTestable(),
+          findsOneWidget,
+        );
         await tester.tap(find.widgetWithText(Button, 'Set up SMS access'));
         await tester.pumpAndSettle();
         final drawer = find.byKey(const ValueKey('sms-access-setup-drawer'));

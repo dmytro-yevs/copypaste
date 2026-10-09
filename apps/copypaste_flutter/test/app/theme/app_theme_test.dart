@@ -109,6 +109,75 @@ void main() {
     }),
   );
 
+  testWidgets(
+    'icon button variants stay square at enlarged text sizes',
+    (tester) async {
+      for (final scale in [1.0, 2.0]) {
+        final styles = <AbstractButtonStyle>[
+          for (final style in const [
+            ButtonStyle.primaryIcon(),
+            ButtonStyle.secondaryIcon(),
+            ButtonStyle.outlineIcon(),
+            ButtonStyle.ghostIcon(),
+            ButtonStyle.destructiveIcon(),
+          ])
+            AppTheme.controlButtonStyle(style),
+          const ButtonStyle.secondaryIcon(density: ButtonDensity.iconDense),
+          const ButtonStyle.destructiveIcon(density: ButtonDensity.iconDense),
+          AppTheme.navigationIconButtonStyle,
+          AppTheme.historyToolbarIconStyle,
+          AppTheme.historyToolbarDestructiveIconStyle,
+          AppTheme.inputFeatureButtonStyle,
+          AppTheme.historyDragHandleStyle(dragging: false, touch: true),
+          AppTheme.historyDragHandleStyle(dragging: false, touch: false),
+        ];
+        await tester.pumpWidget(
+          ShadcnApp(
+            theme: AppTheme.light,
+            builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(
+                context,
+              ).copyWith(textScaler: TextScaler.linear(scale)),
+              child: Builder(
+                builder: (context) => AppTheme.builder(context, child),
+              ),
+            ),
+            home: Scaffold(
+              child: Wrap(
+                children: [
+                  for (var index = 0; index < styles.length; index++)
+                    Button(
+                      key: ValueKey('square-icon-$index'),
+                      style: styles[index],
+                      onPressed: () {},
+                      child: const Icon(LucideIcons.plus),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        for (var index = 0; index < styles.length; index++) {
+          final size = tester.getSize(
+            find.byKey(ValueKey('square-icon-$index')),
+          );
+          expect(
+            size.width,
+            closeTo(size.height, 0.01),
+            reason: 'Icon style $index must stay square at text scale $scale',
+          );
+        }
+        expect(tester.takeException(), isNull);
+      }
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
   test('uses one system light and dark shadcn theme', () {
     expect(AppTheme.mode, ThemeMode.system);
     expect(AppTheme.light.colorScheme.brightness, Brightness.light);

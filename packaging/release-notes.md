@@ -2,6 +2,8 @@ Improve Android background capture and shared controls.
 
 - Show one silent persistent CopyPaste notification for clipboard capture, screenshots, and SMS Codes.
 - Simplify Android screenshot permissions and improve source application attribution.
+- Keep icon-only controls square across platforms and text sizes, with responsive wrapping in narrow History inspectors.
+- Keep module setup actions accessible on small screens with enlarged text.
 - Align shared control sizing and verify device and screenshot settings behavior.
 
 Optional modules remain available from Settings. OCR engines and models are not bundled with the application.

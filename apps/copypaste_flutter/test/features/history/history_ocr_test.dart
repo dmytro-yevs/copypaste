@@ -320,11 +320,13 @@ void main() {
       expect(find.widgetWithText(Button, 'Copy'), findsOneWidget);
       expect(find.widgetWithText(Button, 'Pin'), findsOneWidget);
       expect(find.widgetWithText(Button, 'Delete'), findsOneWidget);
-      await render(220, 1);
+      await render(250, 1);
       final first = tester.getRect(find.byKey(ValueKey<String>(keys.first)));
       for (final key in keys) {
         final finder = find.byKey(ValueKey<String>(key));
         expect(tester.widget<Button>(finder).child, isA<Icon>());
+        final size = tester.getSize(finder);
+        expect(size.width, closeTo(size.height, 0.01));
         expect(
           tester.getRect(finder).center.dy,
           closeTo(first.center.dy, 0.01),
@@ -342,6 +344,28 @@ void main() {
             tester.getRect(find.byKey(ValueKey<String>(keys[index - 1]))).right,
           ),
         );
+      }
+      await render(220, 1);
+      final narrowRects = [
+        for (final key in keys)
+          tester.getRect(find.byKey(ValueKey<String>(key))),
+      ];
+      final actionBounds = tester.getRect(
+        find.byKey(const ValueKey('history-detail-actions')),
+      );
+      for (var index = 0; index < keys.length; index++) {
+        final rect = narrowRects[index];
+        expect(rect.width, closeTo(rect.height, 0.01));
+        expect(rect.height, closeTo(narrowRects.first.height, 0.01));
+        expect(rect.left, greaterThanOrEqualTo(actionBounds.left));
+        expect(rect.right, lessThanOrEqualTo(actionBounds.right));
+        expect(
+          find.byKey(ValueKey<String>(keys[index])).hitTestable(),
+          findsOneWidget,
+        );
+        for (final previous in narrowRects.take(index)) {
+          expect(rect.overlaps(previous), isFalse);
+        }
       }
       await tester.tap(
         find.byKey(const ValueKey<String>('history-pin-screenshot')),

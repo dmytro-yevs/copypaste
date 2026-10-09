@@ -108,7 +108,11 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
               child: Scaffold(
                 headers: [
                   AppBar(
-                    title: Text('${module?.title ?? 'Module'} settings'),
+                    title: Text(
+                      '${module?.title ?? 'Module'} settings',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                     leading: const [Icon(LucideIcons.settings)],
                     trailing: [
                       Tooltip(
@@ -136,11 +140,40 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                   const Divider(),
                   Padding(
                     padding: const EdgeInsets.all(AppSpacing.lg),
-                    child: Button.primary(
-                      key: ValueKey('module-settings-done-$moduleId'),
-                      alignment: AppTheme.moduleSettingsActionAlignment,
-                      onPressed: () => closeDrawer(context),
-                      child: const Text('Done', textAlign: TextAlign.center),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if ((module, _draft) case (
+                          final module?,
+                          final draft?,
+                        )) ...[
+                          Button.primary(
+                            key: ValueKey('module-preferences-save-$moduleId'),
+                            alignment: AppTheme.moduleSettingsActionAlignment,
+                            onPressed:
+                                controller.busy ||
+                                    module.error != null ||
+                                    draft.busy ||
+                                    !draft.valid
+                                ? null
+                                : _savePreferences,
+                            child: const Text(
+                              'Save',
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                          const Gap(AppSpacing.md),
+                        ],
+                        Button.primary(
+                          key: ValueKey('module-settings-done-$moduleId'),
+                          alignment: AppTheme.moduleSettingsActionAlignment,
+                          onPressed: () => closeDrawer(context),
+                          child: const Text(
+                            'Done',
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -219,25 +252,6 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                                 draft: draft,
                                 enabled:
                                     !controller.busy && module.error == null,
-                              ),
-                              const Gap(AppSpacing.md),
-                              Button.primary(
-                                key: ValueKey(
-                                  'module-preferences-save-$moduleId',
-                                ),
-                                alignment:
-                                    AppTheme.moduleSettingsActionAlignment,
-                                onPressed:
-                                    controller.busy ||
-                                        module.error != null ||
-                                        draft.busy ||
-                                        !draft.valid
-                                    ? null
-                                    : _savePreferences,
-                                child: const Text(
-                                  'Save',
-                                  textAlign: TextAlign.center,
-                                ),
                               ),
                             ],
                             if (update != null) ...[

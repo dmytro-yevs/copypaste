@@ -761,32 +761,35 @@ class _DeviceDetailsInspector extends StatelessWidget {
             ],
           ),
           const Gap(AppSpacing.md),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: SecondaryBadge(child: Text(device.relationship)),
-          ),
-          if (controller.errorMessage case final errorMessage?) ...[
-            const Gap(AppSpacing.md),
-            Alert.destructive(
-              key: const ValueKey<String>('device-details-action-error'),
-              leading: const Icon(LucideIcons.circleAlert),
-              title: Text(controller.errorTitle),
-              content: Text(errorMessage),
-            ),
-          ],
-          const Gap(AppSpacing.xl),
           Expanded(
             child: SingleChildScrollView(
+              key: const ValueKey<String>('device-details-scroll-content'),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: SecondaryBadge(child: Text(device.relationship)),
+                  ),
+                  if (controller.errorMessage case final errorMessage?) ...[
+                    const Gap(AppSpacing.md),
+                    Alert.destructive(
+                      key: const ValueKey<String>(
+                        'device-details-action-error',
+                      ),
+                      leading: const Icon(LucideIcons.circleAlert),
+                      title: Text(controller.errorTitle),
+                      content: Text(errorMessage),
+                    ),
+                  ],
+                  const Gap(AppSpacing.xl),
                   _DeviceDetailsTable(rows: _detailRows(context, device)),
-                  const Gap(AppSpacing.xxl),
-                  _actions(device),
                 ],
               ),
             ),
           ),
+          const Gap(AppSpacing.xxl),
+          _actions(device),
         ],
       ),
     );
@@ -1089,6 +1092,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
           const Gap(AppSpacing.lg),
           Expanded(
             child: SingleChildScrollView(
+              key: const ValueKey<String>('pairing-scroll-content'),
               child: switch (mode) {
                 PairingEntryMode.invite => _invitationContent(),
                 PairingEntryMode.scanQr => _scannerContent(),
@@ -1100,6 +1104,10 @@ class _PairingInspectorState extends State<_PairingInspector> {
               },
             ),
           ),
+          if (_pairingActions() case final actions?) ...[
+            const Gap(AppSpacing.xl),
+            actions,
+          ],
         ],
       ),
     );
@@ -1189,21 +1197,6 @@ class _PairingInspectorState extends State<_PairingInspector> {
           const Gap(AppSpacing.md),
           _pairingError(),
         ],
-        const Gap(AppSpacing.xl),
-        Align(
-          alignment: Alignment.center,
-          child: Button.primary(
-            key: const ValueKey<String>('submit-pairing-code'),
-            onPressed: widget.controller.pairingInFlight ? null : _submitCode,
-            leading: widget.controller.pairingInFlight
-                ? const SizedBox.square(
-                    dimension: AppIconSize.sm,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(LucideIcons.link),
-            child: const Text('Join device'),
-          ),
-        ),
       ],
     );
   }
@@ -1262,16 +1255,6 @@ class _PairingInspectorState extends State<_PairingInspector> {
           const Gap(AppSpacing.md),
           _pairingError(),
         ],
-        const Gap(AppSpacing.lg),
-        Align(
-          alignment: Alignment.center,
-          child: Button.primary(
-            key: const ValueKey<String>('start-pairing-scanner'),
-            onPressed: _startScanner,
-            leading: const Icon(LucideIcons.camera),
-            child: const Text('Start scanner'),
-          ),
-        ),
       ],
     );
   }
@@ -1325,9 +1308,6 @@ class _PairingInspectorState extends State<_PairingInspector> {
   }
 
   Widget _pairingProgress(PairingCeremony ceremony) {
-    final terminal = ceremony.state.isTerminal;
-    final awaitingConfirmation =
-        ceremony.state == PairingState.awaitingConfirmation;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1417,39 +1397,80 @@ class _PairingInspectorState extends State<_PairingInspector> {
           const Gap(AppSpacing.lg),
           _pairingError(),
         ],
-        const Gap(AppSpacing.xl),
-        Wrap(
-          alignment: WrapAlignment.center,
-          spacing: AppSpacing.sm,
-          runSpacing: AppSpacing.sm,
-          children: [
-            if (awaitingConfirmation)
-              Button.destructive(
-                onPressed:
-                    widget.controller.decisionInFlight ||
-                        !widget.controller.canConfirmPairing
-                    ? null
-                    : () => widget.controller.confirmPairing(accept: false),
-                child: const Text('Reject'),
-              ),
-            if (awaitingConfirmation)
-              Button.primary(
-                onPressed:
-                    widget.controller.decisionInFlight ||
-                        !widget.controller.canConfirmPairing
-                    ? null
-                    : () => widget.controller.confirmPairing(accept: true),
-                child: const Text('Accept'),
-              ),
-            if (terminal)
-              Button.primary(
-                onPressed: widget.onClose,
-                child: const Text('Done'),
-              ),
-          ],
-        ),
       ],
     );
+  }
+
+  Widget? _pairingActions() {
+    final ceremony = widget.controller.pairing;
+    if (ceremony != null) {
+      final terminal = ceremony.state.isTerminal;
+      final awaitingConfirmation =
+          ceremony.state == PairingState.awaitingConfirmation;
+      if (!terminal && !awaitingConfirmation) return null;
+      return Wrap(
+        key: const ValueKey<String>('pairing-actions'),
+        alignment: WrapAlignment.center,
+        spacing: AppSpacing.sm,
+        runSpacing: AppSpacing.sm,
+        children: [
+          if (awaitingConfirmation)
+            Button.destructive(
+              onPressed:
+                  widget.controller.decisionInFlight ||
+                      !widget.controller.canConfirmPairing
+                  ? null
+                  : () => widget.controller.confirmPairing(accept: false),
+              child: const Text('Reject'),
+            ),
+          if (awaitingConfirmation)
+            Button.primary(
+              onPressed:
+                  widget.controller.decisionInFlight ||
+                      !widget.controller.canConfirmPairing
+                  ? null
+                  : () => widget.controller.confirmPairing(accept: true),
+              child: const Text('Accept'),
+            ),
+          if (terminal)
+            Button.primary(
+              onPressed: widget.onClose,
+              child: const Text('Done'),
+            ),
+        ],
+      );
+    }
+    switch (widget.controller.pairingEntryMode) {
+      case PairingEntryMode.enterCode:
+        return Align(
+          alignment: Alignment.center,
+          child: Button.primary(
+            key: const ValueKey<String>('submit-pairing-code'),
+            onPressed: widget.controller.pairingInFlight ? null : _submitCode,
+            leading: widget.controller.pairingInFlight
+                ? const SizedBox.square(
+                    dimension: AppIconSize.sm,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(LucideIcons.link),
+            child: const Text('Join device'),
+          ),
+        );
+      case PairingEntryMode.scanQr:
+        if (widget.controller.usesSystemScanner) return null;
+        return Align(
+          alignment: Alignment.center,
+          child: Button.primary(
+            key: const ValueKey<String>('start-pairing-scanner'),
+            onPressed: _startScanner,
+            leading: const Icon(LucideIcons.camera),
+            child: const Text('Start scanner'),
+          ),
+        );
+      case PairingEntryMode.invite:
+      case null:
+        return null;
+    }
   }
 
   Widget _pairingError() => Alert.destructive(
