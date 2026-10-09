@@ -91,8 +91,8 @@ def main():
         raise ValueError("Native package target does not match the qualification host")
     glibc_floor = linux_glibc_floor(args.package) if args.platform == "linux" else None
     prefix = []
-    runner_uid = os.getuid()
-    runner_gid = os.getgid()
+    runner_uid = os.getuid() if args.platform == "linux" else None
+    runner_gid = os.getgid() if args.platform == "linux" else None
     if args.platform == "macos":
         prefix = ["/usr/bin/sandbox-exec", "-p", "(version 1)(allow default)(deny network*)"]
     elif args.platform == "linux":
