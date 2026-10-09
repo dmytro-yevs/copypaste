@@ -17,7 +17,7 @@ import java.util.Locale
 internal interface ScreenshotCaptureReader {
     fun policyAllowsCapture(): Boolean
     fun readMetadata(action: () -> Unit): Boolean
-    fun capture(uri: Uri, type: String, takenAt: Long): Boolean
+    fun capture(uri: Uri, type: String, displayName: String): Boolean
     fun close(completion: (Boolean) -> Unit)
 }
 
@@ -34,8 +34,8 @@ internal class NativeScreenshotCaptureReader(private val context: Context) : Scr
     override fun readMetadata(action: () -> Unit): Boolean = host()?.let {
         AndroidClipboardReader.readCaptureMetadata(it, action)
     } ?: false
-    override fun capture(uri: Uri, type: String, takenAt: Long): Boolean = host()?.let {
-        AndroidClipboardReader.captureScreenshot(context, it, uri, type, takenAt)
+    override fun capture(uri: Uri, type: String, displayName: String): Boolean = host()?.let {
+        AndroidClipboardReader.captureScreenshot(context, it, uri, type, displayName)
     } ?: false
     @Synchronized override fun close(completion: (Boolean) -> Unit) {
         closed = true
@@ -119,7 +119,7 @@ internal class ScreenshotCaptureMonitor(
                             !isNew(since, added, taken)) continue
                         val uri = ContentUris.withAppendedId(Images.EXTERNAL_CONTENT_URI, cursor.getLong(0))
                         val receipt = "$uri:$added:$taken"
-                        if (!receipts.contains(receipt)) candidates.add(Candidate(uri, type, receipt, taken))
+                        if (!receipts.contains(receipt)) candidates.add(Candidate(uri, type, receipt, name))
                     }
                 }
             }
@@ -129,9 +129,9 @@ internal class ScreenshotCaptureMonitor(
                 else if (!closed) worker.postDelayed(scanTask, 250L)
                 return
             }
-            for ((uri, type, receipt, takenAt) in candidates) {
+            for ((uri, type, receipt, displayName) in candidates) {
                 if (closed || !ScreenshotCaptureState.enabled(context) || !ScreenshotCaptureState.mediaGranted(context)) return
-                if (reader.capture(uri, type, takenAt)) receipts.record(receipt)
+                if (reader.capture(uri, type, displayName)) receipts.record(receipt)
                 else if (!reader.readMetadata {}) {
                     if (!reader.policyAllowsCapture()) ScreenshotCaptureState.skipThrough(context)
                     return
@@ -142,7 +142,7 @@ internal class ScreenshotCaptureMonitor(
         }
     }
 
-    private data class Candidate(val uri: Uri, val type: String, val receipt: String, val takenAt: Long)
+    private data class Candidate(val uri: Uri, val type: String, val receipt: String, val displayName: String)
 
     companion object {
         internal fun isScreenshot(name: String, path: String): Boolean {
