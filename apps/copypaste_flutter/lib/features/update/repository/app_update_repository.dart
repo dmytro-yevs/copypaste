@@ -15,3 +15,11 @@ abstract interface class AppUpdateRepository {
 
   void dispose();
 }
+
+/// Supplies an asset that exactly matches the Linux package already installed.
+abstract interface class LinuxAppUpdateRepository {
+  Future<AppRelease?> findLinuxUpdate({
+    required Version currentVersion,
+    required LinuxAppUpdateInstallation installation,
+  });
+}
