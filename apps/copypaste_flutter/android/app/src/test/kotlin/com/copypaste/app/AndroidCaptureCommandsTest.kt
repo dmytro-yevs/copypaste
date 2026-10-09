@@ -20,7 +20,7 @@ class AndroidCaptureCommandsTest {
             captureGrantCommands(packageName),
         )
         assertEquals(
-            (captureGrantCommands(packageName) + screenshotSourceGrantCommands(packageName)).map { "adb shell ${it.joinToString(" ")}" },
+            captureGrantCommands(packageName).map { "adb shell ${it.joinToString(" ")}" },
             adbCaptureGrantCommands(packageName),
         )
     }
