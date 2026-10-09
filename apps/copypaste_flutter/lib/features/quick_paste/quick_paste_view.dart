@@ -472,8 +472,11 @@ class _QuickPasteViewState extends State<QuickPasteView> {
   }
 }
 
-SingleActivator _desktopShortcut(LogicalKeyboardKey key) =>
-    SingleActivator(key, meta: Platform.isMacOS, control: Platform.isWindows);
+SingleActivator _desktopShortcut(LogicalKeyboardKey key) => SingleActivator(
+  key,
+  meta: Platform.isMacOS,
+  control: Platform.isWindows || Platform.isLinux,
+);
 
 class _ClipContent extends StatelessWidget {
   const _ClipContent({
