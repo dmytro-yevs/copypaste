@@ -41,16 +41,19 @@ void main() {
     expect(status.screenshotProtection, isFalse);
   });
 
-  test('passes consent and companion setup results through unchanged', () async {
-    expect(await port.requestRemoteDesktop(), isTrue);
-    expect(await port.openCompanionSetup(), isTrue);
-  });
+  test(
+    'passes consent and companion setup results through unchanged',
+    () async {
+      expect(await port.requestRemoteDesktop(), isTrue);
+      expect(await port.openCompanionSetup(), isTrue);
+    },
+  );
 
   test('rejects partial or invalid native state', () async {
-    messenger.setMockMethodCallHandler(channel, (call) async => {
-      'session': 'wayland',
-      'globalShortcuts': true,
-    });
+    messenger.setMockMethodCallHandler(
+      channel,
+      (call) async => {'session': 'wayland', 'globalShortcuts': true},
+    );
 
     await expectLater(port.status(), throwsFormatException);
   });

@@ -27,7 +27,8 @@ class MethodChannelAppUpdatePlatform implements AppUpdatePlatform {
     MethodChannel? channel,
     AppUpdateTarget? target,
     LinuxAppUpdateArchitecture? Function()? linuxArchitecture,
-  }) : _channel = channel ?? const MethodChannel('com.copypaste.app/app_update'),
+  }) : _channel =
+           channel ?? const MethodChannel('com.copypaste.app/app_update'),
        _target = target,
        _linuxArchitecture = linuxArchitecture ?? currentLinuxUpdateArchitecture;
 

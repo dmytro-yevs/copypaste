@@ -50,7 +50,8 @@ class AppUpdateController extends ChangeNotifier {
     await check();
     final target = _platform.target;
     if (_disposed ||
-        (target != AppUpdateTarget.android && target != AppUpdateTarget.linux)) {
+        (target != AppUpdateTarget.android &&
+            target != AppUpdateTarget.linux)) {
       return;
     }
     final previousPhase = _phase;
@@ -97,10 +98,11 @@ class AppUpdateController extends ChangeNotifier {
             'This Linux installation cannot update automatically.',
           );
         }
-        release = await repository.findLinuxUpdate(
-          currentVersion: installed,
-          installation: installation,
-        );
+        release = await (repository as LinuxAppUpdateRepository)
+            .findLinuxUpdate(
+              currentVersion: installed,
+              installation: installation,
+            );
       } else {
         release = await _repository.findUpdate(
           currentVersion: installed,
@@ -183,9 +185,9 @@ class AppUpdateController extends ChangeNotifier {
     switch (result) {
       case AppUpdateInstallResult.started:
         _message = switch (_platform.target) {
-          AppUpdateTarget.android => 'Continue in the Android system installer.',
-          AppUpdateTarget.linux =>
-            'Continue in your system package manager.',
+          AppUpdateTarget.android =>
+            'Continue in the Android system installer.',
+          AppUpdateTarget.linux => 'Continue in your system package manager.',
           _ => 'The installer is starting.',
         };
         _setPhase(AppUpdatePhase.installing);
@@ -257,8 +259,10 @@ class AppUpdateController extends ChangeNotifier {
     'invalid_arguments' => 'The update package details are invalid.',
     'unsupported_installation' =>
       'This Linux installation cannot update automatically.',
-    'verification_failed' => 'The downloaded update failed its integrity check.',
-    'installer_launch_failed' => 'CopyPaste could not start the system installer.',
+    'verification_failed' =>
+      'The downloaded update failed its integrity check.',
+    'installer_launch_failed' =>
+      'CopyPaste could not start the system installer.',
     'update_busy' => 'An update installation is already in progress.',
     'open_failed' => 'CopyPaste could not open the release page.',
     _ => 'CopyPaste could not install the update.',
