@@ -182,9 +182,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           key: const ValueKey<String>(
                             'settings-navigation-sidebar',
                           ),
-                          backgroundColor: Theme.of(
-                            context,
-                          ).colorScheme.secondary,
+                          backgroundColor: Theme.of(context)
+                              .colorScheme
+                              .secondary,
                           padding: const EdgeInsets.symmetric(
                             horizontal: AppSpacing.md,
                             vertical: AppSpacing.sm,
@@ -739,8 +739,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _SettingsTargetId.androidBackgroundCapture,
             ),
             title: 'Android background capture',
-            description:
-                'Choose Full or Limited mode and manage the one-time Shizuku or ADB setup.',
+            description: 'Choose Full or Limited mode and manage the one-time Shizuku or ADB setup.',
             trailing: Button.secondary(
               onPressed: widget.controller.busy
                   ? null
@@ -768,8 +767,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               widget.controller.screenshotCapture.needsPermission)
             _SettingRow(
               title: 'Screenshot access',
-              description:
-                  'Allow access to all photos and notifications to save new screenshots in the background.',
+              description: 'Allow access to all photos and notifications to save new screenshots in the background.',
               trailing: Button.secondary(
                 key: const ValueKey<String>('screenshot-capture-permission'),
                 onPressed: widget.controller.busy
@@ -904,8 +902,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           key: _instantClipboardKey,
           highlighted: _isHighlighted(_SettingsTargetId.instantClipboard),
           title: 'Instant clipboard',
-          description:
-              'Automatically copy newer clips from other devices to this clipboard.',
+          description: 'Automatically copy newer clips from other devices to this clipboard.',
           trailing: Switch(
             key: const ValueKey('instant-clipboard-switch'),
             value: settings.instantClipboard,
@@ -961,16 +958,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         const Text('Excluded applications').medium(),
                         const Gap(AppSpacing.xs),
                         Text(switch (defaultTargetPlatform) {
-                          TargetPlatform.macOS =>
-                            'Skip automatic capture during activity from these apps. Background copies may bypass exclusions.',
-                          TargetPlatform.windows =>
-                            'Skip automatic capture from identified clipboard owners in this list.',
-                          TargetPlatform.android =>
-                            'Android skips automatic capture while exclusions are set because it cannot identify source apps.',
-                          TargetPlatform.linux =>
-                            'Skip automatic capture from identified clipboard owners. Capture is paused when exclusions are set and the source cannot be identified.',
-                          TargetPlatform.iOS || TargetPlatform.fuchsia =>
-                            'Application exclusions are supported on macOS, Windows, and Android.',
+                          TargetPlatform.macOS => 'Skip automatic capture during activity from these apps. Background copies may bypass exclusions.',
+                          TargetPlatform.windows => 'Skip automatic capture from identified clipboard owners in this list.',
+                          TargetPlatform.android => 'Android skips automatic capture while exclusions are set because it cannot identify source apps.',
+                          TargetPlatform.linux => 'Skip automatic capture from identified clipboard owners. Capture is paused when exclusions are set and the source cannot be identified.',
+                          TargetPlatform.iOS || TargetPlatform.fuchsia => 'Application exclusions are supported on macOS, Windows, and Android.',
                         }).muted().textSmall(),
                       ],
                     ),
@@ -1595,16 +1587,16 @@ class _QuickPasteSection extends StatelessWidget {
                 key: shortcutKey,
                 highlighted: shortcutHighlighted,
                 title: 'Open Quick Paste',
-                description:
-                    'The shortcut works while CopyPaste is running in the background.',
+                description: controller.registeredShortcutDescription == null
+                    ? 'The shortcut works while CopyPaste is running in the background.'
+                    : 'Registered shortcut: ${controller.registeredShortcutDescription}',
                 trailing: _ShortcutRecorder(controller: controller),
               ),
               _SettingRow(
                 key: autoPasteKey,
                 highlighted: autoPasteHighlighted,
                 title: 'Paste automatically',
-                description:
-                    'Selecting a clip returns to the previous app and pastes it.',
+                description: 'Selecting a clip returns to the previous app and pastes it.',
                 trailing: Switch(
                   value: controller.autoPaste,
                   onChanged: controller.busy ? null : controller.setAutoPaste,
