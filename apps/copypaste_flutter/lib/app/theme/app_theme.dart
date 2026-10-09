@@ -217,19 +217,12 @@ abstract final class AppTheme {
   static AbstractButtonStyle controlButtonStyle(ButtonStyle style) {
     if (style.density != ButtonDensity.icon) return style;
     return style.copyWith(
-      padding: (context, states, value) {
-        final padding = value.resolve(Directionality.of(context));
+      padding: (context, states, _) {
         final iconSize =
             style.iconTheme(context, states).size ??
             Theme.of(context).iconTheme.small.size ??
             AppIconSize.sm;
-        final vertical = (controlHeight(context) - iconSize) / 2;
-        return EdgeInsets.fromLTRB(
-          padding.left,
-          vertical,
-          padding.right,
-          vertical,
-        );
+        return EdgeInsets.all((controlHeight(context) - iconSize) / 2);
       },
     );
   }

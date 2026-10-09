@@ -42,6 +42,14 @@ void main() {
                     onPressed: () {},
                     child: const Icon(LucideIcons.scanText),
                   ),
+                  Button.primary(
+                    key: const ValueKey('primary-icon-control'),
+                    style: AppTheme.controlButtonStyle(
+                      const ButtonStyle.primaryIcon(),
+                    ),
+                    onPressed: () {},
+                    child: const Icon(LucideIcons.plus),
+                  ),
                   const SizedBox(
                     width: 240,
                     child: TextField(
@@ -71,11 +79,24 @@ void main() {
         final height = tester
             .getSize(find.byKey(const ValueKey('text-control')))
             .height;
-        for (final key in ['icon-control', 'input-control', 'select-control']) {
+        for (final key in [
+          'icon-control',
+          'primary-icon-control',
+          'input-control',
+          'select-control',
+        ]) {
           expect(
             tester.getSize(find.byKey(ValueKey(key))).height,
             closeTo(height, 0.01),
             reason: '$key at text scale $scale',
+          );
+        }
+        for (final key in ['icon-control', 'primary-icon-control']) {
+          final size = tester.getSize(find.byKey(ValueKey(key)));
+          expect(
+            size.width,
+            closeTo(size.height, 0.01),
+            reason: '$key must stay square at text scale $scale',
           );
         }
         expect(tester.takeException(), isNull);

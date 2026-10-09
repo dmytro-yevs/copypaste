@@ -74,10 +74,6 @@ class SettingsController extends ChangeNotifier {
     _screenshotStatus = await _screenshotCapture.requestPermission();
   });
 
-  Future<bool> openScreenshotSourceAccess() => _run(() async {
-    await _screenshotCapture.openSourceAccess();
-  });
-
   Future<void> initialize() async {
     if (_disposed) return;
     _loadState = SettingsLoadState.loading;

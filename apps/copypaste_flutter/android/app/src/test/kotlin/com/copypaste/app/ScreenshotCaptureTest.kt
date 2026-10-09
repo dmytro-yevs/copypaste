@@ -87,7 +87,7 @@ class ScreenshotCaptureTest {
         monitor.scan()
         monitor.scan()
         assertEquals(listOf(2L), first.ids)
-        assertEquals(listOf(since + 1000), first.takenAt)
+        assertEquals(listOf("Screenshot_new.png"), first.displayNames)
         monitor.close()
         val resumed = Reader()
         val next = ScreenshotCaptureMonitor(app, resumed)
@@ -117,7 +117,6 @@ class ScreenshotCaptureTest {
         val monitor = ScreenshotCaptureMonitor(app, reader)
         monitor.scan()
         assertEquals(listOf(1L), reader.ids)
-        assertEquals(listOf(0L), reader.takenAt)
         monitor.close()
     }
 
@@ -176,16 +175,16 @@ class ScreenshotCaptureTest {
         var saves = true
         var busy = false
         val ids = mutableListOf<Long>()
-        val takenAt = mutableListOf<Long>()
+        val displayNames = mutableListOf<String>()
         override fun policyAllowsCapture(): Boolean = allowed
         override fun readMetadata(action: () -> Unit): Boolean {
             if (allowed && !busy) action()
             return allowed && !busy
         }
-        override fun capture(uri: Uri, type: String, takenAt: Long): Boolean {
+        override fun capture(uri: Uri, type: String, displayName: String): Boolean {
             if (saves) {
                 ids.add(uri.lastPathSegment!!.toLong())
-                this.takenAt.add(takenAt)
+                displayNames.add(displayName)
             }
             return saves
         }

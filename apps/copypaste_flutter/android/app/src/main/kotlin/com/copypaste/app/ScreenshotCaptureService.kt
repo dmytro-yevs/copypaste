@@ -1,15 +1,10 @@
 package com.copypaste.app
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.os.IBinder
-import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 
 class ScreenshotCaptureService : Service() {
@@ -18,16 +13,7 @@ class ScreenshotCaptureService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!eligible(this)) { stopSelf(startId); return START_NOT_STICKY }
         MainActivity.ensureRuntime(applicationContext)
-        if (Build.VERSION.SDK_INT >= 26) getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(channel, "Screenshot capture", NotificationManager.IMPORTANCE_LOW),
-        )
-        startForeground(2208, NotificationCompat.Builder(this, channel)
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("CopyPaste is saving screenshots")
-            .setContentText("New screenshots are saved to your private history.")
-            .setOngoing(true).setOnlyAlertOnce(true)
-            .setContentIntent(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)).build())
+        BackgroundActivityNotification.start(this)
         if (monitor == null) {
             monitor = ScreenshotCaptureMonitor(applicationContext)
             if (monitor?.start() != true) { stopSelf(startId); return START_NOT_STICKY }
@@ -43,7 +29,6 @@ class ScreenshotCaptureService : Service() {
         super.onDestroy()
     }
     companion object {
-        private const val channel = "screenshot-capture"
         @Volatile private var active: ScreenshotCaptureService? = null
         fun isRunning(): Boolean = active != null
         private fun eligible(context: Context): Boolean = ScreenshotCaptureState.enabled(context) &&
