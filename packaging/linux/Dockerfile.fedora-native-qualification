@@ -1,0 +1,16 @@
+FROM fedora:40@sha256:3c86d25fef9d2001712bc3d9b091fc40cf04be4767e48f1aa3b785bf58d300ed
+
+# Fedora 40 provides the Plasma 6 KWin companion runtime and the RPM package
+# manager used by Linux native qualification. The image is disposable: each
+# workflow run mounts exact artifacts and evidence into a fresh container.
+RUN dnf --assumeyes --setopt=install_weak_deps=False install \
+    dbus-daemon dbus-tools gnome-keyring \
+    gtk3 libsecret python3-gobject \
+    kf6-kpackage kwin kwin-wayland kwin-x11 plasma-workspace-x11 \
+    xdg-desktop-portal xdg-desktop-portal-kde \
+    xclip wl-clipboard wtype xdotool xorg-x11-server-Xvfb xorg-x11-xauth \
+    dpkg rpm sudo \
+ && dnf clean all
+
+ENV LIBGL_ALWAYS_SOFTWARE=1 \
+    GALLIUM_DRIVER=llvmpipe
