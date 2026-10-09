@@ -22,11 +22,14 @@ def main():
     if module["id"] not in {"copypaste.ocr", "copypaste.semantic-search", "copypaste.supabase"}:
         raise ValueError("No native qualification contract exists for this module")
     verify_receipts(args.directory, module, args.commit, args.run_id)
-    print(f"Verified exact signed {module['id']} package receipts for macOS, Windows, and Android")
+    print(f"Verified exact signed {module['id']} package receipts for macOS, Windows, Linux, and Android")
 
 
 def verify_receipts(directory, module, commit, run_id):
-    for platform, architecture in [("macos", "aarch64"), ("windows", "x86_64"), ("android", "x86_64")]:
+    for platform, architecture in [
+        ("macos", "aarch64"), ("windows", "x86_64"),
+        ("linux", "x86_64"), ("linux", "aarch64"), ("android", "x86_64"),
+    ]:
         name = f"CopyPasteModule-{module['id']}-v{module['version']}-{platform}-{architecture}.cpmodule"
         package = directory / name
         receipt = json.loads((directory / (name + ".receipt.json")).read_text())
