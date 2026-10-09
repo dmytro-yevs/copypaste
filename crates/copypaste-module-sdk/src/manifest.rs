@@ -266,6 +266,7 @@ impl ModuleManifest {
             || self.title.len() > 160
             || self.description.len() > 2048
             || self.target != target
+            || (self.schema_version < 5 && self.target.platform == ModulePlatform::Linux)
             || (self.schema_version >= 2
                 && (self.supported_platforms.is_empty()
                     || self.supported_platforms.len() > 4
@@ -658,7 +659,14 @@ mod tests {
 
         module.entrypoint = "bin/module.so".into();
         module.files[0].path = module.entrypoint.clone();
-        module.schema_version = 4;
-        assert!(module.validate("1.0.6", module.target).is_err());
+        for schema_version in 1..5 {
+            module.schema_version = schema_version;
+            module.supported_platforms = if schema_version == 1 {
+                Vec::new()
+            } else {
+                vec![ModulePlatform::Linux]
+            };
+            assert!(module.validate("1.0.6", module.target).is_err());
+        }
     }
 }
