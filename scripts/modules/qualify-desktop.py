@@ -59,6 +59,18 @@ def linux_glibc_floor(package):
     return ".".join(map(str, max(versions)))
 
 
+def linux_network_prefix(uid, gid, parent_network_namespace):
+    # `unshare` creates the network namespace while privileged, then drops to
+    # the runner identity before the module host receives any fixture or data
+    # path. The shell also proves both conditions for every host restart.
+    return [
+        "sudo", "unshare", "--net", "--setgid", str(gid), "--setuid", str(uid), "--",
+        "sh", "-ceu",
+        'test "$(id -u)" = "$1"; test "$(readlink /proc/self/ns/net)" != "$2"; shift 2; exec "$@"',
+        "module-qualification", str(uid), parent_network_namespace,
+    ]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--platform", required=True, choices=["macos", "windows", "linux"])
@@ -79,12 +91,12 @@ def main():
         raise ValueError("Native package target does not match the qualification host")
     glibc_floor = linux_glibc_floor(args.package) if args.platform == "linux" else None
     prefix = []
+    runner_uid = os.getuid()
+    runner_gid = os.getgid()
     if args.platform == "macos":
         prefix = ["/usr/bin/sandbox-exec", "-p", "(version 1)(allow default)(deny network*)"]
     elif args.platform == "linux":
-        # The GitHub-hosted Linux runner grants sudo. A new network namespace
-        # binds the exact signed artifact test without ambient network access.
-        prefix = ["sudo", "unshare", "--net", "--"]
+        prefix = linux_network_prefix(runner_uid, runner_gid, os.readlink("/proc/self/ns/net"))
     rule = "CopyPaste-module-qualification-" + uuid.uuid4().hex
     environment = {
         **os.environ, "COPYPASTE_QUALIFICATION_RULE": rule,
@@ -116,7 +128,11 @@ def main():
                 "removal_completed_after_restart": True,
                 "environment": "github-native-" + args.platform,
                 "system_version": platform.platform(),
-                **({"glibc_floor": glibc_floor} if glibc_floor else {}),
+                **({
+                    "glibc_floor": glibc_floor,
+                    "effective_uid": runner_uid,
+                    "network_namespace_isolated": True,
+                } if glibc_floor else {}),
             })
             args.receipt.write_text(json.dumps(receipt), encoding="utf-8")
     finally:

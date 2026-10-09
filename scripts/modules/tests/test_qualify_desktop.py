@@ -18,6 +18,16 @@ class DesktopQualificationTargetTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             qualification.host_target("linux", "armv7l")
 
+    def test_linux_network_prefix_drops_to_the_runner_identity_without_preserving_environment(self):
+        prefix = qualification.linux_network_prefix(1001, 1002, "net:[12345]")
+        self.assertEqual(
+            prefix[:8],
+            ["sudo", "unshare", "--net", "--setgid", "1002", "--setuid", "1001", "--"],
+        )
+        self.assertNotIn("--preserve-env", prefix)
+        self.assertIn('test "$(id -u)" = "$1"', prefix[10])
+        self.assertIn('readlink /proc/self/ns/net', prefix[10])
+
 
 if __name__ == "__main__":
     unittest.main()

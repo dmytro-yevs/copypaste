@@ -28,7 +28,11 @@ class ReleaseReceiptsTest(unittest.TestCase):
                 "package_sha256": hashlib.sha256(package.read_bytes()).hexdigest(), "package_size_bytes": package.stat().st_size,
                 "cases_passed": 3, "signature_verified": True, "removal_completed_after_restart": True,
                 "restart_required": module_id != "copypaste.supabase",
-                **({"glibc_floor": "2.39.0"} if platform == "linux" else {}),
+                **({
+                    "glibc_floor": "2.39.0",
+                    "effective_uid": 1001,
+                    "network_namespace_isolated": True,
+                } if platform == "linux" else {}),
             }))
             paths.append(receipt)
         return module, paths
@@ -61,6 +65,18 @@ class ReleaseReceiptsTest(unittest.TestCase):
             linux.write_text(json.dumps(receipt))
             with self.assertRaises(ValueError):
                 receipts.verify_receipts(root, module, "a" * 40, "123")
+
+    def test_linux_receipts_reject_root_or_unisolated_qualification(self):
+        for field, value in [("effective_uid", 0), ("network_namespace_isolated", False)]:
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                module, paths = self.fixtures(root, "copypaste.ocr", ["linux"])
+                receipt_path = next(path for path in paths if "linux-x86_64.cpmodule.receipt.json" in path.name)
+                receipt = json.loads(receipt_path.read_text())
+                receipt[field] = value
+                receipt_path.write_text(json.dumps(receipt))
+                with self.assertRaises(ValueError):
+                    receipts.verify_receipts(root, module, "a" * 40, "123")
 
     def test_rejects_wrong_provenance_incomplete_execution_and_missing_platform(self):
         mutations = {"commit": "b" * 40, "run_id": "124", "module_id": "copypaste.ocr", "module_version": "0.2.0",

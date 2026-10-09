@@ -58,6 +58,9 @@ def verify_receipts(directory, module, commit, run_id):
             raise ValueError(f"Native evidence does not qualify the exact {platform}/{architecture} package")
         if platform == "linux" and not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", receipt.get("glibc_floor", "")):
             raise ValueError(f"Linux native evidence is missing the package glibc ABI floor for {architecture}")
+        uid = receipt.get("effective_uid")
+        if platform == "linux" and (not isinstance(uid, int) or uid <= 0 or not receipt.get("network_namespace_isolated")):
+            raise ValueError(f"Linux native evidence did not run under the runner identity in an isolated network namespace for {architecture}")
 
 
 if __name__ == "__main__":
