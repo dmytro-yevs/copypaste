@@ -50,7 +50,7 @@ const ENV_EPHEMERAL: &str = "COPYPASTE_EPHEMERAL_KEY";
     all(any(target_os = "macos", target_os = "linux"), not(debug_assertions)),
     test
 ))]
-const KEYSTORE_LOAD_TIMEOUT: Duration = Duration::from_secs(8);
+pub(super) const KEYSTORE_LOAD_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// The device secret plus the keys derived from it. The secret is zeroized on
 /// drop.
@@ -105,7 +105,7 @@ impl Keyring {
             );
             return Ok(Self::from_secret(&random_secret()));
         }
-        #[cfg(all(any(target_os = "macos", target_os = "linux"), not(debug_assertions)))]
+        #[cfg(all(target_os = "macos", not(debug_assertions)))]
         let secret = {
             let lookup_dir = data_dir.to_path_buf();
             let lookup = load_with_timeout(KEYSTORE_LOAD_TIMEOUT, move || {
@@ -113,6 +113,8 @@ impl Keyring {
             })?;
             super::keystore::finish_load_or_create_secret(data_dir, lookup)?
         };
+        #[cfg(all(target_os = "linux", not(debug_assertions)))]
+        let secret = super::keystore::load_or_create_linux_secret(data_dir)?;
         #[cfg(any(not(any(target_os = "macos", target_os = "linux")), debug_assertions))]
         let secret = super::keystore::load_or_create_secret(data_dir)?;
         Ok(Self { secret })
@@ -151,7 +153,7 @@ impl Keyring {
     test
 ))]
 #[cfg_attr(test, allow(dead_code))]
-fn load_with_timeout<T, F>(timeout: Duration, load: F) -> Result<T, CryptoError>
+pub(super) fn load_with_timeout<T, F>(timeout: Duration, load: F) -> Result<T, CryptoError>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T, CryptoError> + Send + 'static,

@@ -16,7 +16,7 @@ use secret_service::blocking::SecretService;
 use secret_service::EncryptionType;
 use zeroize::Zeroizing;
 
-use super::super::keys::random_secret;
+use super::super::keys::{load_with_timeout, random_secret, KEYSTORE_LOAD_TIMEOUT};
 use super::{CryptoError, DeviceSecret, Lookup, KEYSTORE_ACCOUNT, KEYSTORE_SERVICE, KEY_LEN};
 
 const ATTRIBUTE_SERVICE: &str = "service";
@@ -24,6 +24,20 @@ const ATTRIBUTE_ACCOUNT: &str = "account";
 const ITEM_LABEL: &str = "CopyPaste device secret";
 const CONTENT_TYPE: &str = "application/octet-stream";
 const CREATION_LOCK_NAME: &str = "copypaste-device-secret.lock";
+
+/// All Secret Service traffic runs in this bounded standard worker. zbus's
+/// blocking API creates its own Tokio runtime, so calling it from the daemon's
+/// Tokio runtime panics instead of merely blocking it.
+pub(super) fn load_or_create(data_dir: &Path) -> Result<DeviceSecret, CryptoError> {
+    let data_dir = data_dir.to_path_buf();
+    load_with_timeout(KEYSTORE_LOAD_TIMEOUT, move || {
+        // This deliberately calls the raw backend methods below, selected as
+        // `backend` by the parent module. It does not recurse into this
+        // adapter, and keeps I-20 plus the F-11 guard in one transaction.
+        let lookup = load(&data_dir)?;
+        super::finish_load_or_create_secret(&data_dir, lookup)
+    })
+}
 
 /// `data_dir` is deliberately not part of the item identity. Secret Service is
 /// user-session scoped, like the macOS Keychain: `--data-dir` relocates the
@@ -149,7 +163,11 @@ fn unavailable(_: secret_service::Error) -> CryptoError {
 
 #[cfg(test)]
 mod tests {
+    use std::process::Command;
+
     use super::*;
+
+    const ASYNC_RUNTIME_CHILD: &str = "COPYPASTE_LINUX_KEYSTORE_ASYNC_TEST_CHILD";
 
     #[test]
     fn secret_service_identity_is_the_frozen_service_and_account() {
@@ -173,5 +191,45 @@ mod tests {
             Err(CryptoError::KeystoreEntryUnusable(_))
         ));
         assert_eq!(*decode_secret(&[7; KEY_LEN]).unwrap(), [7; KEY_LEN]);
+    }
+
+    #[test]
+    fn async_runtime_uses_a_worker_and_never_touches_the_session_bus() {
+        if std::env::var_os(ASYNC_RUNTIME_CHILD).is_none() {
+            let dir = tempfile::tempdir().unwrap();
+            let missing_bus = dir.path().join("missing-session-bus");
+            let address = format!("unix:path={}", missing_bus.display());
+            let (_, module) = module_path!().split_once("::").unwrap();
+            let status = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    &format!(
+                        "{module}::async_runtime_uses_a_worker_and_never_touches_the_session_bus"
+                    ),
+                    "--nocapture",
+                ])
+                .env(ASYNC_RUNTIME_CHILD, "1")
+                .env("DBUS_SESSION_BUS_ADDRESS", address)
+                .env("XDG_RUNTIME_DIR", dir.path())
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        }
+
+        let data_dir = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR").unwrap()).join("data");
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let result = runtime.block_on(async move {
+            // This is the exact worker boundary `load_or_create` uses around
+            // its complete transaction. Call raw `load` here because this
+            // host typecheck intentionally leaves the file backend selected.
+            load_with_timeout(KEYSTORE_LOAD_TIMEOUT, move || load(&data_dir))
+        });
+
+        assert!(matches!(result, Err(CryptoError::KeystoreUnavailable(_))));
     }
 }
