@@ -102,6 +102,8 @@ class _QuickPasteViewState extends State<QuickPasteView> {
                       Expanded(
                         child: HistoryInspector(
                           controller: controller.history,
+                          presentationRevision:
+                              controller.presentationGeneration,
                           inDrawer: false,
                           showActions: false,
                           compact: true,
