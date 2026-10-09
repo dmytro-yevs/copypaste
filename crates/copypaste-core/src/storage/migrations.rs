@@ -185,6 +185,7 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(INITIAL_SCHEMA).unwrap();
         let metadata = crate::PayloadMetadata {
+            privacy: Default::default(),
             file: None,
             source_app_icon: Some(icon()),
         }
@@ -222,6 +223,7 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(INITIAL_SCHEMA).unwrap();
         let metadata = crate::PayloadMetadata {
+            privacy: Default::default(),
             file: None,
             source_app_icon: Some(icon()),
         }
@@ -399,6 +401,7 @@ mod tests {
         apply_key(&conn, &KEY).unwrap();
         conn.execute_batch(INITIAL_SCHEMA).unwrap();
         let metadata = crate::PayloadMetadata {
+            privacy: Default::default(),
             file: None,
             source_app_icon: Some(icon()),
         }

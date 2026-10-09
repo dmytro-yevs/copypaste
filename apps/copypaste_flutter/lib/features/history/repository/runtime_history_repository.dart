@@ -247,6 +247,8 @@ HistoryClip _fromRuntimeClip(runtime.Clip clip, {bool includeBody = false}) {
   final details = clip.fileDetails;
   final imageDetails = clip.imageDetails;
   return HistoryClip(
+    secret: clip.secret,
+    transient: clip.transient,
     id: clip.id,
     contentType: clip.contentType,
     preview: clip.content,

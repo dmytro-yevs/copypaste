@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:copypaste_flutter/app/theme/app_motion.dart';
 
 import 'package:copypaste_flutter/features/history/repository/history_file_importer.dart';
 import 'package:flutter/services.dart';
@@ -16,6 +17,52 @@ import 'package:image/image.dart' as image;
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
+  testWidgets(
+    'Quick Paste spoiler reveal neither copies nor persists into a reopened menu',
+    (tester) async {
+      final repository = _Repository();
+      repository.clips.clear();
+      repository.clips.add(
+        HistoryClip(
+          id: 'secret-menu',
+          contentType: 'text',
+          preview: 'SYNTHETIC MENU SECRET',
+          body: 'SYNTHETIC MENU SECRET',
+          secret: true,
+          createdAt: DateTime.utc(2026),
+          pinned: false,
+        ),
+      );
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: _ContextHost(),
+      );
+      await controller.initialize();
+      await controller.opened(1);
+      await tester.pumpWidget(QuickPasteApp(controller: controller));
+      await tester.pump();
+      expect(find.text('SYNTHETIC MENU SECRET'), findsNothing);
+      final generation = controller.presentationGeneration;
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(ValueKey('quick-spoiler-secret-menu-$generation')),
+          matching: find.byType(Button),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(AppMotion.spoilerReveal);
+      expect(find.text('SYNTHETIC MENU SECRET'), findsOneWidget);
+      expect(repository.copied, isEmpty);
+      await controller.opened(2);
+      await tester.pump();
+      expect(find.text('SYNTHETIC MENU SECRET'), findsNothing);
+      expect(repository.copied, isEmpty);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   test('cold engine restores the native inspector state', () async {
     final host = _ContextHost()
       ..openWhenReady = true

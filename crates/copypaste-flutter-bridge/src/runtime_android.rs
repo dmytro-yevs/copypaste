@@ -277,6 +277,32 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_scoped(
 
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_classify(
+    _env: JNIEnv,
+    _class: JClass,
+    token: jlong,
+    secret: jboolean,
+    transient: jboolean,
+) -> jboolean {
+    if token > 0
+        && RUNTIME.get().is_some_and(|runtime| {
+            runtime.capture_admission().classify(
+                token as u64,
+                copypaste_ipc::ClipboardPrivacy {
+                    secret: secret != JNI_FALSE,
+                    transient: transient != JNI_FALSE,
+                },
+            )
+        })
+    {
+        JNI_TRUE
+    } else {
+        JNI_FALSE
+    }
+}
+
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_abandon(
     _env: JNIEnv,
     _class: JClass,

@@ -126,7 +126,8 @@ impl<'a> CapturePolicy<'a> {
             _ => return false,
         };
 
-        !self.settings.private_mode
+        capture.privacy.allows(self.settings)
+            && !self.settings.private_mode
             && capture.source_policy.allows(
                 &self.settings.excluded_app_bundle_ids,
                 capture.app_bundle_id.as_deref(),
@@ -172,6 +173,7 @@ impl SourcePolicyEvidence {
 /// One captured clipboard change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Capture {
+    pub privacy: copypaste_ipc::ClipboardPrivacy,
     /// UTF-8 text captured from the system pasteboard.
     pub content: String,
     /// Owned bytes for image or materialized file capture. Text stays in `content`; the fields
@@ -198,6 +200,7 @@ impl Capture {
     #[allow(dead_code)]
     fn text(content: String) -> Self {
         Self {
+            privacy: Default::default(),
             content,
             binary_content: None,
             file_path: None,

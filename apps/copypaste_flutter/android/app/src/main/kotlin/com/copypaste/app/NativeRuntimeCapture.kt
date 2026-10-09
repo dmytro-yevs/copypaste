@@ -17,6 +17,7 @@ internal object NativeRuntimeCapture {
         contentType: String,
         callback: CaptureCallback,
     ): Boolean
+    @JvmStatic external fun classify(token: Long, secret: Boolean, transient: Boolean): Boolean
     @JvmStatic external fun abandon(token: Long)
     @JvmStatic external fun ingestText(token: Long, text: String): Boolean
     @JvmStatic external fun ingestBinary(

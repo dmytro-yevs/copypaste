@@ -235,6 +235,8 @@ impl Settings {
             };
             let capture_privacy_epoch = if next.private_mode != current.private_mode
                 || next.excluded_app_bundle_ids != current.excluded_app_bundle_ids
+                || next.skip_secret != current.skip_secret
+                || next.skip_transient != current.skip_transient
             {
                 current
                     .0
@@ -691,6 +693,42 @@ mod tests {
         assert!(exhausted
             .with_capture_authority(|_, _| panic!("exhausted authority was trusted"))
             .is_none());
+    }
+
+    #[test]
+    fn toggling_marker_gates_invalidates_pending_captures_even_after_aba() {
+        let (state, _dir) = crate::testutil::test_state("marker-epoch");
+        let before = state
+            .settings
+            .with_capture_authority(|_, epoch| epoch)
+            .unwrap();
+        for patch in [
+            ConfigPatch {
+                skip_secret: Some(false),
+                ..Default::default()
+            },
+            ConfigPatch {
+                skip_secret: Some(true),
+                ..Default::default()
+            },
+            ConfigPatch {
+                skip_transient: Some(false),
+                ..Default::default()
+            },
+            ConfigPatch {
+                skip_transient: Some(true),
+                ..Default::default()
+            },
+        ] {
+            state.settings.apply(&state.meta, &patch).unwrap();
+        }
+        assert_eq!(
+            state
+                .settings
+                .with_capture_authority(|_, epoch| epoch)
+                .unwrap(),
+            before + 4
+        );
     }
 
     #[test]

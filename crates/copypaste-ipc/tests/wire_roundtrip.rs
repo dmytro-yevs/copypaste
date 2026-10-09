@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 
 fn item() -> Item {
     Item {
+        privacy: Default::default(),
         id: "item-1".into(),
         content: "hello".into(),
         content_type: "text/plain".into(),

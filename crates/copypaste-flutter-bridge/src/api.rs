@@ -164,6 +164,8 @@ impl std::error::Error for RuntimeError {}
 
 #[derive(Debug, Clone)]
 pub struct Clip {
+    pub secret: bool,
+    pub transient: bool,
     pub id: String,
     pub content: String,
     pub content_type: String,
@@ -511,6 +513,8 @@ pub struct CaptureState {
 
 #[derive(Debug, Clone)]
 pub struct RuntimeSettingsData {
+    pub skip_secret: bool,
+    pub skip_transient: bool,
     pub retention_days: u32,
     pub storage_quota_bytes: u64,
     pub excluded_app_ids: Vec<String>,
@@ -524,6 +528,8 @@ pub struct RuntimeSettingsData {
 
 #[derive(Debug, Clone, Default)]
 pub struct RuntimeSettingsPatch {
+    pub skip_secret: Option<bool>,
+    pub skip_transient: Option<bool>,
     pub retention_days: Option<u32>,
     pub storage_quota_bytes: Option<u64>,
     pub excluded_app_ids: Option<Vec<String>>,
@@ -634,6 +640,8 @@ pub async fn update_runtime_settings(
         patch: copypaste_ipc::ConfigPatch {
             retention_days: patch.retention_days,
             storage_quota_bytes: patch.storage_quota_bytes,
+            skip_secret: patch.skip_secret,
+            skip_transient: patch.skip_transient,
             excluded_app_bundle_ids: patch.excluded_app_ids,
             lan_visibility: patch.lan_visibility,
             sync_enabled: patch.sync_enabled,
@@ -1109,6 +1117,8 @@ async fn cloud_status_response(method: Method) -> Result<CloudAccountStatus, Run
 
 fn runtime_settings(config: copypaste_ipc::ConfigData) -> RuntimeSettingsData {
     RuntimeSettingsData {
+        skip_secret: config.skip_secret,
+        skip_transient: config.skip_transient,
         retention_days: config.retention_days,
         storage_quota_bytes: config.storage_quota_bytes,
         excluded_app_ids: config.excluded_app_bundle_ids,
@@ -1260,6 +1270,8 @@ fn device_observation_trust(
 
 fn clip(item: copypaste_ipc::Item) -> Clip {
     Clip {
+        secret: item.privacy.secret,
+        transient: item.privacy.transient,
         id: item.id,
         content: item.content,
         content_type: item.content_type,
@@ -1470,6 +1482,7 @@ mod tests {
     #[test]
     fn clip_maps_original_image_metadata_and_sync_warning() {
         let mapped = clip(copypaste_ipc::Item {
+            privacy: Default::default(),
             id: "image-1".into(),
             content: "[image]".into(),
             content_type: copypaste_ipc::content_type::IMAGE_PNG.into(),

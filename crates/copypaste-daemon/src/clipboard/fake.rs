@@ -266,6 +266,7 @@ impl ClipboardSource for FakeClipboard {
             return None;
         }
         Some(Capture {
+            privacy: Default::default(),
             content,
             binary_content: None,
             file_path: None,

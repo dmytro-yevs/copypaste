@@ -59,13 +59,16 @@ fn to_wire_with(
     // The item id is the AAD: a row decrypted under another row's identity must
     // fail authentication, not fall back to a plaintext read (AGENTS.md rule 4,
     // "fail closed on crypto").
+    let privacy = row.clipboard_privacy();
     let payload = ClipboardPayload::open(&row, key)?;
     // Measured on the plaintext bytes, because that is what the cloud path
     // measures: `LocalItem::content` is the opened payload, and the seal that
     // follows is a fixed overhead the cap does not count.
     let too_large_to_sync =
         copypaste_sync::too_large_to_sync(&row.content_type, payload.byte_len());
-    let (content, truncated) = if preview {
+    let (content, truncated) = if preview && privacy.secret {
+        (String::new(), false)
+    } else if preview {
         payload.display_preview()
     } else {
         (payload.display_text(), false)
@@ -125,15 +128,24 @@ fn to_wire_with(
         .and_then(|text| copypaste_core::classify_semantic(&row.content_type, text));
     let content_class = copypaste_ipc::content_type::classify(&row.content_type);
     let item = Item {
+        privacy,
         id: row.id,
         content,
         content_type: row.content_type,
         content_class,
-        semantic_kind: semantic.map(|classification| classification.kind),
-        color_rgba: semantic.and_then(|classification| classification.color_rgba),
+        semantic_kind: semantic
+            .filter(|_| !privacy.secret || !preview)
+            .map(|classification| classification.kind),
+        color_rgba: semantic
+            .filter(|_| !privacy.secret || !preview)
+            .and_then(|classification| classification.color_rgba),
         created_at: row.created_at,
         pinned: row.pinned,
-        file_details,
+        file_details: if preview && privacy.secret {
+            None
+        } else {
+            file_details
+        },
         image_details,
         origin_device_id: origin.device_id.clone(),
         origin_device_name: origin.device_name.clone(),

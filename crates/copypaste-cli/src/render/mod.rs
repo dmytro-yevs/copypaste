@@ -323,6 +323,7 @@ mod tests {
 
     fn item(content: &str) -> Item {
         Item {
+            privacy: Default::default(),
             id: "3f2a91c4-0000-4000-8000-000000000001".into(),
             content: content.into(),
             content_type: "text".into(),

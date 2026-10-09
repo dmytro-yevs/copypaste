@@ -9,6 +9,34 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'settings_test_support.dart';
 
 void main() {
+  test(
+    'both privacy gates persist independently through a new controller',
+    () async {
+      final repository = FakeSettingsRepository();
+      SettingsController create() => SettingsController(
+        repository: repository,
+        filePicker: FakeSettingsFilePicker(),
+        notifications: FakeCaptureNotificationPort(),
+        screenshotProtection: _Protection(),
+        captureRefreshInterval: Duration.zero,
+      );
+      final first = create();
+      await first.initialize();
+      expect(first.settings!.skipSecret, isTrue);
+      expect(first.settings!.skipTransient, isTrue);
+      expect(await first.setSkipSecret(false), isTrue);
+      expect(first.settings!.skipSecret, isFalse);
+      expect(first.settings!.skipTransient, isTrue);
+      expect(await first.setSkipTransient(false), isTrue);
+      first.dispose();
+      final restored = create();
+      addTearDown(restored.dispose);
+      await restored.initialize();
+      expect(restored.settings!.skipSecret, isFalse);
+      expect(restored.settings!.skipTransient, isFalse);
+    },
+  );
+
   TestWidgetsFlutterBinding.ensureInitialized();
 
   SettingsController controller(_Protection protection) => SettingsController(
@@ -95,7 +123,28 @@ void main() {
         await tester.pump();
         await tester.pump();
         expect(find.text('Block screenshots'), findsOneWidget);
-        expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+        expect(
+          tester
+              .widget<Switch>(find.byKey(const ValueKey('skip-secret-switch')))
+              .value,
+          isTrue,
+        );
+        expect(
+          tester
+              .widget<Switch>(
+                find.byKey(const ValueKey('skip-transient-switch')),
+              )
+              .value,
+          isTrue,
+        );
+        expect(
+          tester
+              .widget<Switch>(
+                find.byKey(const ValueKey('block-screenshots-switch')),
+              )
+              .value,
+          isFalse,
+        );
         if (platform == TargetPlatform.android) {
           await tester.pump(const Duration(milliseconds: 500));
           expect(
@@ -105,21 +154,58 @@ void main() {
             findsNothing,
           );
         }
-        expect(tester.widget<Switch>(find.byType(Switch)).enabled, isTrue);
-        expect(tester.widget<Switch>(find.byType(Switch)).onChanged, isNotNull);
-        await tester.ensureVisible(find.byType(Switch));
+        expect(
+          tester
+              .widget<Switch>(
+                find.byKey(const ValueKey('block-screenshots-switch')),
+              )
+              .enabled,
+          isTrue,
+        );
+        expect(
+          tester
+              .widget<Switch>(
+                find.byKey(const ValueKey('block-screenshots-switch')),
+              )
+              .onChanged,
+          isNotNull,
+        );
+        await tester.ensureVisible(
+          find.byKey(const ValueKey('block-screenshots-switch')),
+        );
         await tester.pump();
-        expect(find.byType(Switch).hitTestable(), findsOneWidget);
-        await tester.tap(find.byType(Switch));
+        expect(
+          find.byKey(const ValueKey('block-screenshots-switch')).hitTestable(),
+          findsOneWidget,
+        );
+        await tester.tap(
+          find.byKey(const ValueKey('block-screenshots-switch')),
+        );
         await tester.pump();
         await tester.pump();
         expect(protection.value, isTrue);
-        expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
-        await tester.tap(find.byType(Switch));
+        expect(
+          tester
+              .widget<Switch>(
+                find.byKey(const ValueKey('block-screenshots-switch')),
+              )
+              .value,
+          isTrue,
+        );
+        await tester.tap(
+          find.byKey(const ValueKey('block-screenshots-switch')),
+        );
         await tester.pump();
         await tester.pump();
         expect(protection.value, isFalse);
-        expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+        expect(
+          tester
+              .widget<Switch>(
+                find.byKey(const ValueKey('block-screenshots-switch')),
+              )
+              .value,
+          isFalse,
+        );
       },
       variant: TargetPlatformVariant.only(platform),
     );

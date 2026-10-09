@@ -662,18 +662,25 @@ impl Runtime {
             .acquire(token, CaptureScope::Commit)
             .ok_or(RuntimeError::CaptureRefused)?;
         let settings = &permit.config;
-        let ingested = copypaste_core::ingest_into_with_capture_source_with_current_retention(
-            &self.store,
-            &self.keyring,
-            content,
-            copypaste_ipc::content_type::TEXT,
-            now_ms(),
-            None,
-            None,
-            &settings,
-            || self.settings.config(),
-        )
-        .map_err(|_| RuntimeError::Capture)?;
+        let privacy_metadata =
+            (!permit.privacy.is_empty()).then_some(copypaste_core::PayloadMetadata {
+                privacy: permit.privacy,
+                ..Default::default()
+            });
+        let ingested =
+            copypaste_core::ingest_into_with_capture_source_metadata_with_current_retention(
+                &self.store,
+                &self.keyring,
+                content,
+                copypaste_ipc::content_type::TEXT,
+                now_ms(),
+                None,
+                None,
+                privacy_metadata.as_ref(),
+                settings,
+                || self.settings.config(),
+            )
+            .map_err(|_| RuntimeError::Capture)?;
         self.emit_capture(ingested.into_item());
         permit.committed();
         Ok(())
@@ -799,7 +806,14 @@ impl Runtime {
             .ok_or(RuntimeError::Capture)?;
             (copypaste_ipc::content_type::FILE, Some(metadata))
         };
-        let ingested = copypaste_core::ingest_binary_into_with_capture_source(
+        let metadata = copypaste_core::PayloadMetadata {
+            privacy: permit.privacy,
+            file: metadata,
+            source_app_icon: None,
+        };
+        let metadata =
+            (!metadata.privacy.is_empty() || metadata.file.is_some()).then_some(metadata);
+        let ingested = copypaste_core::ingest_binary_into_with_capture_source_metadata(
             &self.store,
             &self.keyring,
             bytes,
@@ -808,7 +822,7 @@ impl Runtime {
             None,
             None,
             metadata.as_ref(),
-            &settings,
+            settings,
         )
         .map_err(|_| RuntimeError::Capture)?;
         self.emit_capture(ingested.into_item());
@@ -1513,6 +1527,7 @@ impl Runtime {
         preview: bool,
         origin: &ItemOrigin,
     ) -> Option<Item> {
+        let privacy = row.clipboard_privacy();
         let origin_device_id = origin.device_id.clone();
         let origin_device_name = origin.device_name.clone();
         let origin_device_class = origin.device_class;
@@ -1520,7 +1535,9 @@ impl Runtime {
             Ok(payload) => payload,
             Err(_) => return None,
         };
-        let (content, truncated) = if preview {
+        let (content, truncated) = if preview && privacy.secret {
+            (String::new(), false)
+        } else if preview {
             payload.display_preview()
         } else {
             (payload.display_text(), false)
@@ -1581,15 +1598,24 @@ impl Runtime {
             }
         };
         Some(Item {
+            privacy,
             id: row.id,
             content,
             content_type: row.content_type.clone(),
             content_class: copypaste_ipc::content_type::classify(&row.content_type),
-            semantic_kind: semantic.map(|classification| classification.kind),
-            color_rgba: semantic.and_then(|classification| classification.color_rgba),
+            semantic_kind: semantic
+                .filter(|_| !privacy.secret || !preview)
+                .map(|classification| classification.kind),
+            color_rgba: semantic
+                .filter(|_| !privacy.secret || !preview)
+                .and_then(|classification| classification.color_rgba),
             created_at: row.created_at,
             pinned: row.pinned,
-            file_details,
+            file_details: if preview && privacy.secret {
+                None
+            } else {
+                file_details
+            },
             image_details,
             origin_device_id,
             origin_device_name,

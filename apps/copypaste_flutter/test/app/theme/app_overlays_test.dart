@@ -55,7 +55,7 @@ void main() {
 
     final dialog = find.byType(AlertDialog);
     final dialogWidget = tester.widget<AlertDialog>(dialog);
-    final leading = dialogWidget.leading! as Icon;
+    final leading = tester.widget<Icon>(find.byIcon(LucideIcons.pencil));
     final field = tester.widget<TextField>(find.byType(TextField));
     final fieldDecoration = field.decoration!;
 
@@ -71,6 +71,76 @@ void main() {
       const BorderRadius.all(Radius.circular(AppRadius.md)),
     );
   });
+
+  testWidgets(
+    'confirmation fits its content and centers the header icon',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1200, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+        await _openConfirmation(tester, mode: mode);
+        final dialog = tester.getRect(find.byType(AlertDialog));
+        final icon = tester.getRect(find.byIcon(LucideIcons.trash2));
+        final title = tester.getRect(find.text('Delete this clip?'));
+        expect(icon.center.dy, closeTo(title.center.dy, 0.01));
+        expect(dialog.width, lessThan(AppOverlaySize.dialogMaxWidth));
+        expect(icon.left - dialog.left, lessThanOrEqualTo(AppSpacing.xl + 2));
+        expect(tester.takeException(), isNull);
+        await tester.tap(find.text('Cancel'));
+        await tester.pumpAndSettle();
+        expect(find.byType(AlertDialog), findsNothing);
+      }
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
+  testWidgets(
+    'long headers and actions fit a 320px viewport at 200 percent text',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(320, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+        for (final title in [
+          'Delete this clip?',
+          'Replace local history?',
+          'Revoke a device with a long name?',
+          'Remove a module with a long name?',
+        ]) {
+          await _openConfirmation(
+            tester,
+            mode: mode,
+            scale: 2,
+            title: title,
+            content: const Text('This action changes the local data.'),
+            action: 'Choose backup',
+          );
+          final dialog = tester.getRect(find.byType(AlertDialog));
+          final icon = tester.getRect(find.byIcon(LucideIcons.trash2));
+          final titleRect = tester.getRect(find.text(title));
+          expect(icon.center.dy, closeTo(titleRect.center.dy, 0.01));
+          expect(dialog.left, greaterThanOrEqualTo(0));
+          expect(dialog.right, lessThanOrEqualTo(320));
+          for (final label in ['Cancel', 'Choose backup']) {
+            final actionRect = tester.getRect(find.text(label));
+            expect(dialog.contains(actionRect.topLeft), isTrue);
+            expect(dialog.contains(actionRect.bottomRight), isTrue);
+          }
+          expect(tester.takeException(), isNull);
+          await tester.tap(find.text('Cancel'));
+          await tester.pumpAndSettle();
+        }
+      }
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
 
   testWidgets('keeps the shared dialog inside compact viewports', (
     tester,
@@ -115,4 +185,52 @@ void main() {
     expect(dialogRect.left, greaterThanOrEqualTo(0));
     expect(dialogRect.right, lessThanOrEqualTo(360));
   });
+}
+
+Future<void> _openConfirmation(
+  WidgetTester tester, {
+  required ThemeMode mode,
+  double scale = 1,
+  String title = 'Delete this clip?',
+  Widget? content,
+  String action = 'Delete',
+}) async {
+  await tester.pumpWidget(
+    ShadcnApp(
+      theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
+      themeMode: mode,
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(
+          context,
+        ).copyWith(textScaler: TextScaler.linear(scale)),
+        child: Builder(builder: (context) => AppTheme.builder(context, child)),
+      ),
+      home: Builder(
+        builder: (context) => Button.primary(
+          onPressed: () => AppOverlays.showDialog<void>(
+            context,
+            builder: (context) => AppOverlays.alertDialog(
+              icon: LucideIcons.trash2,
+              title: Text(title),
+              content: content,
+              actions: [
+                Button.ghost(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                Button.destructive(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(action),
+                ),
+              ],
+            ),
+          ),
+          child: const Text('Open'),
+        ),
+      ),
+    ),
+  );
+  await tester.tap(find.text('Open'));
+  await tester.pumpAndSettle();
 }

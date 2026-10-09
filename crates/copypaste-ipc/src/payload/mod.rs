@@ -467,6 +467,8 @@ fn default_content_class() -> crate::ContentClass {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Item {
+    #[serde(default, skip_serializing_if = "crate::ClipboardPrivacy::is_empty")]
+    pub privacy: crate::ClipboardPrivacy,
     pub id: String,
     pub content: String,
     pub content_type: String,

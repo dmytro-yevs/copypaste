@@ -139,6 +139,22 @@ pub struct StoredItem {
     pub payload_metadata: Option<String>,
 }
 
+impl StoredItem {
+    pub fn clipboard_privacy(&self) -> copypaste_ipc::ClipboardPrivacy {
+        self.payload_metadata
+            .as_deref()
+            .map(|json| {
+                crate::PayloadMetadata::from_json(json, &self.content_type)
+                    .map(|metadata| metadata.privacy)
+                    .unwrap_or(copypaste_ipc::ClipboardPrivacy {
+                        secret: true,
+                        transient: false,
+                    })
+            })
+            .unwrap_or_default()
+    }
+}
+
 /// Storage failures.
 ///
 /// No variant carries a filesystem path (AGENTS.md rule 4). `rusqlite` and

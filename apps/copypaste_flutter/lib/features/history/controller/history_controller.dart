@@ -13,6 +13,8 @@ enum HistoryLoadState { initial, loading, ready, empty, error }
 
 enum HistoryFileDownloadResult { saved, cancelled, failed }
 
+enum _HistoryBulkMutation { delete, pin, unpin }
+
 /// Keeps paged history, selection, query cancellation and bounded media caches
 /// outside the widget tree.
 class HistoryController extends ChangeNotifier {
@@ -53,6 +55,10 @@ class HistoryController extends ChangeNotifier {
   final Set<String> _deleteMutations = <String>{};
   final Set<String> _downloadMutations = <String>{};
   final Set<String> _collapsedSections = <String>{};
+  final Set<String> _bulkSelectedIds = <String>{};
+  bool _isBulkSelecting = false;
+  bool _isBulkMutating = false;
+  bool _refreshAfterBulkMutation = false;
 
   StreamSubscription<HistoryRuntimeEvent>? _watchSubscription;
   Timer? _searchTimer;
@@ -77,6 +83,7 @@ class HistoryController extends ChangeNotifier {
   int _mediaEpoch = 0;
 
   bool get canSuspend =>
+      !_isBulkMutating &&
       !_isImportingFiles &&
       !_isReorderingPinned &&
       !_isDeletingAll &&
@@ -91,6 +98,8 @@ class HistoryController extends ChangeNotifier {
   void suspend() {
     if (_disposed || _suspended) return;
     _suspended = true;
+    _isBulkSelecting = false;
+    _bulkSelectedIds.clear();
     _queryEpoch++;
     _mediaEpoch++;
     _items.clear();
@@ -118,6 +127,21 @@ class HistoryController extends ChangeNotifier {
   bool get isLoadingMore => _isLoadingMore;
   bool get isDeletingAll => _isDeletingAll;
   bool get isReorderingPinned => _isReorderingPinned;
+  bool get isBulkSelecting => _isBulkSelecting;
+  bool get isBulkMutating => _isBulkMutating;
+  Set<String> get bulkSelectedIds => Set.unmodifiable(_bulkSelectedIds);
+  bool isBulkSelected(String id) => _bulkSelectedIds.contains(id);
+  bool get canBeginBulkSelection =>
+      !_disposed &&
+      !_suspended &&
+      _state == HistoryLoadState.ready &&
+      !_isImportingFiles &&
+      !_isDeletingAll &&
+      !_isReorderingPinned &&
+      !_isBulkMutating &&
+      _draggedPinnedId == null &&
+      _pinMutations.isEmpty &&
+      _deleteMutations.isEmpty;
   String? get draggedPinnedId => _draggedPinnedId;
   bool get hasUnfilteredQuery =>
       !_query.hasSearch &&
@@ -127,6 +151,7 @@ class HistoryController extends ChangeNotifier {
       _query.sourceApp == null;
   bool get canReorderPinned =>
       !_disposed &&
+      !_isBulkSelecting &&
       hasUnfilteredQuery &&
       _state == HistoryLoadState.ready &&
       !_isReorderingPinned &&
@@ -147,6 +172,110 @@ class HistoryController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void beginBulkSelection([String? id]) {
+    if (!canBeginBulkSelection) return;
+    if (id != null && !_items.any((clip) => clip.id == id)) return;
+    _searchTimer?.cancel();
+    _isBulkSelecting = true;
+    _selectedId = null;
+    _selectedClip = null;
+    if (id != null) _bulkSelectedIds.add(id);
+    notifyListeners();
+  }
+
+  void toggleBulkSelection(String id) {
+    if (!_isBulkSelecting ||
+        _isBulkMutating ||
+        !_items.any((clip) => clip.id == id)) {
+      return;
+    }
+    if (!_bulkSelectedIds.add(id)) _bulkSelectedIds.remove(id);
+    notifyListeners();
+  }
+
+  void endBulkSelection() {
+    if (_isBulkMutating) return;
+    _isBulkSelecting = false;
+    _bulkSelectedIds.clear();
+    notifyListeners();
+  }
+
+  Future<bool> deleteBulkSelection() =>
+      _mutateBulkSelection(_HistoryBulkMutation.delete);
+
+  Future<bool> setBulkPinned(bool pinned) => _mutateBulkSelection(
+    pinned ? _HistoryBulkMutation.pin : _HistoryBulkMutation.unpin,
+  );
+
+  Future<bool> _mutateBulkSelection(_HistoryBulkMutation action) async {
+    if (!_isBulkSelecting || _isBulkMutating || _bulkSelectedIds.isEmpty) {
+      return false;
+    }
+    _isBulkMutating = true;
+    _errorMessage = null;
+    notifyListeners();
+    var failed = 0;
+    try {
+      // Finish an existing live refresh before taking the operation snapshot.
+      while (_visibleItemsRefresh != null) {
+        await _visibleItemsRefresh;
+      }
+      final clips = _items
+          .where((clip) => _bulkSelectedIds.contains(clip.id))
+          .toList();
+      for (final clip in clips) {
+        if (_disposed) return false;
+        try {
+          if (action == _HistoryBulkMutation.delete) {
+            await _repository.delete(clip.id);
+            if (_disposed) return false;
+            _items.removeWhere((item) => item.id == clip.id);
+            _bulkSelectedIds.remove(clip.id);
+          } else {
+            final pinned = action == _HistoryBulkMutation.pin;
+            if (clip.pinned == pinned) continue;
+            await _repository.setPinned(clip.id, pinned);
+            if (_disposed) return false;
+            _replace(clip.copyWith(pinned: pinned));
+          }
+        } catch (_) {
+          failed++;
+        }
+      }
+      if (_items.isEmpty) _state = HistoryLoadState.empty;
+      _trimCachedMedia(_sourceIcons, retainedIds: _retainedSourceIconIds);
+      if (action == _HistoryBulkMutation.delete && _bulkSelectedIds.isEmpty) {
+        _isBulkSelecting = false;
+      }
+    } finally {
+      if (!_disposed) {
+        // Mutations can change both the pin order and pagination cursors.
+        try {
+          _refreshAfterBulkMutation = false;
+          await _refreshItemsAndFacets();
+          if (_refreshAfterBulkMutation) {
+            _refreshAfterBulkMutation = false;
+            await _refreshItemsAndFacets();
+          }
+        } finally {
+          _isBulkMutating = false;
+          if (failed > 0) {
+            _errorMessage = action == _HistoryBulkMutation.delete
+                ? 'Some selected clips could not be deleted. Try again.'
+                : 'Some selected pins could not be updated. Try again.';
+          }
+          if (!_disposed) notifyListeners();
+        }
+      }
+    }
+    return failed == 0;
+  }
+
+  void _pruneBulkSelection() {
+    final ids = _items.map((clip) => clip.id).toSet();
+    _bulkSelectedIds.removeWhere((id) => !ids.contains(id));
+  }
+
   bool get canDownloadSelected {
     final file = _selectedClip?.file;
     return _fileDownloader != null && file != null && !file.sourceAvailable;
@@ -159,6 +288,10 @@ class HistoryController extends ChangeNotifier {
     _watchSubscription ??= _repository.watch().listen((event) {
       if (_suspended) return;
       if (event == HistoryRuntimeEvent.itemsChanged) {
+        if (_isBulkMutating) {
+          _refreshAfterBulkMutation = true;
+          return;
+        }
         if (_isImportingFiles) {
           _refreshAfterFileImport = true;
           return;
@@ -235,6 +368,7 @@ class HistoryController extends ChangeNotifier {
     _items
       ..clear()
       ..addAll(refreshed);
+    _pruneBulkSelection();
     _nextCursor = cursor;
     _skippedUndecryptable = skipped;
     _state = _items.isEmpty ? HistoryLoadState.empty : HistoryLoadState.ready;
@@ -269,7 +403,9 @@ class HistoryController extends ChangeNotifier {
   }
 
   Future<void> updateQuery(HistoryQuery query) async {
+    if (_isBulkMutating) return;
     _searchTimer?.cancel();
+    endBulkSelection();
     if (query.sort == HistorySort.relevance && !query.hasSearch) {
       query = query.copyWith(sort: HistorySort.newest);
     }
@@ -298,6 +434,7 @@ class HistoryController extends ChangeNotifier {
         return;
       }
       _items.addAll(page.items);
+      _pruneBulkSelection();
       _nextCursor = page.nextCursor;
       _skippedUndecryptable = page.skippedUndecryptable;
       _state = _items.isEmpty ? HistoryLoadState.empty : HistoryLoadState.ready;
@@ -320,6 +457,7 @@ class HistoryController extends ChangeNotifier {
     final cursor = _nextCursor;
     if (cursor == null ||
         _isLoadingMore ||
+        _isBulkMutating ||
         _isReorderingPinned ||
         _state != HistoryLoadState.ready) {
       return;
@@ -351,7 +489,11 @@ class HistoryController extends ChangeNotifier {
     }
   }
 
+  /// Explicitly opens a spoiler without changing selection or caching its plaintext.
+  Future<HistoryClip> revealClip(String id) => _repository.get(id);
+
   Future<void> select(String id) async {
+    if (_isBulkSelecting) return;
     final epoch = _queryEpoch;
     _selectedId = id;
     _selectedClip = _items.where((item) => item.id == id).firstOrNull;
@@ -504,7 +646,9 @@ class HistoryController extends ChangeNotifier {
   }
 
   Future<bool> togglePin(HistoryClip clip) async {
-    if (_isReorderingPinned || _draggedPinnedId != null) return false;
+    if (_isBulkMutating || _isReorderingPinned || _draggedPinnedId != null) {
+      return false;
+    }
     if (!_pinMutations.add(clip.id)) {
       return false;
     }
@@ -657,7 +801,9 @@ class HistoryController extends ChangeNotifier {
   }
 
   Future<bool> deleteClip(String id) async {
-    if (_isReorderingPinned || _draggedPinnedId != null) return false;
+    if (_isBulkMutating || _isReorderingPinned || _draggedPinnedId != null) {
+      return false;
+    }
     if (!_deleteMutations.add(id)) {
       return false;
     }
@@ -665,6 +811,7 @@ class HistoryController extends ChangeNotifier {
     try {
       await _repository.delete(id);
       _items.removeWhere((item) => item.id == id);
+      _bulkSelectedIds.remove(id);
       if (_selectedId == id) clearSelection();
       _trimCachedMedia(_sourceIcons, retainedIds: _retainedSourceIconIds);
       if (_items.isEmpty) _state = HistoryLoadState.empty;
@@ -683,7 +830,10 @@ class HistoryController extends ChangeNotifier {
   }
 
   Future<bool> deleteAll() async {
-    if (_isDeletingAll || _isReorderingPinned || _draggedPinnedId != null) {
+    if (_isBulkMutating ||
+        _isDeletingAll ||
+        _isReorderingPinned ||
+        _draggedPinnedId != null) {
       return false;
     }
     _isDeletingAll = true;
@@ -691,6 +841,7 @@ class HistoryController extends ChangeNotifier {
     try {
       await _repository.deleteAll();
       _items.removeWhere((item) => !item.pinned);
+      _pruneBulkSelection();
       _nextCursor = null;
       _state = _items.isEmpty ? HistoryLoadState.empty : HistoryLoadState.ready;
       if (_selectedId != null &&

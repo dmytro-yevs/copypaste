@@ -208,6 +208,11 @@ impl ClipboardSource for WindowsClipboard {
             return None;
         }
 
+        let privacy = self.formats.privacy();
+        if !privacy.allows(policy.settings) {
+            return None;
+        }
+
         // Resolve attribution on every change so explicit app exclusions are
         // applied consistently.
         let source_app = self.source_app(count);
@@ -243,6 +248,7 @@ impl ClipboardSource for WindowsClipboard {
                 content,
                 content_type,
             } => Some(Capture {
+                privacy,
                 content,
                 binary_content: None,
                 file_path: None,
@@ -256,6 +262,7 @@ impl ClipboardSource for WindowsClipboard {
                 bytes,
                 content_type,
             } => Some(Capture {
+                privacy,
                 content: String::new(),
                 binary_content: Some(bytes),
                 file_path: None,
@@ -266,6 +273,7 @@ impl ClipboardSource for WindowsClipboard {
                 source_policy: super::SourcePolicyEvidence::Legacy,
             }),
             Representation::File { path, metadata } => Some(Capture {
+                privacy,
                 content: String::new(),
                 binary_content: None,
                 file_path: Some(path),

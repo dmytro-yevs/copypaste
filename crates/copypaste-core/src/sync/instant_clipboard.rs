@@ -42,7 +42,11 @@ impl InstantClipboard {
     ) {
         let _guard = self.0.lock().unwrap_or_else(|error| error.into_inner());
         let config = settings();
-        if !config.sync_enabled || !config.instant_clipboard || row.deleted {
+        if !config.sync_enabled
+            || !config.instant_clipboard
+            || row.deleted
+            || row.clipboard_privacy().secret
+        {
             return;
         }
         let Ok(Some((newest_id, newest_stamp))) = store.newest_live_key() else {

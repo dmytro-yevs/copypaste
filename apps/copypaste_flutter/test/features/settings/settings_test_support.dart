@@ -100,6 +100,8 @@ class FakeSettingsRepository implements SettingsRepository {
   @override
   Future<RuntimeSettings> updateSettings(RuntimeSettingsChange change) async {
     currentSettings = RuntimeSettings(
+      skipSecret: change.skipSecret ?? currentSettings.skipSecret,
+      skipTransient: change.skipTransient ?? currentSettings.skipTransient,
       retentionDays: change.retentionDays ?? currentSettings.retentionDays,
       storageQuotaBytes:
           change.storageQuotaBytes ?? currentSettings.storageQuotaBytes,

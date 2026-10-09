@@ -70,7 +70,7 @@ abstract final class AppOverlays {
         constraints: const BoxConstraints(
           maxWidth: AppOverlaySize.dialogMaxWidth,
         ),
-        child: SizedBox(width: double.infinity, child: builder(dialogContext)),
+        child: builder(dialogContext),
       ),
     ).future;
   }
@@ -82,17 +82,33 @@ abstract final class AppOverlays {
     List<Widget>? actions,
   }) {
     return AlertDialog(
-      leading: Icon(icon, size: AppIconSize.sm),
-      title: title,
+      title: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: AppIconSize.sm).iconMutedForeground(),
+          const Gap(AppSpacing.lg),
+          Flexible(child: title),
+        ],
+      ),
       content: content,
-      actions: actions
-          ?.map(
-            (action) => ButtonStyleOverride(
-              decoration: AppTheme.actionButtonDecoration,
-              child: action,
-            ),
-          )
-          .toList(),
+      actions: actions == null || actions.isEmpty
+          ? null
+          : [
+              Flexible(
+                child: Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: [
+                    for (final action in actions)
+                      ButtonStyleOverride(
+                        decoration: AppTheme.actionButtonDecoration,
+                        child: action,
+                      ),
+                  ],
+                ),
+              ),
+            ],
       padding: const EdgeInsets.all(AppSpacing.xl),
       surfaceOpacity: 1,
       surfaceBlur: 0,

@@ -405,6 +405,7 @@ pub fn ingest_binary_into_with_capture_source(
     settings: &copypaste_ipc::ConfigData,
 ) -> Result<Ingested, IngestError> {
     let payload_metadata = payload_metadata.map(|file| crate::PayloadMetadata {
+        privacy: Default::default(),
         file: Some(file.clone()),
         source_app_icon: None,
     });
@@ -589,6 +590,7 @@ mod tests {
             let ingress = ingress.clone();
             std::thread::spawn(move || {
                 let metadata = crate::PayloadMetadata {
+                    privacy: Default::default(),
                     file: None,
                     source_app_icon: Some(source_icon()),
                 };
@@ -806,6 +808,7 @@ mod tests {
     fn capture_source_metadata_is_stored_atomically_with_a_binary_item() {
         let f = fixture();
         let metadata = crate::PayloadMetadata {
+            privacy: Default::default(),
             file: Some(crate::FileMetadata::new("report.pdf", "application/pdf").unwrap()),
             source_app_icon: Some(source_icon()),
         };
@@ -836,6 +839,7 @@ mod tests {
     fn text_capture_preserves_source_icon_metadata() {
         let f = fixture();
         let metadata = crate::PayloadMetadata {
+            privacy: Default::default(),
             file: None,
             source_app_icon: Some(source_icon()),
         };

@@ -41,6 +41,7 @@ class RuntimeSettingsRepository implements SettingsRepository {
   @override
   Future<CaptureNotificationPreview?> capturePreview(String id) async {
     final clip = await runtime.getClip(id: id);
+    if (clip.secret) return null;
     switch (clip.contentClass) {
       case runtime.ClipContentClass.image:
         final image = await runtime.clipImagePreview(id: id, maxEdge: 256);
@@ -82,6 +83,8 @@ class RuntimeSettingsRepository implements SettingsRepository {
   Future<RuntimeSettings> updateSettings(RuntimeSettingsChange change) async {
     final updated = await runtime.updateRuntimeSettings(
       patch: runtime.RuntimeSettingsPatch(
+        skipSecret: change.skipSecret,
+        skipTransient: change.skipTransient,
         retentionDays: change.retentionDays,
         storageQuotaBytes: change.storageQuotaBytes == null
             ? null
@@ -165,6 +168,8 @@ class RuntimeSettingsRepository implements SettingsRepository {
       RuntimeSettings(
         retentionDays: settings.retentionDays,
         storageQuotaBytes: settings.storageQuotaBytes.toInt(),
+        skipSecret: settings.skipSecret,
+        skipTransient: settings.skipTransient,
         excludedAppIds: List.unmodifiable(settings.excludedAppIds),
         lanVisibility: settings.lanVisibility,
         syncEnabled: settings.syncEnabled,

@@ -326,6 +326,8 @@ class CaptureState {
 }
 
 class Clip {
+  final bool secret;
+  final bool transient;
   final String id;
   final String content;
   final String contentType;
@@ -346,6 +348,8 @@ class Clip {
   final ClipImageDetails? imageDetails;
 
   const Clip({
+    required this.secret,
+    required this.transient,
     required this.id,
     required this.content,
     required this.contentType,
@@ -366,6 +370,8 @@ class Clip {
 
   @override
   int get hashCode =>
+      secret.hashCode ^
+      transient.hashCode ^
       id.hashCode ^
       content.hashCode ^
       contentType.hashCode ^
@@ -388,6 +394,8 @@ class Clip {
       identical(this, other) ||
       other is Clip &&
           runtimeType == other.runtimeType &&
+          secret == other.secret &&
+          transient == other.transient &&
           id == other.id &&
           content == other.content &&
           contentType == other.contentType &&
@@ -1202,6 +1210,8 @@ class RuntimePeerSyncStatus {
 }
 
 class RuntimeSettingsData {
+  final bool skipSecret;
+  final bool skipTransient;
   final int retentionDays;
   final BigInt storageQuotaBytes;
   final List<String> excludedAppIds;
@@ -1213,6 +1223,8 @@ class RuntimeSettingsData {
   final bool soundOnCopy;
 
   const RuntimeSettingsData({
+    required this.skipSecret,
+    required this.skipTransient,
     required this.retentionDays,
     required this.storageQuotaBytes,
     required this.excludedAppIds,
@@ -1226,6 +1238,8 @@ class RuntimeSettingsData {
 
   @override
   int get hashCode =>
+      skipSecret.hashCode ^
+      skipTransient.hashCode ^
       retentionDays.hashCode ^
       storageQuotaBytes.hashCode ^
       excludedAppIds.hashCode ^
@@ -1241,6 +1255,8 @@ class RuntimeSettingsData {
       identical(this, other) ||
       other is RuntimeSettingsData &&
           runtimeType == other.runtimeType &&
+          skipSecret == other.skipSecret &&
+          skipTransient == other.skipTransient &&
           retentionDays == other.retentionDays &&
           storageQuotaBytes == other.storageQuotaBytes &&
           excludedAppIds == other.excludedAppIds &&
@@ -1253,6 +1269,8 @@ class RuntimeSettingsData {
 }
 
 class RuntimeSettingsPatch {
+  final bool? skipSecret;
+  final bool? skipTransient;
   final int? retentionDays;
   final BigInt? storageQuotaBytes;
   final List<String>? excludedAppIds;
@@ -1264,6 +1282,8 @@ class RuntimeSettingsPatch {
   final bool? soundOnCopy;
 
   const RuntimeSettingsPatch({
+    this.skipSecret,
+    this.skipTransient,
     this.retentionDays,
     this.storageQuotaBytes,
     this.excludedAppIds,
@@ -1280,6 +1300,8 @@ class RuntimeSettingsPatch {
 
   @override
   int get hashCode =>
+      skipSecret.hashCode ^
+      skipTransient.hashCode ^
       retentionDays.hashCode ^
       storageQuotaBytes.hashCode ^
       excludedAppIds.hashCode ^
@@ -1295,6 +1317,8 @@ class RuntimeSettingsPatch {
       identical(this, other) ||
       other is RuntimeSettingsPatch &&
           runtimeType == other.runtimeType &&
+          skipSecret == other.skipSecret &&
+          skipTransient == other.skipTransient &&
           retentionDays == other.retentionDays &&
           storageQuotaBytes == other.storageQuotaBytes &&
           excludedAppIds == other.excludedAppIds &&

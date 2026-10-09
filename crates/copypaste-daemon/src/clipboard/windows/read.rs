@@ -38,6 +38,10 @@ pub(super) enum Representation {
 /// Clipboard atoms registered once when the backend starts. They are stable for
 /// the process lifetime and probing them does not materialise clipboard data.
 pub(super) struct RegisteredFormats {
+    excluded: Option<u32>,
+    concealed: Option<u32>,
+    transient: Option<u32>,
+    history: Option<u32>,
     png: Option<u32>,
     tiff: Option<u32>,
     rtf: Option<u32>,
@@ -45,8 +49,40 @@ pub(super) struct RegisteredFormats {
 }
 
 impl RegisteredFormats {
+    pub(super) fn privacy(&self) -> copypaste_ipc::ClipboardPrivacy {
+        if [self.excluded, self.concealed, self.transient, self.history]
+            .iter()
+            .any(Option::is_none)
+        {
+            return copypaste_ipc::ClipboardPrivacy {
+                secret: true,
+                transient: true,
+            };
+        }
+        let present = |format: Option<u32>| format.is_some_and(raw::is_format_avail);
+        let excluded_from_history = self
+            .history
+            .filter(|format| raw::is_format_avail(*format))
+            .is_some_and(|format| {
+                let mut value = [0u8; 4];
+                raw::size(format).map(|size| size.get()) != Some(value.len())
+                    || raw::get(format, &mut value).ok() != Some(value.len())
+                    || u32::from_le_bytes(value) == 0
+            });
+        copypaste_ipc::ClipboardPrivacy {
+            secret: present(self.excluded) || present(self.concealed),
+            transient: present(self.transient) || excluded_from_history,
+        }
+    }
     pub(super) fn register() -> Self {
         Self {
+            excluded: raw::register_format("ExcludeClipboardContentFromMonitorProcessing")
+                .map(|value| value.get()),
+            concealed: raw::register_format("org.nspasteboard.ConcealedType")
+                .map(|value| value.get()),
+            transient: raw::register_format("org.nspasteboard.TransientType")
+                .map(|value| value.get()),
+            history: raw::register_format("CanIncludeInClipboardHistory").map(|value| value.get()),
             png: raw::register_format("PNG").map(|format| format.get()),
             tiff: raw::register_format("TIFF").map(|format| format.get()),
             rtf: raw::register_format("Rich Text Format").map(|format| format.get()),

@@ -235,12 +235,11 @@ fn is_path(value: &str) -> bool {
     if value.starts_with("~/") || value.starts_with("/Volumes/") || value.starts_with("/Users/") {
         return value.len() > 2;
     }
-    if value.starts_with('/') {
-        return value.len() > 1
-            && (value[1..].contains('/') || !value[1..].contains(char::is_whitespace));
+    if let Some(path) = value.strip_prefix('/') {
+        return value.len() > 1 && (path.contains('/') || !path.contains(char::is_whitespace));
     }
-    if value.starts_with("\\\\") {
-        return value[2..].contains('\\');
+    if let Some(path) = value.strip_prefix("\\\\") {
+        return path.contains('\\');
     }
     let bytes = value.as_bytes();
     bytes.len() > 3

@@ -4,6 +4,10 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, TryLockError};
 
 use copypaste_ipc::ConfigData;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("capture admission is unavailable")]
+pub struct CaptureAdmissionError;
+
 type Cancellation = Arc<dyn Fn() + Send + Sync>;
 const MAX_OPERATIONS: usize = 32;
 const MAX_HOSTS: usize = 32;
@@ -23,6 +27,7 @@ pub enum CaptureScope {
 }
 #[derive(Clone)]
 struct Operation {
+    privacy: copypaste_ipc::ClipboardPrivacy,
     host: u64,
     generation: u64,
     committed: bool,
@@ -141,6 +146,7 @@ impl CaptureAdmission {
         state.operations.insert(
             id,
             Operation {
+                privacy: Default::default(),
                 host,
                 generation,
                 committed: false,
@@ -149,13 +155,32 @@ impl CaptureAdmission {
         );
         Some(id)
     }
+    pub fn classify(&self, token: u64, privacy: copypaste_ipc::ClipboardPrivacy) -> bool {
+        let Some(mut state) = self.try_state() else {
+            return false;
+        };
+        if state.closed || state.transitioning || !privacy.allows(&state.config) {
+            return false;
+        }
+        let generation = state.generation;
+        let Some(operation) = state.operations.get_mut(&token) else {
+            return false;
+        };
+        if operation.generation != generation || operation.committed {
+            return false;
+        }
+        operation.privacy = operation.privacy.union(privacy);
+        let combined = operation.privacy;
+        combined.allows(&state.config)
+    }
     pub fn acquire(&self, token: u64, scope: CaptureScope) -> Option<Permit<'_>> {
         let mut state = self.try_state()?;
         if state.closed || state.transitioning {
             return None;
         }
         let operation = state.operations.get(&token)?.clone();
-        if operation.generation != state.generation
+        if !operation.privacy.allows(&state.config)
+            || operation.generation != state.generation
             || !state.hosts.contains_key(&operation.host)
             || operation.committed != (scope == CaptureScope::Completion)
             || state.active.contains_key(&token)
@@ -167,6 +192,7 @@ impl CaptureAdmission {
         }
         state.active.insert(token, operation.host);
         let permit = Permit {
+            privacy: operation.privacy,
             owner: self,
             token,
             scope,
@@ -200,9 +226,9 @@ impl CaptureAdmission {
         }
     }
     /// Revocation linearizes synchronously, without waiting for active callbacks.
-    pub fn revoke_host(&self, host: u64) -> Result<(), ()> {
+    pub fn revoke_host(&self, host: u64) -> Result<(), CaptureAdmissionError> {
         let callbacks = {
-            let mut state = self.state.lock().map_err(|_| ())?;
+            let mut state = self.state.lock().map_err(|_| CaptureAdmissionError)?;
             state.hosts.remove(&host);
             let tokens: Vec<_> = state
                 .operations
@@ -219,17 +245,20 @@ impl CaptureAdmission {
         Ok(())
     }
     /// Worker-only proof of drain. Call only after synchronous host revocation.
-    pub fn drain_host(&self, host: u64) -> Result<(), ()> {
-        let mut state = self.state.lock().map_err(|_| ())?;
+    pub fn drain_host(&self, host: u64) -> Result<(), CaptureAdmissionError> {
+        let mut state = self.state.lock().map_err(|_| CaptureAdmissionError)?;
         if state.hosts.contains_key(&host) {
-            return Err(());
+            return Err(CaptureAdmissionError);
         }
         while state
             .active
             .values()
             .any(|active_host| *active_host == host)
         {
-            state = self.drained.wait(state).map_err(|_| ())?;
+            state = self
+                .drained
+                .wait(state)
+                .map_err(|_| CaptureAdmissionError)?;
         }
         Ok(())
     }
@@ -260,16 +289,20 @@ impl CaptureAdmission {
         Ok(Transition { owner: self })
     }
     /// Worker-only permanent close; process-global reuse cannot reopen admission.
-    pub fn shutdown(&self) -> Result<(), ()> {
+    pub fn shutdown(&self) -> Result<(), CaptureAdmissionError> {
         self.fail_closed();
-        let mut state = self.state.lock().map_err(|_| ())?;
+        let mut state = self.state.lock().map_err(|_| CaptureAdmissionError)?;
         while !state.active.is_empty() {
-            state = self.drained.wait(state).map_err(|_| ())?;
+            state = self
+                .drained
+                .wait(state)
+                .map_err(|_| CaptureAdmissionError)?;
         }
         Ok(())
     }
 }
 pub struct Permit<'a> {
+    pub privacy: copypaste_ipc::ClipboardPrivacy,
     owner: &'a CaptureAdmission,
     token: u64,
     scope: CaptureScope,
@@ -457,8 +490,10 @@ mod tests {
             let (done_tx, done_rx) = mpsc::channel();
             let worker = std::thread::spawn(move || {
                 let transition = worker_gate.transition().unwrap();
-                let mut next = ConfigData::default();
-                next.private_mode = true;
+                let next = ConfigData {
+                    private_mode: true,
+                    ..Default::default()
+                };
                 transition.publish(next).unwrap();
                 done_tx.send(()).unwrap();
             });
@@ -480,8 +515,10 @@ mod tests {
             let (host, old) = token(&gate, CaptureKind::Implicit);
             let transition = gate.transition().unwrap();
             assert!(gate.acquire(old, scope).is_none());
-            let mut paused = ConfigData::default();
-            paused.private_mode = true;
+            let paused = ConfigData {
+                private_mode: true,
+                ..Default::default()
+            };
             transition.publish(paused).unwrap();
             drop(transition);
             let transition = gate.transition().unwrap();
@@ -494,8 +531,10 @@ mod tests {
 
     #[test]
     fn exclusions_and_limits_preserve_explicit_exception_but_pause_blocks_both() {
-        let mut excluded = ConfigData::default();
-        excluded.excluded_app_bundle_ids = vec!["com.example.editor".into()];
+        let mut excluded = ConfigData {
+            excluded_app_bundle_ids: vec!["com.example.editor".into()],
+            ..Default::default()
+        };
         let gate = CaptureAdmission::new(excluded.clone());
         let implicit = gate.open_host(CaptureKind::Implicit).unwrap();
         let explicit = gate.open_host(CaptureKind::Explicit).unwrap();
@@ -606,5 +645,70 @@ mod tests {
             assert!(gate.acquire(op, CaptureScope::Read).is_none());
         }
         assert!(gate.begin(host, Arc::new(|| {})).is_some());
+    }
+}
+
+#[cfg(test)]
+mod privacy_tests {
+    use super::*;
+    #[test]
+    fn classification_is_bound_to_the_live_capture_and_commit() {
+        let admission = CaptureAdmission::new(ConfigData {
+            skip_secret: false,
+            ..Default::default()
+        });
+        let host = admission.open_host(CaptureKind::Implicit).unwrap();
+        let token = admission.begin(host, Arc::new(|| {})).unwrap();
+        let secret = copypaste_ipc::ClipboardPrivacy {
+            secret: true,
+            transient: false,
+        };
+        assert!(admission.classify(token, secret));
+        assert!(admission.classify(token, Default::default()));
+        let permit = admission.acquire(token, CaptureScope::Commit).unwrap();
+        assert!(permit.privacy.secret);
+        drop(permit);
+        assert!(!admission.classify(token, secret));
+    }
+    #[test]
+    fn default_policy_rejects_marks_before_read_admission() {
+        let admission = CaptureAdmission::new(ConfigData::default());
+        let host = admission.open_host(CaptureKind::Implicit).unwrap();
+        let token = admission.begin(host, Arc::new(|| {})).unwrap();
+        assert!(!admission.classify(
+            token,
+            copypaste_ipc::ClipboardPrivacy {
+                secret: true,
+                transient: false
+            }
+        ));
+        assert!(!admission.classify(
+            token,
+            copypaste_ipc::ClipboardPrivacy {
+                secret: false,
+                transient: true
+            }
+        ));
+        admission.abandon(token);
+    }
+    #[test]
+    fn enabling_the_gate_revokes_already_classified_work() {
+        let admission = CaptureAdmission::new(ConfigData {
+            skip_secret: false,
+            ..Default::default()
+        });
+        let host = admission.open_host(CaptureKind::Implicit).unwrap();
+        let token = admission.begin(host, Arc::new(|| {})).unwrap();
+        assert!(admission.classify(
+            token,
+            copypaste_ipc::ClipboardPrivacy {
+                secret: true,
+                transient: false
+            }
+        ));
+        let transition = admission.transition().unwrap();
+        transition.publish(ConfigData::default()).unwrap();
+        drop(transition);
+        assert!(admission.acquire(token, CaptureScope::Commit).is_none());
     }
 }

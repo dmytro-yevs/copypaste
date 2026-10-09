@@ -482,10 +482,12 @@ fn capture_metadata_with(
             copypaste_core::SourceAppIconMetadata::new(&png, icon.width, icon.height)
         });
     let metadata = copypaste_core::PayloadMetadata {
+        privacy: capture.privacy,
         file: capture.file_metadata.clone(),
         source_app_icon,
     };
-    (metadata.file.is_some() || metadata.source_app_icon.is_some()).then_some(metadata)
+    (metadata.file.is_some() || metadata.source_app_icon.is_some() || !metadata.privacy.is_empty())
+        .then_some(metadata)
 }
 
 fn reject_file_input(reason: crate::clipboard::file_capture::FileReadError) {
@@ -755,6 +757,7 @@ mod tests {
 
     fn captured(content: &str, app: Option<SourceApp>) -> crate::clipboard::Capture {
         crate::clipboard::Capture {
+            privacy: Default::default(),
             content: content.to_string(),
             binary_content: None,
             file_path: None,
@@ -1062,62 +1065,70 @@ mod tests {
         drop(guard);
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn a_pre_acceptance_tick_panic_keeps_the_loop_alive_and_authority_closed() {
-        struct PanickingSource {
-            entered: Option<tokio::sync::oneshot::Sender<()>>,
-            release: std::sync::mpsc::Receiver<()>,
-            polls: Arc<AtomicUsize>,
-        }
-        impl crate::clipboard::ClipboardSource for PanickingSource {
-            fn poll(&mut self) -> Option<crate::clipboard::Capture> {
-                self.polls.fetch_add(1, Ordering::SeqCst);
-                self.entered.take().unwrap().send(()).unwrap();
-                self.release.recv().unwrap();
-                panic!("test-only source panic before acceptance");
-            }
-            fn poll_with_policy(
-                &mut self,
-                _: crate::clipboard::CapturePolicy<'_>,
-            ) -> Option<crate::clipboard::Capture> {
-                self.poll()
-            }
-            fn set_contents(&mut self, _: &str) -> anyhow::Result<()> {
-                Ok(())
-            }
-            fn backend_name(&self) -> &'static str {
-                "fake-pre-acceptance-panic"
-            }
-        }
+    #[test]
+    fn a_pre_acceptance_tick_panic_keeps_the_loop_alive_and_authority_closed() {
         let _serial = TEST_PERSIST_SERIAL
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        let polls = Arc::new(AtomicUsize::new(0));
-        let (entered, observer) = tokio::sync::oneshot::channel();
-        let (release, worker) = std::sync::mpsc::channel();
-        let (state, _dir) = crate::testutil::test_state_with_clipboard(
-            "pre-acceptance-panic",
-            Box::new(PanickingSource {
-                entered: Some(entered),
-                release: worker,
-                polls: polls.clone(),
-            }),
-        );
-        let task = tokio::spawn(run(Arc::clone(&state), state.shutdown_rx()));
-        tokio::task::yield_now().await;
-        tokio::time::advance(Duration::from_millis(state.settings.get().poll_interval_ms)).await;
-        observer
-            .await
-            .expect("ordinary tick entered source before acceptance");
-        state.request_shutdown();
-        release.send(()).expect("release pre-acceptance panic");
-        task.await
-            .expect("capture loop must not panic")
-            .expect("pre-acceptance failure remains a logged tick failure");
-        assert!(!state.capture_running());
-        assert!(matches!(tick(&state, &mut None), CaptureOutcome::NoCapture));
-        assert_eq!(polls.load(Ordering::SeqCst), 1);
-        assert_eq!(state.store.count().unwrap(), 0);
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .start_paused(true)
+            .build()
+            .unwrap()
+            .block_on(async {
+                struct PanickingSource {
+                    entered: Option<tokio::sync::oneshot::Sender<()>>,
+                    release: std::sync::mpsc::Receiver<()>,
+                    polls: Arc<AtomicUsize>,
+                }
+                impl crate::clipboard::ClipboardSource for PanickingSource {
+                    fn poll(&mut self) -> Option<crate::clipboard::Capture> {
+                        self.polls.fetch_add(1, Ordering::SeqCst);
+                        self.entered.take().unwrap().send(()).unwrap();
+                        self.release.recv().unwrap();
+                        panic!("test-only source panic before acceptance");
+                    }
+                    fn poll_with_policy(
+                        &mut self,
+                        _: crate::clipboard::CapturePolicy<'_>,
+                    ) -> Option<crate::clipboard::Capture> {
+                        self.poll()
+                    }
+                    fn set_contents(&mut self, _: &str) -> anyhow::Result<()> {
+                        Ok(())
+                    }
+                    fn backend_name(&self) -> &'static str {
+                        "fake-pre-acceptance-panic"
+                    }
+                }
+                let polls = Arc::new(AtomicUsize::new(0));
+                let (entered, observer) = tokio::sync::oneshot::channel();
+                let (release, worker) = std::sync::mpsc::channel();
+                let (state, _dir) = crate::testutil::test_state_with_clipboard(
+                    "pre-acceptance-panic",
+                    Box::new(PanickingSource {
+                        entered: Some(entered),
+                        release: worker,
+                        polls: polls.clone(),
+                    }),
+                );
+                let task = tokio::spawn(run(Arc::clone(&state), state.shutdown_rx()));
+                tokio::task::yield_now().await;
+                tokio::time::advance(Duration::from_millis(state.settings.get().poll_interval_ms))
+                    .await;
+                observer
+                    .await
+                    .expect("ordinary tick entered source before acceptance");
+                state.request_shutdown();
+                release.send(()).expect("release pre-acceptance panic");
+                task.await
+                    .expect("capture loop must not panic")
+                    .expect("pre-acceptance failure remains a logged tick failure");
+                assert!(!state.capture_running());
+                assert!(matches!(tick(&state, &mut None), CaptureOutcome::NoCapture));
+                assert_eq!(polls.load(Ordering::SeqCst), 1);
+                assert_eq!(state.store.count().unwrap(), 0);
+            });
     }
 
     #[test]
@@ -1128,6 +1139,7 @@ mod tests {
             &state,
             &state.settings.get(),
             crate::clipboard::Capture {
+                privacy: Default::default(),
                 content: String::new(),
                 binary_content: Some(bytes.clone()),
                 file_path: None,
@@ -1166,6 +1178,7 @@ mod tests {
         .unwrap();
 
         let mut capture = crate::clipboard::Capture {
+            privacy: Default::default(),
             content: String::new(),
             binary_content: None,
             file_path: Some(path),
@@ -1224,6 +1237,7 @@ mod tests {
             copypaste_core::FileMetadata::new("oversized.bin", "application/octet-stream").unwrap();
 
         let mut capture = crate::clipboard::Capture {
+            privacy: Default::default(),
             content: String::new(),
             binary_content: None,
             file_path: Some(path),
@@ -1251,6 +1265,7 @@ mod tests {
                 &state,
                 &state.settings.get(),
                 crate::clipboard::Capture {
+                    privacy: Default::default(),
                     content: content.to_string(),
                     binary_content: None,
                     file_path: None,
@@ -1394,6 +1409,7 @@ mod tests {
 
     fn deferred_file(path: &std::path::Path) -> crate::clipboard::Capture {
         crate::clipboard::Capture {
+            privacy: Default::default(),
             content: String::new(),
             binary_content: None,
             file_path: Some(path.to_owned()),

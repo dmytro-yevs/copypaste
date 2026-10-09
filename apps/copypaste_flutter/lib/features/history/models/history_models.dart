@@ -178,6 +178,8 @@ class HistoryFacets {
 /// Compact item data returned by a page query.
 class HistoryClip {
   const HistoryClip({
+    this.secret = false,
+    this.transient = false,
     required this.id,
     required this.contentType,
     required this.preview,
@@ -196,6 +198,8 @@ class HistoryClip {
     this.tooLargeToSync = false,
   });
 
+  final bool secret;
+  final bool transient;
   final String id;
   final String contentType;
   final String preview;
@@ -221,6 +225,8 @@ class HistoryClip {
       kind ?? HistoryClipKindX.fromContentType(contentType);
 
   HistoryClip copyWith({bool? pinned}) => HistoryClip(
+    secret: secret,
+    transient: transient,
     id: id,
     contentType: contentType,
     preview: preview,

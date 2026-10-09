@@ -368,6 +368,8 @@ pub(crate) fn config_patch(action: &ConfigAction) -> ConfigPatch {
     };
     ConfigPatch {
         private_mode: None,
+        skip_secret: None,
+        skip_transient: None,
         poll_interval_ms: *poll_interval_ms,
         history_limit: *history_limit,
         storage_quota_bytes: *storage_quota_bytes,
@@ -545,6 +547,8 @@ mod tests {
             config_patch(&action),
             ConfigPatch {
                 private_mode: None,
+                skip_secret: None,
+                skip_transient: None,
                 poll_interval_ms: Some(250),
                 history_limit: Some(400),
                 storage_quota_bytes: Some(52_428_800),

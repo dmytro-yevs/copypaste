@@ -34,7 +34,7 @@ pub(super) fn normalise(
             (excluded.updated_at = source_app_icons.updated_at AND excluded.png_base64 > source_app_icons.png_base64)",
         params![id, icon.png_base64, icon.width, icon.height, captured_at],
     )?;
-    let remaining = if parsed.file.is_some() {
+    let remaining = if parsed.file.is_some() || !parsed.privacy.is_empty() {
         parsed.to_json(content_type)
     } else {
         None
@@ -78,12 +78,14 @@ impl Store {
         let Some(icon) = self.source_app_icon_by_id(icon_id)? else {
             return Ok(item.payload_metadata.clone());
         };
+        let privacy = item.clipboard_privacy();
         let file = item
             .payload_metadata
             .as_deref()
             .and_then(|json| PayloadMetadata::from_json(json, &item.content_type))
             .and_then(|metadata| metadata.file);
         Ok(PayloadMetadata {
+            privacy,
             file,
             source_app_icon: Some(icon),
         }
@@ -129,6 +131,7 @@ pub(super) mod tests {
         let mut row = item(text, timestamp);
         row.app_bundle_id = app.map(str::to_owned);
         row.payload_metadata = PayloadMetadata {
+            privacy: Default::default(),
             file: None,
             source_app_icon: Some(icon()),
         }
@@ -216,6 +219,7 @@ pub(super) mod tests {
     fn synced_clips_normalise_assets_without_losing_wire_metadata() {
         let store = store();
         let metadata = PayloadMetadata {
+            privacy: Default::default(),
             file: None,
             source_app_icon: Some(icon()),
         }

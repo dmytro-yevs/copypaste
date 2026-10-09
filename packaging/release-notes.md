@@ -1,9 +1,10 @@
-This update improves shared controls and Android update downloads.
+This update adds bulk History actions and improves clipboard privacy.
 
-- Keep controls and overlays consistent across History, Devices, Settings, Quick Paste, and module setup.
-- Publish signed universal, arm64, and armv7 Android APKs with the same version code.
-- Select the matching ARM update package when available, with a signed universal fallback.
-- Verify Android ABI contents and all release artifact receipts before publication.
+- Select History clips by holding a clip or using the new selection button.
+- Delete selected clips with confirmation, or pin and unpin them together.
+- Keep confidential content behind an explicit spoiler reveal in History and Quick Paste.
+- Carry clipboard privacy metadata through capture, encrypted storage, and paired-device synchronization.
+- Apply privacy controls consistently across macOS, Android, and Windows.
 
 Optional modules remain available from Settings. OCR engines and models are not bundled with the application.
 

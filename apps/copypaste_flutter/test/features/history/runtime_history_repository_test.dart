@@ -11,6 +11,8 @@ void main() {
     'maps generated list and detail clips without duplicating the wire model',
     () {
       final generated = runtime.Clip(
+        secret: false,
+        transient: false,
         id: 'clip-1',
         content: 'The complete clip body',
         contentType: 'file',
@@ -59,6 +61,8 @@ void main() {
   test('maps original image metadata and sync refusal state', () {
     final detail = RuntimeHistoryRepository.mapDetailClip(
       runtime.Clip(
+        secret: false,
+        transient: false,
         id: 'image-1',
         content: '[image]',
         contentType: 'image/png',
@@ -101,6 +105,8 @@ void main() {
     for (final entry in expected.entries) {
       final clip = RuntimeHistoryRepository.mapListClip(
         runtime.Clip(
+          secret: false,
+          transient: false,
           id: entry.key.name,
           content: 'value',
           contentType: 'text',

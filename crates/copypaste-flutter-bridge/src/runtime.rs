@@ -174,7 +174,7 @@ fn isolated_socket_path(_data_dir: &Path) -> Result<PathBuf, RuntimeError> {
         if path.as_os_str().as_bytes().len() >= 104 {
             return Err(RuntimeError::daemon_start_failed());
         }
-        return Ok(path);
+        Ok(path)
     }
     #[cfg(not(unix))]
     {

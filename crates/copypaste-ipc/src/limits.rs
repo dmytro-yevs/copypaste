@@ -199,6 +199,7 @@ mod tests {
 
     fn item_of(content: String) -> Item {
         Item {
+            privacy: Default::default(),
             id: "8f14e45f-ceea-467a-9f6a-1a2b3c4d5e6f".into(),
             content,
             content_type: content_type::TEXT.to_string(),

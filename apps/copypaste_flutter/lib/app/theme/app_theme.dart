@@ -172,13 +172,23 @@ abstract final class AppTheme {
 
   static final AbstractButtonStyle historyToolbarIconStyle =
       const ButtonStyle.secondaryIcon().copyWith(
-        padding: (context, states, value) => EdgeInsets.all(
-          (controlHeight(context, minimum: AppControlSize.large) -
-                  AppIconSize.md) /
-              2,
-        ),
+        padding: _historyToolbarIconPadding,
         decoration: softSelectDecoration,
       );
+
+  static final AbstractButtonStyle historyToolbarDestructiveIconStyle =
+      const ButtonStyle.destructiveIcon().copyWith(
+        padding: _historyToolbarIconPadding,
+      );
+
+  static EdgeInsetsGeometry _historyToolbarIconPadding(
+    BuildContext context,
+    Set<WidgetState> states,
+    EdgeInsetsGeometry value,
+  ) => EdgeInsets.all(
+    (controlHeight(context, minimum: AppControlSize.large) - AppIconSize.md) /
+        2,
+  );
 
   static double controlHeight(
     BuildContext context, {
@@ -245,6 +255,14 @@ abstract final class AppTheme {
       borderRadius: BorderRadius.circular(AppRadius.sm),
     );
   }
+
+  static final historySectionButtonStyle = const ButtonStyle.ghost()
+      .withPadding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.xs,
+        ),
+      );
 
   static AbstractButtonStyle historyClipButtonStyle({required bool selected}) =>
       (selected ? const ButtonStyle.secondary() : const ButtonStyle.ghost())

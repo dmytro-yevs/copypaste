@@ -91,7 +91,7 @@ impl Store {
         }
         let mut conn = self.conn()?;
         let tx = write_tx(&mut conn)?;
-        let live: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM clipboard_items WHERE id = ?1 AND content_hash = ?2 AND deleted = 0)", params![work.item_id, work.content_hash], |row| row.get(0))?;
+        let live: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM clipboard_items WHERE id = ?1 AND content_hash = ?2 AND deleted = 0 AND fts_rowid IS NOT NULL)", params![work.item_id, work.content_hash], |row| row.get(0))?;
         if !live {
             return Ok(false);
         }
@@ -137,7 +137,7 @@ impl Store {
             "SELECT v.item_id, v.vector FROM module_search_vectors v \
             JOIN module_search_documents d ON d.scope = v.scope AND d.item_id = v.item_id \
             JOIN clipboard_items ci ON ci.id = d.item_id \
-            WHERE v.scope = ?1 AND ci.deleted = 0 AND ci.content_hash = d.content_hash \
+            WHERE v.scope = ?1 AND ci.deleted = 0 AND ci.fts_rowid IS NOT NULL AND ci.content_hash = d.content_hash \
             AND (ci.content_type = 'text' OR ci.content_type LIKE 'text/%')",
         )?;
         let mut rows = stmt.query([scope])?;
