@@ -26,7 +26,14 @@ def digest(path):
 
 def prepare(platform, architecture, destination, cache, ndk=None):
     metadata = json.loads((ROOT / "assets/runtime-sources.json").read_text())
-    source = metadata["sources"][platform]
+    source = dict(metadata["sources"][platform])
+    if platform == "linux":
+        release_architecture = {"x86_64": "x64", "aarch64": "aarch64"}.get(architecture)
+        if release_architecture is None:
+            raise ValueError("Linux modules ship only x86_64 and aarch64")
+        source["url"] = source["url"].format(architecture=release_architecture)
+        source["member"] = source["member"].format(architecture=release_architecture)
+        source["sha256"] = source["sha256"][architecture]
     cache.mkdir(parents=True, exist_ok=True)
     archive = cache / source["url"].rsplit("/", 1)[-1]
     if not archive.exists() or digest(archive) != source["sha256"]:
@@ -45,11 +52,12 @@ def prepare(platform, architecture, destination, cache, ndk=None):
                 staged.unlink(missing_ok=True)
     target = destination / platform / architecture
     target.mkdir(parents=True, exist_ok=True)
-    name = {"macos": "libonnxruntime.dylib", "windows": "onnxruntime.dll", "android": "libonnxruntime.so"}[platform]
+    name = {"macos": "libonnxruntime.dylib", "windows": "onnxruntime.dll", "linux": "libonnxruntime.so", "android": "libonnxruntime.so"}[platform]
     output = target / name
-    if platform == "macos":
+    if platform in {"macos", "linux"}:
         if architecture != "aarch64":
-            raise ValueError("The shipped macOS application uses aarch64")
+            if platform == "macos":
+                raise ValueError("The shipped macOS application uses aarch64")
         with tarfile.open(archive) as package:
             member = package.getmember(source["member"])
             if not member.isfile():
@@ -75,7 +83,7 @@ def prepare(platform, architecture, destination, cache, ndk=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--platform", required=True, choices=["macos", "windows", "android"])
+    parser.add_argument("--platform", required=True, choices=["macos", "windows", "linux", "android"])
     parser.add_argument("--architecture", required=True, choices=["arm", "aarch64", "x86_64"])
     parser.add_argument("--destination", type=Path, default=ROOT / "native")
     parser.add_argument("--cache", type=Path, required=True)
