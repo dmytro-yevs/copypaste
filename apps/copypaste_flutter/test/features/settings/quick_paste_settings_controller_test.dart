@@ -149,18 +149,19 @@ void main() {
   });
 
   test('Linux setup actions refresh confirmed integration state', () async {
-    final integration = _LinuxIntegration(
-      const LinuxIntegrationStatus(
-        session: LinuxDesktopSession.x11,
-        globalShortcuts: true,
-        remoteDesktop: LinuxRemoteDesktopState.consentRequired,
-        companion: LinuxCompanionState.disabled,
-        quickPaste: false,
-        screenshotProtection: false,
-      ),
-    )
-      ..remoteDesktopResult = true
-      ..companionSetupResult = true;
+    final integration =
+        _LinuxIntegration(
+            const LinuxIntegrationStatus(
+              session: LinuxDesktopSession.x11,
+              globalShortcuts: true,
+              remoteDesktop: LinuxRemoteDesktopState.consentRequired,
+              companion: LinuxCompanionState.disabled,
+              quickPaste: false,
+              screenshotProtection: false,
+            ),
+          )
+          ..remoteDesktopResult = true
+          ..companionSetupResult = true;
     final controller = QuickPasteSettingsController(
       store: MemoryQuickPastePreferencesStore(),
       registrar: _Registrar(),
