@@ -382,6 +382,7 @@ pub enum DevicePlatform {
     Windows,
     Android,
     Unknown,
+    Linux,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1227,6 +1228,7 @@ fn device_platform(platform: copypaste_ipc::DevicePlatform) -> DevicePlatform {
         copypaste_ipc::DevicePlatform::Windows => DevicePlatform::Windows,
         copypaste_ipc::DevicePlatform::Android => DevicePlatform::Android,
         copypaste_ipc::DevicePlatform::Unknown => DevicePlatform::Unknown,
+        copypaste_ipc::DevicePlatform::Linux => DevicePlatform::Linux,
     }
 }
 
@@ -1453,6 +1455,14 @@ mod tests {
         assert_eq!(
             details.presence.expect("presence").state,
             DevicePresenceState::Online
+        );
+    }
+
+    #[test]
+    fn maps_linux_device_platform() {
+        assert_eq!(
+            device_platform(copypaste_ipc::DevicePlatform::Linux),
+            DevicePlatform::Linux
         );
     }
 

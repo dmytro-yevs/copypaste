@@ -70,6 +70,8 @@ class ModuleMarketplacePlatform {
     Abi.androidArm => ('android', 'arm'),
     Abi.androidX64 => ('android', 'x86_64'),
     Abi.androidIA32 => ('android', 'x86'),
+    Abi.linuxX64 => ('linux', 'x86_64'),
+    Abi.linuxArm64 => ('linux', 'aarch64'),
     _ => throw const ModulesException(
       'Modules are unavailable on this device.',
     ),

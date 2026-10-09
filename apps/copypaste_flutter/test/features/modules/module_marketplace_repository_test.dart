@@ -32,16 +32,23 @@ void main() {
         'version': '0.1.0',
         'app_versions': '>=1.0.0, <2.0.0',
         'artifacts': [
-          for (final platform in ['macos', 'windows', 'android'])
-            for (final architecture in ['aarch64', 'x86_64', 'arm'])
-              {
-                'platform': platform,
-                'architecture': architecture,
-                'url':
-                    'https://github.com/dmytro-yevs/copypaste/releases/download/module-copypaste.ocr-v0.1.0/ocr-$platform-$architecture.cpmodule',
-                'size_bytes': 7,
-                'sha256': sha256.convert(utf8.encode('package')).toString(),
-              },
+          for (final target in const [
+            ('macos', 'aarch64'),
+            ('windows', 'x86_64'),
+            ('linux', 'x86_64'),
+            ('linux', 'aarch64'),
+            ('android', 'arm'),
+            ('android', 'aarch64'),
+            ('android', 'x86_64'),
+          ])
+            {
+              'platform': target.$1,
+              'architecture': target.$2,
+              'url':
+                  'https://github.com/dmytro-yevs/copypaste/releases/download/module-copypaste.ocr-v0.1.0/ocr-${target.$1}-${target.$2}.cpmodule',
+              'size_bytes': 7,
+              'sha256': sha256.convert(utf8.encode('package')).toString(),
+            },
         ],
       },
     ],
@@ -50,25 +57,31 @@ void main() {
   test(
     'selects exact platform, process architecture, and app compatibility',
     () {
-      for (final platform in ['macos', 'windows', 'android']) {
-        for (final architecture in ['aarch64', 'x86_64', 'arm']) {
-          final modules = const ModuleCatalogParser().parse(
-            jsonEncode(catalog()),
-            ModuleMarketplaceTarget(
-              platform: platform,
-              architecture: architecture,
-              appVersion: target.appVersion,
-            ),
-          );
-          expect(
-            modules.single.supportedPlatforms,
-            unorderedEquals(ModulePlatform.values),
-          );
-          expect(
-            modules.single.artifact!.downloadUri.path,
-            endsWith('ocr-$platform-$architecture.cpmodule'),
-          );
-        }
+      for (final artifactTarget in const [
+        ('macos', 'aarch64'),
+        ('windows', 'x86_64'),
+        ('linux', 'x86_64'),
+        ('linux', 'aarch64'),
+        ('android', 'arm'),
+        ('android', 'aarch64'),
+        ('android', 'x86_64'),
+      ]) {
+        final modules = const ModuleCatalogParser().parse(
+          jsonEncode(catalog()),
+          ModuleMarketplaceTarget(
+            platform: artifactTarget.$1,
+            architecture: artifactTarget.$2,
+            appVersion: target.appVersion,
+          ),
+        );
+        expect(
+          modules.single.supportedPlatforms,
+          unorderedEquals(ModulePlatform.values),
+        );
+        expect(
+          modules.single.artifact!.downloadUri.path,
+          endsWith('ocr-${artifactTarget.$1}-${artifactTarget.$2}.cpmodule'),
+        );
       }
       for (final version in ['0.9.0', '2.0.0']) {
         expect(
@@ -106,7 +119,7 @@ void main() {
       entry['artifacts'] = (entry['artifacts'] as List)
           .where((artifact) => artifact['platform'] == 'android')
           .toList();
-      for (final platform in ['macos', 'windows', 'android']) {
+      for (final platform in ['macos', 'windows', 'linux', 'android']) {
         for (final architecture in ['aarch64', 'x86']) {
           final module = const ModuleCatalogParser()
               .parse(
@@ -289,12 +302,14 @@ void main() {
         Abi.androidArm: ('android', 'arm'),
         Abi.androidX64: ('android', 'x86_64'),
         Abi.androidIA32: ('android', 'x86'),
+        Abi.linuxX64: ('linux', 'x86_64'),
+        Abi.linuxArm64: ('linux', 'aarch64'),
       };
       for (final entry in expected.entries) {
         expect(ModuleMarketplacePlatform.targetForAbi(entry.key), entry.value);
       }
       expect(
-        () => ModuleMarketplacePlatform.targetForAbi(Abi.linuxX64),
+        () => ModuleMarketplacePlatform.targetForAbi(Abi.fuchsiaArm64),
         throwsA(isA<ModulesException>()),
       );
     },
