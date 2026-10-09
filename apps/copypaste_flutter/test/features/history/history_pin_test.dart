@@ -122,8 +122,10 @@ void main() {
   testWidgets('keeps the drawer pin state reactive and visibly selected', (
     tester,
   ) async {
-    await tester.binding.setSurfaceSize(const Size(799, 900));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(799, 900);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final clip = HistoryClip(
       id: 'drawer-pin',
       contentType: 'text/plain',
