@@ -24,6 +24,65 @@ import 'package:image/image.dart' as raster;
 
 void main() {
   testWidgets(
+    'bulk taps select confidential clips without revealing their spoiler',
+    (tester) async {
+      final repository = _ScreenRepository()
+        ..page = HistoryClipPage(
+          items: [
+            HistoryClip(
+              id: 'bulk-secret',
+              contentType: 'text',
+              preview: 'SYNTHETIC BULK SECRET',
+              body: 'SYNTHETIC BULK SECRET',
+              secret: true,
+              createdAt: DateTime.utc(2026),
+              pinned: false,
+            ),
+          ],
+        );
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: Scaffold(child: HistoryScreen(controller: controller)),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('history-select-clips')));
+      await tester.pump();
+      final spoiler = find.byKey(const ValueKey('history-spoiler-bulk-secret'));
+      expect(
+        find.bySemanticsLabel('Confidential content. Reveal spoiler'),
+        findsNothing,
+      );
+      await tester.tapAt(tester.getCenter(spoiler));
+      await tester.pump();
+      expect(controller.bulkSelectedIds, {'bulk-secret'});
+      expect(find.text('SYNTHETIC BULK SECRET'), findsNothing);
+      expect(controller.selectedId, isNull);
+      await tester.tapAt(tester.getCenter(spoiler));
+      await tester.pump();
+      expect(controller.bulkSelectedIds, isEmpty);
+      expect(find.text('SYNTHETIC BULK SECRET'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('history-bulk-close')));
+      await tester.pump();
+      await tester.tapAt(tester.getCenter(spoiler));
+      await tester.pump();
+      await tester.pump(AppMotion.spoilerReveal);
+      expect(find.text('SYNTHETIC BULK SECRET'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
+  testWidgets(
     'bulk button selects multiple clips, pins and unpins, and confirms deletion',
     (tester) async {
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -233,7 +292,7 @@ void main() {
       expect(find.text('SYNTHETIC HISTORY SECRET'), findsNothing);
       await tester.tap(
         find.descendant(
-          of: find.byKey(const ValueKey('inspector-spoiler-secret-fixture')),
+          of: find.byKey(const ValueKey('inspector-spoiler-secret-fixture-0')),
           matching: find.byType(Button),
         ),
       );

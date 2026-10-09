@@ -159,7 +159,7 @@ impl CaptureAdmission {
         let Some(mut state) = self.try_state() else {
             return false;
         };
-        if state.closed || state.transitioning || !privacy.allows(&state.config) {
+        if state.closed || state.transitioning {
             return false;
         }
         let generation = state.generation;
@@ -689,6 +689,10 @@ mod privacy_tests {
                 transient: true
             }
         ));
+        // Ignoring the refusal cannot reopen a read/commit or remove the hint.
+        assert!(!admission.classify(token, Default::default()));
+        assert!(admission.acquire(token, CaptureScope::Read).is_none());
+        assert!(admission.acquire(token, CaptureScope::Commit).is_none());
         admission.abandon(token);
     }
     #[test]

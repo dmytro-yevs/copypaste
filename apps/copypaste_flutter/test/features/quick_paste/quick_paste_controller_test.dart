@@ -58,6 +58,27 @@ void main() {
       await tester.pump();
       expect(find.text('SYNTHETIC MENU SECRET'), findsNothing);
       expect(repository.copied, isEmpty);
+      await controller.toggleInspector();
+      await tester.pump();
+      final inspectorGeneration = controller.presentationGeneration;
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(
+            ValueKey('inspector-spoiler-secret-menu-$inspectorGeneration'),
+          ),
+          matching: find.byType(Button),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(AppMotion.spoilerReveal);
+      expect(find.text('SYNTHETIC MENU SECRET'), findsOneWidget);
+      await controller.opened(3);
+      if (!controller.inspectorOpen) {
+        await controller.toggleInspector();
+      }
+      await tester.pump();
+      expect(find.text('SYNTHETIC MENU SECRET'), findsNothing);
+      expect(repository.copied, isEmpty);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },
