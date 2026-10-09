@@ -22,6 +22,74 @@ void main() {
   });
 
   test(
+    'Shift range uses visual order and shrinks from a stable anchor',
+    () async {
+      await controller.loadMore();
+      await controller.select('one');
+      const order = ['one', 'three', 'two'];
+      controller.selectBulkClip('two', orderedIds: order, range: true);
+      expect(controller.bulkSelectedIds, {'one', 'three', 'two'});
+      expect(controller.selectedId, isNull);
+      controller.selectBulkClip('three', orderedIds: order, range: true);
+      expect(controller.bulkSelectedIds, {'one', 'three'});
+    },
+  );
+
+  test(
+    'Ctrl adds to the inspector selection and Ctrl Shift preserves other clips',
+    () async {
+      await controller.loadMore();
+      await controller.select('one');
+      const order = ['one', 'two', 'three'];
+      controller.selectBulkClip('three', orderedIds: order, additive: true);
+      expect(controller.bulkSelectedIds, {'one', 'three'});
+      controller.selectBulkClip(
+        'two',
+        orderedIds: order,
+        additive: true,
+        range: true,
+      );
+      expect(controller.bulkSelectedIds, {'one', 'two', 'three'});
+      controller.selectBulkClip('one', orderedIds: order, additive: true);
+      expect(controller.bulkSelectedIds, {'two', 'three'});
+    },
+  );
+
+  test(
+    'held range reverses without toggling clips or losing its original selection',
+    () async {
+      controller.beginBulkSelection('two');
+      expect(controller.beginBulkDragSelection('one'), isTrue);
+      expect(controller.canSuspend, isFalse);
+      await controller.loadMore();
+      const order = ['one', 'two', 'three'];
+      controller.updateBulkDragSelection('three', orderedIds: order);
+      expect(controller.bulkSelectedIds, {'one', 'two', 'three'});
+      controller.updateBulkDragSelection('one', orderedIds: order);
+      expect(controller.bulkSelectedIds, {'one', 'two'});
+      expect(await controller.deleteBulkSelection(), isFalse);
+      controller.endBulkDragSelection();
+      expect(controller.isBulkDragSelecting, isFalse);
+      expect(controller.isBulkSelecting, isTrue);
+      expect(controller.canSuspend, isTrue);
+    },
+  );
+
+  test('held selection defers live refresh until release', () async {
+    controller.beginBulkDragSelection('one');
+    final reads = repository.queryCalls;
+    repository.clips.removeWhere((clip) => clip.id == 'one');
+    repository.events.add(HistoryRuntimeEvent.itemsChanged);
+    await Future<void>.delayed(Duration.zero);
+    expect(repository.queryCalls, reads);
+    expect(controller.bulkSelectedIds, {'one'});
+    controller.endBulkDragSelection();
+    await Future<void>.delayed(Duration.zero);
+    expect(repository.queryCalls, greaterThan(reads));
+    expect(controller.bulkSelectedIds, isEmpty);
+  });
+
+  test(
     'entry clears the inspector and taps only toggle bulk membership',
     () async {
       await controller.select('one');
