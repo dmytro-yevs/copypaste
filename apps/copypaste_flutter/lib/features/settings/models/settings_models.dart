@@ -24,6 +24,8 @@ class CaptureSettingsState {
 
 class RuntimeSettings {
   const RuntimeSettings({
+    this.skipSecret = true,
+    this.skipTransient = true,
     required this.retentionDays,
     required this.storageQuotaBytes,
     required this.excludedAppIds,
@@ -35,6 +37,8 @@ class RuntimeSettings {
     required this.soundOnCopy,
   });
 
+  final bool skipSecret;
+  final bool skipTransient;
   final int retentionDays;
   final int storageQuotaBytes;
   final List<String> excludedAppIds;
@@ -48,6 +52,8 @@ class RuntimeSettings {
 
 class RuntimeSettingsChange {
   const RuntimeSettingsChange({
+    this.skipSecret,
+    this.skipTransient,
     this.retentionDays,
     this.storageQuotaBytes,
     this.excludedAppIds,
@@ -59,6 +65,8 @@ class RuntimeSettingsChange {
     this.soundOnCopy,
   });
 
+  final bool? skipSecret;
+  final bool? skipTransient;
   final int? retentionDays;
   final int? storageQuotaBytes;
   final List<String>? excludedAppIds;

@@ -57,6 +57,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _clipboardSectionKey = GlobalKey();
   final _modulesSectionKey = GlobalKey();
   final _privacySectionKey = GlobalKey();
+  final _skipSecretKey = GlobalKey();
+  final _skipTransientKey = GlobalKey();
   final _blockScreenshotsKey = GlobalKey();
   final _dataSectionKey = GlobalKey();
   final _syncSectionKey = GlobalKey();
@@ -574,6 +576,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
         targetKey: _notificationPreviewKey,
       ),
       _SettingsNavigationTarget(
+        id: _SettingsTargetId.skipSecret,
+        section: SettingsSectionId.privacy,
+        label: 'Skip confidential clipboard',
+        description: 'Keep producer-marked secrets out of History.',
+        keywords: 'secret password sensitive concealed spoiler',
+        targetKey: _skipSecretKey,
+      ),
+      _SettingsNavigationTarget(
+        id: _SettingsTargetId.skipTransient,
+        section: SettingsSectionId.privacy,
+        label: 'Skip temporary clipboard',
+        description: 'Keep producer-marked temporary copies out of History.',
+        keywords: 'transient temporary privacy',
+        targetKey: _skipTransientKey,
+      ),
+      _SettingsNavigationTarget(
         id: _SettingsTargetId.blockScreenshots,
         section: SettingsSectionId.privacy,
         label: 'Block screenshots',
@@ -1010,11 +1028,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
         _SettingRow(
+          key: _skipSecretKey,
+          highlighted: _isHighlighted(_SettingsTargetId.skipSecret),
+          title: 'Skip confidential clipboard',
+          description: 'Keep producer-marked secrets out of History.',
+          trailing: Switch(
+            key: const ValueKey('skip-secret-switch'),
+            value: settings.skipSecret,
+            enabled: !widget.controller.busy,
+            onChanged: widget.controller.busy
+                ? null
+                : widget.controller.setSkipSecret,
+          ),
+        ),
+        _SettingRow(
+          key: _skipTransientKey,
+          highlighted: _isHighlighted(_SettingsTargetId.skipTransient),
+          title: 'Skip temporary clipboard',
+          description: 'Keep producer-marked temporary copies out of History.',
+          trailing: Switch(
+            key: const ValueKey('skip-transient-switch'),
+            value: settings.skipTransient,
+            enabled: !widget.controller.busy,
+            onChanged: widget.controller.busy
+                ? null
+                : widget.controller.setSkipTransient,
+          ),
+        ),
+        _SettingRow(
           key: _blockScreenshotsKey,
           highlighted: _isHighlighted(_SettingsTargetId.blockScreenshots),
           title: 'Block screenshots',
           description: 'Prevent screenshots and screen recording of CopyPaste.',
           trailing: Switch(
+            key: const ValueKey('block-screenshots-switch'),
             value: widget.controller.blockScreenshots,
             enabled: !widget.controller.busy,
             onChanged: widget.controller.busy
@@ -1675,6 +1722,8 @@ class _SettingsNavigationTarget {
 }
 
 abstract final class _SettingsTargetId {
+  static const String skipSecret = 'result-skip-secret';
+  static const String skipTransient = 'result-skip-transient';
   static const String blockScreenshots = 'result-block-screenshots';
   static const String androidBackgroundCapture =
       'result-android-background-capture';
