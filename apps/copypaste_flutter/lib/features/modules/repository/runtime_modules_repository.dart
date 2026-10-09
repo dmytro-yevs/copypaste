@@ -17,6 +17,11 @@ class RuntimeModulesRepository implements ModulesRepository {
           version: module['version'] as String,
           enabled: module['enabled'] as bool,
           sizeBytes: module['size_bytes'] as int,
+          supportedPlatforms: List.unmodifiable(
+            (module['supported_platforms'] as List<dynamic>? ?? const [])
+                .cast<String>()
+                .map(ModulePlatform.values.byName),
+          ),
           searchLanguageField: module['search_language_field'] as String?,
           searchModels: List.unmodifiable(
             (module['search_models'] as List<dynamic>? ?? const []).map((

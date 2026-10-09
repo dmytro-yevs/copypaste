@@ -230,7 +230,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
                     controller.rescanInFlight || controller.actionInFlight
                     ? null
                     : controller.rescan,
-                leading: const Icon(LucideIcons.scanLine),
+                leading: const Icon(LucideIcons.radar),
                 child: Text(controller.rescanInFlight ? 'Scanning…' : 'Scan'),
               ),
             ],
@@ -304,7 +304,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     try {
       final drawer = _pairingDrawer = showOverlay<void>(
         context,
-        AppOverlays.bottomDrawerConfiguration,
+        AppOverlays.drawerConfiguration(context),
         builder: (context) => ButtonStyleOverride(
           decoration: AppTheme.actionButtonDecoration,
           child: ConstrainedBox(
@@ -377,7 +377,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     try {
       final drawer = _deviceDrawer = showOverlay<void>(
         context,
-        AppOverlays.bottomDrawerConfiguration,
+        AppOverlays.drawerConfiguration(context),
         builder: (context) => ButtonStyleOverride(
           decoration: AppTheme.actionButtonDecoration,
           child: ConstrainedBox(
@@ -1040,7 +1040,7 @@ class _PairingInspector extends StatefulWidget {
 }
 
 class _PairingInspectorState extends State<_PairingInspector> {
-  static const int _pairingCodeLength = 52;
+  static const int _pairingCodeLength = 8;
 
   late final TextEditingController _addressController = TextEditingController(
     text: widget.controller.pendingAddress,
@@ -1133,7 +1133,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
         const Text('Pairing code').semiBold(),
         const Gap(AppSpacing.xs),
         const Text(
-          'Enter the 52-character code shown on the other device.',
+          'Enter the 8-character code shown on the other device.',
         ).muted(),
         const Gap(AppSpacing.md),
         Semantics(
@@ -1295,7 +1295,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
     if (_pairingCode.length != _pairingCodeLength || address.isEmpty) {
       setState(() {
         _validationMessage = _pairingCode.length != _pairingCodeLength
-            ? 'Enter the complete 52-character pairing code.'
+            ? 'Enter the complete 8-character pairing code.'
             : 'Enter the device host:port address.';
       });
       return;
@@ -1366,6 +1366,13 @@ class _PairingInspectorState extends State<_PairingInspector> {
             ),
           ),
           const Gap(AppSpacing.lg),
+          const Divider(key: ValueKey('pairing-invite-divider')),
+          const Gap(AppSpacing.lg),
+          const AppBar(
+            title: Text('Pairing details'),
+            leading: [Icon(LucideIcons.info)],
+          ),
+          const Gap(AppSpacing.md),
           InspectorTable(
             tableKey: const ValueKey<String>('pairing-invite-details'),
             rows: [

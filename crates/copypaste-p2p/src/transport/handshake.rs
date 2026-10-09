@@ -17,10 +17,10 @@
 //! * **Forward secrecy.** The `ee` DH in message two means a token disclosed
 //!   later does not decrypt traffic captured earlier.
 //!
-//! `NNpsk0` is *not* a PAKE and does not need to be: a PAKE protects a
-//! low-entropy human secret from an offline dictionary attack, and our token is
-//! 256 bits from the OS CSPRNG, so the dictionary does not exist (port manifest
-//! 02 §6.3).
+//! Stored tokens are 256 bits from the OS CSPRNG. Eight-symbol invitation codes
+//! instead authenticate a SPAKE2 exchange in `pairing_bootstrap`; its shared key
+//! keys Noise for channel confirmation and encrypted transfer of the full token.
+//! A short code is never expanded into a stored PSK or used directly by Noise.
 //!
 //! # A handshake cannot pin a task
 //!
@@ -128,11 +128,24 @@ impl Session {
         stream: TcpStream,
         candidates: &[PskCandidate],
     ) -> Result<(Self, String), TransportError> {
+        Self::accept_with_pairing(stream, candidates, None).await
+    }
+
+    pub(crate) async fn accept_with_pairing(
+        stream: TcpStream,
+        candidates: &[PskCandidate],
+        invitation: Option<&super::PairingCandidate>,
+    ) -> Result<(Self, String), TransportError> {
         let peer_addr = stream.peer_addr().map_err(TransportError::Io)?;
         let _ = stream.set_nodelay(true);
         timeout(HANDSHAKE_TIMEOUT, async move {
             let mut framed = Framed::new(stream, codec());
             let first = next_handshake_frame(&mut framed).await?;
+            if first.starts_with(super::pairing_bootstrap::PREFIX) {
+                let invitation = invitation.ok_or(TransportError::Handshake)?;
+                return super::pairing_bootstrap::accept(framed, &first, invitation, peer_addr)
+                    .await;
+            }
             let mut buf = Zeroizing::new(vec![0u8; MAX_NOISE_MESSAGE]);
 
             for candidate in candidates {
@@ -182,7 +195,15 @@ impl Session {
         initiator: bool,
         peer_addr: SocketAddr,
     ) -> Result<Self, TransportError> {
-        let mut framed = Framed::new(stream, codec());
+        Self::handshake_framed(Framed::new(stream, codec()), psk, initiator, peer_addr).await
+    }
+
+    pub(super) async fn handshake_framed(
+        mut framed: Framed<TcpStream, LengthDelimitedCodec>,
+        psk: &[u8; TOKEN_LEN],
+        initiator: bool,
+        peer_addr: SocketAddr,
+    ) -> Result<Self, TransportError> {
         let builder = Builder::new(noise_params()?)
             .psk(0, psk)
             .map_err(|_| TransportError::Handshake)?;
@@ -248,7 +269,7 @@ pub(super) fn noise_params() -> Result<NoiseParams, TransportError> {
 
 /// Read one frame during the handshake. A clean close here is not a clean
 /// close — it means the peer gave up, which is a handshake failure.
-async fn next_handshake_frame(
+pub(super) async fn next_handshake_frame(
     framed: &mut Framed<TcpStream, LengthDelimitedCodec>,
 ) -> Result<tokio_util::bytes::BytesMut, TransportError> {
     match framed.next().await {

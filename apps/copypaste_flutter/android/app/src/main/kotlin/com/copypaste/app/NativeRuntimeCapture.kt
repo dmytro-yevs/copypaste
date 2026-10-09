@@ -26,6 +26,9 @@ internal object NativeRuntimeCapture {
         contentType: String,
         filename: String,
         sourceReference: String,
+        sourcePackageName: String,
+        sourceName: String,
+        sourceIcon: ByteArray,
     ): Boolean
     @JvmStatic external fun implicitCaptureAllowed(): Boolean
     @JvmStatic external fun setCaptureRunning(running: Boolean)

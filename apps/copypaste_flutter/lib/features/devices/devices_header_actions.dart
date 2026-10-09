@@ -43,9 +43,7 @@ class DevicesHeaderActions extends StatelessWidget {
         onPressed: controller.canChangePairingMode
             ? controller.openInvitation
             : null,
-        leading: Icon(
-          DevicePresentation.pairingEntryIcon(PairingEntryMode.invite),
-        ),
+        leading: const Icon(LucideIcons.plus),
         child: const Text('Pair device'),
       ),
       Button.secondary(
@@ -77,7 +75,7 @@ class DevicesHeaderActions extends StatelessWidget {
         context: context,
         key: const ValueKey<String>('pair-device'),
         label: 'Pair device',
-        icon: DevicePresentation.pairingEntryIcon(PairingEntryMode.invite),
+        icon: LucideIcons.plus,
         primary: true,
         onPressed: controller.canChangePairingMode
             ? controller.openInvitation
