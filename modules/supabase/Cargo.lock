@@ -213,11 +213,11 @@ dependencies = [
 
 [[package]]
 name = "copypaste-clock"
-version = "1.0.17"
+version = "1.0.18"
 
 [[package]]
 name = "copypaste-cloud"
-version = "1.0.17"
+version = "1.0.18"
 dependencies = [
  "argon2",
  "backon",
@@ -247,7 +247,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-ipc"
-version = "1.0.17"
+version = "1.0.18"
 dependencies = [
  "copypaste-module-sdk",
  "directories",
@@ -292,7 +292,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-payload"
-version = "1.0.17"
+version = "1.0.18"
 dependencies = [
  "base64 0.22.1",
  "copypaste-ipc",
@@ -303,14 +303,14 @@ dependencies = [
 
 [[package]]
 name = "copypaste-retry"
-version = "1.0.17"
+version = "1.0.18"
 dependencies = [
  "backon",
 ]
 
 [[package]]
 name = "copypaste-sync"
-version = "1.0.17"
+version = "1.0.18"
 dependencies = [
  "base64 0.22.1",
  "copypaste-ipc",
