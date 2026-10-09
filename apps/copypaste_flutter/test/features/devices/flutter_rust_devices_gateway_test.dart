@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:copypaste_flutter/features/devices/device_presentation.dart';
 import 'package:copypaste_flutter/features/devices/devices_gateway.dart';
 import 'package:copypaste_flutter/features/devices/flutter_rust_devices_gateway.dart';
 import 'package:copypaste_flutter/generated/api.dart' as frb;
@@ -54,6 +55,18 @@ void main() {
       );
     },
   );
+
+  test('maps Linux profiles from the generated platform contract', () async {
+    api.thisDevicePlatform = frb.DevicePlatform.linux;
+
+    final snapshot = await gateway.load();
+
+    expect(
+      snapshot.thisDevice.details!.profile!.platform,
+      DevicePlatform.linux,
+    );
+    expect(DevicePresentation.platformLabel(DevicePlatform.linux), 'Linux');
+  });
 
   test(
     'routes unpair and permanent revoke to separate generated actions',
@@ -198,6 +211,7 @@ class _FakeGeneratedDevicesApi implements GeneratedDevicesApi {
       StreamController<frb.RuntimeEvent>.broadcast();
   int _nextWatchId = 1;
   List<frb.SyncOutcome> syncOutcomes = const [];
+  frb.DevicePlatform thisDevicePlatform = frb.DevicePlatform.macos;
 
   @override
   Future<List<frb.DiscoveredDevice>> listDiscoveredDevices() async => [
@@ -331,7 +345,7 @@ class _FakeGeneratedDevicesApi implements GeneratedDevicesApi {
     name: 'Desktop',
     appVersion: '1.2.3',
     protocolVersion: 7,
-    details: _details(platform: frb.DevicePlatform.macos),
+    details: _details(platform: thisDevicePlatform),
   );
 
   @override
