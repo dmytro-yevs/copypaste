@@ -92,8 +92,8 @@ classification, is carried with the synchronized version.
 
 Cloud synchronization is provided by an optional signed Supabase module. Content
 is encrypted client-side under a passphrase-derived key. Metadata used for merge
-ordering is authenticated; the backend still observes account and traffic
-metadata. Credentials and derived sync keys use application-owned encrypted
+ordering is authenticated; the backend observes account, traffic, and synchronized
+metadata, including producer privacy classification. Credentials and derived sync keys use application-owned encrypted
 state, not plaintext preference files. Never infer deployed row-level security
 from repository SQL or local stubs: the actual deployment requires separate
 qualification. See [cloud privacy](docs/cloud-privacy.md).
