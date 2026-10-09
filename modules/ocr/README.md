@@ -6,7 +6,10 @@ The base application has no OCR model or ONNX Runtime dependency.
 
 ## Package preparation
 
-The catalog declares macOS 14+, Windows 10+, Linux with glibc 2.35+, and Android 7+ for this runtime.
+The catalog declares macOS 14+, Windows 10+, and Android 7+ for this runtime.
+Linux compatibility is proved by the signed native packages; the marketplace does not
+claim a distribution version because its current system-version field cannot represent
+the runtime's glibc ABI floor.
 CopyPaste 1.0.6+ displays these requirements and keeps incompatible modules
 visible with installation disabled. The **Build and publish OCR module**
 workflow prepares all seven shipped packages, signs them, performs native

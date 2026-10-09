@@ -5,9 +5,14 @@ import json
 from pathlib import Path
 import platform
 import os
+import re
+import shutil
 import subprocess
 import tempfile
 import uuid
+import zipfile
+
+from catalog import read_package
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -19,6 +24,39 @@ def native_run(arguments):
         print(result.stderr)
         raise RuntimeError("The production-signed package failed native qualification")
     return result
+
+
+def host_target(platform_name, machine):
+    architectures = {
+        "macos": {"arm64": "aarch64", "aarch64": "aarch64"},
+        "windows": {"AMD64": "x86_64", "x86_64": "x86_64"},
+        "linux": {"x86_64": "x86_64", "aarch64": "aarch64"},
+    }
+    try:
+        return {"platform": platform_name, "architecture": architectures[platform_name][machine]}
+    except KeyError as error:
+        raise ValueError("Native package qualification requires the exact shipped desktop target") from error
+
+
+def linux_glibc_floor(package):
+    versions = []
+    with zipfile.ZipFile(package) as archive, tempfile.TemporaryDirectory(prefix="module-glibc-") as directory:
+        directory = Path(directory)
+        libraries = [name for name in archive.namelist() if name.endswith(".so")]
+        if not libraries:
+            raise ValueError("Linux package has no shared libraries to inspect")
+        for index, name in enumerate(libraries):
+            library = directory / f"library-{index}.so"
+            library.write_bytes(archive.read(name))
+            readelf = shutil.which("readelf")
+            command = [readelf, "--version-info", str(library)] if readelf else ["strings", str(library)]
+            result = subprocess.run(command, check=True, capture_output=True, text=True)
+            for value in re.findall(r"GLIBC_([0-9]+(?:\.[0-9]+){1,2})", result.stdout):
+                parts = tuple(map(int, value.split(".")))
+                versions.append(parts + (0,) * (3 - len(parts)))
+    if not versions:
+        raise ValueError("Linux package shared libraries do not declare a glibc ABI floor")
+    return ".".join(map(str, max(versions)))
 
 
 def main():
@@ -33,13 +71,13 @@ def main():
     parser.add_argument("--fixtures", type=Path, default=ROOT / "scripts/modules/fixtures")
     args = parser.parse_args()
     expected_system = {"macos": "Darwin", "windows": "Windows", "linux": "Linux"}[args.platform]
-    expected_architecture = {
-        "macos": {"arm64", "aarch64"},
-        "windows": {"AMD64", "x86_64"},
-        "linux": {"x86_64", "aarch64"},
-    }
-    if platform.system() != expected_system or platform.machine() not in expected_architecture[args.platform]:
+    if platform.system() != expected_system:
         raise ValueError("Native package qualification requires the exact shipped desktop target")
+    expected_target = host_target(args.platform, platform.machine())
+    package_target = read_package(args.package).manifest["target"]
+    if package_target != expected_target:
+        raise ValueError("Native package target does not match the qualification host")
+    glibc_floor = linux_glibc_floor(args.package) if args.platform == "linux" else None
     prefix = []
     if args.platform == "macos":
         prefix = ["/usr/bin/sandbox-exec", "-p", "(version 1)(allow default)(deny network*)"]
@@ -66,7 +104,8 @@ def main():
                 args.commit, args.run_id,
             ])
             receipt = json.loads(result.stdout)
-            if receipt["cases_passed"] != 3 or not receipt["signature_verified"]:
+            if (receipt["target"] != expected_target or receipt["cases_passed"] != 3
+                    or not receipt["signature_verified"]):
                 raise ValueError("Desktop package qualification is incomplete")
             result = native_run([
                 *prefix, str(args.program.resolve()), "--finish-removal", data, args.app_version,
@@ -77,6 +116,7 @@ def main():
                 "removal_completed_after_restart": True,
                 "environment": "github-native-" + args.platform,
                 "system_version": platform.platform(),
+                **({"glibc_floor": glibc_floor} if glibc_floor else {}),
             })
             args.receipt.write_text(json.dumps(receipt), encoding="utf-8")
     finally:
