@@ -8,6 +8,8 @@
 #include <X11/Xlib.h>
 #include <X11/extensions/XTest.h>
 
+#include <linux/input-event-codes.h>
+
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
@@ -28,8 +30,18 @@ int record_grab_error(Display*, XErrorEvent* event) {
 int evdev_keycode(guint usage) {
   static constexpr int kLetters[] = {30, 48, 46, 32, 18, 33, 34, 35, 23, 36, 37, 38, 50, 49, 24, 25, 16, 19, 31, 20, 22, 47, 17, 45, 21, 44};
   static constexpr int kDigits[] = {2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+  static constexpr int kFunctionKeys[] = {
+      KEY_F1,  KEY_F2,  KEY_F3,  KEY_F4,  KEY_F5,  KEY_F6,
+      KEY_F7,  KEY_F8,  KEY_F9,  KEY_F10, KEY_F11, KEY_F12,
+      KEY_F13, KEY_F14, KEY_F15, KEY_F16, KEY_F17, KEY_F18,
+      KEY_F19, KEY_F20, KEY_F21, KEY_F22, KEY_F23, KEY_F24,
+  };
   if (usage >= 0x04 && usage <= 0x1d) return kLetters[usage - 0x04];
   if (usage >= 0x1e && usage <= 0x27) return kDigits[usage - 0x1e];
+  if (usage >= 0x3a && usage <= 0x45) return kFunctionKeys[usage - 0x3a];
+  if (usage >= 0x68 && usage <= 0x73) {
+    return kFunctionKeys[12 + usage - 0x68];
+  }
   switch (usage) { case 0x28: return 28; case 0x29: return 1; case 0x2a: return 14; case 0x2b: return 15; case 0x2c: return 57; case 0x2d: return 12; case 0x2e: return 13; case 0x2f: return 26; case 0x30: return 27; case 0x31: return 43; case 0x33: return 39; case 0x34: return 40; case 0x35: return 41; case 0x36: return 51; case 0x37: return 52; case 0x38: return 53; case 0x49: return 110; case 0x4a: return 102; case 0x4b: return 104; case 0x4c: return 107; case 0x4d: return 109; case 0x4e: return 105; case 0x4f: return 106; case 0x50: return 103; case 0x51: return 108; case 0x52: return 111; default: return 0; }
 }
 

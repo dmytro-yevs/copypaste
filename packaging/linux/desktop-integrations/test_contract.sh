@@ -56,9 +56,19 @@ if rg -F "registerShortcut(" "$kde/contents/code/main.js"; then
   exit 1
 fi
 if rg -F "addKeybinding(" "$gnome/extension.js"; then
-  echo "GNOME must use the GlobalShortcuts portal binding." >&2
+  echo "GNOME must not use an extension-local keybinding setting." >&2
   exit 1
 fi
+shortcut_bridge="$gnome/shortcut_bridge.js"
+rg -F "app.copypaste.GnomeShortcuts" "$shortcut_bridge" >/dev/null
+rg -F "/app/copypaste/GnomeShortcuts" "$shortcut_bridge" >/dev/null
+rg -F "global.display.grab_accelerator" "$shortcut_bridge" >/dev/null
+rg -F "global.display.ungrab_accelerator" "$shortcut_bridge" >/dev/null
+rg -F "Meta.external_binding_name_for_action" "$shortcut_bridge" >/dev/null
+rg -F "Main.wm.allowKeybinding" "$shortcut_bridge" >/dev/null
+rg -F "Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW" "$shortcut_bridge" >/dev/null
+rg -F "<signal name=\"Activated\"" "$shortcut_bridge" >/dev/null
+rg -F "new ShortcutBridge" "$gnome/extension.js" >/dev/null
 
 if rg -i 'clipboard|primary selection|window title|\.get_title\(' \
   "$kde/contents/code/main.js"; then
