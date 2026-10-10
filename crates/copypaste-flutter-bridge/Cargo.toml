@@ -12,6 +12,7 @@ crate-type = ["cdylib", "staticlib"]
 copypaste-ipc = { path = "../copypaste-ipc" }
 copypaste-core = { path = "../copypaste-core" }
 copypaste-runtime = { path = "../copypaste-runtime" }
+copypaste-modules = { path = "../copypaste-modules" }
 copypaste-p2p = { path = "../copypaste-p2p" }
 flutter_rust_bridge = "=2.13.0-beta.5"
 futures-util.workspace = true

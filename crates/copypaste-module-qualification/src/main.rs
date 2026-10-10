@@ -1,6 +1,20 @@
 use std::path::Path;
 
 fn main() {
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|arg| arg == "--inference-worker")
+    {
+        if copypaste_modules::run_inference_worker(
+            std::io::stdin().lock(),
+            std::io::stdout().lock(),
+        )
+        .is_err()
+        {
+            std::process::exit(1);
+        }
+        return;
+    }
     let arguments: Vec<String> = std::env::args().collect();
     let result = if arguments.len() == 4 && arguments[1] == "--finish-removal" {
         copypaste_module_qualification::finish_after_restart(
