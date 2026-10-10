@@ -10,6 +10,8 @@ case "$family" in 6.0|6.3|all) ;; *) echo "ERROR: use KWin bridge version 6.0, 6
 [[ -z "$runtime_output" || "$family" != all ]] || { echo "ERROR: runtime export requires one KWin family" >&2; exit 1; }
 
 root="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+linux_root="$(CDPATH='' cd -- "$root/../.." && pwd)"
+container_root="/workspace/linux/desktop-integrations/kde-native-clipboard"
 engine="${COPYPASTE_CONTAINER_ENGINE:-docker}"
 
 prepare_runtime_output() {
@@ -42,11 +44,11 @@ build_one() {
   "$engine" build --platform "$platform" --build-arg "KWIN_FAMILY=$selected" \
     --file "$root/Dockerfile.fedora40-build" --tag "$tag" "$root"
   if [[ -n "$runtime_output" ]]; then
-    "$engine" run --rm --platform "$platform" --volume "$root:/workspace:ro" --volume "$runtime_output:/output" "$tag" \
-      bash /workspace/verify-build.sh "$selected" /output
+    "$engine" run --rm --platform "$platform" --volume "$linux_root:/workspace/linux:ro" --volume "$runtime_output:/output" "$tag" \
+      bash "$container_root/verify-build.sh" "$selected" /output
   else
-    "$engine" run --rm --platform "$platform" --volume "$root:/workspace:ro" "$tag" \
-      bash /workspace/verify-build.sh "$selected"
+    "$engine" run --rm --platform "$platform" --volume "$linux_root:/workspace/linux:ro" "$tag" \
+      bash "$container_root/verify-build.sh" "$selected"
   fi
 }
 

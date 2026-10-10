@@ -156,6 +156,10 @@ rg -F 'dnf config-manager --set-disabled updates updates-source' "$root/Dockerfi
 rg -F '6.3)' "$root/Dockerfile.fedora40-build" >/dev/null
 rg -F 'dnf config-manager --set-enabled fedora-source updates-source' "$root/Dockerfile.fedora40-build" >/dev/null
 rg -F -- '--build-arg "KWIN_FAMILY=$selected"' "$root/run-fedora-build.sh" >/dev/null
+rg -F 'linux_root="$(CDPATH=' "$root/run-fedora-build.sh" >/dev/null
+rg -F 'container_root="/workspace/linux/desktop-integrations/kde-native-clipboard"' "$root/run-fedora-build.sh" >/dev/null
+rg -F '"$linux_root:/workspace/linux:ro"' "$root/run-fedora-build.sh" >/dev/null
+rg -F 'bash "$container_root/verify-build.sh"' "$root/run-fedora-build.sh" >/dev/null
 rg -F 'prepare_runtime_output()' "$root/run-fedora-build.sh" >/dev/null
 rg -F 'runtime output must be empty' "$root/run-fedora-build.sh" >/dev/null
 rg -F 'runtime output must be an ordinary mounted directory' "$root/verify-build.sh" >/dev/null
@@ -170,14 +174,25 @@ set -euo pipefail
 printf '%s\n' "$1" >> "$COPYPASTE_FAKE_ENGINE_LOG"
 if [[ "$1" == run ]]; then
   output=""
+  source_tree=""
+  command=""
   previous=""
   for argument in "$@"; do
     if [[ "$previous" == --volume && "$argument" == *:/output ]]; then
       output="${argument%:/output}"
     fi
+    if [[ "$previous" == --volume && "$argument" == *:/workspace/linux:ro ]]; then
+      source_tree="${argument%:/workspace/linux:ro}"
+    fi
     previous="$argument"
   done
-  [[ -d "$output" && -z "$(find "$output" -mindepth 1 -maxdepth 1 -print -quit)" ]]
+  for argument in "$@"; do
+    [[ "$command" == bash ]] && command="$argument" && break
+    [[ "$argument" == bash ]] && command=bash
+  done
+  [[ -d "$output" && -d "$source_tree/compositor-runtime" && \
+    "$command" == /workspace/linux/desktop-integrations/kde-native-clipboard/verify-build.sh && \
+    -z "$(find "$output" -mindepth 1 -maxdepth 1 -print -quit)" ]]
 fi
 EOF
 chmod +x "$fake_engine"
