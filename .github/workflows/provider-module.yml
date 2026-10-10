@@ -33,7 +33,9 @@ jobs:
           printf 'runner=%s\narch=%s\n' "$(uname -srvmo)" "$(uname -m)" | tee "$evidence/environment.txt"
 
           build_variant() {
-            local name="$1" mode="$2" directory="$RUNNER_TEMP/qt-wire-$name"
+            local name="$1"
+            local mode="$2"
+            local directory="$RUNNER_TEMP/qt-wire-$name"
             phase "build-$name"
             rm -rf "$directory"
             mkdir -p "$directory"
@@ -174,7 +176,8 @@ jobs:
           cmake --build "$split/build" --parallel 2 >"$evidence/split-build.log" 2>&1
 
           run_split() {
-            local mode="$1" address="$RUNNER_TEMP/qt-wire-$mode.address"
+            local mode="$1"
+            local address="$RUNNER_TEMP/qt-wire-$mode.address"
             rm -f "$address"
             phase "run-split-$mode-server"
             timeout --signal=TERM --kill-after=2s 20s strace -ff -tt -s 256 -o "$evidence/split-$mode-server.strace" "$split/build/copypaste-qt-wire-server" "$address" >"$evidence/split-$mode-server.log" 2>&1 &
