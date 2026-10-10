@@ -35,8 +35,8 @@ impl Fixture {
         let entry = format!("bin/module.{extension}");
         let hash = hex::encode(Sha256::digest(b"fixture"));
         let manifest = serde_json::json!({
-            "schema_version":3,"api_version":1,"id":"copypaste.fixture-search","title":"Fixture","description":"Test embeddings.","version":"0.1.0","app_versions":">=1.0.0, <2.0.0",
-            "supported_platforms":["macos","android","windows"],"target":target,"entrypoint":entry,"unload_policy":"process",
+            "schema_version":5,"api_version":1,"id":"copypaste.fixture-search","title":"Fixture","description":"Test embeddings.","version":"0.1.0","app_versions":">=1.0.0, <2.0.0",
+            "supported_platforms":["macos","android","windows","linux"],"target":target,"entrypoint":entry,"unload_policy":"process",
             "files":[{"path":entry,"sha256":hash,"size_bytes":7}],
             "commands":[{"id":"embed","title":"Embed","description":"Fixture.","arguments":[
                 {"id":"text","title":"Text","kind":"text","default":"","required":true},
