@@ -260,7 +260,17 @@ def source_rpm_license_files(owner: tuple[str, str, str, str], destination: Path
     source_dir = destination / source_rpm
     if not source_dir.exists():
         source_dir.mkdir(parents=True)
-        run(["dnf", "-q", "download", "--source", "--destdir", str(source_dir), source_rpm])
+        attempts = [source_rpm, source_rpm.removesuffix(".src.rpm")]
+        errors = []
+        for request in dict.fromkeys(attempts):
+            command = ["dnf", "-q", "download", "--source", "--destdir", str(source_dir), request]
+            completed = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+            if completed.returncode == 0:
+                break
+            errors.append({"request": request, "exit": completed.returncode, "output": completed.stdout[:512].replace("\n", " ")})
+        else:
+            detail = "; ".join(f"request={item['request']} exit={item['exit']} output={item['output']!r}" for item in errors)
+            raise ClosureError(f"exact source RPM download failed for {name}: {detail}")
     archives = [path for path in source_dir.iterdir() if path.is_file() and path.name == source_rpm]
     if len(archives) != 1:
         raise ClosureError(f"exact source RPM is unavailable for {name}")
