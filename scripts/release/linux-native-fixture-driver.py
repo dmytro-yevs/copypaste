@@ -673,12 +673,17 @@ def cli_item_count(status):
 def wait_for_count(cli, environment, minimum):
     deadline = time.monotonic() + CAPTURE_TIMEOUT_SECONDS
     observed = None
+    observed_status = None
     while time.monotonic() < deadline:
-        observed = cli_item_count(status(cli, environment))
+        observed_status = status(cli, environment)
+        observed = cli_item_count(observed_status)
         if observed >= minimum:
             return observed
         time.sleep(0.15)
-    raise RuntimeError(f"clipboard history count did not reach at least {minimum}; saw {observed}")
+    raise RuntimeError(
+        f"clipboard history count did not reach at least {minimum}; saw {observed}; "
+        f"status={json.dumps(observed_status, sort_keys=True, separators=(',', ':'))}"
+    )
 
 
 def newest_item(items, before_ids, content_type):
