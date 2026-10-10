@@ -16,6 +16,7 @@ import tempfile
 import time
 import socket
 import stat
+import importlib.util
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -23,9 +24,20 @@ from urllib.parse import unquote, urlparse
 
 PROVIDER = Path(__file__).with_name("linux-clipboard-provider.py")
 X11_INPUT_TARGET = Path(__file__).with_name("linux-x11-input-target.c")
+MODULE_QUALIFICATION = Path(__file__).with_name("linux-module-qualification.py")
 SOURCE_APPLICATION_ID = "org.copypaste.QualificationSource"
 SOURCE_APPLICATION_NAME = "CopyPaste Qualification Source"
 CAPTURE_TIMEOUT_SECONDS = 8
+PROC_ROOT = Path("/proc")
+
+
+def module_qualification_helper():
+    spec = importlib.util.spec_from_file_location("linux_module_qualification", MODULE_QUALIFICATION)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Linux module qualification helper is unavailable")
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    return helper
 
 
 def run(argv, *, input_bytes=None, env=None, timeout=15):
@@ -379,36 +391,54 @@ def require_x11_quick_paste(cli, environment, workspace):
         emit_result("native_x11_keyboard_input", restored)
 
 
-def require_modules(socket_path, artifacts, architecture):
-    """Inspect the live inventory and require an exact native module package.
+def require_modules(socket_path, artifacts, fixtures, application_data, architecture, app_version, evidence_dir, restart):
+    """Exercise every signed module through the GUI-owned daemon lifecycle."""
+    def emit(record):
+        print("COPYPASTE_QUALIFICATION_IPC " + json.dumps(record, separators=(",", ":")))
 
-    An inventory is not module lifecycle evidence. The modules assertion is
-    emitted only after a signed, target-matched staged package has completed
-    install, invocation, disable, removal, and restart checks.
-    """
-    response = ipc(socket_path, "modules", {"operation": "list"})
-    modules = response.get("data", {}).get("modules")
-    if not isinstance(modules, dict) or not isinstance(modules.get("json"), str):
-        raise RuntimeError("GUI-owned daemon did not return its typed module inventory")
-    try:
-        inventory = json.loads(modules["json"])
-    except json.JSONDecodeError as error:
-        raise RuntimeError("module inventory is not JSON") from error
-    if not isinstance(inventory, list):
-        raise RuntimeError("module inventory is not a list")
-    packages = [
-        path for path in artifacts.glob(f"CopyPasteModule-*-linux-{architecture}.cpmodule")
-        if path.is_file() and not path.is_symlink()
-    ]
-    if not packages:
-        raise RuntimeError(
-            "modules require an exact staged signed Linux module package; "
-            "inventory alone is not lifecycle qualification"
-        )
-    raise RuntimeError(
-        "staged module lifecycle qualification requires the package-specific "
-        "native invocation contract"
+    return module_qualification_helper().qualify_modules(
+        socket_path, artifacts, fixtures, application_data, architecture, app_version, evidence_dir, restart, emit,
     )
+
+
+def gui_daemon_data_dir(gui, data_home):
+    """Read the controlled GUI child's explicit daemon data directory."""
+    children = PROC_ROOT / str(gui.pid) / "task" / str(gui.pid) / "children"
+    try:
+        pids = children.read_text(encoding="ascii").split()
+    except OSError as error:
+        raise RuntimeError("packaged GUI child process inventory is unavailable") from error
+    candidates = []
+    for pid in pids:
+        process = PROC_ROOT / pid
+        try:
+            status = process.joinpath("status").read_text(encoding="utf-8")
+            cmdline = process.joinpath("cmdline").read_bytes().split(b"\0")
+        except OSError:
+            continue
+        uid = next((line.split()[1] for line in status.splitlines() if line.startswith("Uid:") and len(line.split()) >= 2), None)
+        if uid != str(os.geteuid()):
+            continue
+        argv = [value.decode("utf-8") for value in cmdline if value]
+        if not argv or Path(argv[0]).name != "copypaste-daemon":
+            continue
+        if argv.count("--data-dir") != 1:
+            raise RuntimeError("GUI-owned daemon did not receive exactly one explicit data directory")
+        index = argv.index("--data-dir")
+        if index + 1 >= len(argv):
+            raise RuntimeError("GUI-owned daemon has no data directory argument")
+        path = Path(argv[index + 1])
+        try:
+            resolved = path.resolve(strict=True)
+            resolved.relative_to(data_home.resolve(strict=True))
+        except (OSError, ValueError) as error:
+            raise RuntimeError("GUI-owned daemon data directory escapes isolated XDG data") from error
+        if path.is_symlink() or not resolved.is_dir():
+            raise RuntimeError("GUI-owned daemon data directory is unsafe")
+        candidates.append(resolved)
+    if len(candidates) != 1:
+        raise RuntimeError("packaged GUI did not own exactly one daemon with an explicit data directory")
+    return candidates[0]
 
 
 def require_pairing_sync(prefix, cli, environment, workspace, primary_socket):
@@ -492,6 +522,8 @@ def main():
     parser.add_argument("--desktop", required=True, choices=("GNOME", "KDE"))
     parser.add_argument("--session", required=True, choices=("x11", "wayland"))
     parser.add_argument("--evidence-dir", required=True, type=Path)
+    parser.add_argument("--module-artifacts", required=True, type=Path)
+    parser.add_argument("--module-fixtures", required=True, type=Path)
     parser.add_argument("--previous-artifacts", type=Path)
     parser.add_argument("--previous-version")
     parser.add_argument("--first-install-baseline", action="store_true")
@@ -618,7 +650,27 @@ def main():
                 if not isinstance(restart_page, dict) or not any(persisted in item.get("content", "") for item in restart_page.get("items", [])):
                     raise RuntimeError("encrypted history did not survive daemon restart")
                 emit_result("encrypted_restart_persistence", restart_items)
-                require_modules(runtime_socket, args.artifacts, args.architecture)
+                daemon_data = gui_daemon_data_dir(app, data_home)
+                def restart_gui_for_modules():
+                    nonlocal app, runtime_socket, cli_environment, daemon_data
+                    prior_sockets = set(runtime_dir.glob("cp-*.sock"))
+                    app.terminate()
+                    app.wait(timeout=5)
+                    app, runtime_socket = start_gui_runtime(
+                        prefix / "copypaste", environment, runtime_dir, prior_sockets,
+                    )
+                    cli_environment = {**environment, "COPYPASTE_SOCKET": str(runtime_socket)}
+                    if not isinstance(status(cli, cli_environment), dict):
+                        raise RuntimeError("GUI-owned daemon did not become ready after module lifecycle restart")
+                    restarted_data = gui_daemon_data_dir(app, data_home)
+                    if restarted_data != daemon_data:
+                        raise RuntimeError("GUI-owned daemon changed its data directory during module qualification")
+                    return runtime_socket
+
+                runtime_socket = require_modules(
+                    runtime_socket, args.module_artifacts, args.module_fixtures,
+                    daemon_data, args.architecture, args.version, args.evidence_dir, restart_gui_for_modules,
+                )
                 require_pairing_sync(prefix, cli, environment, workspace, runtime_socket)
 
                 # The remaining assertions deliberately execute their public probes and fail if the exact product
