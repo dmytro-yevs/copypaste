@@ -4,6 +4,7 @@ from pathlib import Path
 from copy import deepcopy
 import hashlib
 import json
+import os
 import re
 import runpy
 import subprocess
@@ -521,7 +522,6 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
     def test_linux_native_evidence_binds_all_formats_and_desktop_sessions(self):
         verifier = runpy.run_path(str(ROOT / "scripts/release/verify-linux-native-qualification.py"))
         verify = verifier["verify"]
-        assertions = verifier["ASSERTIONS"]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             artifacts = root / "artifacts"
@@ -536,12 +536,15 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
             for architecture in ("x86_64", "aarch64"):
                 for desktop in ("GNOME", "KDE"):
                     for session in ("x11", "wayland"):
+                        assertions = verifier["assertion_set"]("prior_release", session)
                         trace_name = f"linux-native-{architecture}-{desktop.lower()}-{session}.trace.json"
                         trace = {
                             "schema": 1, "version": "1.2.3", "commit": "a" * 40,
                             "source_run_id": "123", "artifact_run_id": "456",
                             "architecture": architecture, "desktop": desktop, "session": session,
                             "upgrade_mode": "prior_release",
+                            "installed_formats": ["AppImage", "deb" if desktop == "GNOME" else "rpm"],
+                            "environment": {"distribution": "ubuntu" if desktop == "GNOME" else "fedora", "distribution_version": "24.04"},
                             "commands": [{"argv": ["native-probe"], "returncode": 0, "assertions": sorted(assertions)}],
                         }
                         (root / trace_name).write_text(json.dumps(trace), encoding="utf-8")
@@ -551,12 +554,24 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                             "source_run_id": "123", "artifact_run_id": "456", "architecture": architecture,
                             "desktop": desktop, "session": session,
                             "upgrade_mode": "prior_release",
+                            "installed_formats": ["AppImage", "deb" if desktop == "GNOME" else "rpm"],
+                            "environment": {"distribution": "ubuntu" if desktop == "GNOME" else "fedora", "distribution_version": "24.04"},
                             "assertions": {name: True for name in assertions},
                             "packages": package_rows(architecture),
                             "trace": {"name": trace_name, "sha256": trace_digest, "size_bytes": (root / trace_name).stat().st_size},
                             "evidence": [{"name": trace_name, "sha256": trace_digest, "size_bytes": (root / trace_name).stat().st_size}],
                         }))
             verify(root, artifacts, "1.2.3", "a" * 40, "123", "456")
+            x11 = root / "linux-native-x86_64-gnome-x11.json"
+            receipt = json.loads(x11.read_text())
+            receipt["assertions"].pop("native_x11_keyboard_input")
+            receipt["assertions"]["portal_keyboard_grant"] = True
+            x11.write_text(json.dumps(receipt))
+            with self.assertRaisesRegex(ValueError, "assertions are incomplete"):
+                verify(root, artifacts, "1.2.3", "a" * 40, "123", "456")
+            receipt["assertions"].pop("portal_keyboard_grant")
+            receipt["assertions"]["native_x11_keyboard_input"] = True
+            x11.write_text(json.dumps(receipt))
             broken = root / "linux-native-x86_64-gnome-x11.json"
             receipt = json.loads(broken.read_text())
             receipt["assertions"]["package_upgrade"] = "true"
@@ -574,8 +589,10 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                     version = "1.2.3" if name == "current" else "1.2.2"
                     (root / name / f"CopyPaste-v{version}-linux-x86_64.{extension}").write_bytes(name.encode())
             driver = root / "driver.py"
-            driver.write_text("#!/usr/bin/env python3\nimport json\nprint('COPYPASTE_QUALIFICATION_COMMAND ' + json.dumps({'argv': ['probe'], 'returncode': 0, 'assertions': " + repr(sorted(producer["ASSERTIONS"])) + "}))\n", encoding="utf-8")
+            driver_assertions = producer["scenario_assertions"]("prior_release", "wayland")
+            driver.write_text("#!/usr/bin/env python3\nimport json\nprint('COPYPASTE_QUALIFICATION_COMMAND ' + json.dumps({'argv': ['probe'], 'returncode': 0, 'assertions': " + repr(sorted(driver_assertions)) + "}))\n", encoding="utf-8")
             driver.chmod(0o755)
+            os.environ["COPYPASTE_INSTALLED_FORMATS"] = "AppImage,deb"
             receipt_path = producer["produce"](argparse.Namespace(
                 artifacts=root / "current", previous_artifacts=root / "previous",
                 version="1.2.3", previous_version="1.2.2", architecture="x86_64",
