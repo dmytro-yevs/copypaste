@@ -17,6 +17,10 @@ RUNTIMES = {
     ("KDE", "x86_64"): ("kwin", "6.0", "fedora", "40", "rpm"),
     ("KDE", "aarch64"): ("kwin", "6.0", "fedora", "40", "rpm"),
 }
+BASELINES = {
+    "GNOME": ("fe8d2be3f90f89f286c89b164c94a4f86552bc97", "packaging/linux/desktop-integrations/gnome-shell-extension/mutter/mutter-46-writer-identity.patch"),
+    "KDE": ("1ddcb4e288c4f7dcecdc94efccd655b7e3666d30", "packaging/linux/desktop-integrations/kde-native-clipboard/patches/kwin-6.0.patch"),
+}
 
 
 def sha256(path: Path) -> str:
@@ -51,6 +55,12 @@ def artifact_name(desktop: str, architecture: str) -> str:
     return f"copypaste-compositor-runtime-{family}-{version}-{distro}{distro_version}-{architecture}"
 
 
+def verify_baseline_source(desktop: str, source: dict) -> None:
+    revision, patch = BASELINES[desktop]
+    if source.get("revision") != revision or source.get("patch_sha256") != sha256(ROOT / patch):
+        raise ValueError("producer source revision or patch bytes differ from the checked-out baseline")
+
+
 def verify_source(run: dict, artifacts: dict, repository: str, commit: str) -> None:
     if (
         type(run.get("id")) is not int or run.get("head_sha") != commit
@@ -82,6 +92,30 @@ def safe_file(root: Path, name: str, label: str) -> Path:
     return path
 
 
+def stage_runtime_module():
+    spec = importlib.util.spec_from_file_location(
+        "compositor_stage_runtime", ROOT / "packaging/linux/compositor-runtime/stage_runtime.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def session_descriptor_text(receipt: dict) -> str:
+    runtime_id = receipt["runtime_id"]
+    session_name = "GNOME" if receipt["desktop"] == "GNOME" else "Plasma"
+    launcher = f"/usr/lib/copypaste/compositor-runtime/bin/copypaste-compositor-session-{runtime_id}"
+    return (
+        "[Desktop Entry]\n"
+        f"Name={session_name} (CopyPaste Clipboard)\n"
+        "Comment=User-selected CopyPaste compositor session\n"
+        f"Exec={launcher}\n"
+        "Type=Application\n"
+        "DesktopNames=CopyPaste\n"
+    )
+
+
 def binding(root: Path, desktop: str, architecture: str, commit: str, producer_run_id: str) -> dict:
     root = root.resolve(strict=True)
     if root.is_symlink() or not root.is_dir():
@@ -102,6 +136,7 @@ def binding(root: Path, desktop: str, architecture: str, commit: str, producer_r
     source = producer["source"]
     if not isinstance(source, dict) or set(source) != {"revision", "patch_sha256"} or not isinstance(source["revision"], str) or not SHA256.fullmatch(source.get("patch_sha256", "")):
         raise ValueError("producer receipt source provenance is invalid")
+    verify_baseline_source(desktop, source)
     runtime = producer["runtime_receipt"]
     package = producer["package"]
     for label, record in (("runtime receipt", runtime), ("package", package)):
@@ -116,10 +151,7 @@ def binding(root: Path, desktop: str, architecture: str, commit: str, producer_r
     checksum_path = safe_file(root, package_path.name + ".sha256", "companion package checksum")
     if checksum_path.read_text(encoding="utf-8") != f"{package['sha256']}  {package_path.name}\n":
         raise ValueError("companion package checksum file differs")
-    spec = importlib.util.spec_from_file_location("compositor_stage_runtime", ROOT / "packaging/linux/compositor-runtime/stage_runtime.py")
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
+    module = stage_runtime_module()
     receipt = module.read_receipt(runtime_path)
     module.validate_receipt(receipt)
     runtime_input = root / "runtime"
@@ -128,6 +160,7 @@ def binding(root: Path, desktop: str, architecture: str, commit: str, producer_r
     module.validate_payload(runtime_input, receipt)
     if any(receipt.get(key) != producer.get(key) for key in ("runtime_id", "architecture", "desktop", "distribution", "source", "glibc_floor")):
         raise ValueError("immutable runtime receipt differs from producer receipt")
+    verify_baseline_source(desktop, receipt["source"])
     return {"schema": 1, "producer_run_id": producer_run_id, "commit": commit, "runtime_id": producer["runtime_id"], "desktop": desktop, "architecture": architecture, "distribution": producer["distribution"], "format": package_format, "package": package, "runtime_receipt": runtime}
 
 
@@ -144,19 +177,16 @@ def verify_installed(binding_value: dict, installed_root: Path) -> None:
     descriptor = installed_root / "usr/share/wayland-sessions" / f"copypaste-{runtime_id}.desktop"
     if not runtime.is_dir() or runtime.is_symlink() or not launcher.is_file() or launcher.is_symlink() or launcher.stat().st_mode & 0o111 == 0 or not descriptor.is_file() or descriptor.is_symlink():
         raise ValueError("installed compositor runtime launcher is incomplete")
-    if f"Exec=/usr/lib/copypaste/compositor-runtime/bin/{launcher.name}" not in descriptor.read_text(encoding="utf-8"):
-        raise ValueError("installed session descriptor does not select the generated launcher")
-    if any(argument in launcher.read_text(encoding="utf-8") for argument in ("eval ", "systemctl", "restart")):
-        raise ValueError("generated compositor launcher contains forbidden control flow")
-    spec = importlib.util.spec_from_file_location("compositor_stage_runtime", ROOT / "packaging/linux/compositor-runtime/stage_runtime.py")
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
+    module = stage_runtime_module()
     receipt = module.read_receipt(receipt_path)
     module.validate_receipt(receipt)
     if any(receipt.get(key) != binding_value.get(key) for key in ("runtime_id", "desktop", "architecture", "distribution")):
         raise ValueError("installed runtime receipt identity differs from authenticated input")
     module.validate_payload(runtime, receipt)
+    if launcher.read_text(encoding="utf-8") != module.launcher_text(receipt, "/usr/lib/copypaste/compositor-runtime"):
+        raise ValueError("installed compositor launcher differs from authenticated deterministic launcher")
+    if descriptor.read_text(encoding="utf-8") != session_descriptor_text(receipt):
+        raise ValueError("installed session descriptor differs from authenticated deterministic descriptor")
 
 
 def main() -> None:
