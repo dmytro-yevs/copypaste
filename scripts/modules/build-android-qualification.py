@@ -33,8 +33,14 @@ def main():
         directory = Path(directory)
         classes = directory / "classes"
         classes.mkdir()
+        generated = directory / "generated"
+        generated.mkdir()
+        aidl = ROOT / "apps/copypaste_flutter/android/app/src/main/aidl/com/copypaste/app/IInferenceWorker.aidl"
+        run([tools / "aidl", "-I" + str(aidl.parents[3]), "-p" + str(args.sdk / "platforms/android-36/framework.aidl"),
+             "-o" + str(generated), aidl])
         run(["javac", "-source", "8", "-target", "8", "-classpath", android,
-             "-d", classes, ROOT / "scripts/modules/android-qualification/MainActivity.java"])
+             "-d", classes, *sorted((ROOT / "scripts/modules/android-qualification").glob("*.java")),
+             *sorted(generated.rglob("*.java"))])
         dex = directory / "dex"
         dex.mkdir()
         run([tools / "d8", "--lib", android, "--output", dex, *classes.rglob("*.class")])
