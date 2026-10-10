@@ -259,5 +259,11 @@ class _LinuxIntegration implements LinuxIntegrationPort {
   }
 
   @override
+  Future<bool> registerCopypasteUri() async => true;
+
+  @override
+  Future<bool> setStartAtLogin(bool enabled) async => true;
+
+  @override
   Future<LinuxIntegrationStatus> status() async => value;
 }
