@@ -124,7 +124,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends dbus-user-session gnome-shell gnome-session gnome-keyring gnome-shell-extension-appindicator kde-config-screenlocker kwin-wayland kwin-x11 plasma-workspace libsecret-tools wl-clipboard wtype x11-utils xdotool xdg-desktop-portal xdg-desktop-portal-gnome xdg-desktop-portal-kde xvfb rpm cpio xclip python3-gi build-essential pkg-config libgtk-3-dev at-spi2-core python3-pyatspi ffmpeg qrencode v4l-utils
+          sudo apt-get install --yes --no-install-recommends dbus-user-session gnome-shell gnome-session gnome-keyring gnome-shell-extension-appindicator libdisplay-info1 kde-config-screenlocker kwin-wayland kwin-x11 plasma-workspace libsecret-tools wl-clipboard wtype x11-utils xdotool xdg-desktop-portal xdg-desktop-portal-gnome xdg-desktop-portal-kde xvfb rpm cpio xclip python3-gi build-essential pkg-config libgtk-3-dev at-spi2-core python3-pyatspi ffmpeg qrencode v4l-utils
       - name: Provision owned V4L2 loopback camera for this diagnostic job
         env: {COPYPASTE_QUALIFICATION_HEADLESS: "1"}
         run: python3 scripts/release/provision-linux-v4l2loopback.py provision --state "$RUNNER_TEMP/copypaste-v4l2loopback.json" --environment "$GITHUB_ENV"
