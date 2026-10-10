@@ -77,21 +77,19 @@ wait_for() {
 
 case "$SESSION" in
   x11)
+    export COPYPASTE_COMPOSITOR_EXECUTION=stock-x11
     Xvfb :99 -screen 0 1280x800x24 -nolisten tcp >"$runtime/xserver.log" 2>&1 &
     xserver_pid=$!
     export DISPLAY=:99
     wait_for 'xdpyinfo -display "$DISPLAY" >/dev/null 2>&1'
-    "$COMPOSITOR_LAUNCHER" >"$runtime/kwin.log" 2>&1 &
+    kwin_x11 --replace >"$runtime/kwin.log" 2>&1 &
     kwin_pid=$!
     wait_for 'kill -0 "$kwin_pid" 2>/dev/null'
     xprop -root -display "$DISPLAY" >/dev/null
     ;;
   wayland)
-    "$COMPOSITOR_LAUNCHER" >"$runtime/kwin.log" 2>&1 &
-    kwin_pid=$!
-    wait_for 'kill -0 "$kwin_pid" 2>/dev/null'
-    wait_for 'find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name "wayland-*" | grep -q .'
-    export WAYLAND_DISPLAY="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'wayland-*' -printf '%f\n' | head -n1)"
+    echo "ERROR: Wayland qualification requires a reviewed receipt-listed private compositor entrypoint and loader observation" >&2
+    exit 1
     ;;
 esac
 
