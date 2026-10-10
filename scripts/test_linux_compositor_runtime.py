@@ -52,6 +52,8 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
         self.assertIn("compositor_runtime_run_id:", workflow)
         self.assertIn("verify-linux-compositor-runtime.py source", workflow)
         self.assertIn("verify-linux-compositor-runtime.py artifact", workflow)
+        self.assertIn("--compositor-runtime-binding compositor-runtime/binding.json", workflow)
+        self.assertIn("--compositor-runtime-binding /compositor-runtime/binding.json", workflow)
         for name in ("gnome-46-ubuntu24.04", "kwin-6.0-fedora40"):
             self.assertIn(name, workflow)
         for name in ("run-linux-native-desktop-session.sh", "run-fedora-plasma6-session.sh"):
