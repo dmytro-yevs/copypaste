@@ -38,6 +38,7 @@ COMPOSITOR_QUALIFICATION_ENTRYPOINT="$runtime_root/$qualification_entrypoint"
 private_shell="$runtime_root/usr/bin/gnome-shell"
 [[ -x "$private_shell" ]] || { echo "ERROR: receipt-listed GNOME Shell is missing" >&2; exit 1; }
 private_library_path="$runtime_root/lib:$runtime_root/lib64:$runtime_root/usr/lib:$runtime_root/usr/lib/x86_64-linux-gnu:$runtime_root/usr/lib/x86_64-linux-gnu/gnome-shell:$runtime_root/usr/lib/aarch64-linux-gnu:$runtime_root/usr/lib/aarch64-linux-gnu/gnome-shell"
+private_typelib_path="$runtime_root/usr/lib/x86_64-linux-gnu/mutter-14:$runtime_root/usr/lib/x86_64-linux-gnu/gnome-shell:$runtime_root/usr/lib/aarch64-linux-gnu/mutter-14:$runtime_root/usr/lib/aarch64-linux-gnu/gnome-shell"
 if ! loader_report="$(LD_LIBRARY_PATH="$private_library_path" ldd "$private_shell" 2>&1)"; then
   printf 'ERROR: could not inspect private GNOME Shell loader closure\n%s\n' "$loader_report" >&2
   exit 1
@@ -107,7 +108,7 @@ PY
     cp -a "$extension" "$XDG_DATA_HOME/gnome-shell/extensions/$extension_id"
     native="$XDG_DATA_HOME/gnome-shell/extensions/$extension_id/native"
     [[ -d "$native/lib" && -d "$native/typelib" ]] || { echo "ERROR: packaged GNOME companion native runtime is incomplete" >&2; exit 1; }
-    export GI_TYPELIB_PATH="$native/typelib${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"
+    export GI_TYPELIB_PATH="$private_typelib_path:$native/typelib${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"
     compositor_library_path="$native/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     if [[ "$SESSION" == wayland ]]; then
       geometry_extension="$SCRIPT_DIR/qualification/gnome-window-geometry-extension"
