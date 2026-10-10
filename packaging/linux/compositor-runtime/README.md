@@ -41,7 +41,8 @@ The compiler receipt uses schema 1:
   "payload": [{"path": "bin/start-plasma", "type": "file", "mode": "0755", "sha256": "<64 hex>"}],
   "launch": {"kind": "private", "entrypoint": "bin/start-plasma"},
   "runtime_env": {},
-  "package_dependencies": [{"name": "kwin", "version": "6.3.0"}]
+  "package_dependencies": [{"name": "kwin", "version": "6.3.0"}],
+  "upstream_license": {"spdx": "GPL-2.0-or-later", "name": "usr/share/doc/copypaste/COPYING", "sha256": "<64 hex>"}
 }
 ```
 
@@ -74,11 +75,12 @@ outputs are not an install instruction.
 
 `scripts/release/build-linux-packages.sh` accepts the same inputs through
 `COPYPASTE_COMPOSITOR_RUNTIME_RECEIPT` and
-`COPYPASTE_COMPOSITOR_RUNTIME_DIRECTORY`. Stable Linux jobs set
-`COPYPASTE_REQUIRE_COMPOSITOR_RUNTIME=1`, so a source-only or missing runtime
-cannot produce a release candidate. The RPM manifest lists the private runtime,
-its receipt, and the session definition explicitly; the AppImage build removes
-all three after building the native package roots.
+`COPYPASTE_COMPOSITOR_RUNTIME_DIRECTORY` for an explicit target build or a
+packaging fixture. It is not the stable-release delivery path: one app-package
+run cannot safely embed both Ubuntu and Fedora compositor runtimes. Stable
+release gating consumes the separate signed companion assets and verifies their
+producer receipts for both baseline desktops. The AppImage never contains a
+sidecar session.
 
 This creates only a private prefix, a receipt, a strict launcher, and
 `/usr/share/wayland-sessions/copypaste-<id>.desktop`. The user selects the
@@ -92,3 +94,10 @@ run must start this generated launcher from the staged private prefix and bind
 its receipt, package digest, distribution release, architecture, and glibc
 floor to the release evidence. Source-only bridge bundles do not qualify a
 release.
+
+Current production baselines are GNOME 46 on Ubuntu 24.04 and KWin 6.0 on
+Fedora 40, each on x86_64 and aarch64. A current GNOME compiler output contains
+private Mutter libraries but no private Shell; it must not produce a companion
+receipt until a reviewed session route proves the matching Shell loads those
+private libraries. GNOME 47 and KWin 6.3 builds are ABI gates only until they
+have matching session runtimes and native evidence.
