@@ -137,7 +137,7 @@ def binding(root: Path, desktop: str, architecture: str, commit: str, producer_r
         raise ValueError("producer receipt schema is invalid")
     if (producer.get("commit") != commit or str(producer.get("producer_run_id")) != producer_run_id
             or producer.get("architecture") != architecture or producer.get("desktop") != desktop
-            or producer.get("family") != family or producer.get("format") != package_format
+            or producer.get("family") != family_version or producer.get("format") != package_format
             or producer.get("distribution") != {"id": distro, "version": distro_version}
             or not isinstance(producer.get("version"), str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", producer["version"])
             or not isinstance(producer.get("runtime_id"), str) or not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,63}", producer["runtime_id"])
