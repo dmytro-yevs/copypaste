@@ -14,11 +14,21 @@ G_BEGIN_DECLS
  */
 GObject *copypaste_clipboard_source_new (GVariant *payloads, GError **error);
 
-/** Returns a `(suus)` writer identity tuple, or NULL when unavailable. */
+/**
+ * copypaste_clipboard_source_writer_identity:
+ * @source: (not nullable): the actual Mutter selection source
+ * @error: (out) (optional): return location for a #GError
+ *
+ * Returns: (transfer full) (nullable): a `(suus)` writer identity tuple.
+ */
 GVariant *copypaste_clipboard_source_writer_identity (GObject *source,
                                                        GError **error);
 
 /**
+ * copypaste_clipboard_selection_owner:
+ * @selection: (not nullable): the Mutter selection service
+ * @error: (out) (optional): return location for a #GError
+ *
  * Returns: (transfer none) (nullable): current clipboard owner, borrowed from
  * Mutter and valid only while @selection remains alive.
  */
