@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import importlib.util
 import json
@@ -18,6 +19,7 @@ from pathlib import Path
 
 MODULE = Path(__file__).parents[1] / "stage_runtime.py"
 sys.path.insert(0, str(MODULE.parent))
+from license_provenance import CANONICAL_STANDARD_LICENSES
 SPEC = importlib.util.spec_from_file_location("stage_runtime", MODULE)
 assert SPEC and SPEC.loader
 stage_runtime = importlib.util.module_from_spec(SPEC)
@@ -35,6 +37,10 @@ closure_spec = importlib.util.spec_from_file_location("private_elf_closure", Pat
 assert closure_spec and closure_spec.loader
 private_elf_closure = importlib.util.module_from_spec(closure_spec)
 closure_spec.loader.exec_module(private_elf_closure)
+emit_spec = importlib.util.spec_from_file_location("emit_runtime_receipt", Path(__file__).parents[1] / "emit_runtime_receipt.py")
+assert emit_spec and emit_spec.loader
+emit_runtime_receipt = importlib.util.module_from_spec(emit_spec)
+emit_spec.loader.exec_module(emit_runtime_receipt)
 
 
 def digest(data: bytes) -> str:
@@ -211,6 +217,55 @@ class RuntimeStageTests(unittest.TestCase):
             manifest.write_text(json.dumps(data), encoding="utf-8")
             with self.assertRaises(stage_runtime.ContractError):
                 stage_runtime.validate_payload(runtime, receipt)
+
+    def test_license_provenance_binds_canonical_bytes_and_safe_source_members_in_both_consumers(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime = Path(temporary) / "runtime"
+            (runtime / "bin").mkdir(parents=True)
+            executable = runtime / "bin/start"
+            executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            executable.chmod(0o755)
+            receipt = self.make_receipt(runtime, {"kind": "private", "entrypoint": "bin/start"})
+            manifest_path = runtime / "usr/share/copypaste/compositor-runtime-private-closure.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            base = manifest["licenses"][0]
+            source_path = runtime / "usr/share/doc/copypaste-compositor-runtime-private-licenses/source-COPYING"
+            source_path.write_bytes(b"source RPM notice")
+            source = {**base, "license_origin": "source-rpm", "path": source_path.relative_to(runtime).as_posix(),
+                      "sha256": digest(source_path.read_bytes()), "license_archive": base["license_source_rpm"],
+                      "license_archive_sha256": "b" * 64, "license_archive_supplier": "kdecoration2",
+                      "license_archive_evr": base["license_evr"], "license_source_member": "COPYING"}
+            asset = Path(private_elf_closure.__file__).with_name("licenses") / "GNU-LGPL-3.0.txt"
+            standard_bytes = base64.b64decode(b"".join(asset.read_bytes().split()), validate=True)
+            standard_url = "https://www.gnu.org/licenses/lgpl-3.0.txt"
+            standard_path = runtime / "usr/share/doc/copypaste-compositor-runtime-private-licenses/GNU-LGPL-3.0.txt"
+            standard_path.write_bytes(standard_bytes)
+            standard = {**base, "license_origin": "standard-license", "path": standard_path.relative_to(runtime).as_posix(),
+                        "sha256": digest(standard_bytes), "standard_license_url": standard_url,
+                        "standard_license_sha256": CANONICAL_STANDARD_LICENSES[standard_url]}
+            manifest["licenses"].extend((source, standard))
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            receipt["payload"] = emit_runtime_receipt.payload(runtime)
+            receipt["upstream_licenses"] = [
+                {"spdx": "GPL-2.0-or-later", "name": "COPYING", "sha256": digest((runtime / "COPYING").read_bytes())},
+                *emit_runtime_receipt.closure_licenses(runtime),
+            ]
+            stage_runtime.validate_payload(runtime, receipt)
+
+            for record, key, value in ((standard, "standard_license_url", "https://invalid.example/license"),
+                                       (standard, "standard_license_sha256", "0" * 64),
+                                       (standard, "sha256", "0" * 64),
+                                       (source, "license_source_member", "../COPYING"),
+                                       (source, "license_source_member", "licenses/./COPYING")):
+                broken = json.loads(json.dumps(manifest))
+                index = manifest["licenses"].index(record)
+                broken["licenses"][index][key] = value
+                manifest_path.write_text(json.dumps(broken), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    emit_runtime_receipt.closure_licenses(runtime)
+                with self.assertRaises(stage_runtime.ContractError):
+                    stage_runtime.validate_payload(runtime, receipt)
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
     def test_rpm_contract_rejects_private_elf_capabilities_and_host_decoration_constraints(self) -> None:
         for requires, provides in (
