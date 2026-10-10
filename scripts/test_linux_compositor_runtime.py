@@ -236,6 +236,18 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
             script.index('session_phase=enable_appindicator'),
         )
 
+    def test_gnome_private_shell_dependency_is_packaged_and_its_loader_closure_is_checked_before_startup(self):
+        receipt = (ROOT / "packaging/linux/desktop-integrations/gnome-shell-extension/mutter/verify-patch.sh").read_text(encoding="utf-8")
+        script = (ROOT / "scripts/release/run-linux-native-desktop-session.sh").read_text(encoding="utf-8")
+        self.assertIn('--dependency libdisplay-info1', receipt)
+        self.assertIn('LD_LIBRARY_PATH="$private_library_path" ldd "$private_shell"', script)
+        self.assertIn("awk '/=> not found/ {print $1}'", script)
+        self.assertIn('private GNOME Shell loader closure is unresolved', script)
+        self.assertLess(
+            script.index('private GNOME Shell loader closure is unresolved'),
+            script.index('RUNTIME="$(mktemp -d)"'),
+        )
+
     def test_private_shell_revision_marker_is_not_receipt_listed_payload(self):
         script = (ROOT / "packaging/linux/desktop-integrations/gnome-shell-extension/mutter/verify-patch.sh").read_text(encoding="utf-8")
         marker = '"$runtime_output/.copypaste-gnome-shell-revision"'

@@ -35,6 +35,18 @@ runtime_root="/usr/lib/copypaste/compositor-runtime/$runtime_id"
 qualification_entrypoint="$(jq -er '.qualification.entrypoint | select(type == "string" and test("^[A-Za-z0-9._/+@-]+$"))' "/usr/share/copypaste/compositor-runtime/$runtime_id.receipt.json")"
 COMPOSITOR_QUALIFICATION_ENTRYPOINT="$runtime_root/$qualification_entrypoint"
 [[ -x "$COMPOSITOR_QUALIFICATION_ENTRYPOINT" ]] || { echo "ERROR: receipt-listed GNOME qualification entrypoint is missing" >&2; exit 1; }
+private_shell="$runtime_root/usr/bin/gnome-shell"
+[[ -x "$private_shell" ]] || { echo "ERROR: receipt-listed GNOME Shell is missing" >&2; exit 1; }
+private_library_path="$runtime_root/lib:$runtime_root/lib64:$runtime_root/usr/lib:$runtime_root/usr/lib/x86_64-linux-gnu:$runtime_root/usr/lib/x86_64-linux-gnu/gnome-shell:$runtime_root/usr/lib/aarch64-linux-gnu:$runtime_root/usr/lib/aarch64-linux-gnu/gnome-shell"
+if ! loader_report="$(LD_LIBRARY_PATH="$private_library_path" ldd "$private_shell" 2>&1)"; then
+  printf 'ERROR: could not inspect private GNOME Shell loader closure\n%s\n' "$loader_report" >&2
+  exit 1
+fi
+unresolved_private_libraries="$(printf '%s\n' "$loader_report" | awk '/=> not found/ {print $1}')"
+[[ -z "$unresolved_private_libraries" ]] || {
+  printf 'ERROR: private GNOME Shell loader closure is unresolved: %s\n' "$(printf '%s\n' "$unresolved_private_libraries" | paste -sd, -)" >&2
+  exit 1
+}
 
 RUNTIME="$(mktemp -d)"
 DISPLAY_NUMBER=99
@@ -138,7 +150,7 @@ if [[ "$SESSION" == x11 ]]; then
   wait_for 'kill -0 "$desktop_pid" 2>/dev/null'
 else
   export COPYPASTE_COMPOSITOR_EXECUTION=private-wayland
-  compositor_library_path="$runtime_root/lib:$runtime_root/lib64:$runtime_root/usr/lib:$runtime_root/usr/lib/x86_64-linux-gnu:$runtime_root/usr/lib/x86_64-linux-gnu/gnome-shell:$runtime_root/usr/lib/aarch64-linux-gnu:$runtime_root/usr/lib/aarch64-linux-gnu/gnome-shell:$compositor_library_path"
+  compositor_library_path="$private_library_path:$compositor_library_path"
   LD_LIBRARY_PATH="$compositor_library_path" "$COMPOSITOR_QUALIFICATION_ENTRYPOINT" >"$RUNTIME/desktop.log" 2>&1 &
   desktop_pid=$!
   wait_for 'kill -0 "$desktop_pid" 2>/dev/null'
