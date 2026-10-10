@@ -99,8 +99,9 @@ def read_live_device() -> dict:
     label = Path(f"/sys/class/video4linux/video{DEVICE_NUMBER}/name").read_text(encoding="utf-8").strip()
     exclusive = Path(f"/sys/module/{MODULE}/parameters/exclusive_caps").read_text(encoding="utf-8").strip()
     sysfs_dev = Path(f"/sys/class/video4linux/video{DEVICE_NUMBER}/dev").read_text(encoding="utf-8").strip()
-    if label != LABEL or exclusive not in {"1", "Y", "y"} or sysfs_dev != f"{os.major(details.st_rdev)}:{os.minor(details.st_rdev)}":
-        raise RuntimeError("owned V4L2 live device contract differs")
+    expected_dev = f"{os.major(details.st_rdev)}:{os.minor(details.st_rdev)}"
+    if label != LABEL or exclusive not in {"1", "Y", "y"} or sysfs_dev != expected_dev:
+        raise RuntimeError(f"owned V4L2 live device contract differs: label={label!r} exclusive={exclusive!r} sysfs_dev={sysfs_dev!r} expected_dev={expected_dev!r}")
     return {"major": os.major(details.st_rdev), "minor": os.minor(details.st_rdev), "uid": details.st_uid, "gid": details.st_gid, "mode": f"{stat.S_IMODE(details.st_mode):04o}"}
 
 
