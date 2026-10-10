@@ -26,6 +26,8 @@ test -f "$source_license"
 python3 /workspace/scripts/release/diagnostics/fedora-closure-missing.py \
   --runtime "$runtime" --soname libpxbackend-1.0.so
 python3 /workspace/scripts/release/diagnostics/fedora-license-audit.py --package libxcb --restore
+python3 /workspace/scripts/release/diagnostics/fedora-source-license-members.py \
+  --package libdrm --package libtdb
 python3 /workspace/scripts/release/diagnostics/fedora-closure-preflight.py --runtime "$runtime"
 
 python3 /workspace/packaging/linux/compositor-runtime/private_elf_closure.py \
