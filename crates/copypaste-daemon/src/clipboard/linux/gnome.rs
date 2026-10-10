@@ -427,8 +427,7 @@ fn apply_owner_changed(state: &mut State, sequence: u64, mimes: Vec<String>) {
 }
 
 fn valid_mimes(mimes: &[String]) -> bool {
-    !mimes.is_empty()
-        && mimes.len() <= MAX_MIMES
+    mimes.len() <= MAX_MIMES
         && mimes
             .iter()
             .all(|mime| !mime.is_empty() && mime.len() <= MAX_MIME_BYTES)
@@ -527,8 +526,8 @@ mod tests {
                 .expect("fixture runtime");
             let _guard = runtime.enter();
             let state = Arc::new(Mutex::new(BridgeState {
-                sequence: 1,
-                mimes: vec!["text/plain;charset=utf-8".into()],
+                sequence: 0,
+                mimes: Vec::new(),
                 values: HashMap::from([(
                     "text/plain;charset=utf-8".into(),
                     b"bridge text".to_vec(),
