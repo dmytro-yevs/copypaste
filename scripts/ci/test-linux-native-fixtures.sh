@@ -18,7 +18,9 @@ export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
 
 ./scripts/test-linux-clipboard-x11.sh
 ./scripts/test-linux-clipboard-gnome.sh
+./scripts/test-linux-x11-quick-paste.sh
 ./scripts/test-linux-portal.sh
+./scripts/test-linux-gnome-shortcuts.sh
 ./scripts/test-linux-packagekit.sh
 
 fixture_dir="$(mktemp -d)"

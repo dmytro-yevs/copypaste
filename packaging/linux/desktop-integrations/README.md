@@ -19,10 +19,30 @@ same entry's `userInstallPath`.
 | GNOME Shell | `gnome-shell-extension` | `/usr/share/gnome-shell/extensions/copypaste-quick-paste@copypaste.app` | Enable `copypaste-quick-paste@copypaste.app` in Extensions, or run `gnome-extensions enable copypaste-quick-paste@copypaste.app`. |
 | Plasma / KWin | `kde-kwin-script` | `/usr/share/kwin/scripts/copypaste-quick-paste` | Enable **CopyPaste Quick Paste** in System Settings → Window Management → KWin Scripts. For an AppImage user install, run `kpackagetool6 --type KWin/Script --install <source-directory>` first. |
 
-CopyPaste owns the Quick Paste binding through the user-consented
-GlobalShortcuts portal. The application settings change that one binding on
-both desktops. Neither companion registers a second shortcut or needs a
-desktop-specific shortcut setting.
+KWin owns the Quick Paste binding through the user-consented GlobalShortcuts
+portal. GNOME Shell 46 and 47 do not provide that portal interface, so the
+GNOME extension registers the same canonical GTK accelerator with Mutter. The
+application settings still own one binding; no companion adds a separate
+desktop-specific setting.
+
+## GNOME shortcut bridge
+
+The GNOME extension exports `app.copypaste.GnomeShortcuts` at
+`/app/copypaste/GnomeShortcuts` on its
+`app.copypaste.GnomeIntegration` session-bus name. `Version() -> (u)` returns
+`1`. The host registers canonical GTK accelerators with
+`RegisterShortcut(s id, s accelerator) -> (b registered, s triggerDescription)`
+and removes them with `UnregisterShortcut(s id) -> (b removed)`. A successful
+registration returns the exact accepted accelerator; a failed grab returns
+`false` and an empty description. Mutter collisions are never reported as a
+successful registration.
+
+The bridge accepts register and unregister calls only from the current unique
+owner of `app.copypaste.CopyPaste` with the extension's Unix UID. `Version` is
+public. It emits `Activated(s id)` when Mutter activates a registered binding;
+the native host resolves its existing `AwaitQuickPaste` request, preserving the
+focus-restoration transaction. Loss of the host bus name and extension disable
+release every Mutter grab and bus watcher.
 
 ## GNOME clipboard bridge
 

@@ -29,7 +29,7 @@ run_architecture() {
     -v "$ROOT:/source:ro" "$IMAGE" bash -ceu '
       apt-get update
       apt-get install --yes --no-install-recommends \
-        binutils cpio curl dpkg-dev file gcc rpm xz-utils
+        binutils build-essential cpio curl dpkg-dev file rpm xz-utils
       cp -a /source /work
       cd /work
       mkdir -p dist/linux-"$ARCHITECTURE"/bundle

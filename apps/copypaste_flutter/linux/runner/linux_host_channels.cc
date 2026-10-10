@@ -1,4 +1,5 @@
 #include "linux_host_channels.h"
+#include "linux_gnome_shortcuts.h"
 #include "linux_packagekit.h"
 #include "linux_portal.h"
 #include "linux_restart_helper.h"
@@ -45,6 +46,7 @@ struct ChannelState {
 ChannelState* state = nullptr;
 std::vector<ChannelState*> engine_states;
 std::unique_ptr<LinuxPortal> portal;
+std::unique_ptr<LinuxGnomeShortcuts> gnome_shortcuts;
 std::unique_ptr<LinuxX11QuickPaste> x11_quick_paste;
 LinuxPackageKit packagekit;
 GDBusConnection* bridge_connection = nullptr;
@@ -194,6 +196,14 @@ bool gdk_is_x11() {
 #else
   return false;
 #endif
+}
+
+void wake_bridge_waiter() {
+  if (bridge_waiter == nullptr) return;
+  g_dbus_method_invocation_return_value(bridge_waiter, g_variant_new("(b)", TRUE));
+  g_object_unref(bridge_waiter);
+  bridge_waiter = nullptr;
+  bridge_waiter_owner.clear();
 }
 
 std::string companion_owner() {
@@ -749,14 +759,19 @@ FlValue* integration_status() {
       x11_quick_paste->available();
   const bool wayland = gdk_is_wayland();
   const bool companion = wayland && bridge_companion_active();
+  const bool portal_shortcuts = portal != nullptr && portal->is_available();
+  const bool gnome_shortcuts_available = wayland && !portal_shortcuts &&
+      gnome_shortcuts != nullptr && gnome_shortcuts->is_available();
   const bool remote_active = portal != nullptr && portal->remote_desktop_active();
   const bool remote_available = portal != nullptr && portal->remote_desktop_available();
-  const bool shortcut_active = portal != nullptr && portal->shortcut_registered();
+  const bool shortcut_active = (portal_shortcuts && portal->shortcut_registered()) ||
+      (gnome_shortcuts_available && gnome_shortcuts->shortcut_registered());
   const char* session = wayland ? "wayland" : x11 ? "x11" : "unsupported";
   FlValue* response = fl_value_new_map();
   fl_value_set_string_take(response, "session", fl_value_new_string(session));
   fl_value_set_string_take(response, "globalShortcuts",
-                           fl_value_new_bool(x11 || (portal != nullptr && portal->is_available())));
+                           fl_value_new_bool(x11 || portal_shortcuts ||
+                                             gnome_shortcuts_available));
   fl_value_set_string_take(response, "remoteDesktop",
                            fl_value_new_string(wayland
                                ? (remote_active ? "active" : remote_available
@@ -811,8 +826,12 @@ void pairing_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
 void quick_paste_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
   const bool x11 = gdk_is_x11() && x11_quick_paste != nullptr &&
       x11_quick_paste->input_available();
-  const bool wayland_ready = gdk_is_wayland() && portal != nullptr &&
-      portal->shortcut_registered() && bridge_companion_active();
+  const bool portal_shortcuts = portal != nullptr && portal->is_available();
+  const bool gnome_shortcuts_available = gdk_is_wayland() && !portal_shortcuts &&
+      gnome_shortcuts != nullptr && gnome_shortcuts->is_available();
+  const bool wayland_ready = gdk_is_wayland() && bridge_companion_active() &&
+      ((portal_shortcuts && portal->shortcut_registered()) ||
+       (gnome_shortcuts_available && gnome_shortcuts->shortcut_registered()));
   if (is_method(call, "isSupported") || is_method(call, "prepare")) {
     success(call, fl_value_new_bool(x11 || wayland_ready));
   } else if (is_method(call, "accessibilityGranted") ||
@@ -937,8 +956,11 @@ void quick_paste_context_call(FlMethodChannel* channel, FlMethodCall* call, gpoi
 void shortcuts_call(FlMethodChannel* channel, FlMethodCall* call, gpointer) {
   const bool x11 = gdk_is_x11() && x11_quick_paste != nullptr &&
       x11_quick_paste->available();
+  const bool portal_shortcuts = portal != nullptr && portal->is_available();
+  const bool gnome_shortcuts_available = gdk_is_wayland() && !portal_shortcuts &&
+      gnome_shortcuts != nullptr && gnome_shortcuts->is_available();
   if (is_method(call, "isSupported")) {
-    success(call, fl_value_new_bool(x11 || (portal != nullptr && portal->is_available())));
+    success(call, fl_value_new_bool(x11 || portal_shortcuts || gnome_shortcuts_available));
   } else if (is_method(call, "register")) {
     ShortcutRequest request;
     const gchar* id = string_argument(call, "id");
@@ -985,10 +1007,24 @@ void shortcuts_call(FlMethodChannel* channel, FlMethodCall* call, gpointer) {
                                         nullptr, nullptr);
         fl_value_unref(arguments);
       });
-    } else if (portal != nullptr) {
+    } else if (portal_shortcuts && gnome_shortcuts != nullptr &&
+               gnome_shortcuts->shortcut_registered()) {
+      // The portal became available after the fallback was registered. Release
+      // the fallback first so the same shortcut is never owned by both paths.
+      gnome_shortcuts->unregister_shortcut(
+          request.id, [request, complete](bool removed) mutable {
+            if (!removed || portal == nullptr) {
+              complete({false, {}, "GNOME did not release the existing shortcut."});
+              return;
+            }
+            portal->register_shortcut(request, std::move(complete));
+          });
+    } else if (portal_shortcuts) {
       // The Wayland portal callback wakes the authenticated companion's
       // AwaitQuickPaste transaction. It must not open a second Flutter child.
       portal->register_shortcut(request, complete);
+    } else if (gnome_shortcuts_available) {
+      gnome_shortcuts->register_shortcut(request, complete);
     } else {
       complete({false, {}, "Global shortcuts are unavailable."});
     }
@@ -1005,8 +1041,12 @@ void shortcuts_call(FlMethodChannel* channel, FlMethodCall* call, gpointer) {
     };
     if (x11) {
       x11_quick_paste->unregister_shortcut(id, complete);
-    } else if (portal != nullptr) {
+    } else if (gnome_shortcuts != nullptr && gnome_shortcuts->shortcut_registered()) {
+      gnome_shortcuts->unregister_shortcut(id, complete);
+    } else if (portal_shortcuts) {
       portal->unregister_shortcut(id, complete);
+    } else if (gnome_shortcuts_available) {
+      gnome_shortcuts->unregister_shortcut(id, complete);
     } else {
       complete(false);
     }
@@ -1292,13 +1332,12 @@ void register_linux_host_channels(FlBinaryMessenger* messenger,
     if (windows != nullptr) {
       portal = std::make_unique<LinuxPortal>(GTK_WINDOW(windows->data),
           LinuxPortalCallbacks{[](const std::string&, const std::string&) {
-            if (bridge_waiter != nullptr) {
-              g_dbus_method_invocation_return_value(bridge_waiter,
-                                                    g_variant_new("(b)", TRUE));
-              g_object_unref(bridge_waiter);
-              bridge_waiter = nullptr;
-            }
+            wake_bridge_waiter();
           }, [] { cancel_bridge(); }});
+      gnome_shortcuts = std::make_unique<LinuxGnomeShortcuts>([](const std::string&) {
+        // Both native shortcut paths release the same authenticated waiter.
+        wake_bridge_waiter();
+      });
       if (g_object_get_data(G_OBJECT(application), "copypaste-quick-paste") == nullptr) {
         g_bus_own_name(G_BUS_TYPE_SESSION, kBridgeName, G_BUS_NAME_OWNER_FLAGS_NONE,
                        bridge_bus_acquired, nullptr, nullptr, nullptr, nullptr);

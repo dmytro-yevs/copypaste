@@ -4,6 +4,7 @@ import GLib from 'gi://GLib';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import {ClipboardBridge} from './clipboard_bridge.js';
+import {ShortcutBridge} from './shortcut_bridge.js';
 
 const COMPANION_BUS_NAME = 'app.copypaste.GnomeIntegration';
 const HOST_BUS_NAME = 'app.copypaste.CopyPaste';
@@ -69,6 +70,8 @@ export default class CopyPasteQuickPasteExtension extends Extension {
         this._cancelCalls();
         this._clipboardBridge?.destroy();
         this._clipboardBridge = null;
+        this._shortcutBridge?.destroy();
+        this._shortcutBridge = null;
         if (this._cancelSignalId)
             this._bus.signal_unsubscribe(this._cancelSignalId);
         if (this._windowCreatedId)
@@ -104,6 +107,7 @@ export default class CopyPasteQuickPasteExtension extends Extension {
             const factory = await import('gi://CopyPasteClipboard?version=1.0');
             if (this._enabled) {
                 this._clipboardBridge = new ClipboardBridge(this._bus, factory);
+                this._shortcutBridge = new ShortcutBridge(this._bus);
                 this._ownCompanionName();
             }
         } catch (_error) {

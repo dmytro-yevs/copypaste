@@ -172,7 +172,7 @@ jobs:
           - { name: macos, platform: macos, runner: macos-14, target: macos }
           - { name: android, platform: android, runner: ubuntu-24.04, target: apk }
           - { name: windows, platform: windows, runner: windows-2022, target: windows }
-          - { name: Linux x86_64, platform: linux, runner: ubuntu-22.04, target: linux }
+          - { name: Linux x86_64, platform: linux, runner: ubuntu-24.04, target: linux }
           - { name: Linux aarch64, platform: linux, runner: ubuntu-24.04-arm, target: linux }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5

@@ -64,6 +64,10 @@ impl Fixture {
                 "arguments":[{"id":"text", "title":"Text", "kind":"text", "default":"", "required":true}]}],
             "preferences": [{"id":"uppercase", "title":"Uppercase", "kind":"boolean", "default":false}]
         });
+        if target().platform == ModulePlatform::Linux {
+            manifest["schema_version"] = json!(5);
+            manifest["supported_platforms"] = json!(["linux"]);
+        }
         mutate(&mut manifest);
         let entrypoint = manifest["entrypoint"].as_str().unwrap().to_owned();
         let bytes = serde_json::to_vec(&manifest).unwrap();
@@ -233,17 +237,19 @@ fn signed_native_module_runs_offline_and_survives_restart_update_disable_and_rem
     let library = fs::read(native_library()).unwrap();
     let package = fixture.package("1.0.0", &library, |_| {}, None);
     let installed = manager.install(&package).unwrap();
-    assert_eq!(
-        installed.supported_platforms,
+    let expected_platforms = if target().platform == ModulePlatform::Linux {
+        vec![ModulePlatform::Linux]
+    } else {
         vec![
             ModulePlatform::Macos,
             ModulePlatform::Windows,
             ModulePlatform::Android,
         ]
-    );
+    };
+    assert_eq!(installed.supported_platforms, expected_platforms);
     assert_eq!(
         serde_json::to_value(&installed).unwrap()["supported_platforms"],
-        json!(["macos", "windows", "android"])
+        json!(expected_platforms)
     );
 
     assert!(installed.enabled);

@@ -1,7 +1,4 @@
-// Compile this focused fixture on Linux with:
-// c++ -std=c++17 -Wall -Wextra -Werror linux_portal_test.cc \
-//   $(pkg-config --cflags --libs gtk+-3.0 gio-2.0) -o linux_portal_test
-// ./linux_portal_test
+// Run scripts/test-linux-portal.sh to compile and execute this fixture.
 
 #include <gio/gio.h>
 #include <glib.h>
