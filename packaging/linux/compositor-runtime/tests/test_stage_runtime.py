@@ -262,7 +262,7 @@ class RuntimeStageTests(unittest.TestCase):
                  mock.patch.object(private_elf_closure, "trusted_library", side_effect=lambda path: path), \
                  mock.patch.object(private_elf_closure, "rpm_owner", side_effect=lambda path: ("kdecoration2" if path == decoration else "kf6-kcoreaddons", "6.0.0-1", "kde-6.0.0-1.src.rpm", "LGPL-2.1-or-later")), \
                  mock.patch.object(private_elf_closure, "rpm_installed_license_files", side_effect=lambda owner: [(("kdecoration2-doc", "6.0.0-1", "kde-6.0.0-1.src.rpm", "LGPL-2.1-or-later"), license_source), (("kdecoration2-doc", "6.0.0-1", "kde-6.0.0-1.src.rpm", "LGPL-2.1-or-later"), notice_source)] if owner[0] == "kdecoration2" else []), \
-                 mock.patch.object(private_elf_closure, "source_rpm_license_files", side_effect=lambda owner, _destination: [(owner, "LICENSE", license_source.read_bytes(), owner[2], "a" * 64, "kde", owner[1])]):
+                 mock.patch.object(private_elf_closure, "source_rpm_license_files", side_effect=lambda owner, _destination: [(owner, "LICENSE", license_source.read_bytes(), owner[2], "a" * 64, "kde", owner[1], "LICENSE")]):
                 manifest = private_elf_closure.copy_closure(runtime, [entrypoint])
 
             self.assertEqual([item["soname"] for item in manifest["libraries"]], ["libKDecoration2.so.6", "libKF6CoreAddons.so.6"])
@@ -296,6 +296,13 @@ class RuntimeStageTests(unittest.TestCase):
         source = b"/* Copyright 2026 Example. Permission is hereby granted. */\nint main(void) { return 0; }\n"
         self.assertEqual(private_elf_closure.source_header_notice(source), b"/* Copyright 2026 Example. Permission is hereby granted. */")
         self.assertIsNone(private_elf_closure.source_header_notice(b"/* Build helper. */\nCopyright 2026 Example."))
+        self.assertIsNone(private_elf_closure.source_header_notice(b"/* SPDX-License-Identifier: MIT */\nint main(void) { return 0; }"))
+
+    def test_source_notices_deduplicate_bytes_with_a_bounded_total(self) -> None:
+        self.assertEqual(
+            private_elf_closure.bounded_source_notices([("a.c", b"notice"), ("b.c", b"notice"), ("c.c", b"other")]),
+            [("a.c", b"notice"), ("c.c", b"other")],
+        )
 
     def test_rpm_owner_reports_only_the_invalid_license_length(self) -> None:
         expression = "L" * 1025

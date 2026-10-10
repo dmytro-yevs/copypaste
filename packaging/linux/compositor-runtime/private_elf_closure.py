@@ -36,13 +36,14 @@ SAFE_LICENSE = re.compile(r"^[\x20-\x7e]{1,1024}$")
 SAFE_SONAME = re.compile(r"^[A-Za-z0-9._+-]{1,255}$")
 NOTICE_NAME = re.compile(r"^(?:LICENSE|LICENCE|COPYING|NOTICE|COPYRIGHT|README)(?:[._-].*)?$", re.IGNORECASE)
 README_NAME = re.compile(r"^README(?:[._-].*)?$", re.IGNORECASE)
-SPDX_IDENTIFIER = re.compile(rb"spdx-license-identifier\s*:\s*[^\r\n]+", re.IGNORECASE)
 COPYRIGHT = re.compile(rb"copyright", re.IGNORECASE)
-LEGAL_BANNER = re.compile(rb"(?:permission\s+is\s+hereby\s+granted|this\s+(?:program|library)\s+is\s+free\s+software|licensed\s+under\s+the\s+(?:gnu\s+)?(?:lesser\s+)?general\s+public\s+license)", re.IGNORECASE)
+MIT_BANNER = re.compile(rb"permission\s+is\s+hereby\s+granted", re.IGNORECASE)
+FULL_GPL_BANNER = re.compile(rb"gnu\s+(?:lesser\s+)?general\s+public\s+license.*end\s+of\s+terms\s+and\s+conditions", re.IGNORECASE | re.DOTALL)
 LEADING_COMMENT = re.compile(rb"\A\s*/\*.*?\*/", re.DOTALL)
 MAX_SOURCE_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_LICENSE_BYTES = 4 * 1024 * 1024
-MAX_LICENSE_MEMBERS = 64
+MAX_LICENSE_MEMBERS = 128
+MAX_SOURCE_NOTICE_BYTES = 128 * 1024
 GLIBC_SONAMES = {
     "libc.so.6", "libdl.so.2", "libm.so.6", "libpthread.so.0", "librt.so.1",
     "libutil.so.1", "libresolv.so.2", "libnsl.so.1", "ld-linux-x86-64.so.2",
@@ -251,7 +252,7 @@ def safe_source_member(value: str) -> str | None:
 
 
 def has_legal_notice(value: bytes) -> bool:
-    return SPDX_IDENTIFIER.search(value) is not None or (COPYRIGHT.search(value) is not None and LEGAL_BANNER.search(value) is not None)
+    return COPYRIGHT.search(value) is not None and (MIT_BANNER.search(value) is not None or FULL_GPL_BANNER.search(value) is not None)
 
 
 def source_member_has_notice_text(member: str, value: bytes) -> bool:
@@ -265,6 +266,22 @@ def source_header_notice(value: bytes) -> bytes | None:
     if match is None or not has_legal_notice(match.group()):
         return None
     return match.group()
+
+
+def bounded_source_notices(candidates: list[tuple[str, bytes]]) -> list[tuple[str, bytes]]:
+    unique: list[tuple[str, bytes]] = []
+    seen = set()
+    total = 0
+    for member, value in candidates:
+        digest = hashlib.sha256(value).digest()
+        if digest in seen:
+            continue
+        seen.add(digest)
+        total += len(value)
+        if len(unique) >= MAX_LICENSE_MEMBERS or total > MAX_SOURCE_NOTICE_BYTES:
+            raise ClosureError("exact source RPM has too many legal notice bytes")
+        unique.append((member, value))
+    return unique
 
 
 def cpio_member_bytes(archive: Path, member: str) -> bytes:
@@ -292,7 +309,7 @@ def bounded_rpm2cpio(archive: Path) -> bytes:
     return bytes(output)
 
 
-def source_rpm_license_files(owner: tuple[str, str, str, str], destination: Path) -> list[tuple[tuple[str, str, str, str], str, bytes, str, str, str, str]]:
+def source_rpm_license_files(owner: tuple[str, str, str, str], destination: Path) -> list[tuple[tuple[str, str, str, str], str, bytes, str, str, str, str, str]]:
     name, evr, source_rpm, _license = owner
     source_dir = destination / source_rpm
     if not source_dir.exists():
@@ -354,13 +371,13 @@ def source_rpm_license_files(owner: tuple[str, str, str, str], destination: Path
                         header_candidates.append((source_path, notice))
         except (tarfile.TarError, OSError):
             continue
-    if not candidates and header_candidates:
-        candidates.append(header_candidates[0])
-    candidates = [(member, value) for member, value in candidates if len(value) <= MAX_LICENSE_BYTES]
-    if not candidates or len(candidates) > MAX_LICENSE_MEMBERS:
+    if not candidates:
+        candidates.extend(header_candidates)
+    candidates = bounded_source_notices([(member, value) for member, value in candidates if len(value) <= MAX_LICENSE_BYTES])
+    if not candidates:
         raise ClosureError(f"exact source RPM has no safe license or notice bytes for {name}: candidates={','.join(hints) or 'none'}")
     archive_hash = sha256(archive)
-    return [(owner, Path(member).name, value, source_rpm, archive_hash, source_name, source_evr) for member, value in sorted(candidates)]
+    return [(owner, Path(member).name, value, source_rpm, archive_hash, source_name, source_evr, member) for member, value in candidates]
 
 
 def trusted_license(path: Path) -> Path:
@@ -455,12 +472,12 @@ def copy_closure(runtime: Path, initial: Iterable[Path]) -> dict:
             owner = (package["name"], package["evr"], package["source_rpm"], package["license"])
             installed = rpm_installed_license_files(owner)
             origin = "installed-rpm"
-            source_records: list[tuple[tuple[str, str, str, str], str, bytes, str, str, str, str]] = []
+            source_records: list[tuple[tuple[str, str, str, str], str, bytes, str, str, str, str, str]] = []
             if not installed:
                 origin = "source-rpm"
                 source_records = source_rpm_license_files(owner, source_cache)
-            records = [(record_owner, source.name, source.read_bytes(), None, None, None, None) for record_owner, source in installed] if installed else source_records
-            for index, (license_owner, source_name, source_bytes, archive_name, archive_hash, archive_supplier, archive_evr) in enumerate(records):
+            records = [(record_owner, source.name, source.read_bytes(), None, None, None, None, None) for record_owner, source in installed] if installed else source_records
+            for index, (license_owner, source_name, source_bytes, archive_name, archive_hash, archive_supplier, archive_evr, source_member) in enumerate(records):
                 target = license_destination / f"{package['name']}-{index}-{source_name}"
                 if target.exists() or target.is_symlink():
                     raise ClosureError("private RPM license destination collides")
@@ -471,7 +488,7 @@ def copy_closure(runtime: Path, initial: Iterable[Path]) -> dict:
                     "path": target.relative_to(runtime).as_posix(), "sha256": sha256(target), "license_origin": origin,
                 }
                 if origin == "source-rpm":
-                    record.update({"license_archive": archive_name, "license_archive_sha256": archive_hash, "license_archive_supplier": archive_supplier, "license_archive_evr": archive_evr})
+                    record.update({"license_archive": archive_name, "license_archive_sha256": archive_hash, "license_archive_supplier": archive_supplier, "license_archive_evr": archive_evr, "license_source_member": source_member})
                 licenses.append(record)
     manifest = {"schema": 1, "libraries": sorted(libraries, key=lambda item: item["path"]),
                 "packages": sorted(packages.values(), key=lambda item: item["name"]), "licenses": licenses}
