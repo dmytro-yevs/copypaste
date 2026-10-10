@@ -155,6 +155,10 @@ else
   LD_LIBRARY_PATH="$compositor_library_path" "$COMPOSITOR_QUALIFICATION_ENTRYPOINT" >"$RUNTIME/desktop.log" 2>&1 &
   desktop_pid=$!
   wait_for 'kill -0 "$desktop_pid" 2>/dev/null'
+  if [[ -r "/proc/$desktop_pid/maps" ]]; then
+    printf 'Diagnostic GNOME compositor mappings:\n' >&2
+    awk '/libmutter|libgnome-shell|libst-14|libclutter/ {print}' "/proc/$desktop_pid/maps" >&2
+  fi
   export COPYPASTE_QUALIFICATION_GEOMETRY_OWNER_PID="$desktop_pid"
   wait_for 'find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name "wayland-*" | grep -q .'
   export WAYLAND_DISPLAY="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'wayland-*' -printf '%f\n' | head -n1)"
