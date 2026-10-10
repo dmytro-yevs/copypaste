@@ -769,6 +769,26 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                             ],
                         }
                         compositor_runtime = {"schema": 1, "producer_run_id": "1", "commit": "a" * 40, "runtime_id": "fixture", "desktop": desktop, "architecture": architecture, "distribution": "ubuntu" if desktop == "GNOME" else "fedora", "format": native_format, "package": {"name": "runtime-package", "sha256": "a" * 64, "size_bytes": 1}, "runtime_receipt": {"name": "runtime-receipt", "sha256": "b" * 64, "size_bytes": 1}}
+                        compositor_session = None
+                        session_evidence = []
+                        if session == "wayland":
+                            binding_path = root / f"linux-compositor-{architecture}-{desktop.lower()}-{session}.binding.json"
+                            binding_path.write_text(json.dumps(compositor_runtime), encoding="utf-8")
+                            record_path = root / f"linux-compositor-{architecture}-{desktop.lower()}-{session}.session.json"
+                            record_path.write_text(json.dumps({
+                                "schema": 1,
+                                "binding_sha256": hashlib.sha256(binding_path.read_bytes()).hexdigest(),
+                                "session": "wayland",
+                                "runtime_id": "fixture",
+                                "desktop": desktop,
+                                "pid": 42,
+                                "executable": {"path": "usr/bin/private-compositor", "sha256": "c" * 64},
+                                "mapped_private_libraries": [{"path": "lib/libmutter-private.so" if desktop == "GNOME" else "lib/libkwin-private.so", "sha256": "d" * 64}],
+                            }), encoding="utf-8")
+                            def attachment(path):
+                                return {"name": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "size_bytes": path.stat().st_size}
+                            compositor_session = {"binding": attachment(binding_path), "record": attachment(record_path)}
+                            session_evidence = [compositor_session["binding"], compositor_session["record"]]
                         trace = {
                             "schema": 1, "version": "1.2.3", "commit": "a" * 40,
                             "source_run_id": "123", "artifact_run_id": "456",
@@ -794,6 +814,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                                 {"format": native_format, "gui_owned_daemon": True, "executables": {name: {"path": f"/usr/lib/copypaste/{name}", "sha256": "e" * 64, "size_bytes": 1} for name in ("copypaste", "copypaste-daemon", "copypaste-cli")}},
                             ],
                             "compositor_runtime": compositor_runtime,
+                            "compositor_session": compositor_session,
                         }
                         (root / trace_name).write_text(json.dumps(trace), encoding="utf-8")
                         trace_digest = hashlib.sha256((root / trace_name).read_bytes()).hexdigest()
@@ -806,11 +827,12 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                             "environment": {"distribution": "ubuntu" if desktop == "GNOME" else "fedora", "distribution_version": "24.04"},
                             "assertions": {name: True for name in assertions},
                             "compositor_runtime": compositor_runtime,
+                            "compositor_session": compositor_session,
                             "packages": package_rows(architecture),
                             "previous_packages": previous_package_rows(architecture),
                             "upgrade": upgrade,
                             "trace": {"name": trace_name, "sha256": trace_digest, "size_bytes": (root / trace_name).stat().st_size},
-                            "evidence": [{"name": trace_name, "sha256": trace_digest, "size_bytes": (root / trace_name).stat().st_size}],
+                            "evidence": [{"name": trace_name, "sha256": trace_digest, "size_bytes": (root / trace_name).stat().st_size}, *session_evidence],
                         }))
             verify(root, artifacts, "1.2.3", "a" * 40, "123", "456", previous_artifacts=previous_artifacts, previous_version="1.2.2")
             trace_path = root / "linux-native-x86_64-gnome-x11.trace.json"
@@ -923,13 +945,32 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                 encoding="utf-8",
             )
             driver.chmod(0o755)
-            receipt_path = producer["produce"](argparse.Namespace(
-                artifacts=root / "current", previous_artifacts=root / "previous",
-                version="1.2.3", previous_version="1.2.2", architecture="x86_64",
-                desktop="GNOME", session="wayland", commit="a" * 40,
-                source_run_id="123", artifact_run_id="456", driver=driver, output=root / "evidence",
-                module_artifacts=module_artifacts, module_fixtures=module_fixtures, compositor_runtime_binding=binding,
-            ))
+            session_record = root / "compositor-session.json"
+            session_record.write_text(json.dumps({
+                "schema": 1,
+                "binding_sha256": hashlib.sha256(binding.read_bytes()).hexdigest(),
+                "session": "wayland",
+                "runtime_id": "fixture",
+                "desktop": "GNOME",
+                "pid": 42,
+                "executable": {"path": "usr/bin/private-compositor", "sha256": "c" * 64},
+                "mapped_private_libraries": [{"path": "lib/libmutter-private.so", "sha256": "d" * 64}],
+            }), encoding="utf-8")
+            previous_session_record = os.environ.get("COPYPASTE_COMPOSITOR_SESSION_RECORD")
+            os.environ["COPYPASTE_COMPOSITOR_SESSION_RECORD"] = str(session_record)
+            try:
+                receipt_path = producer["produce"](argparse.Namespace(
+                    artifacts=root / "current", previous_artifacts=root / "previous",
+                    version="1.2.3", previous_version="1.2.2", architecture="x86_64",
+                    desktop="GNOME", session="wayland", commit="a" * 40,
+                    source_run_id="123", artifact_run_id="456", driver=driver, output=root / "evidence",
+                    module_artifacts=module_artifacts, module_fixtures=module_fixtures, compositor_runtime_binding=binding,
+                ))
+            finally:
+                if previous_session_record is None:
+                    os.environ.pop("COPYPASTE_COMPOSITOR_SESSION_RECORD", None)
+                else:
+                    os.environ["COPYPASTE_COMPOSITOR_SESSION_RECORD"] = previous_session_record
             receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
             self.assertEqual(receipt["artifact_run_id"], "456")
             self.assertEqual(len(receipt["packages"]), 3)

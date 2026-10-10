@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 from pathlib import Path, PurePosixPath
+from typing import Optional
 
 
 ARCHITECTURES = ("x86_64", "aarch64")
@@ -355,7 +356,7 @@ def compositor_runtime_binding(path: Path, commit: str, desktop: str, architectu
     return binding
 
 
-def compositor_session_record(binding_path: Path, binding: dict, session: str, output: Path) -> dict | None:
+def compositor_session_record(binding_path: Path, binding: dict, session: str, output: Path) -> Optional[dict]:
     if session != "wayland":
         return None
     source_name = os.environ.get("COPYPASTE_COMPOSITOR_SESSION_RECORD", "")
