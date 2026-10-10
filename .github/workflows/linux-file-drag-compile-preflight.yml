@@ -106,8 +106,16 @@ jobs:
           sink_window="$(xdotool search --name '^CopyPaste Qualification File Drop Sink$')"
           xdotool windowmove "$source_window" 100 150
           xdotool windowmove "$sink_window" 760 150
+          window_center() {
+            xdotool getwindowgeometry --shell "$1" | awk -F= '
+              /^X=/{x=$2} /^Y=/{y=$2} /^WIDTH=/{width=$2} /^HEIGHT=/{height=$2}
+              END {print x + width / 2, y + height / 2}
+            '
+          }
+          read -r source_x source_y <<<"$(window_center "$source_window")"
+          read -r sink_x sink_y <<<"$(window_center "$sink_window")"
           xdotool windowfocus "$source_window"
-          xdotool mousemove --sync 260 198
+          xdotool mousemove --sync "$source_x" "$source_y"
           xdotool mousedown 1
           : >"$work/start"
           for _ in $(seq 1 100); do
@@ -115,7 +123,7 @@ jobs:
             sleep 0.05
           done
           grep -Fqx '{"event":"drag_started"}' "$work/activity"
-          xdotool mousemove --sync 920 230
+          xdotool mousemove --sync "$sink_x" "$sink_y"
           xdotool mouseup 1
           for _ in $(seq 1 100); do
             [[ "$(cat "$work/result" 2>/dev/null || true)" == "received" ]] && break
