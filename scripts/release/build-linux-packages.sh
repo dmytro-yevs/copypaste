@@ -101,8 +101,8 @@ if [[ -n "$RUNTIME_RECEIPT" || -n "$RUNTIME_DIRECTORY" ]]; then
   python3 "$ROOT/packaging/linux/compositor-runtime/verify_runtime_package.py" \
     --root "$STAGE" --runtime-id "$runtime_id"
   RUNTIME_RPM_FILES=$'/usr/share/copypaste/compositor-runtime\n/usr/share/wayland-sessions'
-  RUNTIME_DEB_DEPENDS="$(python3 -c 'import json, sys; print(", ".join("{} (= {})".format(item["name"], item["version"]) for item in json.load(open(sys.argv[1], encoding="utf-8"))["package_dependencies"]))' "$RUNTIME_RECEIPT")"
-  RUNTIME_RPM_REQUIRES="$(python3 -c 'import json, sys; print("\n".join("Requires: {} = {}".format(item["name"], item["version"]) for item in json.load(open(sys.argv[1], encoding="utf-8"))["package_dependencies"]))' "$RUNTIME_RECEIPT")"
+  RUNTIME_DEB_DEPENDS="$(python3 -c 'import json, sys; receipt=json.load(open(sys.argv[1], encoding="utf-8")); assert receipt.get("package_dependencies") == []; print(", ".join(item["name"] if "operator" not in item else "{} ({} {})".format(item["name"], item["operator"], item["version"]) for item in receipt.get("host_requirements", [])))' "$RUNTIME_RECEIPT")"
+  RUNTIME_RPM_REQUIRES="$(python3 -c 'import json, sys; receipt=json.load(open(sys.argv[1], encoding="utf-8")); assert receipt.get("package_dependencies") == []; print("\n".join("Requires: " + item["name"] + (" {} {}".format(item["operator"], item["version"]) if "operator" in item else "") for item in receipt.get("host_requirements", [])))' "$RUNTIME_RECEIPT")"
 elif [[ "${COPYPASTE_REQUIRE_COMPOSITOR_RUNTIME:-0}" == 1 ]]; then
   echo "ERROR: stable Linux packaging requires an immutable compositor runtime receipt" >&2
   exit 1

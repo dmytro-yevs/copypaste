@@ -513,6 +513,15 @@ class ReleaseSafetyTest(unittest.TestCase):
         self.assertNotIn("/etc/xdg/autostart", packages)
         desktop = (ROOT / "packaging/linux/com.copypaste.CopyPaste.desktop").read_text(encoding="utf-8")
         self.assertIn("x-scheme-handler/copypaste", desktop)
+
+    def test_linux_runtime_host_requirements_do_not_restore_legacy_pins(self):
+        packages = (ROOT / "scripts/release/build-linux-packages.sh").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        smoke = (ROOT / "scripts/release/smoke-linux-production.sh").read_text(encoding="utf-8")
+        desktop = (ROOT / "packaging/linux/com.copypaste.CopyPaste.desktop").read_text(encoding="utf-8")
+        self.assertIn('receipt.get("host_requirements", [])', packages)
+        self.assertIn('receipt.get("package_dependencies") == []', packages)
+        self.assertNotIn('item["name"], item["version"]', packages)
         self.assertIn("X-GNOME-Autostart-enabled=true", desktop)
         self.assertIn("gnome-keyring-daemon", smoke)
         self.assertIn("XDG_SESSION_TYPE", smoke)
