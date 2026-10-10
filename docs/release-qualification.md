@@ -13,6 +13,19 @@ Linux publication requires the exact-artifact GNOME/KDE X11/native Wayland
 matrix in [Linux native qualification](../packaging/linux/native-qualification.md).
 Package builds and protocol fixtures alone do not satisfy that contract.
 
+Each Linux matrix row also stages the signed OCR, Semantic Search, and Supabase
+packages for its exact architecture, their package-native qualification
+receipts, and offline fixtures. The installed GUI daemon must receive the typed
+IPC install, enable, invoke, disable, and remove operations for every package,
+then restart before the post-removal inventory check. The acceptance helper
+verifies each package with `MODULE_RELEASE_PUBLIC_KEY`, binds its receipt to
+the staged bytes, target, and app version, checks OCR fixture hashes, and
+checks semantic model hashes against the model manifest inside the signed
+package. Its typed IPC command
+trace and `linux-module-qualification.json` are release evidence; an inventory
+listing or an independently produced module receipt cannot substitute for this
+installed-product lifecycle.
+
 Every downloadable updater artifact also receives the repository's detached
 updater signature. Each platform job records the exact commit, workflow run,
 filename, byte size, and SHA-256 digest. The qualification job re-hashes those

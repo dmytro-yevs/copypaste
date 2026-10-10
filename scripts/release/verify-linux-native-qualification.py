@@ -29,6 +29,8 @@ TRACE_PLACEHOLDERS = {
     "external-gtk-clipboard",
     "desktop entry URI handler and icon verified",
 }
+MODULE_IDS = ("copypaste.ocr", "copypaste.semantic-search", "copypaste.supabase")
+IPC_OPERATIONS = {"list", "install", "set_preferences", "set_enabled", "invoke", "remove"}
 
 
 def digest(path: Path) -> str:
@@ -101,11 +103,54 @@ def verify_trace(root: Path, receipt: dict, architecture: str, desktop: str, ses
         assertions = command.get("assertions")
         if not isinstance(argv, list) or not argv or not all(isinstance(value, str) and value and len(value) <= 256 and "\n" not in value and "\r" not in value for value in argv):
             raise ValueError(f"scenario trace command is invalid: {name}")
+        if argv[:2] == ["unix-ipc", "modules"]:
+            raise ValueError(f"scenario trace must use typed IPC records: {name}")
         if any(value in TRACE_PLACEHOLDERS for value in argv) or argv[:2] == ["sh", "-ceu"]:
             raise ValueError(f"scenario trace command is a placeholder: {name}")
         if not isinstance(assertions, list) or not assertions or not all(item in expected_assertions for item in assertions):
             raise ValueError(f"scenario trace assertions are invalid: {name}")
         covered.update(assertions)
+    ipc = trace.get("ipc")
+    if not isinstance(ipc, list):
+        raise ValueError(f"scenario trace has no typed IPC results: {name}")
+    required = {
+        "endpoint_category", "method", "operation", "request_sha256",
+        "response_sha256", "success", "assertions",
+    }
+    module_rows = []
+    for row in ipc:
+        if not isinstance(row, dict) or not required <= set(row) or set(row) - (required | {"module_id", "enabled"}):
+            raise ValueError(f"scenario typed IPC record is invalid: {name}")
+        if (row["endpoint_category"] != "gui_owned_unix_socket" or row["method"] != "modules"
+                or row["operation"] not in IPC_OPERATIONS or row["success"] is not True):
+            raise ValueError(f"scenario typed IPC result is invalid: {name}")
+        if not all(isinstance(row[key], str) and re.fullmatch(r"[0-9a-f]{64}", row[key]) for key in ("request_sha256", "response_sha256")):
+            raise ValueError(f"scenario typed IPC digests are invalid: {name}")
+        module_id = row.get("module_id")
+        if row["operation"] == "list":
+            if module_id is not None or "enabled" in row:
+                raise ValueError(f"module list IPC record has lifecycle data: {name}")
+        elif module_id not in MODULE_IDS:
+            raise ValueError(f"module IPC record has an unknown module identity: {name}")
+        if "enabled" in row and (row["operation"] != "set_enabled" or not isinstance(row["enabled"], bool)):
+            raise ValueError(f"module IPC enabled state is invalid: {name}")
+        assertions = row["assertions"]
+        if not isinstance(assertions, list) or not assertions or not all(item in expected_assertions for item in assertions):
+            raise ValueError(f"scenario typed IPC assertions are invalid: {name}")
+        covered.update(assertions)
+        if "modules" in assertions:
+            module_rows.append(row)
+    if "modules" in expected_assertions:
+        if not module_rows:
+            raise ValueError(f"scenario trace has no module lifecycle IPC evidence: {name}")
+        for module_id in MODULE_IDS:
+            rows = [row for row in module_rows if row.get("module_id") == module_id]
+            if {row["operation"] for row in rows} < {"install", "invoke", "remove", "set_enabled"}:
+                raise ValueError(f"scenario trace module lifecycle is incomplete for {module_id}: {name}")
+            if {row.get("enabled") for row in rows if row["operation"] == "set_enabled"} != {True, False}:
+                raise ValueError(f"scenario trace module enable lifecycle is incomplete for {module_id}: {name}")
+        if not any(row.get("module_id") == "copypaste.semantic-search" and row["operation"] == "set_preferences" for row in module_rows):
+            raise ValueError(f"scenario trace semantic setup is missing: {name}")
     if covered != expected_assertions:
         raise ValueError(f"scenario trace does not execute every assertion: {name}")
     if receipt.get("trace") != {"name": name, "sha256": digest(path), "size_bytes": path.stat().st_size}:

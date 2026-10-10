@@ -36,6 +36,9 @@ TRACE_PLACEHOLDERS = {
     "external-gtk-clipboard",
     "desktop entry URI handler and icon verified",
 }
+IPC_PREFIX = "COPYPASTE_QUALIFICATION_IPC "
+MODULE_IDS = ("copypaste.ocr", "copypaste.semantic-search", "copypaste.supabase")
+IPC_OPERATIONS = {"list", "install", "set_preferences", "set_enabled", "invoke", "remove"}
 
 
 def sha256(path: Path) -> str:
@@ -61,6 +64,8 @@ def command_rows(stdout: str, expected_assertions: set[str]) -> list[dict]:
     for line in stdout.splitlines():
         if not line:
             continue
+        if line.startswith(IPC_PREFIX):
+            continue
         if not line.startswith("COPYPASTE_QUALIFICATION_COMMAND "):
             raise ValueError("scenario driver emitted unstructured output")
         row = json.loads(line.removeprefix("COPYPASTE_QUALIFICATION_COMMAND "))
@@ -70,6 +75,8 @@ def command_rows(stdout: str, expected_assertions: set[str]) -> list[dict]:
             raise ValueError("scenario driver reported a failed command")
         if not all(isinstance(value, str) and value and len(value) <= 256 and "\n" not in value and "\r" not in value for value in row["argv"]):
             raise ValueError("scenario driver emitted unsafe command arguments")
+        if row["argv"][:2] == ["unix-ipc", "modules"]:
+            raise ValueError("typed IPC must use a typed IPC trace record")
         if any(value in TRACE_PLACEHOLDERS for value in row["argv"]) or row["argv"][:2] == ["sh", "-ceu"]:
             raise ValueError("scenario driver emitted a placeholder command trace")
         if not isinstance(row["assertions"], list) or not row["assertions"] or not all(item in expected_assertions for item in row["assertions"]):
@@ -77,9 +84,60 @@ def command_rows(stdout: str, expected_assertions: set[str]) -> list[dict]:
         rows.append(row)
     if not rows:
         raise ValueError("scenario driver produced no executed-command trace")
-    if {item for row in rows for item in row["assertions"]} != expected_assertions:
-        raise ValueError("scenario driver did not execute every required assertion")
     return rows
+
+
+def ipc_rows(stdout: str, expected_assertions: set[str]) -> list[dict]:
+    rows = []
+    required = {
+        "endpoint_category", "method", "operation", "request_sha256",
+        "response_sha256", "success", "assertions",
+    }
+    for line in stdout.splitlines():
+        if not line.startswith(IPC_PREFIX):
+            continue
+        row = json.loads(line.removeprefix(IPC_PREFIX))
+        if not isinstance(row, dict) or not required <= set(row) or set(row) - (required | {"module_id", "enabled"}):
+            raise ValueError("scenario driver emitted an invalid typed IPC trace")
+        if (row["endpoint_category"] != "gui_owned_unix_socket" or row["method"] != "modules"
+                or row["operation"] not in IPC_OPERATIONS or row["success"] is not True):
+            raise ValueError("scenario driver emitted an invalid typed IPC result")
+        if not all(isinstance(row[name], str) and re.fullmatch(r"[0-9a-f]{64}", row[name]) for name in ("request_sha256", "response_sha256")):
+            raise ValueError("scenario driver emitted invalid typed IPC digests")
+        module_id = row.get("module_id")
+        if row["operation"] == "list":
+            if module_id is not None or "enabled" in row:
+                raise ValueError("module list IPC trace has unexpected lifecycle data")
+        elif module_id not in MODULE_IDS:
+            raise ValueError("module IPC trace has an unknown module identity")
+        if "enabled" in row and (row["operation"] != "set_enabled" or not isinstance(row["enabled"], bool)):
+            raise ValueError("module IPC trace has an invalid enabled state")
+        assertions = row["assertions"]
+        if not isinstance(assertions, list) or not assertions or not all(item in expected_assertions for item in assertions):
+            raise ValueError("scenario driver emitted invalid typed IPC assertion coverage")
+        rows.append(row)
+    return rows
+
+
+def trace_rows(stdout: str, expected_assertions: set[str]) -> tuple[list[dict], list[dict]]:
+    commands = command_rows(stdout, expected_assertions)
+    ipc = ipc_rows(stdout, expected_assertions)
+    covered = {item for row in commands + ipc for item in row["assertions"]}
+    if covered != expected_assertions:
+        raise ValueError("scenario driver did not execute every required assertion")
+    if "modules" in expected_assertions:
+        module_rows = [row for row in ipc if "modules" in row["assertions"]]
+        if not module_rows:
+            raise ValueError("module qualification has no typed IPC trace")
+        for module_id in MODULE_IDS:
+            operations = [row for row in module_rows if row.get("module_id") == module_id]
+            if {row["operation"] for row in operations} < {"install", "invoke", "remove", "set_enabled"}:
+                raise ValueError(f"module qualification lifecycle is incomplete for {module_id}")
+            if {row.get("enabled") for row in operations if row["operation"] == "set_enabled"} != {True, False}:
+                raise ValueError(f"module qualification did not enable and disable {module_id}")
+        if not any(row.get("module_id") == "copypaste.semantic-search" and row["operation"] == "set_preferences" for row in module_rows):
+            raise ValueError("module qualification did not configure semantic search through typed IPC")
+    return commands, ipc
 
 
 def scenario_assertions(upgrade_mode: str, session: str) -> set[str]:
@@ -109,6 +167,16 @@ def runtime_environment() -> dict:
     return {"distribution": values.get("ID"), "distribution_version": values.get("VERSION_ID")}
 
 
+def staged_directory(path: Path, label: str) -> Path:
+    try:
+        resolved = path.resolve(strict=True)
+    except FileNotFoundError as error:
+        raise ValueError(f"{label} staging directory is missing") from error
+    if path.is_symlink() or not resolved.is_dir():
+        raise ValueError(f"{label} staging directory is unsafe")
+    return resolved
+
+
 def produce(args: argparse.Namespace) -> Path:
     if args.architecture not in ARCHITECTURES or args.desktop not in DESKTOPS or args.session not in SESSIONS:
         raise ValueError("unsupported Linux qualification matrix coordinate")
@@ -118,6 +186,8 @@ def produce(args: argparse.Namespace) -> Path:
         raise ValueError("source run ID is invalid")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
+    module_artifacts = staged_directory(args.module_artifacts, "module artifact")
+    module_fixtures = staged_directory(args.module_fixtures, "module fixture")
     packages = artifact_inventory(args.artifacts.resolve(), args.version, args.architecture)
     installed_formats = os.environ.get("COPYPASTE_INSTALLED_FORMATS", "").split(",")
     if set(installed_formats) not in ({"AppImage", "deb"}, {"AppImage", "rpm"}):
@@ -139,7 +209,8 @@ def produce(args: argparse.Namespace) -> Path:
     result = subprocess.run(
         [str(driver), "--artifacts", str(args.artifacts.resolve()), "--version", args.version,
          "--architecture", args.architecture, "--desktop", args.desktop, "--session", args.session,
-         "--evidence-dir", str(output)] + (
+         "--evidence-dir", str(output), "--module-artifacts", str(module_artifacts),
+         "--module-fixtures", str(module_fixtures)] + (
             ["--previous-artifacts", str(args.previous_artifacts.resolve()), "--previous-version", args.previous_version]
             if upgrade_mode == "prior_release" else ["--first-install-baseline"]
         ),
@@ -150,7 +221,7 @@ def produce(args: argparse.Namespace) -> Path:
     log_path.write_text(result.stdout, encoding="utf-8")
     if result.returncode:
         raise RuntimeError(f"native scenario driver failed; full output: {log_path}")
-    commands = command_rows(result.stdout, expected_assertions)
+    commands, ipc = trace_rows(result.stdout, expected_assertions)
     trace_name = f"linux-native-{args.architecture}-{args.desktop.lower()}-{args.session}.trace.json"
     trace_path = output / trace_name
     trace_path.write_text(json.dumps({
@@ -161,6 +232,7 @@ def produce(args: argparse.Namespace) -> Path:
         "installed_formats": installed_formats,
         "environment": runtime_environment(),
         "commands": commands,
+        "ipc": ipc,
     }, indent=2) + "\n", encoding="utf-8")
     attachments = [attachment(log_path), attachment(trace_path)]
     for path in sorted(output.iterdir()):
@@ -200,6 +272,8 @@ def main() -> int:
     parser.add_argument("--artifact-run-id", required=True)
     parser.add_argument("--driver", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--module-artifacts", required=True, type=Path)
+    parser.add_argument("--module-fixtures", required=True, type=Path)
     args = parser.parse_args()
     print(produce(args))
     return 0

@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from zipfile import ZipFile
 
 
@@ -522,6 +523,26 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
     def test_linux_native_evidence_binds_all_formats_and_desktop_sessions(self):
         verifier = runpy.run_path(str(ROOT / "scripts/release/verify-linux-native-qualification.py"))
         verify = verifier["verify"]
+        def module_ipc():
+            rows = []
+            for module_id in ("copypaste.ocr", "copypaste.semantic-search", "copypaste.supabase"):
+                for operation, enabled in (("install", None), ("set_enabled", True), ("invoke", None), ("set_enabled", False), ("remove", None)):
+                    row = {
+                        "endpoint_category": "gui_owned_unix_socket", "method": "modules",
+                        "operation": operation, "module_id": module_id,
+                        "request_sha256": "a" * 64, "response_sha256": "b" * 64,
+                        "success": True, "assertions": ["modules"],
+                    }
+                    if enabled is not None:
+                        row["enabled"] = enabled
+                    rows.append(row)
+            rows.append({
+                "endpoint_category": "gui_owned_unix_socket", "method": "modules",
+                "operation": "set_preferences", "module_id": "copypaste.semantic-search",
+                "request_sha256": "c" * 64, "response_sha256": "d" * 64,
+                "success": True, "assertions": ["modules"],
+            })
+            return rows
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             artifacts = root / "artifacts"
@@ -545,7 +566,8 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                             "upgrade_mode": "prior_release",
                             "installed_formats": ["AppImage", "deb" if desktop == "GNOME" else "rpm"],
                             "environment": {"distribution": "ubuntu" if desktop == "GNOME" else "fedora", "distribution_version": "24.04"},
-                            "commands": [{"argv": ["native-probe"], "returncode": 0, "assertions": sorted(assertions)}],
+                            "commands": [{"argv": ["native-probe"], "returncode": 0, "assertions": sorted(assertions - {"modules"})}],
+                            "ipc": module_ipc(),
                         }
                         (root / trace_name).write_text(json.dumps(trace), encoding="utf-8")
                         trace_digest = hashlib.sha256((root / trace_name).read_bytes()).hexdigest()
@@ -562,7 +584,23 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                             "evidence": [{"name": trace_name, "sha256": trace_digest, "size_bytes": (root / trace_name).stat().st_size}],
                         }))
             verify(root, artifacts, "1.2.3", "a" * 40, "123", "456")
+            trace_path = root / "linux-native-x86_64-gnome-x11.trace.json"
+            trace = json.loads(trace_path.read_text())
+            trace["commands"][0]["argv"] = ["unix-ipc", "modules"]
+            trace_path.write_text(json.dumps(trace))
             x11 = root / "linux-native-x86_64-gnome-x11.json"
+            receipt = json.loads(x11.read_text())
+            trace_attachment = {
+                "name": trace_path.name, "sha256": hashlib.sha256(trace_path.read_bytes()).hexdigest(),
+                "size_bytes": trace_path.stat().st_size,
+            }
+            receipt["trace"] = trace_attachment
+            receipt["evidence"] = [trace_attachment]
+            x11.write_text(json.dumps(receipt))
+            with self.assertRaisesRegex(ValueError, "typed IPC"):
+                verify(root, artifacts, "1.2.3", "a" * 40, "123", "456")
+            trace["commands"][0]["argv"] = ["native-probe"]
+            trace_path.write_text(json.dumps(trace))
             receipt = json.loads(x11.read_text())
             receipt["assertions"].pop("native_x11_keyboard_input")
             receipt["assertions"]["portal_keyboard_grant"] = True
@@ -588,9 +626,21 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                 for extension in ("AppImage", "deb", "rpm"):
                     version = "1.2.3" if name == "current" else "1.2.2"
                     (root / name / f"CopyPaste-v{version}-linux-x86_64.{extension}").write_bytes(name.encode())
+            module_artifacts = root / "module-artifacts"
+            module_fixtures = root / "module-fixtures"
+            module_artifacts.mkdir()
+            module_fixtures.mkdir()
             driver = root / "driver.py"
             driver_assertions = producer["scenario_assertions"]("prior_release", "wayland")
-            driver.write_text("#!/usr/bin/env python3\nimport json\nprint('COPYPASTE_QUALIFICATION_COMMAND ' + json.dumps({'argv': ['probe'], 'returncode': 0, 'assertions': " + repr(sorted(driver_assertions)) + "}))\n", encoding="utf-8")
+            module_ipc = []
+            for module_id in ("copypaste.ocr", "copypaste.semantic-search", "copypaste.supabase"):
+                for operation, enabled in (("install", None), ("set_enabled", True), ("invoke", None), ("set_enabled", False), ("remove", None)):
+                    row = {"endpoint_category": "gui_owned_unix_socket", "method": "modules", "operation": operation, "module_id": module_id, "request_sha256": "a" * 64, "response_sha256": "b" * 64, "success": True, "assertions": ["modules"]}
+                    if enabled is not None:
+                        row["enabled"] = enabled
+                    module_ipc.append(row)
+            module_ipc.append({"endpoint_category": "gui_owned_unix_socket", "method": "modules", "operation": "set_preferences", "module_id": "copypaste.semantic-search", "request_sha256": "c" * 64, "response_sha256": "d" * 64, "success": True, "assertions": ["modules"]})
+            driver.write_text("#!/usr/bin/env python3\nimport json\nprint('COPYPASTE_QUALIFICATION_COMMAND ' + json.dumps({'argv': ['probe'], 'returncode': 0, 'assertions': " + repr(sorted(driver_assertions - {"modules"})) + "}))\nfor row in " + repr(module_ipc) + ": print('COPYPASTE_QUALIFICATION_IPC ' + json.dumps(row))\n", encoding="utf-8")
             driver.chmod(0o755)
             os.environ["COPYPASTE_INSTALLED_FORMATS"] = "AppImage,deb"
             receipt_path = producer["produce"](argparse.Namespace(
@@ -598,6 +648,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                 version="1.2.3", previous_version="1.2.2", architecture="x86_64",
                 desktop="GNOME", session="wayland", commit="a" * 40,
                 source_run_id="123", artifact_run_id="456", driver=driver, output=root / "evidence",
+                module_artifacts=module_artifacts, module_fixtures=module_fixtures,
             ))
             receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
             self.assertEqual(receipt["artifact_run_id"], "456")
@@ -611,6 +662,52 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
             })
             with self.assertRaisesRegex(ValueError, "placeholder command"):
                 producer["command_rows"](placeholder, driver_assertions)
+            fake_ipc = "COPYPASTE_QUALIFICATION_COMMAND " + json.dumps({
+                "argv": ["unix-ipc", "modules", "invented"], "returncode": 0,
+                "assertions": [next(iter(driver_assertions - {"modules"}))],
+            })
+            with self.assertRaisesRegex(ValueError, "typed IPC"):
+                producer["command_rows"](fake_ipc, driver_assertions)
+
+    def test_linux_native_producer_forwards_resolved_module_staging_paths(self):
+        producer = runpy.run_path(str(ROOT / "scripts/release/produce-linux-native-qualification.py"))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            current = root / "current"
+            current.mkdir()
+            for extension in ("AppImage", "deb", "rpm"):
+                (current / f"CopyPaste-v1.2.3-linux-x86_64.{extension}").write_bytes(b"package")
+            module_artifacts = root / "module-artifacts"
+            module_fixtures = root / "module-fixtures"
+            module_artifacts.mkdir()
+            module_fixtures.mkdir()
+            driver = root / "driver"
+            driver.write_text("fixture", encoding="utf-8")
+            driver.chmod(0o755)
+            arguments = argparse.Namespace(
+                artifacts=current, previous_artifacts=None, version="1.2.3", previous_version=None,
+                architecture="x86_64", desktop="GNOME", session="x11", commit="a" * 40,
+                source_run_id="123", artifact_run_id="456", driver=driver, output=root / "evidence",
+                module_artifacts=module_artifacts, module_fixtures=module_fixtures,
+            )
+            expected = producer["scenario_assertions"]("first_install_baseline", "x11")
+            module_ipc = []
+            for module_id in ("copypaste.ocr", "copypaste.semantic-search", "copypaste.supabase"):
+                for operation, enabled in (("install", None), ("set_enabled", True), ("invoke", None), ("set_enabled", False), ("remove", None)):
+                    row = {"endpoint_category": "gui_owned_unix_socket", "method": "modules", "operation": operation, "module_id": module_id, "request_sha256": "a" * 64, "response_sha256": "b" * 64, "success": True, "assertions": ["modules"]}
+                    if enabled is not None:
+                        row["enabled"] = enabled
+                    module_ipc.append(row)
+            module_ipc.append({"endpoint_category": "gui_owned_unix_socket", "method": "modules", "operation": "set_preferences", "module_id": "copypaste.semantic-search", "request_sha256": "c" * 64, "response_sha256": "d" * 64, "success": True, "assertions": ["modules"]})
+            output = "COPYPASTE_QUALIFICATION_COMMAND " + json.dumps({"argv": ["probe"], "returncode": 0, "assertions": sorted(expected - {"modules"})})
+            output += "\n" + "\n".join("COPYPASTE_QUALIFICATION_IPC " + json.dumps(row) for row in module_ipc)
+            completed = subprocess.CompletedProcess(["driver"], 0, stdout=output)
+            with mock.patch.dict(os.environ, {"COPYPASTE_INSTALLED_FORMATS": "AppImage,deb"}, clear=False), \
+                    mock.patch.object(producer["subprocess"], "run", return_value=completed) as run:
+                producer["produce"](arguments)
+            argv = run.call_args.args[0]
+            self.assertEqual(argv[argv.index("--module-artifacts") + 1], str(module_artifacts.resolve()))
+            self.assertEqual(argv[argv.index("--module-fixtures") + 1], str(module_fixtures.resolve()))
 
 
 if __name__ == "__main__":
