@@ -20,6 +20,7 @@ jobs:
       - name: Prove exact-kernel V4L2 loopback feed
         run: |
           set -euo pipefail
+          export COPYPASTE_QUALIFICATION_HEADLESS=1
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends ffmpeg
           state="$RUNNER_TEMP/copypaste-v4l2loopback.json"
