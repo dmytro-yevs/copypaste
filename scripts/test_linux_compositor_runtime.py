@@ -49,6 +49,18 @@ class CompositorRuntimeSourceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exactly one artifact"):
             self.module.verify_source(self.run, duplicate, "owner/repo", "a" * 40)
 
+    def test_accepts_only_a_same_repository_ci_producer_run(self):
+        run = copy.deepcopy(self.run)
+        run.update({"path": ".github/workflows/ci.yml", "event": "pull_request", "pull_requests": [{"number": 7}]})
+        self.module.verify_source(run, self.artifacts, "owner/repo", "a" * 40)
+        run["head_sha"] = "b" * 40
+        with self.assertRaisesRegex(ValueError, "exact-commit"):
+            self.module.verify_source(run, self.artifacts, "owner/repo", "a" * 40)
+        run["head_sha"] = "a" * 40
+        run["head_repository"] = {"full_name": "fork/repo"}
+        with self.assertRaisesRegex(ValueError, "exact-commit"):
+            self.module.verify_source(run, self.artifacts, "owner/repo", "a" * 40)
+
     def test_requires_checked_out_baseline_revision_and_patch_bytes(self):
         revision, shell_revision, patch = self.module.BASELINES["GNOME"]
         source = {"revision": revision, "shell_revision": shell_revision, "patch_sha256": self.module.sha256(ROOT / patch)}
@@ -112,6 +124,20 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
         self.assertIn("libmutter-14-dev gobject-introspection libgirepository1.0-dev", workflow)
         self.assertIn("TAURI_SIGNING_PRIVATE_KEY", workflow)
         self.assertIn("workflow_call:", workflow)
+
+    def test_ci_calls_the_producer_only_for_same_repository_pull_requests(self):
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        condition = "github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository"
+        self.assertGreaterEqual(workflow.count(condition), 2)
+        self.assertIn("uses: ./.github/workflows/compositor-runtime.yml", workflow)
+        self.assertIn("commit: ${{ needs.compositor-runtime-metadata.outputs.commit }}", workflow)
+        self.assertIn("ref: ${{ github.event.pull_request.head.sha }}", workflow)
+        self.assertIn('"$commit" == "${{ github.event.pull_request.head.sha }}"', workflow)
+        self.assertIn("source_run_id: ${{ needs.compositor-runtime-metadata.outputs.source_run_id }}", workflow)
+        self.assertIn("TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}", workflow)
+        producer = (ROOT / ".github/workflows/compositor-runtime.yml").read_text(encoding="utf-8")
+        self.assertIn('"$(git rev-parse HEAD)" == "${{ inputs.commit }}"', producer)
+        self.assertNotIn('"$GITHUB_SHA" == "${{ inputs.commit }}"', producer)
 
     def test_uses_authenticated_runtime_artifacts_and_generated_launchers(self):
         workflow = (ROOT / ".github/workflows/linux-native-qualification.yml").read_text(encoding="utf-8")

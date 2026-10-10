@@ -65,11 +65,13 @@ def verify_baseline_source(desktop: str, source: dict) -> None:
 
 
 def verify_source(run: dict, artifacts: dict, repository: str, commit: str) -> None:
+    direct = run.get("path") == ".github/workflows/compositor-runtime.yml" and run.get("event") == "workflow_dispatch"
+    trusted_ci = (run.get("path") == ".github/workflows/ci.yml" and run.get("event") == "pull_request"
+                  and isinstance(run.get("pull_requests"), list) and len(run["pull_requests"]) == 1)
     if (
         type(run.get("id")) is not int or run.get("head_sha") != commit
         or run.get("head_repository", {}).get("full_name") != repository
-        or run.get("path") != ".github/workflows/compositor-runtime.yml"
-        or run.get("event") not in {"workflow_dispatch", "workflow_call"} or run.get("status") != "completed"
+        or not (direct or trusted_ci) or run.get("status") != "completed"
         or run.get("conclusion") != "success"
     ):
         raise ValueError("compositor runtime source is not a successful exact-commit producer run")

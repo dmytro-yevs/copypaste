@@ -11,6 +11,46 @@ permissions:
   contents: read
 
 jobs:
+  compositor-runtime-metadata:
+    name: Compositor runtime metadata
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      commit: ${{ steps.identity.outputs.commit }}
+      source_run_id: ${{ steps.identity.outputs.source_run_id }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - id: identity
+        run: |
+          set -euo pipefail
+          commit="$(git rev-parse HEAD)"
+          [[ "$commit" == "${{ github.event.pull_request.head.sha }}" && "$commit" =~ ^[0-9a-f]{40}$ ]]
+          version="$(awk '/^version:[[:space:]]*/ {print $2; exit}' apps/copypaste_flutter/pubspec.yaml)"
+          version="${version%%+*}"
+          cargo_version="$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{gsub(/["[:space:]]/, "", $3); print $3; exit}' Cargo.toml)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$version" == "$cargo_version" ]]
+          {
+            echo "version=$version"
+            echo "commit=$commit"
+            echo "source_run_id=$GITHUB_RUN_ID"
+          } >> "$GITHUB_OUTPUT"
+
+  compositor-runtime-producer:
+    name: Compositor runtime producer
+    needs: compositor-runtime-metadata
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.compositor-runtime-metadata.result == 'success'
+    uses: ./.github/workflows/compositor-runtime.yml
+    with:
+      version: ${{ needs.compositor-runtime-metadata.outputs.version }}
+      commit: ${{ needs.compositor-runtime-metadata.outputs.commit }}
+      source_run_id: ${{ needs.compositor-runtime-metadata.outputs.source_run_id }}
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
   rust-and-supabase:
     runs-on: ubuntu-24.04
     steps:

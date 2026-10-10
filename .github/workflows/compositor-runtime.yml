@@ -91,7 +91,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          [[ "${{ inputs.commit }}" =~ ^[0-9a-f]{40}$ && "$GITHUB_SHA" == "${{ inputs.commit }}" ]]
+          [[ "${{ inputs.commit }}" =~ ^[0-9a-f]{40}$ && "$(git rev-parse HEAD)" == "${{ inputs.commit }}" ]]
           [[ "${{ inputs.source_run_id }}" =~ ^[1-9][0-9]*$ ]]
       - name: Provision pinned GNOME 46 source build dependencies
         if: matrix.desktop == 'GNOME'

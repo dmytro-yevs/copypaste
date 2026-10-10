@@ -28,12 +28,14 @@ EXPECTED_JOBS = {
 
 
 def verify(run: dict, jobs: dict, artifacts: dict, repository: str, commit: str) -> None:
+    direct = run.get("path") == ".github/workflows/compositor-runtime.yml" and run.get("event") == "workflow_dispatch"
+    trusted_ci = (run.get("path") == ".github/workflows/ci.yml" and run.get("event") == "pull_request"
+                  and isinstance(run.get("pull_requests"), list) and len(run["pull_requests"]) == 1)
     if (
         type(run.get("id")) is not int
         or run.get("head_sha") != commit
         or run.get("head_repository", {}).get("full_name") != repository
-        or run.get("path") != ".github/workflows/compositor-runtime.yml"
-        or run.get("event") != "workflow_dispatch"
+        or not (direct or trusted_ci)
         or run.get("status") != "completed"
         or run.get("conclusion") != "success"
     ):
@@ -46,7 +48,8 @@ def verify(run: dict, jobs: dict, artifacts: dict, repository: str, commit: str)
         for job in entries
         if job.get("status") == "completed" and job.get("conclusion") == "success"
     }
-    if not EXPECTED_JOBS <= passed:
+    required_jobs = EXPECTED_JOBS if direct else {"Compositor runtime metadata", *EXPECTED_JOBS}
+    if not all(any(name == expected or name.endswith(f" / {expected}") for name in passed) for expected in required_jobs):
         raise ValueError("compositor runtime source did not pass every production runtime job")
     names = {
         artifact.get("name")
