@@ -645,7 +645,7 @@ class _Footer extends StatelessWidget {
         icon: LucideIcons.info,
         title: const Text('CopyPaste'),
         content: const Text(
-          'Private clipboard history across macOS, Android, and Windows.',
+          'Private clipboard history across macOS, Android, Windows, and Linux.',
         ),
         actions: [
           Button.primary(

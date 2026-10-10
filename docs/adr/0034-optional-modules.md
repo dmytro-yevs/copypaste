@@ -8,11 +8,12 @@ code and assets. They are not dependencies of the application build. OCR is an
 optional module; the base application includes no OCR engine or models.
 
 The first implementation accepts only packages signed by CopyPaste's pinned
-release identity. Modules execute locally on macOS, Android, and Windows. A
+release identity. Modules execute locally on macOS, Android, Windows, and Linux. A
 package is specific to one OS and architecture; module behavior and manifest
-contributions normally have parity across all three platforms. Schema 2 can
+contributions normally have parity across all supported platforms. Schema 2 can
 declare `supported_platforms` for explicitly platform-specific capabilities.
-SMS Codes is an Android-only module; it never runs on macOS or Windows.
+Schema 5 adds Linux native targets without changing legacy target values.
+SMS Codes is an Android-only module; it never runs on macOS, Windows, or Linux.
 
 Raycast's [extension architecture](https://www.raycast.com/blog/how-raycast-api-extensions-work),
 [manifest](https://developers.raycast.com/information/manifest), and

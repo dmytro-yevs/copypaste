@@ -1,12 +1,17 @@
 # Release qualification
 
-CopyPaste releases one stable version across macOS, Android, and Windows.
+The shared release contract covers macOS, Android, Windows, and Linux.
 `.github/workflows/release.yml` builds only production artifacts:
 
 - an ad-hoc sealed macOS DMG with the bundled release daemon and Homebrew
   per-machine self-signing helper;
 - universal, arm64, and armv7 Android APKs signed by the durable release keystore;
-- an Authenticode-signed current-user Windows NSIS installer.
+- an Authenticode-signed current-user Windows NSIS installer;
+- signed Linux AppImage, Debian, and RPM packages for x86_64 and ARM64.
+
+Linux publication requires the exact-artifact GNOME/KDE X11/native Wayland
+matrix in [Linux native qualification](../packaging/linux/native-qualification.md).
+Package builds and protocol fixtures alone do not satisfy that contract.
 
 Every downloadable updater artifact also receives the repository's detached
 updater signature. Each platform job records the exact commit, workflow run,
