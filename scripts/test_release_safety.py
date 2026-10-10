@@ -559,15 +559,32 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                     for session in ("x11", "wayland"):
                         assertions = verifier["assertion_set"]("prior_release", session)
                         trace_name = f"linux-native-{architecture}-{desktop.lower()}-{session}.trace.json"
+                        native_format = "deb" if desktop == "GNOME" else "rpm"
+                        installed = [row for row in package_rows(architecture) if row["name"].endswith((".AppImage", f".{native_format}"))]
+                        appimage = next(row for row in installed if row["name"].endswith(".AppImage"))
+                        native = next(row for row in installed if row["name"].endswith(f".{native_format}"))
+                        appimage = {"format": "AppImage", "path": f"/driver/{appimage['name']}", **appimage}
+                        native = {"format": native_format, "path": f"/driver/{native['name']}", **native}
+                        appimage_argv = ["env", "APPIMAGE_EXTRACT_AND_RUN=1", appimage["path"], "--appimage-extract"]
+                        native_argv = (["sudo", "apt-get", "install", "--yes", native["path"]]
+                                       if native_format == "deb" else ["sudo", "dnf", "--assumeyes", "install", native["path"]])
                         trace = {
                             "schema": 1, "version": "1.2.3", "commit": "a" * 40,
                             "source_run_id": "123", "artifact_run_id": "456",
                             "architecture": architecture, "desktop": desktop, "session": session,
                             "upgrade_mode": "prior_release",
-                            "installed_formats": ["AppImage", "deb" if desktop == "GNOME" else "rpm"],
+                            "installed_formats": ["AppImage", native_format],
                             "environment": {"distribution": "ubuntu" if desktop == "GNOME" else "fedora", "distribution_version": "24.04"},
-                            "commands": [{"argv": ["native-probe"], "returncode": 0, "assertions": sorted(assertions - {"modules"})}],
+                            "commands": [
+                                {"argv": appimage_argv, "returncode": 0, "assertions": ["package_install"]},
+                                {"argv": native_argv, "returncode": 0, "assertions": ["package_install"]},
+                                {"argv": ["native-probe"], "returncode": 0, "assertions": sorted(assertions - {"modules", "package_install"})},
+                            ],
                             "ipc": module_ipc(),
+                            "installation": {
+                                "formats": ["AppImage", native_format], "packages": [appimage, native],
+                                "appimage_extract_argv": appimage_argv, "native_install_argv": native_argv,
+                            },
                         }
                         (root / trace_name).write_text(json.dumps(trace), encoding="utf-8")
                         trace_digest = hashlib.sha256((root / trace_name).read_bytes()).hexdigest()
@@ -585,10 +602,26 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                         }))
             verify(root, artifacts, "1.2.3", "a" * 40, "123", "456")
             trace_path = root / "linux-native-x86_64-gnome-x11.trace.json"
+            x11 = root / "linux-native-x86_64-gnome-x11.json"
+            original_trace = json.loads(trace_path.read_text())
+            original_receipt = json.loads(x11.read_text())
+            def rejects_trace(mutator, message):
+                trace = deepcopy(original_trace)
+                mutator(trace)
+                trace_path.write_text(json.dumps(trace))
+                receipt = deepcopy(original_receipt)
+                attachment = {"name": trace_path.name, "sha256": hashlib.sha256(trace_path.read_bytes()).hexdigest(), "size_bytes": trace_path.stat().st_size}
+                receipt["trace"] = attachment
+                receipt["evidence"] = [attachment]
+                with self.assertRaisesRegex(ValueError, message):
+                    verifier["verify_trace"](root, receipt, "x86_64", "GNOME", "x11", "1.2.3", "a" * 40, "123", "456", verifier["assertion_set"]("prior_release", "x11"))
+                trace_path.write_text(json.dumps(original_trace))
+            rejects_trace(lambda trace: trace["installation"].update({"formats": ["AppImage", "deb", "deb"]}), "installation formats")
+            rejects_trace(lambda trace: trace["installation"]["appimage_extract_argv"].append("--extra"), "installation commands")
+            rejects_trace(lambda trace: trace["installation"]["native_install_argv"].__setitem__(-1, "/driver/substituted.deb"), "package manager command")
             trace = json.loads(trace_path.read_text())
             trace["commands"][0]["argv"] = ["unix-ipc", "modules"]
             trace_path.write_text(json.dumps(trace))
-            x11 = root / "linux-native-x86_64-gnome-x11.json"
             receipt = json.loads(x11.read_text())
             trace_attachment = {
                 "name": trace_path.name, "sha256": hashlib.sha256(trace_path.read_bytes()).hexdigest(),
@@ -640,9 +673,20 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                         row["enabled"] = enabled
                     module_ipc.append(row)
             module_ipc.append({"endpoint_category": "gui_owned_unix_socket", "method": "modules", "operation": "set_preferences", "module_id": "copypaste.semantic-search", "request_sha256": "c" * 64, "response_sha256": "d" * 64, "success": True, "assertions": ["modules"]})
-            driver.write_text("#!/usr/bin/env python3\nimport json\nprint('COPYPASTE_QUALIFICATION_COMMAND ' + json.dumps({'argv': ['probe'], 'returncode': 0, 'assertions': " + repr(sorted(driver_assertions - {"modules"})) + "}))\nfor row in " + repr(module_ipc) + ": print('COPYPASTE_QUALIFICATION_IPC ' + json.dumps(row))\n", encoding="utf-8")
+            driver.write_text(
+                "#!/usr/bin/env python3\nimport hashlib,json,os,sys\n"
+                "def value(flag): return sys.argv[sys.argv.index(flag)+1]\n"
+                "artifacts=value('--artifacts'); appimage=os.path.join(artifacts,'CopyPaste-v1.2.3-linux-x86_64.AppImage'); native=os.path.join(artifacts,'CopyPaste-v1.2.3-linux-x86_64.deb')\n"
+                "def package(path,format):\n d=hashlib.sha256(open(path,'rb').read()).hexdigest(); return {'format':format,'name':os.path.basename(path),'path':os.path.realpath(path),'sha256':d,'size_bytes':os.path.getsize(path)}\n"
+                "appimage_argv=['env','APPIMAGE_EXTRACT_AND_RUN=1',appimage,'--appimage-extract']; native_argv=['sudo','apt-get','install','--yes',native]\n"
+                "print('COPYPASTE_QUALIFICATION_COMMAND '+json.dumps({'argv':appimage_argv,'returncode':0,'assertions':['package_install']}))\n"
+                "print('COPYPASTE_QUALIFICATION_COMMAND '+json.dumps({'argv':native_argv,'returncode':0,'assertions':['package_install']}))\n"
+                "print('COPYPASTE_QUALIFICATION_COMMAND '+json.dumps({'argv':['probe'],'returncode':0,'assertions':" + repr(sorted(driver_assertions - {"modules", "package_install"})) + "}))\n"
+                "for row in " + repr(module_ipc) + ": print('COPYPASTE_QUALIFICATION_IPC '+json.dumps(row))\n"
+                "print('COPYPASTE_QUALIFICATION_INSTALL '+json.dumps({'formats':['AppImage','deb'],'packages':[package(appimage,'AppImage'),package(native,'deb')],'appimage_extract_argv':appimage_argv,'native_install_argv':native_argv}))\n",
+                encoding="utf-8",
+            )
             driver.chmod(0o755)
-            os.environ["COPYPASTE_INSTALLED_FORMATS"] = "AppImage,deb"
             receipt_path = producer["produce"](argparse.Namespace(
                 artifacts=root / "current", previous_artifacts=root / "previous",
                 version="1.2.3", previous_version="1.2.2", architecture="x86_64",
@@ -699,15 +743,34 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                         row["enabled"] = enabled
                     module_ipc.append(row)
             module_ipc.append({"endpoint_category": "gui_owned_unix_socket", "method": "modules", "operation": "set_preferences", "module_id": "copypaste.semantic-search", "request_sha256": "c" * 64, "response_sha256": "d" * 64, "success": True, "assertions": ["modules"]})
-            output = "COPYPASTE_QUALIFICATION_COMMAND " + json.dumps({"argv": ["probe"], "returncode": 0, "assertions": sorted(expected - {"modules"})})
+            appimage = current / "CopyPaste-v1.2.3-linux-x86_64.AppImage"
+            native = current / "CopyPaste-v1.2.3-linux-x86_64.deb"
+            appimage_argv = ["env", "APPIMAGE_EXTRACT_AND_RUN=1", str(appimage.resolve()), "--appimage-extract"]
+            native_argv = ["sudo", "apt-get", "install", "--yes", str(native.resolve())]
+            output = "COPYPASTE_QUALIFICATION_COMMAND " + json.dumps({"argv": appimage_argv, "returncode": 0, "assertions": ["package_install"]})
+            output += "\nCOPYPASTE_QUALIFICATION_COMMAND " + json.dumps({"argv": native_argv, "returncode": 0, "assertions": ["package_install"]})
+            output += "\nCOPYPASTE_QUALIFICATION_COMMAND " + json.dumps({"argv": ["probe"], "returncode": 0, "assertions": sorted(expected - {"modules", "package_install"})})
             output += "\n" + "\n".join("COPYPASTE_QUALIFICATION_IPC " + json.dumps(row) for row in module_ipc)
+            output += "\nCOPYPASTE_QUALIFICATION_INSTALL " + json.dumps({
+                "formats": ["AppImage", "deb"], "packages": [
+                    {"format": "AppImage", "name": appimage.name, "path": str(appimage.resolve()), "sha256": hashlib.sha256(appimage.read_bytes()).hexdigest(), "size_bytes": appimage.stat().st_size},
+                    {"format": "deb", "name": native.name, "path": str(native.resolve()), "sha256": hashlib.sha256(native.read_bytes()).hexdigest(), "size_bytes": native.stat().st_size},
+                ], "appimage_extract_argv": appimage_argv, "native_install_argv": native_argv,
+            })
             completed = subprocess.CompletedProcess(["driver"], 0, stdout=output)
-            with mock.patch.dict(os.environ, {"COPYPASTE_INSTALLED_FORMATS": "AppImage,deb"}, clear=False), \
+            with mock.patch.dict(os.environ, {}, clear=True), \
                     mock.patch.object(producer["subprocess"], "run", return_value=completed) as run:
                 producer["produce"](arguments)
             argv = run.call_args.args[0]
             self.assertEqual(argv[argv.index("--module-artifacts") + 1], str(module_artifacts.resolve()))
             self.assertEqual(argv[argv.index("--module-fixtures") + 1], str(module_fixtures.resolve()))
+            packages = producer["artifact_inventory"](current, "1.2.3", "x86_64")
+            with self.assertRaisesRegex(ValueError, "exactly one actual package installation"):
+                producer["installation_report"]("", packages, current)
+            with self.assertRaisesRegex(ValueError, "invalid formats"):
+                producer["installation_report"]("COPYPASTE_QUALIFICATION_INSTALL " + json.dumps({
+                    "formats": ["AppImage"], "packages": [], "appimage_extract_argv": [], "native_install_argv": [],
+                }), packages, current)
 
 
 if __name__ == "__main__":
