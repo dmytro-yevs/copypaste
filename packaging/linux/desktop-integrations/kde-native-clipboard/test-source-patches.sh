@@ -152,6 +152,12 @@ rg -F 'bool CopyPasteClipboardBridge::authorize(bool allowGui)' "$root/src/copyp
 rg -F 'if (!authorize(true))' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
 rg -F 'kGuiBusName = "app.copypaste.CopyPaste"' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
 test "$(rg -F -c 'if (!authorize())' "$root/src/copypasteclipboardbridge.cpp")" = 3
+rg -F 'auto bus = QDBusConnection::sessionBus();' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
+if rg -F 'const auto bus = QDBusConnection::sessionBus();' "$root/src/copypasteclipboardbridge.cpp"; then
+  echo "ERROR: the KWin bridge must keep its exported D-Bus connection mutable" >&2
+  exit 1
+fi
+rg -F 'const auto sender = message().service();' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
 rg -F 'qDBusRegisterMetaType<QMap<QString, QByteArray>>();' "$root/test-wire/main.cpp" >/dev/null
 rg -F 'qDBusRegisterMetaType<QMap<QString, QByteArray>>();' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
 rg -F 'QDBusConnection::connectToPeer(server.address(), connectionName)' "$root/test-wire/main.cpp" >/dev/null

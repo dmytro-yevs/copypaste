@@ -239,7 +239,7 @@ CopyPasteClipboardBridge::CopyPasteClipboardBridge(QObject *parent)
 {
     qDBusRegisterMetaType<CopyPasteWriterIdentity>();
     qDBusRegisterMetaType<QMap<QString, QByteArray>>();
-    const auto bus = QDBusConnection::sessionBus();
+    auto bus = QDBusConnection::sessionBus();
     bus.registerObject(QLatin1String(kObjectPath), this,
                        QDBusConnection::ExportScriptableSlots | QDBusConnection::ExportScriptableSignals);
     if (const auto interface = bus.interface()) {
@@ -373,7 +373,7 @@ bool CopyPasteClipboardBridge::authorize(bool allowGui)
         return true;
     }
     const auto bus = connection();
-    const auto sender = message().sender();
+    const auto sender = message().service();
     if (sender.isEmpty()) {
         fail(QStringLiteral("AccessDenied"));
         return false;
