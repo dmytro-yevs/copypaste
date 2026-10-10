@@ -132,6 +132,28 @@ void test_autostart_is_owned_and_atomic() {
   g_assert_no_error(error);
   g_assert_cmpstr(user_contents, ==, user_entry.c_str());
   g_free(user_contents);
+
+  const std::string old_appimage = "/home/test/CopyPaste-old.AppImage";
+  const std::string old_entry =
+      LinuxXdgStartup::DesktopEntryForExecutable(old_appimage, true);
+  g_assert_true(g_file_set_contents(path.c_str(), old_entry.c_str(), -1, &error));
+  g_assert_no_error(error);
+  g_assert_false(startup.Status().start_at_login);
+  g_assert_true(startup.SetStartAtLogin(true, &error));
+  g_assert_no_error(error);
+  gchar* updated_contents = nullptr;
+  gsize updated_length = 0;
+  g_assert_true(g_file_get_contents(path.c_str(), &updated_contents,
+                                    &updated_length, &error));
+  g_assert_no_error(error);
+  const std::string current_entry =
+      LinuxXdgStartup::DesktopEntryForExecutable(fixture->executable(), true);
+  g_assert_cmpstr(updated_contents, ==, current_entry.c_str());
+  g_free(updated_contents);
+  g_assert_true(startup.Status().start_at_login);
+  g_assert_true(startup.SetStartAtLogin(false, &error));
+  g_assert_no_error(error);
+  g_assert_false(g_file_test(path.c_str(), G_FILE_TEST_EXISTS));
 }
 
 void test_uri_registration_uses_private_xdg_home() {
