@@ -25,6 +25,7 @@ export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
 ./scripts/test-linux-gnome-shortcuts.sh
 ./scripts/test-linux-packagekit.sh
 ./scripts/test-linux-glibc-version.sh
+./scripts/test-linux-xdg-startup.sh
 
 fixture_dir="$(mktemp -d)"
 cleanup() {
