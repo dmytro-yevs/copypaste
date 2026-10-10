@@ -8,8 +8,8 @@ set -euo pipefail
 # package database.
 version=${1:?usage: $0 46|47 [source-dir] [build-dir]}
 case "$version" in
-  46) commit=fe8d2be3f90f89f286c89b164c94a4f86552bc97; patch="$PWD/mutter-46-writer-identity.patch"; target=mutter-14 ;;
-  47) commit=d688d0823fdc044885a4bd5f51dff038c9c6e8fc; patch="$PWD/mutter-47-writer-identity.patch"; target=mutter-15 ;;
+  46) commit=fe8d2be3f90f89f286c89b164c94a4f86552bc97; patch="$PWD/mutter-46-writer-identity.patch"; target=mutter-14; test_options=(-Dtests=false) ;;
+  47) commit=d688d0823fdc044885a4bd5f51dff038c9c6e8fc; patch="$PWD/mutter-47-writer-identity.patch"; target=mutter-15; test_options=(-Dtests=disabled) ;;
   *) echo "unsupported Mutter version: $version" >&2; exit 2 ;;
 esac
 source_dir=${2:-"$PWD/mutter-source-$version"}
@@ -25,6 +25,6 @@ git -C "$source_dir" checkout --detach "$commit"
 git -C "$source_dir" apply --check "$patch"
 git -C "$source_dir" apply "$patch"
 meson setup --wipe "$build_dir" "$source_dir" \
-  -Dtests=false -Dman=false -Dprofiler=false -Dinstalled_tests=false
+  "${test_options[@]}" -Dprofiler=false -Dinstalled_tests=false
 meson compile -C "$build_dir" "$target"
 echo "verified Mutter $version commit $commit and built $target"

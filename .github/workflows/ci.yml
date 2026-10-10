@@ -288,6 +288,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends cmake ninja-build qt6-base-dev dbus-x11
+          export COPYPASTE_QT_PREFIX="$(qmake6 -query QT_INSTALL_PREFIX)"
           packaging/linux/desktop-integrations/kde-native-clipboard/test-wire.sh
       - name: Compile the pinned patched KWin in an isolated Fedora builder
         run: packaging/linux/desktop-integrations/kde-native-clipboard/run-fedora-build.sh "${{ matrix.container_platform }}" "${{ matrix.kwin }}"
