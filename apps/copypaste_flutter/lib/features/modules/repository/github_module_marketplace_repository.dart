@@ -12,7 +12,7 @@ import 'module_marketplace_repository.dart';
 import 'modules_repository.dart';
 
 const moduleRepositoryPath = '/dmytro-yevs/copypaste/releases/download/';
-const moduleCatalogName = 'modules.json';
+const moduleCatalogName = 'modules-v2.json';
 const maximumModulePackageBytes = 2 * 1024 * 1024 * 1024;
 
 /// The catalog authenticates metadata and compressed packages. The runtime
@@ -312,7 +312,7 @@ class ModuleCatalogParser {
           'macos' => 'macOS',
           'windows' => 'Windows',
           'android' => 'Android',
-          'linux' => 'Linux',
+          'linux' => 'glibc',
           _ => 'this system',
         };
         final systemRequirement = minimum == null
