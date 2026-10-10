@@ -171,7 +171,8 @@ jobs:
           }
           read -r source_x source_y <<<"$(window_center "$source_window")"
           read -r sink_x sink_y <<<"$(window_center "$sink_window")"
-          xdotool windowactivate --sync "$source_window"
+          xdotool windowfocus "$source_window"
+          [[ "$(xdotool getwindowfocus)" == "$source_window" ]]
           xdotool mousemove --sync "$source_x" "$source_y"
           xdotool mousedown 1
           : >"$work/start"
