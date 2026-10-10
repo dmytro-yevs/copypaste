@@ -1,246 +1,125 @@
-name: Build and publish provider module
+name: Fedora compositor closure diagnostic
 
 on:
   workflow_dispatch:
     inputs:
       module:
-        description: First-party module to publish
+        description: Required provider-workflow compatibility input; unused by this diagnostic
         required: true
         type: choice
         options: [supabase, semantic-search]
       publish:
-        description: Publish qualified packages and update the signed marketplace
+        description: Must remain false; this diagnostic never publishes
         required: true
         type: boolean
         default: false
-
-concurrency:
-  group: provider-module-${{ inputs.module }}
-  cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  preflight:
+  fedora-closure-smoke:
+    if: inputs.publish == false
     runs-on: ubuntu-24.04
-    outputs:
-      version: ${{ steps.metadata.outputs.version }}
-      app_version: ${{ steps.metadata.outputs.app_version }}
-      library: ${{ steps.metadata.outputs.library }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - id: metadata
-        env:
-          MODULE: ${{ inputs.module }}
+      - name: Build disposable Fedora 40 RPM inspection image
         run: |
-          python3 - <<'PY'
-          import json, os, tomllib
+          set -euo pipefail
+          docker build --platform linux/amd64 \
+            --build-arg KWIN_FAMILY=6.0 \
+            --file packaging/linux/desktop-integrations/kde-native-clipboard/Dockerfile.fedora40-build \
+            --tag copypaste-fedora-closure-smoke:6.0 .
+      - name: Smoke the private closure against installed Fedora KWin RPMs
+        run: |
+          set -euo pipefail
+          docker run --rm --platform linux/amd64 \
+            --volume "$GITHUB_WORKSPACE:/workspace:ro" \
+            copypaste-fedora-closure-smoke:6.0 bash -lc '
+              set -euxo pipefail
+              runtime=/tmp/kwin-runtime
+              stage=/tmp/kwin-stage
+              mkdir -p "$runtime" "$stage"
+              rpm -q kwin kwin-wayland
+              while IFS= read -r source; do
+                [[ -f "$source" || -L "$source" ]] || continue
+                target="$runtime$source"
+                mkdir -p "$(dirname "$target")"
+                cp -a --no-dereference "$source" "$target"
+              done < <(rpm -ql kwin kwin-wayland | sort -u)
+              test -x "$runtime/usr/bin/kwin_wayland"
+              license_file=/workspace/packaging/linux/desktop-integrations/kde-native-clipboard/src/copypasteclipboardbridge.cpp
+              test -f "$license_file"
+          python3 - "$runtime" <<"PYTHON"
+          import importlib.util
+          import subprocess
+          import sys
+          from collections import deque
           from pathlib import Path
-          name = os.environ["MODULE"]
-          if name not in {"supabase", "semantic-search"}:
-              raise ValueError("Unknown first-party provider module")
-          module = json.loads(Path(f"modules/{name}/module.json").read_text())
-          application = tomllib.loads(Path("Cargo.toml").read_text())["workspace"]["package"]["version"]
-          if module["id"] != f"copypaste.{name}":
-              raise ValueError("Module directory and signed identity must match")
-          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-              output.write(f"version={module['version']}\napp_version={application}\nlibrary=copypaste_module_{name.replace(chr(45), chr(95))}\n")
-          PY
-  desktop:
-    needs: preflight
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { platform: macos, architecture: aarch64, runner: macos-14, prefix: lib, suffix: dylib, runtime: libonnxruntime.dylib, program: copypaste-module-qualification }
-          - { platform: windows, architecture: x86_64, runner: windows-2022, prefix: '', suffix: dll, runtime: onnxruntime.dll, program: copypaste-module-qualification.exe }
-          - { platform: linux, architecture: x86_64, runner: ubuntu-24.04, prefix: lib, suffix: so, runtime: libonnxruntime.so, program: copypaste-module-qualification }
-          - { platform: linux, architecture: aarch64, runner: ubuntu-24.04-arm, prefix: lib, suffix: so, runtime: libonnxruntime.so, program: copypaste-module-qualification }
-    runs-on: ${{ matrix.runner }}
-    env:
-      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
-        with:
-          toolchain: "1.96"
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.12"
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "22"
-      - name: Select OpenSSL 3 for authenticated module metadata
-        if: matrix.platform == 'macos'
-        run: bash scripts/ci/use-macos-openssl3.sh
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          workspaces: |
-            .
-            modules/${{ inputs.module }}
-      - name: Prepare checksum-pinned semantic runtime and models
-        if: inputs.module == 'semantic-search'
-        run: |
-          python3 modules/ocr/scripts/prepare-runtime.py --platform ${{ matrix.platform }} --architecture ${{ matrix.architecture }} --destination modules/semantic-search/native --cache "$RUNNER_TEMP/module-runtime"
-          python3 scripts/modules/fetch-search-models.py --sources modules/semantic-search/assets/search-models.json --destination "$RUNNER_TEMP/module-fixtures"
-      - name: Build native module and qualification host
-        run: |
-          cargo +1.96 build --manifest-path modules/${{ inputs.module }}/Cargo.toml --release --locked --lib
-          cargo +1.96 build --release --locked -p copypaste-module-qualification
-          cargo +1.96 test --manifest-path modules/${{ inputs.module }}/Cargo.toml --locked --lib
-      - name: Qualify encrypted synchronization boundary
-        if: inputs.module == 'supabase'
-        run: cargo +1.96 test --locked -p copypaste-modules --test supabase
-      - name: Qualify real-model encrypted indexing
-        if: inputs.module == 'semantic-search'
-        env:
-          COPYPASTE_SEMANTIC_MODELS: ${{ runner.temp }}/module-fixtures
-          COPYPASTE_SEMANTIC_LIBRARY: ${{ github.workspace }}/modules/semantic-search/target/release/${{ matrix.prefix }}${{ needs.preflight.outputs.library }}.${{ matrix.suffix }}
-          COPYPASTE_SEMANTIC_RUNTIME: ${{ github.workspace }}/modules/semantic-search/native/${{ matrix.platform }}/${{ matrix.architecture }}/${{ matrix.runtime }}
-        run: |
-          cargo +1.96 build --release --locked -p copypaste-daemon
-          worker="$GITHUB_WORKSPACE/target/release/copypaste-daemon"
-          if [[ "${{ matrix.platform }}" == windows ]]; then worker="$worker.exe"; fi
-          COPYPASTE_INFERENCE_WORKER="$worker" cargo +1.96 test --locked -p copypaste-modules signed_semantic_package -- --ignored --nocapture
-      - name: Sign target package
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          mkdir -p dist
-          python3 scripts/modules/package.py --module-dir modules/${{ inputs.module }} --library modules/${{ inputs.module }}/target/release/${{ matrix.prefix }}${{ needs.preflight.outputs.library }}.${{ matrix.suffix }} --platform ${{ matrix.platform }} --architecture ${{ matrix.architecture }} --output dist/CopyPasteModule-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}-${{ matrix.platform }}-${{ matrix.architecture }}.cpmodule
-      - name: Qualify exact production package
-        run: |
-          fixtures="scripts/modules/fixtures"
-          if [[ "${{ inputs.module }}" == "semantic-search" ]]; then fixtures="$RUNNER_TEMP/module-fixtures"; fi
-          version="$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{gsub(/["[:space:]]/, "", $3); print $3; exit}' Cargo.toml)"
-          python3 scripts/modules/qualify-desktop.py --platform ${{ matrix.platform }} --fixtures "$fixtures" --package dist/CopyPasteModule-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}-${{ matrix.platform }}-${{ matrix.architecture }}.cpmodule --program target/release/${{ matrix.program }} --app-version "$version" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --receipt dist/CopyPasteModule-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}-${{ matrix.platform }}-${{ matrix.architecture }}.cpmodule.receipt.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: provider-${{ inputs.module }}-${{ matrix.platform }}-${{ matrix.architecture }}
-          if-no-files-found: error
-          path: dist/*
 
-  android:
-    needs: preflight
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { architecture: arm, target: armv7-linux-androideabi }
-          - { architecture: aarch64, target: aarch64-linux-android }
-          - { architecture: x86_64, target: x86_64-linux-android }
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
-        with:
-          toolchain: "1.96"
-          targets: ${{ matrix.target }}
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.12"
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "22"
-      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
-        with:
-          distribution: temurin
-          java-version: "25"
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          workspaces: |
-            .
-            modules/${{ inputs.module }}
-      - name: Prepare Android toolchain
-        run: |
-          python3 - <<'PYTHON'
-          import os, subprocess
-          subprocess.run([os.environ["ANDROID_HOME"] + "/cmdline-tools/latest/bin/sdkmanager", "--licenses"], input="y\n" * 100, text=True, check=True)
+          spec = importlib.util.spec_from_file_location("closure", "/workspace/packaging/linux/compositor-runtime/private_elf_closure.py")
+          closure = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(closure)
+          root = Path(sys.argv[1])
+          initial = closure.exported_elfs(root)
+          private = {value for path in initial if (value := closure.provided_soname(path)) is not None}
+          cache = closure.library_cache()
+          queue = deque((name, cache[name]) for path in initial for name in sorted(closure.needed(path)) if name not in closure.GLIBC_SONAMES and name not in private)
+          seen = set()
+          while queue:
+              requested, candidate = queue.popleft()
+              source = closure.trusted_library(candidate)
+              if source in seen:
+                  continue
+              seen.add(source)
+              try:
+                  closure.rpm_owner(source)
+              except closure.ClosureError:
+                  raw = subprocess.run(["rpm", "-qf", "--qf", "%{NAME}\\n%{EVR}\\n%{LICENSE}\\n", str(source)], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+                  print(f"invalid_owner_path={source}")
+                  print(f"invalid_owner_rpm_exit={raw.returncode}")
+                  print(f"invalid_owner_rpm_fields={raw.stdout!r}")
+                  fields = raw.stdout.splitlines()
+                  if fields:
+                      licenses = subprocess.run(["rpm", "-ql", fields[0]], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+                      paths = [item for item in licenses.stdout.splitlines() if item.startswith("/usr/share/licenses/")]
+                      print(f"invalid_owner_license_list_exit={licenses.returncode}")
+                      print(f"invalid_owner_license_paths={paths!r}")
+                  raise
+              for name in sorted(closure.needed(source)):
+                  if name not in closure.GLIBC_SONAMES and name not in private:
+                      queue.append((name, cache[name]))
+          print(f"rpm_owner_preflight_libraries={len(seen)}")
           PYTHON
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.13846066" "platforms;android-36" "build-tools;36.0.0"
-      - name: Prepare checksum-pinned semantic runtime
-        if: inputs.module == 'semantic-search'
-        run: |
-          bash scripts/ci/use-ubuntu-https-archive.sh
-          sudo apt-get update
-          sudo apt-get install -y patchelf
-          python3 modules/ocr/scripts/prepare-runtime.py --platform android --architecture ${{ matrix.architecture }} --destination modules/semantic-search/native --cache "$RUNNER_TEMP/module-runtime" --ndk "$ANDROID_HOME/ndk/29.0.13846066"
-      - name: Stage both real models for offline Android inference
-        if: inputs.module == 'semantic-search' && matrix.architecture == 'x86_64'
-        run: python3 scripts/modules/fetch-search-models.py --sources modules/semantic-search/assets/search-models.json --destination "$RUNNER_TEMP/module-fixtures"
-      - name: Build and verify target ABI
-        run: python3 scripts/modules/build-android-module.py --module-dir modules/${{ inputs.module }} --library-name lib${{ needs.preflight.outputs.library }}.so --architecture ${{ matrix.architecture }} --ndk "$ANDROID_HOME/ndk/29.0.13846066"
-      - name: Sign target package
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          mkdir -p dist
-          python3 scripts/modules/package.py --module-dir modules/${{ inputs.module }} --library modules/${{ inputs.module }}/target/${{ matrix.target }}/release/lib${{ needs.preflight.outputs.library }}.so --platform android --architecture ${{ matrix.architecture }} --output dist/CopyPasteModule-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}-android-${{ matrix.architecture }}.cpmodule
-      - name: Build app-private native qualification APK
-        if: matrix.architecture == 'x86_64'
-        run: |
-          fixtures="scripts/modules/fixtures"
-          if [[ "${{ inputs.module }}" == "semantic-search" ]]; then fixtures="$RUNNER_TEMP/module-fixtures"; fi
-          python3 scripts/modules/build-android-qualification.py --fixtures "$fixtures" --sdk "$ANDROID_HOME" --library target/x86_64-linux-android/release/libcopypaste_module_qualification.so --package dist/CopyPasteModule-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}-android-x86_64.cpmodule --output dist/provider-qualification.apk
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: provider-${{ inputs.module }}-android-${{ matrix.architecture }}
-          if-no-files-found: error
-          path: dist/*
-
-  android-native:
-    needs: [preflight, android]
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
-        with:
-          distribution: temurin
-          java-version: "25"
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: provider-${{ inputs.module }}-android-x86_64
-          path: dist
-      - name: Enable emulator acceleration
-        run: sudo chmod 666 /dev/kvm
-      - uses: ReactiveCircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2
-        with:
-          api-level: 36
-          arch: x86_64
-          target: default
-          disable-animations: true
-          script: python3 scripts/modules/qualify-android.py --apk dist/provider-qualification.apk --app-version "$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{gsub(/["[:space:]]/, "", $3); print $3; exit}' Cargo.toml)" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --receipt dist/CopyPasteModule-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}-android-x86_64.cpmodule.receipt.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: provider-${{ inputs.module }}-android-native
-          if-no-files-found: error
-          path: dist/*.receipt.json
-
-  publish:
-    needs: [preflight, desktop, android, android-native]
-    if: inputs.publish
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-      actions: write
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          pattern: provider-${{ inputs.module }}-*
-          merge-multiple: true
-          path: dist
-      - name: Verify authenticated packages and native receipts
-        run: python3 scripts/modules/verify-release-packages.py --directory dist --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --release-tag module-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}
-      - name: Publish qualified module release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create module-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }} dist/*.cpmodule dist/*.receipt.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false --title "CopyPaste ${{ inputs.module }} ${{ needs.preflight.outputs.version }}" --notes "Optional first-party ${{ inputs.module }} module. Production-signed packages and exact native qualification receipts for macOS, Windows, Linux x86_64/aarch64, and Android."
-          gh workflow run module-marketplace.yml --repo "$GITHUB_REPOSITORY" --ref module-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }} -f module_release_tag=module-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}
+              python3 /workspace/packaging/linux/compositor-runtime/private_elf_closure.py \
+                --runtime-dir "$runtime" --entrypoint usr/bin/kwin_wayland
+              python3 /workspace/packaging/linux/compositor-runtime/emit_runtime_receipt.py \
+                --runtime-dir "$runtime" --output /tmp/runtime-receipt.json \
+                --runtime-id kwin-6.0-fedora40-smoke --desktop KDE \
+                --source-revision 1ddcb4e288c4f7dcecdc94efccd655b7e3666d30 \
+                --patch /workspace/packaging/linux/desktop-integrations/kde-native-clipboard/patches/kwin-6.0.patch \
+                --glibc-floor 2.39 --private-entrypoint usr/bin/kwin_wayland \
+                --qualification-entrypoint usr/bin/kwin_wayland --license-file "$license_file"
+              python3 /workspace/packaging/linux/compositor-runtime/stage_runtime.py \
+                --receipt /tmp/runtime-receipt.json --runtime-dir "$runtime" \
+                --stage-root "$stage" --expected-architecture x86_64
+              python3 /workspace/packaging/linux/compositor-runtime/verify_runtime_package.py \
+                --root "$stage" --runtime-id kwin-6.0-fedora40-smoke
+              python3 /workspace/packaging/linux/compositor-runtime/build_companion_package.py \
+                --receipt /tmp/runtime-receipt.json --runtime-dir "$runtime" \
+                --version 1.0.0 --format rpm --output /tmp/kwin-closure-smoke.rpm
+              printf '%s\n' '--- private RPM requires ---'
+              rpm -qp --requires /tmp/kwin-closure-smoke.rpm | sort
+              printf '%s\n' '--- private RPM provides ---'
+              rpm -qp --provides /tmp/kwin-closure-smoke.rpm | sort
+              printf '%s\n' '--- private RPM obsoletes/conflicts ---'
+              rpm -qp --obsoletes /tmp/kwin-closure-smoke.rpm | sort
+              rpm -qp --conflicts /tmp/kwin-closure-smoke.rpm | sort
+          python3 - /tmp/kwin-runtime/usr/share/copypaste/compositor-runtime-private-closure.json <<"PY"
+          import json, sys
+          value = json.load(open(sys.argv[1], encoding="utf-8"))
+          print(f"closure_libraries={len(value['libraries'])}")
+          print(f"closure_rpms={len(value['packages'])}")
+          print(f"closure_license_files={len(value['licenses'])}")
+          PY
+            '
