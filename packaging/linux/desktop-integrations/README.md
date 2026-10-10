@@ -19,6 +19,13 @@ same entry's `userInstallPath`.
 | GNOME Shell | `gnome-shell-extension` | `/usr/share/gnome-shell/extensions/copypaste-quick-paste@copypaste.app` | Enable `copypaste-quick-paste@copypaste.app` in Extensions, or run `gnome-extensions enable copypaste-quick-paste@copypaste.app`. |
 | Plasma / KWin | `kde-kwin-script` | `/usr/share/kwin/scripts/copypaste-quick-paste` | Enable **CopyPaste Quick Paste** in System Settings → Window Management → KWin Scripts. For an AppImage user install, run `kpackagetool6 --type KWin/Script --install <source-directory>` first. |
 
+The package also carries `kde-native-clipboard` under
+`/usr/share/copypaste/desktop-integrations`. It is source for a maintained KWin
+6.0 or 6.3 build patch, not a loadable Script or Effect. A distribution
+maintainer applies it when building an authenticated KWin source package. It
+never replaces or restarts a user compositor, and the Clipboard v2 transport is
+unavailable until that patched KWin package is installed.
+
 KWin owns the Quick Paste binding through the user-consented GlobalShortcuts
 portal. GNOME Shell 46 and 47 do not provide that portal interface, so the
 GNOME extension registers the same canonical GTK accelerator with Mutter. The
