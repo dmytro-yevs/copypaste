@@ -284,7 +284,7 @@ def source_rpm_license_files(owner: tuple[str, str, str, str], destination: Path
     source_name, epoch, version, release, architecture = identity[0].split("\t")
     source_evr = f"{epoch}:{version}-{release}" if epoch not in {"", "0", "(none)"} else f"{version}-{release}"
     if architecture != "src" or source_evr != evr or archive.name != f"{source_name}-{version}-{release}.src.rpm":
-        raise ClosureError(f"exact source RPM provenance differs for {name}")
+        raise ClosureError(f"exact source RPM provenance differs for {name}: expected={source_rpm}/{evr} header={source_name}/{source_evr}/{architecture}")
     listing = bounded_rpm2cpio(archive)
     members_process = subprocess.run(["cpio", "-it"], input=listing, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
     verbose_process = subprocess.run(["cpio", "-itv"], input=listing, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
