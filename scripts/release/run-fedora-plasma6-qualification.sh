@@ -8,6 +8,8 @@ ARTIFACTS=""
 EVIDENCE=""
 PREVIOUS_ARTIFACTS=""
 COMPANION_SOURCE=""
+MODULE_ARTIFACTS=""
+MODULE_FIXTURES=""
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --session) SESSION="$2"; shift 2 ;;
@@ -16,6 +18,8 @@ while [[ "$#" -gt 0 ]]; do
     --evidence) EVIDENCE="$2"; shift 2 ;;
     --previous-artifacts) PREVIOUS_ARTIFACTS="$2"; shift 2 ;;
     --companion-source) COMPANION_SOURCE="$2"; shift 2 ;;
+    --module-artifacts) MODULE_ARTIFACTS="$2"; shift 2 ;;
+    --module-fixtures) MODULE_FIXTURES="$2"; shift 2 ;;
     --) shift; break ;;
     *) echo "ERROR: unknown Fedora qualification argument: $1" >&2; exit 2 ;;
   esac
@@ -24,7 +28,7 @@ done
 [[ "$ARCHITECTURE" == x86_64 || "$ARCHITECTURE" == aarch64 ]]
 [[ -d "$ARTIFACTS" && -d "$EVIDENCE" && "$#" -gt 0 ]]
 [[ -z "$PREVIOUS_ARTIFACTS" || -d "$PREVIOUS_ARTIFACTS" ]]
-[[ -d "$COMPANION_SOURCE" ]]
+[[ -d "$COMPANION_SOURCE" && -d "$MODULE_ARTIFACTS" && -d "$MODULE_FIXTURES" ]]
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 case "$ARCHITECTURE" in
@@ -35,6 +39,8 @@ image="copypaste-linux-native-qualification:fedora40-$ARCHITECTURE"
 docker build --platform "$platform" --file "$ROOT/packaging/linux/Dockerfile.fedora-native-qualification" --tag "$image" "$ROOT"
 mounts=(--volume "$ROOT:/work:ro" --volume "$(cd "$ARTIFACTS" && pwd):/artifacts:ro" --volume "$(cd "$EVIDENCE" && pwd):/evidence")
 mounts+=(--volume "$(cd "$COMPANION_SOURCE" && pwd):/companion:ro")
+mounts+=(--volume "$(cd "$MODULE_ARTIFACTS" && pwd):/module-artifacts:ro")
+mounts+=(--volume "$(cd "$MODULE_FIXTURES" && pwd):/module-fixtures:ro")
 if [[ -n "$PREVIOUS_ARTIFACTS" ]]; then
   mounts+=(--volume "$(cd "$PREVIOUS_ARTIFACTS" && pwd):/previous:ro")
 fi

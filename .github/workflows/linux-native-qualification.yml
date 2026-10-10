@@ -12,6 +12,18 @@ on:
         required: false
         type: string
         default: ""
+      supabase_module_run_id:
+        description: Successful unpublished Supabase module workflow run at this exact product commit
+        required: true
+        type: string
+      semantic_search_module_run_id:
+        description: Successful unpublished Semantic Search module workflow run at this exact product commit
+        required: true
+        type: string
+      ocr_module_run_id:
+        description: Successful unpublished OCR module workflow run at this exact product commit
+        required: true
+        type: string
 
 concurrency:
   group: linux-native-qualification-${{ inputs.artifact_run_id }}
@@ -39,6 +51,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
           PREVIOUS_ARTIFACT_RUN_ID: ${{ inputs.previous_artifact_run_id }}
+          SUPABASE_MODULE_RUN_ID: ${{ inputs.supabase_module_run_id }}
+          SEMANTIC_SEARCH_MODULE_RUN_ID: ${{ inputs.semantic_search_module_run_id }}
+          OCR_MODULE_RUN_ID: ${{ inputs.ocr_module_run_id }}
         run: |
           set -euo pipefail
           [[ "$ARTIFACT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
@@ -73,6 +88,20 @@ jobs:
           version="$(awk '/^version:[[:space:]]*/ {print $2; exit}' apps/copypaste_flutter/pubspec.yaml)"
           version="${version%%+*}"
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          cargo_version="$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{gsub(/["[:space:]]/, "", $3); print $3; exit}' Cargo.toml)"
+          [[ "$version" == "$cargo_version" ]] || { echo "ERROR: Flutter and module-host app versions differ" >&2; exit 1; }
+          for module_source in "$SUPABASE_MODULE_RUN_ID:.github/workflows/provider-module.yml:supabase" "$SEMANTIC_SEARCH_MODULE_RUN_ID:.github/workflows/provider-module.yml:semantic-search" "$OCR_MODULE_RUN_ID:.github/workflows/ocr-module.yml:ocr"; do
+            IFS=: read -r module_run_id module_workflow module_name <<< "$module_source"
+            [[ "$module_run_id" =~ ^[1-9][0-9]*$ ]]
+            prefix="$RUNNER_TEMP/module-$module_name"
+            mkdir -p "$prefix"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$module_run_id" > "$prefix/run.json"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$module_run_id/jobs?per_page=100" > "$prefix/jobs.json"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$module_run_id/artifacts?per_page=100" > "$prefix/artifacts.json"
+            python3 scripts/release/verify-linux-module-source-run.py \
+              --run "$prefix/run.json" --jobs "$prefix/jobs.json" --artifacts "$prefix/artifacts.json" \
+              --repository "$GITHUB_REPOSITORY" --commit "$commit" --workflow "$module_workflow" --module "$module_name"
+          done
           [[ "$upgrade_mode" == first_install_baseline || "$previous_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           {
             echo "commit=$commit"
@@ -147,6 +176,34 @@ jobs:
           path: previous
           run-id: ${{ inputs.previous_artifact_run_id }}
           github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: provider-supabase-linux-${{ matrix.architecture }}
+          path: module-downloads/supabase
+          run-id: ${{ inputs.supabase_module_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: provider-semantic-search-linux-${{ matrix.architecture }}
+          path: module-downloads/semantic-search
+          run-id: ${{ inputs.semantic_search_module_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ocr-linux-${{ matrix.architecture }}
+          path: module-downloads/ocr
+          run-id: ${{ inputs.ocr_module_run_id }}
+          github-token: ${{ github.token }}
+      - name: Authenticate signed modules and stage offline fixtures
+        run: |
+          set -euo pipefail
+          python3 scripts/release/stage-linux-module-qualification.py \
+            --downloads module-downloads --module-artifacts module-artifacts --module-fixtures module-fixtures \
+            --architecture "${{ matrix.architecture }}" --app-version "${{ needs.source.outputs.version }}" \
+            --commit "${{ needs.source.outputs.commit }}" \
+            --supabase-run-id "${{ inputs.supabase_module_run_id }}" \
+            --semantic-search-run-id "${{ inputs.semantic_search_module_run_id }}" \
+            --ocr-run-id "${{ inputs.ocr_module_run_id }}"
       - name: Execute exact package scenarios in a nested desktop
         run: |
           set -euo pipefail
@@ -161,7 +218,8 @@ jobs:
             --artifacts current --version "${{ needs.source.outputs.version }}"
             --architecture "${{ matrix.architecture }}" --desktop "${{ matrix.desktop }}" --session "${{ matrix.session }}"
             --commit "${{ needs.source.outputs.commit }}" --source-run-id "$GITHUB_RUN_ID" --artifact-run-id "${{ inputs.artifact_run_id }}"
-            --driver scripts/release/run-linux-native-scenarios.sh --output evidence)
+            --driver scripts/release/run-linux-native-scenarios.sh --output evidence
+            --module-artifacts module-artifacts --module-fixtures module-fixtures)
           if [[ "${{ needs.source.outputs.upgrade_mode }}" == prior_release ]]; then
             producer+=(--previous-artifacts previous --previous-version "${{ needs.source.outputs.previous_version }}")
           fi
@@ -170,8 +228,9 @@ jobs:
               --artifacts /artifacts --version "${{ needs.source.outputs.version }}"
               --architecture "${{ matrix.architecture }}" --desktop KDE --session "${{ matrix.session }}"
               --commit "${{ needs.source.outputs.commit }}" --source-run-id "$GITHUB_RUN_ID" --artifact-run-id "${{ inputs.artifact_run_id }}"
-              --driver /work/scripts/release/run-linux-native-scenarios.sh --output /evidence)
-            fedora_args=(--session "${{ matrix.session }}" --architecture "${{ matrix.architecture }}" --artifacts current --evidence evidence --companion-source "$companion_source")
+              --driver /work/scripts/release/run-linux-native-scenarios.sh --output /evidence
+              --module-artifacts /module-artifacts --module-fixtures /module-fixtures)
+            fedora_args=(--session "${{ matrix.session }}" --architecture "${{ matrix.architecture }}" --artifacts current --evidence evidence --companion-source "$companion_source" --module-artifacts module-artifacts --module-fixtures module-fixtures)
             if [[ "${{ needs.source.outputs.upgrade_mode }}" == prior_release ]]; then
               fedora_args+=(--previous-artifacts previous)
               fedora_producer+=(--previous-artifacts /previous --previous-version "${{ needs.source.outputs.previous_version }}")
