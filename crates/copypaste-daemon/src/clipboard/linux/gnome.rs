@@ -1,8 +1,8 @@
-//! GNOME Shell clipboard bridge transport.
+//! Authenticated compositor clipboard bridge transport.
 //!
-//! The extension authenticates every call by our session-bus name and UID. A
-//! missing extension therefore leaves this adapter inactive rather than
-//! pretending that another clipboard implementation exists.
+//! GNOME and KWin expose the same bounded, generation-bound protocol. A
+//! missing companion leaves its adapter inactive rather than pretending that
+//! another clipboard implementation exists.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -16,7 +16,8 @@ use zbus::blocking::{connection::Builder, Connection, Proxy};
 use super::super::{Capture, CapturePolicy, ClipboardSource, SourcePolicyEvidence};
 
 const DAEMON: &str = "app.copypaste.Daemon";
-const BRIDGE: &str = "app.copypaste.GnomeIntegration";
+const GNOME_BRIDGE: &str = "app.copypaste.GnomeIntegration";
+const KWIN_BRIDGE: &str = "org.kde.KWin";
 const PATH: &str = "/app/copypaste/Clipboard";
 const INTERFACE: &str = "app.copypaste.Clipboard";
 const MAX_BODY: usize = 4 * 1024 * 1024;
@@ -26,6 +27,38 @@ const MAX_MIME_BYTES: usize = 255;
 const KDE_PASSWORD_MANAGER_HINT: &str = "x-kde-passwordManagerHint";
 const RPC_TIMEOUT: Duration = Duration::from_secs(2);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
+const BRIDGE_VERSION: u32 = 2;
+
+#[derive(Clone, Copy)]
+struct Bridge {
+    service: &'static str,
+    backend_name: &'static str,
+}
+
+const GNOME: Bridge = Bridge {
+    service: GNOME_BRIDGE,
+    backend_name: "linux-gnome-wayland-clipboard",
+};
+
+const KWIN: Bridge = Bridge {
+    service: KWIN_BRIDGE,
+    backend_name: "linux-kwin-wayland-clipboard",
+};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SourceIdentity {
+    app_id: String,
+}
+
+impl SourceIdentity {
+    fn from_wire(status: String, pid: u32, _uid: u32, app_id: String) -> Option<Self> {
+        match status.as_str() {
+            "verified" if pid != 0 && valid_app_id(&app_id) => Some(Self { app_id }),
+            "no-client" | "no-app-id" | "ambiguous" if app_id.is_empty() => None,
+            _ => None,
+        }
+    }
+}
 
 #[derive(Default)]
 struct State {
@@ -36,9 +69,11 @@ struct State {
     sequence: u64,
     owned_sequence: Option<u64>,
     mimes: Vec<String>,
+    source: Option<SourceIdentity>,
 }
 
 pub(in crate::clipboard) struct GnomeClipboard {
+    bridge: Bridge,
     commands: mpsc::Sender<Command>,
     state: Arc<Mutex<State>>,
     staging: super::super::file_materialize::StagingArea,
@@ -61,6 +96,14 @@ enum Command {
 
 impl GnomeClipboard {
     pub(super) fn new(data_dir: &Path) -> std::io::Result<Self> {
+        Self::with_bridge(data_dir, GNOME)
+    }
+
+    pub(super) fn new_kwin(data_dir: &Path) -> std::io::Result<Self> {
+        Self::with_bridge(data_dir, KWIN)
+    }
+
+    fn with_bridge(data_dir: &Path, bridge: Bridge) -> std::io::Result<Self> {
         // The cleanup owner exists before the D-Bus worker can accept a file.
         let staging = super::super::file_materialize::StagingArea::new(data_dir)?;
         let state = Arc::new(Mutex::new(State::default()));
@@ -68,8 +111,9 @@ impl GnomeClipboard {
         let worker_state = Arc::clone(&state);
         // zbus::blocking owns a global runtime. Never construct or call it
         // from the daemon's Tokio executor; this thread is the only boundary.
-        let worker = thread::spawn(move || worker(receiver, worker_state));
+        let worker = thread::spawn(move || worker(receiver, worker_state, bridge));
         Ok(Self {
+            bridge,
             commands,
             state,
             staging,
@@ -89,17 +133,22 @@ impl GnomeClipboard {
         received.recv_timeout(REQUEST_TIMEOUT).ok().flatten()
     }
     fn read(&mut self, settings: &copypaste_ipc::ConfigData) -> Option<Capture> {
-        let (epoch, sequence, mimes) = {
+        let (epoch, sequence, mimes, source) = {
             let mut state = self.state.lock().ok()?;
             if !state.active || !state.dirty {
                 return None;
             }
             state.dirty = false;
-            (state.epoch, state.sequence, state.mimes.clone())
+            (
+                state.epoch,
+                state.sequence,
+                state.mimes.clone(),
+                state.source.clone(),
+            )
         };
         // The cursor has advanced before every policy gate: a value copied
         // during private mode must never be captured when private mode ends.
-        if settings.private_mode || !settings.excluded_app_bundle_ids.is_empty() {
+        if settings.private_mode || !allows_source(settings, source.as_ref()) {
             return None;
         }
         let secret = if mimes.iter().any(|mime| mime == KDE_PASSWORD_MANAGER_HINT) {
@@ -127,7 +176,9 @@ impl GnomeClipboard {
             return None;
         }
         if content_type == copypaste_ipc::content_type::FILE {
-            return super::file_capture(bytes, privacy, None);
+            let mut capture = super::file_capture(bytes, privacy, None)?;
+            attach_source(&mut capture, source);
+            return Some(capture);
         }
         Some(Capture {
             privacy,
@@ -140,8 +191,8 @@ impl GnomeClipboard {
             file_path: None,
             file_metadata: None,
             content_type: content_type.into(),
-            app_bundle_id: None,
-            app_name: None,
+            app_bundle_id: source.as_ref().map(|source| source.app_id.clone()),
+            app_name: source.and_then(|source| source_label(&source.app_id)),
             source_policy: SourcePolicyEvidence::Legacy,
         })
     }
@@ -240,11 +291,11 @@ impl ClipboardSource for GnomeClipboard {
             .map_err(|_| ClipboardWriteError::Failed)
     }
     fn backend_name(&self) -> &'static str {
-        "linux-gnome-wayland-clipboard"
+        self.bridge.backend_name
     }
 }
 
-fn worker(commands: mpsc::Receiver<Command>, state: Arc<Mutex<State>>) {
+fn worker(commands: mpsc::Receiver<Command>, state: Arc<Mutex<State>>, bridge: Bridge) {
     let Ok(connection) =
         Builder::session().and_then(|builder| builder.method_timeout(RPC_TIMEOUT).build())
     else {
@@ -253,8 +304,8 @@ fn worker(commands: mpsc::Receiver<Command>, state: Arc<Mutex<State>>) {
     if connection.request_name(DAEMON).is_err() {
         return;
     }
-    watch_service(connection.clone(), Arc::clone(&state));
-    activate(&connection, &state);
+    watch_service(connection.clone(), Arc::clone(&state), bridge);
+    activate(&connection, &state, bridge);
     loop {
         let command = match commands.recv_timeout(RPC_TIMEOUT) {
             Ok(command) => command,
@@ -265,7 +316,7 @@ fn worker(commands: mpsc::Receiver<Command>, state: Arc<Mutex<State>>) {
             let _ = connection.close();
             return;
         }
-        let proxy = Proxy::new(&connection, BRIDGE, PATH, INTERFACE).ok();
+        let proxy = Proxy::new(&connection, bridge.service, PATH, INTERFACE).ok();
         match command {
             Command::Read {
                 sequence,
@@ -289,28 +340,38 @@ fn worker(commands: mpsc::Receiver<Command>, state: Arc<Mutex<State>>) {
     }
 }
 
-fn activate(connection: &Connection, state: &Arc<Mutex<State>>) {
-    let Ok(proxy) = Proxy::new(connection, BRIDGE, PATH, INTERFACE) else {
+fn activate(connection: &Connection, state: &Arc<Mutex<State>>, bridge: Bridge) {
+    let Ok(proxy) = Proxy::new(connection, bridge.service, PATH, INTERFACE) else {
         return;
     };
-    let Ok((sequence, mimes)) = proxy.call::<_, _, (u64, Vec<String>)>("Snapshot", &()) else {
+    let Ok(version) = proxy.call::<_, _, u32>("Version", &()) else {
+        return;
+    };
+    if version != BRIDGE_VERSION {
+        return;
+    }
+    let Ok((sequence, mimes, identity)) =
+        proxy.call::<_, _, (u64, Vec<String>, (String, u32, u32, String))>("Snapshot", &())
+    else {
         return;
     };
     if !valid_mimes(&mimes) {
         return;
     }
+    let source = SourceIdentity::from_wire(identity.0, identity.1, identity.2, identity.3);
     let epoch = if let Ok(mut state) = state.lock() {
         state.active = true;
         state.watching = false;
         state.dirty = false;
         state.sequence = sequence;
         state.mimes = mimes;
+        state.source = source;
         state.epoch
     } else {
         return;
     };
     let (ready, subscribed) = mpsc::sync_channel(1);
-    watch_clipboard(connection.clone(), Arc::clone(state), epoch, ready);
+    watch_clipboard(connection.clone(), Arc::clone(state), epoch, ready, bridge);
     if subscribed.recv_timeout(RPC_TIMEOUT).is_err() {
         invalidate(state);
         return;
@@ -322,7 +383,7 @@ fn activate(connection: &Connection, state: &Arc<Mutex<State>>) {
     }
 }
 
-fn watch_service(connection: Connection, state: Arc<Mutex<State>>) {
+fn watch_service(connection: Connection, state: Arc<Mutex<State>>, bridge: Bridge) {
     thread::spawn(move || {
         let Ok(proxy) = Proxy::new(
             &connection,
@@ -340,12 +401,12 @@ fn watch_service(connection: Connection, state: Arc<Mutex<State>>) {
             else {
                 continue;
             };
-            if name != BRIDGE {
+            if name != bridge.service {
                 continue;
             }
             invalidate(&state);
             if !new.is_empty() {
-                activate(&connection, &state);
+                activate(&connection, &state, bridge);
             }
         }
     });
@@ -356,9 +417,10 @@ fn watch_clipboard(
     state: Arc<Mutex<State>>,
     epoch: u64,
     ready: mpsc::SyncSender<()>,
+    bridge: Bridge,
 ) {
     thread::spawn(move || {
-        let Ok(proxy) = Proxy::new(&connection, BRIDGE, PATH, INTERFACE) else {
+        let Ok(proxy) = Proxy::new(&connection, bridge.service, PATH, INTERFACE) else {
             return;
         };
         let Ok(signals) = proxy.receive_signal("OwnerChanged") else {
@@ -366,7 +428,11 @@ fn watch_clipboard(
         };
         let _ = ready.send(());
         for signal in signals {
-            let Ok((sequence, mimes)) = signal.body().deserialize::<(u64, Vec<String>)>() else {
+            let Ok((sequence, mimes, identity)) =
+                signal
+                    .body()
+                    .deserialize::<(u64, Vec<String>, (String, u32, u32, String))>()
+            else {
                 continue;
             };
             if !valid_mimes(&mimes) {
@@ -376,7 +442,12 @@ fn watch_clipboard(
                 if state.epoch != epoch || !state.active {
                     break;
                 }
-                apply_owner_changed(&mut state, sequence, mimes.to_vec());
+                apply_owner_changed(
+                    &mut state,
+                    sequence,
+                    mimes.to_vec(),
+                    SourceIdentity::from_wire(identity.0, identity.1, identity.2, identity.3),
+                );
                 state.active = true;
             }
         }
@@ -389,6 +460,7 @@ fn watch_clipboard(
                 state.sequence = 0;
                 state.owned_sequence = None;
                 state.mimes.clear();
+                state.source = None;
             }
         }
     });
@@ -403,6 +475,7 @@ fn invalidate(state: &Arc<Mutex<State>>) {
         state.sequence = 0;
         state.owned_sequence = None;
         state.mimes.clear();
+        state.source = None;
     }
 }
 
@@ -412,12 +485,18 @@ fn current_epoch(state: &Arc<Mutex<State>>, epoch: u64, sequence: u64) -> bool {
         .is_ok_and(|state| state.active && state.epoch == epoch && state.sequence == sequence)
 }
 
-fn apply_owner_changed(state: &mut State, sequence: u64, mimes: Vec<String>) {
+fn apply_owner_changed(
+    state: &mut State,
+    sequence: u64,
+    mimes: Vec<String>,
+    source: Option<SourceIdentity>,
+) {
     if sequence < state.sequence {
         return;
     }
     state.sequence = sequence;
     state.mimes = mimes;
+    state.source = source;
     if state.owned_sequence == Some(sequence) {
         state.owned_sequence = None;
         state.dirty = false;
@@ -431,6 +510,34 @@ fn valid_mimes(mimes: &[String]) -> bool {
         && mimes
             .iter()
             .all(|mime| !mime.is_empty() && mime.len() <= MAX_MIME_BYTES)
+}
+
+fn valid_app_id(value: &str) -> bool {
+    (1..=255).contains(&value.len())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn allows_source(settings: &copypaste_ipc::ConfigData, source: Option<&SourceIdentity>) -> bool {
+    settings.excluded_app_bundle_ids.is_empty()
+        || source.is_some_and(|source| {
+            !settings
+                .excluded_app_bundle_ids
+                .iter()
+                .any(|excluded| excluded == &source.app_id)
+        })
+}
+
+fn source_label(app_id: &str) -> Option<String> {
+    super::super::linux_attribution::resolve_desktop_id(app_id).map(|source| source.name)
+}
+
+fn attach_source(capture: &mut Capture, source: Option<SourceIdentity>) {
+    capture.app_name = source
+        .as_ref()
+        .and_then(|source| source_label(&source.app_id));
+    capture.app_bundle_id = source.map(|source| source.app_id);
 }
 fn valid_payloads(values: &HashMap<String, Vec<u8>>) -> bool {
     !values.is_empty()
@@ -470,6 +577,7 @@ mod tests {
     struct BridgeState {
         sequence: u64,
         mimes: Vec<String>,
+        identity: (String, u32, u32, String),
         values: HashMap<String, Vec<u8>>,
         writes: Vec<HashMap<String, Vec<u8>>>,
         stall_reads: bool,
@@ -484,11 +592,16 @@ mod tests {
             emitter: &zbus::object_server::SignalEmitter<'_>,
             sequence: u64,
             mimes: Vec<String>,
+            identity: (String, u32, u32, String),
         ) -> zbus::Result<()>;
 
-        fn snapshot(&self) -> (u64, Vec<String>) {
+        fn version(&self) -> u32 {
+            BRIDGE_VERSION
+        }
+
+        fn snapshot(&self) -> (u64, Vec<String>, (String, u32, u32, String)) {
             let state = self.0.lock().expect("fixture bridge state");
-            (state.sequence, state.mimes.clone())
+            (state.sequence, state.mimes.clone(), state.identity.clone())
         }
 
         fn read(&self, sequence: u64, mime: &str, limit: u32) -> Vec<u8> {
@@ -528,6 +641,7 @@ mod tests {
             let state = Arc::new(Mutex::new(BridgeState {
                 sequence: 0,
                 mimes: Vec::new(),
+                identity: ("verified".into(), 99, 1000, "org.example.Writer".into()),
                 values: HashMap::from([(
                     "text/plain;charset=utf-8".into(),
                     b"bridge text".to_vec(),
@@ -536,7 +650,7 @@ mod tests {
             }));
             let connection = Connection::session().expect("fixture session bus");
             connection
-                .request_name(BRIDGE)
+                .request_name(GNOME_BRIDGE)
                 .expect("fixture bridge name");
             connection
                 .object_server()
@@ -550,6 +664,12 @@ mod tests {
         }
 
         fn owner_changed(&self, sequence: u64, mimes: Vec<String>) {
+            let identity = self
+                .state
+                .lock()
+                .expect("fixture bridge state")
+                .identity
+                .clone();
             let interface = self
                 .connection
                 .object_server()
@@ -560,6 +680,7 @@ mod tests {
                     interface.signal_emitter(),
                     sequence,
                     mimes,
+                    identity,
                 ))
                 .expect("fixture owner signal");
         }
@@ -726,6 +847,33 @@ mod tests {
     }
 
     #[test]
+    fn only_a_bounded_verified_identity_can_authorize_an_exclusion_read() {
+        let source =
+            SourceIdentity::from_wire("verified".into(), 42, 1000, "org.example.Writer".into());
+        let settings = copypaste_ipc::ConfigData {
+            excluded_app_bundle_ids: vec!["org.example.Other".into()],
+            ..Default::default()
+        };
+        assert!(allows_source(&settings, source.as_ref()));
+        assert!(!allows_source(
+            &copypaste_ipc::ConfigData {
+                excluded_app_bundle_ids: vec!["org.example.Writer".into()],
+                ..Default::default()
+            },
+            source.as_ref(),
+        ));
+        assert!(!allows_source(&settings, None));
+        assert!(
+            SourceIdentity::from_wire("verified".into(), 0, 1000, "org.example.Writer".into(),)
+                .is_none()
+        );
+        assert!(
+            SourceIdentity::from_wire("ambiguous".into(), 0, 0, "org.example.Writer".into(),)
+                .is_none()
+        );
+    }
+
+    #[test]
     fn service_loss_fences_stale_read_and_resets_capture_cursor() {
         let state = Arc::new(Mutex::new(State {
             active: true,
@@ -735,6 +883,7 @@ mod tests {
             sequence: 42,
             owned_sequence: None,
             mimes: vec!["text/plain;charset=utf-8".into()],
+            ..State::default()
         }));
         assert!(current_epoch(&state, 7, 42));
         invalidate(&state);
@@ -770,10 +919,10 @@ mod tests {
             owned_sequence: Some(5),
             ..Default::default()
         };
-        apply_owner_changed(&mut state, 5, vec!["text/plain;charset=utf-8".into()]);
+        apply_owner_changed(&mut state, 5, vec!["text/plain;charset=utf-8".into()], None);
         assert!(!state.dirty);
         state.owned_sequence = Some(6);
-        apply_owner_changed(&mut state, 7, vec!["text/plain;charset=utf-8".into()]);
+        apply_owner_changed(&mut state, 7, vec!["text/plain;charset=utf-8".into()], None);
         assert!(state.dirty);
         assert_eq!(state.sequence, 7);
     }
