@@ -7,6 +7,7 @@ import argparse
 import importlib.util
 import json
 import subprocess
+import tempfile
 from collections import deque
 from pathlib import Path
 
@@ -49,7 +50,9 @@ def main() -> int:
     seen = set()
     host_libraries = 0
     failures = []
-    while queue:
+    with tempfile.TemporaryDirectory(prefix="copypaste-compositor-preflight-") as temporary:
+      source_cache = Path(temporary)
+      while queue:
         source = queue.popleft()
         if source in seen:
             continue
@@ -64,7 +67,8 @@ def main() -> int:
             if resolved not in seen:
                 try:
                     owner = closure.rpm_owner(resolved)
-                    closure.rpm_license_files(owner)
+                    if not closure.rpm_installed_license_files(owner):
+                        closure.source_rpm_license_files(owner, source_cache)
                 except closure.ClosureError as error:
                     failures.append({
                         "failure": str(error),
