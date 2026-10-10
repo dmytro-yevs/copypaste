@@ -58,6 +58,7 @@ def main() -> int:
     p.add_argument("--source-revision", required=True); p.add_argument("--patch", required=True, type=Path)
     p.add_argument("--glibc-floor", required=True); p.add_argument("--dependency", action="append", default=[])
     p.add_argument("--private-entrypoint"); p.add_argument("--gnome-major", type=int)
+    p.add_argument("--shell-revision")
     p.add_argument("--license-file", required=True, type=Path); p.add_argument("--license-spdx", default="GPL-2.0-or-later")
     a = p.parse_args()
     try:
@@ -87,7 +88,11 @@ def main() -> int:
         license_target=root / "usr/share/doc" / f"copypaste-compositor-runtime-{a.runtime_id}" / a.license_file.name
         license_target.parent.mkdir(parents=True, exist_ok=True); shutil.copyfile(a.license_file, license_target)
         rows=payload(root)
-        receipt={"schema":1,"runtime_id":a.runtime_id,"desktop":a.desktop,"architecture":architecture(),"distribution":os_release(),"glibc_floor":a.glibc_floor,"source":{"revision":a.source_revision,"patch_sha256":digest(a.patch)},"payload":rows,"launch":launch,"runtime_env":{},"package_dependencies":deps,"upstream_license":{"spdx":a.license_spdx,"name":license_target.relative_to(root).as_posix(),"sha256":digest(license_target)}}
+        source={"revision":a.source_revision,"patch_sha256":digest(a.patch)}
+        if a.shell_revision:
+            if not re.fullmatch(r"[0-9a-f]{40}", a.shell_revision): raise ValueError("private Shell revision must be a full SHA")
+            source["shell_revision"]=a.shell_revision
+        receipt={"schema":1,"runtime_id":a.runtime_id,"desktop":a.desktop,"architecture":architecture(),"distribution":os_release(),"glibc_floor":a.glibc_floor,"source":source,"payload":rows,"launch":launch,"runtime_env":{},"package_dependencies":deps,"upstream_license":{"spdx":a.license_spdx,"name":license_target.relative_to(root).as_posix(),"sha256":digest(license_target)}}
         if receipt["architecture"] not in {"x86_64","aarch64"}: raise ValueError("unsupported build architecture")
         a.output.parent.mkdir(parents=True, exist_ok=True); a.output.write_text(json.dumps(receipt,indent=2)+"\n",encoding="utf-8")
     except (OSError, subprocess.CalledProcessError, ValueError) as e:
