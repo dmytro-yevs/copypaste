@@ -162,10 +162,23 @@ void test_autostart_is_owned_and_atomic() {
   g_assert_cmpstr(user_contents, ==, user_entry.c_str());
   g_free(user_contents);
 
-  const std::string old_appimage = "/home/test/CopyPaste-old.AppImage";
-  const std::string old_entry =
-      LinuxXdgStartup::DesktopEntryForExecutable(old_appimage, true);
-  g_assert_true(g_file_set_contents(path.c_str(), old_entry.c_str(), -1, &error));
+  const std::string legacy_old_entry =
+      "[Desktop Entry]\n"
+      "Type=Application\n"
+      "Name=CopyPaste\n"
+      "Comment=Encrypted clipboard history\n"
+      "Exec=\"/home/test/CopyPaste-old.AppImage\" %U\n"
+      "TryExec=\"/home/test/CopyPaste-old.AppImage\"\n"
+      "Icon=com.copypaste.CopyPaste\n"
+      "Terminal=false\n"
+      "Categories=Utility;\n"
+      "StartupNotify=true\n"
+      "MimeType=x-scheme-handler/copypaste;\n"
+      "X-CopyPaste-ApplicationId=com.copypaste.CopyPaste\n"
+      "X-GNOME-Autostart-enabled=true\n"
+      "X-CopyPaste-Managed=true\n";
+  g_assert_true(g_file_set_contents(path.c_str(), legacy_old_entry.c_str(), -1,
+                                    &error));
   g_assert_no_error(error);
   g_assert_false(startup.GetStatus().start_at_login);
   g_assert_true(startup.SetStartAtLogin(true, &error));
@@ -183,6 +196,38 @@ void test_autostart_is_owned_and_atomic() {
   g_assert_true(startup.SetStartAtLogin(false, &error));
   g_assert_no_error(error);
   g_assert_false(g_file_test(path.c_str(), G_FILE_TEST_EXISTS));
+
+  const std::string custom_legacy_entry =
+      "[Desktop Entry]\n"
+      "Type=Application\n"
+      "Name=CopyPaste\n"
+      "Comment=Encrypted clipboard history\n"
+      "Exec=\"/home/test/CopyPaste-old.AppImage\" %U\n"
+      "TryExec=\"/home/test/Other.AppImage\"\n"
+      "Icon=com.copypaste.CopyPaste\n"
+      "Terminal=false\n"
+      "Categories=Utility;\n"
+      "StartupNotify=true\n"
+      "MimeType=x-scheme-handler/copypaste;\n"
+      "X-CopyPaste-ApplicationId=com.copypaste.CopyPaste\n"
+      "X-GNOME-Autostart-enabled=true\n"
+      "X-CopyPaste-Managed=true\n";
+  g_assert_true(g_file_set_contents(path.c_str(), custom_legacy_entry.c_str(),
+                                    -1, &error));
+  g_assert_no_error(error);
+  g_assert_false(startup.SetStartAtLogin(true, &error));
+  g_assert_error(error, G_FILE_ERROR, G_FILE_ERROR_ACCES);
+  g_clear_error(&error);
+  g_assert_false(startup.SetStartAtLogin(false, &error));
+  g_assert_error(error, G_FILE_ERROR, G_FILE_ERROR_ACCES);
+  g_clear_error(&error);
+  gchar* custom_contents = nullptr;
+  gsize custom_length = 0;
+  g_assert_true(g_file_get_contents(path.c_str(), &custom_contents,
+                                    &custom_length, &error));
+  g_assert_no_error(error);
+  g_assert_cmpstr(custom_contents, ==, custom_legacy_entry.c_str());
+  g_free(custom_contents);
 }
 
 void test_uri_registration_uses_private_xdg_home() {
