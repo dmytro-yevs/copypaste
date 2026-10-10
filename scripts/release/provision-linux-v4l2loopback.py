@@ -164,7 +164,7 @@ def provision(state: Path, environment: Path) -> None:
         command(["sudo", "chmod", "600", str(DEVICE)])
         live = read_live_device()
         if live["uid"] != uid or live["gid"] != gid or live["mode"] != "0600":
-            raise RuntimeError("owned V4L2 device permissions differ after job-user grant")
+            raise RuntimeError(f"owned V4L2 device permissions differ after job-user grant: live={live!r} expected_uid={uid} expected_gid={gid}")
         replace_state(state, {**state_base(uid, gid, "active"), "live": live})
         append_environment(environment, f"COPYPASTE_QUALIFICATION_V4L2_DEVICE={DEVICE}\nCOPYPASTE_QUALIFICATION_V4L2_STATE={state}\n")
     except Exception:

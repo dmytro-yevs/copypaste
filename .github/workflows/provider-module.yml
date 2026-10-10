@@ -39,6 +39,6 @@ jobs:
           test "$(stat -c '%a' /dev/video42)" = 600
           ffmpeg -hide_banner -loglevel error -re -f lavfi -i testsrc2=size=64x48:rate=10 -pix_fmt yuyv422 -f v4l2 /dev/video42 &
           producer=$!
-          v4l2-ctl --device /dev/video42 --stream-mmap=3 --stream-count=1 --stream-to="$RUNNER_TEMP/copypaste-v4l2-frame.raw"
+          ffmpeg -hide_banner -loglevel error -f v4l2 -input_format yuyv422 -video_size 64x48 -i /dev/video42 -frames:v 1 -f rawvideo "$RUNNER_TEMP/copypaste-v4l2-frame.raw"
           test -s "$RUNNER_TEMP/copypaste-v4l2-frame.raw"
           v4l2-ctl --device /dev/video42 --all
