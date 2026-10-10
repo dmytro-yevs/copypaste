@@ -84,11 +84,13 @@ function loadGnome({focusWindow = null} = {}) {
     const Extension = class {};
     const shell = {display: {focus_window: focusWindow, connect: () => 4, disconnect() {}}, get_current_time: () => 1};
     const ClipboardBridge = class { destroy() {} };
-    const ExtensionClass = new Function('Gio', 'GLib', 'Extension', 'ClipboardBridge', 'global', `${source}; return CopyPasteQuickPasteExtension;`)(
+    const ShortcutBridge = class { destroy() {} };
+    const ExtensionClass = new Function('Gio', 'GLib', 'Extension', 'ClipboardBridge', 'ShortcutBridge', 'global', `${source}; return CopyPasteQuickPasteExtension;`)(
         Gio,
         GLib,
         Extension,
         ClipboardBridge,
+        ShortcutBridge,
         shell
     );
     return {callbacks, calls, timers, shell, extension: new ExtensionClass()};
@@ -100,6 +102,104 @@ function completeGnome(bus, call, value) {
 
 function failGnome(bus, call, message) {
     call.callback(bus, {error: new Error(message)});
+}
+
+function loadShortcutBridge() {
+    const source = fs.readFileSync(new URL('gnome-shell-extension/shortcut_bridge.js', root), 'utf8')
+        .replace(/^import .*;\n/gm, '')
+        .replace('export class ', 'class ');
+    const state = {active: new Map(), allowed: [], calls: [], owner: ':1.host', pendingDbus: [], signals: [], uid: 1000, ungrabs: 0, unexports: 0, watches: 0};
+    const bus = {
+        call(...args) {
+            const method = args[3];
+            state.calls.push(method);
+            const reply = method === 'GetNameOwner' ? [state.owner] : [state.uid];
+            const respond = () => args[9](bus, {value: {deep_unpack: () => reply}});
+            if (state.deferNextDbus) {
+                state.deferNextDbus = false;
+                state.pendingDbus.push(respond);
+            } else {
+                respond();
+            }
+        },
+        call_finish(result) {
+            return result.value;
+        },
+    };
+    class Variant {
+        constructor(_type, value) { this.value = value; }
+        deep_unpack() { return this.value; }
+    }
+    const display = {
+        connect(signal, callback) {
+            assert.equal(signal, 'accelerator-activated');
+            state.activated = callback;
+            return 31;
+        },
+        disconnect(id) { state.disconnected = id; },
+        grab_accelerator(accelerator) {
+            if (state.active.has(accelerator))
+                return 0;
+            const action = state.active.size + 1;
+            state.active.set(accelerator, action);
+            return action;
+        },
+        ungrab_accelerator(action) {
+            for (const [accelerator, candidate] of state.active) {
+                if (candidate === action)
+                    state.active.delete(accelerator);
+            }
+            state.ungrabs += 1;
+        },
+    };
+    const Gio = {
+        BusNameWatcherFlags: {NONE: 0},
+        DBusCallFlags: {NONE: 0},
+        Credentials: class { get_unix_user() { return 1000; } },
+        VariantType: class { constructor(type) { this.type = type; } },
+        DBusExportedObject: {
+            wrapJSObject(_xml, handlers) {
+                state.handlers = handlers;
+                return {
+                    export(_connection, path) { state.path = path; },
+                    unexport() { state.unexports += 1; },
+                    emit_signal(name, value) { state.signals.push({name, value: value.deep_unpack()}); },
+                };
+            },
+        },
+        bus_watch_name_on_connection(_bus, _name, _flags, appeared, vanished) {
+            state.hostAppeared = appeared;
+            state.hostVanished = vanished;
+            return 32;
+        },
+        bus_unwatch_name(id) { state.unwatched = id; },
+    };
+    const GLib = {Variant, VariantType: class { constructor(type) { this.type = type; } }};
+    const Meta = {
+        KeyBindingFlags: {NONE: 0},
+        external_binding_name_for_action: action => `external-${action}`,
+    };
+    const Shell = {ActionMode: {NONE: 0, NORMAL: 1, OVERVIEW: 2}};
+    const Main = {wm: {allowKeybinding(name, modes) {
+        state.allowed.push({name, modes});
+        if (state.throwAllowKeybinding)
+            throw new Error('Shell rejected keybinding mode');
+    }}};
+    const ShortcutBridge = new Function('Gio', 'GLib', 'Meta', 'Shell', 'Main', 'global', `${source}; return ShortcutBridge;`)(
+        Gio, GLib, Meta, Shell, Main, {display}
+    );
+    return {bus, state, bridge: new ShortcutBridge(bus)};
+}
+
+async function invokeShortcut(runtime, method, params, sender = ':1.host') {
+    let reply;
+    const invocation = {
+        get_sender: () => sender,
+        return_value: value => { reply = {value: value.deep_unpack()}; },
+        return_dbus_error: (_name, code) => { reply = {error: code}; },
+    };
+    await runtime.state.handlers[method](params, invocation);
+    return reply;
 }
 
 {
@@ -187,6 +287,75 @@ function failGnome(bus, call, message) {
     assert.equal(runtime.extension._isQuickPasteWindow(roleAbsentWaylandWindow), true, 'Wayland title fallback must identify the native transient');
     assert.equal(runtime.extension._isQuickPasteWindow({...roleAbsentWaylandWindow, get_gtk_application_id: () => 'other.app'}), false, 'title alone must not identify a foreign window');
     assert.equal(runtime.extension._isQuickPasteWindow({...roleAbsentWaylandWindow, get_title: () => 'Other'}), false, 'app ID alone must not identify the main window');
+}
+
+{
+    const runtime = loadShortcutBridge();
+    const version = await invokeShortcut(runtime, 'VersionAsync', []);
+    assert.deepEqual(version.value, [1], 'the public shortcut bridge reports its wire version');
+    assert.deepEqual(runtime.state.calls, [], 'Version does not require host ownership');
+    const unauthorized = await invokeShortcut(runtime, 'RegisterShortcutAsync', ['quick-paste', '<Super>V'], ':1.other');
+    assert.equal(unauthorized.error, 'AccessDenied', 'only the current host name owner may register shortcuts');
+    assert.equal(runtime.state.active.size, 0, 'rejected callers cannot reserve accelerators');
+    const registered = await invokeShortcut(runtime, 'RegisterShortcutAsync', ['quick-paste', '<Super>V']);
+    assert.deepEqual(registered.value, [true, '<Super>V'], 'a successful Mutter grab reports the exact accepted accelerator');
+    assert.deepEqual(runtime.state.allowed, [{name: 'external-1', modes: 3}], 'registered shortcuts are enabled only in unlocked Shell modes');
+    const collision = await invokeShortcut(runtime, 'RegisterShortcutAsync', ['other', '<Super>V']);
+    assert.deepEqual(collision.value, [false, ''], 'a reserved accelerator collision must not claim registration');
+    runtime.state.activated(null, 1);
+    assert.deepEqual(runtime.state.signals, [{name: 'Activated', value: ['quick-paste']}], 'accelerator activation only emits the host-facing signal');
+    runtime.state.hostVanished();
+    assert.equal(runtime.state.active.size, 0, 'host name loss clears every Mutter grab');
+    assert.equal(runtime.state.ungrabs, 1, 'host name loss ungrabs the active shortcut exactly once');
+    const second = await invokeShortcut(runtime, 'RegisterShortcutAsync', ['quick-paste', '<Super>C']);
+    assert.deepEqual(second.value, [true, '<Super>C']);
+    runtime.bridge.destroy();
+    assert.equal(runtime.state.active.size, 0, 'destroy clears shortcut grabs');
+    assert.equal(runtime.state.unwatched, 32, 'destroy removes the host owner watcher');
+    assert.equal(runtime.state.unexports, 1, 'destroy unexports the D-Bus object');
+    runtime.state.activated(null, 1);
+    assert.equal(runtime.state.signals.length, 1, 'destroyed bridges never emit late activations');
+}
+
+{
+    const runtime = loadShortcutBridge();
+    runtime.state.deferNextDbus = true;
+    const pending = invokeShortcut(runtime, 'RegisterShortcutAsync', ['quick-paste', '<Super>V']);
+    runtime.state.hostVanished();
+    runtime.state.pendingDbus.shift()();
+    const result = await pending;
+    assert.equal(result.error, 'Unavailable', 'an in-flight registration cannot re-grab after host owner loss');
+    assert.equal(runtime.state.active.size, 0, 'owner loss keeps accelerators released after delayed authorization');
+}
+
+{
+    const runtime = loadShortcutBridge();
+    runtime.state.deferNextDbus = true;
+    const pending = invokeShortcut(runtime, 'RegisterShortcutAsync', ['quick-paste', '<Super>V']);
+    runtime.bridge.destroy();
+    runtime.state.pendingDbus.shift()();
+    const result = await pending;
+    assert.equal(result.error, 'Unavailable', 'destroyed bridges reject authorization that completes late');
+    assert.equal(runtime.state.active.size, 0, 'destroyed bridges never restore delayed grabs');
+}
+
+{
+    const runtime = loadShortcutBridge();
+    runtime.state.throwAllowKeybinding = true;
+    const result = await invokeShortcut(runtime, 'RegisterShortcutAsync', ['quick-paste', '<Super>V']);
+    assert.deepEqual(result.value, [false, ''], 'a failed Shell permission step does not report a registered shortcut');
+    assert.equal(runtime.state.active.size, 0, 'a failed Shell permission step releases the accelerator');
+    assert.equal(runtime.state.ungrabs, 1, 'accelerator release runs even when allowKeybinding throws');
+}
+
+{
+    const runtime = loadShortcutBridge();
+    await invokeShortcut(runtime, 'RegisterShortcutAsync', ['quick-paste', '<Super>V']);
+    runtime.state.throwAllowKeybinding = true;
+    const removed = await invokeShortcut(runtime, 'UnregisterShortcutAsync', ['quick-paste']);
+    assert.deepEqual(removed.value, [true], 'unregistration still succeeds when disabling Shell handling throws');
+    assert.equal(runtime.state.active.size, 0, 'unregistration always releases the accelerator after allowKeybinding throws');
+    assert.equal(runtime.state.ungrabs, 1, 'unregistration attempts Mutter ungrab independently of Shell mode cleanup');
 }
 
 function loadKde({activateWindow} = {}) {
