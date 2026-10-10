@@ -189,6 +189,10 @@ function awaitQuickPaste() {
 }
 
 workspace.windowAdded.connect(window => {
+    if (qualificationClose && isHostWindow(window) && window.pid === qualificationClose.pid) {
+        reportQualification(qualificationClose.transaction, qualificationClose.pid, true);
+        qualificationClose = null;
+    }
     if (activeTransaction && isQuickPasteWindow(window)) {
         activeTransaction.presentationWindow = window;
         workspace.activateWindow(window);
@@ -204,7 +208,6 @@ workspace.windowActivated.connect(window => {
 workspace.windowRemoved.connect(window => {
     if (qualificationClose?.window === window) {
         reportQualification(qualificationClose.transaction, qualificationClose.pid, false);
-        qualificationClose = null;
     }
     if (activeTransaction?.window === window)
         cancelTransaction(activeTransaction);

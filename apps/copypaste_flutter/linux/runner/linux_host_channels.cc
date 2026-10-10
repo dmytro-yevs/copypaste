@@ -66,6 +66,7 @@ std::string bridge_sender;
 std::string bridge_waiter_owner;
 std::string qualification_transaction;
 std::string qualification_action;
+bool qualification_unmapped = false;
 
 constexpr char kBridgeName[] = "app.copypaste.CopyPaste";
 constexpr char kBridgePath[] = "/app/copypaste/WaylandIntegration";
@@ -1363,6 +1364,7 @@ void bridge_call(GDBusConnection*, const gchar* sender, const gchar*, const gcha
     }
     qualification_transaction = g_uuid_string_random();
     qualification_action = action;
+    qualification_unmapped = false;
     g_dbus_connection_emit_signal(
         bridge_connection, nullptr, kBridgePath, kBridgeInterface,
         "QualificationRequested",
@@ -1405,8 +1407,11 @@ void bridge_call(GDBusConnection*, const gchar* sender, const gchar*, const gcha
         "QualificationObservation", g_variant_new("(susb)", transaction, pid, role, mapped),
         nullptr);
     if (!mapped) {
+      qualification_unmapped = true;
+    } else if (qualification_unmapped) {
       qualification_transaction.clear();
       qualification_action.clear();
+      qualification_unmapped = false;
     }
     g_dbus_method_invocation_return_value(invocation, nullptr);
     return;
