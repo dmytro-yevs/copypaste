@@ -61,6 +61,11 @@ def device_is_character(path: Path) -> bool:
         return False
 
 
+def exclusive_caps_enabled(value: str) -> bool:
+    values = value.split(",")
+    return bool(values) and values[0] in {"1", "Y", "y"} and all(item in {"0", "N", "n"} for item in values[1:])
+
+
 def assert_unowned_target() -> None:
     if DEVICE.exists() or DEVICE.is_symlink() or Path(f"/sys/class/video4linux/video{DEVICE_NUMBER}").exists():
         raise RuntimeError("qualification V4L2 device number is already in use")
@@ -100,7 +105,7 @@ def read_live_device() -> dict:
     exclusive = Path(f"/sys/module/{MODULE}/parameters/exclusive_caps").read_text(encoding="utf-8").strip()
     sysfs_dev = Path(f"/sys/class/video4linux/video{DEVICE_NUMBER}/dev").read_text(encoding="utf-8").strip()
     expected_dev = f"{os.major(details.st_rdev)}:{os.minor(details.st_rdev)}"
-    if label != LABEL or exclusive not in {"1", "Y", "y"} or sysfs_dev != expected_dev:
+    if label != LABEL or not exclusive_caps_enabled(exclusive) or sysfs_dev != expected_dev:
         raise RuntimeError(f"owned V4L2 live device contract differs: label={label!r} exclusive={exclusive!r} sysfs_dev={sysfs_dev!r} expected_dev={expected_dev!r}")
     return {"major": os.major(details.st_rdev), "minor": os.minor(details.st_rdev), "uid": details.st_uid, "gid": details.st_gid, "mode": f"{stat.S_IMODE(details.st_mode):04o}"}
 
