@@ -56,7 +56,7 @@ jobs:
           marker = 'qDBusRegisterMetaType<WriterIdentity>();'
           if source.count(marker) != 1:
               raise SystemExit('unexpected exact fixture metatype registration shape')
-          source = source.replace(marker, marker + '\n    qRegisterMetaType<QMap<QString, QByteArray>>("QMap<QString,QByteArray>");')
+          source = source.replace(marker, marker + '\n    qDBusRegisterMetaType<QMap<QString, QByteArray>>();')
           path.write_text(source)
           PY
             fi
@@ -129,7 +129,7 @@ jobs:
               QCoreApplication app(argc, argv);
               if (argc != 2) return 64;
               qDBusRegisterMetaType<WriterIdentity>();
-              qRegisterMetaType<QMap<QString, QByteArray>>("QMap<QString,QByteArray>");
+              qDBusRegisterMetaType<QMap<QString, QByteArray>>();
               ClipboardFixture fixture;
               QDBusServer server(QStringLiteral("unix:tmpdir=%1").arg(QDir::tempPath()));
               if (!server.isConnected()) return 1;
