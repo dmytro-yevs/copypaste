@@ -41,15 +41,18 @@ def verify(run: dict, jobs: dict, artifacts: dict, repository: str, commit: str,
     if not all(successful_linux_jobs.values()):
         raise ValueError("Module artifact source did not pass every Linux architecture job")
 
+    entries = artifacts.get("artifacts", [])
+    if artifacts.get("total_count") != len(entries):
+        raise ValueError("Module artifact source artifact inventory is incomplete")
     expected = {artifact_name(workflow, module, architecture) for architecture in ARCHITECTURES}
     found = {
-        artifact.get("name"): artifact
-        for artifact in artifacts.get("artifacts", [])
-        if artifact.get("name") in expected
+        name: [artifact for artifact in entries if artifact.get("name") == name]
+        for name in expected
     }
-    if set(found) != expected:
-        raise ValueError("Module artifact source lacks both exact Linux architecture artifacts")
-    for name, artifact in found.items():
+    if any(len(records) != 1 for records in found.values()):
+        raise ValueError("Module artifact source requires exactly one artifact for each Linux architecture")
+    for name, records in found.items():
+        artifact = records[0]
         source = artifact.get("workflow_run", {})
         if artifact.get("expired") is not False or source.get("id") != run["id"] or source.get("head_sha") != commit:
             raise ValueError(f"Module artifact provenance differs: {name}")
