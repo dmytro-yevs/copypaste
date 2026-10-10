@@ -1,0 +1,27 @@
+name: Wayland AT-SPI diagnostic
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bus:
+    strategy:
+      matrix:
+        image: [ubuntu:24.04, fedora:40]
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    steps:
+      - name: Activate and enable the session AT-SPI bus
+        run: |
+          set -euo pipefail
+          if command -v apt-get >/dev/null; then
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install --yes at-spi2-core dbus systemd
+          else
+            dnf --assumeyes install at-spi2-core dbus-daemon systemd
+          fi
+          dbus-run-session -- bash -ceu '
+            gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.a11y.Bus.GetAddress >/dev/null
+            busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true
+            test "$(busctl --user get-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled)" = "b true"
+          '
