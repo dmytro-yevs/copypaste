@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Optional
+import runpy
 
 
 def sha256(path: Path) -> str:
@@ -14,7 +15,7 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def verify(root: Path, version: str, commit: str, run_id: str, *, require_linux: bool = False, linux_origin_run_id: Optional[str] = None) -> None:
+def verify(root: Path, version: str, commit: str, run_id: str, *, require_linux: bool = False, require_compositor_runtime: bool = False, linux_origin_run_id: Optional[str] = None) -> None:
     platforms = ["macos", "android", "windows"]
     if require_linux:
         platforms.append("linux")
@@ -81,6 +82,18 @@ def verify(root: Path, version: str, commit: str, run_id: str, *, require_linux:
             }
             if not baselines <= set(names):
                 raise ValueError("Linux receipt must bind each architecture runtime baseline")
+    if require_compositor_runtime:
+        if not require_linux:
+            raise ValueError("compositor runtime companions require the Linux release contract")
+        verifier = runpy.run_path(str(Path(__file__).with_name("stage-compositor-runtime-release.py")))
+        expected = verifier["verify_public"](root / "compositor-runtime", version, commit, run_id)
+        receipt_path = root / "compositor-runtime" / "production-receipt.json"
+        try:
+            actual = json.loads(receipt_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError("compositor runtime production receipt is missing or invalid") from error
+        if actual != expected:
+            raise ValueError("compositor runtime production receipt does not bind public companion bytes")
 
 
 def main() -> int:
@@ -90,9 +103,10 @@ def main() -> int:
     parser.add_argument("--commit", required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--require-linux", action="store_true")
+    parser.add_argument("--require-compositor-runtime", action="store_true")
     parser.add_argument("--linux-origin-run-id")
     args = parser.parse_args()
-    verify(args.root, args.version, args.commit, args.run_id, require_linux=args.require_linux, linux_origin_run_id=args.linux_origin_run_id)
+    verify(args.root, args.version, args.commit, args.run_id, require_linux=args.require_linux, require_compositor_runtime=args.require_compositor_runtime, linux_origin_run_id=args.linux_origin_run_id)
     print("verified production artifacts for macOS, Android, Windows, and Linux" if args.require_linux else "verified production artifacts for macOS, Android, and Windows")
     return 0
 
