@@ -180,19 +180,14 @@ jobs:
           [[ "$(xdotool getwindowfocus)" == "$source_window" ]]
           xdotool mousemove --sync "$source_x" "$source_y"
           xdotool mousedown 1
-          : >"$work/start"
-          for _ in $(seq 1 100); do
-            grep -Fqx '{"event":"drag_started"}' "$work/activity" 2>/dev/null && break
-            sleep 0.05
-          done
-          grep -Fqx '{"event":"drag_started"}' "$work/activity"
           xdotool mousemove --sync "$sink_x" "$sink_y"
           xdotool mouseup 1
           for _ in $(seq 1 100); do
             [[ "$(cat "$work/result" 2>/dev/null || true)" == "received" ]] && break
             sleep 0.05
           done
-          cat "$work/activity"
+          grep -Fqx '{"event":"uri_list_requested"}' "$work/activity"
+          grep -Fqx '{"event":"drag_completed"}' "$work/activity"
           [[ "$(cat "$work/result")" == "received" ]]
       - name: Compile the GTK source in pinned Fedora 40
         run: |
