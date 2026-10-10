@@ -19,6 +19,7 @@ namespace {
 constexpr char kDesktopFileName[] = "com.copypaste.CopyPaste.desktop";
 constexpr char kPackagedExecutable[] = "/usr/lib/copypaste/copypaste";
 constexpr char kManagedKey[] = "X-CopyPaste-Managed=true";
+constexpr char kApplicationId[] = "com.copypaste.CopyPaste";
 
 bool is_regular_executable_owned_by(const std::string& path, uid_t owner) {
   struct stat metadata = {};
@@ -133,28 +134,107 @@ bool current_user_regular_file(const std::string& path) {
       metadata.st_uid == getuid();
 }
 
-bool has_managed_desktop_key(const gchar* contents, gsize length) {
-  bool desktop_entry = false;
-  bool managed = false;
-  const gchar* line = contents;
-  const gchar* end = contents + length;
-  while (line < end) {
-    const gchar* next = static_cast<const gchar*>(
-        memchr(line, '\n', static_cast<size_t>(end - line)));
-    const gsize line_length = next == nullptr
-        ? static_cast<gsize>(end - line)
-        : static_cast<gsize>(next - line);
-    const std::string value(line, line_length);
-    if (value == "[Desktop Entry]") {
-      desktop_entry = true;
-    } else if (desktop_entry && !value.empty() && value.front() == '[') {
-      desktop_entry = false;
-    } else if (desktop_entry && value == kManagedKey) {
-      managed = true;
-    }
-    line = next == nullptr ? end : next + 1;
+bool decode_desktop_exec_argument(const std::string& quoted,
+                                  std::string* executable) {
+  if (quoted.size() < 2 || quoted.front() != '"' || quoted.back() != '"') {
+    return false;
   }
-  return managed;
+  std::string decoded;
+  for (size_t index = 1; index + 1 < quoted.size(); ++index) {
+    const char character = quoted[index];
+    if (character == '\\') {
+      if (++index + 1 >= quoted.size()) return false;
+      const char escaped = quoted[index];
+      if (escaped != '\\' && escaped != '"' && escaped != '`' &&
+          escaped != '$') {
+        return false;
+      }
+      decoded.push_back(escaped);
+    } else if (character == '%') {
+      if (++index + 1 >= quoted.size() || quoted[index] != '%') return false;
+      decoded.push_back('%');
+    } else if (character == '"' || character == '\n' || character == '\r') {
+      return false;
+    } else {
+      decoded.push_back(character);
+    }
+  }
+  if (!g_path_is_absolute(decoded.c_str()) || decoded.empty() ||
+      std::strpbrk(decoded.c_str(), "\n\r") != nullptr) {
+    return false;
+  }
+  *executable = std::move(decoded);
+  return true;
+}
+
+bool key_matches(GKeyFile* entry, const char* key, const char* expected) {
+  g_autofree gchar* value =
+      g_key_file_get_string(entry, "Desktop Entry", key, nullptr);
+  return value != nullptr && g_strcmp0(value, expected) == 0;
+}
+
+bool has_only_managed_keys(GKeyFile* entry, bool autostart) {
+  static constexpr const char* kBaseKeys[] = {
+      "Type", "Name", "Comment", "Exec", "TryExec", "Icon", "Terminal",
+      "Categories", "StartupNotify", "MimeType", "X-CopyPaste-ApplicationId",
+      "X-CopyPaste-Managed",
+  };
+  gsize count = 0;
+  g_auto(GStrv) keys = g_key_file_get_keys(entry, "Desktop Entry", &count, nullptr);
+  if (keys == nullptr || count != G_N_ELEMENTS(kBaseKeys) + (autostart ? 1 : 0)) {
+    return false;
+  }
+  for (const char* key : kBaseKeys) {
+    if (!g_key_file_has_key(entry, "Desktop Entry", key, nullptr)) return false;
+  }
+  return !autostart || g_key_file_has_key(
+      entry, "Desktop Entry", "X-GNOME-Autostart-enabled", nullptr);
+}
+
+bool is_managed_desktop_entry(const gchar* contents, gsize length,
+                              bool autostart) {
+  g_autoptr(GKeyFile) entry = g_key_file_new();
+  if (!g_key_file_load_from_data(entry, contents, length, G_KEY_FILE_NONE,
+                                 nullptr)) {
+    return false;
+  }
+  gsize group_count = 0;
+  g_auto(GStrv) groups = g_key_file_get_groups(entry, &group_count);
+  if (group_count != 1 || g_strcmp0(groups[0], "Desktop Entry") != 0 ||
+      !has_only_managed_keys(entry, autostart) ||
+      !key_matches(entry, "Type", "Application") ||
+      !key_matches(entry, "Name", "CopyPaste") ||
+      !key_matches(entry, "Comment", "Encrypted clipboard history") ||
+      !key_matches(entry, "Icon", kApplicationId) ||
+      !key_matches(entry, "Terminal", "false") ||
+      !key_matches(entry, "Categories", "Utility;") ||
+      !key_matches(entry, "StartupNotify", "true") ||
+      !key_matches(entry, "MimeType", "x-scheme-handler/copypaste;") ||
+      !key_matches(entry, "X-CopyPaste-ApplicationId", kApplicationId) ||
+      !key_matches(entry, "X-CopyPaste-Managed", "true") ||
+      (autostart && !key_matches(
+          entry, "X-GNOME-Autostart-enabled", "true"))) {
+    return false;
+  }
+  g_autofree gchar* exec =
+      g_key_file_get_string(entry, "Desktop Entry", "Exec", nullptr);
+  g_autofree gchar* try_exec =
+      g_key_file_get_string(entry, "Desktop Entry", "TryExec", nullptr);
+  if (exec == nullptr || try_exec == nullptr) return false;
+  const std::string exec_value(exec);
+  static constexpr char kUriFieldCode[] = " %U";
+  if (exec_value.size() <= strlen(kUriFieldCode) ||
+      exec_value.compare(exec_value.size() - strlen(kUriFieldCode),
+                         strlen(kUriFieldCode), kUriFieldCode) != 0) {
+    return false;
+  }
+  const std::string quoted_exec =
+      exec_value.substr(0, exec_value.size() - strlen(kUriFieldCode));
+  std::string executable;
+  std::string try_executable;
+  return decode_desktop_exec_argument(quoted_exec, &executable) &&
+      decode_desktop_exec_argument(try_exec, &try_executable) &&
+      executable == try_executable;
 }
 
 }  // namespace
@@ -227,11 +307,13 @@ std::string LinuxXdgStartup::DesktopEntryForExecutable(
       "Name=CopyPaste\n"
       "Comment=Encrypted clipboard history\n"
       "Exec=" + quote_desktop_exec_argument(executable) + " %U\n"
+      "TryExec=" + quote_desktop_exec_argument(executable) + "\n"
       "Icon=com.copypaste.CopyPaste\n"
       "Terminal=false\n"
       "Categories=Utility;\n"
       "StartupNotify=true\n"
-      "MimeType=x-scheme-handler/copypaste;\n";
+      "MimeType=x-scheme-handler/copypaste;\n"
+      "X-CopyPaste-ApplicationId=com.copypaste.CopyPaste\n";
   if (autostart) entry.append("X-GNOME-Autostart-enabled=true\n");
   entry.append(kManagedKey).append("\n");
   return entry;
@@ -239,14 +321,24 @@ std::string LinuxXdgStartup::DesktopEntryForExecutable(
 
 bool LinuxXdgStartup::owns_entry_for_current_executable(
     const std::string& path, bool autostart) const {
-  if (!current_user_regular_file(path)) return false;
+  if (!owns_managed_entry(path, autostart)) return false;
   gchar* contents = nullptr;
   gsize length = 0;
   if (!g_file_get_contents(path.c_str(), &contents, &length, nullptr)) return false;
   const std::string expected = DesktopEntryForExecutable(executable_, autostart);
-  const bool owned = has_managed_desktop_key(contents, length) &&
-      expected.size() == length &&
+  const bool matches = expected.size() == length &&
       std::memcmp(contents, expected.data(), length) == 0;
+  g_free(contents);
+  return matches;
+}
+
+bool LinuxXdgStartup::owns_managed_entry(const std::string& path,
+                                         bool autostart) const {
+  if (!current_user_regular_file(path)) return false;
+  gchar* contents = nullptr;
+  gsize length = 0;
+  if (!g_file_get_contents(path.c_str(), &contents, &length, nullptr)) return false;
+  const bool owned = is_managed_desktop_entry(contents, length, autostart);
   g_free(contents);
   return owned;
 }
@@ -254,7 +346,7 @@ bool LinuxXdgStartup::owns_entry_for_current_executable(
 bool LinuxXdgStartup::write_owned_entry(const std::string& path, bool autostart,
                                          GError** error) const {
   if (g_file_test(path.c_str(), G_FILE_TEST_EXISTS) &&
-      !owns_entry_for_current_executable(path, autostart)) {
+      !owns_managed_entry(path, autostart)) {
     g_set_error(error, G_FILE_ERROR, G_FILE_ERROR_ACCES,
                 "Refusing to replace an XDG entry not owned by CopyPaste.");
     return false;
@@ -278,7 +370,7 @@ bool LinuxXdgStartup::SetStartAtLogin(bool enabled, GError** error) const {
   const std::string path = autostart_path();
   if (enabled) return write_owned_entry(path, true, error);
   if (!g_file_test(path.c_str(), G_FILE_TEST_EXISTS)) return true;
-  if (!owns_entry_for_current_executable(path, true)) {
+  if (!owns_managed_entry(path, true)) {
     g_set_error(error, G_FILE_ERROR, G_FILE_ERROR_ACCES,
                 "Refusing to remove an XDG entry not owned by CopyPaste.");
     return false;
