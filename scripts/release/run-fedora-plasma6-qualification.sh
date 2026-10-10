@@ -63,7 +63,7 @@ docker run --rm --platform "$platform" \
 docker_status=$?
 set -e
 
-if find "$evidence_root" -xdev -depth -uid 0 -exec chown --no-dereference "$source_owner" {} +; then
+if sudo find "$evidence_root" -xdev -depth -uid 0 -exec chown --no-dereference "$source_owner" {} +; then
   restore_status=0
 else
   restore_status=$?
