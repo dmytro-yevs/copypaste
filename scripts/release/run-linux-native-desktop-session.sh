@@ -26,7 +26,8 @@ done
 case "$SESSION" in x11|wayland) ;; *) exit 2 ;; esac
 runtime_package="$(jq -er '.package.name | select(type == "string" and test("^[A-Za-z0-9._+-]+\\.deb$"))' "$COMPOSITOR_RUNTIME_BINDING")"
 runtime_id="$(jq -er '.runtime_id | select(type == "string" and test("^[a-z0-9.-]+$"))' "$COMPOSITOR_RUNTIME_BINDING")"
-sudo apt-get install --yes "$COMPOSITOR_RUNTIME/$runtime_package"
+runtime_package_path="$(realpath "$COMPOSITOR_RUNTIME/$runtime_package")"
+sudo apt-get install --yes "$runtime_package_path"
 dpkg-query --show "copypaste-compositor-runtime-$runtime_id" >/dev/null
 python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/verify-linux-compositor-runtime.py" installed --binding "$COMPOSITOR_RUNTIME_BINDING" --root /
 COMPOSITOR_LAUNCHER="/usr/lib/copypaste/compositor-runtime/bin/copypaste-compositor-session-$runtime_id"
