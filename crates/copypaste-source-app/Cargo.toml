@@ -8,8 +8,11 @@ license.workspace = true
 [dependencies]
 base64.workspace = true
 image.workspace = true
+resvg.workspace = true
 
 [dev-dependencies]
+hex.workspace = true
+sha2.workspace = true
 tempfile.workspace = true
 
 [target.'cfg(unix)'.dependencies]
