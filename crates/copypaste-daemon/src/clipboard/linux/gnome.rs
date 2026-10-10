@@ -71,6 +71,7 @@ struct State {
     owned_sequence: Option<u64>,
     mimes: Vec<String>,
     source: Option<SourceIdentity>,
+    owner: Option<String>,
 }
 
 pub(in crate::clipboard) struct GnomeClipboard {
@@ -317,7 +318,15 @@ fn worker(commands: mpsc::Receiver<Command>, state: Arc<Mutex<State>>, bridge: B
             let _ = connection.close();
             return;
         }
-        let proxy = Proxy::new(&connection, bridge.service, PATH, INTERFACE).ok();
+        let owner = state
+            .lock()
+            .ok()
+            .and_then(|state| state.active.then(|| state.owner.clone()).flatten());
+        let proxy = owner.as_deref().and_then(|owner| {
+            owner_is_current(&connection, bridge, owner)
+                .then(|| Proxy::new(&connection, owner, PATH, INTERFACE).ok())
+                .flatten()
+        });
         match command {
             Command::Read {
                 sequence,
@@ -327,13 +336,39 @@ fn worker(commands: mpsc::Receiver<Command>, state: Arc<Mutex<State>>, bridge: B
             } => {
                 let bytes = proxy
                     .as_ref()
-                    .and_then(|proxy| proxy.call("Read", &(sequence, mime.as_str(), limit)).ok());
+                    .and_then(|proxy| proxy.call("Read", &(sequence, mime.as_str(), limit)).ok())
+                    .filter(|_| {
+                        owner.as_deref().is_some_and(|owner| {
+                            owner_is_current(&connection, bridge, owner)
+                                && state.lock().is_ok_and(|state| {
+                                    state.active && state.owner.as_deref() == Some(owner)
+                                })
+                        })
+                    });
+                if bytes.is_none() {
+                    if let Some(owner) = owner.as_deref() {
+                        invalidate_owner(&state, Some(owner));
+                    }
+                }
                 let _ = reply.send(bytes);
             }
             Command::Write { values, reply } => {
                 let sequence = proxy
                     .as_ref()
-                    .and_then(|proxy| proxy.call("Write", &(values,)).ok());
+                    .and_then(|proxy| proxy.call("Write", &(values,)).ok())
+                    .filter(|_| {
+                        owner.as_deref().is_some_and(|owner| {
+                            owner_is_current(&connection, bridge, owner)
+                                && state.lock().is_ok_and(|state| {
+                                    state.active && state.owner.as_deref() == Some(owner)
+                                })
+                        })
+                    });
+                if sequence.is_none() {
+                    if let Some(owner) = owner.as_deref() {
+                        invalidate_owner(&state, Some(owner));
+                    }
+                }
                 let _ = reply.send(sequence);
             }
             Command::Stop => unreachable!("Stop returned before proxy dispatch"),
@@ -342,52 +377,97 @@ fn worker(commands: mpsc::Receiver<Command>, state: Arc<Mutex<State>>, bridge: B
 }
 
 fn activate(connection: &Connection, state: &Arc<Mutex<State>>, bridge: Bridge) {
-    if !service_is_current_user(connection, bridge) {
+    let Some(epoch) = state.lock().ok().map(|state| state.epoch) else {
+        return;
+    };
+    let Some(owner) = verified_service_owner(connection, bridge) else {
+        return;
+    };
+    if let Ok(mut state) = state.lock() {
+        if state.epoch != epoch {
+            return;
+        }
+        state.active = false;
+        state.watching = false;
+        state.dirty = false;
+        state.sequence = 0;
+        state.owned_sequence = None;
+        state.mimes.clear();
+        state.source = None;
+        state.owner = Some(owner.clone());
+    } else {
         return;
     }
-    let Ok(proxy) = Proxy::new(connection, bridge.service, PATH, INTERFACE) else {
+    let (ready, subscribed) = mpsc::sync_channel(1);
+    watch_clipboard(
+        connection.clone(),
+        Arc::clone(state),
+        epoch,
+        owner.clone(),
+        ready,
+    );
+    if subscribed.recv_timeout(RPC_TIMEOUT).is_err() {
+        invalidate_owner(state, Some(&owner));
+        return;
+    }
+    let Ok(proxy) = Proxy::new(connection, owner.as_str(), PATH, INTERFACE) else {
+        invalidate_owner(state, Some(&owner));
         return;
     };
     let Ok(version) = proxy.call::<_, _, u32>("Version", &()) else {
+        invalidate_owner(state, Some(&owner));
         return;
     };
     if version != BRIDGE_VERSION {
+        invalidate_owner(state, Some(&owner));
         return;
     }
     let Ok((sequence, mimes, identity)) =
         proxy.call::<_, _, (u64, Vec<String>, (String, u32, u32, String))>("Snapshot", &())
     else {
+        invalidate_owner(state, Some(&owner));
         return;
     };
-    if !valid_mimes(&mimes) {
+    if !valid_mimes(&mimes) || !owner_is_current(connection, bridge, &owner) {
+        invalidate_owner(state, Some(&owner));
         return;
     }
     let source = SourceIdentity::from_wire(identity.0, identity.1, identity.2, identity.3);
-    let epoch = if let Ok(mut state) = state.lock() {
+    if let Ok(mut state) = state.lock() {
+        if state.epoch != epoch || state.owner.as_deref() != Some(owner.as_str()) {
+            return;
+        }
         state.active = true;
-        state.watching = false;
+        state.watching = true;
         state.dirty = false;
         state.sequence = sequence;
         state.mimes = mimes;
         state.source = source;
-        state.epoch
-    } else {
-        return;
-    };
-    let (ready, subscribed) = mpsc::sync_channel(1);
-    watch_clipboard(connection.clone(), Arc::clone(state), epoch, ready, bridge);
-    if subscribed.recv_timeout(RPC_TIMEOUT).is_err() {
-        invalidate(state);
-        return;
-    }
-    if let Ok(mut state) = state.lock() {
-        if state.epoch == epoch && state.active {
-            state.watching = true;
-        }
     }
 }
 
-fn service_is_current_user(connection: &Connection, bridge: Bridge) -> bool {
+fn verified_service_owner(connection: &Connection, bridge: Bridge) -> Option<String> {
+    let Ok(bus) = Proxy::new(
+        connection,
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+    ) else {
+        return None;
+    };
+    let Ok(owner) = bus.call::<_, _, String>("GetNameOwner", &(bridge.service,)) else {
+        return None;
+    };
+    let Ok(uid) = bus.call::<_, _, u32>("GetConnectionUnixUser", &(owner.as_str(),)) else {
+        return None;
+    };
+    std::fs::metadata("/proc/self")
+        .ok()
+        .filter(|current| current.uid() == uid)
+        .map(|_| owner)
+}
+
+fn owner_is_current(connection: &Connection, bridge: Bridge, expected: &str) -> bool {
     let Ok(bus) = Proxy::new(
         connection,
         "org.freedesktop.DBus",
@@ -396,13 +476,8 @@ fn service_is_current_user(connection: &Connection, bridge: Bridge) -> bool {
     ) else {
         return false;
     };
-    let Ok(owner) = bus.call::<_, _, String>("GetNameOwner", &(bridge.service,)) else {
-        return false;
-    };
-    let Ok(uid) = bus.call::<_, _, u32>("GetConnectionUnixUser", &(owner.as_str(),)) else {
-        return false;
-    };
-    std::fs::metadata("/proc/self").is_ok_and(|current| current.uid() == uid)
+    bus.call::<_, _, String>("GetNameOwner", &(bridge.service,))
+        .is_ok_and(|owner| owner == expected)
 }
 
 fn watch_service(connection: Connection, state: Arc<Mutex<State>>, bridge: Bridge) {
@@ -438,11 +513,11 @@ fn watch_clipboard(
     connection: Connection,
     state: Arc<Mutex<State>>,
     epoch: u64,
+    owner: String,
     ready: mpsc::SyncSender<()>,
-    bridge: Bridge,
 ) {
     thread::spawn(move || {
-        let Ok(proxy) = Proxy::new(&connection, bridge.service, PATH, INTERFACE) else {
+        let Ok(proxy) = Proxy::new(&connection, owner.as_str(), PATH, INTERFACE) else {
             return;
         };
         let Ok(signals) = proxy.receive_signal("OwnerChanged") else {
@@ -455,15 +530,15 @@ fn watch_clipboard(
                     .body()
                     .deserialize::<(u64, Vec<String>, (String, u32, u32, String))>()
             else {
-                invalidate(&state);
+                invalidate_owner(&state, Some(&owner));
                 break;
             };
             if !valid_mimes(&mimes) {
-                invalidate(&state);
+                invalidate_owner(&state, Some(&owner));
                 break;
             }
             if let Ok(mut state) = state.lock() {
-                if state.epoch != epoch || !state.active {
+                if state.epoch != epoch || state.owner.as_deref() != Some(owner.as_str()) {
                     break;
                 }
                 apply_owner_changed(
@@ -476,7 +551,7 @@ fn watch_clipboard(
             }
         }
         if let Ok(mut state) = state.lock() {
-            if state.epoch == epoch {
+            if state.epoch == epoch && state.owner.as_deref() == Some(owner.as_str()) {
                 state.epoch = state.epoch.wrapping_add(1);
                 state.active = false;
                 state.watching = false;
@@ -485,6 +560,7 @@ fn watch_clipboard(
                 state.owned_sequence = None;
                 state.mimes.clear();
                 state.source = None;
+                state.owner = None;
             }
         }
     });
@@ -500,13 +576,32 @@ fn invalidate(state: &Arc<Mutex<State>>) {
         state.owned_sequence = None;
         state.mimes.clear();
         state.source = None;
+        state.owner = None;
     }
 }
 
+fn invalidate_owner(state: &Arc<Mutex<State>>, owner: Option<&str>) {
+    let Ok(mut state) = state.lock() else {
+        return;
+    };
+    if owner.is_some_and(|owner| state.owner.as_deref() != Some(owner)) {
+        return;
+    }
+    state.epoch = state.epoch.wrapping_add(1);
+    state.active = false;
+    state.watching = false;
+    state.dirty = false;
+    state.sequence = 0;
+    state.owned_sequence = None;
+    state.mimes.clear();
+    state.source = None;
+    state.owner = None;
+}
+
 fn current_epoch(state: &Arc<Mutex<State>>, epoch: u64, sequence: u64) -> bool {
-    state
-        .lock()
-        .is_ok_and(|state| state.active && state.epoch == epoch && state.sequence == sequence)
+    state.lock().is_ok_and(|state| {
+        state.active && state.owner.is_some() && state.epoch == epoch && state.sequence == sequence
+    })
 }
 
 fn apply_owner_changed(
@@ -606,6 +701,9 @@ mod tests {
         writes: Vec<HashMap<String, Vec<u8>>>,
         reads: usize,
         stall_reads: bool,
+        snapshots: usize,
+        completed_snapshots: usize,
+        stall_snapshots: bool,
     }
 
     struct FixtureBridge(Arc<Mutex<BridgeState>>);
@@ -625,8 +723,20 @@ mod tests {
         }
 
         fn snapshot(&self) -> (u64, Vec<String>, (String, u32, u32, String)) {
-            let state = self.0.lock().expect("fixture bridge state");
-            (state.sequence, state.mimes.clone(), state.identity.clone())
+            let mut state = self.0.lock().expect("fixture bridge state");
+            state.snapshots += 1;
+            if state.stall_snapshots {
+                drop(state);
+                thread::sleep(RPC_TIMEOUT + Duration::from_secs(1));
+                self.0
+                    .lock()
+                    .expect("fixture bridge state")
+                    .completed_snapshots += 1;
+                return (0, Vec::new(), ("no-client".into(), 0, 0, String::new()));
+            }
+            let snapshot = (state.sequence, state.mimes.clone(), state.identity.clone());
+            state.completed_snapshots += 1;
+            snapshot
         }
 
         fn read(&self, sequence: u64, mime: &str, limit: u32) -> Vec<u8> {
@@ -762,6 +872,7 @@ mod tests {
         }
         for bridge in [GNOME, KWIN] {
             live_bridge_fixture(bridge);
+            stale_snapshot_owner_replacement_fixture(bridge);
         }
     }
 
@@ -906,6 +1017,62 @@ mod tests {
         panic!("companion owner loss retained source provenance");
     }
 
+    fn stale_snapshot_owner_replacement_fixture(bridge: Bridge) {
+        let original = BridgeFixture::start(bridge);
+        original
+            .state
+            .lock()
+            .expect("fixture bridge state")
+            .stall_snapshots = true;
+        let directory = tempfile::tempdir().expect("fixture data dir");
+        let clipboard =
+            GnomeClipboard::with_bridge(directory.path(), bridge).expect("compositor clipboard");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if original
+                .state
+                .lock()
+                .is_ok_and(|state| state.snapshots == 1)
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            original
+                .state
+                .lock()
+                .expect("fixture bridge state")
+                .snapshots,
+            1,
+            "the original owner never received Snapshot",
+        );
+        original.release_name();
+        let _replacement = BridgeFixture::start(bridge);
+        wait_for_active(&clipboard);
+        let state = clipboard.state.lock().expect("clipboard state");
+        assert_eq!(
+            state.source.as_ref().map(|source| source.app_id.as_str()),
+            Some("org.example.Writer")
+        );
+        assert!(state.owner.is_some());
+        drop(state);
+        let deadline = Instant::now() + REQUEST_TIMEOUT + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if original
+                .state
+                .lock()
+                .is_ok_and(|state| state.completed_snapshots == 1)
+            {
+                let state = clipboard.state.lock().expect("clipboard state");
+                assert!(state.active && state.source.is_some());
+                return;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        panic!("stalled original Snapshot did not finish");
+    }
+
     #[test]
     fn bounded_write_rejects_overflowing_body_and_total() {
         assert!(!valid_payloads(&HashMap::from([(
@@ -1026,6 +1193,7 @@ mod tests {
             sequence: 42,
             owned_sequence: None,
             mimes: vec!["text/plain;charset=utf-8".into()],
+            owner: Some(":1.42".into()),
             ..State::default()
         }));
         assert!(current_epoch(&state, 7, 42));
