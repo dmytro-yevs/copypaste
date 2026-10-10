@@ -6,6 +6,7 @@
 #include "linux_quick_paste_window.h"
 #include "linux_restart_helper.h"
 #include "linux_release_page.h"
+#include "linux_xdg_startup.h"
 #include "linux_x11_quick_paste.h"
 
 #include <unistd.h>
@@ -1151,7 +1152,41 @@ void shortcuts_call(FlMethodChannel* channel, FlMethodCall* call, gpointer) {
 
 void integration_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
   if (is_method(call, "status")) {
-    success(call, integration_status());
+    FlValue* status = integration_status();
+    g_autoptr(GError) error = nullptr;
+    const auto startup = LinuxXdgStartup::CreateForCurrentExecutable(&error);
+    const LinuxXdgStartupStatus startup_status =
+        startup ? startup->Status() : LinuxXdgStartupStatus{};
+    fl_value_set_string_take(status, "startAtLogin",
+                             fl_value_new_bool(startup_status.start_at_login));
+    fl_value_set_string_take(status, "uriRegistered",
+                             fl_value_new_bool(startup_status.uri_registered));
+    success(call, status);
+  } else if (is_method(call, "setStartAtLogin")) {
+    FlValue* args = fl_method_call_get_args(call);
+    FlValue* enabled = args != nullptr && fl_value_get_type(args) == FL_VALUE_TYPE_MAP
+        ? fl_value_lookup_string(args, "enabled") : nullptr;
+    if (enabled == nullptr || fl_value_get_type(enabled) != FL_VALUE_TYPE_BOOL) {
+      failure(call, "invalid_arguments", "Start at login requires an enabled value.");
+      return;
+    }
+    g_autoptr(GError) error = nullptr;
+    const auto startup = LinuxXdgStartup::CreateForCurrentExecutable(&error);
+    if (!startup || !startup->SetStartAtLogin(fl_value_get_bool(enabled), &error)) {
+      failure(call, "xdg_failed", error == nullptr ? "XDG startup is unavailable."
+                                                     : error->message);
+      return;
+    }
+    success(call, fl_value_new_bool(true));
+  } else if (is_method(call, "registerCopypasteUri")) {
+    g_autoptr(GError) error = nullptr;
+    const auto startup = LinuxXdgStartup::CreateForCurrentExecutable(&error);
+    if (!startup || !startup->RegisterCopypasteUri(&error)) {
+      failure(call, "xdg_failed", error == nullptr ? "XDG URI registration is unavailable."
+                                                     : error->message);
+      return;
+    }
+    success(call, fl_value_new_bool(true));
   } else if (is_method(call, "openCompanionSetup")) {
     success(call, fl_value_new_bool(spawn_companion_setup()));
   } else if (is_method(call, "requestRemoteDesktop")) {
