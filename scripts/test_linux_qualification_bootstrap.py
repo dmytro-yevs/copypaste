@@ -13,6 +13,10 @@ class LinuxQualificationBootstrapTest(unittest.TestCase):
         for name in ("artifact_run_id: ${{ inputs.linux_artifact_run_id }}", "previous_artifact_run_id: ${{ inputs.previous_linux_artifact_run_id }}", "supabase_module_run_id", "semantic_search_module_run_id", "ocr_module_run_id", "compositor_runtime_run_id"):
             self.assertIn(name, workflow)
         self.assertIn("needs.preflight.outputs.linux_qualification_only != 'true'", workflow)
+        self.assertIn("GITHUB_EVENT_NAME\" == workflow_dispatch", workflow)
+        self.assertIn("linux_evidence_run_id", workflow)
+        self.assertIn("Run exact staged Linux native qualification /", workflow)
+        self.assertIn('all(.[]; . == "skipped")', workflow)
 
     def test_native_workflow_is_callable_and_downloads_public_runtime_for_final_verification(self):
         workflow = (ROOT / ".github/workflows/linux-native-qualification.yml").read_text(encoding="utf-8")
@@ -21,6 +25,9 @@ class LinuxQualificationBootstrapTest(unittest.TestCase):
         self.assertIn("name: production-compositor-runtime", evidence)
         self.assertIn("path: compositor-runtime", evidence)
         self.assertIn("run-id: ${{ inputs.artifact_run_id }}", evidence)
+        self.assertEqual(evidence.count("path: previous-artifacts/x86_64"), 1)
+        self.assertEqual(evidence.count("path: previous-artifacts/aarch64"), 1)
+        self.assertIn("run-id: ${{ inputs.previous_artifact_run_id }}", evidence)
 
 
 if __name__ == "__main__":
