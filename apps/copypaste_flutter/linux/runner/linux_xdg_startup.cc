@@ -1,8 +1,11 @@
 #include "linux_xdg_startup.h"
 
-#include <gio/gdesktopappinfo.h>
 #include <gio/gio.h>
 #include <glib/gstdio.h>
+
+#if defined(__linux__)
+#include <gio/gdesktopappinfo.h>
+#endif
 
 #include <cerrno>
 #include <climits>
@@ -20,6 +23,7 @@ constexpr char kDesktopFileName[] = "com.copypaste.CopyPaste.desktop";
 constexpr char kPackagedExecutable[] = "/usr/lib/copypaste/copypaste";
 constexpr char kManagedKey[] = "X-CopyPaste-Managed=true";
 constexpr char kApplicationId[] = "com.copypaste.CopyPaste";
+constexpr char kUriHandlerContentType[] = "x-scheme-handler/copypaste";
 
 bool is_regular_executable_owned_by(const std::string& path, uid_t owner) {
   struct stat metadata = {};
@@ -360,7 +364,7 @@ LinuxXdgStartupStatus LinuxXdgStartup::Status() const {
       owns_entry_for_current_executable(autostart_path(), true);
   if (!owns_entry_for_current_executable(desktop_entry_path(), false)) return status;
   g_autoptr(GAppInfo) registered =
-      g_app_info_get_default_for_uri_scheme("copypaste");
+      g_app_info_get_default_for_type(kUriHandlerContentType, TRUE);
   status.uri_registered = registered != nullptr &&
       g_strcmp0(g_app_info_get_id(registered), kDesktopFileName) == 0;
   return status;
@@ -387,6 +391,11 @@ bool LinuxXdgStartup::SetStartAtLogin(bool enabled, GError** error) const {
 bool LinuxXdgStartup::RegisterCopypasteUri(GError** error) const {
   const std::string path = desktop_entry_path();
   if (!write_owned_entry(path, false, error)) return false;
+#if !defined(__linux__)
+  g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+              "CopyPaste URI registration requires Linux desktop integration.");
+  return false;
+#else
   g_autoptr(GDesktopAppInfo) app_info =
       g_desktop_app_info_new_from_filename(path.c_str());
   if (app_info == nullptr) {
@@ -394,9 +403,10 @@ bool LinuxXdgStartup::RegisterCopypasteUri(GError** error) const {
                 "Unable to load the CopyPaste URI desktop entry.");
     return false;
   }
-  if (!g_app_info_set_as_default_for_uri_scheme(
-          G_APP_INFO(app_info), "copypaste", nullptr, error)) {
+  if (!g_app_info_set_as_default_for_type(
+          G_APP_INFO(app_info), kUriHandlerContentType, error)) {
     return false;
   }
   return true;
+#endif
 }
