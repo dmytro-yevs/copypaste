@@ -18,6 +18,7 @@ jobs:
     container: ${{ matrix.image }}
     steps:
       - name: Activate and enable the session AT-SPI bus
+        shell: bash
         run: |
           set -euo pipefail
           if command -v apt-get >/dev/null; then
