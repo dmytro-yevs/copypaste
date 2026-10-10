@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import tarfile
+import urllib.request
 from collections import deque
 from pathlib import Path
 from typing import Iterable
@@ -39,11 +40,16 @@ README_NAME = re.compile(r"^README(?:[._-].*)?$", re.IGNORECASE)
 COPYRIGHT = re.compile(rb"copyright", re.IGNORECASE)
 MIT_BANNER = re.compile(rb"permission\s+is\s+hereby\s+granted", re.IGNORECASE)
 FULL_GPL_BANNER = re.compile(rb"gnu\s+(?:lesser\s+)?general\s+public\s+license.*end\s+of\s+terms\s+and\s+conditions", re.IGNORECASE | re.DOTALL)
+LGPL_REFERENCE = re.compile(rb"this\s+library\s+is\s+free\s+software.*gnu\s+lesser\s+general\s+public\s+license", re.IGNORECASE | re.DOTALL)
 LEADING_COMMENT = re.compile(rb"\A\s*/\*.*?\*/", re.DOTALL)
 MAX_SOURCE_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_LICENSE_BYTES = 4 * 1024 * 1024
 MAX_LICENSE_MEMBERS = 128
 MAX_SOURCE_NOTICE_BYTES = 128 * 1024
+STANDARD_LICENSES = (
+    ("GNU-LGPL-3.0.txt", "https://www.gnu.org/licenses/lgpl-3.0.txt", "e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118"),
+    ("GNU-GPL-3.0.txt", "https://www.gnu.org/licenses/gpl-3.0.txt", "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"),
+)
 GLIBC_SONAMES = {
     "libc.so.6", "libdl.so.2", "libm.so.6", "libpthread.so.0", "librt.so.1",
     "libutil.so.1", "libresolv.so.2", "libnsl.so.1", "ld-linux-x86-64.so.2",
@@ -260,10 +266,12 @@ def source_member_has_notice_text(member: str, value: bytes) -> bool:
     return README_NAME.fullmatch(Path(member).name) is None or has_legal_notice(value)
 
 
-def source_header_notice(value: bytes) -> bytes | None:
+def source_header_notice(value: bytes, *, allow_lgpl_reference: bool = False) -> bytes | None:
     """Return one leading source comment only when it is a complete legal banner."""
     match = LEADING_COMMENT.match(value[:16 * 1024])
-    if match is None or not has_legal_notice(match.group()):
+    if match is None or COPYRIGHT.search(match.group()) is None:
+        return None
+    if not has_legal_notice(match.group()) and not (allow_lgpl_reference and LGPL_REFERENCE.search(match.group()) is not None):
         return None
     return match.group()
 
@@ -282,6 +290,19 @@ def bounded_source_notices(candidates: list[tuple[str, bytes]]) -> list[tuple[st
             raise ClosureError("exact source RPM has too many legal notice bytes")
         unique.append((member, value))
     return unique
+
+
+def standard_license_records(owner: tuple[str, str, str, str]) -> list[tuple[str, bytes, str, str]]:
+    if owner[3] != "LGPL-3.0-or-later":
+        return []
+    records = []
+    for name, url, expected in STANDARD_LICENSES:
+        with urllib.request.urlopen(url, timeout=20) as response:
+            value = response.read(MAX_LICENSE_BYTES + 1)
+        if len(value) > MAX_LICENSE_BYTES or hashlib.sha256(value).hexdigest() != expected:
+            raise ClosureError("canonical GNU license text verification failed")
+        records.append((name, value, url, expected))
+    return records
 
 
 def cpio_member_bytes(archive: Path, member: str) -> bytes:
@@ -367,7 +388,7 @@ def source_rpm_license_files(owner: tuple[str, str, str, str], destination: Path
                     value = handle.read(MAX_LICENSE_BYTES + 1)
                     if safe is not None and source_member_has_notice_text(safe, value):
                         candidates.append((safe, value))
-                    elif not candidates and (notice := source_header_notice(value)) is not None:
+                    elif not candidates and (notice := source_header_notice(value, allow_lgpl_reference=_license == "LGPL-3.0-or-later")) is not None:
                         header_candidates.append((source_path, notice))
         except (tarfile.TarError, OSError):
             continue
@@ -471,13 +492,13 @@ def copy_closure(runtime: Path, initial: Iterable[Path]) -> dict:
         for package in sorted(packages.values(), key=lambda item: item["name"]):
             owner = (package["name"], package["evr"], package["source_rpm"], package["license"])
             installed = rpm_installed_license_files(owner)
-            origin = "installed-rpm"
             source_records: list[tuple[tuple[str, str, str, str], str, bytes, str, str, str, str, str]] = []
             if not installed:
-                origin = "source-rpm"
                 source_records = source_rpm_license_files(owner, source_cache)
-            records = [(record_owner, source.name, source.read_bytes(), None, None, None, None, None) for record_owner, source in installed] if installed else source_records
-            for index, (license_owner, source_name, source_bytes, archive_name, archive_hash, archive_supplier, archive_evr, source_member) in enumerate(records):
+            records = [("installed-rpm", record_owner, source.name, source.read_bytes(), None, None, None, None, None, None, None) for record_owner, source in installed] if installed else [("source-rpm", *record, None, None) for record in source_records]
+            if not installed:
+                records.extend(("standard-license", owner, source_name, source_bytes, None, None, None, None, None, standard_url, standard_hash) for source_name, source_bytes, standard_url, standard_hash in standard_license_records(owner))
+            for index, (origin, license_owner, source_name, source_bytes, archive_name, archive_hash, archive_supplier, archive_evr, source_member, standard_url, standard_hash) in enumerate(records):
                 target = license_destination / f"{package['name']}-{index}-{source_name}"
                 if target.exists() or target.is_symlink():
                     raise ClosureError("private RPM license destination collides")
@@ -489,6 +510,8 @@ def copy_closure(runtime: Path, initial: Iterable[Path]) -> dict:
                 }
                 if origin == "source-rpm":
                     record.update({"license_archive": archive_name, "license_archive_sha256": archive_hash, "license_archive_supplier": archive_supplier, "license_archive_evr": archive_evr, "license_source_member": source_member})
+                if origin == "standard-license":
+                    record.update({"standard_license_url": standard_url, "standard_license_sha256": standard_hash})
                 licenses.append(record)
     manifest = {"schema": 1, "libraries": sorted(libraries, key=lambda item: item["path"]),
                 "packages": sorted(packages.values(), key=lambda item: item["name"]), "licenses": licenses}
