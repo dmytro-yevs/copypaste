@@ -197,6 +197,7 @@ class FlutterDesktopWindowHost
       }
       icon
         ..icon = image
+        ..setTitle('CopyPaste')
         ..setTooltip('CopyPaste')
         ..setContextMenu(menu)
         ..setContextMenuTrigger(
