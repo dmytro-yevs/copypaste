@@ -286,6 +286,7 @@ def source_rpm_license_files(owner: tuple[str, str, str, str], destination: Path
         raise ClosureError(f"cannot inspect exact source RPM for {name}")
     members = [line.removeprefix("./") for line in members_process.stdout.decode(errors="replace").splitlines()]
     candidates: list[tuple[str, bytes]] = []
+    hints = [member for member in members if re.search(r"(?:LICENSE|LICENCE|COPYING|NOTICE)", member, re.IGNORECASE)][:16]
     for member in members:
         safe = safe_source_member(member)
         if safe is not None:
@@ -311,7 +312,7 @@ def source_rpm_license_files(owner: tuple[str, str, str, str], destination: Path
             continue
     candidates = [(member, value) for member, value in candidates if len(value) <= MAX_LICENSE_BYTES]
     if not candidates or len(candidates) > MAX_LICENSE_MEMBERS:
-        raise ClosureError(f"exact source RPM has no safe license or notice bytes for {name}")
+        raise ClosureError(f"exact source RPM has no safe license or notice bytes for {name}: candidates={','.join(hints) or 'none'}")
     archive_hash = sha256(archive)
     return [(owner, Path(member).name, value, source_rpm, archive_hash, source_name, source_evr) for member, value in sorted(candidates)]
 
