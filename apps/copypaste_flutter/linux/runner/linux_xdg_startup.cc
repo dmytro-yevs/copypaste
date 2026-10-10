@@ -244,8 +244,13 @@ bool is_managed_desktop_entry(const gchar* contents, gsize length,
       exec_value.substr(0, exec_value.size() - strlen(kUriFieldCode));
   std::string executable;
   std::string try_executable;
-  return decode_desktop_exec_argument(quoted_exec, &executable) &&
-      is_plain_executable_path(try_exec, &try_executable) &&
+  if (!decode_desktop_exec_argument(quoted_exec, &executable)) return false;
+  if (is_plain_executable_path(try_exec, &try_executable)) {
+    return executable == try_executable;
+  }
+  // Entries emitted before GKeyFile serialization used Desktop Entry quoting
+  // for TryExec as well. Keep only that exact legacy shape migratable.
+  return decode_desktop_exec_argument(try_exec, &try_executable) &&
       executable == try_executable;
 }
 
