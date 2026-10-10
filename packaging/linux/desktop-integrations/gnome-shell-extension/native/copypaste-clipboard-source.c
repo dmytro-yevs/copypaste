@@ -1,7 +1,43 @@
 /* SPDX-License-Identifier: MIT */
 #include "copypaste-clipboard-source.h"
 
+#include <gmodule.h>
+#include <meta/meta-selection.h>
 #include <meta/meta-selection-source.h>
+
+typedef gboolean (*WriterIdentityFunc) (MetaSelectionSource *source,
+                                        guint32 *pid,
+                                        guint32 *uid,
+                                        gchar **status,
+                                        gchar **app_id);
+typedef MetaSelectionSource *(*CurrentOwnerFunc) (MetaSelection *selection,
+                                                  MetaSelectionType selection_type);
+
+static GModule *mutter_module;
+static WriterIdentityFunc writer_identity;
+static CurrentOwnerFunc current_owner;
+
+static gboolean resolve_mutter_api (GError **error) {
+  gpointer symbol = NULL;
+  if (!mutter_module)
+    mutter_module = g_module_open (NULL, G_MODULE_BIND_LAZY);
+  if (!mutter_module || !g_module_symbol (mutter_module,
+                                           "meta_selection_source_get_writer_identity",
+                                           &symbol)) {
+    g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+                         "Mutter writer identity bridge is unavailable");
+    return FALSE;
+  }
+  writer_identity = (WriterIdentityFunc) symbol;
+  symbol = NULL;
+  if (!g_module_symbol (mutter_module, "meta_selection_get_current_owner", &symbol)) {
+    g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+                         "Mutter current-owner bridge is unavailable");
+    return FALSE;
+  }
+  current_owner = (CurrentOwnerFunc) symbol;
+  return TRUE;
+}
 
 #define MAX_BYTES (4u * 1024u * 1024u)
 #define MAX_TOTAL_BYTES (32u * 1024u * 1024u)
@@ -119,4 +155,41 @@ GObject *copypaste_clipboard_source_new (GVariant *payloads, GError **error) {
     return NULL;
   }
   return G_OBJECT (self);
+}
+
+GVariant *copypaste_clipboard_source_writer_identity (GObject *source,
+                                                       GError **error) {
+  guint32 uid = 0;
+  guint32 pid = 0;
+  gchar *status = NULL;
+  gchar *app_id = NULL;
+  GType selection_source_type = g_type_from_name ("MetaSelectionSource");
+  if (!source || !selection_source_type ||
+      !g_type_is_a (G_OBJECT_TYPE (source), selection_source_type)) {
+    g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+                         "Not a Mutter selection source");
+    return NULL;
+  }
+  if (!resolve_mutter_api (error) ||
+      !writer_identity ((MetaSelectionSource *) source, &pid, &uid, &status, &app_id) || !status) {
+    g_free (status);
+    g_free (app_id);
+    return NULL;
+  }
+  GVariant *identity = g_variant_ref_sink (g_variant_new ("(suus)", status, pid, uid,
+                                                           app_id ? app_id : ""));
+  g_free (status);
+  g_free (app_id);
+  return identity;
+}
+
+GObject *copypaste_clipboard_selection_owner (GObject *selection, GError **error) {
+  if (!selection) {
+    g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+                         "Missing Mutter selection");
+    return NULL;
+  }
+  if (!resolve_mutter_api (error))
+    return NULL;
+  return G_OBJECT (current_owner ((MetaSelection *) selection, META_SELECTION_CLIPBOARD));
 }

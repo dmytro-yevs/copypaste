@@ -1,0 +1,159 @@
+--- a/src/meta/meta-selection-source.h	2026-10-10 12:46:56
++++ b/src/meta/meta-selection-source.h	2026-10-10 12:46:44
+@@ -78,3 +78,10 @@
+ 
+ META_EXPORT
+ gboolean meta_selection_source_is_active         (MetaSelectionSource  *source);
++
++META_EXPORT
++gboolean meta_selection_source_get_writer_identity (MetaSelectionSource *source,
++                                                     guint32             *pid,
++                                                     guint32             *uid,
++                                                     gchar              **status,
++                                                     gchar              **app_id);
+--- a/src/meta/meta-selection.h	2026-10-10 12:46:57
++++ b/src/meta/meta-selection.h	2026-10-10 12:46:44
+@@ -47,6 +47,10 @@
+                                               MetaSelectionSource  *owner);
+ 
+ META_EXPORT
++MetaSelectionSource * meta_selection_get_current_owner (MetaSelection    *selection,
++                                                        MetaSelectionType  selection_type);
++
++META_EXPORT
+ GList *  meta_selection_get_mimetypes        (MetaSelection        *selection,
+                                               MetaSelectionType     selection_type);
+ 
+--- a/src/core/meta-selection.c	2026-10-10 12:46:57
++++ b/src/core/meta-selection.c	2026-10-10 12:46:44
+@@ -482,6 +482,7 @@
+   return g_task_propagate_boolean (G_TASK (result), error);
+ }
+ 
++META_EXPORT
+ MetaSelectionSource *
+ meta_selection_get_current_owner (MetaSelection     *selection,
+                                   MetaSelectionType  selection_type)
+--- a/src/wayland/meta-selection-source-wayland.c	2026-10-10 12:46:58
++++ b/src/wayland/meta-selection-source-wayland.c	2026-10-10 12:49:52
+@@ -21,8 +21,16 @@
+ 
+ #include <glib-unix.h>
+ #include <gio/gunixinputstream.h>
++#include <string.h>
+ 
++#include "core/meta-context-private.h"
++#include "core/window-private.h"
++#include "meta/display.h"
++#include "meta/window.h"
+ #include "wayland/meta-selection-source-wayland-private.h"
++#include "wayland/meta-wayland-private.h"
++#include "wayland/meta-wayland-surface-private.h"
++#include "wayland/meta-wayland-data-source.h"
+ 
+ struct _MetaSelectionSourceWayland
+ {
+@@ -166,3 +174,103 @@
+ 
+   return META_SELECTION_SOURCE (source_wayland);
+ }
++
++gboolean
++meta_selection_source_get_writer_identity (MetaSelectionSource *source,
++                                            guint32             *pid,
++                                            guint32             *uid,
++                                            gchar              **status,
++                                            gchar              **app_id)
++{
++  MetaSelectionSourceWayland *source_wayland;
++  struct wl_resource *resource;
++  struct wl_client *writer_client;
++  MetaDisplay *display;
++  GList *windows;
++  GList *l;
++  pid_t writer_pid;
++  uid_t writer_uid;
++  const char *candidate = NULL;
++  gboolean ambiguous = FALSE;
++  gboolean found_client_window = FALSE;
++  gboolean found_missing_app_id = FALSE;
++
++  g_return_val_if_fail (pid != NULL, FALSE);
++  g_return_val_if_fail (uid != NULL, FALSE);
++  g_return_val_if_fail (status != NULL, FALSE);
++  g_return_val_if_fail (app_id != NULL, FALSE);
++  *pid = 0;
++  *uid = 0;
++  *status = g_strdup ("no-client");
++  *app_id = NULL;
++
++  if (!META_IS_SELECTION_SOURCE_WAYLAND (source))
++    return TRUE;
++
++  source_wayland = META_SELECTION_SOURCE_WAYLAND (source);
++  resource = meta_wayland_data_source_get_resource (source_wayland->data_source);
++  if (!resource)
++    return TRUE;
++
++  writer_client = wl_resource_get_client (resource);
++  if (!writer_client)
++    return TRUE;
++  wl_client_get_credentials (writer_client, &writer_pid, &writer_uid, NULL);
++  if (writer_pid <= 0)
++    return TRUE;
++  *pid = (guint32) writer_pid;
++  *uid = (guint32) writer_uid;
++  g_clear_pointer (status, g_free);
++  *status = g_strdup ("no-app-id");
++
++  display = meta_context_get_display (meta_wayland_compositor_get_context (
++                                        meta_wayland_data_source_get_compositor (
++                                          source_wayland->data_source)));
++  if (!display)
++    return TRUE;
++
++  windows = meta_display_list_all_windows (display);
++  for (l = windows; l; l = l->next)
++    {
++      MetaWindow *window = l->data;
++      MetaWaylandSurface *surface;
++      const char *window_app_id;
++
++      surface = meta_window_get_wayland_surface (window);
++      if (!surface || meta_wayland_surface_get_resource (surface) == NULL ||
++          wl_resource_get_client (meta_wayland_surface_get_resource (surface)) != writer_client)
++        continue;
++      found_client_window = TRUE;
++      window_app_id = meta_window_get_wm_class (window);
++      if (!window_app_id || !*window_app_id)
++        {
++          found_missing_app_id = TRUE;
++          continue;
++        }
++      if (candidate && strcmp (candidate, window_app_id) != 0)
++        {
++          ambiguous = TRUE;
++          break;
++        }
++      candidate = window_app_id;
++    }
++  g_list_free (windows);
++
++  if (ambiguous)
++    {
++      g_clear_pointer (status, g_free);
++      *status = g_strdup ("ambiguous");
++    }
++  else if (found_client_window && found_missing_app_id)
++    {
++      g_clear_pointer (status, g_free);
++      *status = g_strdup ("no-app-id");
++    }
++  else if (found_client_window && candidate)
++    {
++      g_clear_pointer (status, g_free);
++      *status = g_strdup ("verified");
++      *app_id = g_strdup (candidate);
++    }
++  return TRUE;
++}
