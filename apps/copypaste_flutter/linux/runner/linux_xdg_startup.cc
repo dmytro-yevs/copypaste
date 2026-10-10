@@ -358,7 +358,7 @@ bool LinuxXdgStartup::write_owned_entry(const std::string& path, bool autostart,
   return atomic_write(path, DesktopEntryForExecutable(executable_, autostart), error);
 }
 
-LinuxXdgStartupStatus LinuxXdgStartup::Status() const {
+LinuxXdgStartupStatus LinuxXdgStartup::GetStatus() const {
   LinuxXdgStartupStatus status;
   status.start_at_login =
       owns_entry_for_current_executable(autostart_path(), true);
