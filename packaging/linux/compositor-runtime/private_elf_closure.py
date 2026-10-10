@@ -298,7 +298,8 @@ def standard_license_records(owner: tuple[str, str, str, str]) -> list[tuple[str
     records = []
     for name, url, expected in STANDARD_LICENSES:
         asset = Path(__file__).with_name("licenses") / name
-        value = base64.b64decode(asset.read_bytes(), validate=True)
+        encoded = b"".join(asset.read_bytes().split())
+        value = base64.b64decode(encoded, validate=True)
         if len(value) > MAX_LICENSE_BYTES or hashlib.sha256(value).hexdigest() != expected:
             raise ClosureError("canonical GNU license text verification failed")
         records.append((name, value, url, expected))
