@@ -96,7 +96,7 @@ PY
     native="$XDG_DATA_HOME/gnome-shell/extensions/$extension_id/native"
     [[ -d "$native/lib" && -d "$native/typelib" ]] || { echo "ERROR: packaged GNOME companion native runtime is incomplete" >&2; exit 1; }
     export GI_TYPELIB_PATH="$native/typelib${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"
-    export LD_LIBRARY_PATH="$native/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    compositor_library_path="$native/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     if [[ "$SESSION" == wayland ]]; then
       geometry_extension="$SCRIPT_DIR/qualification/gnome-window-geometry-extension"
       geometry_extension_id="copypaste-qualification-window-geometry@copypaste.app"
@@ -133,13 +133,13 @@ if [[ "$SESSION" == x11 ]]; then
   display_pid=$!
   export DISPLAY=":$DISPLAY_NUMBER"
   wait_for 'xdpyinfo -display "$DISPLAY" >/dev/null 2>&1'
-  gnome-shell --x11 --replace >"$RUNTIME/desktop.log" 2>&1 &
+  LD_LIBRARY_PATH="$compositor_library_path" gnome-shell --x11 --replace >"$RUNTIME/desktop.log" 2>&1 &
   desktop_pid=$!
   wait_for 'kill -0 "$desktop_pid" 2>/dev/null'
 else
   export COPYPASTE_COMPOSITOR_EXECUTION=private-wayland
-  export LD_LIBRARY_PATH="$runtime_root/lib:$runtime_root/lib64:$runtime_root/usr/lib:$runtime_root/usr/lib/x86_64-linux-gnu:$runtime_root/usr/lib/aarch64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-  "$COMPOSITOR_QUALIFICATION_ENTRYPOINT" >"$RUNTIME/desktop.log" 2>&1 &
+  compositor_library_path="$runtime_root/lib:$runtime_root/lib64:$runtime_root/usr/lib:$runtime_root/usr/lib/x86_64-linux-gnu:$runtime_root/usr/lib/x86_64-linux-gnu/gnome-shell:$runtime_root/usr/lib/aarch64-linux-gnu:$runtime_root/usr/lib/aarch64-linux-gnu/gnome-shell:$compositor_library_path"
+  LD_LIBRARY_PATH="$compositor_library_path" "$COMPOSITOR_QUALIFICATION_ENTRYPOINT" >"$RUNTIME/desktop.log" 2>&1 &
   desktop_pid=$!
   wait_for 'kill -0 "$desktop_pid" 2>/dev/null'
   export COPYPASTE_QUALIFICATION_GEOMETRY_OWNER_PID="$desktop_pid"
@@ -151,6 +151,7 @@ else
     --output "$COPYPASTE_COMPOSITOR_SESSION_RECORD"
   wait_for 'gdbus call --session --dest app.copypaste.QualificationGeometry --object-path /app/copypaste/QualificationGeometry --method app.copypaste.QualificationGeometry.Version >/dev/null 2>&1'
 fi
+wait_for 'gdbus call --session --dest org.gnome.Shell.Extensions --object-path /org/gnome/Shell/Extensions --method org.gnome.Shell.Extensions.ListExtensions >/dev/null 2>&1'
 
 session_phase=publish_session_environment
 dbus-update-activation-environment \
