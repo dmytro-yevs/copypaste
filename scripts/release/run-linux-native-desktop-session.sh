@@ -38,7 +38,17 @@ COMPOSITOR_QUALIFICATION_ENTRYPOINT="$runtime_root/$qualification_entrypoint"
 
 RUNTIME="$(mktemp -d)"
 DISPLAY_NUMBER=99
+session_phase=prepare_session
 cleanup() {
+  local status=$?
+  if [[ "$status" != 0 ]]; then
+    printf 'ERROR: GNOME session phase %s exited %s\n' "$session_phase" "$status" >&2
+    for startup_log in "$RUNTIME/desktop.log" "$RUNTIME/xserver.log"; do
+      [[ -f "$startup_log" && ! -L "$startup_log" ]] || continue
+      printf 'Startup log (last 1 MiB): %s\n' "$startup_log" >&2
+      tail -c 1048576 -- "$startup_log" >&2
+    done
+  fi
   [[ -n "${geometry_broker_pid:-}" ]] && kill "$geometry_broker_pid" 2>/dev/null || true
   [[ -n "${shell_pid:-}" ]] && kill "$shell_pid" 2>/dev/null || true
   [[ -n "${desktop_pid:-}" ]] && kill "$desktop_pid" 2>/dev/null || true
@@ -107,6 +117,7 @@ esac
 
 wait_for() {
   local predicate="$1"
+  session_phase="readiness: $predicate"
   for _ in $(seq 1 100); do
     eval "$predicate" && return 0
     sleep 0.1
@@ -141,23 +152,30 @@ else
   wait_for 'gdbus call --session --dest app.copypaste.QualificationGeometry --object-path /app/copypaste/QualificationGeometry --method app.copypaste.QualificationGeometry.Version >/dev/null 2>&1'
 fi
 
+session_phase=publish_session_environment
 dbus-update-activation-environment \
   DBUS_SESSION_BUS_ADDRESS DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_DATA_HOME \
   XDG_CONFIG_HOME XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE
+session_phase=initialize_accessibility
 gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.a11y.Bus.GetAddress >/dev/null
 busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true
 [[ "$(busctl --user get-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled)" == "b true" ]]
 keyring_password="$(openssl rand -hex 24)"
+session_phase=keyring_login
 printf '%s\n' "$keyring_password" | gnome-keyring-daemon --login >/dev/null
+session_phase=keyring_start
 eval "$(gnome-keyring-daemon --start --components=secrets)"
+session_phase=keyring_unlock
 printf '%s' "$keyring_password" | secret-tool store --label='CopyPaste qualification keyring' copypaste-qualification default >/dev/null
 secret-tool lookup copypaste-qualification default >/dev/null
 unset keyring_password
 
 if [[ "$DESKTOP" == GNOME ]]; then
+  session_phase=enable_appindicator
   appindicator="$(gnome-extensions list 2>/dev/null | awk '/appindicator|ubuntu-appindicators/ {print; exit}')"
   [[ -n "$appindicator" ]] || { echo "ERROR: GNOME AppIndicator extension is unavailable" >&2; exit 1; }
   gnome-extensions enable "$appindicator"
 fi
 
+session_phase=run_product_scenarios
 "$@"
