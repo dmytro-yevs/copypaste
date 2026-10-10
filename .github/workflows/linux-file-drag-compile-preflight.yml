@@ -1,0 +1,51 @@
+name: Linux file-drag compile preflight
+
+on:
+  push:
+    branches:
+      - codex/linux-file-drag-compile-preflight
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    name: ${{ matrix.architecture }} GTK source compile
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x86_64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - architecture: aarch64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Compile the GTK source on Ubuntu 24.04
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends build-essential pkg-config libgtk-3-dev
+          cc -std=c11 -O2 -Wall -Wextra -Werror \
+            scripts/release/linux-gtk-file-drop-source.c \
+            -o /tmp/copypaste-gtk-file-drop-source \
+            $(pkg-config --cflags --libs gtk+-3.0)
+      - name: Compile the GTK source in pinned Fedora 40
+        run: |
+          set -euo pipefail
+          docker build --platform "${{ matrix.platform }}" \
+            --file packaging/linux/Dockerfile.fedora-native-qualification \
+            --tag "copypaste-file-drag-preflight:${{ matrix.architecture }}" .
+          docker run --rm --platform "${{ matrix.platform }}" \
+            --volume "$GITHUB_WORKSPACE:/workspace:ro" \
+            "copypaste-file-drag-preflight:${{ matrix.architecture }}" \
+            bash -ceu '
+              cc -std=c11 -O2 -Wall -Wextra -Werror \
+                /workspace/scripts/release/linux-gtk-file-drop-source.c \
+                -o /tmp/copypaste-gtk-file-drop-source \
+                $(pkg-config --cflags --libs gtk+-3.0)
+            '
