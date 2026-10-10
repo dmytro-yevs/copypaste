@@ -29,7 +29,9 @@ run_architecture() {
     -v "$ROOT:/source:ro" "$IMAGE" bash -ceu '
       apt-get update
       apt-get install --yes --no-install-recommends \
-        binutils build-essential ca-certificates cpio curl dpkg-dev file rpm xz-utils
+        binutils build-essential ca-certificates cpio curl dpkg-dev file rpm xz-utils \
+        gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+        libgstreamer1.0-dev patchelf pkg-config
       cp -a /source /work
       cd /work
       mkdir -p dist/linux-"$ARCHITECTURE"/bundle
@@ -38,6 +40,9 @@ run_architecture() {
       install -m 755 /tmp/copypaste-fake dist/linux-"$ARCHITECTURE"/bundle/copypaste
       install -m 755 /tmp/copypaste-fake dist/linux-"$ARCHITECTURE"/bundle/copypaste-daemon
       install -m 755 /tmp/copypaste-fake dist/linux-"$ARCHITECTURE"/bundle/copypaste-cli
+      printf "#include <gst/gst.h>\nvoid camera_fixture(void) { gst_init(0, 0); }\n" > /tmp/copypaste-camera-fixture.c
+      mkdir -p dist/linux-"$ARCHITECTURE"/bundle/lib
+      cc -shared -fPIC -o dist/linux-"$ARCHITECTURE"/bundle/lib/libcamera_desktop_plugin.so /tmp/copypaste-camera-fixture.c $(pkg-config --cflags --libs gstreamer-1.0)
       mkdir -p packaging/linux/desktop-integrations/gnome-shell-extension
       mkdir -p packaging/linux/desktop-integrations/gnome-shell-extension/native
       mkdir -p packaging/linux/desktop-integrations/kde-kwin-script/contents/code
@@ -80,6 +85,28 @@ run_architecture() {
       test -s /tmp/appimage/squashfs-root/usr/share/copypaste/desktop-integrations/gnome-shell-extension/native/lib/libcopypaste_clipboard_source.so
       test -s /tmp/appimage/squashfs-root/usr/share/copypaste/desktop-integrations/gnome-shell-extension/native/typelib/CopyPasteClipboard-1.0.typelib
       file --brief /tmp/appimage/squashfs-root/usr/share/copypaste/desktop-integrations/gnome-shell-extension/native/lib/libcopypaste_clipboard_source.so | grep -q "^ELF "
+      test -x /tmp/appimage/squashfs-root/usr/libexec/gstreamer-1.0/gst-plugin-scanner
+      test -f /tmp/appimage/squashfs-root/usr/share/copypaste/gstreamer-camera-runtime.json
+      for element in videoconvert videoscale videorate appsink v4l2src jpegdec; do
+        grep -F "\"element\": \"$element\"" /tmp/appimage/squashfs-root/usr/share/copypaste/gstreamer-camera-runtime.json
+      done
+      grep -F "GST_PLUGIN_SYSTEM_PATH" /tmp/appimage/squashfs-root/AppRun
+      grep -F "LD_LIBRARY_PATH=\"\$HERE/usr/lib/gstreamer-runtime:\$HERE/usr/lib/copypaste/lib\"" /tmp/appimage/squashfs-root/AppRun
+      app_root=/tmp/appimage/squashfs-root
+      camera_plugin="$app_root/usr/lib/copypaste/lib/libcamera_desktop_plugin.so"
+      env -i PATH="$PATH" LD_LIBRARY_PATH="$app_root/usr/lib/gstreamer-runtime:$app_root/usr/lib/copypaste/lib" \
+        LD_PRELOAD= LD_AUDIT= ldd "$camera_plugin" | grep -F "$app_root/usr/lib/gstreamer-runtime/libgstreamer-1.0.so"
+      for element in videoconvert videoscale videorate appsink v4l2src jpegdec; do
+        env -i HOME=/tmp PATH="$PATH" XDG_CACHE_HOME=/tmp \
+          LD_LIBRARY_PATH="$app_root/usr/lib/gstreamer-runtime:$app_root/usr/lib/copypaste/lib" \
+          GST_REGISTRY_1_0=/tmp/copypaste-gst-registry.bin \
+          GST_PLUGIN_PATH="$app_root/usr/lib/gstreamer-1.0" \
+          GST_PLUGIN_PATH_1_0="$app_root/usr/lib/gstreamer-1.0" \
+          GST_PLUGIN_SYSTEM_PATH="$app_root/usr/lib/gstreamer-1.0" \
+          GST_PLUGIN_SYSTEM_PATH_1_0="$app_root/usr/lib/gstreamer-1.0" \
+          GST_PLUGIN_SCANNER="$app_root/usr/libexec/gstreamer-1.0/gst-plugin-scanner" \
+          gst-inspect-1.0 "$element" | grep -F "Filename                 $app_root/usr/lib/gstreamer-1.0/"
+      done
       dpkg-deb --ctrl-tarfile "dist/CopyPaste-v$VERSION-linux-$ARCHITECTURE.deb" | tar -tv | grep -E " root/root .*control$"
     '
 }
