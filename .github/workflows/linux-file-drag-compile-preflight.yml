@@ -90,7 +90,14 @@ jobs:
           cat >"$sink_file" <<'EOF'
           #include <gtk/gtk.h>
 
-          struct State { const char* ready; const char* result; };
+          struct State { const char* ready; const char* result; const char* activity; };
+
+          static void activity(const struct State* state, const char* event, GdkDragContext* context) {
+            gchar* value = g_strdup_printf("{\"event\":\"%s\",\"selected_action\":%u}\n", event,
+                                          context == NULL ? 0 : gdk_drag_context_get_selected_action(context));
+            g_file_set_contents(state->activity, value, -1, NULL);
+            g_free(value);
+          }
 
           static void receive(GtkWidget* widget, GdkDragContext* context, gint x, gint y,
                               GtkSelectionData* selection, guint info, guint time, gpointer data) {
@@ -100,7 +107,25 @@ jobs:
             gboolean accepted = uris != NULL && uris[0] != NULL && g_str_has_prefix(uris[0], "file://");
             if (accepted) g_file_set_contents(state->result, "received\n", -1, NULL);
             g_strfreev(uris);
+            activity(state, "drag_data_received", context);
             gtk_drag_finish(context, accepted, FALSE, time);
+          }
+
+          static gboolean motion(GtkWidget* widget, GdkDragContext* context, gint x, gint y, guint time, gpointer data) {
+            (void)widget; (void)x; (void)y; (void)time;
+            activity(data, "drag_motion", context);
+            return FALSE;
+          }
+
+          static gboolean drop(GtkWidget* widget, GdkDragContext* context, gint x, gint y, guint time, gpointer data) {
+            (void)widget; (void)x; (void)y; (void)time;
+            activity(data, "drag_drop", context);
+            return FALSE;
+          }
+
+          static void leave(GtkWidget* widget, GdkDragContext* context, guint time, gpointer data) {
+            (void)widget; (void)time;
+            activity(data, "drag_leave", context);
           }
 
           static void activate(GtkApplication* app, gpointer data) {
@@ -110,14 +135,17 @@ jobs:
             gtk_window_set_default_size(GTK_WINDOW(window), 320, 160);
             GtkTargetEntry target = {(gchar*)"text/uri-list", 0, 0};
             gtk_drag_dest_set(window, GTK_DEST_DEFAULT_ALL, &target, 1, GDK_ACTION_COPY);
+            g_signal_connect(window, "drag-motion", G_CALLBACK(motion), state);
+            g_signal_connect(window, "drag-drop", G_CALLBACK(drop), state);
+            g_signal_connect(window, "drag-leave", G_CALLBACK(leave), state);
             g_signal_connect(window, "drag-data-received", G_CALLBACK(receive), state);
             gtk_widget_show_all(window);
             g_file_set_contents(state->ready, "ready\n", -1, NULL);
           }
 
           int main(int argc, char** argv) {
-            if (argc != 5 || g_strcmp0(argv[1], "--ready-file") != 0 || g_strcmp0(argv[3], "--result-file") != 0) return 2;
-            struct State state = {argv[2], argv[4]};
+            if (argc != 7 || g_strcmp0(argv[1], "--ready-file") != 0 || g_strcmp0(argv[3], "--result-file") != 0 || g_strcmp0(argv[5], "--activity-log") != 0) return 2;
+            struct State state = {argv[2], argv[4], argv[6]};
             GtkApplication* app = gtk_application_new("org.copypaste.QualificationFileDropSink", G_APPLICATION_NON_UNIQUE);
             g_signal_connect(app, "activate", G_CALLBACK(activate), &state);
             int result = g_application_run(G_APPLICATION(app), 1, argv);
@@ -153,7 +181,7 @@ jobs:
             sleep 0.05
           done
           kill -0 "$wm_pid"
-          /tmp/copypaste-gtk-file-drop-sink --ready-file "$work/sink-ready" --result-file "$work/result" >/dev/null 2>&1 &
+          /tmp/copypaste-gtk-file-drop-sink --ready-file "$work/sink-ready" --result-file "$work/result" --activity-log "$work/sink-activity" >/dev/null 2>&1 &
           sink_pid=$!
           touch "$work/fixture"
           printf 'file://%s\r\n' "$work/fixture" >"$work/uris"
@@ -179,21 +207,32 @@ jobs:
           xdotool windowfocus "$source_window"
           [[ "$(xdotool getwindowfocus)" == "$source_window" ]]
           xdotool mousemove --sync "$source_x" "$source_y"
-          xdotool mousedown 1
           : >"$work/start"
           for _ in $(seq 1 100); do
-            grep -Fqx '{"event":"drag_started"}' "$work/activity" 2>/dev/null && break
+            grep -Fq '"event":"drag_armed"' "$work/activity" 2>/dev/null && break
             sleep 0.05
           done
-          grep -Fqx '{"event":"drag_started"}' "$work/activity"
+          grep -Fq '"event":"drag_armed"' "$work/activity"
+          xdotool mousedown 1
+          for _ in $(seq 1 100); do
+            grep -Fq '"event":"drag_begin"' "$work/activity" 2>/dev/null && break
+            sleep 0.05
+          done
+          grep -Fq '"event":"drag_begin"' "$work/activity"
           xdotool mousemove --sync "$sink_x" "$sink_y"
-          sleep 0.2
+          for _ in $(seq 1 100); do
+            grep -Fq '"event":"drag_motion"' "$work/sink-activity" 2>/dev/null && grep -Fq '"event":"drag_status_copy"' "$work/activity" 2>/dev/null && break
+            sleep 0.05
+          done
+          grep -Fq '"event":"drag_motion"' "$work/sink-activity"
+          grep -Fq '"event":"drag_status_copy"' "$work/activity"
           xdotool mouseup 1
           for _ in $(seq 1 100); do
             [[ "$(cat "$work/result" 2>/dev/null || true)" == "received" ]] && break
             sleep 0.05
           done
           cat "$work/activity"
+          cat "$work/sink-activity"
           [[ "$(cat "$work/result")" == "received" ]]
       - name: Compile the GTK source in pinned Fedora 40
         run: |
