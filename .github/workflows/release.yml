@@ -502,6 +502,9 @@ jobs:
       version: ${{ needs.preflight.outputs.version }}
       source_run_id: ${{ github.run_id }}
       commit: ${{ needs.preflight.outputs.release_commit }}
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
   compositor-runtime-external:
     name: Verify staged compositor runtime companions
