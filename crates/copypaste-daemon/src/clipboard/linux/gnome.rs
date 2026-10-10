@@ -1063,13 +1063,15 @@ mod tests {
         );
         drop(state);
 
-        fixture
-            .state
-            .lock()
-            .expect("fixture bridge state")
-            .stall_reads = true;
+        let foreign_sequence = {
+            let mut state = fixture.state.lock().expect("fixture bridge state");
+            state.stall_reads = true;
+            // Write has already consumed its own generation. A foreign owner
+            // must advance it rather than replaying that write's signal.
+            state.sequence.checked_add(1).expect("fixture generation")
+        };
         fixture.update_owner(
-            10,
+            foreign_sequence,
             vec![
                 KDE_PASSWORD_MANAGER_HINT.into(),
                 "text/plain;charset=utf-8".into(),
