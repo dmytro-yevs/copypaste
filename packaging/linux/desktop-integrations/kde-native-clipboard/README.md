@@ -19,16 +19,18 @@ The bridge registers on KWin's existing session service (`org.kde.KWin`) at
 | Method or signal | Signature | Rule |
 | --- | --- | --- |
 | `Version` | `() -> u` | Always returns `2`. |
-| `Snapshot` | `() -> (t as (s u u s))` | Atomically returns generation, MIME names, and writer identity. |
+| `Snapshot` | `() -> t, as, (s u u s)` | Returns exactly three top-level out arguments: generation, MIME names, and writer identity. |
 | `Read` | `(t s u) -> ay` | Reads only the supplied generation and MIME name. A replacement before completion is `StaleSelection`. |
 | `Write` | `(a{say}) -> t` | Creates a bounded KWin-owned selection source. |
 | `OwnerChanged` | `(t as (s u u s))` | Emitted after every KWin seat-selection replacement. |
 
 The identity tuple is `(status, pid, uid, app_id)`. `status` is one of
 `verified`, `no-client`, `no-app-id`, or `ambiguous`; `app_id` is nonempty only
-for `verified`. `verified` requires exactly one nonempty `desktopFileName` among
+for `verified`. `verified` requires exactly one nonempty raw XDG `app_id` among
 the current Wayland toplevel windows whose `surface()->client()` is the exact
-client that owns the clipboard data source. It never uses the focused window,
+client that owns the clipboard data source. The versioned KWin patch exposes a
+typed `rawAppId()` accessor backed by the XDG toplevel protocol value before
+KWin rules can rewrite `desktopFileName`. It never uses the focused window,
 title, a PID lookup, executable inference, or a timing relationship. The
 compositor reads Wayland credentials from that same client before any payload
 read. The daemon must fail closed unless `status == "verified"`.
@@ -37,8 +39,11 @@ Only the current unique owner of `app.copypaste.Daemon` with the KWin session
 UID can invoke the bridge. `Read` is bounded to 4 MiB and two seconds; `Write`
 allows at most 64 MIME types, 4 MiB each, and 32 MiB in total. The bridge
 returns `AccessDenied`, `StaleSelection`, `UnsupportedMime`, `TooLarge`, or
-`Unavailable` as D-Bus errors. It allows one pending read, cancels it when the
-selection or daemon name owner changes, and does not log payloads. A KWin-owned
+`Unavailable` as D-Bus errors. Authorization gives each D-Bus name and UID
+lookup a 250 ms bound. It allows one pending read and eight pending writes per
+KWin-owned selection, cancels all pending transfers when the selection or
+daemon name owner changes, and rejects a queued read reply when its captured
+daemon-owner epoch no longer matches. It does not log payloads. A KWin-owned
 write has `no-client` identity, so the daemon's fail-closed exclusion also
 prevents it from being attributed to another application or recaptured as an
 external producer.
@@ -76,3 +81,16 @@ one exact-client app ID, then prove `StaleSelection` when the producer replaces
 the selection during `Read`. It must also prove `no-app-id` and `ambiguous`
 states exclude capture. These commands belong in the hosted pinned-KWin job;
 they cannot be replaced by a package fixture or an API probe.
+
+The executable build check is `run-fedora-build.sh`. Run
+`./run-fedora-build.sh linux/amd64 all` and
+`./run-fedora-build.sh linux/arm64 all`; each call builds the pinned Fedora 40
+builder, checks out both immutable sources, applies the patch, configures CMake,
+and completes the Ninja build without installing a compositor on the host.
+`DISTRIBUTION.md` describes the required opt-in, signed side-by-side runtime and
+session route for making the bridge usable.
+
+`test-wire.sh` is a Qt 6-only private peer-to-peer D-Bus serialization fixture.
+Set `COPYPASTE_QT_PREFIX` to the Qt 6 SDK prefix; it asserts that `Snapshot`
+replies with the exact shared `tas(suus)` signature and three top-level values,
+rather than one enclosing struct.
