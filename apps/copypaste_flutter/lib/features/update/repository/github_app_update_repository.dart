@@ -468,6 +468,11 @@ class GitHubReleaseParser {
     if (parsed != null &&
         parsed.scheme == 'https' &&
         parsed.host == 'github.com' &&
+        parsed.port == 443 &&
+        parsed.userInfo.isEmpty &&
+        !parsed.pathSegments.any(
+          (segment) => segment == '.' || segment == '..',
+        ) &&
         parsed.path.startsWith('/dmytro-yevs/copypaste/releases/')) {
       return parsed;
     }
