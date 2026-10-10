@@ -17,23 +17,27 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Diagnose exact-kernel V4L2 loopback load
+      - name: Prove exact-kernel V4L2 loopback feed
         run: |
           set -euo pipefail
-          kernel="$(uname -r)"
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends "linux-headers-$kernel" v4l2loopback-dkms v4l-utils
-          dkms status
-          modinfo v4l2loopback
-          dpkg-query -W -f='${binary:Package} ${Version}\n' "linux-headers-$kernel" "linux-modules-$kernel" "linux-modules-extra-$kernel" || true
-          apt-cache policy linux-azure linux-modules-extra-azure "linux-modules-extra-$kernel"
-          apt-cache search '^linux-modules-extra.*azure$'
-          apt-cache search "^linux-modules-extra-${kernel%%-*}"
-          apt-cache depends "linux-modules-$kernel" || true
-          find "/lib/modules/$kernel" -type f \( -name 'v4l2loopback.ko*' -o -name 'videodev.ko*' \) -print
-          if sudo modprobe v4l2loopback video_nr=42 card_label=CopyPasteQualification exclusive_caps=1; then
-            sudo modprobe -r v4l2loopback
-            exit 0
-          fi
-          sudo dmesg | tail -n 200
-          exit 1
+          sudo apt-get install --yes --no-install-recommends ffmpeg
+          state="$RUNNER_TEMP/copypaste-v4l2loopback.json"
+          producer=""
+          cleanup() {
+            status=$?
+            if [[ -n "$producer" ]]; then
+              kill "$producer" 2>/dev/null || true
+              wait "$producer" || true
+            fi
+            python3 scripts/release/provision-linux-v4l2loopback.py cleanup --state "$state" --missing-ok
+            exit "$status"
+          }
+          trap cleanup EXIT
+          python3 scripts/release/provision-linux-v4l2loopback.py provision --state "$state" --environment "$GITHUB_ENV"
+          test "$(stat -c '%a' /dev/video42)" = 600
+          ffmpeg -hide_banner -loglevel error -re -f lavfi -i testsrc2=size=64x48:rate=10 -pix_fmt yuyv422 -f v4l2 /dev/video42 &
+          producer=$!
+          v4l2-ctl --device /dev/video42 --stream-mmap=3 --stream-count=1 --stream-to="$RUNNER_TEMP/copypaste-v4l2-frame.raw"
+          test -s "$RUNNER_TEMP/copypaste-v4l2-frame.raw"
+          v4l2-ctl --device /dev/video42 --all
