@@ -26,6 +26,26 @@ pub const MAX_ICON_BYTES: usize = 32 * 1024;
 const MAX_SOURCE_ICON_EDGE: u32 = 512;
 const MAX_SOURCE_ICON_BYTES: usize = 512 * 1024;
 
+/// A bounded display label for a source identity already verified by a native
+/// capture adapter. It is never inferred from a PID, title, or foreground app.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceAppLabel(String);
+
+impl SourceAppLabel {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub fn linux_source_label(app_id: &str) -> Option<SourceAppLabel> {
+    linux::source_label(app_id)
+}
+
 /// A normalized source-application icon safe to persist and transport.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppIcon {

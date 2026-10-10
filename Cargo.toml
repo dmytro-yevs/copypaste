@@ -88,6 +88,7 @@ base64 = "0.22"
 # unbounded clipboard payload. PNG and TIFF are the formats our capture ports
 # store on macOS and Android.
 image = { version = "0.25.10", default-features = false, features = ["png", "tiff"] }
+resvg = { version = "0.48.1", default-features = false }
 qrcode = { version = "0.14", default-features = false, features = ["image"] }
 url = "2"
 csscolorparser = { version = "0.8.3", default-features = false, features = ["std"] }

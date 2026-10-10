@@ -698,7 +698,7 @@ fn allows_source(settings: &copypaste_ipc::ConfigData, source: Option<&SourceIde
 }
 
 fn source_label(app_id: &str) -> Option<String> {
-    super::super::linux_attribution::resolve_desktop_id(app_id).map(|source| source.name)
+    copypaste_source_app::linux_source_label(app_id).map(|label| label.into_inner())
 }
 
 fn attach_source(capture: &mut Capture, source: Option<SourceIdentity>) {
