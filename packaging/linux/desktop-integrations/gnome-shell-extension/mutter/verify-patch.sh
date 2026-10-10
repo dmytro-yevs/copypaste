@@ -41,7 +41,7 @@ if [[ -n "$runtime_output" ]]; then
   python3 "$PWD/../../../compositor-runtime/emit_runtime_receipt.py" \
     --runtime-dir "$runtime_output" --output "$runtime_output/runtime-receipt.json" \
     --runtime-id "$runtime_id" --desktop GNOME --source-revision "$commit" \
-    --patch "$patch" --glibc-floor 2.39 --dependency gnome-shell --dependency gnome-session \
+    --patch "$patch" --glibc-floor 2.39 --dependency gnome-shell --dependency gnome-session --dependency libdisplay-info1 \
     --private-entrypoint usr/libexec/copypaste-gnome-shell \
     --qualification-entrypoint usr/libexec/copypaste-gnome-shell-headless \
     --shell-revision "$shell_revision" --license-file "$source_dir/COPYING"
