@@ -274,6 +274,13 @@ jobs:
           chmod +x scripts/release/run-linux-native-desktop-session.sh scripts/release/run-linux-native-scenarios.sh scripts/release/run-fedora-plasma6-qualification.sh
           mkdir -p evidence
           appimage="current/CopyPaste-v${{ needs.source.outputs.version }}-linux-${{ matrix.architecture }}.AppImage"
+          [[ -f "$appimage" && ! -L "$appimage" ]]
+          chmod u+x "$appimage"
+          if [[ "${{ needs.source.outputs.upgrade_mode }}" == prior_release ]]; then
+            previous_appimage="previous/CopyPaste-v${{ needs.source.outputs.previous_version }}-linux-${{ matrix.architecture }}.AppImage"
+            [[ -f "$previous_appimage" && ! -L "$previous_appimage" ]]
+            chmod u+x "$previous_appimage"
+          fi
           mkdir companion
           (cd companion && APPIMAGE_EXTRACT_AND_RUN=1 "../$appimage" --appimage-extract >/dev/null)
           companion_source="$PWD/companion/squashfs-root/usr/share/copypaste/desktop-integrations"
