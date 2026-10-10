@@ -278,6 +278,12 @@ class RuntimeStageTests(unittest.TestCase):
                 ("qtbase-gui", "6.7.0-1.fc40", "qtbase-6.7.0-1.fc40.src.rpm", expression),
             )
 
+    def test_rpm_owner_reports_only_the_invalid_license_length(self) -> None:
+        expression = "L" * 1025
+        with mock.patch.object(private_elf_closure, "run", return_value=f"libproxy\t0.5.3-5.fc40\tlibproxy-0.5.3-5.fc40.src.rpm\t{expression}\n"):
+            with self.assertRaisesRegex(private_elf_closure.ClosureError, r"library=libproxy\.so\.0 field=license length=1025"):
+                private_elf_closure.rpm_owner(Path("/usr/lib64/libproxy.so.0"))
+
     def test_rpm_siblings_require_an_exact_source_rpm_and_evr(self) -> None:
         owner = ("kwin-libs", "6.0.3.1-2.fc40", "kwin-6.0.3.1-2.fc40.src.rpm", "GPL-2.0-only")
         inventory = "\n".join((

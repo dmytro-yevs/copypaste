@@ -151,21 +151,33 @@ def trusted_library(path: Path) -> Path:
     return resolved
 
 
-def rpm_provenance(arguments: list[str]) -> tuple[str, str, str, str]:
+def provenance_error(library: str, field: str, value: str | None = None) -> ClosureError:
+    safe_library = library if SAFE_SONAME.fullmatch(library) else "unknown"
+    suffix = f" length={len(value)}" if value is not None else ""
+    return ClosureError(f"bundled ELF RPM provenance is invalid: library={safe_library} field={field}{suffix}")
+
+
+def rpm_provenance(arguments: list[str], library: str) -> tuple[str, str, str, str]:
     package = run(["rpm", *arguments, "--qf", "%{NAME}\t%{EVR}\t%{SOURCERPM}\t%{LICENSE}\n"])
     rows = package.splitlines()
     if len(rows) != 1:
-        raise ClosureError("bundled ELF library has unsafe or unavailable RPM provenance")
+        raise provenance_error(library, "record")
     values = rows[0].split("\t")
-    if (len(values) != 4 or not SAFE_NAME.fullmatch(values[0])
-            or not SAFE_EVR.fullmatch(values[1]) or not SAFE_SOURCE_RPM.fullmatch(values[2])
-            or not SAFE_LICENSE.fullmatch(values[3]) or values[3] != values[3].strip()):
-        raise ClosureError("bundled ELF library has unsafe or unavailable RPM provenance")
+    if len(values) != 4:
+        raise provenance_error(library, "record")
+    if not SAFE_NAME.fullmatch(values[0]):
+        raise provenance_error(library, "name")
+    if not SAFE_EVR.fullmatch(values[1]):
+        raise provenance_error(library, "evr")
+    if not SAFE_SOURCE_RPM.fullmatch(values[2]):
+        raise provenance_error(library, "source_rpm")
+    if not SAFE_LICENSE.fullmatch(values[3]) or values[3] != values[3].strip():
+        raise provenance_error(library, "license", values[3])
     return values[0], values[1], values[2], values[3]
 
 
 def rpm_owner(path: Path) -> tuple[str, str, str, str]:
-    return rpm_provenance(["-qf", str(path)])
+    return rpm_provenance(["-qf", str(path)], path.name)
 
 
 def rpm_siblings(owner: tuple[str, str, str, str]) -> list[tuple[str, str, str, str]]:
