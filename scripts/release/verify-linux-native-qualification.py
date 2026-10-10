@@ -20,8 +20,9 @@ ASSERTIONS = {
     "privacy_excluded_app", "privacy_private_mode", "quick_paste_hotkey",
     "quick_paste_focus_restore", "tray_window_notification",
     "encrypted_restart_persistence", "pairing_sync", "modules",
-    "portal_keyboard_grant",
 }
+X11_KEYBOARD_ASSERTION = "native_x11_keyboard_input"
+WAYLAND_KEYBOARD_ASSERTION = "portal_keyboard_grant"
 FIRST_INSTALL_ASSERTIONS = (ASSERTIONS - {"package_upgrade"}) | {"clean_install_baseline"}
 EVIDENCE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
@@ -58,12 +59,18 @@ def expected_packages(artifacts: Path, version: str, architecture: str) -> dict[
     return expected
 
 
-def assertion_set(upgrade_mode: object) -> set[str]:
+def assertion_set(upgrade_mode: object, session: object) -> set[str]:
     if upgrade_mode == "prior_release":
-        return ASSERTIONS
-    if upgrade_mode == "first_install_baseline":
-        return FIRST_INSTALL_ASSERTIONS
-    raise ValueError("evidence upgrade mode is invalid")
+        assertions = ASSERTIONS
+    elif upgrade_mode == "first_install_baseline":
+        assertions = FIRST_INSTALL_ASSERTIONS
+    else:
+        raise ValueError("evidence upgrade mode is invalid")
+    if session == "x11":
+        return assertions | {X11_KEYBOARD_ASSERTION}
+    if session == "wayland":
+        return assertions | {WAYLAND_KEYBOARD_ASSERTION}
+    raise ValueError("evidence session is invalid")
 
 
 def verify_trace(root: Path, receipt: dict, architecture: str, desktop: str, session: str, version: str, commit: str, source_run_id: str, artifact_run_id: Optional[str], expected_assertions: set[str]) -> None:
@@ -103,6 +110,7 @@ def verify(root: Path, artifacts: Path, version: str, commit: str, source_run_id
     root = root.resolve(strict=True)
     artifacts = artifacts.resolve(strict=True)
     seen = set()
+    installed_coverage = {(architecture, format_name): 0 for architecture in ARCHITECTURES for format_name in FORMATS}
     for architecture in ARCHITECTURES:
         expected = expected_packages(artifacts, version, architecture)
         for desktop in DESKTOPS:
@@ -117,7 +125,18 @@ def verify(root: Path, artifacts: Path, version: str, commit: str, source_run_id
                     raise ValueError(f"evidence provenance differs: {name}")
                 if artifact_run_id is not None and str(receipt.get("artifact_run_id")) != str(artifact_run_id):
                     raise ValueError(f"evidence artifact provenance differs: {name}")
-                expected_assertions = assertion_set(receipt.get("upgrade_mode"))
+                installed_formats = receipt.get("installed_formats")
+                environment = receipt.get("environment")
+                if not isinstance(installed_formats, list) or set(installed_formats) not in ({"AppImage", "deb"}, {"AppImage", "rpm"}):
+                    raise ValueError(f"evidence installed formats are invalid: {name}")
+                if not isinstance(environment, dict) or not isinstance(environment.get("distribution"), str) or not isinstance(environment.get("distribution_version"), str):
+                    raise ValueError(f"evidence runtime environment is invalid: {name}")
+                native_format = next(format_name for format_name in installed_formats if format_name != "AppImage")
+                if (native_format == "deb" and environment["distribution"] not in {"ubuntu", "debian"}) or (native_format == "rpm" and environment["distribution"] != "fedora"):
+                    raise ValueError(f"evidence native package manager differs from runtime: {name}")
+                for format_name in installed_formats:
+                    installed_coverage[(architecture, format_name)] += 1
+                expected_assertions = assertion_set(receipt.get("upgrade_mode"), session)
                 assertions = receipt.get("assertions")
                 if not isinstance(assertions, dict) or set(assertions) != expected_assertions or any(value is not True for value in assertions.values()):
                     raise ValueError(f"evidence assertions are incomplete: {name}")
@@ -145,6 +164,8 @@ def verify(root: Path, artifacts: Path, version: str, commit: str, source_run_id
                 seen.add(identity)
     if len(seen) != len(ARCHITECTURES) * len(DESKTOPS) * len(SESSIONS):
         raise ValueError("native qualification matrix is incomplete")
+    if any(count < 2 for count in installed_coverage.values()):
+        raise ValueError("native package formats were not installed in two desktop sessions")
 
 
 def main() -> int:

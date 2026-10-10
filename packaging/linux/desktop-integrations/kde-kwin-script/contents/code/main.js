@@ -159,8 +159,10 @@ function awaitQuickPaste() {
 }
 
 workspace.windowAdded.connect(window => {
-    if (activeTransaction && isQuickPasteWindow(window))
+    if (activeTransaction && isQuickPasteWindow(window)) {
         activeTransaction.presentationWindow = window;
+        workspace.activateWindow(window);
+    }
     recoverAwaitForHostWindow(window);
 });
 workspace.windowActivated.connect(window => {

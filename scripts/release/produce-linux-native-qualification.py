@@ -27,8 +27,9 @@ ASSERTIONS = {
     "privacy_excluded_app", "privacy_private_mode", "quick_paste_hotkey",
     "quick_paste_focus_restore", "tray_window_notification",
     "encrypted_restart_persistence", "pairing_sync", "modules",
-    "portal_keyboard_grant",
 }
+X11_KEYBOARD_ASSERTION = "native_x11_keyboard_input"
+WAYLAND_KEYBOARD_ASSERTION = "portal_keyboard_grant"
 FIRST_INSTALL_ASSERTIONS = (ASSERTIONS - {"package_upgrade"}) | {"clean_install_baseline"}
 SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
@@ -75,10 +76,31 @@ def command_rows(stdout: str, expected_assertions: set[str]) -> list[dict]:
     return rows
 
 
+def scenario_assertions(upgrade_mode: str, session: str) -> set[str]:
+    assertions = ASSERTIONS if upgrade_mode == "prior_release" else FIRST_INSTALL_ASSERTIONS
+    if session == "x11":
+        return assertions | {X11_KEYBOARD_ASSERTION}
+    if session == "wayland":
+        return assertions | {WAYLAND_KEYBOARD_ASSERTION}
+    raise ValueError("unsupported session assertion contract")
+
+
 def attachment(path: Path) -> dict:
     if not path.is_file() or path.is_symlink() or not SAFE_NAME.fullmatch(path.name):
         raise ValueError(f"unsafe evidence attachment: {path}")
     return {"name": path.name, "sha256": sha256(path), "size_bytes": path.stat().st_size}
+
+
+def runtime_environment() -> dict:
+    values = {}
+    os_release = Path("/etc/os-release")
+    if not os_release.is_file():
+        return {"distribution": "unknown", "distribution_version": "unknown"}
+    for line in os_release.read_text(encoding="utf-8").splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            values[key] = value.strip('"')
+    return {"distribution": values.get("ID"), "distribution_version": values.get("VERSION_ID")}
 
 
 def produce(args: argparse.Namespace) -> Path:
@@ -91,17 +113,20 @@ def produce(args: argparse.Namespace) -> Path:
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     packages = artifact_inventory(args.artifacts.resolve(), args.version, args.architecture)
+    installed_formats = os.environ.get("COPYPASTE_INSTALLED_FORMATS", "").split(",")
+    if set(installed_formats) not in ({"AppImage", "deb"}, {"AppImage", "rpm"}):
+        raise ValueError("native scenario did not report one portable and one native installed format")
     upgrade_mode = "prior_release" if args.previous_artifacts is not None else "first_install_baseline"
     if upgrade_mode == "prior_release":
         if args.previous_version is None:
             raise ValueError("prior-release qualification requires a previous version")
         previous = artifact_inventory(args.previous_artifacts.resolve(), args.previous_version, args.architecture)
-        expected_assertions = ASSERTIONS
+        expected_assertions = scenario_assertions(upgrade_mode, args.session)
     else:
         if args.previous_version is not None:
             raise ValueError("first-install baseline cannot name a prior version")
         previous = []
-        expected_assertions = FIRST_INSTALL_ASSERTIONS
+        expected_assertions = scenario_assertions(upgrade_mode, args.session)
     driver = args.driver.resolve()
     if not driver.is_file() or not os.access(driver, os.X_OK):
         raise ValueError("repository-controlled scenario driver is missing or not executable")
@@ -127,6 +152,8 @@ def produce(args: argparse.Namespace) -> Path:
         "artifact_run_id": args.artifact_run_id,
         "architecture": args.architecture, "desktop": args.desktop, "session": args.session,
         "upgrade_mode": upgrade_mode,
+        "installed_formats": installed_formats,
+        "environment": runtime_environment(),
         "commands": commands,
     }, indent=2) + "\n", encoding="utf-8")
     attachments = [attachment(log_path), attachment(trace_path)]
@@ -142,6 +169,8 @@ def produce(args: argparse.Namespace) -> Path:
         "artifact_run_id": args.artifact_run_id,
         "architecture": args.architecture, "desktop": args.desktop, "session": args.session,
         "upgrade_mode": upgrade_mode,
+        "installed_formats": installed_formats,
+        "environment": runtime_environment(),
         "packages": packages,
         "previous_packages": previous,
         "assertions": {name: True for name in sorted(expected_assertions)},

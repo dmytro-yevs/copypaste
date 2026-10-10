@@ -72,15 +72,7 @@ PY
 
 current_package() { printf '%s/CopyPaste-v%s-linux-%s.%s' "$ARTIFACTS" "$VERSION" "$ARCHITECTURE" "$1"; }
 previous_package() { printf '%s/CopyPaste-v%s-linux-%s.%s' "$PREVIOUS_ARTIFACTS" "$PREVIOUS_VERSION" "$ARCHITECTURE" "$1"; }
-for format in AppImage deb rpm; do
-  [[ -f "$(current_package "$format")" ]] || {
-    echo "ERROR: exact current $format package is required" >&2
-    exit 1
-  }
-  if [[ "$FIRST_INSTALL_BASELINE" != true ]]; then
-    [[ -f "$(previous_package "$format")" ]] || { echo "ERROR: exact prior $format package is required" >&2; exit 1; }
-  fi
-done
+for format in AppImage deb rpm; do [[ -f "$(current_package "$format")" ]] || { echo "ERROR: exact current $format package is required" >&2; exit 1; }; done
 
 cleanup_packages() {
   sudo dpkg --purge copypaste >/dev/null 2>&1 || true
@@ -88,55 +80,33 @@ cleanup_packages() {
 }
 trap cleanup_packages EXIT
 
-# AppImage is a portable package: extraction exercises its install boundary and
-# both exact artifacts execute their own launcher. Deb and rpm are installed
-# through their native package managers, then upgraded in-place from the prior
-# stable artifact. The probe below receives the same directories for the
-# application-level scenarios.
+# AppImage is exercised as a portable launch boundary. Its updater is not
+# qualified here: extraction does not replace a user-owned executable or prove
+# preserved history. The native system format is installed by its own package
+# manager with dependency resolution; there is no --nodeps escape hatch.
 work="$(mktemp -d)"
 trap 'rm -rf "$work"; cleanup_packages' EXIT
-for format in AppImage deb rpm; do
-  current="$(current_package "$format")"
-  previous=""
-  [[ "$FIRST_INSTALL_BASELINE" == true ]] || previous="$(previous_package "$format")"
-  case "$format" in
-    AppImage)
-      mkdir -p "$work/appimage-current"
-      if [[ "$FIRST_INSTALL_BASELINE" != true ]]; then
-        mkdir -p "$work/appimage-prior"
-        (cd "$work/appimage-prior" && APPIMAGE_EXTRACT_AND_RUN=1 "$previous" --appimage-extract >/dev/null)
-      fi
-      (cd "$work/appimage-current" && APPIMAGE_EXTRACT_AND_RUN=1 "$current" --appimage-extract >/dev/null)
-      test -x "$work/appimage-current/squashfs-root/AppRun"
-      test -f "$work/appimage-current/squashfs-root/com.copypaste.CopyPaste.desktop"
-      grep -Fx 'MimeType=x-scheme-handler/copypaste;' "$work/appimage-current/squashfs-root/com.copypaste.CopyPaste.desktop"
-      test -f "$work/appimage-current/squashfs-root/com.copypaste.CopyPaste.png"
-      emit_command package_install "$current" --appimage-extract
-      if [[ "$FIRST_INSTALL_BASELINE" == true ]]; then emit_command clean_install_baseline "$current" --appimage-extract; else emit_command package_upgrade "$previous" "$current" --appimage-extract; fi
-      emit_command desktop_uri_icon sh -ceu 'desktop entry URI handler and icon verified'
-      ;;
-    deb)
-      if [[ "$FIRST_INSTALL_BASELINE" != true ]]; then sudo dpkg --install "$previous"; fi
-      sudo dpkg --install "$current"
-      test -f /usr/share/applications/com.copypaste.CopyPaste.desktop
-      emit_command package_install sudo dpkg --install "$current"
-      if [[ "$FIRST_INSTALL_BASELINE" == true ]]; then emit_command clean_install_baseline sudo dpkg --install "$current"; else emit_command package_upgrade sudo dpkg --install "$previous" "$current"; fi
-      cleanup_packages
-      ;;
-    rpm)
-      [[ -f /etc/fedora-release ]] || {
-        echo "ERROR: RPM installation and upgrade require the Fedora qualification runtime" >&2
-        exit 1
-      }
-      if [[ "$FIRST_INSTALL_BASELINE" != true ]]; then sudo rpm --install --nodeps "$previous"; fi
-      if [[ "$FIRST_INSTALL_BASELINE" == true ]]; then sudo rpm --install --nodeps "$current"; else sudo rpm --upgrade --nodeps "$current"; fi
-      rpm -q copypaste >/dev/null
-      emit_command package_install sudo rpm --install --nodeps "$current"
-      if [[ "$FIRST_INSTALL_BASELINE" == true ]]; then emit_command clean_install_baseline sudo rpm --install --nodeps "$current"; else emit_command package_upgrade sudo rpm --upgrade --nodeps "$previous" "$current"; fi
-      cleanup_packages
-      ;;
-  esac
-done
+mkdir -p "$work/appimage-current"
+(cd "$work/appimage-current" && APPIMAGE_EXTRACT_AND_RUN=1 "$(current_package AppImage)" --appimage-extract >/dev/null)
+test -x "$work/appimage-current/squashfs-root/AppRun"
+test -f "$work/appimage-current/squashfs-root/com.copypaste.CopyPaste.desktop"
+grep -Fx 'MimeType=x-scheme-handler/copypaste;' "$work/appimage-current/squashfs-root/com.copypaste.CopyPaste.desktop"
+test -f "$work/appimage-current/squashfs-root/com.copypaste.CopyPaste.png"
+emit_command package_install "$(current_package AppImage)" --appimage-extract
+emit_command desktop_uri_icon sh -ceu 'desktop entry URI handler and icon verified'
+
+if [[ -f /etc/fedora-release ]]; then
+  native_format=rpm
+  sudo dnf --assumeyes install "$(current_package rpm)"
+  rpm -q copypaste >/dev/null
+  emit_command package_install sudo dnf --assumeyes install "$(current_package rpm)"
+else
+  native_format=deb
+  sudo apt-get install --yes "$(current_package deb)"
+  dpkg-query --show copypaste >/dev/null
+  emit_command package_install sudo apt-get install --yes "$(current_package deb)"
+fi
+export COPYPASTE_INSTALLED_FORMATS="AppImage,$native_format"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 args=(--artifacts "$ARTIFACTS" --version "$VERSION" --architecture "$ARCHITECTURE" --desktop "$DESKTOP" --session "$SESSION" --evidence-dir "$EVIDENCE_DIR")

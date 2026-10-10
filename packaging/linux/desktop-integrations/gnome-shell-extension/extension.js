@@ -29,20 +29,13 @@ export default class CopyPasteQuickPasteExtension extends Extension {
         this._activeTransaction = null;
         this._calls = new Set();
         this._windowCreatedId = global.display.connect('window-created', (_display, window) => {
-            if (this._activeTransaction && this._isQuickPasteWindow(window))
-                this._activeTransaction.presentationWindow = window;
+            this._watchQuickPasteWindow(window);
+        });
+        this._focusWindowId = global.display.connect('notify::focus-window', () => {
+            if (this._activeTransaction)
+                this._trackQuickPasteWindow(this._activeTransaction, global.display.focus_window);
         });
         this._loadClipboardBridge();
-        this._busOwnerId = Gio.bus_own_name_on_connection(
-            this._bus,
-            COMPANION_BUS_NAME,
-            Gio.BusNameOwnerFlags.NONE,
-            () => {
-                this._ownsBusName = true;
-                this._armAwait();
-            },
-            () => this._stopForLostCompanionName()
-        );
         this._hostWatchId = Gio.bus_watch_name_on_connection(
             this._bus,
             HOST_BUS_NAME,
@@ -80,12 +73,15 @@ export default class CopyPasteQuickPasteExtension extends Extension {
             this._bus.signal_unsubscribe(this._cancelSignalId);
         if (this._windowCreatedId)
             global.display.disconnect(this._windowCreatedId);
+        if (this._focusWindowId)
+            global.display.disconnect(this._focusWindowId);
         if (this._hostWatchId)
             Gio.bus_unwatch_name(this._hostWatchId);
         if (this._busOwnerId)
             Gio.bus_unown_name(this._busOwnerId);
         this._cancelSignalId = 0;
         this._windowCreatedId = 0;
+        this._focusWindowId = 0;
         this._hostWatchId = 0;
         this._busOwnerId = 0;
         this._awaitingShortcut = false;
@@ -106,11 +102,28 @@ export default class CopyPasteQuickPasteExtension extends Extension {
             GIRepository.Repository.prepend_search_path(`${this.path}/native/typelib`);
             GIRepository.Repository.prepend_library_path(`${this.path}/native/lib`);
             const factory = await import('gi://CopyPasteClipboard?version=1.0');
-            if (this._enabled)
+            if (this._enabled) {
                 this._clipboardBridge = new ClipboardBridge(this._bus, factory);
+                this._ownCompanionName();
+            }
         } catch (_error) {
             // Clipboard capture stays unavailable until the packaged native shim loads.
         }
+    }
+
+    _ownCompanionName() {
+        if (!this._enabled || this._busOwnerId)
+            return;
+        this._busOwnerId = Gio.bus_own_name_on_connection(
+            this._bus,
+            COMPANION_BUS_NAME,
+            Gio.BusNameOwnerFlags.NONE,
+            () => {
+                this._ownsBusName = true;
+                this._armAwait();
+            },
+            () => this._stopForLostCompanionName()
+        );
     }
 
     _hostVanished() {
@@ -119,6 +132,7 @@ export default class CopyPasteQuickPasteExtension extends Extension {
         this._generation += 1;
         this._hostAvailable = false;
         this._awaitingShortcut = false;
+        this._clearWindowWatches(this._activeTransaction);
         this._activeTransaction = null;
         this._clearRetry();
         this._cancelCalls();
@@ -130,6 +144,7 @@ export default class CopyPasteQuickPasteExtension extends Extension {
         this._generation += 1;
         this._ownsBusName = false;
         this._awaitingShortcut = false;
+        this._clearWindowWatches(this._activeTransaction);
         this._activeTransaction = null;
         this._clearRetry();
         this._cancelCalls();
@@ -149,6 +164,7 @@ export default class CopyPasteQuickPasteExtension extends Extension {
             id: GLib.uuid_string_random(),
             window: focusedWindow,
             generation: this._generation,
+            watchIds: new Map(),
         };
         this._activeTransaction = pending;
         this._callHost('BeginQuickPaste', pending.id, '(b)', BEGIN_TIMEOUT_MS, pending.generation, result => {
@@ -190,8 +206,10 @@ export default class CopyPasteQuickPasteExtension extends Extension {
     }
 
     _cancelTransaction(pending, rearm = true) {
-        if (this._activeTransaction === pending)
+        if (this._activeTransaction === pending) {
             this._activeTransaction = null;
+            this._clearWindowWatches(pending);
+        }
         this._restoreCopyOnlyFocus(pending);
         if (this._bus && this._hostAvailable) {
             this._bus.call(
@@ -217,13 +235,43 @@ export default class CopyPasteQuickPasteExtension extends Extension {
         if (this._activeTransaction !== pending)
             return;
         this._activeTransaction = null;
+        this._clearWindowWatches(pending);
         this._armAwait();
     }
 
     _capturePresentationWindow(pending) {
-        const focusedWindow = global.display.focus_window;
-        if (this._isQuickPasteWindow(focusedWindow))
-            pending.presentationWindow = focusedWindow;
+        this._trackQuickPasteWindow(pending, global.display.focus_window);
+    }
+
+    _watchQuickPasteWindow(window) {
+        const pending = this._activeTransaction;
+        if (!pending || !window || pending.watchIds.has(window))
+            return;
+        const refresh = () => this._trackQuickPasteWindow(pending, window);
+        pending.watchIds.set(window, [
+            window.connect('notify::gtk-application-id', refresh),
+            window.connect('notify::title', refresh),
+        ]);
+        refresh();
+    }
+
+    _trackQuickPasteWindow(pending, window) {
+        if (!pending || !this._isActive(pending) || !this._isQuickPasteWindow(window))
+            return;
+        pending.presentationWindow = window;
+        if (global.display.focus_window !== window) {
+            try { window.activate(global.get_current_time()); } catch (_error) {}
+        }
+    }
+
+    _clearWindowWatches(pending) {
+        if (!pending?.watchIds)
+            return;
+        for (const [window, ids] of pending.watchIds) {
+            for (const id of ids)
+                window.disconnect(id);
+        }
+        pending.watchIds.clear();
     }
 
     _isQuickPasteWindow(window) {

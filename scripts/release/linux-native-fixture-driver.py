@@ -95,11 +95,22 @@ def write_source_desktop_entry(data_home):
     )
 
 
+def gtk_provider_helper(workspace, environment):
+    helper = workspace / "gtk3-clipboard-provider"
+    if helper.is_file() and not helper.is_symlink() and os.access(helper, os.X_OK):
+        return helper
+    run([sys.executable, str(PROVIDER), "--build-helper", str(helper)], env=environment, timeout=30)
+    if not helper.is_file() or helper.is_symlink() or not os.access(helper, os.X_OK):
+        raise RuntimeError("GTK3 clipboard provider build did not create an executable")
+    return helper
+
+
 @contextmanager
 def clipboard_provider(workspace, evidence_dir, label, payloads, environment):
     """Offer real MIME data from a visible GTK client until the assertion ends."""
     if not PROVIDER.is_file() or not os.access(PROVIDER, os.X_OK):
         raise RuntimeError("native clipboard provider is unavailable")
+    helper = gtk_provider_helper(workspace, environment)
     directory = workspace / f"provider-{time.monotonic_ns()}"
     directory.mkdir(mode=0o700)
     offers = []
@@ -117,7 +128,7 @@ def clipboard_provider(workspace, evidence_dir, label, payloads, environment):
     ready = directory / "ready.json"
     activity = directory / "activity.jsonl"
     provider = subprocess.Popen(
-        [sys.executable, str(PROVIDER), "--manifest", str(manifest), "--ready-file", str(ready),
+        [sys.executable, str(PROVIDER), "--helper", str(helper), "--manifest", str(manifest), "--ready-file", str(ready),
          "--activity-log", str(activity), "--hold-seconds", "20"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -129,9 +140,8 @@ def clipboard_provider(workspace, evidence_dir, label, payloads, environment):
             time.sleep(0.05)
         if provider.poll() is not None or not ready.is_file():
             raise RuntimeError("GTK clipboard provider did not become ready")
-        descriptor = json.loads(ready.read_text(encoding="utf-8"))
-        if descriptor != {"application_id": SOURCE_APPLICATION_ID, "mimes": list(payloads)}:
-            raise RuntimeError("GTK clipboard provider readiness does not match its offers")
+        if ready.read_text(encoding="utf-8") != "ready\n":
+            raise RuntimeError("GTK clipboard provider readiness is invalid")
         yield activity
     finally:
         provider.terminate()

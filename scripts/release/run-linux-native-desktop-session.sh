@@ -19,8 +19,10 @@ case "$SESSION" in x11|wayland) ;; *) exit 2 ;; esac
 RUNTIME="$(mktemp -d)"
 DISPLAY_NUMBER=99
 cleanup() {
+  [[ -n "${shell_pid:-}" ]] && kill "$shell_pid" 2>/dev/null || true
   [[ -n "${desktop_pid:-}" ]] && kill "$desktop_pid" 2>/dev/null || true
   [[ -n "${display_pid:-}" ]] && kill "$display_pid" 2>/dev/null || true
+  [[ -n "${dbus_pid:-}" ]] && kill "$dbus_pid" 2>/dev/null || true
   rm -rf "$RUNTIME"
 }
 trap cleanup EXIT
@@ -31,6 +33,17 @@ export GALLIUM_DRIVER=llvmpipe
 export XDG_CURRENT_DESKTOP="$DESKTOP"
 export XDG_SESSION_DESKTOP="$DESKTOP"
 export XDG_SESSION_TYPE="$SESSION"
+export XDG_DATA_HOME="$RUNTIME/data"
+export XDG_CONFIG_HOME="$RUNTIME/config"
+export XDG_CACHE_HOME="$RUNTIME/cache"
+mkdir -p "$XDG_DATA_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
+
+if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
+  mapfile -t bus < <(dbus-daemon --session --fork --print-address=1 --print-pid=1)
+  [[ "${#bus[@]}" == 2 ]] || { echo "ERROR: could not start session bus" >&2; exit 1; }
+  export DBUS_SESSION_BUS_ADDRESS="${bus[0]}"
+  dbus_pid="${bus[1]}"
+fi
 
 wait_for() {
   local predicate="$1"
@@ -63,6 +76,19 @@ else
   wait_for 'kill -0 "$desktop_pid" 2>/dev/null'
   wait_for 'find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name "wayland-*" | grep -q .'
   export WAYLAND_DISPLAY="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'wayland-*' -printf '%f\n' | head -n1)"
+fi
+
+dbus-update-activation-environment \
+  DBUS_SESSION_BUS_ADDRESS DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_DATA_HOME \
+  XDG_CONFIG_HOME XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE
+keyring_password="$(openssl rand -hex 24)"
+printf '%s\n' "$keyring_password" | gnome-keyring-daemon --unlock >/dev/null
+unset keyring_password
+
+if [[ "$DESKTOP" == GNOME ]]; then
+  appindicator="$(gnome-extensions list 2>/dev/null | awk '/appindicator|ubuntu-appindicators/ {print; exit}')"
+  [[ -n "$appindicator" ]] || { echo "ERROR: GNOME AppIndicator extension is unavailable" >&2; exit 1; }
+  gnome-extensions enable "$appindicator"
 fi
 
 "$@"

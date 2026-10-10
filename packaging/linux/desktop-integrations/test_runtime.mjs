@@ -105,6 +105,7 @@ function failGnome(bus, call, message) {
 {
     const runtime = loadGnome();
     runtime.extension.enable();
+    runtime.extension._ownCompanionName();
     runtime.callbacks.ownAppeared();
     assert.equal(runtime.calls.length, 0, 'an absent host must not receive an await call');
     runtime.callbacks.hostAppeared();
@@ -115,6 +116,7 @@ function failGnome(bus, call, message) {
 {
     const runtime = loadGnome();
     runtime.extension.enable();
+    runtime.extension._ownCompanionName();
     runtime.callbacks.ownAppeared();
     runtime.callbacks.hostAppeared();
     const firstAwait = runtime.calls.at(-1);
@@ -127,6 +129,7 @@ function failGnome(bus, call, message) {
 {
     const runtime = loadGnome();
     runtime.extension.enable();
+    runtime.extension._ownCompanionName();
     runtime.callbacks.ownAppeared();
     runtime.callbacks.hostAppeared();
     const staleAwait = runtime.calls.at(-1);
@@ -145,6 +148,7 @@ function failGnome(bus, call, message) {
     const runtime = loadGnome({focusWindow: source});
     source.activate = () => { runtime.shell.display.focus_window = {}; };
     runtime.extension.enable();
+    runtime.extension._ownCompanionName();
     runtime.callbacks.ownAppeared();
     runtime.callbacks.hostAppeared();
     completeGnome(runtime.extension._bus, runtime.calls.at(-1), [true]);
@@ -159,6 +163,7 @@ function failGnome(bus, call, message) {
     const source = {activate() { restored = true; }};
     const runtime = loadGnome({focusWindow: source});
     runtime.extension.enable();
+    runtime.extension._ownCompanionName();
     runtime.callbacks.ownAppeared();
     runtime.callbacks.hostAppeared();
     completeGnome(runtime.extension._bus, runtime.calls.at(-1), [true]);
