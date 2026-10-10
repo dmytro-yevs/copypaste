@@ -15,6 +15,8 @@ class LinuxIntegrationStatus {
     required this.clipboard,
     required this.quickPaste,
     required this.screenshotProtection,
+    this.startAtLogin = false,
+    this.uriRegistered = false,
   });
 
   final LinuxDesktopSession session;
@@ -24,6 +26,8 @@ class LinuxIntegrationStatus {
   final bool clipboard;
   final bool quickPaste;
   final bool screenshotProtection;
+  final bool startAtLogin;
+  final bool uriRegistered;
 
   factory LinuxIntegrationStatus.fromMap(Map<String, Object?> values) {
     return LinuxIntegrationStatus(
@@ -37,6 +41,8 @@ class LinuxIntegrationStatus {
       clipboard: _boolValue(values, 'clipboard'),
       quickPaste: _boolValue(values, 'quickPaste'),
       screenshotProtection: _boolValue(values, 'screenshotProtection'),
+      startAtLogin: _boolValue(values, 'startAtLogin'),
+      uriRegistered: _boolValue(values, 'uriRegistered'),
     );
   }
 
@@ -61,6 +67,10 @@ abstract interface class LinuxIntegrationPort {
   Future<bool> requestRemoteDesktop();
 
   Future<bool> openCompanionSetup();
+
+  Future<bool> setStartAtLogin(bool enabled);
+
+  Future<bool> registerCopypasteUri();
 }
 
 class MethodChannelLinuxIntegrationPort implements LinuxIntegrationPort {
@@ -86,4 +96,15 @@ class MethodChannelLinuxIntegrationPort implements LinuxIntegrationPort {
   @override
   Future<bool> openCompanionSetup() async =>
       await _channel.invokeMethod<bool>('openCompanionSetup') ?? false;
+
+  @override
+  Future<bool> setStartAtLogin(bool enabled) async =>
+      await _channel.invokeMethod<bool>('setStartAtLogin', <String, Object>{
+        'enabled': enabled,
+      }) ??
+      false;
+
+  @override
+  Future<bool> registerCopypasteUri() async =>
+      await _channel.invokeMethod<bool>('registerCopypasteUri') ?? false;
 }

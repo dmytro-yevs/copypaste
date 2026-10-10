@@ -515,10 +515,16 @@ LinuxOnboardingController _completedLinuxOnboarding() {
 
 class _ReadyLinuxIntegration implements LinuxIntegrationPort {
   @override
+  Future<bool> registerCopypasteUri() async => true;
+
+  @override
   Future<bool> openCompanionSetup() async => true;
 
   @override
   Future<bool> requestRemoteDesktop() async => true;
+
+  @override
+  Future<bool> setStartAtLogin(bool enabled) async => true;
 
   @override
   Future<LinuxIntegrationStatus> status() async => const LinuxIntegrationStatus(

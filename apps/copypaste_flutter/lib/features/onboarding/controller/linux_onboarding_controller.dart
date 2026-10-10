@@ -88,6 +88,20 @@ class LinuxOnboardingController extends ChangeNotifier {
     await _refresh();
   });
 
+  Future<void> setStartAtLogin(bool enabled) => _run(() async {
+    if (!await _integration.setStartAtLogin(enabled)) {
+      _errorMessage = 'Start at login could not be updated.';
+    }
+    await _refresh();
+  });
+
+  Future<void> registerCopypasteUri() => _run(() async {
+    if (!await _integration.registerCopypasteUri()) {
+      _errorMessage = 'CopyPaste links could not be registered.';
+    }
+    await _refresh();
+  });
+
   Future<void> continueFromIntegration() async {
     if (_busy) return;
     await _run(_refresh);

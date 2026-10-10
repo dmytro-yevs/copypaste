@@ -191,6 +191,42 @@ class _IntegrationSetup extends StatelessWidget {
                     : LucideIcons.circleAlert,
               ),
               const Divider(),
+              SetupSettingRow(
+                icon: LucideIcons.power,
+                title: 'Start at login',
+                description: 'Open CopyPaste when you sign in.',
+                action: Checkbox(
+                  state: status.startAtLogin
+                      ? CheckboxState.checked
+                      : CheckboxState.unchecked,
+                  onChanged: controller.busy
+                      ? null
+                      : (state) => controller.setStartAtLogin(
+                          state == CheckboxState.checked,
+                        ),
+                  trailing: const Text('Enable'),
+                ),
+              ),
+              const Divider(),
+              SetupSettingRow(
+                icon: LucideIcons.link,
+                title: 'CopyPaste links',
+                description: status.uriRegistered
+                    ? 'CopyPaste links open in this app.'
+                    : 'Register CopyPaste links for pairing invitations.',
+                statusIcon: status.uriRegistered
+                    ? LucideIcons.circleCheck
+                    : null,
+                action: status.uriRegistered
+                    ? null
+                    : Button.secondary(
+                        onPressed: controller.busy
+                            ? null
+                            : controller.registerCopypasteUri,
+                        child: const Text('Register links'),
+                      ),
+              ),
+              const Divider(),
               const SetupSettingRow(
                 icon: LucideIcons.cameraOff,
                 title: 'Screenshot blocking',

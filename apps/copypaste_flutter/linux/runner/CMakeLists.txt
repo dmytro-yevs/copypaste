@@ -12,6 +12,7 @@ add_executable(${BINARY_NAME}
   "linux_quick_paste_window.cc"
   "linux_restart_helper.cc"
   "linux_release_page.cc"
+  "linux_xdg_startup.cc"
   "linux_x11_quick_paste.cc"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
 )
@@ -21,5 +22,5 @@ target_compile_features(${BINARY_NAME} PRIVATE cxx_std_17)
 target_compile_options(${BINARY_NAME} PRIVATE -Wextra -Werror)
 add_definitions(-DAPPLICATION_ID="${APPLICATION_ID}")
 add_definitions(-DCOPYPASTE_VERSION="${COPYPASTE_VERSION}")
-target_link_libraries(${BINARY_NAME} PRIVATE flutter PkgConfig::GTK PkgConfig::X11)
+target_link_libraries(${BINARY_NAME} PRIVATE flutter PkgConfig::GTK PkgConfig::GIO_UNIX PkgConfig::X11)
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
