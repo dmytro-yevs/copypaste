@@ -23,7 +23,13 @@ make_fixture() {
   mkdir -p "$tree/src"
   printf 'set(PROJECT_VERSION "%s.0")\n' "$version" > "$tree/CMakeLists.txt"
   if [[ "$version" == 6.0 ]]; then
-    cat > "$tree/src/CMakeLists.txt" <<'EOF'
+    {
+      for _ in $(seq 1 31); do printf '\n'; done
+      cat <<'EOF'
+target_compile_definitions(kwin PRIVATE
+    -DTRANSLATION_DOMAIN=\"kwin\"
+)
+
 target_sources(kwin PRIVATE
     client_machine.cpp
     colors/colordevice.cpp
@@ -33,6 +39,7 @@ target_sources(kwin PRIVATE
     compositor_x11.cpp
 )
 EOF
+    } > "$tree/src/CMakeLists.txt"
     cat > "$tree/src/wayland_server.cpp" <<'EOF'
 /*
  */
@@ -52,6 +59,10 @@ bool WaylandServer::init(const QString &socketName)
 EOF
   else
     cat > "$tree/src/CMakeLists.txt" <<'EOF'
+target_compile_definitions(kwin PRIVATE
+    -DTRANSLATION_DOMAIN=\"kwin\"
+)
+
 target_sources(kwin PRIVATE
     appmenu.cpp
     client_machine.cpp
@@ -125,6 +136,12 @@ EOF
   rg -F 'new CopyPasteClipboardBridge(this);' "$tree/src/wayland_server.cpp" >/dev/null
   rg -F 'QString rawAppId() const;' "$tree/src/xdgshellwindow.h" >/dev/null
   rg -F 'return m_shellSurface->windowClass();' "$tree/src/xdgshellwindow.cpp" >/dev/null
+  if [[ "$version" == 6.0 ]]; then
+    rg -F 'COPYPASTE_KWIN_6_0' "$tree/src/CMakeLists.txt" >/dev/null
+  elif rg -F 'COPYPASTE_KWIN_6_0' "$tree/src/CMakeLists.txt"; then
+    echo "ERROR: KWin 6.3 must use the serial selection API" >&2
+    exit 1
+  fi
 }
 
 bash -n "$root/apply-to-kwin-source.sh"
@@ -161,6 +178,9 @@ rg -F 'toplevel->surface()->client() != client' "$root/src/copypasteclipboardbri
 rg -F 'toplevel->rawAppId()' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
 rg -F 'kAuthorizerTimeoutMs = 250' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
 rg -F 'cancelPendingTransfers();' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
+rg -F '#if defined(COPYPASTE_KWIN_6_0)' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
+rg -F 'setSelection(source);' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
+rg -F 'setSelection(source, waylandServer()->display()->nextSerial());' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
 rg -F '++m_daemonOwnerEpoch;' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
 rg -F 'bridge->m_daemonOwnerEpoch != daemonOwnerEpoch' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
 for export in 'Q_SCRIPTABLE void Version(uint &version);' 'Q_SCRIPTABLE void Snapshot(' 'Q_SCRIPTABLE QByteArray Read(' \
