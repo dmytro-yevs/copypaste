@@ -1,7 +1,7 @@
 # Linux desktop integrations
 
 These optional companions provide Wayland Quick Paste focus restoration. They
-are shipped for GNOME Shell 46, 47, and 48, and for Plasma 6 through KWin's
+are shipped for GNOME Shell 46 and 47, and for Plasma 6 through KWin's
 public JavaScript scripting API. They use the session bus and require a running
 CopyPaste app with an active, user-consented RemoteDesktop portal session.
 
@@ -51,8 +51,12 @@ required asynchronous `Meta.SelectionSource` virtual method. Distribution builds
 run `make -C native` and stage its library and typelib in `native/lib` and
 `native/typelib` beside the extension; these generated binaries are not tracked.
 
-`Snapshot() -> (t, as)` and `OwnerChanged(t, as)` contain only a local sequence
-and MIME names. `Read(t, s, u) -> ay` requires the current sequence and a
+`Version() -> (u)` returns `2`. `Snapshot() -> (t, as, (s u u s))` and
+`OwnerChanged(t, as, (s u u s))` contain
+the selection sequence, MIME names, and a classified writer identity. The
+identity fields are status, PID, UID, and app ID. Status is exactly one of
+`verified`, `no-client`, `no-app-id`, or `ambiguous`; app ID is non-empty only
+for `verified`. `Read(t, s, u) -> ay` requires the current sequence and a
 requested size from 1 through 4 MiB. `Write(a{say}) -> t` accepts at most 64
 MIME names of at most 255 UTF-8 bytes. Each payload is at most 4 MiB and the
 whole write is at most the 32 MiB IPC frame limit, so a maximal primary payload
@@ -60,6 +64,13 @@ can keep its required privacy marker or fallback representation. The bridge
 rejects oversize data instead of dropping formats. A
 selection owner change cancels in-flight reads; no clipboard bytes are logged
 or included in signals.
+
+The identity tuple is captured on the owner transition before any payload
+transfer. The host rejects a non-empty exclusion list when the tuple is
+unknown and accepts it only while the sequence still matches the `Read()`
+request. The maintained Mutter export maps the exact Wayland source client to
+Mutter's own windows and returns an app ID only when every matching window has
+the same non-empty value.
 
 ## Bridge contract
 

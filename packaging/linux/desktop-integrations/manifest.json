@@ -14,7 +14,7 @@
       "extensionId": "copypaste-quick-paste@copypaste.app",
       "systemInstallPath": "/usr/share/gnome-shell/extensions/copypaste-quick-paste@copypaste.app",
       "userInstallPath": "$XDG_DATA_HOME/gnome-shell/extensions/copypaste-quick-paste@copypaste.app",
-      "supportedShellVersions": ["46", "47", "48"],
+      "supportedShellVersions": ["46", "47"],
       "nativeBuild": "make -C native",
       "nativeArtifacts": ["native/lib/libcopypaste_clipboard_source.so", "native/typelib/CopyPasteClipboard-1.0.typelib"],
       "enable": "user"
