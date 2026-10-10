@@ -210,7 +210,6 @@ export default class CopyPasteQuickPasteExtension extends Extension {
             return;
         if (action === 'close-main') {
             this._qualification = {transactionId, pid};
-            this._reportQualification(transactionId, pid, true);
             const unmanaging = window.connect('unmanaging', () => {
                 this._reportQualification(transactionId, pid, false);
             });
