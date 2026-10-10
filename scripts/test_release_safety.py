@@ -723,13 +723,20 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             artifacts = root / "artifacts"
+            previous_artifacts = root / "previous-artifacts"
             artifacts.mkdir()
+            previous_artifacts.mkdir()
             for architecture in ("x86_64", "aarch64"):
                 for extension in ("AppImage", "deb", "rpm"):
                     (artifacts / f"CopyPaste-v1.2.3-linux-{architecture}.{extension}").write_bytes(b"package")
+                    (previous_artifacts / f"CopyPaste-v1.2.2-linux-{architecture}.{extension}").write_bytes(b"prior-package")
             package_rows = lambda architecture: [{
                 "name": f"CopyPaste-v1.2.3-linux-{architecture}.{extension}",
                 "sha256": hashlib.sha256(b"package").hexdigest(), "size_bytes": len(b"package"),
+            } for extension in ("AppImage", "deb", "rpm")]
+            previous_package_rows = lambda architecture: [{
+                "name": f"CopyPaste-v1.2.2-linux-{architecture}.{extension}",
+                "sha256": hashlib.sha256(b"prior-package").hexdigest(), "size_bytes": len(b"prior-package"),
             } for extension in ("AppImage", "deb", "rpm")]
             for architecture in ("x86_64", "aarch64"):
                 for desktop in ("GNOME", "KDE"):
@@ -745,6 +752,22 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                         appimage_argv = ["env", "APPIMAGE_EXTRACT_AND_RUN=1", appimage["path"], "--appimage-extract"]
                         native_argv = (["sudo", "apt-get", "install", "--yes", native["path"]]
                                        if native_format == "deb" else ["sudo", "dnf", "--assumeyes", "install", native["path"]])
+                        prior_installed = [row for row in previous_package_rows(architecture) if row["name"].endswith((".AppImage", f".{native_format}"))]
+                        prior_appimage = next(row for row in prior_installed if row["name"].endswith(".AppImage"))
+                        prior_native = next(row for row in prior_installed if row["name"].endswith(f".{native_format}"))
+                        prior_appimage = {"format": "AppImage", "path": f"/driver/{prior_appimage['name']}", **prior_appimage}
+                        prior_native = {"format": native_format, "path": f"/driver/{prior_native['name']}", **prior_native}
+                        prior_appimage_argv = ["env", "APPIMAGE_EXTRACT_AND_RUN=1", prior_appimage["path"], "--appimage-extract"]
+                        prior_native_argv = (["sudo", "apt-get", "install", "--yes", prior_native["path"]]
+                                             if native_format == "deb" else ["sudo", "dnf", "--assumeyes", "install", prior_native["path"]])
+                        upgrade = {
+                            "prior": {"version": "1.2.2", "packages": [prior_appimage, prior_native], "appimage_extract_argv": prior_appimage_argv, "native_install_argv": prior_native_argv},
+                            "current": {"version": "1.2.3", "packages": [appimage, native], "appimage_extract_argv": appimage_argv, "native_install_argv": native_argv},
+                            "seeds": [
+                                {"format": "AppImage", "source_executable": {"path": "/driver/appimage-prior/squashfs-root/usr/lib/copypaste/copypaste", "sha256": "d" * 64, "size_bytes": 1}, "canary": {"id": "prior-appimage", "content_sha256": verifier["UPGRADE_CANARY_SHA256"], "executable_sha256": "d" * 64}},
+                                {"format": native_format, "source_executable": {"path": "/usr/lib/copypaste/copypaste", "sha256": "f" * 64, "size_bytes": 1}, "canary": {"id": "prior-native", "content_sha256": verifier["UPGRADE_CANARY_SHA256"], "executable_sha256": "f" * 64}},
+                            ],
+                        }
                         compositor_runtime = {"schema": 1, "producer_run_id": "1", "commit": "a" * 40, "runtime_id": "fixture", "desktop": desktop, "architecture": architecture, "distribution": "ubuntu" if desktop == "GNOME" else "fedora", "format": native_format, "package": {"name": "runtime-package", "sha256": "a" * 64, "size_bytes": 1}, "runtime_receipt": {"name": "runtime-receipt", "sha256": "b" * 64, "size_bytes": 1}}
                         trace = {
                             "schema": 1, "version": "1.2.3", "commit": "a" * 40,
@@ -754,15 +777,18 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                             "installed_formats": ["AppImage", native_format],
                             "environment": {"distribution": "ubuntu" if desktop == "GNOME" else "fedora", "distribution_version": "24.04"},
                             "commands": [
+                                {"argv": prior_appimage_argv, "returncode": 0, "assertions": ["package_upgrade"]},
+                                {"argv": prior_native_argv, "returncode": 0, "assertions": ["package_upgrade"]},
                                 {"argv": appimage_argv, "returncode": 0, "assertions": ["package_install"]},
                                 {"argv": native_argv, "returncode": 0, "assertions": ["package_install"]},
-                                {"argv": ["native-probe"], "returncode": 0, "assertions": sorted(assertions - {"modules", "package_install"})},
+                                {"argv": ["native-probe"], "returncode": 0, "assertions": sorted(assertions - {"modules", "package_install", "package_upgrade"})},
                             ],
                             "ipc": module_ipc(),
                             "installation": {
                                 "formats": ["AppImage", native_format], "packages": [appimage, native],
                                 "appimage_extract_argv": appimage_argv, "native_install_argv": native_argv,
                             },
+                            "upgrade": upgrade,
                             "runtimes": [
                                 {"format": "AppImage", "gui_owned_daemon": True, "executables": {name: {"path": f"/runtime/squashfs-root/usr/lib/copypaste/{name}", "sha256": "e" * 64, "size_bytes": 1} for name in ("copypaste", "copypaste-daemon", "copypaste-cli")}},
                                 {"format": native_format, "gui_owned_daemon": True, "executables": {name: {"path": f"/usr/lib/copypaste/{name}", "sha256": "e" * 64, "size_bytes": 1} for name in ("copypaste", "copypaste-daemon", "copypaste-cli")}},
@@ -781,10 +807,12 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                             "assertions": {name: True for name in assertions},
                             "compositor_runtime": compositor_runtime,
                             "packages": package_rows(architecture),
+                            "previous_packages": previous_package_rows(architecture),
+                            "upgrade": upgrade,
                             "trace": {"name": trace_name, "sha256": trace_digest, "size_bytes": (root / trace_name).stat().st_size},
                             "evidence": [{"name": trace_name, "sha256": trace_digest, "size_bytes": (root / trace_name).stat().st_size}],
                         }))
-            verify(root, artifacts, "1.2.3", "a" * 40, "123", "456")
+            verify(root, artifacts, "1.2.3", "a" * 40, "123", "456", previous_artifacts=previous_artifacts, previous_version="1.2.2")
             trace_path = root / "linux-native-x86_64-gnome-x11.trace.json"
             x11 = root / "linux-native-x86_64-gnome-x11.json"
             original_trace = json.loads(trace_path.read_text())
@@ -798,12 +826,28 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                 receipt["trace"] = attachment
                 receipt["evidence"] = [attachment]
                 with self.assertRaisesRegex(ValueError, message):
-                    verifier["verify_trace"](root, receipt, "x86_64", "GNOME", "x11", "1.2.3", "a" * 40, "123", "456", verifier["assertion_set"]("prior_release", "x11"))
+                    verifier["verify_trace"](root, receipt, "x86_64", "GNOME", "x11", "1.2.3", "a" * 40, "123", "456", verifier["assertion_set"]("prior_release", "x11"), "1.2.2", verifier["expected_packages"](previous_artifacts, "1.2.2", "x86_64"))
                 trace_path.write_text(json.dumps(original_trace))
             rejects_trace(lambda trace: trace["installation"].update({"formats": ["AppImage", "deb", "deb"]}), "installation formats")
             rejects_trace(lambda trace: trace["installation"]["appimage_extract_argv"].append("--extra"), "installation commands")
             rejects_trace(lambda trace: trace["installation"]["native_install_argv"].__setitem__(-1, "/driver/substituted.deb"), "package manager command")
             rejects_trace(lambda trace: trace["runtimes"][1]["executables"]["copypaste"].__setitem__("sha256", "f" * 64), "executables differ")
+            def rejects_upgrade(mutator, message):
+                trace = deepcopy(original_trace)
+                receipt = deepcopy(original_receipt)
+                mutator(trace["upgrade"])
+                receipt["upgrade"] = deepcopy(trace["upgrade"])
+                trace_path.write_text(json.dumps(trace))
+                attachment = {"name": trace_path.name, "sha256": hashlib.sha256(trace_path.read_bytes()).hexdigest(), "size_bytes": trace_path.stat().st_size}
+                receipt["trace"] = attachment
+                receipt["evidence"] = [attachment]
+                x11.write_text(json.dumps(receipt))
+                with self.assertRaisesRegex(ValueError, message):
+                    verify(root, artifacts, "1.2.3", "a" * 40, "123", "456", previous_artifacts=previous_artifacts, previous_version="1.2.2")
+                trace_path.write_text(json.dumps(original_trace))
+                x11.write_text(json.dumps(original_receipt))
+            rejects_upgrade(lambda upgrade: upgrade["prior"].__setitem__("version", "1.2.1"), "prior upgrade transition")
+            rejects_upgrade(lambda upgrade: upgrade["prior"]["packages"][0].__setitem__("sha256", "f" * 64), "prior upgrade digest")
             trace = json.loads(trace_path.read_text())
             trace["commands"][0]["argv"] = ["unix-ipc", "modules"]
             trace_path.write_text(json.dumps(trace))
@@ -816,7 +860,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
             receipt["evidence"] = [trace_attachment]
             x11.write_text(json.dumps(receipt))
             with self.assertRaisesRegex(ValueError, "typed IPC"):
-                verify(root, artifacts, "1.2.3", "a" * 40, "123", "456")
+                verify(root, artifacts, "1.2.3", "a" * 40, "123", "456", previous_artifacts=previous_artifacts, previous_version="1.2.2")
             trace["commands"][0]["argv"] = ["native-probe"]
             trace_path.write_text(json.dumps(trace))
             receipt = json.loads(x11.read_text())
@@ -824,7 +868,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
             receipt["assertions"]["portal_keyboard_grant"] = True
             x11.write_text(json.dumps(receipt))
             with self.assertRaisesRegex(ValueError, "assertions are incomplete"):
-                verify(root, artifacts, "1.2.3", "a" * 40, "123", "456")
+                verify(root, artifacts, "1.2.3", "a" * 40, "123", "456", previous_artifacts=previous_artifacts, previous_version="1.2.2")
             receipt["assertions"].pop("portal_keyboard_grant")
             receipt["assertions"]["native_x11_keyboard_input"] = True
             x11.write_text(json.dumps(receipt))
@@ -833,7 +877,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
             receipt["assertions"]["package_upgrade"] = "true"
             broken.write_text(json.dumps(receipt))
             with self.assertRaisesRegex(ValueError, "assertions are incomplete"):
-                verify(root, artifacts, "1.2.3", "a" * 40, "123", "456")
+                verify(root, artifacts, "1.2.3", "a" * 40, "123", "456", previous_artifacts=previous_artifacts, previous_version="1.2.2")
 
     def test_linux_native_producer_owns_trace_and_artifact_digests(self):
         producer = runpy.run_path(str(ROOT / "scripts/release/produce-linux-native-qualification.py"))
@@ -863,14 +907,18 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
             driver.write_text(
                 "#!/usr/bin/env python3\nimport hashlib,json,os,sys\n"
                 "def value(flag): return sys.argv[sys.argv.index(flag)+1]\n"
-                "artifacts=value('--artifacts'); appimage=os.path.join(artifacts,'CopyPaste-v1.2.3-linux-x86_64.AppImage'); native=os.path.join(artifacts,'CopyPaste-v1.2.3-linux-x86_64.deb')\n"
+                "artifacts=value('--artifacts'); previous=value('--previous-artifacts'); appimage=os.path.join(artifacts,'CopyPaste-v1.2.3-linux-x86_64.AppImage'); native=os.path.join(artifacts,'CopyPaste-v1.2.3-linux-x86_64.deb'); prior_appimage=os.path.join(previous,'CopyPaste-v1.2.2-linux-x86_64.AppImage'); prior_native=os.path.join(previous,'CopyPaste-v1.2.2-linux-x86_64.deb')\n"
                 "def package(path,format):\n d=hashlib.sha256(open(path,'rb').read()).hexdigest(); return {'format':format,'name':os.path.basename(path),'path':os.path.realpath(path),'sha256':d,'size_bytes':os.path.getsize(path)}\n"
-                "appimage_argv=['env','APPIMAGE_EXTRACT_AND_RUN=1',appimage,'--appimage-extract']; native_argv=['sudo','apt-get','install','--yes',native]\n"
+                "appimage_argv=['env','APPIMAGE_EXTRACT_AND_RUN=1',appimage,'--appimage-extract']; native_argv=['sudo','apt-get','install','--yes',native]; prior_appimage_argv=['env','APPIMAGE_EXTRACT_AND_RUN=1',prior_appimage,'--appimage-extract']; prior_native_argv=['sudo','apt-get','install','--yes',prior_native]\n"
+                "print('COPYPASTE_QUALIFICATION_COMMAND '+json.dumps({'argv':prior_appimage_argv,'returncode':0,'assertions':['package_upgrade']}))\n"
+                "print('COPYPASTE_QUALIFICATION_COMMAND '+json.dumps({'argv':prior_native_argv,'returncode':0,'assertions':['package_upgrade']}))\n"
                 "print('COPYPASTE_QUALIFICATION_COMMAND '+json.dumps({'argv':appimage_argv,'returncode':0,'assertions':['package_install']}))\n"
                 "print('COPYPASTE_QUALIFICATION_COMMAND '+json.dumps({'argv':native_argv,'returncode':0,'assertions':['package_install']}))\n"
                 "print('COPYPASTE_QUALIFICATION_COMMAND '+json.dumps({'argv':['probe'],'returncode':0,'assertions':" + repr(sorted(driver_assertions - {"modules", "package_install"})) + "}))\n"
                 "for row in " + repr(module_ipc) + ": print('COPYPASTE_QUALIFICATION_IPC '+json.dumps(row))\n"
                 "print('COPYPASTE_QUALIFICATION_INSTALL '+json.dumps({'formats':['AppImage','deb'],'packages':[package(appimage,'AppImage'),package(native,'deb')],'appimage_extract_argv':appimage_argv,'native_install_argv':native_argv}))\n"
+                "canary=hashlib.sha256(b'copypaste-upgrade-canary').hexdigest(); source_app={'path':'/runtime/appimage-prior/squashfs-root/usr/lib/copypaste/copypaste','sha256':'d'*64,'size_bytes':1}; source_native={'path':'/usr/lib/copypaste/copypaste','sha256':'f'*64,'size_bytes':1}\n"
+                "print('COPYPASTE_QUALIFICATION_UPGRADE '+json.dumps({'prior':{'version':'1.2.2','packages':[package(prior_appimage,'AppImage'),package(prior_native,'deb')],'appimage_extract_argv':prior_appimage_argv,'native_install_argv':prior_native_argv},'current':{'version':'1.2.3','packages':[package(appimage,'AppImage'),package(native,'deb')],'appimage_extract_argv':appimage_argv,'native_install_argv':native_argv},'seeds':[{'format':'AppImage','source_executable':source_app,'canary':{'id':'prior-appimage','content_sha256':canary,'executable_sha256':source_app['sha256']}},{'format':'deb','source_executable':source_native,'canary':{'id':'prior-native','content_sha256':canary,'executable_sha256':source_native['sha256']}}]}))\n"
                 "for format in ['AppImage','deb']: print('COPYPASTE_QUALIFICATION_RUNTIME '+json.dumps({'format':format,'gui_owned_daemon':True,'executables':{name:{'path':('/runtime/squashfs-root/usr/lib/copypaste/' if format=='AppImage' else '/usr/lib/copypaste/')+name,'sha256':'e'*64,'size_bytes':1} for name in ['copypaste','copypaste-daemon','copypaste-cli']}}))\n",
                 encoding="utf-8",
             )
