@@ -200,7 +200,7 @@ class FlutterDesktopWindowHost
         ..setTooltip('CopyPaste')
         ..setContextMenu(menu)
         ..setContextMenuTrigger(
-          Platform.isMacOS
+          (Platform.isMacOS || Platform.isLinux)
               ? ContextMenuTrigger.clicked
               : ContextMenuTrigger.rightClicked,
         );
