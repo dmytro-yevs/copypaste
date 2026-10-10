@@ -133,6 +133,30 @@ bool current_user_regular_file(const std::string& path) {
       metadata.st_uid == getuid();
 }
 
+bool has_managed_desktop_key(const gchar* contents, gsize length) {
+  bool desktop_entry = false;
+  bool managed = false;
+  const gchar* line = contents;
+  const gchar* end = contents + length;
+  while (line < end) {
+    const gchar* next = static_cast<const gchar*>(
+        memchr(line, '\n', static_cast<size_t>(end - line)));
+    const gsize line_length = next == nullptr
+        ? static_cast<gsize>(end - line)
+        : static_cast<gsize>(next - line);
+    const std::string value(line, line_length);
+    if (value == "[Desktop Entry]") {
+      desktop_entry = true;
+    } else if (desktop_entry && !value.empty() && value.front() == '[') {
+      desktop_entry = false;
+    } else if (desktop_entry && value == kManagedKey) {
+      managed = true;
+    }
+    line = next == nullptr ? end : next + 1;
+  }
+  return managed;
+}
+
 }  // namespace
 
 LinuxXdgStartup::LinuxXdgStartup(std::string executable,
@@ -213,33 +237,24 @@ std::string LinuxXdgStartup::DesktopEntryForExecutable(
   return entry;
 }
 
-bool LinuxXdgStartup::owns_file(const std::string& path) const {
-  if (!current_user_regular_file(path)) return false;
-  gchar* contents = nullptr;
-  gsize length = 0;
-  const bool owned = g_file_get_contents(path.c_str(), &contents, &length,
-                                         nullptr) &&
-      g_strstr_len(contents, static_cast<gssize>(length), kManagedKey) != nullptr;
-  g_free(contents);
-  return owned;
-}
-
 bool LinuxXdgStartup::owns_entry_for_current_executable(
     const std::string& path, bool autostart) const {
-  if (!owns_file(path)) return false;
+  if (!current_user_regular_file(path)) return false;
   gchar* contents = nullptr;
   gsize length = 0;
   if (!g_file_get_contents(path.c_str(), &contents, &length, nullptr)) return false;
   const std::string expected = DesktopEntryForExecutable(executable_, autostart);
-  const bool matches = expected.size() == length &&
+  const bool owned = has_managed_desktop_key(contents, length) &&
+      expected.size() == length &&
       std::memcmp(contents, expected.data(), length) == 0;
   g_free(contents);
-  return matches;
+  return owned;
 }
 
 bool LinuxXdgStartup::write_owned_entry(const std::string& path, bool autostart,
                                          GError** error) const {
-  if (g_file_test(path.c_str(), G_FILE_TEST_EXISTS) && !owns_file(path)) {
+  if (g_file_test(path.c_str(), G_FILE_TEST_EXISTS) &&
+      !owns_entry_for_current_executable(path, autostart)) {
     g_set_error(error, G_FILE_ERROR, G_FILE_ERROR_ACCES,
                 "Refusing to replace an XDG entry not owned by CopyPaste.");
     return false;
@@ -263,7 +278,7 @@ bool LinuxXdgStartup::SetStartAtLogin(bool enabled, GError** error) const {
   const std::string path = autostart_path();
   if (enabled) return write_owned_entry(path, true, error);
   if (!g_file_test(path.c_str(), G_FILE_TEST_EXISTS)) return true;
-  if (!owns_file(path)) {
+  if (!owns_entry_for_current_executable(path, true)) {
     g_set_error(error, G_FILE_ERROR, G_FILE_ERROR_ACCES,
                 "Refusing to remove an XDG entry not owned by CopyPaste.");
     return false;
