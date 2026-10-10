@@ -28,6 +28,31 @@ on:
         required: false
         type: string
         default: ""
+      linux_qualification_only:
+        description: Run only the exact Linux native qualification against completed staging inputs
+        required: false
+        type: boolean
+        default: false
+      supabase_module_run_id:
+        description: Completed exact-source unpublished Supabase module run
+        required: false
+        type: string
+        default: ""
+      semantic_search_module_run_id:
+        description: Completed exact-source unpublished Semantic Search module run
+        required: false
+        type: string
+        default: ""
+      ocr_module_run_id:
+        description: Completed exact-source unpublished OCR module run
+        required: false
+        type: string
+        default: ""
+      previous_linux_artifact_run_id:
+        description: Optional completed earlier Linux staging run for upgrade qualification
+        required: false
+        type: string
+        default: ""
   push:
     tags: ["v*"]
 
@@ -53,6 +78,7 @@ jobs:
       linux_required: ${{ steps.version.outputs.linux_required }}
       linux_artifact_run_id: ${{ steps.version.outputs.linux_artifact_run_id }}
       compositor_runtime_required: ${{ steps.version.outputs.compositor_runtime_required }}
+      linux_qualification_only: ${{ steps.version.outputs.linux_qualification_only }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -63,6 +89,10 @@ jobs:
           QUALIFIED_RUN_ID: ${{ inputs.qualified_run_id }}
           LINUX_ARTIFACT_RUN_ID: ${{ inputs.linux_artifact_run_id }}
           COMPOSITOR_RUNTIME_RUN_ID: ${{ inputs.compositor_runtime_run_id }}
+          LINUX_QUALIFICATION_ONLY: ${{ inputs.linux_qualification_only }}
+          SUPABASE_MODULE_RUN_ID: ${{ inputs.supabase_module_run_id }}
+          SEMANTIC_SEARCH_MODULE_RUN_ID: ${{ inputs.semantic_search_module_run_id }}
+          OCR_MODULE_RUN_ID: ${{ inputs.ocr_module_run_id }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -82,6 +112,12 @@ jobs:
           reuse_qualified=false
           linux_artifact_run_id="$GITHUB_RUN_ID"
           compositor_runtime_required=false
+          linux_qualification_only=false
+          if [[ "${LINUX_QUALIFICATION_ONLY:-false}" == true ]]; then
+            [[ "${REQUESTED_PUBLISH:-false}" == false ]]
+            for value in "$LINUX_ARTIFACT_RUN_ID" "$COMPOSITOR_RUNTIME_RUN_ID" "$SUPABASE_MODULE_RUN_ID" "$SEMANTIC_SEARCH_MODULE_RUN_ID" "$OCR_MODULE_RUN_ID"; do [[ "$value" =~ ^[1-9][0-9]*$ ]]; done
+            linux_qualification_only=true
+          fi
           if [[ -n "${QUALIFIED_RUN_ID:-}" ]]; then
             [[ "$QUALIFIED_RUN_ID" =~ ^[1-9][0-9]*$ ]]
             [[ "${REQUESTED_PUBLISH:-false}" == true ]]
@@ -173,11 +209,25 @@ jobs:
             echo "linux_required=$linux_required"
             echo "linux_artifact_run_id=$linux_artifact_run_id"
             echo "compositor_runtime_required=$compositor_runtime_required"
+            echo "linux_qualification_only=$linux_qualification_only"
           } >> "$GITHUB_OUTPUT"
+
+  linux-native-bootstrap:
+    name: Run exact staged Linux native qualification
+    needs: preflight
+    if: needs.preflight.outputs.linux_qualification_only == 'true'
+    uses: ./.github/workflows/linux-native-qualification.yml
+    with:
+      artifact_run_id: ${{ inputs.linux_artifact_run_id }}
+      previous_artifact_run_id: ${{ inputs.previous_linux_artifact_run_id }}
+      supabase_module_run_id: ${{ inputs.supabase_module_run_id }}
+      semantic_search_module_run_id: ${{ inputs.semantic_search_module_run_id }}
+      ocr_module_run_id: ${{ inputs.ocr_module_run_id }}
+      compositor_runtime_run_id: ${{ inputs.compositor_runtime_run_id }}
 
   macos:
     needs: preflight
-    if: needs.preflight.outputs.reuse_qualified != 'true'
+    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true'
     runs-on: macos-14
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -247,7 +297,7 @@ jobs:
 
   android:
     needs: preflight
-    if: needs.preflight.outputs.reuse_qualified != 'true'
+    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -327,7 +377,7 @@ jobs:
 
   windows:
     needs: preflight
-    if: needs.preflight.outputs.reuse_qualified != 'true'
+    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true'
     runs-on: windows-2022
     env:
       OPENSSL_NO_VENDOR: "1"
@@ -403,7 +453,7 @@ jobs:
   linux:
     name: Linux build (${{ matrix.architecture }})
     needs: preflight
-    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_required == 'true' && needs.preflight.outputs.linux_artifact_run_id == github.run_id
+    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && needs.preflight.outputs.linux_artifact_run_id == github.run_id
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -496,7 +546,7 @@ jobs:
   compositor-runtime-build:
     name: Build opt-in compositor runtime companions
     needs: preflight
-    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && inputs.compositor_runtime_run_id == ''
+    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && inputs.compositor_runtime_run_id == ''
     uses: ./.github/workflows/compositor-runtime.yml
     with:
       version: ${{ needs.preflight.outputs.version }}
@@ -509,7 +559,7 @@ jobs:
   compositor-runtime-external:
     name: Verify staged compositor runtime companions
     needs: preflight
-    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && inputs.compositor_runtime_run_id != ''
+    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && inputs.compositor_runtime_run_id != ''
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -532,7 +582,7 @@ jobs:
   compositor-runtime-public:
     name: Sign and bind opt-in compositor runtime companions
     needs: [preflight, compositor-runtime-build, compositor-runtime-external]
-    if: ${{ always() && needs.preflight.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && (needs.compositor-runtime-build.result == 'success' || needs.compositor-runtime-external.result == 'success') }}
+    if: ${{ always() && needs.preflight.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && (needs.compositor-runtime-build.result == 'success' || needs.compositor-runtime-external.result == 'success') }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
