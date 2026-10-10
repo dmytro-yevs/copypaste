@@ -110,13 +110,28 @@ void test_autostart_is_owned_and_atomic() {
   g_assert_no_error(error);
   g_assert_false(g_file_test(path.c_str(), G_FILE_TEST_EXISTS));
 
-  g_assert_true(g_file_set_contents(path.c_str(), "[Desktop Entry]\nName=Other\n",
-                                    -1, &error));
+  const std::string user_entry =
+      "[Desktop Entry]\n"
+      "Name=User CopyPaste\n"
+      "Comment=X-CopyPaste-Managed=true\n"
+      "X-User-Note=X-CopyPaste-Managed=true\n"
+      "Exec=/usr/bin/user-command %U\n";
+  g_assert_true(g_file_set_contents(path.c_str(), user_entry.c_str(), -1, &error));
   g_assert_no_error(error);
   g_assert_false(startup.SetStartAtLogin(false, &error));
   g_assert_error(error, G_FILE_ERROR, G_FILE_ERROR_ACCES);
   g_clear_error(&error);
+  g_assert_false(startup.SetStartAtLogin(true, &error));
+  g_assert_error(error, G_FILE_ERROR, G_FILE_ERROR_ACCES);
+  g_clear_error(&error);
   g_assert_true(g_file_test(path.c_str(), G_FILE_TEST_EXISTS));
+  gchar* user_contents = nullptr;
+  gsize user_length = 0;
+  g_assert_true(
+      g_file_get_contents(path.c_str(), &user_contents, &user_length, &error));
+  g_assert_no_error(error);
+  g_assert_cmpstr(user_contents, ==, user_entry.c_str());
+  g_free(user_contents);
 }
 
 void test_uri_registration_uses_private_xdg_home() {
