@@ -25,7 +25,7 @@ jobs:
             apt-get update
             DEBIAN_FRONTEND=noninteractive apt-get install --yes at-spi2-core dbus systemd libglib2.0-bin
           else
-            dnf --assumeyes install at-spi2-core dbus-daemon systemd
+            dnf --assumeyes install at-spi2-core dbus-daemon systemd gtk3
           fi
           dbus-run-session -- bash -ceu '
             gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.a11y.Bus.GetAddress >/dev/null
