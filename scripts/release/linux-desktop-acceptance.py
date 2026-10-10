@@ -36,6 +36,7 @@ CLIPBOARD_PROVIDER = Path(__file__).with_name("linux-clipboard-provider.py").res
 SNI_NAME = re.compile(r"^org\.kde\.StatusNotifierItem-(?P<pid>[1-9][0-9]*)-(?P<index>[1-9][0-9]*)$")
 SERIAL = re.compile(r"\bserial=(?P<serial>[0-9]+)\b")
 REPLY_SERIAL = re.compile(r"\breply_serial=(?P<serial>[0-9]+)\b")
+CALL_SENDER = re.compile(r"\bsender=(?P<sender>:[0-9]+\.[0-9]+)\b")
 UINT32 = re.compile(r"^\s*uint32\s+(?P<value>[0-9]+)\s*$")
 QUOTED_STRING = re.compile(r'^s\s+"(?P<value>(?:[^"\\]|\\.)*)"\s*$')
 MONITOR_STRING = re.compile(r'^\s*string\s+"(?P<value>(?:[^"\\]|\\.)*)"\s*$')
@@ -278,12 +279,15 @@ class NotificationTranscript:
     awaiting_app_name: bool = False
     awaiting_reply_id: bool = False
     server_owner: str = ""
+    caller_owner: str = ""
     notification_id: int | None = None
 
     def consume(self, line: str) -> None:
         if "interface=org.freedesktop.Notifications; member=Notify" in line:
             match = SERIAL.search(line)
             self.call_serial = int(match.group("serial")) if match else None
+            sender = CALL_SENDER.search(line)
+            self.caller_owner = sender.group("sender") if sender else ""
             self.awaiting_app_name = self.call_serial is not None
             return
         if self.awaiting_app_name:
@@ -351,6 +355,7 @@ def run_notification_capture(
     cli: Path,
     socket_path: Path,
     capture_command: list[str],
+    gui_pid: int,
 ) -> tuple[NotificationTranscript, CommandResult]:
     cli_environment = {**environment, "COPYPASTE_SOCKET": str(socket_path)}
     config = require_ok(
@@ -394,6 +399,8 @@ def run_notification_capture(
             while b"\n" in buffered:
                 raw, buffered = buffered.split(b"\n", 1)
                 transcript.consume(raw.decode("utf-8", errors="replace"))
+                if transcript.call_serial is not None and not transcript.awaiting_app_name and transcript.caller_owner:
+                    require_bus_credentials(environment, transcript.caller_owner, gui_pid)
                 if transcript.notification_id is not None:
                     return transcript, capture
         raise AcceptanceError("desktop notification server did not accept CopyPaste's captured-clip notification")
@@ -416,7 +423,7 @@ def start_wayland_qualification(action: str) -> str:
     if action not in {"close-main", "quick-paste"}:
         raise AcceptanceError("unsupported Wayland qualification action")
     capability = os.environ.get("COPYPASTE_QUALIFICATION_CAPABILITY")
-    if not capability:
+    if not capability or not re.fullmatch(r"[0-9a-fA-F]{64}", capability):
         raise AcceptanceError("Wayland qualification capability is unavailable")
     try:
         from gi.repository import Gio, GLib  # type: ignore[import-not-found]
@@ -468,7 +475,7 @@ def qualify(args: argparse.Namespace) -> None:
     wait_for_x11_map_state(environment, window, "IsViewable")
 
     notification, capture = run_notification_capture(
-        environment, args.cli, args.socket, parse_capture_command(args.capture_command),
+        environment, args.cli, args.socket, parse_capture_command(args.capture_command), args.gui_pid,
     )
     if notification.notification_id is None:
         raise AcceptanceError("desktop notification server did not return a notification id")

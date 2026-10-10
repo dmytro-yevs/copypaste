@@ -185,8 +185,13 @@ bool authorised_child(const gchar* sender) {
 }
 
 bool qualification_enabled() {
-  return g_strcmp0(g_getenv("COPYPASTE_QUALIFICATION"), "1") == 0 &&
-      g_getenv("COPYPASTE_QUALIFICATION_CAPABILITY") != nullptr;
+  const gchar* capability = g_getenv("COPYPASTE_QUALIFICATION_CAPABILITY");
+  if (g_strcmp0(g_getenv("COPYPASTE_QUALIFICATION"), "1") != 0 ||
+      capability == nullptr || strlen(capability) != 64) return false;
+  for (const gchar* value = capability; *value != '\0'; ++value) {
+    if (!g_ascii_isxdigit(*value)) return false;
+  }
+  return true;
 }
 
 bool authorised_qualification(const gchar* sender, const gchar* capability) {
@@ -1386,6 +1391,17 @@ void bridge_call(GDBusConnection*, const gchar* sender, const gchar*, const gcha
                                   qualification_action.c_str(), static_cast<guint32>(getpid())));
     return;
   }
+  if (g_strcmp0(method, "QualificationEnabled") == 0) {
+    if (!authorised_companion(sender)) {
+      g_dbus_method_invocation_return_dbus_error(
+          invocation, "app.copypaste.WaylandIntegration.Error.Unauthorized",
+          "Qualification is unavailable.");
+      return;
+    }
+    g_dbus_method_invocation_return_value(
+        invocation, g_variant_new("(b)", qualification_enabled()));
+    return;
+  }
   if (g_strcmp0(method, "QualificationObserved") == 0) {
     const gchar* transaction = nullptr;
     guint32 pid = 0;
@@ -1536,6 +1552,7 @@ void bridge_bus_acquired(GDBusConnection* connection, const gchar*, gpointer) {
       "<method name='OpenSettings'><arg type='s' direction='in'/><arg type='b' direction='out'/></method>"
       "<method name='StartQualification'><arg type='s' direction='in'/><arg type='s' direction='in'/><arg type='s' direction='out'/></method>"
       "<method name='AwaitQualification'><arg type='s' direction='out'/><arg type='s' direction='out'/><arg type='u' direction='out'/></method>"
+      "<method name='QualificationEnabled'><arg type='b' direction='out'/></method>"
       "<method name='QualificationObserved'><arg type='s' direction='in'/><arg type='u' direction='in'/><arg type='s' direction='in'/><arg type='s' direction='in'/><arg type='b' direction='in'/></method>"
       "<signal name='QualificationRequested'><arg type='s'/><arg type='u'/><arg type='s'/></signal>"
       "<signal name='QualificationObservation'><arg type='s'/><arg type='u'/><arg type='s'/><arg type='b'/></signal>"

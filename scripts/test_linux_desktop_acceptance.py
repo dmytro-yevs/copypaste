@@ -3,6 +3,7 @@
 
 import importlib.util
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -89,6 +90,18 @@ class LinuxDesktopAcceptanceTest(unittest.TestCase):
             MODULE.parse_capture_command('sh -c true')
         with self.assertRaisesRegex(MODULE.AcceptanceError, "GTK clipboard provider"):
             MODULE.parse_capture_command('["true"]')
+
+    def test_wayland_capability_requires_256_bits(self):
+        prior = os.environ.get('COPYPASTE_QUALIFICATION_CAPABILITY')
+        try:
+            os.environ['COPYPASTE_QUALIFICATION_CAPABILITY'] = 'not-a-capability'
+            with self.assertRaisesRegex(MODULE.AcceptanceError, 'capability'):
+                MODULE.start_wayland_qualification('close-main')
+        finally:
+            if prior is None:
+                os.environ.pop('COPYPASTE_QUALIFICATION_CAPABILITY', None)
+            else:
+                os.environ['COPYPASTE_QUALIFICATION_CAPABILITY'] = prior
 
 
 if __name__ == "__main__":
