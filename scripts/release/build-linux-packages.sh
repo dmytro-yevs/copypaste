@@ -25,6 +25,11 @@ INTEGRATIONS="$ROOT/packaging/linux/desktop-integrations"
   echo "ERROR: build-linux-flutter.sh must stage app, daemon, and CLI first" >&2
   exit 1
 }
+mapfile -t camera_plugins < <(find "$BUNDLE" -type f -name 'libcamera_desktop_plugin.so' -print | sort)
+[[ "${#camera_plugins[@]}" == 1 ]] || {
+  echo "ERROR: Linux camera plugin must be present exactly once in the staged Flutter bundle" >&2
+  exit 1
+}
 NATIVE_SHIM="$INTEGRATIONS/gnome-shell-extension/native"
 make -C "$NATIVE_SHIM"
 [[ -s "$NATIVE_SHIM/build/libcopypaste_clipboard_source.so" && -s "$NATIVE_SHIM/build/CopyPasteClipboard-1.0.typelib" ]] || {
@@ -129,7 +134,7 @@ Section: utils
 Priority: optional
 Architecture: $DEB_ARCH
 Maintainer: CopyPaste <support@copypaste.app>
-Depends: $DEB_DEPENDS
+Depends: $DEB_DEPENDS, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good
 Description: Encrypted clipboard history
  CopyPaste keeps encrypted clipboard history locally and syncs only with paired devices.
 EOF
@@ -147,6 +152,8 @@ License: MIT OR Apache-2.0
 BuildArch: $RPM_ARCH
 Requires: glibc >= 2.39
 $RUNTIME_RPM_REQUIRES
+Requires: gstreamer1-plugins-base
+Requires: gstreamer1-plugins-good
 
 %description
 CopyPaste keeps encrypted clipboard history locally and syncs only with paired devices.
@@ -195,12 +202,24 @@ cp -a "$STAGE/usr/share/gnome-shell/extensions/copypaste-quick-paste@copypaste.a
   "$APPDIR/usr/share/copypaste/desktop-integrations/gnome-shell-extension"
 cp -a "$STAGE/usr/share/kwin/scripts/copypaste-quick-paste" \
   "$APPDIR/usr/share/copypaste/desktop-integrations/kde-kwin-script"
+python3 "$ROOT/scripts/release/bundle-linux-gstreamer-camera.py" \
+  --appdir "$APPDIR" --architecture "$ARCHITECTURE" --maximum-glibc 2.39 \
+  --manifest "$APPDIR/usr/share/copypaste/gstreamer-camera-runtime.json"
 sed 's#^Exec=.*#Exec=AppRun %U#' "$DESKTOP_TEMPLATE" > "$APPDIR/com.copypaste.CopyPaste.desktop"
 cp "$ICON" "$APPDIR/com.copypaste.CopyPaste.png"
 cat > "$APPDIR/AppRun" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+unset LD_ASSUME_KERNEL LD_AUDIT LD_BIND_NOW LD_DEBUG LD_DEBUG_OUTPUT LD_DYNAMIC_WEAK \
+  LD_HWCAP_MASK LD_LIBRARY_PATH LD_ORIGIN_PATH LD_PRELOAD LD_PROFILE LD_SHOW_AUXV \
+  LD_TRACE_LOADED_OBJECTS
+export LD_LIBRARY_PATH="$HERE/usr/lib/gstreamer-runtime:$HERE/usr/lib/copypaste/lib"
+export GST_PLUGIN_PATH="$HERE/usr/lib/gstreamer-1.0"
+export GST_PLUGIN_PATH_1_0="$HERE/usr/lib/gstreamer-1.0"
+export GST_PLUGIN_SYSTEM_PATH="$HERE/usr/lib/gstreamer-1.0"
+export GST_PLUGIN_SYSTEM_PATH_1_0="$HERE/usr/lib/gstreamer-1.0"
+export GST_PLUGIN_SCANNER="$HERE/usr/libexec/gstreamer-1.0/gst-plugin-scanner"
 exec "$HERE/usr/lib/copypaste/copypaste" "$@"
 EOF
 chmod 755 "$APPDIR/AppRun"
