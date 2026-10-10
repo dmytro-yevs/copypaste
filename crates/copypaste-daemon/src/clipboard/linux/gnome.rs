@@ -5,6 +5,7 @@
 //! another clipboard implementation exists.
 
 use std::collections::HashMap;
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -341,6 +342,9 @@ fn worker(commands: mpsc::Receiver<Command>, state: Arc<Mutex<State>>, bridge: B
 }
 
 fn activate(connection: &Connection, state: &Arc<Mutex<State>>, bridge: Bridge) {
+    if !service_is_current_user(connection, bridge) {
+        return;
+    }
     let Ok(proxy) = Proxy::new(connection, bridge.service, PATH, INTERFACE) else {
         return;
     };
@@ -381,6 +385,24 @@ fn activate(connection: &Connection, state: &Arc<Mutex<State>>, bridge: Bridge) 
             state.watching = true;
         }
     }
+}
+
+fn service_is_current_user(connection: &Connection, bridge: Bridge) -> bool {
+    let Ok(bus) = Proxy::new(
+        connection,
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+    ) else {
+        return false;
+    };
+    let Ok(owner) = bus.call::<_, _, String>("GetNameOwner", &(bridge.service,)) else {
+        return false;
+    };
+    let Ok(uid) = bus.call::<_, _, u32>("GetConnectionUnixUser", &(owner.as_str(),)) else {
+        return false;
+    };
+    std::fs::metadata("/proc/self").is_ok_and(|current| current.uid() == uid)
 }
 
 fn watch_service(connection: Connection, state: Arc<Mutex<State>>, bridge: Bridge) {
@@ -433,10 +455,12 @@ fn watch_clipboard(
                     .body()
                     .deserialize::<(u64, Vec<String>, (String, u32, u32, String))>()
             else {
-                continue;
+                invalidate(&state);
+                break;
             };
             if !valid_mimes(&mimes) {
-                continue;
+                invalidate(&state);
+                break;
             }
             if let Ok(mut state) = state.lock() {
                 if state.epoch != epoch || !state.active {
@@ -580,6 +604,7 @@ mod tests {
         identity: (String, u32, u32, String),
         values: HashMap<String, Vec<u8>>,
         writes: Vec<HashMap<String, Vec<u8>>>,
+        reads: usize,
         stall_reads: bool,
     }
 
@@ -605,7 +630,8 @@ mod tests {
         }
 
         fn read(&self, sequence: u64, mime: &str, limit: u32) -> Vec<u8> {
-            let state = self.0.lock().expect("fixture bridge state");
+            let mut state = self.0.lock().expect("fixture bridge state");
+            state.reads += 1;
             if state.stall_reads {
                 drop(state);
                 thread::sleep(RPC_TIMEOUT + Duration::from_secs(1));
@@ -628,10 +654,11 @@ mod tests {
         _runtime: tokio::runtime::Runtime,
         connection: Connection,
         state: Arc<Mutex<BridgeState>>,
+        service: &'static str,
     }
 
     impl BridgeFixture {
-        fn start() -> Self {
+        fn start(bridge: Bridge) -> Self {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
                 .enable_all()
@@ -650,7 +677,7 @@ mod tests {
             }));
             let connection = Connection::session().expect("fixture session bus");
             connection
-                .request_name(GNOME_BRIDGE)
+                .request_name(bridge.service)
                 .expect("fixture bridge name");
             connection
                 .object_server()
@@ -660,6 +687,7 @@ mod tests {
                 _runtime: runtime,
                 connection,
                 state,
+                service: bridge.service,
             }
         }
 
@@ -692,6 +720,16 @@ mod tests {
             drop(state);
             self.owner_changed(sequence, mimes);
         }
+
+        fn update_identity(&self, identity: (String, u32, u32, String)) {
+            self.state.lock().expect("fixture bridge state").identity = identity;
+        }
+
+        fn release_name(&self) {
+            self.connection
+                .release_name(self.service)
+                .expect("release fixture bridge name");
+        }
     }
 
     fn wait_for_active(clipboard: &GnomeClipboard) {
@@ -722,17 +760,59 @@ mod tests {
         if std::env::var_os("COPYPASTE_GNOME_FIXTURE") != Some("1".into()) {
             return;
         }
-        let fixture = BridgeFixture::start();
+        for bridge in [GNOME, KWIN] {
+            live_bridge_fixture(bridge);
+        }
+    }
+
+    fn live_bridge_fixture(bridge: Bridge) {
+        let fixture = BridgeFixture::start(bridge);
         let directory = tempfile::tempdir().expect("fixture data dir");
-        let mut clipboard = GnomeClipboard::new(directory.path()).expect("GNOME clipboard");
+        let mut clipboard =
+            GnomeClipboard::with_bridge(directory.path(), bridge).expect("compositor clipboard");
         wait_for_active(&clipboard);
 
         fixture.update_owner(2, vec!["text/plain;charset=utf-8".into()]);
         wait_for_change(&mut clipboard);
         let capture = clipboard.poll().expect("capture bridge text");
         assert_eq!(capture.content, "bridge text");
+        assert_eq!(capture.app_bundle_id.as_deref(), Some("org.example.Writer"));
 
+        fixture.update_identity(("verified".into(), 100, 1000, "org.example.Other".into()));
         fixture.update_owner(3, vec!["text/plain;charset=utf-8".into()]);
+        wait_for_change(&mut clipboard);
+        let capture = clipboard.poll().expect("capture changed writer");
+        assert_eq!(capture.app_bundle_id.as_deref(), Some("org.example.Other"));
+
+        let excluded = copypaste_ipc::ConfigData {
+            excluded_app_bundle_ids: vec!["org.example.Writer".into()],
+            ..Default::default()
+        };
+        for (sequence, identity) in [
+            (
+                4,
+                ("verified".into(), 99, 1000, "org.example.Writer".into()),
+            ),
+            (5, ("no-app-id".into(), 99, 1000, String::new())),
+            (6, ("ambiguous".into(), 99, 1000, String::new())),
+            (7, ("verified".into(), 99, 1000, "../invalid".into())),
+        ] {
+            fixture.update_identity(identity);
+            fixture.update_owner(sequence, vec!["text/plain;charset=utf-8".into()]);
+            wait_for_change(&mut clipboard);
+            let reads = fixture.state.lock().expect("fixture bridge state").reads;
+            assert!(clipboard
+                .poll_with_policy(CapturePolicy::new(&excluded))
+                .is_none());
+            assert_eq!(
+                fixture.state.lock().expect("fixture bridge state").reads,
+                reads,
+                "source policy sent Read for sequence {sequence}",
+            );
+        }
+
+        fixture.update_identity(("verified".into(), 99, 1000, "org.example.Writer".into()));
+        fixture.update_owner(8, vec!["text/plain;charset=utf-8".into()]);
         wait_for_change(&mut clipboard);
         let private = copypaste_ipc::ConfigData {
             private_mode: true,
@@ -748,7 +828,7 @@ mod tests {
 
         {
             let mut bridge = fixture.state.lock().expect("fixture bridge state");
-            bridge.sequence = 4;
+            bridge.sequence = 9;
             bridge.mimes = vec![
                 KDE_PASSWORD_MANAGER_HINT.into(),
                 "text/plain;charset=utf-8".into(),
@@ -758,7 +838,7 @@ mod tests {
                 .insert(KDE_PASSWORD_MANAGER_HINT.into(), b"secret".to_vec());
         }
         fixture.owner_changed(
-            4,
+            9,
             vec![
                 KDE_PASSWORD_MANAGER_HINT.into(),
                 "text/plain;charset=utf-8".into(),
@@ -790,7 +870,7 @@ mod tests {
             .expect("fixture bridge state")
             .stall_reads = true;
         fixture.update_owner(
-            6,
+            10,
             vec![
                 KDE_PASSWORD_MANAGER_HINT.into(),
                 "text/plain;charset=utf-8".into(),
@@ -808,9 +888,22 @@ mod tests {
             "stalled bridge Read exceeded the bounded caller wait"
         );
         drop(clipboard);
-        let replacement =
-            GnomeClipboard::new(directory.path()).expect("replacement GNOME clipboard");
+        let replacement = GnomeClipboard::with_bridge(directory.path(), bridge)
+            .expect("replacement compositor clipboard");
         wait_for_active(&replacement);
+        fixture.release_name();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if replacement
+                .state
+                .lock()
+                .is_ok_and(|state| !state.active && state.source.is_none())
+            {
+                return;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        panic!("companion owner loss retained source provenance");
     }
 
     #[test]
@@ -871,6 +964,56 @@ mod tests {
             SourceIdentity::from_wire("ambiguous".into(), 0, 0, "org.example.Writer".into(),)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn owner_transitions_replace_and_protocol_loss_clears_provenance() {
+        let mut state = State {
+            active: true,
+            sequence: 40,
+            source: SourceIdentity::from_wire(
+                "verified".into(),
+                40,
+                1000,
+                "org.example.First".into(),
+            ),
+            ..State::default()
+        };
+        apply_owner_changed(
+            &mut state,
+            41,
+            vec!["text/plain;charset=utf-8".into()],
+            SourceIdentity::from_wire("verified".into(), 41, 1000, "org.example.Second".into()),
+        );
+        assert_eq!(
+            state.source.as_ref().map(|source| source.app_id.as_str()),
+            Some("org.example.Second")
+        );
+
+        // A stale sequence cannot replace metadata from the current owner.
+        apply_owner_changed(
+            &mut state,
+            40,
+            vec!["text/plain;charset=utf-8".into()],
+            None,
+        );
+        assert_eq!(
+            state.source.as_ref().map(|source| source.app_id.as_str()),
+            Some("org.example.Second")
+        );
+
+        // A valid frame with malformed identity is a new owner but has no
+        // provenance. Exclusion policy therefore fails before Read.
+        apply_owner_changed(
+            &mut state,
+            42,
+            vec!["text/plain;charset=utf-8".into()],
+            SourceIdentity::from_wire("verified".into(), 42, 1000, "../invalid".into()),
+        );
+        assert!(state.source.is_none());
+        let state = Arc::new(Mutex::new(state));
+        invalidate(&state);
+        assert!(state.lock().expect("state").source.is_none());
     }
 
     #[test]
