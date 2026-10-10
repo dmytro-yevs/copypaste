@@ -6,6 +6,7 @@ import json
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 
 
@@ -73,22 +74,100 @@ class LinuxWaylandQuickPasteTest(unittest.TestCase):
     def test_receipt_binds_every_actor_pid_and_rejects_weak_input_proof(self):
         digest = 'a' * 64
         record = module.receipt(
-            gui_pid=11, app_portal_dialog_pid=12, portal_dialog_pid=13, input_target_pid=14,
+            gui_pid=11, portal_dialog_pid=13, input_target_pid=14,
             marker='fixture', portal_input_calls=8, portal_session_digest=digest,
-            app_click_digest=digest, app_consent_digest=digest, portal_click_digest=digest,
+            portal_click_digest=digest,
         )
         self.assertEqual(record['actors'], {
             'gui_pid': 11,
-            'app_portal_dialog_pid': 12,
             'portal_dialog_pid': 13,
             'input_target_pid': 14,
         })
         with self.assertRaisesRegex(module.QuickPasteQualificationError, 'proof'):
             module.receipt(
-                gui_pid=11, app_portal_dialog_pid=12, portal_dialog_pid=13, input_target_pid=14,
+                gui_pid=11, portal_dialog_pid=13, input_target_pid=14,
                 marker='fixture', portal_input_calls=7, portal_session_digest=digest,
-                app_click_digest=digest, app_consent_digest=digest, portal_click_digest=digest,
+                portal_click_digest=digest,
             )
+
+    def test_gnome_portal_consent_checks_remote_interaction_before_sharing(self):
+        class State:
+            def __init__(self, *values):
+                self.values = set(values)
+
+            def contains(self, value):
+                return value in self.values
+
+        class Action:
+            def __init__(self, names):
+                self.names = names
+                self.nActions = len(names)
+
+            def getName(self, index):
+                return self.names[index]
+
+            def doAction(self, index):
+                self.node.clicked.append(self.names[index])
+                if self.node.name == 'Allow Remote Interaction':
+                    self.node._state.values.add('checked')
+                return True
+
+        class Node:
+            def __init__(self, name='', *states, children=(), actions=('click',)):
+                self.name = name
+                self._state = State(*states)
+                self._children = list(children)
+                self.childCount = len(self._children)
+                self.actions = actions
+                self.clicked = []
+
+            def getState(self):
+                return self._state
+
+            def getChildAtIndex(self, index):
+                return self._children[index]
+
+            def queryAction(self):
+                action = Action(self.actions)
+                action.node = self
+                return action
+
+        atspi = SimpleNamespace(STATE_CHECKABLE='checkable', STATE_CHECKED='checked', STATE_SHOWING='showing', STATE_VISIBLE='visible', STATE_ENABLED='enabled')
+        interaction = Node('Allow Remote Interaction', 'checkable', 'showing', 'visible', 'enabled', actions=('toggle',))
+        share = Node('Share', 'showing', 'visible')
+        application = Node(children=(interaction, share))
+        self.assertFalse(module.gnome_portal_consent(application, atspi))
+        self.assertEqual(interaction.clicked, ['toggle'])
+        share._state.values.add('enabled')
+        self.assertTrue(module.gnome_portal_consent(application, atspi))
+        self.assertEqual(interaction.clicked, ['toggle'])
+        self.assertEqual(share.clicked, ['click'])
+
+    def test_kde_portal_consent_uses_the_localized_allow_button(self):
+        class State:
+            def contains(self, _value):
+                return True
+
+        class Action:
+            nActions = 1
+
+            def getName(self, _index):
+                return 'Press'
+
+            def doAction(self, _index):
+                return True
+
+        class Node:
+            name = 'Allow'
+            childCount = 0
+
+            def getState(self):
+                return State()
+
+            def queryAction(self):
+                return Action()
+
+        self.assertTrue(module.kde_portal_consent(Node(), SimpleNamespace(STATE_SHOWING='showing', STATE_VISIBLE='visible', STATE_ENABLED='enabled')))
 
     def test_portal_response_received_during_call_is_not_lost(self):
         class Reply:
