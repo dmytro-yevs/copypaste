@@ -119,7 +119,8 @@ bash -n "$root/verify-build.sh"
 bash -n "$root/run-fedora-build.sh"
 rg -F 'FROM fedora:40@sha256:' "$root/Dockerfile.fedora40-build" >/dev/null
 rg -F 'dnf builddep' "$root/Dockerfile.fedora40-build" >/dev/null
-rg -F 'fedora-source updates-source' "$root/Dockerfile.fedora40-build" >/dev/null
+rg -F 'dnf config-manager --set-enabled fedora-source' "$root/Dockerfile.fedora40-build" >/dev/null
+rg -F 'dnf config-manager --set-disabled updates updates-source' "$root/Dockerfile.fedora40-build" >/dev/null
 rg -F 'cmake --build' "$root/verify-build.sh" >/dev/null
 rg -F 'Version() == 2' "$root/DISTRIBUTION.md" >/dev/null
 if [[ "${COPYPASTE_VERIFY_QT_WIRE:-0}" == 1 ]]; then

@@ -2,10 +2,12 @@ FROM fedora:40@sha256:3c86d25fef9d2001712bc3d9b091fc40cf04be4767e48f1aa3b785bf58
 
 # This image is an isolated source-package builder. It never installs a KWin
 # binary on the host or produces a package that replaces the host compositor.
-RUN dnf --assumeyes --setopt=install_weak_deps=False install \
+RUN dnf --disablerepo=updates --disablerepo=updates-source \
+    --assumeyes --setopt=install_weak_deps=False install \
     dnf-plugins-core fedora-repos rpmdevtools cmake ninja-build git \
     dbus-daemon dbus-tools plasma-workspace-x11 kwin-wayland wl-clipboard \
- && dnf config-manager --set-enabled fedora-source updates-source \
+ && dnf config-manager --set-enabled fedora-source \
+ && dnf config-manager --set-disabled updates updates-source \
  && dnf builddep --assumeyes --setopt=install_weak_deps=False kwin \
  && dnf clean all
 

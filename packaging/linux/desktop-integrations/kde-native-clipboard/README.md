@@ -69,8 +69,11 @@ immutable upstream release below:
 | 6.0.0 | `1ddcb4e288c4f7dcecdc94efccd655b7e3666d30` | `6.0` |
 | 6.3.0 | `3e19ea5a1bd69fa619aa5fd3c1b285e5b9168b5b` | `6.3` |
 
-The container must install `dnf-plugins-core`, enable source repositories, run
-`dnf builddep --assumeyes kwin`, and install `cmake`, `ninja-build`, `git`,
+The pinned Fedora 40 builder uses its base and `fedora-source` repositories; it
+disables `updates` and `updates-source` so KWin 6.0 builds against its matching
+`KDecoration2` CMake contract rather than a later KDecoration release. The
+container installs `dnf-plugins-core`, runs `dnf builddep --assumeyes kwin`, and
+installs `cmake`, `ninja-build`, `git`,
 `dbus-daemon`, `dbus-tools`, `plasma-workspace-x11`, `kwin-wayland`, and
 `wl-clipboard`. It clones the selected ref with `git -c protocol.version=2
 clone --filter=blob:none`, verifies `HEAD` exactly, applies this source bundle,
