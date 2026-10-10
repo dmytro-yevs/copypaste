@@ -40,6 +40,12 @@ TARGET_TITLE = "CopyPaste Qualification Wayland Input Target"
 TARGET_SOURCE = Path(__file__).with_name("linux-wayland-input-target.c")
 MEDIA_ACTOR = Path(__file__).with_name("linux-native-media.py")
 UNIQUE_NAME = re.compile(r"^:[0-9]+\.[0-9]+$")
+PORTAL_IMPLEMENTATION_PREFIX = "org.freedesktop.impl.portal.desktop."
+APP_PERMISSION_GRANTED = "Keyboard control is allowed for Quick Paste."
+PORTAL_DIALOG_PRESENTERS = {
+    "GNOME": ("org.gnome.Shell",),
+    "KDE": ("org.kde.plasmashell", "org.kde.KWin"),
+}
 
 
 class QuickPasteQualificationError(RuntimeError):
@@ -82,13 +88,12 @@ def portal_request_path(unique_owner: str, handle_token: str) -> str:
 
 
 def receipt(
-    *, gui_pid: int, app_portal_dialog_pid: int, portal_dialog_pid: int, input_target_pid: int,
-    marker: str, portal_input_calls: int, portal_session_digest: str, app_click_digest: str,
-    app_consent_digest: str, portal_click_digest: str,
+    *, gui_pid: int, portal_dialog_pid: int, input_target_pid: int, marker: str,
+    portal_input_calls: int, portal_session_digest: str, portal_click_digest: str,
 ) -> dict[str, Any]:
     """Return a redacted receipt bound to every UI actor process."""
-    pids = (gui_pid, app_portal_dialog_pid, portal_dialog_pid, input_target_pid)
-    digests = (portal_session_digest, app_click_digest, app_consent_digest, portal_click_digest)
+    pids = (gui_pid, portal_dialog_pid, input_target_pid)
+    digests = (portal_session_digest, portal_click_digest)
     if any(type(pid) is not int or pid <= 0 for pid in pids):
         raise QuickPasteQualificationError("Wayland receipt actor identity is invalid")
     if type(portal_input_calls) is not int or portal_input_calls < 8 or any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in digests):
@@ -98,15 +103,12 @@ def receipt(
         "kind": "wayland_quick_paste",
         "actors": {
             "gui_pid": gui_pid,
-            "app_portal_dialog_pid": app_portal_dialog_pid,
             "portal_dialog_pid": portal_dialog_pid,
             "input_target_pid": input_target_pid,
         },
         "target": {"pid": input_target_pid, "title_sha256": sha256(TARGET_TITLE), "marker_sha256": sha256(marker)},
         "portal": {"input_calls": portal_input_calls, "session_sha256": portal_session_digest},
         "atspi": {
-            "application_click_sha256": app_click_digest,
-            "application_consent_sha256": app_consent_digest,
             "portal_click_sha256": portal_click_digest,
         },
     }
@@ -235,6 +237,57 @@ class PortalKeyboard:
         if type(uid) is not int or uid != os.getuid():
             raise QuickPasteQualificationError("desktop portal is not owned by the qualification user")
         return owner
+
+    def _bus_owner(self, name: str) -> str:
+        reply = self.connection.call_sync(
+            "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetNameOwner",
+            self.glib.Variant("(s)", (name,)), self.glib.VariantType.new("(s)"),
+            self.gio.DBusCallFlags.NONE, 8000, None,
+        )
+        owner, = reply.unpack()
+        if not isinstance(owner, str) or not UNIQUE_NAME.fullmatch(owner):
+            raise QuickPasteQualificationError("portal implementation has no unique D-Bus owner")
+        return owner
+
+    def _owner_credentials(self, owner: str) -> tuple[int, int]:
+        pid_reply = self.connection.call_sync(
+            "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetConnectionUnixProcessID",
+            self.glib.Variant("(s)", (owner,)), self.glib.VariantType.new("(u)"),
+            self.gio.DBusCallFlags.NONE, 8000, None,
+        )
+        uid_reply = self.connection.call_sync(
+            "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetConnectionUnixUser",
+            self.glib.Variant("(s)", (owner,)), self.glib.VariantType.new("(u)"),
+            self.gio.DBusCallFlags.NONE, 8000, None,
+        )
+        pid, = pid_reply.unpack()
+        uid, = uid_reply.unpack()
+        if type(pid) is not int or pid <= 0 or type(uid) is not int or uid != os.getuid():
+            raise QuickPasteQualificationError("portal implementation credentials are invalid")
+        return pid, uid
+
+    def owned_portal_pids(self) -> set[int]:
+        """Return same-user portal services and this desktop's live presenter."""
+        reply = self.connection.call_sync(
+            "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "ListNames",
+            None, self.glib.VariantType.new("(as)"), self.gio.DBusCallFlags.NONE, 8000, None,
+        )
+        names, = reply.unpack()
+        if not isinstance(names, (list, tuple)):
+            raise QuickPasteQualificationError("session D-Bus portal inventory is invalid")
+        portal_names = [
+            name for name in names if name == PORTAL_NAME or (
+                isinstance(name, str) and name.startswith(PORTAL_IMPLEMENTATION_PREFIX)
+            )
+        ]
+        if PORTAL_NAME not in portal_names:
+            raise QuickPasteQualificationError("desktop portal is absent from the session bus")
+        desktop = os.environ.get("XDG_CURRENT_DESKTOP")
+        presenters = PORTAL_DIALOG_PRESENTERS.get(desktop or "")
+        if presenters is None:
+            raise QuickPasteQualificationError("Wayland portal desktop identity is unsupported")
+        portal_names.extend(name for name in presenters if name in names)
+        return {self._owner_credentials(self._bus_owner(name))[0] for name in portal_names}
 
     def require_gui_owner(self, gui_pid: int) -> str:
         """Bind this run to the exact GUI process before driving any input."""
@@ -367,44 +420,190 @@ class PortalKeyboard:
                 self.session = ""
 
 
-def actor_click(actor: Path, pid: int, target: str, expected: str, environment: dict[str, str]) -> str:
+def accessible_children(node: Any):
+    try:
+        count = node.childCount
+    except Exception as error:
+        raise QuickPasteQualificationError("AT-SPI tree is unavailable") from error
+    for index in range(count):
+        try:
+            yield node.getChildAtIndex(index)
+        except Exception:
+            continue
+
+
+def accessible_descendants(node: Any):
+    pending = [node]
+    while pending:
+        current = pending.pop()
+        yield current
+        pending.extend(reversed(tuple(accessible_children(current))))
+
+
+def atspi_application(registry: Any, pid: int) -> Any | None:
+    try:
+        desktop = registry.getDesktop(0)
+    except Exception as error:
+        raise QuickPasteQualificationError("AT-SPI desktop is unavailable") from error
+    for application in accessible_children(desktop):
+        try:
+            if application.get_process_id() == pid:
+                return application
+        except Exception:
+            continue
+    return None
+
+
+def action_index(node: Any, allowed: set[str]) -> int | None:
+    try:
+        actions = node.queryAction()
+        matching = [
+            index for index in range(actions.nActions)
+            if isinstance(actions.getName(index), str) and actions.getName(index).casefold() in allowed
+        ]
+        if len(matching) == 1:
+            return matching[0]
+    except Exception:
+        return None
+    return None
+
+
+def portal_control(application: Any, atspi: Any, name: str, actions: set[str]) -> tuple[Any, int] | None:
+    candidates = []
+    for node in accessible_descendants(application):
+        try:
+            state = node.getState()
+            if node.name == name and all(state.contains(value) for value in (atspi.STATE_SHOWING, atspi.STATE_VISIBLE, atspi.STATE_ENABLED)):
+                index = action_index(node, actions)
+                if index is not None:
+                    candidates.append((node, index))
+        except Exception:
+            continue
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def activate(node: Any, index: int) -> bool:
+    try:
+        return node.queryAction().doAction(index) is True
+    except Exception:
+        return False
+
+
+def gnome_portal_consent(application: Any, atspi: Any) -> bool:
+    toggle = portal_control(application, atspi, "Allow Remote Interaction", {"toggle"})
+    if toggle is None:
+        return False
+    try:
+        before = toggle[0].getState()
+        if not before.contains(atspi.STATE_CHECKABLE):
+            return False
+    except Exception:
+        return False
+    if not before.contains(atspi.STATE_CHECKED):
+        if not activate(*toggle):
+            return False
+        try:
+            state = toggle[0].getState()
+            if not state.contains(atspi.STATE_CHECKABLE) or not state.contains(atspi.STATE_CHECKED):
+                return False
+        except Exception:
+            return False
+    share = portal_control(application, atspi, "Share", {"press", "click"})
+    return share is not None and activate(*share)
+
+
+def kde_portal_consent(application: Any, atspi: Any) -> bool:
+    accept = portal_control(application, atspi, "Allow", {"press", "click"})
+    return accept is not None and activate(*accept)
+
+
+def click_owned_portal_consent(portal: PortalKeyboard) -> tuple[int, str]:
+    """Drive the active desktop's source-defined RemoteDesktop grant controls."""
+    try:
+        import pyatspi  # type: ignore[import-not-found]
+    except ImportError as error:
+        raise QuickPasteQualificationError("python3-pyatspi is required for Wayland portal qualification") from error
+    deadline = time.monotonic() + 12
+    while time.monotonic() < deadline:
+        desktop = os.environ.get("XDG_CURRENT_DESKTOP")
+        sequence = {"GNOME": gnome_portal_consent, "KDE": kde_portal_consent}.get(desktop or "")
+        if sequence is None:
+            raise QuickPasteQualificationError("Wayland portal desktop identity is unsupported")
+        for pid in sorted(portal.owned_portal_pids()):
+            application = atspi_application(pyatspi.Registry, pid)
+            if application is None:
+                continue
+            if sequence(application, pyatspi):
+                return pid, sha256(f"portal-consent:{desktop}:{pid}")
+        time.sleep(0.2)
+    raise QuickPasteQualificationError("owned portal consent dialog did not expose the desktop grant sequence")
+
+
+def actor_command(actor: Path, command: str, pid: int, target: str, environment: dict[str, str]) -> str:
     require_regular(actor, "AT-SPI actor")
     deadline = time.monotonic() + 12
     while time.monotonic() < deadline:
         result = subprocess.run(
-            [sys.executable, str(actor), "click", "--pid", str(pid), "--target", target, "--expect", expected],
+            [sys.executable, str(actor), command, "--pid", str(pid), "--target", target],
             env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False, timeout=20,
         )
         if not result.returncode:
             return hashlib.sha256(result.stdout.encode("utf-8")).hexdigest()
         time.sleep(0.2)
-    raise QuickPasteQualificationError("AT-SPI portal-consent action failed")
+    raise QuickPasteQualificationError(f"AT-SPI {command} action failed")
 
 
-def qualify(args: argparse.Namespace) -> dict[str, Any]:
-    if args.gui_pid <= 0 or args.app_portal_dialog_pid <= 0 or args.portal_dialog_pid <= 0:
-        raise QuickPasteQualificationError("GUI and portal dialog PIDs are invalid")
+def grant_product_permission(args: argparse.Namespace) -> dict[str, Any]:
+    """Grant the installed application's own portal request from onboarding."""
+    if args.gui_pid <= 0:
+        raise QuickPasteQualificationError("GUI PID is invalid")
     environment = dict(os.environ)
     if not environment.get("WAYLAND_DISPLAY"):
         raise QuickPasteQualificationError("Wayland display is unavailable")
-    # This action invokes the product's visible permission control. Its portal
-    # reply is deliberately never fabricated by this helper.
-    app_click = actor_click(args.actor, args.gui_pid, args.app_permission_target, args.app_permission_expect, environment)
-    app_consent = actor_click(args.actor, args.app_portal_dialog_pid, args.app_allow_target, args.app_allow_expect, environment)
-    helper = build_target(args.workspace, environment)
-    target = start_target(helper, args.workspace, args.marker, environment)
     try:
+        from gi.repository import Gio, GLib  # type: ignore[import-not-found]
+    except ImportError as error:
+        raise QuickPasteQualificationError("PyGObject is required for Wayland portal qualification") from error
+    portal = PortalKeyboard(Gio, GLib)
+    try:
+        gui_owner = portal.require_gui_owner(args.gui_pid)
+        app_click = actor_command(args.actor, "click", args.gui_pid, args.app_permission_target, environment)
+        dialog_pid, consent = click_owned_portal_consent(portal)
+        granted = (
+            actor_command(args.actor, "observe", args.gui_pid, APP_PERMISSION_GRANTED, environment)
+            if args.require_granted_text else consent
+        )
+        if portal.require_gui_owner(args.gui_pid) != gui_owner:
+            raise QuickPasteQualificationError("CopyPaste GUI D-Bus owner changed during its portal consent")
+        return {"schema": 1, "gui_pid": args.gui_pid, "dialog_pid": dialog_pid,
+                "click_sha256": app_click, "consent_sha256": sha256(f"{consent}:{granted}")}
+    finally:
+        portal.close()
+
+
+def qualify(args: argparse.Namespace) -> dict[str, Any]:
+    if args.gui_pid <= 0:
+        raise QuickPasteQualificationError("GUI PID is invalid")
+    environment = dict(os.environ)
+    if not environment.get("WAYLAND_DISPLAY"):
+        raise QuickPasteQualificationError("Wayland display is unavailable")
+    helper = build_target(args.workspace, environment)
+    try:
+        from gi.repository import Gio, GLib  # type: ignore[import-not-found]
+    except ImportError as error:
+        raise QuickPasteQualificationError("PyGObject is required for Wayland portal qualification") from error
+    portal = PortalKeyboard(Gio, GLib)
+    try:
+        gui_owner = portal.require_gui_owner(args.gui_pid)
+        target = start_target(helper, args.workspace, args.marker, environment)
         try:
-            from gi.repository import Gio, GLib  # type: ignore[import-not-found]
-        except ImportError as error:
-            raise QuickPasteQualificationError("PyGObject is required for Wayland portal qualification") from error
-        portal = PortalKeyboard(Gio, GLib)
-        try:
-            gui_owner = portal.require_gui_owner(args.gui_pid)
             consent_click = ""
+            portal_dialog_pid = 0
+
             def accept_helper_consent() -> None:
-                nonlocal consent_click
-                consent_click = actor_click(args.actor, args.portal_dialog_pid, args.portal_allow_target, args.portal_allow_expect, environment)
+                nonlocal consent_click, portal_dialog_pid
+                portal_dialog_pid, consent_click = click_owned_portal_consent(portal)
+
             portal.grant(accept_helper_consent)
             if portal.require_gui_owner(args.gui_pid) != gui_owner:
                 raise QuickPasteQualificationError("CopyPaste GUI D-Bus owner changed before global shortcut input")
@@ -421,34 +620,33 @@ def qualify(args: argparse.Namespace) -> dict[str, Any]:
             if portal.require_gui_owner(args.gui_pid) != gui_owner:
                 raise QuickPasteQualificationError("CopyPaste GUI D-Bus owner changed during Quick Paste input")
         finally:
-            portal.close()
+            target.close()
+        return receipt(
+            gui_pid=args.gui_pid, portal_dialog_pid=portal_dialog_pid, input_target_pid=target.pid, marker=args.marker,
+            portal_input_calls=portal.calls.count("NotifyKeyboardKeycode"), portal_session_digest=portal.session_digest,
+            portal_click_digest=consent_click,
+        )
     finally:
-        target.close()
-    return receipt(
-        gui_pid=args.gui_pid, app_portal_dialog_pid=args.app_portal_dialog_pid,
-        portal_dialog_pid=args.portal_dialog_pid, input_target_pid=target.pid, marker=args.marker,
-        portal_input_calls=portal.calls.count("NotifyKeyboardKeycode"), portal_session_digest=portal.session_digest,
-        app_click_digest=app_click, app_consent_digest=app_consent, portal_click_digest=consent_click,
-    )
+        portal.close()
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gui-pid", required=True, type=int)
-    parser.add_argument("--workspace", required=True, type=Path)
-    parser.add_argument("--marker", required=True, type=marker_argument)
+    parser.add_argument("--workspace", type=Path)
+    parser.add_argument("--marker", type=marker_argument)
     parser.add_argument("--actor", type=Path, default=MEDIA_ACTOR)
-    parser.add_argument("--app-permission-target", required=True)
-    parser.add_argument("--app-permission-expect", required=True)
-    parser.add_argument("--app-portal-dialog-pid", required=True, type=int)
-    parser.add_argument("--app-allow-target", required=True)
-    parser.add_argument("--app-allow-expect", required=True)
-    parser.add_argument("--portal-dialog-pid", required=True, type=int)
-    parser.add_argument("--portal-allow-target", required=True)
-    parser.add_argument("--portal-allow-expect", required=True)
+    parser.add_argument("--app-permission-target", default="Allow keyboard control")
+    parser.add_argument("--grant-product-permission", action="store_true")
+    parser.add_argument("--require-granted-text", action="store_true")
     args = parser.parse_args()
     try:
-        print("COPYPASTE_QUALIFICATION_WAYLAND " + json.dumps(qualify(args), separators=(",", ":"), sort_keys=True))
+        if args.grant_product_permission:
+            print("COPYPASTE_QUALIFICATION_WAYLAND_PERMISSION " + json.dumps(grant_product_permission(args), separators=(",", ":"), sort_keys=True))
+        else:
+            if args.workspace is None or args.marker is None:
+                raise QuickPasteQualificationError("workspace and marker are required for Quick Paste qualification")
+            print("COPYPASTE_QUALIFICATION_WAYLAND " + json.dumps(qualify(args), separators=(",", ":"), sort_keys=True))
         return 0
     except (QuickPasteQualificationError, OSError, subprocess.TimeoutExpired) as error:
         print(f"ERROR: {error}", file=sys.stderr)
