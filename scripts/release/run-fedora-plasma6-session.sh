@@ -6,6 +6,7 @@ SESSION=""
 COMPANION_SOURCE=""
 COMPOSITOR_RUNTIME=""
 COMPOSITOR_RUNTIME_BINDING=""
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --session) SESSION="$2"; shift 2 ;;
@@ -33,6 +34,7 @@ COMPOSITOR_QUALIFICATION_ENTRYPOINT="$runtime_root/$qualification_entrypoint"
 
 runtime="$(mktemp -d)"
 cleanup() {
+  [[ -n "${geometry_broker_pid:-}" ]] && kill "$geometry_broker_pid" 2>/dev/null || true
   [[ -n "${shell_pid:-}" ]] && kill "$shell_pid" 2>/dev/null || true
   [[ -n "${kwin_pid:-}" ]] && kill "$kwin_pid" 2>/dev/null || true
   [[ -n "${xserver_pid:-}" ]] && kill "$xserver_pid" 2>/dev/null || true
@@ -65,6 +67,12 @@ script="$COMPANION_SOURCE/kde-kwin-script"
 [[ -d "$script" ]] || { echo "ERROR: packaged KDE companion is missing" >&2; exit 1; }
 kpackagetool6 --type KWin/Script --install "$script"
 kwriteconfig6 --file "$XDG_CONFIG_HOME/kwinrc" --group Plugins --key copypaste-quick-pasteEnabled true
+if [[ "$SESSION" == wayland ]]; then
+  geometry_script="$SCRIPT_DIR/qualification/kde-window-geometry-script"
+  [[ -f "$geometry_script/metadata.json" && -f "$geometry_script/contents/code/main.js" ]] || { echo "ERROR: qualification KWin geometry fixture is missing" >&2; exit 1; }
+  kpackagetool6 --type KWin/Script --install "$geometry_script"
+  kwriteconfig6 --file "$XDG_CONFIG_HOME/kwinrc" --group Plugins --key copypaste-qualification-window-geometryEnabled true
+fi
 
 wait_for() {
   local test_command="$1"
@@ -99,6 +107,12 @@ case "$SESSION" in
     "$COMPOSITOR_QUALIFICATION_ENTRYPOINT" >"$runtime/kwin.log" 2>&1 &
     kwin_pid=$!
     wait_for 'kill -0 "$kwin_pid" 2>/dev/null'
+    geometry_broker="$runtime/copypaste-wayland-geometry-broker"
+    cc -std=c11 -O2 -Wall -Wextra -Werror "$SCRIPT_DIR/linux-wayland-geometry-broker.c" -o "$geometry_broker" $(pkg-config --cflags --libs gio-2.0)
+    "$geometry_broker" --compositor-pid "$kwin_pid" >"$runtime/geometry-broker.log" 2>&1 &
+    geometry_broker_pid=$!
+    export COPYPASTE_QUALIFICATION_GEOMETRY_OWNER_PID="$geometry_broker_pid"
+    wait_for 'gdbus call --session --dest app.copypaste.QualificationGeometry --object-path /app/copypaste/QualificationGeometry --method app.copypaste.QualificationGeometry.Version >/dev/null 2>&1'
     wait_for 'find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name "wayland-*" | grep -q .'
     export WAYLAND_DISPLAY="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'wayland-*' -printf '%f\n' | head -n1)"
     export COPYPASTE_COMPOSITOR_SESSION_RECORD="$runtime/compositor-session-record.json"

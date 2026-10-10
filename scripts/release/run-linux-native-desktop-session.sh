@@ -7,6 +7,7 @@ SESSION=""
 COMPANION_SOURCE=""
 COMPOSITOR_RUNTIME=""
 COMPOSITOR_RUNTIME_BINDING=""
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --desktop) DESKTOP="$2"; shift 2 ;;
@@ -37,6 +38,7 @@ COMPOSITOR_QUALIFICATION_ENTRYPOINT="$runtime_root/$qualification_entrypoint"
 RUNTIME="$(mktemp -d)"
 DISPLAY_NUMBER=99
 cleanup() {
+  [[ -n "${geometry_broker_pid:-}" ]] && kill "$geometry_broker_pid" 2>/dev/null || true
   [[ -n "${shell_pid:-}" ]] && kill "$shell_pid" 2>/dev/null || true
   [[ -n "${desktop_pid:-}" ]] && kill "$desktop_pid" 2>/dev/null || true
   [[ -n "${display_pid:-}" ]] && kill "$display_pid" 2>/dev/null || true
@@ -84,7 +86,15 @@ PY
     [[ -d "$native/lib" && -d "$native/typelib" ]] || { echo "ERROR: packaged GNOME companion native runtime is incomplete" >&2; exit 1; }
     export GI_TYPELIB_PATH="$native/typelib${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"
     export LD_LIBRARY_PATH="$native/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    gsettings set org.gnome.shell enabled-extensions "['$extension_id']"
+    if [[ "$SESSION" == wayland ]]; then
+      geometry_extension="$SCRIPT_DIR/qualification/gnome-window-geometry-extension"
+      geometry_extension_id="copypaste-qualification-window-geometry@copypaste.app"
+      [[ -f "$geometry_extension/metadata.json" && -f "$geometry_extension/extension.js" ]] || { echo "ERROR: qualification GNOME geometry fixture is missing" >&2; exit 1; }
+      cp -a "$geometry_extension" "$XDG_DATA_HOME/gnome-shell/extensions/$geometry_extension_id"
+      gsettings set org.gnome.shell enabled-extensions "['$extension_id', '$geometry_extension_id']"
+    else
+      gsettings set org.gnome.shell enabled-extensions "['$extension_id']"
+    fi
     ;;
   KDE)
     script="$COMPANION_SOURCE/kde-kwin-script"
@@ -120,12 +130,14 @@ else
   "$COMPOSITOR_QUALIFICATION_ENTRYPOINT" >"$RUNTIME/desktop.log" 2>&1 &
   desktop_pid=$!
   wait_for 'kill -0 "$desktop_pid" 2>/dev/null'
+  export COPYPASTE_QUALIFICATION_GEOMETRY_OWNER_PID="$desktop_pid"
   wait_for 'find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name "wayland-*" | grep -q .'
   export WAYLAND_DISPLAY="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'wayland-*' -printf '%f\n' | head -n1)"
   export COPYPASTE_COMPOSITOR_SESSION_RECORD="$RUNTIME/compositor-session-record.json"
   python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/record-linux-compositor-session.py" \
     --binding "$COMPOSITOR_RUNTIME_BINDING" --root / --pid "$desktop_pid" --session wayland \
     --output "$COPYPASTE_COMPOSITOR_SESSION_RECORD"
+  wait_for 'gdbus call --session --dest app.copypaste.QualificationGeometry --object-path /app/copypaste/QualificationGeometry --method app.copypaste.QualificationGeometry.Version >/dev/null 2>&1'
 fi
 
 dbus-update-activation-environment \
