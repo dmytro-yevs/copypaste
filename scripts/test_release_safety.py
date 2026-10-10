@@ -276,8 +276,8 @@ class ReleaseSafetyTest(unittest.TestCase):
             for name in (
                 "copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64",
                 "copypaste-compositor-runtime-gnome-46-ubuntu24.04-aarch64",
-                "copypaste-compositor-runtime-kde-6.0-fedora40-x86_64",
-                "copypaste-compositor-runtime-kde-6.0-fedora40-aarch64",
+                "copypaste-compositor-runtime-kwin-6.0-fedora40-x86_64",
+                "copypaste-compositor-runtime-kwin-6.0-fedora40-aarch64",
             )
         ]}
         verify(run, jobs, artifacts, "owner/repo", "commit")
@@ -297,6 +297,31 @@ class ReleaseSafetyTest(unittest.TestCase):
         artifacts["artifacts"].pop()
         with self.assertRaisesRegex(ValueError, "artifact inventory"):
             verify(run, jobs, artifacts, "owner/repo", "commit")
+
+    def test_compositor_runtime_uses_kwin_artifact_names_everywhere(self):
+        expected = {
+            "copypaste-compositor-runtime-kwin-6.0-fedora40-x86_64",
+            "copypaste-compositor-runtime-kwin-6.0-fedora40-aarch64",
+        }
+        contract = json.loads((ROOT / "packaging/linux/compositor-runtime/release-contract.json").read_text(encoding="utf-8"))
+        self.assertTrue(expected <= {row["artifact"] for row in contract["baselines"]})
+        stage = runpy.run_path(str(ROOT / "scripts/release/stage-compositor-runtime-release.py"))
+        self.assertTrue(expected <= {
+            stage["coordinate_name"](short, family, distribution, architecture)
+            for short, _desktop, family, distribution, _id, _version, _format in stage["COORDINATES"]
+            for architecture in stage["ARCHITECTURES"]
+        })
+        for path in (
+            ROOT / ".github/workflows/compositor-runtime.yml",
+            ROOT / ".github/workflows/linux-native-qualification.yml",
+            ROOT / ".github/workflows/release.yml",
+        ):
+            value = path.read_text(encoding="utf-8")
+            for name in expected:
+                self.assertIn(name, value)
+            self.assertNotIn("copypaste-compositor-runtime-kde-", value)
+        verifier = runpy.run_path(str(ROOT / "scripts/release/verify-compositor-runtime-source-run.py"))
+        self.assertTrue(expected <= verifier["EXPECTED"])
 
     def test_compositor_runtime_public_receipt_binds_signed_package_bytes(self):
         module = runpy.run_path(

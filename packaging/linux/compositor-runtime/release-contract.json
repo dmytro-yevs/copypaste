@@ -44,7 +44,7 @@
     },
     {
       "job": "KDE 6.0 Fedora 40 (x86_64)",
-      "artifact": "copypaste-compositor-runtime-kde-6.0-fedora40-x86_64",
+      "artifact": "copypaste-compositor-runtime-kwin-6.0-fedora40-x86_64",
       "desktop": "KDE",
       "family": "6.0",
       "distribution": {"id": "fedora", "version": "40"},
@@ -54,7 +54,7 @@
     },
     {
       "job": "KDE 6.0 Fedora 40 (aarch64)",
-      "artifact": "copypaste-compositor-runtime-kde-6.0-fedora40-aarch64",
+      "artifact": "copypaste-compositor-runtime-kwin-6.0-fedora40-aarch64",
       "desktop": "KDE",
       "family": "6.0",
       "distribution": {"id": "fedora", "version": "40"},

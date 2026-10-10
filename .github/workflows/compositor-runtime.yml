@@ -135,6 +135,7 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          COMPOSITOR_RUNTIME_COMMIT: ${{ inputs.commit }}
         run: |
           set -euo pipefail
           package="$(find artifact -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \) -print -quit)"
@@ -156,7 +157,7 @@ jobs:
               target.write_bytes(path.read_bytes())
               licenses.append(meta(target))
           output.write_text(json.dumps({
-              "schema": 1, "commit": os.environ["GITHUB_SHA"], "producer_run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "schema": 1, "commit": os.environ["COMPOSITOR_RUNTIME_COMMIT"], "producer_run_id": int(os.environ["GITHUB_RUN_ID"]),
               "source_run_id": int("${{ inputs.source_run_id }}"), "version": "${{ inputs.version }}",
               "architecture": "${{ matrix.architecture }}", "desktop": "${{ matrix.desktop }}", "family": "${{ matrix.family }}",
               "distribution": {"id": "${{ matrix.distribution_id }}", "version": "${{ matrix.distribution_version }}"},

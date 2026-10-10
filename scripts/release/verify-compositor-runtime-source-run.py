@@ -12,7 +12,7 @@ EXPECTED = {
     f"copypaste-compositor-runtime-{desktop}-{family}-{distribution}-{architecture}"
     for desktop, family, distribution in (
         ("gnome", "46", "ubuntu24.04"),
-        ("kde", "6.0", "fedora40"),
+        ("kwin", "6.0", "fedora40"),
     )
     for architecture in ("x86_64", "aarch64")
 }

@@ -553,8 +553,8 @@ jobs:
           for artifact in \
             copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64 \
             copypaste-compositor-runtime-gnome-46-ubuntu24.04-aarch64 \
-            copypaste-compositor-runtime-kde-6.0-fedora40-x86_64 \
-            copypaste-compositor-runtime-kde-6.0-fedora40-aarch64; do
+            copypaste-compositor-runtime-kwin-6.0-fedora40-x86_64 \
+            copypaste-compositor-runtime-kwin-6.0-fedora40-aarch64; do
             gh run download "$RUNTIME_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$artifact" --dir "runtime-source/$artifact"
           done
       - name: Stage exact runtime producer outputs

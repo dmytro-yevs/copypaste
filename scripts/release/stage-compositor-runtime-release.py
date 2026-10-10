@@ -22,7 +22,7 @@ GLIBC = re.compile(r"[0-9]+\.[0-9]+")
 
 COORDINATES = (
     ("gnome", "GNOME", "46", "ubuntu24.04", "ubuntu", "24.04", "deb"),
-    ("kde", "KDE", "6.0", "fedora40", "fedora", "40", "rpm"),
+    ("kwin", "KDE", "6.0", "fedora40", "fedora", "40", "rpm"),
 )
 ARCHITECTURES = ("x86_64", "aarch64")
 ROOT = Path(__file__).resolve().parents[2]
