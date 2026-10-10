@@ -249,7 +249,11 @@ jobs:
           - { architecture: aarch64, runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Install upstream Mutter build dependencies
+      - name: Build Mutter 47 in a matching GNOME 47 dependency root
+        if: matrix.mutter == 47
+        run: packaging/linux/desktop-integrations/gnome-shell-extension/mutter/run-fedora47-build.sh "${{ matrix.architecture == 'x86_64' && 'linux/amd64' || 'linux/arm64' }}"
+      - name: Install upstream Mutter 46 build dependencies
+        if: matrix.mutter == 46
         run: |
           set -euo pipefail
           sudo python3 - <<'PY'
@@ -266,8 +270,10 @@ jobs:
           sudo apt-get install --yes --no-install-recommends \
             git meson ninja-build libmutter-14-dev gobject-introspection libgirepository1.0-dev
       - name: Compile the stock-header shim and introspection metadata
+        if: matrix.mutter == 46
         run: make -C packaging/linux/desktop-integrations/gnome-shell-extension/native
       - name: Compile the pinned patched Mutter library
+        if: matrix.mutter == 46
         working-directory: packaging/linux/desktop-integrations/gnome-shell-extension/mutter
         run: ./verify-patch.sh "${{ matrix.mutter }}" "$RUNNER_TEMP/mutter-source" "$RUNNER_TEMP/mutter-build"
 
