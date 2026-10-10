@@ -214,8 +214,8 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
         script = (ROOT / "packaging/linux/desktop-integrations/gnome-shell-extension/mutter/build-private-shell.sh").read_text(encoding="utf-8")
         private_library_path = (
             'private_library_path="$root/lib:$root/lib64:$root/usr/lib:'
-            '$root/usr/lib/x86_64-linux-gnu:$root/usr/lib/x86_64-linux-gnu/gnome-shell:'
-            '$root/usr/lib/aarch64-linux-gnu:$root/usr/lib/aarch64-linux-gnu/gnome-shell"'
+            '$root/usr/lib/x86_64-linux-gnu:$root/usr/lib/x86_64-linux-gnu/mutter-14:$root/usr/lib/x86_64-linux-gnu/gnome-shell:'
+            '$root/usr/lib/aarch64-linux-gnu:$root/usr/lib/aarch64-linux-gnu/mutter-14:$root/usr/lib/aarch64-linux-gnu/gnome-shell"'
         )
         self.assertEqual(script.count(private_library_path), 2)
         self.assertEqual(script.count('export LD_LIBRARY_PATH="$private_library_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"'), 2)
