@@ -12,16 +12,17 @@
 #include "wayland_server.h"
 #include "window.h"
 #include "workspace.h"
+#include "xdgshellwindow.h"
 
 #include <QDBusArgument>
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
 #include <QDBusMessage>
 #include <QDBusMetaType>
-#include <QFileInfo>
 #include <QSet>
 #include <QSocketNotifier>
 #include <QThread>
+#include <QTimer>
 
 #include <chrono>
 #include <algorithm>
@@ -45,6 +46,9 @@ constexpr uint kMaximumWriteBytes = 32 * 1024 * 1024;
 constexpr uint kMaximumMimeTypes = 64;
 constexpr uint kMaximumMimeBytes = 255;
 constexpr int kReadTimeoutMs = 2'000;
+constexpr int kWriteTimeoutMs = 2'000;
+constexpr int kAuthorizerTimeoutMs = 250;
+constexpr qsizetype kMaximumPendingWrites = 8;
 
 class MemoryDataSource final : public AbstractDataSource
 {
@@ -62,11 +66,19 @@ public:
             close(fd);
             return;
         }
+        if (m_pendingWrites.size() >= kMaximumPendingWrites) {
+            close(fd);
+            return;
+        }
         new PendingWrite(fd, *payload, this);
     }
 
     void cancel() override
     {
+        const auto pendingWrites = m_pendingWrites;
+        for (auto *pendingWrite : pendingWrites) {
+            pendingWrite->cancel();
+        }
     }
 
     QStringList mimeTypes() const override
@@ -78,18 +90,21 @@ private:
     class PendingWrite final : public QObject
     {
     public:
-        PendingWrite(int fd, QByteArray bytes, QObject *parent)
-            : QObject(parent)
+        PendingWrite(int fd, QByteArray bytes, MemoryDataSource *source)
+            : QObject(source)
             , m_fd(fd)
             , m_bytes(std::move(bytes))
             , m_notifier(fd, QSocketNotifier::Write, this)
         {
+            source->m_pendingWrites.insert(this);
+            connect(this, &QObject::destroyed, source, [source, this] { source->m_pendingWrites.remove(this); });
             const int flags = fcntl(m_fd, F_GETFL);
             if (flags == -1 || fcntl(m_fd, F_SETFL, flags | O_NONBLOCK) == -1) {
                 finish();
                 return;
             }
             connect(&m_notifier, &QSocketNotifier::activated, this, &PendingWrite::writeMore);
+            QTimer::singleShot(kWriteTimeoutMs, this, &PendingWrite::cancel);
             QMetaObject::invokeMethod(this, &PendingWrite::writeMore, Qt::QueuedConnection);
         }
 
@@ -98,6 +113,12 @@ private:
             if (m_fd != -1) {
                 close(m_fd);
             }
+        }
+
+    public:
+        void cancel()
+        {
+            finish();
         }
 
     private:
@@ -138,6 +159,7 @@ private:
     };
 
     QMap<QString, QByteArray> m_payloads;
+    QSet<PendingWrite *> m_pendingWrites;
 };
 
 struct ReadResult {
@@ -211,35 +233,19 @@ const QDBusArgument &operator>>(const QDBusArgument &argument, CopyPasteWriterId
     return argument;
 }
 
-QDBusArgument &operator<<(QDBusArgument &argument, const CopyPasteClipboardSnapshot &snapshot)
-{
-    argument.beginStructure();
-    argument << snapshot.generation << snapshot.mimeTypes << snapshot.identity;
-    argument.endStructure();
-    return argument;
-}
-
-const QDBusArgument &operator>>(const QDBusArgument &argument, CopyPasteClipboardSnapshot &snapshot)
-{
-    argument.beginStructure();
-    argument >> snapshot.generation >> snapshot.mimeTypes >> snapshot.identity;
-    argument.endStructure();
-    return argument;
-}
-
 CopyPasteClipboardBridge::CopyPasteClipboardBridge(QObject *parent)
     : QObject(parent)
 {
     qDBusRegisterMetaType<CopyPasteWriterIdentity>();
-    qDBusRegisterMetaType<CopyPasteClipboardSnapshot>();
     const auto bus = QDBusConnection::sessionBus();
     bus.registerObject(QLatin1String(kObjectPath), this,
                        QDBusConnection::ExportScriptableSlots | QDBusConnection::ExportScriptableSignals);
     if (const auto interface = bus.interface()) {
         connect(interface, &QDBusConnectionInterface::serviceOwnerChanged, this,
-                [this](const QString &name, const QString &, const QString &newOwner) {
-                    if (name == QLatin1String(kDaemonBusName) && newOwner.isEmpty()) {
-                        cancelPendingReads();
+                [this](const QString &name, const QString &oldOwner, const QString &newOwner) {
+                    if (name == QLatin1String(kDaemonBusName) && oldOwner != newOwner) {
+                        ++m_daemonOwnerEpoch;
+                        cancelPendingTransfers();
                     }
                 });
     }
@@ -252,16 +258,16 @@ uint CopyPasteClipboardBridge::Version() const
     return kVersion;
 }
 
-CopyPasteClipboardSnapshot CopyPasteClipboardBridge::Snapshot()
+void CopyPasteClipboardBridge::Snapshot(qulonglong &generation, QStringList &mimeTypes, CopyPasteWriterIdentity &identity)
 {
     if (!authorize()) {
-        return {};
+        return;
     }
     if (!hasValidInventory(m_selection.source)) {
         fail(QStringLiteral("Unavailable"));
-        return {};
+        return;
     }
-    return snapshot();
+    snapshot(generation, mimeTypes, identity);
 }
 
 QByteArray CopyPasteClipboardBridge::Read(qulonglong generation, const QString &mimeType, uint maxBytes)
@@ -297,10 +303,11 @@ QByteArray CopyPasteClipboardBridge::Read(qulonglong generation, const QString &
     const QDBusConnection bus = connection();
     const QPointer<CopyPasteClipboardBridge> bridge(this);
     const auto cancelled = std::make_shared<std::atomic_bool>(false);
+    const auto daemonOwnerEpoch = m_daemonOwnerEpoch;
     m_pendingRead = cancelled;
-    auto *worker = QThread::create([bridge, request, bus, generation, source, maxBytes, cancelled, readFd = fds[0]]() mutable {
+    auto *worker = QThread::create([bridge, request, bus, generation, source, maxBytes, cancelled, daemonOwnerEpoch, readFd = fds[0]]() mutable {
         ReadResult result = readBounded(readFd, maxBytes, cancelled);
-        QMetaObject::invokeMethod(bridge, [bridge, request, bus, generation, source, cancelled, result = std::move(result)]() {
+        QMetaObject::invokeMethod(bridge, [bridge, request, bus, generation, source, cancelled, daemonOwnerEpoch, result = std::move(result)]() {
             if (!bridge) {
                 return;
             }
@@ -309,6 +316,8 @@ QByteArray CopyPasteClipboardBridge::Read(qulonglong generation, const QString &
             }
             if (!bridge->isCurrent(generation, source)) {
                 bus.send(request.createErrorReply(QStringLiteral("app.copypaste.Clipboard.Error.StaleSelection"), QStringLiteral("StaleSelection")));
+            } else if (cancelled->load() || bridge->m_daemonOwnerEpoch != daemonOwnerEpoch) {
+                bus.send(request.createErrorReply(QStringLiteral("app.copypaste.Clipboard.Error.Unavailable"), QStringLiteral("Unavailable")));
             } else if (!result.error.isEmpty()) {
                 bus.send(request.createErrorReply(QStringLiteral("app.copypaste.Clipboard.Error.") + result.error, result.error));
             } else {
@@ -359,10 +368,30 @@ bool CopyPasteClipboardBridge::authorize()
         return true;
     }
     const auto bus = connection();
-    const auto interface = bus.interface();
     const auto sender = message().sender();
-    if (!interface || sender.isEmpty() || interface->serviceOwner(QLatin1String(kDaemonBusName)) != sender ||
-        interface->serviceUid(sender) != getuid()) {
+    if (sender.isEmpty()) {
+        fail(QStringLiteral("AccessDenied"));
+        return false;
+    }
+    QDBusMessage ownerRequest = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.DBus"),
+                                                                QStringLiteral("/org/freedesktop/DBus"),
+                                                                QStringLiteral("org.freedesktop.DBus"),
+                                                                QStringLiteral("GetNameOwner"));
+    ownerRequest.setArguments({QLatin1String(kDaemonBusName)});
+    const auto daemonOwner = bus.call(ownerRequest, QDBus::Block, kAuthorizerTimeoutMs);
+    if (daemonOwner.type() == QDBusMessage::ErrorMessage || daemonOwner.arguments().size() != 1 ||
+        daemonOwner.arguments().constFirst().toString() != sender) {
+        fail(QStringLiteral("AccessDenied"));
+        return false;
+    }
+    QDBusMessage uidRequest = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.DBus"),
+                                                              QStringLiteral("/org/freedesktop/DBus"),
+                                                              QStringLiteral("org.freedesktop.DBus"),
+                                                              QStringLiteral("GetConnectionUnixUser"));
+    uidRequest.setArguments({sender});
+    const auto uidReply = bus.call(uidRequest, QDBus::Block, kAuthorizerTimeoutMs);
+    if (uidReply.type() == QDBusMessage::ErrorMessage || uidReply.arguments().size() != 1 ||
+        uidReply.arguments().constFirst().toUInt() != getuid()) {
         fail(QStringLiteral("AccessDenied"));
         return false;
     }
@@ -395,11 +424,14 @@ bool CopyPasteClipboardBridge::isCurrent(qulonglong generation, const AbstractDa
     return generation == m_generation && source && source == m_selection.source && source == waylandServer()->seat()->selection();
 }
 
-void CopyPasteClipboardBridge::cancelPendingReads()
+void CopyPasteClipboardBridge::cancelPendingTransfers()
 {
     if (m_pendingRead) {
         m_pendingRead->store(true);
         m_pendingRead.reset();
+    }
+    if (auto *memorySource = dynamic_cast<MemoryDataSource *>(m_selection.source.data())) {
+        memorySource->cancel();
     }
 }
 
@@ -413,17 +445,27 @@ CopyPasteWriterIdentity CopyPasteClipboardBridge::identityFor(AbstractDataSource
         return {QStringLiteral("no-client"), 0, 0, {}};
     }
     QSet<QString> appIds;
+    bool hasMatchingToplevel = false;
+    bool hasMissingAppId = false;
     if (!workspace()) {
         return {QStringLiteral("no-app-id"), static_cast<quint32>(client->processId()), static_cast<quint32>(client->userId()), {}};
     }
     for (auto *window : workspace()->windows()) {
-        if (window->surface() && window->surface()->client() == client && !window->desktopFileName().isEmpty()) {
-            appIds.insert(window->desktopFileName());
+        auto *toplevel = qobject_cast<XdgToplevelWindow *>(window);
+        if (!toplevel || !toplevel->surface() || toplevel->surface()->client() != client) {
+            continue;
+        }
+        hasMatchingToplevel = true;
+        const QString appId = toplevel->rawAppId();
+        if (appId.isEmpty()) {
+            hasMissingAppId = true;
+        } else {
+            appIds.insert(appId);
         }
     }
     const auto pid = client->processId() > 0 ? static_cast<quint32>(client->processId()) : 0;
     const auto uid = static_cast<quint32>(client->userId());
-    if (appIds.isEmpty()) {
+    if (!hasMatchingToplevel || hasMissingAppId || appIds.isEmpty()) {
         return {QStringLiteral("no-app-id"), pid, uid, {}};
     }
     if (appIds.size() != 1) {
@@ -432,17 +474,20 @@ CopyPasteWriterIdentity CopyPasteClipboardBridge::identityFor(AbstractDataSource
     return {QStringLiteral("verified"), pid, uid, *appIds.cbegin()};
 }
 
-CopyPasteClipboardSnapshot CopyPasteClipboardBridge::snapshot() const
+void CopyPasteClipboardBridge::snapshot(qulonglong &generation, QStringList &mimeTypes, CopyPasteWriterIdentity &identity) const
 {
+    generation = m_generation;
+    identity = m_selection.identity;
     if (!m_selection.source) {
-        return {m_generation, {}, m_selection.identity};
+        mimeTypes.clear();
+        return;
     }
-    return {m_generation, m_selection.source->mimeTypes(), m_selection.identity};
+    mimeTypes = m_selection.source->mimeTypes();
 }
 
 void CopyPasteClipboardBridge::selectionChanged(AbstractDataSource *source)
 {
-    cancelPendingReads();
+    cancelPendingTransfers();
     const auto oldSource = m_selection.source;
     if (oldSource && oldSource != source) {
         if (auto *memorySource = dynamic_cast<MemoryDataSource *>(oldSource.data())) {
@@ -452,8 +497,11 @@ void CopyPasteClipboardBridge::selectionChanged(AbstractDataSource *source)
     ++m_generation;
     m_selection.source = source;
     m_selection.identity = identityFor(source);
-    const auto state = snapshot();
-    Q_EMIT OwnerChanged(state.generation, hasValidInventory(source) ? state.mimeTypes : QStringList{}, state.identity);
+    qulonglong generation = 0;
+    QStringList mimeTypes;
+    CopyPasteWriterIdentity identity;
+    snapshot(generation, mimeTypes, identity);
+    Q_EMIT OwnerChanged(generation, hasValidInventory(source) ? mimeTypes : QStringList{}, identity);
 }
 } // namespace KWin
 

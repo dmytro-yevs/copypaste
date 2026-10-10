@@ -28,16 +28,8 @@ struct CopyPasteWriterIdentity {
     QString appId;
 };
 
-struct CopyPasteClipboardSnapshot {
-    qulonglong generation = 0;
-    QStringList mimeTypes;
-    CopyPasteWriterIdentity identity;
-};
-
 QDBusArgument &operator<<(QDBusArgument &argument, const CopyPasteWriterIdentity &identity);
 const QDBusArgument &operator>>(const QDBusArgument &argument, CopyPasteWriterIdentity &identity);
-QDBusArgument &operator<<(QDBusArgument &argument, const CopyPasteClipboardSnapshot &snapshot);
-const QDBusArgument &operator>>(const QDBusArgument &argument, CopyPasteClipboardSnapshot &snapshot);
 
 class CopyPasteClipboardBridge final : public QObject, protected QDBusContext
 {
@@ -48,14 +40,14 @@ public:
     explicit CopyPasteClipboardBridge(QObject *parent = nullptr);
 
 public Q_SLOTS:
-    uint Version() const;
-    CopyPasteClipboardSnapshot Snapshot();
-    QByteArray Read(qulonglong generation, const QString &mimeType, uint maxBytes);
-    qulonglong Write(const QMap<QString, QByteArray> &payloads);
+    Q_SCRIPTABLE uint Version() const;
+    Q_SCRIPTABLE void Snapshot(qulonglong &generation, QStringList &mimeTypes, CopyPasteWriterIdentity &identity);
+    Q_SCRIPTABLE QByteArray Read(qulonglong generation, const QString &mimeType, uint maxBytes);
+    Q_SCRIPTABLE qulonglong Write(const QMap<QString, QByteArray> &payloads);
 
 Q_SIGNALS:
-    void OwnerChanged(qulonglong generation, const QStringList &mimeTypes,
-                      const KWin::CopyPasteWriterIdentity &identity);
+    Q_SCRIPTABLE void OwnerChanged(qulonglong generation, const QStringList &mimeTypes,
+                                   const KWin::CopyPasteWriterIdentity &identity);
 
 private:
     struct SelectionState {
@@ -68,16 +60,16 @@ private:
     bool isValidMimeType(const QString &mimeType) const;
     bool hasValidInventory(const AbstractDataSource *source) const;
     bool isCurrent(qulonglong generation, const AbstractDataSource *source) const;
-    void cancelPendingReads();
+    void cancelPendingTransfers();
     CopyPasteWriterIdentity identityFor(AbstractDataSource *source) const;
-    CopyPasteClipboardSnapshot snapshot() const;
+    void snapshot(qulonglong &generation, QStringList &mimeTypes, CopyPasteWriterIdentity &identity) const;
     void selectionChanged(AbstractDataSource *source);
 
     qulonglong m_generation = 0;
+    qulonglong m_daemonOwnerEpoch = 0;
     SelectionState m_selection;
     std::shared_ptr<std::atomic_bool> m_pendingRead;
 };
 } // namespace KWin
 
 Q_DECLARE_METATYPE(KWin::CopyPasteWriterIdentity)
-Q_DECLARE_METATYPE(KWin::CopyPasteClipboardSnapshot)
