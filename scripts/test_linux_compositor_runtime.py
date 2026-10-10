@@ -2,6 +2,9 @@
 import copy
 import importlib.util
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -60,6 +63,21 @@ class CompositorRuntimeSourceTest(unittest.TestCase):
         run["head_repository"] = {"full_name": "fork/repo"}
         with self.assertRaisesRegex(ValueError, "exact-commit"):
             self.module.verify_source(run, self.artifacts, "owner/repo", "a" * 40)
+
+    def test_dynamic_stage_loader_imports_sibling_with_an_isolated_python_path(self):
+        verifier = ROOT / "scripts/release/verify-linux-compositor-runtime.py"
+        code = (
+            "import importlib.util; "
+            f"spec = importlib.util.spec_from_file_location('verify', {str(verifier)!r}); "
+            "module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); "
+            "stage = module.stage_runtime_module(); "
+            "assert hasattr(stage, 'validate_private_elf_closure')"
+        )
+        environment = {"PATH": os.environ["PATH"], "PYTHONPATH": ""}
+        completed = subprocess.run([sys.executable, "-I", "-c", code], cwd=ROOT,
+                                   env=environment, text=True, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, check=False)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_requires_checked_out_baseline_revision_and_patch_bytes(self):
         revision, shell_revision, patch = self.module.BASELINES["GNOME"]

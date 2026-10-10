@@ -47,18 +47,46 @@ def rpm_requires(receipt: dict) -> str:
     return "\n".join(rows)
 
 
-def rpm_desktop_safety(*, requires: str, provides: str, obsoletes: str, conflicts: str) -> None:
-    """Reject package-manager operations that could replace host decorations.
+def rpm_spec(release_version: str, receipt: dict) -> str:
+    """Render an RPM spec that treats the staged runtime as immutable payload."""
+    runtime_id = receipt["runtime_id"]
+    private_root = "/usr/lib/copypaste/compositor-runtime"
+    launcher = f"{private_root}/bin/copypaste-compositor-session-{runtime_id}"
+    architecture = {"x86_64": "x86_64", "aarch64": "aarch64"}[receipt["architecture"]]
+    return (
+        f"Name: {package_name(runtime_id)}\nVersion: {release_version}\nRelease: 1%{{?dist}}\n"
+        "Summary: Opt-in CopyPaste compositor clipboard runtime\nLicense: GPL-2.0-or-later\n"
+        f"BuildArch: {architecture}\n"
+        # The staged runtime is receipt-bound byte-for-byte.  Its ELF files are
+        # private implementation details, so RPM must neither rewrite them nor
+        # publish their SONAMEs as host package-manager capabilities.
+        f"%global __requires_exclude_from ^{private_root}/.*$\n"
+        f"%global __provides_exclude_from ^{private_root}/.*$\n"
+        "%global __brp_strip %{nil}\n"
+        "%global __brp_strip_comment_note %{nil}\n"
+        "%global __brp_strip_lto %{nil}\n"
+        "%global __brp_strip_static_archive %{nil}\n"
+        f"{rpm_requires(receipt)}\n\n"
+        "%description\nPrivate compositor runtime exposed only as a separate login session.\n\n"
+        "%install\ncp -a %{_source_stage}/. %{buildroot}/\n\n%files\n"
+        f"{private_root}/{runtime_id}\n"
+        f"{launcher}\n"
+        f"/usr/share/copypaste/compositor-runtime/{runtime_id}.receipt.json\n"
+        f"/usr/share/wayland-sessions/copypaste-{runtime_id}.desktop\n"
+    )
 
-    RPM generates SONAME requirements for the private closure.  A requirement
-    whose exact token is also provided by this package is private and safe; a
-    named KDecoration package requirement, conflict, or obsolete is not.
-    """
-    private_provides = {line.strip() for line in provides.splitlines() if line.strip()}
+
+def rpm_desktop_safety(*, requires: str, provides: str, obsoletes: str, conflicts: str, allowed_host_requires: set[str] | None = None) -> None:
+    """Reject private ELF metadata and host compositor replacement constraints."""
+    allowed_host_requires = allowed_host_requires or set()
+    for label, values in (("Provides", provides), ("Requires", requires)):
+        for item in (line.strip() for line in values.splitlines() if line.strip()):
+            if ".so" in item and ("(64bit)" in item or "(32bit)" in item):
+                raise ContractError(f"RPM {label} leaked a private ELF capability: {item}")
     desktop_package = re.compile(r"(^|\s)(?:kdecorations?|kdecorations?[0-9._+-]*|plasma-workspace)(?:\s|[<>=()]|$)", re.IGNORECASE)
     for label, values in (("Requires", requires), ("Obsoletes", obsoletes), ("Conflicts", conflicts)):
         for item in (line.strip() for line in values.splitlines() if line.strip()):
-            if label == "Requires" and item in private_provides:
+            if label == "Requires" and item in allowed_host_requires:
                 continue
             if desktop_package.search(item):
                 raise ContractError(f"RPM {label} would constrain a host decoration or Plasma package: {item}")
@@ -86,24 +114,12 @@ def build_deb(stage_root: Path, output: Path, release_version: str, receipt: dic
 
 
 def build_rpm(stage_root: Path, output: Path, release_version: str, receipt: dict) -> None:
-    architecture = {"x86_64": "x86_64", "aarch64": "aarch64"}[receipt["architecture"]]
     with tempfile.TemporaryDirectory() as temporary:
         topdir = Path(temporary)
         for name in ("BUILD", "BUILDROOT", "RPMS", "SOURCES", "SPECS", "SRPMS"):
             (topdir / name).mkdir()
         spec = topdir / "SPECS/runtime.spec"
-        runtime_id = receipt["runtime_id"]
-        spec.write_text(
-            f"Name: {package_name(runtime_id)}\nVersion: {release_version}\nRelease: 1%{{?dist}}\n"
-            "Summary: Opt-in CopyPaste compositor clipboard runtime\nLicense: GPL-2.0-or-later\n"
-            f"BuildArch: {architecture}\n{rpm_requires(receipt)}\n\n"
-            "%description\nPrivate compositor runtime exposed only as a separate login session.\n\n"
-            "%install\ncp -a %{_source_stage}/. %{buildroot}/\n\n%files\n"
-            f"/usr/lib/copypaste/compositor-runtime/{runtime_id}\n"
-            f"/usr/share/copypaste/compositor-runtime/{runtime_id}.receipt.json\n"
-            f"/usr/share/wayland-sessions/copypaste-{runtime_id}.desktop\n",
-            encoding="utf-8",
-        )
+        spec.write_text(rpm_spec(release_version, receipt), encoding="utf-8")
         run(["rpmbuild", "-bb", str(spec), "--define", f"_topdir {topdir}", "--define", f"_source_stage {stage_root}", "--define", "_build_id_links none"])
         outputs = list((topdir / "RPMS").rglob("*.rpm"))
         if len(outputs) != 1:
@@ -126,13 +142,16 @@ def verify_packaged_payload(package_format: str, package: Path, runtime_id: str)
         verify(root, runtime_id)
 
 
-def verify_rpm_desktop_safety(package: Path) -> None:
+def verify_rpm_desktop_safety(package: Path, receipt: dict) -> None:
     def query(flag: str) -> str:
         completed = subprocess.run(["rpm", "-qp", flag, str(package)], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
         if completed.returncode:
             raise ContractError(f"cannot inspect built RPM {flag}")
         return completed.stdout
-    rpm_desktop_safety(requires=query("--requires"), provides=query("--provides"), obsoletes=query("--obsoletes"), conflicts=query("--conflicts"))
+    rpm_desktop_safety(
+        requires=query("--requires"), provides=query("--provides"), obsoletes=query("--obsoletes"), conflicts=query("--conflicts"),
+        allowed_host_requires=set(host_dependencies(receipt, rpm=True).split(", ")) - {""},
+    )
 
 
 def main() -> int:
@@ -166,7 +185,7 @@ def main() -> int:
                 build_deb(stage_root, args.output, args.version, receipt)
             else:
                 build_rpm(stage_root, args.output, args.version, receipt)
-                verify_rpm_desktop_safety(args.output)
+                verify_rpm_desktop_safety(args.output, receipt)
             verify_packaged_payload(args.format, args.output, receipt["runtime_id"])
     except (ContractError, OSError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
