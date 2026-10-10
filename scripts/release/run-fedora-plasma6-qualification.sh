@@ -53,5 +53,5 @@ if [[ -n "$PREVIOUS_ARTIFACTS" ]]; then
   mounts+=(--volume "$(cd "$PREVIOUS_ARTIFACTS" && pwd):/previous:ro")
 fi
 docker run --rm --platform "$platform" \
-  --cap-add SYS_NICE --device "$V4L2_DEVICE:$V4L2_DEVICE" "${mounts[@]}" --workdir /work "$image" \
+  --cap-add SYS_NICE --device "$V4L2_DEVICE:$V4L2_DEVICE" --env "COPYPASTE_QUALIFICATION_V4L2_DEVICE=$V4L2_DEVICE" "${mounts[@]}" --workdir /work "$image" \
   /work/scripts/release/run-fedora-plasma6-session.sh --session "$SESSION" --companion-source /companion --compositor-runtime /compositor-runtime --compositor-runtime-binding /compositor-runtime/$(basename "$COMPOSITOR_RUNTIME_BINDING") -- "$@"

@@ -109,6 +109,17 @@ class BundleLinuxGstreamerCameraTest(unittest.TestCase):
             with self.assertRaisesRegex(bundler.BundleError, "exactly one"):
                 bundler.camera_plugin_path(root)
 
+    def test_manifest_plugin_hashes_are_refreshed_after_rpath_mutation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plugin = root / "usr/lib/gstreamer-1.0/libgstvideo4linux2.so.0"
+            plugin.parent.mkdir(parents=True)
+            plugin.write_bytes(b"before-rpath")
+            records = [{"element": "v4l2src", "path": str(plugin.relative_to(root)), "sha256": bundler.sha256(plugin)}]
+            plugin.write_bytes(b"after-rpath")
+            bundler.refresh_plugin_records(root, records)
+            self.assertEqual(records[0]["sha256"], bundler.sha256(plugin))
+
 
 if __name__ == "__main__":
     unittest.main()
