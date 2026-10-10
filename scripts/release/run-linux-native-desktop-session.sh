@@ -5,19 +5,30 @@ set -euo pipefail
 DESKTOP=""
 SESSION=""
 COMPANION_SOURCE=""
+COMPOSITOR_RUNTIME=""
+COMPOSITOR_RUNTIME_BINDING=""
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --desktop) DESKTOP="$2"; shift 2 ;;
     --session) SESSION="$2"; shift 2 ;;
     --companion-source) COMPANION_SOURCE="$2"; shift 2 ;;
+    --compositor-runtime) COMPOSITOR_RUNTIME="$2"; shift 2 ;;
+    --compositor-runtime-binding) COMPOSITOR_RUNTIME_BINDING="$2"; shift 2 ;;
     --) shift; break ;;
     *) echo "ERROR: unknown desktop-session argument: $1" >&2; exit 2 ;;
   esac
 done
 [[ "$#" -gt 0 ]] || { echo "ERROR: missing command for desktop session" >&2; exit 2; }
 [[ -d "$COMPANION_SOURCE" ]] || { echo "ERROR: exact packaged companion source is required" >&2; exit 2; }
+[[ -d "$COMPOSITOR_RUNTIME" && -f "$COMPOSITOR_RUNTIME_BINDING" && ! -L "$COMPOSITOR_RUNTIME" && ! -L "$COMPOSITOR_RUNTIME_BINDING" ]] || { echo "ERROR: authenticated compositor runtime input is required" >&2; exit 2; }
 case "$DESKTOP" in GNOME|KDE) ;; *) exit 2 ;; esac
 case "$SESSION" in x11|wayland) ;; *) exit 2 ;; esac
+runtime_package="$(jq -er '.package.name | select(type == "string" and test("^[A-Za-z0-9._+-]+\\.deb$"))' "$COMPOSITOR_RUNTIME_BINDING")"
+runtime_id="$(jq -er '.runtime_id | select(type == "string" and test("^[a-z0-9.-]+$"))' "$COMPOSITOR_RUNTIME_BINDING")"
+sudo apt-get install --yes "$COMPOSITOR_RUNTIME/$runtime_package"
+dpkg-query --show "copypaste-compositor-runtime-$runtime_id" >/dev/null
+python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/verify-linux-compositor-runtime.py" installed --binding "$COMPOSITOR_RUNTIME_BINDING" --root /
+COMPOSITOR_LAUNCHER="/usr/lib/copypaste/compositor-runtime/bin/copypaste-compositor-session-$runtime_id"
 
 RUNTIME="$(mktemp -d)"
 DISPLAY_NUMBER=99
@@ -94,14 +105,14 @@ if [[ "$SESSION" == x11 ]]; then
   export DISPLAY=":$DISPLAY_NUMBER"
   wait_for 'xdpyinfo -display "$DISPLAY" >/dev/null 2>&1'
   case "$DESKTOP" in
-    GNOME) gnome-shell --x11 --replace >"$RUNTIME/desktop.log" 2>&1 & ;;
+    GNOME) "$COMPOSITOR_LAUNCHER" >"$RUNTIME/desktop.log" 2>&1 & ;;
     KDE) kwin_x11 --replace >"$RUNTIME/desktop.log" 2>&1 & ;;
   esac
   desktop_pid=$!
   wait_for 'kill -0 "$desktop_pid" 2>/dev/null'
 else
   case "$DESKTOP" in
-    GNOME) gnome-shell --headless --virtual-monitor 1280x800 >"$RUNTIME/desktop.log" 2>&1 & ;;
+    GNOME) "$COMPOSITOR_LAUNCHER" >"$RUNTIME/desktop.log" 2>&1 & ;;
     KDE) kwin_wayland --virtual --no-lockscreen >"$RUNTIME/desktop.log" 2>&1 & ;;
   esac
   desktop_pid=$!

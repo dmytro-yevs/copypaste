@@ -4,10 +4,14 @@ set -euo pipefail
 
 SESSION=""
 COMPANION_SOURCE=""
+COMPOSITOR_RUNTIME=""
+COMPOSITOR_RUNTIME_BINDING=""
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --session) SESSION="$2"; shift 2 ;;
     --companion-source) COMPANION_SOURCE="$2"; shift 2 ;;
+    --compositor-runtime) COMPOSITOR_RUNTIME="$2"; shift 2 ;;
+    --compositor-runtime-binding) COMPOSITOR_RUNTIME_BINDING="$2"; shift 2 ;;
     --) shift; break ;;
     *) echo "ERROR: unknown Fedora session argument: $1" >&2; exit 2 ;;
   esac
@@ -15,6 +19,13 @@ done
 [[ "$SESSION" == x11 || "$SESSION" == wayland ]] || { echo "ERROR: session must be x11 or wayland" >&2; exit 2; }
 [[ "$#" -gt 0 ]] || { echo "ERROR: missing qualification command" >&2; exit 2; }
 [[ -d "$COMPANION_SOURCE" ]] || { echo "ERROR: exact packaged companion source is required" >&2; exit 2; }
+[[ -d "$COMPOSITOR_RUNTIME" && -f "$COMPOSITOR_RUNTIME_BINDING" && ! -L "$COMPOSITOR_RUNTIME" && ! -L "$COMPOSITOR_RUNTIME_BINDING" ]] || { echo "ERROR: authenticated compositor runtime input is required" >&2; exit 2; }
+runtime_package="$(jq -er '.package.name | select(type == "string" and test("^[A-Za-z0-9._+-]+\\.rpm$"))' "$COMPOSITOR_RUNTIME_BINDING")"
+runtime_id="$(jq -er '.runtime_id | select(type == "string" and test("^[a-z0-9.-]+$"))' "$COMPOSITOR_RUNTIME_BINDING")"
+dnf --assumeyes install "$COMPOSITOR_RUNTIME/$runtime_package"
+rpm -q "copypaste-compositor-runtime-$runtime_id" >/dev/null
+python3 /work/scripts/release/verify-linux-compositor-runtime.py installed --binding "$COMPOSITOR_RUNTIME_BINDING" --root /
+COMPOSITOR_LAUNCHER="/usr/lib/copypaste/compositor-runtime/bin/copypaste-compositor-session-$runtime_id"
 
 runtime="$(mktemp -d)"
 cleanup() {
@@ -70,13 +81,13 @@ case "$SESSION" in
     xserver_pid=$!
     export DISPLAY=:99
     wait_for 'xdpyinfo -display "$DISPLAY" >/dev/null 2>&1'
-    kwin_x11 --replace >"$runtime/kwin.log" 2>&1 &
+    "$COMPOSITOR_LAUNCHER" >"$runtime/kwin.log" 2>&1 &
     kwin_pid=$!
     wait_for 'kill -0 "$kwin_pid" 2>/dev/null'
     xprop -root -display "$DISPLAY" >/dev/null
     ;;
   wayland)
-    kwin_wayland --virtual --no-lockscreen >"$runtime/kwin.log" 2>&1 &
+    "$COMPOSITOR_LAUNCHER" >"$runtime/kwin.log" 2>&1 &
     kwin_pid=$!
     wait_for 'kill -0 "$kwin_pid" 2>/dev/null'
     wait_for 'find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name "wayland-*" | grep -q .'
@@ -98,10 +109,5 @@ shell_pid=$!
 wait_for 'kill -0 "$shell_pid" 2>/dev/null'
 
 kpackagetool6 --version >/dev/null
-if [[ "$SESSION" == x11 ]]; then
-  kwin_version="$(kwin_x11 --version)"
-else
-  kwin_version="$(kwin_wayland --version)"
-fi
-printf 'desktop=%s\nsession=%s\nkwin=%s\n' "$XDG_CURRENT_DESKTOP" "$XDG_SESSION_TYPE" "$kwin_version"
+printf 'desktop=%s\nsession=%s\ncompositor_launcher=%s\n' "$XDG_CURRENT_DESKTOP" "$XDG_SESSION_TYPE" "$COMPOSITOR_LAUNCHER"
 exec "$@"
