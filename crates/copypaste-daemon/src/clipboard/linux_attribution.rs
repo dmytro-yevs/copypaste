@@ -63,9 +63,10 @@ pub(crate) fn resolve_owner(
 /// its display label and never derives an identity from desktop state.
 pub(crate) fn resolve_desktop_id(id: &str) -> Option<SourceApp> {
     valid_desktop_id(id).then_some(())?;
+    let (_, name) = desktop_for_class(id)?;
     Some(SourceApp {
         id: id.to_owned(),
-        name: desktop_for_class(id)?,
+        name,
     })
 }
 
