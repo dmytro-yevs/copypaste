@@ -73,15 +73,16 @@ def closure_licenses(root: Path) -> list[dict[str, str]]:
     result = []
     for item in licenses:
         base = {"package", "license_package", "license_evr", "license_source_rpm", "license", "path", "sha256", "license_origin"}
-        source = base | {"license_archive", "license_archive_sha256", "license_archive_supplier", "license_archive_evr"}
-        if not isinstance(item, dict) or set(item) not in (base, source):
+        source = base | {"license_archive", "license_archive_sha256", "license_archive_supplier", "license_archive_evr", "license_source_member"}
+        standard = base | {"standard_license_url", "standard_license_sha256"}
+        if not isinstance(item, dict) or set(item) not in (base, source, standard):
             raise ValueError("private ELF closure license record is invalid")
         path = item["path"]
         if (not isinstance(path, str) or path.startswith("/") or ".." in Path(path).parts
                 or not NAME.fullmatch(item["package"]) or not NAME.fullmatch(item["license_package"]) or not VERSION.fullmatch(item["license_evr"]) or not SOURCE_RPM.fullmatch(item["license_source_rpm"]) or not LICENSE.fullmatch(item["license"]) or item["license"] != item["license"].strip()
                 or not SHA.fullmatch(item["sha256"])):
             raise ValueError("private ELF closure license metadata is unsafe")
-        if item["license_origin"] not in {"installed-rpm", "source-rpm"} or (item["license_origin"] == "source-rpm" and (item.get("license_archive") != item["license_source_rpm"] or not NAME.fullmatch(item.get("license_archive_supplier", "")) or not VERSION.fullmatch(item.get("license_archive_evr", "")) or not SHA.fullmatch(item.get("license_archive_sha256", "")))):
+        if item["license_origin"] not in {"installed-rpm", "source-rpm", "standard-license"} or (item["license_origin"] == "source-rpm" and (item.get("license_archive") != item["license_source_rpm"] or not isinstance(item.get("license_source_member"), str) or not NAME.fullmatch(item.get("license_archive_supplier", "")) or not VERSION.fullmatch(item.get("license_archive_evr", "")) or not SHA.fullmatch(item.get("license_archive_sha256", "")))) or (item["license_origin"] == "standard-license" and (item.get("standard_license_url") not in {"https://www.gnu.org/licenses/lgpl-3.0.txt", "https://www.gnu.org/licenses/gpl-3.0.txt"} or not SHA.fullmatch(item.get("standard_license_sha256", "")))):
             raise ValueError("private ELF closure license origin is invalid")
         source = root / path
         if not source.is_file() or source.is_symlink() or digest(source) != item["sha256"]:

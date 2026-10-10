@@ -10,6 +10,7 @@ DT_NEEDED recursively, copies every non-glibc library into the runtime's
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import io
 import json
@@ -21,7 +22,6 @@ import subprocess
 import sys
 import tempfile
 import tarfile
-import urllib.request
 from collections import deque
 from pathlib import Path
 from typing import Iterable
@@ -297,8 +297,8 @@ def standard_license_records(owner: tuple[str, str, str, str]) -> list[tuple[str
         return []
     records = []
     for name, url, expected in STANDARD_LICENSES:
-        with urllib.request.urlopen(url, timeout=20) as response:
-            value = response.read(MAX_LICENSE_BYTES + 1)
+        asset = Path(__file__).with_name("licenses") / name
+        value = base64.b64decode(asset.read_bytes(), validate=True)
         if len(value) > MAX_LICENSE_BYTES or hashlib.sha256(value).hexdigest() != expected:
             raise ClosureError("canonical GNU license text verification failed")
         records.append((name, value, url, expected))
