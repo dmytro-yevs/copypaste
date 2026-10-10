@@ -19,6 +19,13 @@ from zipfile import ZipFile
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def native_camera_media(native_format):
+    fixtures = runpy.run_path(str(
+        ROOT / "scripts/release/tests/test_linux_camera_qualification_evidence.py"
+    ))
+    return fixtures["media_records"]() + fixtures["media_records"](native_format)
+
+
 class FlutterCacheKeyTest(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -869,6 +876,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                             "architecture": architecture, "desktop": desktop, "session": session,
                             "upgrade_mode": "prior_release",
                             "installed_formats": ["AppImage", native_format],
+                            "media": native_camera_media(native_format),
                             "environment": {"distribution": "ubuntu" if desktop == "GNOME" else "fedora", "distribution_version": "24.04"},
                             "commands": [
                                 {"argv": prior_appimage_argv, "returncode": 0, "assertions": ["package_upgrade"]},
@@ -1015,7 +1023,8 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                 "print('COPYPASTE_QUALIFICATION_INSTALL '+json.dumps({'formats':['AppImage','deb'],'packages':[package(appimage,'AppImage'),package(native,'deb')],'appimage_extract_argv':appimage_argv,'native_install_argv':native_argv}))\n"
                 "canary=hashlib.sha256(b'copypaste-upgrade-canary').hexdigest(); source_app={'path':'/runtime/appimage-prior/squashfs-root/usr/lib/copypaste/copypaste','sha256':'d'*64,'size_bytes':1}; source_native={'path':'/usr/lib/copypaste/copypaste','sha256':'f'*64,'size_bytes':1}\n"
                 "print('COPYPASTE_QUALIFICATION_UPGRADE '+json.dumps({'prior':{'version':'1.2.2','packages':[package(prior_appimage,'AppImage'),package(prior_native,'deb')],'appimage_extract_argv':prior_appimage_argv,'native_install_argv':prior_native_argv},'current':{'version':'1.2.3','packages':[package(appimage,'AppImage'),package(native,'deb')],'appimage_extract_argv':appimage_argv,'native_install_argv':native_argv},'seeds':[{'format':'AppImage','source_executable':source_app,'canary':{'id':'prior-appimage','content_sha256':canary,'executable_sha256':source_app['sha256']}},{'format':'deb','source_executable':source_native,'canary':{'id':'prior-native','content_sha256':canary,'executable_sha256':source_native['sha256']}}]}))\n"
-                "for format in ['AppImage','deb']: print('COPYPASTE_QUALIFICATION_RUNTIME '+json.dumps({'format':format,'gui_owned_daemon':True,'executables':{name:{'path':('/runtime/squashfs-root/usr/lib/copypaste/' if format=='AppImage' else '/usr/lib/copypaste/')+name,'sha256':'e'*64,'size_bytes':1} for name in ['copypaste','copypaste-daemon','copypaste-cli']}}))\n",
+                "for format in ['AppImage','deb']: print('COPYPASTE_QUALIFICATION_RUNTIME '+json.dumps({'format':format,'gui_owned_daemon':True,'executables':{name:{'path':('/runtime/squashfs-root/usr/lib/copypaste/' if format=='AppImage' else '/usr/lib/copypaste/')+name,'sha256':'e'*64,'size_bytes':1} for name in ['copypaste','copypaste-daemon','copypaste-cli']}}))\n"
+                "for record in " + repr(native_camera_media("deb")) + ": print('COPYPASTE_QUALIFICATION_MEDIA '+json.dumps(record))\n",
                 encoding="utf-8",
             )
             driver.chmod(0o755)
@@ -1157,6 +1166,10 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                 "format": format_name, "gui_owned_daemon": True,
                 "executables": {name: {"path": (f"/runtime/squashfs-root/usr/lib/copypaste/{name}" if format_name == "AppImage" else f"/usr/lib/copypaste/{name}"), "sha256": "e" * 64, "size_bytes": 1} for name in ("copypaste", "copypaste-daemon", "copypaste-cli")},
             }) for format_name in ("AppImage", "deb"))
+            output += "\n" + "\n".join(
+                producer["MEDIA_PREFIX"] + json.dumps(record)
+                for record in native_camera_media("deb")
+            )
             completed = subprocess.CompletedProcess(["driver"], 0, stdout=output)
             with mock.patch.dict(os.environ, {}, clear=True), \
                     mock.patch.object(producer["subprocess"], "run", return_value=completed) as run:
