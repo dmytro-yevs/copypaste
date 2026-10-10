@@ -445,8 +445,15 @@ mod native_tests {
         }
         archive.finish().unwrap();
         let data = directory.path().join("host");
-        let manager =
-            Arc::new(ModuleManager::open(&data, "1.0.11", target, &key.pk.to_base64()).unwrap());
+        let manager = Arc::new(
+            ModuleManager::open(
+                &data,
+                env!("CARGO_PKG_VERSION"),
+                target,
+                &key.pk.to_base64(),
+            )
+            .unwrap(),
+        );
         manager.set_inference_launcher(Arc::new(crate::DesktopInferenceLauncher::new(
             PathBuf::from(
                 std::env::var_os("COPYPASTE_INFERENCE_WORKER").expect("candidate inference worker"),
