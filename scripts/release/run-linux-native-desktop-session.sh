@@ -37,7 +37,7 @@ COMPOSITOR_QUALIFICATION_ENTRYPOINT="$runtime_root/$qualification_entrypoint"
 [[ -x "$COMPOSITOR_QUALIFICATION_ENTRYPOINT" ]] || { echo "ERROR: receipt-listed GNOME qualification entrypoint is missing" >&2; exit 1; }
 private_shell="$runtime_root/usr/bin/gnome-shell"
 [[ -x "$private_shell" ]] || { echo "ERROR: receipt-listed GNOME Shell is missing" >&2; exit 1; }
-private_library_path="$runtime_root/lib:$runtime_root/lib64:$runtime_root/usr/lib:$runtime_root/usr/lib/x86_64-linux-gnu:$runtime_root/usr/lib/x86_64-linux-gnu/gnome-shell:$runtime_root/usr/lib/aarch64-linux-gnu:$runtime_root/usr/lib/aarch64-linux-gnu/gnome-shell"
+private_library_path="$runtime_root/lib:$runtime_root/lib64:$runtime_root/usr/lib:$runtime_root/usr/lib/x86_64-linux-gnu:$runtime_root/usr/lib/x86_64-linux-gnu/mutter-14:$runtime_root/usr/lib/x86_64-linux-gnu/gnome-shell:$runtime_root/usr/lib/aarch64-linux-gnu:$runtime_root/usr/lib/aarch64-linux-gnu/mutter-14:$runtime_root/usr/lib/aarch64-linux-gnu/gnome-shell"
 private_typelib_path="$runtime_root/usr/lib/x86_64-linux-gnu/mutter-14:$runtime_root/usr/lib/x86_64-linux-gnu/gnome-shell:$runtime_root/usr/lib/aarch64-linux-gnu/mutter-14:$runtime_root/usr/lib/aarch64-linux-gnu/gnome-shell"
 if ! loader_report="$(LD_LIBRARY_PATH="$private_library_path" ldd "$private_shell" 2>&1)"; then
   printf 'ERROR: could not inspect private GNOME Shell loader closure\n%s\n' "$loader_report" >&2
