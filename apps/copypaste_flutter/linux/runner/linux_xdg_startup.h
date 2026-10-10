@@ -41,6 +41,7 @@ class LinuxXdgStartup {
 
   std::string autostart_path() const;
   std::string desktop_entry_path() const;
+  bool owns_managed_entry(const std::string& path, bool autostart) const;
   bool owns_entry_for_current_executable(const std::string& path,
                                          bool autostart) const;
   bool write_owned_entry(const std::string& path, bool autostart,
