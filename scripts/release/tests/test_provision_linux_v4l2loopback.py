@@ -28,6 +28,12 @@ class ProvisionLinuxV4L2Test(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "already loaded"):
                 tool.assert_unowned_target()
 
+    def test_accepts_one_exclusive_loopback_device_and_rejects_other_arrays(self):
+        self.assertTrue(tool.exclusive_caps_enabled("Y,N,N,N,N,N,N,N"))
+        self.assertTrue(tool.exclusive_caps_enabled("1"))
+        self.assertFalse(tool.exclusive_caps_enabled("N,N,N,N,N,N,N,N"))
+        self.assertFalse(tool.exclusive_caps_enabled("Y,N,Y"))
+
     def test_state_is_exclusive_and_exactly_job_owned(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "v4l2.json"
