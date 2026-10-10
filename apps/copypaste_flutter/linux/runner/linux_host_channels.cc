@@ -235,6 +235,69 @@ bool bridge_companion_active() {
   return bridge_waiter != nullptr && !companion_owner().empty();
 }
 
+bool clipboard_version_active() {
+  g_autoptr(GError) error = nullptr;
+  g_autoptr(GDBusConnection) bus =
+      g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, &error);
+  if (bus == nullptr) return false;
+  for (const char* name : {"app.copypaste.GnomeIntegration", "org.kde.KWin"}) {
+    g_clear_error(&error);
+    g_autoptr(GVariant) owner_reply = g_dbus_connection_call_sync(
+        bus, "org.freedesktop.DBus", "/org/freedesktop/DBus",
+        "org.freedesktop.DBus", "GetNameOwner", g_variant_new("(s)", name),
+        G_VARIANT_TYPE("(s)"), G_DBUS_CALL_FLAGS_NONE, 500, nullptr, &error);
+    if (owner_reply == nullptr) continue;
+    const gchar* owner = nullptr;
+    g_variant_get(owner_reply, "(&s)", &owner);
+    g_autoptr(GVariant) uid_reply = owner == nullptr
+        ? nullptr
+        : g_dbus_connection_call_sync(
+              bus, "org.freedesktop.DBus", "/org/freedesktop/DBus",
+              "org.freedesktop.DBus", "GetConnectionUnixUser",
+              g_variant_new("(s)", owner), G_VARIANT_TYPE("(u)"),
+              G_DBUS_CALL_FLAGS_NONE, 500, nullptr, &error);
+    guint uid = 0;
+    if (uid_reply == nullptr) continue;
+    g_variant_get(uid_reply, "(u)", &uid);
+    if (uid != static_cast<guint>(getuid())) continue;
+    g_autoptr(GVariant) version = g_dbus_connection_call_sync(
+        bus, owner, "/app/copypaste/Clipboard", "app.copypaste.Clipboard",
+        "Version", nullptr, G_VARIANT_TYPE("(u)"), G_DBUS_CALL_FLAGS_NONE,
+        500, nullptr, &error);
+    guint value = 0;
+    if (version == nullptr) continue;
+    g_variant_get(version, "(u)", &value);
+    if (value != 2) continue;
+    g_autoptr(GVariant) current = g_dbus_connection_call_sync(
+        bus, "org.freedesktop.DBus", "/org/freedesktop/DBus",
+        "org.freedesktop.DBus", "GetNameOwner", g_variant_new("(s)", name),
+        G_VARIANT_TYPE("(s)"), G_DBUS_CALL_FLAGS_NONE, 500, nullptr, &error);
+    const gchar* now = nullptr;
+    if (current != nullptr) g_variant_get(current, "(&s)", &now);
+    if (g_strcmp0(owner, now) == 0) return true;
+  }
+  return false;
+}
+
+bool clipboard_version_active() {
+  g_autoptr(GError) error = nullptr;
+  g_autoptr(GDBusConnection) bus = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, &error);
+  if (bus == nullptr) return false;
+  for (const char* name : {"app.copypaste.GnomeIntegration", "org.kde.KWin"}) {
+    g_clear_error(&error);
+    g_autoptr(GVariant) owner_reply = g_dbus_connection_call_sync(bus, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetNameOwner", g_variant_new("(s)", name), G_VARIANT_TYPE("(s)"), G_DBUS_CALL_FLAGS_NONE, 500, nullptr, &error);
+    if (owner_reply == nullptr) continue;
+    const gchar* owner = nullptr; g_variant_get(owner_reply, "(&s)", &owner);
+    g_autoptr(GVariant) uid_reply = owner == nullptr ? nullptr : g_dbus_connection_call_sync(bus, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetConnectionUnixUser", g_variant_new("(s)", owner), G_VARIANT_TYPE("(u)"), G_DBUS_CALL_FLAGS_NONE, 500, nullptr, &error);
+    guint uid = 0; if (uid_reply == nullptr) continue; g_variant_get(uid_reply, "(u)", &uid); if (uid != static_cast<guint>(getuid())) continue;
+    g_autoptr(GVariant) version = g_dbus_connection_call_sync(bus, owner, "/app/copypaste/Clipboard", "app.copypaste.Clipboard", "Version", nullptr, G_VARIANT_TYPE("(u)"), G_DBUS_CALL_FLAGS_NONE, 500, nullptr, &error);
+    guint value = 0; if (version == nullptr) continue; g_variant_get(version, "(u)", &value); if (value != 2) continue;
+    g_autoptr(GVariant) current = g_dbus_connection_call_sync(bus, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetNameOwner", g_variant_new("(s)", name), G_VARIANT_TYPE("(s)"), G_DBUS_CALL_FLAGS_NONE, 500, nullptr, &error);
+    const gchar* now = nullptr; if (current != nullptr) g_variant_get(current, "(&s)", &now); if (g_strcmp0(owner, now) == 0) return true;
+  }
+  return false;
+}
+
 gint64 integer_argument(FlMethodCall* call, const gchar* name,
                         gint64 fallback = 0) {
   FlValue* args = fl_method_call_get_args(call);
@@ -762,7 +825,13 @@ FlValue* integration_status() {
   const bool x11 = gdk_is_x11() && x11_quick_paste != nullptr &&
       x11_quick_paste->available();
   const bool wayland = gdk_is_wayland();
-  const bool companion = wayland && bridge_companion_active();
+  // The Clipboard v2 payload contract admits only the private daemon owner.
+  // The GUI must not probe Version or Snapshot as a readiness shortcut: that
+  // would either fail closed or require widening a payload-bearing interface.
+  // Wayland remains unavailable until the daemon supplies authenticated public
+  // readiness metadata through its typed runtime status.
+  const bool clipboard = x11 || (wayland && clipboard_version_active());
+  const bool companion = wayland && clipboard;
   const bool portal_shortcuts = portal != nullptr && portal->is_available();
   const bool gnome_shortcuts_available = wayland && !portal_shortcuts &&
       gnome_shortcuts != nullptr && gnome_shortcuts->is_available();
