@@ -158,6 +158,15 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
         script = (ROOT / "packaging/linux/desktop-integrations/gnome-shell-extension/mutter/verify-patch.sh").read_text(encoding="utf-8")
         self.assertIn('bash "$PWD/build-private-shell.sh" "$runtime_output"', script)
 
+    def test_private_shell_export_builds_all_install_targets_before_no_rebuild_install(self):
+        script = (ROOT / "packaging/linux/desktop-integrations/gnome-shell-extension/mutter/build-private-shell.sh").read_text(encoding="utf-8")
+        self.assertIn('meson compile -C "$shell_build"\n', script)
+        self.assertNotIn('meson compile -C "$shell_build" gnome-shell', script)
+        self.assertLess(
+            script.index('meson compile -C "$shell_build"\n'),
+            script.index('DESTDIR="$mutter_runtime" meson install -C "$shell_build" --no-rebuild'),
+        )
+
     def test_uses_authenticated_runtime_artifacts_and_generated_launchers(self):
         workflow = (ROOT / ".github/workflows/linux-native-qualification.yml").read_text(encoding="utf-8")
         release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")

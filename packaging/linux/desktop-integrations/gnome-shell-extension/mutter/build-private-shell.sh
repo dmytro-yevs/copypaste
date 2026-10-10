@@ -20,7 +20,7 @@ export PKG_CONFIG_PATH="$private_lib/pkgconfig"
 export GI_TYPELIB_PATH="$private_lib/mutter-14"
 export LD_LIBRARY_PATH="$private_lib"
 meson setup --wipe "$shell_build" "$shell_source" --prefix /usr -Dtests=false
-meson compile -C "$shell_build" gnome-shell
+meson compile -C "$shell_build"
 DESTDIR="$mutter_runtime" meson install -C "$shell_build" --no-rebuild
 entrypoint="$mutter_runtime/usr/libexec/copypaste-gnome-shell"
 install -d "$(dirname "$entrypoint")"
