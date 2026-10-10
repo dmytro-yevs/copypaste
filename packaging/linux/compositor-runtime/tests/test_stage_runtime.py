@@ -45,6 +45,9 @@ def os_release() -> tuple[str, str]:
 
 class RuntimeStageTests(unittest.TestCase):
     def make_receipt(self, runtime: Path, launch: dict, desktop: str = "KDE") -> dict:
+        license_file = runtime / "COPYING"
+        if not license_file.exists():
+            license_file.write_text("GPL-2.0-or-later", encoding="utf-8")
         rows = []
         for path in sorted(runtime.rglob("*")):
             if path.is_dir():
@@ -61,6 +64,7 @@ class RuntimeStageTests(unittest.TestCase):
             "architecture": "x86_64", "distribution": {"id": distribution_id, "version": distribution_version},
             "glibc_floor": "2.39", "source": {"revision": "v6.3.0", "patch_sha256": "a" * 64},
             "payload": rows, "launch": launch, "runtime_env": {}, "package_dependencies": [{"name": "kwin", "version": "6.3.0"}],
+            "upstream_license": {"spdx": "GPL-2.0-or-later", "name": "COPYING", "sha256": digest(license_file.read_bytes())},
         }
 
     @unittest.skipUnless(Path("/etc/os-release").is_file(), "launcher executes only in a Linux session")
