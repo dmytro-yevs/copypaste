@@ -45,6 +45,7 @@ def main() -> int:
         downloaded = run(["dnf", "-q", "download", "--destdir", temporary, f"{name}-{evr}"])
         packages = sorted(Path(temporary).glob("*.rpm"))
         archive = file_records(["rpm", "-qpl", "--qf", "[%{FILENAMES}\t%{FILEFLAGS:fflags}\n]", str(packages[0])]) if len(packages) == 1 else []
+        archive_paths = run(["rpm", "-qpl", str(packages[0])]) if len(packages) == 1 else {"exit": 1, "output": []}
     config = run(["dnf", "-q", "config-manager", "--dump"])
     print(json.dumps({
         "name": name,
@@ -55,6 +56,7 @@ def main() -> int:
         "installed_records": installed,
         "download": downloaded,
         "archive_records": archive,
+        "archive_license_paths": [path for path in archive_paths["output"] if path.startswith("/usr/share/licenses/") or path.startswith("/usr/share/doc/")],
     }, sort_keys=True))
     return 0
 
