@@ -206,6 +206,26 @@ class ReleaseSafetyTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Linux qualification jobs"):
             verify(*evidence, "owner/repo", "commit", require_linux=True)
 
+    def test_compositor_runtime_recovery_requires_the_public_asset_gate(self):
+        verify = runpy.run_path(str(ROOT / "scripts/release/verify-qualified-run.py"))["verify"]
+        evidence = self.qualification()
+        evidence[1]["jobs"].extend([
+            {"name": f"Linux build ({architecture})", "status": "completed", "conclusion": "success"}
+            for architecture in ("x86_64", "aarch64")
+        ])
+        evidence[1]["jobs"].append({
+            "name": "Linux full parity evidence gate", "status": "completed", "conclusion": "success"
+        })
+        evidence[1]["total_count"] = len(evidence[1]["jobs"])
+        with self.assertRaisesRegex(ValueError, "compositor runtime"):
+            verify(*evidence, "owner/repo", "commit", require_linux=True, require_compositor_runtime=True)
+        evidence[1]["jobs"].append({
+            "name": "Sign and bind opt-in compositor runtime companions",
+            "status": "completed", "conclusion": "success",
+        })
+        evidence[1]["total_count"] += 1
+        verify(*evidence, "owner/repo", "commit", require_linux=True, require_compositor_runtime=True)
+
     def test_linux_artifact_source_requires_both_exact_native_builds(self):
         verify = runpy.run_path(str(ROOT / "scripts/release/verify-linux-artifact-source-run.py"))["verify"]
         run = {"id": 123, "head_sha": "commit", "head_repository": {"full_name": "owner/repo"},
@@ -223,6 +243,101 @@ class ReleaseSafetyTest(unittest.TestCase):
         jobs["total_count"] -= 1
         with self.assertRaisesRegex(ValueError, "native build jobs"):
             verify(run, jobs, artifacts, "owner/repo", "commit")
+
+    def test_compositor_runtime_source_requires_every_exact_producer_artifact(self):
+        verify = runpy.run_path(
+            str(ROOT / "scripts/release/verify-compositor-runtime-source-run.py")
+        )["verify"]
+        run = {
+            "id": 987,
+            "head_sha": "commit",
+            "head_repository": {"full_name": "owner/repo"},
+            "path": ".github/workflows/compositor-runtime.yml",
+            "event": "workflow_dispatch",
+            "status": "completed",
+            "conclusion": "success",
+        }
+        jobs = {"total_count": 4, "jobs": [
+            {"name": name, "status": "completed", "conclusion": "success"}
+            for name in (
+                "GNOME 46 Ubuntu 24.04 (x86_64)",
+                "GNOME 46 Ubuntu 24.04 (aarch64)",
+                "KDE 6.0 Fedora 40 (x86_64)",
+                "KDE 6.0 Fedora 40 (aarch64)",
+            )
+        ]}
+        artifacts = {"artifacts": [
+            {
+                "name": name,
+                "expired": False,
+                "workflow_run": {"id": 987, "head_sha": "commit"},
+            }
+            for name in (
+                "copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64",
+                "copypaste-compositor-runtime-gnome-46-ubuntu24.04-aarch64",
+                "copypaste-compositor-runtime-kde-6.0-fedora40-x86_64",
+                "copypaste-compositor-runtime-kde-6.0-fedora40-aarch64",
+            )
+        ]}
+        verify(run, jobs, artifacts, "owner/repo", "commit")
+        artifacts["artifacts"].pop()
+        with self.assertRaisesRegex(ValueError, "artifact inventory"):
+            verify(run, jobs, artifacts, "owner/repo", "commit")
+
+    def test_compositor_runtime_public_receipt_binds_signed_package_bytes(self):
+        module = runpy.run_path(
+            str(ROOT / "scripts/release/stage-compositor-runtime-release.py")
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            release_version = "1.2.3"
+            commit = "a" * 40
+            patch = "b" * 64
+            for short, desktop, family, distribution, distribution_id, distribution_version, package_format in module["COORDINATES"]:
+                for architecture in module["ARCHITECTURES"]:
+                    artifact = source / module["coordinate_name"](short, family, distribution, architecture)
+                    artifact.mkdir()
+                    package = artifact / f"copypaste-compositor-runtime-{short}-{family}-{distribution}-{architecture}.{package_format}"
+                    package.write_bytes(f"{desktop}-{architecture}".encode())
+                    runtime = artifact / "runtime-receipt.json"
+                    runtime.write_text(json.dumps({
+                        "schema": 1, "runtime_id": f"{short}-{family}-{architecture}",
+                        "desktop": desktop, "architecture": architecture,
+                        "distribution": {"id": distribution_id, "version": distribution_version},
+                        "glibc_floor": "2.39",
+                        "source": {"revision": "source", "patch_sha256": patch},
+                    }))
+                    license_path = artifact / "COPYING"
+                    license_path.write_text("license")
+                    producer = {
+                        "schema": 1, "commit": commit, "producer_run_id": 456,
+                        "source_run_id": 123, "version": release_version,
+                        "architecture": architecture, "desktop": desktop, "family": family,
+                        "distribution": {"id": distribution_id, "version": distribution_version},
+                        "format": package_format, "runtime_id": f"{short}-{family}-{architecture}",
+                        "glibc_floor": "2.39", "source": {"revision": "source", "patch_sha256": patch},
+                        "runtime_receipt": module["metadata"](runtime),
+                        "package": module["metadata"](package),
+                        "upstream_licenses": [module["metadata"](license_path)],
+                    }
+                    (artifact / "compositor-runtime-producer-receipt.json").write_text(json.dumps(producer))
+            public = root / "public"
+            module["stage"](source, public, release_version, commit, "456")
+            packages = sorted(path for path in public.iterdir() if path.suffix in (".deb", ".rpm"))
+            self.assertEqual(len(packages), 4)
+            for package in packages:
+                package.with_name(package.name + ".sig").write_bytes(b"signature")
+                package.with_name(package.name + ".sha256").write_text(
+                    f"{module['digest'](package)}  {package.name}\n"
+                )
+            receipt = module["verify_public"](public, release_version, commit, "789")
+            self.assertEqual(receipt["producer_run_id"], 456)
+            self.assertEqual(len(receipt["companions"]), 4)
+            packages[0].write_bytes(b"tampered")
+            with self.assertRaisesRegex(ValueError, "changed after staging"):
+                module["verify_public"](public, release_version, commit, "789")
 
     def test_publication_preserves_existing_bytes_and_uploads_only_missing_files(self):
         missing = runpy.run_path(str(ROOT / "scripts/release/publish-release.py"))["missing_assets"]
@@ -496,6 +611,14 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
             missing_signature.unlink()
             with self.assertRaisesRegex(ValueError, "qualified artifact is missing"):
                 verify(root, "1.2.3", "a" * 40, "123", require_linux=True)
+
+    def test_compositor_runtime_receipt_is_required_only_for_the_new_linux_contract(self):
+        verify = runpy.run_path(str(ROOT / "scripts/release/verify-artifact-receipts.py"))["verify"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_receipts(root)
+            with self.assertRaisesRegex(ValueError, "compositor runtime"):
+                verify(root, "1.2.3", "a" * 40, "123", require_compositor_runtime=True)
 
     def test_linux_architecture_receipts_merge_only_when_their_identity_matches(self):
         merge = runpy.run_path(str(ROOT / "scripts/release/merge-linux-artifact-receipts.py"))["merge"]
