@@ -167,6 +167,14 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
             script.index('DESTDIR="$mutter_runtime" meson install -C "$shell_build" --no-rebuild'),
         )
 
+    def test_private_shell_revision_marker_is_not_receipt_listed_payload(self):
+        script = (ROOT / "packaging/linux/desktop-integrations/gnome-shell-extension/mutter/verify-patch.sh").read_text(encoding="utf-8")
+        marker = '"$runtime_output/.copypaste-gnome-shell-revision"'
+        self.assertIn('shell_revision="$(cat ' + marker + ')"', script)
+        self.assertIn('rm -f ' + marker, script)
+        self.assertIn('--shell-revision "$shell_revision"', script)
+        self.assertLess(script.index('rm -f ' + marker), script.index('emit_runtime_receipt.py'))
+
     def test_uses_authenticated_runtime_artifacts_and_generated_launchers(self):
         workflow = (ROOT / ".github/workflows/linux-native-qualification.yml").read_text(encoding="utf-8")
         release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
