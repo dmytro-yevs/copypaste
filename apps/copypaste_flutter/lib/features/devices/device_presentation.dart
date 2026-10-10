@@ -44,5 +44,6 @@ abstract final class DevicePresentation {
     DevicePlatform.windows => 'Windows',
     DevicePlatform.android => 'Android',
     DevicePlatform.unknown => 'Unknown OS',
+    DevicePlatform.linux => 'Linux',
   };
 }

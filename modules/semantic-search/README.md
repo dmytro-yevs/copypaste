@@ -1,6 +1,6 @@
 # Semantic Search module
 
-First-party offline semantic search for macOS, Windows, and Android. The host
+First-party offline semantic search for macOS, Windows, Linux, and Android. The host
 owns language preferences, authenticated model downloads, encrypted embeddings,
 background indexing, filtering, cursor paging, and shared History/Quick Paste UI.
 Only this separately built module links ONNX Runtime and tokenizers.
@@ -68,7 +68,7 @@ See [Semantic inference lifecycle](../../docs/semantic-inference.md).
 
 ## Build and package
 
-The base app needs manifest schema 3, choices fields, and embedding support;
+The base app needs manifest schema 5, Linux module support, choices fields, and embedding support;
 the module's minimum app version is 1.0.11. Existing schema 1/2 modules remain
 compatible with the updated host.
 
@@ -80,7 +80,7 @@ python3 scripts/modules/package.py --module-dir modules/semantic-search --librar
 
 The runtime preparation utility is shared with OCR and pins ONNX Runtime 1.28.
 Only its runtime is used; OCR models and OCR code are not dependencies of this
-module. Use the same utility for Windows x86_64 and Android arm/aarch64/x86_64.
+module. Use the same utility for Windows x86_64, Linux x86_64/aarch64, and Android arm/aarch64/x86_64.
 Android builds use `scripts/modules/build-android-module.py` with
 `--module-dir modules/semantic-search --library-name libcopypaste_module_semantic_search.so`
 and the repository's pinned NDK 29.0.13846066 / 16 KiB alignment checks.
@@ -91,8 +91,8 @@ Packaging requires the existing production signer. Publication and signed
 marketplace availability require target-specific native qualification; source
 checks or a local artifact do not establish release availability.
 Dispatch `provider-module.yml` with `module=semantic-search` and `publish=true`
-to build all five targets, qualify the production-signed packages on macOS,
-Windows, and Android with both pinned models, and publish the signed catalog.
+to build all seven targets, qualify the production-signed packages on macOS,
+Windows, Linux x86_64/aarch64, and Android with both pinned models, and publish the signed catalog.
 
 ## Validation
 

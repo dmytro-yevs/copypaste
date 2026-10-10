@@ -55,7 +55,7 @@ typed-path = "0.12"
 # syscall wrapper rather than a raw libc call, and it is already in the tree.
 # Target-gated because `rustix::fs` is a POSIX surface with no Windows half.
 [target.'cfg(unix)'.dependencies]
-rustix.workspace = true
+rustix = { workspace = true, features = ["event", "fs", "time"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 # Windows clipboard. Cross-platform clipboard crates do not expose a sequence
@@ -87,6 +87,18 @@ objc2-foundation = { workspace = true, features = ["NSThread", "NSNotification",
 objc2-app-kit = { workspace = true, features = ["NSResponder"] }
 security-framework.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# XFixes is the X11 selection-change signal. It lets the clipboard worker wait
+# for a real owner transition instead of polling or reading clipboard data.
+x11rb = { version = "0.13.2", features = ["xfixes"] }
+zbus = { version = "5.19", default-features = false, features = ["blocking-api", "tokio"] }
+# A persistent data-control client is the only supported Wayland clipboard
+# transport.  `ext-data-control` is preferred; `wlr-data-control` is kept for
+# compositors that have not adopted the extension yet.
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+
 [dev-dependencies]
 image.workspace = true
 copypaste-runtime-log = { path = "../copypaste-runtime-log", features = ["test-support"] }
@@ -95,6 +107,9 @@ tokio = { workspace = true, features = ["test-util"] }
 # or decrypted bytes could reach a log, so the tests assert on what is emitted
 # rather than on a reading of the source. Capturing that needs a subscriber.
 tracing-subscriber.workspace = true
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+wl-clipboard-rs = "0.9"
 
 [features]
 # Demos and profiling only. Release and product builds pass no features.

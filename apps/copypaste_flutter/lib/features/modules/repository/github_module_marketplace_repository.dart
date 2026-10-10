@@ -12,7 +12,7 @@ import 'module_marketplace_repository.dart';
 import 'modules_repository.dart';
 
 const moduleRepositoryPath = '/dmytro-yevs/copypaste/releases/download/';
-const moduleCatalogName = 'modules.json';
+const moduleCatalogName = 'modules-v2.json';
 const maximumModulePackageBytes = 2 * 1024 * 1024 * 1024;
 
 /// The catalog authenticates metadata and compressed packages. The runtime
@@ -266,7 +266,7 @@ class ModuleCatalogParser {
               ? null
               : Version.parse(artifact['minimum_system_version'] as String);
           validateModuleAssetUri(uri);
-          if (!{'macos', 'windows', 'android'}.contains(platform) ||
+          if (!{'macos', 'windows', 'android', 'linux'}.contains(platform) ||
               !{'x86', 'x86_64', 'arm', 'aarch64'}.contains(architecture) ||
               !targets.add('$platform/$architecture') ||
               !uri.path.endsWith('.cpmodule') ||
@@ -312,6 +312,7 @@ class ModuleCatalogParser {
           'macos' => 'macOS',
           'windows' => 'Windows',
           'android' => 'Android',
+          'linux' => 'glibc',
           _ => 'this system',
         };
         final systemRequirement = minimum == null

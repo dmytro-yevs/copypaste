@@ -355,6 +355,10 @@ fn check_pin_state(pinned: bool, pin_order: Option<f64>) -> Result<(), ProtocolE
 
 #[cfg(test)]
 mod tests {
+    use serde::Deserialize;
+
+    use copypaste_ipc::{DeviceClass, DevicePlatform};
+
     use crate::protocol::{
         plaintext_content_hash, ItemSummary, SyncItem, SyncMessage, MAX_CONTENT_BYTES,
         MAX_DEVICE_NAME_BYTES, MAX_ID_BYTES, MAX_ITEMS_PER_MESSAGE, MAX_ITEM_BYTES_PER_MESSAGE,
@@ -395,6 +399,126 @@ mod tests {
             pin_order: None,
             pin_updated_at: 0,
         }
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    enum OldDevicePlatform {
+        Macos,
+        Windows,
+        Android,
+        Unknown,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct OldDeviceProfile {
+        platform: OldDevicePlatform,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(tag = "t", rename_all = "snake_case")]
+    enum OldProfileMessage {
+        Probe { profile: Option<OldDeviceProfile> },
+        ProbeAck { profile: Option<OldDeviceProfile> },
+        Hello { profile: Option<OldDeviceProfile> },
+    }
+
+    fn linux_profile() -> DeviceProfile {
+        DeviceProfile {
+            app_version: Some("1.0.23".into()),
+            protocol_version: Some(PROTOCOL_VERSION),
+            platform: DevicePlatform::Linux,
+            device_class: DeviceClass::Desktop,
+            os_name: Some("Linux".into()),
+            os_version: Some("6.12".into()),
+            model: Some("fixture".into()),
+        }
+    }
+
+    #[test]
+    fn linux_profile_uses_an_old_decoder_safe_platform_and_new_detail() {
+        let value = serde_json::to_value(linux_profile()).unwrap();
+        assert_eq!(value["platform"], "unknown");
+        assert_eq!(value["platform_detail"], "linux");
+        let decoded: DeviceProfile = serde_json::from_value(value).unwrap();
+        assert_eq!(decoded.platform, DevicePlatform::Linux);
+    }
+
+    #[test]
+    fn old_profile_decoder_accepts_linux_hello_probe_and_probe_ack() {
+        let profile = linux_profile();
+        let messages = [
+            SyncMessage::Hello {
+                protocol_version: PROTOCOL_VERSION,
+                device_id: "linux-device".into(),
+                device_name: "Linux".into(),
+                profile: Some(profile.clone()),
+                listen_addr: None,
+                since_ms: 0,
+            },
+            SyncMessage::Probe {
+                protocol_version: PROTOCOL_VERSION,
+                nonce: 1,
+                profile: Some(profile.clone()),
+            },
+            SyncMessage::ProbeAck {
+                protocol_version: PROTOCOL_VERSION,
+                nonce: 1,
+                profile: Some(profile),
+            },
+        ];
+        for message in messages {
+            let bytes = message.encode().unwrap();
+            let decoded: OldProfileMessage = serde_json::from_slice(&bytes)
+                .expect("v1.0.23 must ignore the Linux extension field");
+            let profile = match decoded {
+                OldProfileMessage::Hello { profile }
+                | OldProfileMessage::Probe { profile }
+                | OldProfileMessage::ProbeAck { profile } => profile.unwrap(),
+            };
+            assert!(matches!(profile.platform, OldDevicePlatform::Unknown));
+        }
+    }
+
+    #[test]
+    fn known_platform_profile_wire_bytes_remain_unchanged() {
+        for (platform, expected) in [
+            (
+                DevicePlatform::Macos,
+                r#"{"app_version":null,"protocol_version":null,"platform":"macos","device_class":"laptop","os_name":null,"os_version":null,"model":null}"#,
+            ),
+            (
+                DevicePlatform::Windows,
+                r#"{"app_version":null,"protocol_version":null,"platform":"windows","device_class":"laptop","os_name":null,"os_version":null,"model":null}"#,
+            ),
+            (
+                DevicePlatform::Android,
+                r#"{"app_version":null,"protocol_version":null,"platform":"android","device_class":"laptop","os_name":null,"os_version":null,"model":null}"#,
+            ),
+        ] {
+            let profile = DeviceProfile {
+                platform,
+                device_class: DeviceClass::Laptop,
+                ..DeviceProfile::default()
+            };
+            assert_eq!(serde_json::to_string(&profile).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn unknown_platform_detail_stays_unknown() {
+        let profile: DeviceProfile = serde_json::from_value(serde_json::json!({
+            "app_version": null,
+            "protocol_version": null,
+            "platform": "unknown",
+            "platform_detail": "future_linux_desktop",
+            "device_class": "unknown",
+            "os_name": null,
+            "os_version": null,
+            "model": null
+        }))
+        .unwrap();
+        assert_eq!(profile.platform, DevicePlatform::Unknown);
     }
 
     fn hello() -> SyncMessage {

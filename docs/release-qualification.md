@@ -1,12 +1,30 @@
 # Release qualification
 
-CopyPaste releases one stable version across macOS, Android, and Windows.
+The shared release contract covers macOS, Android, Windows, and Linux.
 `.github/workflows/release.yml` builds only production artifacts:
 
 - an ad-hoc sealed macOS DMG with the bundled release daemon and Homebrew
   per-machine self-signing helper;
 - universal, arm64, and armv7 Android APKs signed by the durable release keystore;
-- an Authenticode-signed current-user Windows NSIS installer.
+- an Authenticode-signed current-user Windows NSIS installer;
+- signed Linux AppImage, Debian, and RPM packages for x86_64 and ARM64.
+
+Linux publication requires the exact-artifact GNOME/KDE X11/native Wayland
+matrix in [Linux native qualification](../packaging/linux/native-qualification.md).
+Package builds and protocol fixtures alone do not satisfy that contract.
+
+Each Linux matrix row also stages the signed OCR, Semantic Search, and Supabase
+packages for its exact architecture, their package-native qualification
+receipts, and offline fixtures. The installed GUI daemon must receive the typed
+IPC install, enable, invoke, disable, and remove operations for every package,
+then restart before the post-removal inventory check. The acceptance helper
+verifies each package with `MODULE_RELEASE_PUBLIC_KEY`, binds its receipt to
+the staged bytes, target, and app version, checks OCR fixture hashes, and
+checks semantic model hashes against the model manifest inside the signed
+package. Its typed IPC command
+trace and `linux-module-qualification.json` are release evidence; an inventory
+listing or an independently produced module receipt cannot substitute for this
+installed-product lifecycle.
 
 Every downloadable updater artifact also receives the repository's detached
 updater signature. Each platform job records the exact commit, workflow run,

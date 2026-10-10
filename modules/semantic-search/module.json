@@ -1,14 +1,15 @@
 {
-  "schema_version": 3,
+  "schema_version": 5,
   "api_version": 1,
   "id": "copypaste.semantic-search",
   "title": "Semantic Search",
   "description": "Find clips by meaning with a local model selected for your languages.",
-  "version": "0.1.0",
-  "app_versions": ">=1.0.11, <2.0.0",
+  "version": "0.1.1",
+  "app_versions": ">=1.0.24, <2.0.0",
   "supported_platforms": [
     "macos",
     "windows",
+    "linux",
     "android"
   ],
   "unload_policy": "process",

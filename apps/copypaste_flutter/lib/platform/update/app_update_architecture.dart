@@ -9,3 +9,11 @@ AndroidAppUpdateArchitecture? currentAndroidUpdateArchitecture({Abi? abi}) =>
       Abi.androidArm => AndroidAppUpdateArchitecture.armv7,
       _ => null,
     };
+
+/// Selects Linux release assets for the architecture of the running process.
+LinuxAppUpdateArchitecture? currentLinuxUpdateArchitecture({Abi? abi}) =>
+    switch (abi ?? Abi.current()) {
+      Abi.linuxX64 => LinuxAppUpdateArchitecture.x86_64,
+      Abi.linuxArm64 => LinuxAppUpdateArchitecture.aarch64,
+      _ => null,
+    };

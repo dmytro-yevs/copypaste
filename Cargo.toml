@@ -24,7 +24,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.0.23"
+version = "1.0.24"
 edition = "2021"
 rust-version = "1.96"
 license = "MIT OR Apache-2.0"
@@ -34,7 +34,7 @@ repository = "https://github.com/dmytro-yevs/copypaste"
 android-release-application-id = "com.copypaste.app"
 android-debug-application-id-suffix = ".debug"
 android-release-certificate-sha256 = "a30ecf2ffd22fe36e781ac1e399c709e94392119a7437069364b9bd4ada22355"
-android-release-version-code = 300000023
+android-release-version-code = 300000024
 
 # Library-first (AGENTS.md rule 1). Every entry here avoids another local
 # implementation of an established primitive.
@@ -88,6 +88,7 @@ base64 = "0.22"
 # unbounded clipboard payload. PNG and TIFF are the formats our capture ports
 # store on macOS and Android.
 image = { version = "0.25.10", default-features = false, features = ["png", "tiff"] }
+resvg = { version = "0.48.1", default-features = false }
 qrcode = { version = "0.14", default-features = false, features = ["image"] }
 url = "2"
 csscolorparser = { version = "0.8.3", default-features = false, features = ["std"] }

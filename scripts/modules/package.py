@@ -20,7 +20,7 @@ def package(module_dir, library, output, platform, architecture):
     manifest = json.loads((module_dir / "module.json").read_text())
     if platform not in manifest.get("supported_platforms", ["macos", "windows", "android"]):
         raise ValueError("This module does not support the requested platform.")
-    suffix = {"macos": ".dylib", "windows": ".dll", "android": ".so"}[platform]
+    suffix = {"macos": ".dylib", "windows": ".dll", "linux": ".so", "android": ".so"}[platform]
     manifest["target"] = {"platform": platform, "architecture": architecture}
     manifest["entrypoint"] = "bin/module" + suffix
     inventory = [(manifest["entrypoint"], library)]
@@ -99,7 +99,7 @@ def main():
     parser.add_argument("--module-dir", required=True, type=Path)
     parser.add_argument("--library", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--platform", required=True, choices=["macos", "windows", "android"])
+    parser.add_argument("--platform", required=True, choices=["macos", "windows", "linux", "android"])
     parser.add_argument("--architecture", required=True, choices=["x86", "x86_64", "arm", "aarch64"])
     args = parser.parse_args()
     manifest = package(args.module_dir, args.library, args.output, args.platform, args.architecture)

@@ -251,6 +251,7 @@ class FlutterRustDevicesGateway
         frb.DevicePlatform.windows => DevicePlatform.windows,
         frb.DevicePlatform.android => DevicePlatform.android,
         frb.DevicePlatform.unknown => DevicePlatform.unknown,
+        frb.DevicePlatform.linux => DevicePlatform.linux,
       };
 
   DevicePresence _devicePresenceState(frb.DevicePresenceState state) =>

@@ -2597,6 +2597,7 @@ impl SseDecode for crate::api::DevicePlatform {
             1 => crate::api::DevicePlatform::Windows,
             2 => crate::api::DevicePlatform::Android,
             3 => crate::api::DevicePlatform::Unknown,
+            4 => crate::api::DevicePlatform::Linux,
             _ => unreachable!("Invalid variant for DevicePlatform: {}", inner),
         };
     }
@@ -3851,6 +3852,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::DevicePlatform {
             Self::Windows => 1.into_dart(),
             Self::Android => 2.into_dart(),
             Self::Unknown => 3.into_dart(),
+            Self::Linux => 4.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -4600,6 +4602,7 @@ impl SseEncode for crate::api::DevicePlatform {
                 crate::api::DevicePlatform::Windows => 1,
                 crate::api::DevicePlatform::Android => 2,
                 crate::api::DevicePlatform::Unknown => 3,
+                crate::api::DevicePlatform::Linux => 4,
                 _ => {
                     unimplemented!("");
                 }

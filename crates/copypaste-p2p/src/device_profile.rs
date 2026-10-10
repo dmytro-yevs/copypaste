@@ -1,6 +1,6 @@
 //! Bounded, non-secret device metadata shared through discovery and Noise.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use copypaste_ipc::{DeviceClass, DevicePlatform};
 
@@ -9,7 +9,7 @@ use crate::protocol::PROTOCOL_VERSION;
 /// Claims made by a device about itself. Trust comes from the channel carrying
 /// the value: mDNS is unverified, while the same value inside Noise is
 /// authenticated to the pairing key.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeviceProfile {
     pub app_version: Option<String>,
     pub protocol_version: Option<u32>,
@@ -18,6 +18,79 @@ pub struct DeviceProfile {
     pub os_name: Option<String>,
     pub os_version: Option<String>,
     pub model: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DeviceProfileWire<'a> {
+    app_version: &'a Option<String>,
+    protocol_version: &'a Option<u32>,
+    platform: DevicePlatform,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    platform_detail: Option<&'static str>,
+    device_class: DeviceClass,
+    os_name: &'a Option<String>,
+    os_version: &'a Option<String>,
+    model: &'a Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeviceProfileWireOwned {
+    app_version: Option<String>,
+    protocol_version: Option<u32>,
+    platform: DevicePlatform,
+    #[serde(default)]
+    platform_detail: Option<String>,
+    device_class: DeviceClass,
+    os_name: Option<String>,
+    os_version: Option<String>,
+    model: Option<String>,
+}
+
+impl Serialize for DeviceProfile {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let (platform, platform_detail) = match self.platform {
+            DevicePlatform::Linux => (DevicePlatform::Unknown, Some("linux")),
+            platform => (platform, None),
+        };
+        DeviceProfileWire {
+            app_version: &self.app_version,
+            protocol_version: &self.protocol_version,
+            platform,
+            platform_detail,
+            device_class: self.device_class,
+            os_name: &self.os_name,
+            os_version: &self.os_version,
+            model: &self.model,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for DeviceProfile {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = DeviceProfileWireOwned::deserialize(deserializer)?;
+        let platform = match (wire.platform, wire.platform_detail.as_deref()) {
+            (DevicePlatform::Linux, _) | (DevicePlatform::Unknown, Some("linux")) => {
+                DevicePlatform::Linux
+            }
+            (platform, _) => platform,
+        };
+        Ok(Self {
+            app_version: wire.app_version,
+            protocol_version: wire.protocol_version,
+            platform,
+            device_class: wire.device_class,
+            os_name: wire.os_name,
+            os_version: wire.os_version,
+            model: wire.model,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,9 +170,43 @@ fn bounded_text(value: String, max_bytes: usize) -> Option<String> {
     (!bounded.is_empty()).then_some(bounded)
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "android")))]
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "windows",
+    target_os = "android",
+    target_os = "linux"
+)))]
 fn native_metadata() -> NativeMetadata {
     NativeMetadata::default()
+}
+
+#[cfg(target_os = "linux")]
+fn native_metadata() -> NativeMetadata {
+    static HARDWARE: std::sync::OnceLock<NativeMetadata> = std::sync::OnceLock::new();
+    HARDWARE
+        .get_or_init(|| NativeMetadata {
+            device_class: std::fs::read_to_string("/sys/class/dmi/id/chassis_type")
+                .ok()
+                .map(|value| linux_chassis_class(&value))
+                .unwrap_or_default(),
+            model: std::fs::read_to_string("/sys/class/dmi/id/product_name")
+                .ok()
+                .and_then(|value| bounded_text(value, 128)),
+            ..NativeMetadata::default()
+        })
+        .clone()
+}
+
+/// SMBIOS chassis values from DMTF's system enclosure contract. Missing or
+/// unfamiliar firmware metadata remains unknown, including ARM systems without DMI.
+#[cfg(any(target_os = "linux", test))]
+fn linux_chassis_class(value: &str) -> DeviceClass {
+    match value.trim().parse::<u8>() {
+        Ok(3..=7 | 13 | 15 | 35 | 36) => DeviceClass::Desktop,
+        Ok(8..=10 | 14 | 31 | 32) => DeviceClass::Laptop,
+        Ok(30) => DeviceClass::Tablet,
+        _ => DeviceClass::Unknown,
+    }
 }
 
 #[cfg(target_os = "android")]
@@ -310,6 +417,17 @@ fn windows_device_class_from_chassis(types: impl Iterator<Item = u8>) -> DeviceC
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classifies_linux_firmware_without_guessing_missing_metadata() {
+        assert_eq!(linux_chassis_class("3\n"), DeviceClass::Desktop);
+        assert_eq!(linux_chassis_class("10"), DeviceClass::Laptop);
+        assert_eq!(linux_chassis_class("30"), DeviceClass::Tablet);
+        assert_eq!(linux_chassis_class("31"), DeviceClass::Laptop);
+        for value in ["", "unknown", "1", "2", "255", "256"] {
+            assert_eq!(linux_chassis_class(value), DeviceClass::Unknown);
+        }
+    }
 
     #[test]
     fn bounds_platform_text_without_splitting_unicode() {

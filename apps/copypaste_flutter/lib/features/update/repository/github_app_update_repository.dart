@@ -12,7 +12,8 @@ import 'minisign_verifier.dart';
 
 typedef UpdateTemporaryDirectoryProvider = Future<Directory> Function();
 
-class GitHubAppUpdateRepository implements AppUpdateRepository {
+class GitHubAppUpdateRepository
+    implements AppUpdateRepository, LinuxAppUpdateRepository {
   GitHubAppUpdateRepository({
     required UpdateTemporaryDirectoryProvider temporaryDirectory,
     HttpClient? client,
@@ -47,6 +48,22 @@ class GitHubAppUpdateRepository implements AppUpdateRepository {
   Future<AppRelease?> findUpdate({
     required Version currentVersion,
     required AppUpdateTarget target,
+  }) => _findUpdate(currentVersion: currentVersion, target: target);
+
+  @override
+  Future<AppRelease?> findLinuxUpdate({
+    required Version currentVersion,
+    required LinuxAppUpdateInstallation installation,
+  }) => _findUpdate(
+    currentVersion: currentVersion,
+    target: AppUpdateTarget.linux,
+    linuxInstallation: installation,
+  );
+
+  Future<AppRelease?> _findUpdate({
+    required Version currentVersion,
+    required AppUpdateTarget target,
+    LinuxAppUpdateInstallation? linuxInstallation,
   }) async {
     final request = await _client.getUrl(_releasesUri).timeout(_requestTimeout);
     request.headers
@@ -69,6 +86,7 @@ class GitHubAppUpdateRepository implements AppUpdateRepository {
       androidArchitecture: target == AppUpdateTarget.android
           ? _androidArchitecture()
           : null,
+      linuxInstallation: linuxInstallation,
     );
   }
 
@@ -293,6 +311,7 @@ class GitHubReleaseParser {
     required Version currentVersion,
     required AppUpdateTarget target,
     AndroidAppUpdateArchitecture? androidArchitecture,
+    LinuxAppUpdateInstallation? linuxInstallation,
   }) {
     final Object? decoded;
     try {
@@ -328,8 +347,15 @@ class GitHubReleaseParser {
               target: target,
               version: versionText,
               androidArchitecture: androidArchitecture,
+              linuxInstallation: linuxInstallation,
             );
-      if (target != AppUpdateTarget.macos && asset == null) continue;
+      final releasePageOnly =
+          target == AppUpdateTarget.linux && linuxInstallation == null;
+      if (target != AppUpdateTarget.macos &&
+          !releasePageOnly &&
+          asset == null) {
+        continue;
+      }
       final candidate = AppRelease(
         version: version,
         releaseUri: releaseUri,
@@ -351,12 +377,20 @@ class GitHubReleaseParser {
     required AppUpdateTarget target,
     required String version,
     AndroidAppUpdateArchitecture? androidArchitecture,
+    LinuxAppUpdateInstallation? linuxInstallation,
   }) {
     if (rawAssets is! List<Object?>) return null;
+    if (target == AppUpdateTarget.linux && linuxInstallation == null) {
+      return null;
+    }
     final expectedName = switch (target) {
       AppUpdateTarget.windows => 'CopyPaste-v$version-windows-x86_64-setup.exe',
       AppUpdateTarget.android => 'CopyPaste-v$version-android.apk',
       AppUpdateTarget.macos => throw StateError('macOS uses Homebrew.'),
+      AppUpdateTarget.linux => _linuxAssetName(
+        version: version,
+        installation: linuxInstallation,
+      ),
     };
     final byName = <String, Map<String, Object?>>{
       for (final rawAsset in rawAssets)
@@ -391,6 +425,21 @@ class GitHubReleaseParser {
     return null;
   }
 
+  String _linuxAssetName({
+    required String version,
+    required LinuxAppUpdateInstallation? installation,
+  }) {
+    if (installation == null) {
+      throw StateError('Linux updates require the installed package details.');
+    }
+    final extension = switch (installation.package) {
+      LinuxAppUpdatePackage.appImage => 'AppImage',
+      LinuxAppUpdatePackage.deb => 'deb',
+      LinuxAppUpdatePackage.rpm => 'rpm',
+    };
+    return 'CopyPaste-v$version-linux-${installation.architecture.name}.$extension';
+  }
+
   (Uri, String, int)? _assetMetadata(
     Map<String, Object?>? raw, {
     required int maximumBytes,
@@ -419,6 +468,11 @@ class GitHubReleaseParser {
     if (parsed != null &&
         parsed.scheme == 'https' &&
         parsed.host == 'github.com' &&
+        parsed.port == 443 &&
+        parsed.userInfo.isEmpty &&
+        !parsed.pathSegments.any(
+          (segment) => segment == '.' || segment == '..',
+        ) &&
         parsed.path.startsWith('/dmytro-yevs/copypaste/releases/')) {
       return parsed;
     }

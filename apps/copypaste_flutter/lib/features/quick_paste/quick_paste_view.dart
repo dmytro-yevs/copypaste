@@ -472,8 +472,11 @@ class _QuickPasteViewState extends State<QuickPasteView> {
   }
 }
 
-SingleActivator _desktopShortcut(LogicalKeyboardKey key) =>
-    SingleActivator(key, meta: Platform.isMacOS, control: Platform.isWindows);
+SingleActivator _desktopShortcut(LogicalKeyboardKey key) => SingleActivator(
+  key,
+  meta: Platform.isMacOS,
+  control: Platform.isWindows || Platform.isLinux,
+);
 
 class _ClipContent extends StatelessWidget {
   const _ClipContent({
@@ -642,7 +645,7 @@ class _Footer extends StatelessWidget {
         icon: LucideIcons.info,
         title: const Text('CopyPaste'),
         content: const Text(
-          'Private clipboard history across macOS, Android, and Windows.',
+          'Private clipboard history across macOS, Android, Windows, and Linux.',
         ),
         actions: [
           Button.primary(

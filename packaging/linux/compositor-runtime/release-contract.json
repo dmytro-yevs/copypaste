@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "producer_receipt": {
+    "required": [
+      "commit",
+      "producer_run_id",
+      "source_run_id",
+      "version",
+      "architecture",
+      "desktop",
+      "family",
+      "distribution",
+      "format",
+      "runtime_id",
+      "glibc_floor",
+      "source",
+      "runtime_receipt",
+      "package",
+      "upstream_licenses"
+    ],
+    "package": ["name", "sha256", "size_bytes"],
+    "runtime_receipt": ["name", "sha256", "size_bytes"]
+  },
+  "baselines": [
+    {
+      "job": "GNOME 46 Ubuntu 24.04 (x86_64)",
+      "artifact": "copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64",
+      "desktop": "GNOME",
+      "family": "46",
+      "distribution": {"id": "ubuntu", "version": "24.04"},
+      "architecture": "x86_64",
+      "format": "deb",
+      "source_revision": "fe8d2be3f90f89f286c89b164c94a4f86552bc97"
+    },
+    {
+      "job": "GNOME 46 Ubuntu 24.04 (aarch64)",
+      "artifact": "copypaste-compositor-runtime-gnome-46-ubuntu24.04-aarch64",
+      "desktop": "GNOME",
+      "family": "46",
+      "distribution": {"id": "ubuntu", "version": "24.04"},
+      "architecture": "aarch64",
+      "format": "deb",
+      "source_revision": "fe8d2be3f90f89f286c89b164c94a4f86552bc97"
+    },
+    {
+      "job": "KDE 6.0 Fedora 40 (x86_64)",
+      "artifact": "copypaste-compositor-runtime-kwin-6.0-fedora40-x86_64",
+      "desktop": "KDE",
+      "family": "6.0",
+      "distribution": {"id": "fedora", "version": "40"},
+      "architecture": "x86_64",
+      "format": "rpm",
+      "source_revision": "1ddcb4e288c4f7dcecdc94efccd655b7e3666d30"
+    },
+    {
+      "job": "KDE 6.0 Fedora 40 (aarch64)",
+      "artifact": "copypaste-compositor-runtime-kwin-6.0-fedora40-aarch64",
+      "desktop": "KDE",
+      "family": "6.0",
+      "distribution": {"id": "fedora", "version": "40"},
+      "architecture": "aarch64",
+      "format": "rpm",
+      "source_revision": "1ddcb4e288c4f7dcecdc94efccd655b7e3666d30"
+    }
+  ]
+}

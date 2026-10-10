@@ -1,0 +1,49 @@
+/* SPDX-License-Identifier: MIT */
+#pragma once
+
+#include <gio/gio.h>
+
+G_BEGIN_DECLS
+
+/**
+ * copypaste_clipboard_source_new:
+ * @payloads: (not nullable): an `a{say}` bounded clipboard payload map
+ * @error: (out) (optional): return location for a #GError
+ *
+ * Returns: (transfer full) (nullable): a new bounded selection source.
+ */
+GObject *copypaste_clipboard_source_new (GVariant *payloads, GError **error);
+
+/**
+ * copypaste_clipboard_source_is_available:
+ * @selection: (not nullable): the actual Mutter selection service
+ * @error: (out) (optional): return location for a #GError
+ *
+ * Returns: whether the loaded Mutter process exposes the required patched
+ * symbols and compatible selection-source ABI.
+ */
+gboolean copypaste_clipboard_source_is_available (GObject *selection,
+                                                   GError **error);
+
+/**
+ * copypaste_clipboard_source_writer_identity:
+ * @source: (not nullable): the actual Mutter selection source
+ * @error: (out) (optional): return location for a #GError
+ *
+ * Returns: (transfer full) (nullable): a `(suus)` writer identity tuple.
+ */
+GVariant *copypaste_clipboard_source_writer_identity (GObject *source,
+                                                       GError **error);
+
+/**
+ * copypaste_clipboard_selection_owner:
+ * @selection: (not nullable): the Mutter selection service
+ * @error: (out) (optional): return location for a #GError
+ *
+ * Returns: (transfer none) (nullable): current clipboard owner, borrowed from
+ * Mutter and valid only while @selection remains alive.
+ */
+GObject *copypaste_clipboard_selection_owner (GObject *selection,
+                                               GError **error);
+
+G_END_DECLS

@@ -1,0 +1,9 @@
+cmake_minimum_required(VERSION 3.21)
+project(copypaste_kwin_clipboard_wire_fixture LANGUAGES CXX)
+find_package(Qt6 REQUIRED COMPONENTS Core DBus)
+# `main.cpp` owns ClipboardFixture's Q_OBJECT declaration and includes its
+# generated meta-object source directly.
+set(CMAKE_AUTOMOC ON)
+qt_add_executable(copypaste-kwin-clipboard-wire-fixture main.cpp)
+target_link_libraries(copypaste-kwin-clipboard-wire-fixture PRIVATE Qt6::Core Qt6::DBus)
+target_compile_features(copypaste-kwin-clipboard-wire-fixture PRIVATE cxx_std_17)

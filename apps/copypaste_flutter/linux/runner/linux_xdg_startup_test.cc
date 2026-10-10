@@ -1,0 +1,356 @@
+// Run scripts/test-linux-xdg-startup.sh. The fixture only uses a private XDG
+// root and never opens a URI or modifies the user's desktop preferences.
+
+#include "linux_xdg_startup.h"
+
+#include <gio/gio.h>
+#include <glib.h>
+#include <glib/gstdio.h>
+
+#if defined(__linux__)
+#include <gio/gdesktopappinfo.h>
+#endif
+
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include <string>
+#include <type_traits>
+#include <utility>
+
+// Xlib defines Status as a macro after the runner includes this adapter.
+// This compile-only assertion preserves that include order in the fixture.
+#define Status int
+static_assert(std::is_same_v<
+              decltype(std::declval<LinuxXdgStartup>().GetStatus()),
+              LinuxXdgStartupStatus>);
+#undef Status
+
+namespace {
+
+class XdgFixture {
+ public:
+  XdgFixture() {
+    g_autoptr(GError) error = nullptr;
+    root_ = g_dir_make_tmp("copypaste-xdg-startup.XXXXXX", &error);
+    g_assert_no_error(error);
+    g_assert_false(root_.empty());
+    config_ = root_ + "/config";
+    data_ = root_ + "/data";
+    executable_ = root_ + "/Copy Paste % handler";
+    const int executable = open(executable_.c_str(), O_WRONLY | O_CREAT | O_EXCL,
+                                0700);
+    g_assert_cmpint(executable, >=, 0);
+    g_assert_cmpint(close(executable), ==, 0);
+    g_setenv("XDG_CONFIG_HOME", config_.c_str(), TRUE);
+    g_setenv("XDG_DATA_HOME", data_.c_str(), TRUE);
+  }
+
+  ~XdgFixture() { remove_tree(root_); }
+
+  LinuxXdgStartup startup() const {
+    g_autoptr(GError) error = nullptr;
+    const auto startup =
+        LinuxXdgStartup::CreateForTesting(executable_, config_, data_, &error);
+    g_assert_no_error(error);
+    g_assert_true(startup.has_value());
+    return *startup;
+  }
+
+  const std::string& root() const { return root_; }
+  const std::string& config() const { return config_; }
+  const std::string& data() const { return data_; }
+  const std::string& executable() const { return executable_; }
+
+  void clear_entries() const {
+    remove_tree(config_);
+    remove_tree(data_);
+  }
+
+ private:
+  static void remove_tree(const std::string& path) {
+    GDir* directory = g_dir_open(path.c_str(), 0, nullptr);
+    if (directory == nullptr) {
+      g_remove(path.c_str());
+      return;
+    }
+    const gchar* name = nullptr;
+    while ((name = g_dir_read_name(directory)) != nullptr) {
+      const std::string child = path + "/" + name;
+      remove_tree(child);
+    }
+    g_dir_close(directory);
+    g_rmdir(path.c_str());
+  }
+
+  std::string root_;
+  std::string config_;
+  std::string data_;
+  std::string executable_;
+};
+
+XdgFixture* fixture = nullptr;
+
+void test_exec_escaping() {
+  const std::string entry = LinuxXdgStartup::DesktopEntryForExecutable(
+      "/tmp/Copy Paste\"quote\\slash%code", false);
+  g_autoptr(GKeyFile) key_file = g_key_file_new();
+  g_autoptr(GError) error = nullptr;
+  g_assert_true(g_key_file_load_from_data(key_file, entry.c_str(), entry.size(),
+                                          G_KEY_FILE_NONE, &error));
+  g_assert_no_error(error);
+  g_autofree gchar* exec =
+      g_key_file_get_string(key_file, "Desktop Entry", "Exec", &error);
+  g_assert_no_error(error);
+  g_assert_cmpstr(exec, ==,
+                  "/bin/sh -c \"exec \\\"\\$0\\\" \\\"\\$@\\\"\" \"/tmp/Copy Paste\\\"quote\\\\slash%%code\" %U");
+  g_autofree gchar* try_exec =
+      g_key_file_get_string(key_file, "Desktop Entry", "TryExec", &error);
+  g_assert_no_error(error);
+  g_assert_cmpstr(try_exec, ==, "/tmp/Copy Paste\"quote\\slash%code");
+  g_autofree gchar* mime_type =
+      g_key_file_get_string(key_file, "Desktop Entry", "MimeType", &error);
+  g_assert_no_error(error);
+  g_assert_cmpstr(mime_type, ==, "x-scheme-handler/copypaste;");
+}
+
+void test_autostart_is_owned_and_atomic() {
+  fixture->clear_entries();
+  const LinuxXdgStartup startup = fixture->startup();
+  g_assert_false(startup.GetStatus().start_at_login);
+
+  g_autoptr(GError) error = nullptr;
+  g_assert_true(startup.SetStartAtLogin(true, &error));
+  g_assert_no_error(error);
+  const std::string path = fixture->config() +
+      "/autostart/com.copypaste.CopyPaste.desktop";
+  gchar* contents = nullptr;
+  gsize length = 0;
+  g_assert_true(g_file_get_contents(path.c_str(), &contents, &length, &error));
+  g_assert_no_error(error);
+  const std::string expected =
+      LinuxXdgStartup::DesktopEntryForExecutable(fixture->executable(), true);
+  g_assert_cmpstr(contents, ==, expected.c_str());
+  g_free(contents);
+  g_assert_true(startup.GetStatus().start_at_login);
+
+  g_assert_true(startup.SetStartAtLogin(false, &error));
+  g_assert_no_error(error);
+  g_assert_false(g_file_test(path.c_str(), G_FILE_TEST_EXISTS));
+
+  const std::string user_entry =
+      "[Desktop Entry]\n"
+      "Name=User CopyPaste\n"
+      "Comment=X-CopyPaste-Managed=true\n"
+      "X-User-Note=X-CopyPaste-Managed=true\n"
+      "Exec=/usr/bin/user-command %U\n";
+  g_assert_true(g_file_set_contents(path.c_str(), user_entry.c_str(), -1, &error));
+  g_assert_no_error(error);
+  g_assert_false(startup.SetStartAtLogin(false, &error));
+  g_assert_error(error, G_FILE_ERROR, G_FILE_ERROR_ACCES);
+  g_clear_error(&error);
+  g_assert_false(startup.SetStartAtLogin(true, &error));
+  g_assert_error(error, G_FILE_ERROR, G_FILE_ERROR_ACCES);
+  g_clear_error(&error);
+  g_assert_true(g_file_test(path.c_str(), G_FILE_TEST_EXISTS));
+  gchar* user_contents = nullptr;
+  gsize user_length = 0;
+  g_assert_true(
+      g_file_get_contents(path.c_str(), &user_contents, &user_length, &error));
+  g_assert_no_error(error);
+  g_assert_cmpstr(user_contents, ==, user_entry.c_str());
+  g_free(user_contents);
+
+  const std::string legacy_old_entry =
+      "[Desktop Entry]\n"
+      "Type=Application\n"
+      "Name=CopyPaste\n"
+      "Comment=Encrypted clipboard history\n"
+      "Exec=\"/home/test/CopyPaste-old.AppImage\" %U\n"
+      "TryExec=\"/home/test/CopyPaste-old.AppImage\"\n"
+      "Icon=com.copypaste.CopyPaste\n"
+      "Terminal=false\n"
+      "Categories=Utility;\n"
+      "StartupNotify=true\n"
+      "MimeType=x-scheme-handler/copypaste;\n"
+      "X-CopyPaste-ApplicationId=com.copypaste.CopyPaste\n"
+      "X-GNOME-Autostart-enabled=true\n"
+      "X-CopyPaste-Managed=true\n";
+  g_assert_true(g_file_set_contents(path.c_str(), legacy_old_entry.c_str(), -1,
+                                    &error));
+  g_assert_no_error(error);
+  g_assert_false(startup.GetStatus().start_at_login);
+  g_assert_true(startup.SetStartAtLogin(true, &error));
+  g_assert_no_error(error);
+  gchar* updated_contents = nullptr;
+  gsize updated_length = 0;
+  g_assert_true(g_file_get_contents(path.c_str(), &updated_contents,
+                                    &updated_length, &error));
+  g_assert_no_error(error);
+  const std::string current_entry =
+      LinuxXdgStartup::DesktopEntryForExecutable(fixture->executable(), true);
+  g_assert_cmpstr(updated_contents, ==, current_entry.c_str());
+  g_free(updated_contents);
+  g_assert_true(startup.GetStatus().start_at_login);
+  g_assert_true(startup.SetStartAtLogin(false, &error));
+  g_assert_no_error(error);
+  g_assert_false(g_file_test(path.c_str(), G_FILE_TEST_EXISTS));
+
+  const std::string custom_legacy_entry =
+      "[Desktop Entry]\n"
+      "Type=Application\n"
+      "Name=CopyPaste\n"
+      "Comment=Encrypted clipboard history\n"
+      "Exec=\"/home/test/CopyPaste-old.AppImage\" %U\n"
+      "TryExec=\"/home/test/Other.AppImage\"\n"
+      "Icon=com.copypaste.CopyPaste\n"
+      "Terminal=false\n"
+      "Categories=Utility;\n"
+      "StartupNotify=true\n"
+      "MimeType=x-scheme-handler/copypaste;\n"
+      "X-CopyPaste-ApplicationId=com.copypaste.CopyPaste\n"
+      "X-GNOME-Autostart-enabled=true\n"
+      "X-CopyPaste-Managed=true\n";
+  g_assert_true(g_file_set_contents(path.c_str(), custom_legacy_entry.c_str(),
+                                    -1, &error));
+  g_assert_no_error(error);
+  g_assert_false(startup.SetStartAtLogin(true, &error));
+  g_assert_error(error, G_FILE_ERROR, G_FILE_ERROR_ACCES);
+  g_clear_error(&error);
+  g_assert_false(startup.SetStartAtLogin(false, &error));
+  g_assert_error(error, G_FILE_ERROR, G_FILE_ERROR_ACCES);
+  g_clear_error(&error);
+  gchar* custom_contents = nullptr;
+  gsize custom_length = 0;
+  g_assert_true(g_file_get_contents(path.c_str(), &custom_contents,
+                                    &custom_length, &error));
+  g_assert_no_error(error);
+  g_assert_cmpstr(custom_contents, ==, custom_legacy_entry.c_str());
+  g_free(custom_contents);
+}
+
+void test_uri_registration_uses_private_xdg_home() {
+  fixture->clear_entries();
+  const LinuxXdgStartup startup = fixture->startup();
+  g_autoptr(GError) error = nullptr;
+  const bool registered = startup.RegisterCopypasteUri(&error);
+  g_assert_no_error(error);
+  g_assert_true(registered);
+  const std::string path = fixture->data() +
+      "/applications/com.copypaste.CopyPaste.desktop";
+  g_assert_true(g_file_test(path.c_str(), G_FILE_TEST_IS_REGULAR));
+  g_autoptr(GAppInfo) handler = g_app_info_get_default_for_type(
+      "x-scheme-handler/copypaste", TRUE);
+  g_assert_nonnull(handler);
+  g_assert_cmpstr(g_app_info_get_id(handler), ==,
+                  "com.copypaste.CopyPaste.desktop");
+  g_assert_true(startup.GetStatus().uri_registered);
+}
+
+#if defined(__linux__)
+void test_desktop_entry_parses_special_executable() {
+  fixture->clear_entries();
+  const std::string executable =
+      fixture->root() + "/Copy Paste\"quote\\slash%=handler";
+  const std::string capture = fixture->root() + "/uri-capture";
+  const int descriptor = open(executable.c_str(), O_WRONLY | O_CREAT | O_EXCL,
+                              0700);
+  g_assert_cmpint(descriptor, >=, 0);
+  static constexpr char kCaptureScript[] =
+      "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$COPYPASTE_XDG_URI_CAPTURE\"\n";
+  g_assert_cmpint(write(descriptor, kCaptureScript, sizeof(kCaptureScript) - 1),
+                  ==, static_cast<ssize_t>(sizeof(kCaptureScript) - 1));
+  g_assert_cmpint(fchmod(descriptor, 0700), ==, 0);
+  g_assert_cmpint(close(descriptor), ==, 0);
+  const std::string applications = fixture->data() + "/applications";
+  g_assert_cmpint(g_mkdir_with_parents(applications.c_str(), 0700), ==, 0);
+  const std::string desktop_path = applications +
+      "/com.copypaste.CopyPaste.desktop";
+  const std::string entry =
+      LinuxXdgStartup::DesktopEntryForExecutable(executable, false);
+  g_autoptr(GError) error = nullptr;
+  g_assert_true(g_file_set_contents(desktop_path.c_str(), entry.c_str(), -1,
+                                    &error));
+  g_assert_no_error(error);
+  g_autoptr(GDesktopAppInfo) app_info =
+      g_desktop_app_info_new_from_filename(desktop_path.c_str());
+  g_assert_nonnull(app_info);
+  g_assert_cmpstr(g_desktop_app_info_get_string(app_info, "TryExec"), ==,
+                  executable.c_str());
+  g_assert_true(g_app_info_supports_uris(G_APP_INFO(app_info)));
+  g_setenv("COPYPASTE_XDG_URI_CAPTURE", capture.c_str(), TRUE);
+  GList* uris = g_list_append(
+      nullptr, g_strdup("copypaste://pair/v1?code=A%25B&address=host%3A1"));
+  g_assert_true(g_app_info_launch_uris(G_APP_INFO(app_info), uris, nullptr,
+                                       &error));
+  g_list_free_full(uris, g_free);
+  g_assert_no_error(error);
+  gchar* received = nullptr;
+  gsize received_length = 0;
+  for (int attempt = 0; attempt < 100 && received == nullptr; ++attempt) {
+    g_usleep(10000);
+    g_file_get_contents(capture.c_str(), &received, &received_length, nullptr);
+  }
+  g_unsetenv("COPYPASTE_XDG_URI_CAPTURE");
+  g_assert_nonnull(received);
+  g_assert_cmpstr(received, ==,
+                  "copypaste://pair/v1?code=A%25B&address=host%3A1\n");
+  g_free(received);
+}
+#endif
+
+void test_rejects_invalid_paths_and_uses_outer_appimage() {
+  fixture->clear_entries();
+  g_autoptr(GError) error = nullptr;
+  const auto relative = LinuxXdgStartup::CreateForTesting(
+      "relative/copypaste", fixture->config(), fixture->data(), &error);
+  g_assert_false(relative.has_value());
+  g_assert_error(error, G_FILE_ERROR, G_FILE_ERROR_INVAL);
+  g_clear_error(&error);
+
+  const auto missing = LinuxXdgStartup::CreateForTesting(
+      fixture->root() + "/missing", fixture->config(), fixture->data(), &error);
+  g_assert_false(missing.has_value());
+  g_assert_nonnull(error);
+  g_clear_error(&error);
+
+  const std::string line_break_path = fixture->root() + "/line\nbreak";
+  const int line_break_file = open(line_break_path.c_str(),
+                                   O_WRONLY | O_CREAT | O_EXCL, 0700);
+  g_assert_cmpint(line_break_file, >=, 0);
+  g_assert_cmpint(close(line_break_file), ==, 0);
+  const auto line_break = LinuxXdgStartup::CreateForTesting(
+      line_break_path, fixture->config(), fixture->data(), &error);
+  g_assert_false(line_break.has_value());
+  g_assert_error(error, G_FILE_ERROR, G_FILE_ERROR_INVAL);
+  g_clear_error(&error);
+
+  g_setenv("APPIMAGE", fixture->executable().c_str(), TRUE);
+  const auto appimage = LinuxXdgStartup::CreateForCurrentExecutable(&error);
+  g_assert_no_error(error);
+  g_assert_true(appimage.has_value());
+  g_assert_true(appimage->SetStartAtLogin(true, &error));
+  g_assert_no_error(error);
+  g_unsetenv("APPIMAGE");
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+  XdgFixture test_fixture;
+  fixture = &test_fixture;
+  g_test_init(&argc, &argv, nullptr);
+  g_test_add_func("/linux/xdg_startup/exec_escaping", test_exec_escaping);
+  g_test_add_func("/linux/xdg_startup/autostart_owned_atomic",
+                  test_autostart_is_owned_and_atomic);
+  g_test_add_func("/linux/xdg_startup/uri_private_xdg",
+                  test_uri_registration_uses_private_xdg_home);
+#if defined(__linux__)
+  g_test_add_func("/linux/xdg_startup/desktop_entry_special_executable",
+                  test_desktop_entry_parses_special_executable);
+#endif
+  g_test_add_func("/linux/xdg_startup/invalid_paths_and_appimage",
+                  test_rejects_invalid_paths_and_uses_outer_appimage);
+  return g_test_run();
+}

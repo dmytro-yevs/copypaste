@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "architectures": {
+    "x86_64": {
+      "deb": "amd64",
+      "rpm": "x86_64",
+      "runner_architecture": "x64"
+    },
+    "aarch64": {
+      "deb": "arm64",
+      "rpm": "aarch64",
+      "runner_architecture": "arm64"
+    }
+  },
+  "formats": ["AppImage", "deb", "rpm"],
+  "maximum_glibc": "2.39"
+}

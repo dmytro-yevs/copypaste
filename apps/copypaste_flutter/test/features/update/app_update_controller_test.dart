@@ -86,6 +86,136 @@ void main() {
   );
 
   test(
+    'Linux selects an update only for its installed package format',
+    () async {
+      const installation = LinuxAppUpdateInstallation(
+        package: LinuxAppUpdatePackage.rpm,
+        architecture: LinuxAppUpdateArchitecture.aarch64,
+      );
+      final repository = _FakeLinuxUpdateRepository(release: _release());
+      final controller = AppUpdateController(
+        repository: repository,
+        platform: _FakeUpdatePlatform(
+          target: AppUpdateTarget.linux,
+          availabilityResult: const AppUpdateAvailability.available(
+            linuxInstallation: installation,
+          ),
+        ),
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+
+      expect(controller.phase, AppUpdatePhase.available);
+      expect(repository.requestedInstallation, installation);
+      await controller.install();
+      expect(controller.phase, AppUpdatePhase.installing);
+      expect(controller.message, 'Continue in your system package manager.');
+    },
+  );
+
+  test(
+    'reports Linux host verification failures without claiming installation',
+    () async {
+      final completion = Completer<AppUpdateInstallResult>();
+      final controller = AppUpdateController(
+        repository: _FakeUpdateRepository(release: _release()),
+        platform: _FakeUpdatePlatform(installCompletion: completion),
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      final installation = controller.install();
+      completion.completeError(PlatformException(code: 'verification_failed'));
+      await installation;
+
+      expect(controller.phase, AppUpdatePhase.error);
+      expect(
+        controller.message,
+        'The downloaded update failed its integrity check.',
+      );
+    },
+  );
+
+  test(
+    'Linux retains the GitHub release page when automatic updates are unavailable',
+    () async {
+      final release = _release();
+      final platform = _FakeUpdatePlatform(
+        target: AppUpdateTarget.linux,
+        availabilityResult: const AppUpdateAvailability.unavailable(
+          'This Linux installation cannot update automatically.',
+        ),
+      );
+      final controller = AppUpdateController(
+        repository: _FakeUpdateRepository(release: release),
+        platform: platform,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+      await controller.openReleasePage();
+
+      expect(controller.phase, AppUpdatePhase.unavailable);
+      expect(controller.release, same(release));
+      expect(platform.openedReleasePages, [release.releaseUri]);
+    },
+  );
+
+  test(
+    'Linux opens the trusted latest release fallback when no newer metadata exists',
+    () async {
+      final platform = _FakeUpdatePlatform(
+        target: AppUpdateTarget.linux,
+        availabilityResult: const AppUpdateAvailability.unavailable(
+          'This Linux installation cannot update automatically.',
+        ),
+      );
+      final controller = AppUpdateController(
+        repository: _FakeUpdateRepository(),
+        platform: platform,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+      await controller.openReleasePage();
+
+      expect(platform.openedReleasePages, [
+        Uri.https('github.com', '/dmytro-yevs/copypaste/releases/latest'),
+      ]);
+    },
+  );
+
+  test(
+    'Linux PackageKit permission requests use package manager copy',
+    () async {
+      final controller = AppUpdateController(
+        repository: _FakeLinuxUpdateRepository(release: _release()),
+        platform: _FakeUpdatePlatform(
+          target: AppUpdateTarget.linux,
+          availabilityResult: const AppUpdateAvailability.available(
+            linuxInstallation: LinuxAppUpdateInstallation(
+              package: LinuxAppUpdatePackage.deb,
+              architecture: LinuxAppUpdateArchitecture.x86_64,
+            ),
+          ),
+          installResults: [AppUpdateInstallResult.permissionRequired],
+        ),
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+      await controller.install();
+
+      expect(controller.phase, AppUpdatePhase.permissionRequired);
+      expect(
+        controller.message,
+        'Authenticate in your system package manager to install this update.',
+      );
+    },
+  );
+
+  test(
     'reuses the verified download after Android grants permission',
     () async {
       final repository = _FakeUpdateRepository(release: _release());
@@ -274,12 +404,31 @@ class _FakeUpdateRepository implements AppUpdateRepository {
   void dispose() {}
 }
 
+class _FakeLinuxUpdateRepository extends _FakeUpdateRepository
+    implements LinuxAppUpdateRepository {
+  _FakeLinuxUpdateRepository({super.release});
+
+  LinuxAppUpdateInstallation? requestedInstallation;
+
+  @override
+  Future<AppRelease?> findLinuxUpdate({
+    required Version currentVersion,
+    required LinuxAppUpdateInstallation installation,
+  }) async {
+    requestedInstallation = installation;
+    return release != null && release!.version > currentVersion
+        ? release
+        : null;
+  }
+}
+
 class _FakeUpdatePlatform implements AppUpdatePlatform {
   _FakeUpdatePlatform({
     this.target = AppUpdateTarget.android,
     List<AppUpdateInstallResult>? installResults,
     this.installCompletion,
     this.restoreCompletion,
+    this.availabilityResult = const AppUpdateAvailability.available(),
   }) : _installResults = installResults ?? [AppUpdateInstallResult.started];
 
   @override
@@ -289,14 +438,15 @@ class _FakeUpdatePlatform implements AppUpdatePlatform {
   String version = '1.0.0';
   final Completer<AppUpdateInstallResult>? installCompletion;
   final Completer<AppUpdateInstallResult?>? restoreCompletion;
+  final AppUpdateAvailability availabilityResult;
+  final List<Uri> openedReleasePages = [];
 
   @override
   Future<AppUpdateInstallResult?> restoreInstallation() async =>
       restoreCompletion == null ? null : await restoreCompletion!.future;
 
   @override
-  Future<AppUpdateAvailability> availability() async =>
-      const AppUpdateAvailability.available();
+  Future<AppUpdateAvailability> availability() async => availabilityResult;
 
   @override
   Future<String> currentVersion() async => version;
@@ -313,5 +463,7 @@ class _FakeUpdatePlatform implements AppUpdatePlatform {
   }
 
   @override
-  Future<void> openReleasePage(Uri uri) async {}
+  Future<void> openReleasePage(Uri uri) async {
+    openedReleasePages.add(uri);
+  }
 }

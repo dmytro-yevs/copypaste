@@ -4,6 +4,7 @@ import 'package:copypaste_flutter/features/settings/repository/quick_paste_prefe
 import 'package:copypaste_flutter/features/settings/view/settings_screen.dart';
 import 'package:copypaste_flutter/platform/desktop/global_shortcut.dart';
 import 'package:copypaste_flutter/platform/desktop/quick_paste_host.dart';
+import 'package:copypaste_flutter/platform/permissions/linux_integration.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -107,16 +108,93 @@ void main() {
     expect(controller.autoPaste, isFalse);
     expect(tester.takeException(), isNull);
   });
+
+  test('registers once after Linux integration becomes active', () async {
+    final integration = _LinuxIntegration(
+      const LinuxIntegrationStatus(
+        session: LinuxDesktopSession.wayland,
+        globalShortcuts: true,
+        remoteDesktop: LinuxRemoteDesktopState.consentRequired,
+        companion: LinuxCompanionState.active,
+        clipboard: false,
+        quickPaste: false,
+        screenshotProtection: false,
+      ),
+    );
+    final registrar = _Registrar();
+    final controller = QuickPasteSettingsController(
+      store: MemoryQuickPastePreferencesStore(),
+      registrar: registrar,
+      windowHost: _WindowHost(),
+      linuxIntegration: integration,
+    );
+    addTearDown(controller.dispose);
+
+    await controller.initialize();
+    expect(controller.supported, isFalse);
+    expect(registrar.registered, isNull);
+
+    integration.value = const LinuxIntegrationStatus(
+      session: LinuxDesktopSession.wayland,
+      globalShortcuts: true,
+      remoteDesktop: LinuxRemoteDesktopState.active,
+      companion: LinuxCompanionState.active,
+      clipboard: true,
+      quickPaste: true,
+      screenshotProtection: false,
+    );
+    await controller.refreshLinuxIntegration();
+
+    expect(controller.supported, isTrue);
+    expect(registrar.registered, controller.shortcut);
+    expect(registrar.registerCalls, 1);
+  });
+
+  test('Linux setup actions refresh confirmed integration state', () async {
+    final integration =
+        _LinuxIntegration(
+            const LinuxIntegrationStatus(
+              session: LinuxDesktopSession.x11,
+              globalShortcuts: true,
+              remoteDesktop: LinuxRemoteDesktopState.consentRequired,
+              companion: LinuxCompanionState.disabled,
+              clipboard: false,
+              quickPaste: false,
+              screenshotProtection: false,
+            ),
+          )
+          ..remoteDesktopResult = true
+          ..companionSetupResult = true;
+    final controller = QuickPasteSettingsController(
+      store: MemoryQuickPastePreferencesStore(),
+      registrar: _Registrar(),
+      windowHost: _WindowHost(),
+      linuxIntegration: integration,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    expect(await controller.requestLinuxRemoteDesktop(), isFalse);
+    expect(
+      controller.errorMessage,
+      'Clipboard input permission was not granted.',
+    );
+    expect(await controller.openLinuxCompanionSetup(), isTrue);
+    expect(integration.remoteDesktopRequests, 1);
+    expect(integration.companionSetupRequests, 1);
+  });
 }
 
 class _Registrar implements DesktopShortcutRegistrar {
   DesktopShortcut? registered;
+  int registerCalls = 0;
 
   @override
   Future<void> register(
     DesktopShortcut shortcut,
     Future<void> Function() callback,
   ) async {
+    registerCalls += 1;
     registered = shortcut;
   }
 
@@ -157,4 +235,35 @@ class _WindowHost implements QuickPasteWindowHost {
 
   @override
   void setOpenSettingsHandler(VoidCallback? handler) {}
+}
+
+class _LinuxIntegration implements LinuxIntegrationPort {
+  _LinuxIntegration(this.value);
+
+  LinuxIntegrationStatus value;
+  bool remoteDesktopResult = false;
+  bool companionSetupResult = false;
+  int remoteDesktopRequests = 0;
+  int companionSetupRequests = 0;
+
+  @override
+  Future<bool> openCompanionSetup() async {
+    companionSetupRequests += 1;
+    return companionSetupResult;
+  }
+
+  @override
+  Future<bool> requestRemoteDesktop() async {
+    remoteDesktopRequests += 1;
+    return remoteDesktopResult;
+  }
+
+  @override
+  Future<bool> registerCopypasteUri() async => true;
+
+  @override
+  Future<bool> setStartAtLogin(bool enabled) async => true;
+
+  @override
+  Future<LinuxIntegrationStatus> status() async => value;
 }

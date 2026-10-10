@@ -7,7 +7,10 @@
 use std::path::Path;
 #[cfg(feature = "dev-ephemeral-key")]
 use std::sync::OnceLock;
-#[cfg(any(all(target_os = "macos", not(debug_assertions)), test))]
+#[cfg(any(
+    all(any(target_os = "macos", target_os = "linux"), not(debug_assertions)),
+    test
+))]
 use std::{
     sync::mpsc::{self, RecvTimeoutError},
     time::Duration,
@@ -40,10 +43,14 @@ const INFO_PEER_STORE_KEY: &[u8] = b"copypaste/v2/peer-store-key";
 #[cfg(feature = "dev-ephemeral-key")]
 const ENV_EPHEMERAL: &str = "COPYPASTE_EPHEMERAL_KEY";
 
-/// Upper bound on a release macOS Keychain load during startup (port manifest
-/// 02, I-22).
-#[cfg(any(all(target_os = "macos", not(debug_assertions)), test))]
-const KEYSTORE_LOAD_TIMEOUT: Duration = Duration::from_secs(8);
+/// Upper bound on a release desktop keystore load during startup (port manifest
+/// 02, I-22). A locked Secret Service can wait for a desktop prompt just as a
+/// Keychain can, but daemon startup must fail closed rather than wait forever.
+#[cfg(any(
+    all(any(target_os = "macos", target_os = "linux"), not(debug_assertions)),
+    test
+))]
+pub(super) const KEYSTORE_LOAD_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// The device secret plus the keys derived from it. The secret is zeroized on
 /// drop.
@@ -60,6 +67,11 @@ impl Keyring {
     /// * **debug macOS** — the development-only `0600` file named
     ///   `device_secret.key`, so local builds never read or prompt the login
     ///   Keychain.
+    /// * **release Linux** — a Secret Service item in the user's session
+    ///   keyring under the same frozen service/account attributes. GNOME
+    ///   Keyring and KWallet expose that API on X11 and Wayland alike.
+    /// * **debug Linux** — the development-only `0600` file named
+    ///   `device_secret.key`, so local tests do not use a real user keyring.
     /// * **Android** — a 32-byte secret sealed with an AES-GCM key held in the
     ///   Android Keystore, kept as a blob in app-private storage.
     /// * **Windows** — the same shape: sealed with DPAPI under the user's
@@ -101,7 +113,9 @@ impl Keyring {
             })?;
             super::keystore::finish_load_or_create_secret(data_dir, lookup)?
         };
-        #[cfg(any(not(target_os = "macos"), debug_assertions))]
+        #[cfg(all(target_os = "linux", not(debug_assertions)))]
+        let secret = super::keystore::load_or_create_linux_secret(data_dir)?;
+        #[cfg(any(not(any(target_os = "macos", target_os = "linux")), debug_assertions))]
         let secret = super::keystore::load_or_create_secret(data_dir)?;
         Ok(Self { secret })
     }
@@ -134,9 +148,12 @@ impl Keyring {
 
 /// Run a potentially prompting Keychain load without allowing it to hold
 /// startup indefinitely.
-#[cfg(any(all(target_os = "macos", not(debug_assertions)), test))]
+#[cfg(any(
+    all(any(target_os = "macos", target_os = "linux"), not(debug_assertions)),
+    test
+))]
 #[cfg_attr(test, allow(dead_code))]
-fn load_with_timeout<T, F>(timeout: Duration, load: F) -> Result<T, CryptoError>
+pub(super) fn load_with_timeout<T, F>(timeout: Duration, load: F) -> Result<T, CryptoError>
 where
     T: Send + 'static,
     F: FnOnce() -> Result<T, CryptoError> + Send + 'static,

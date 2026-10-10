@@ -6,7 +6,9 @@ import 'package:flutter/foundation.dart' show SynchronousFuture;
 import 'package:copypaste_flutter/main.dart';
 import 'package:copypaste_flutter/app/app.dart';
 import 'package:copypaste_flutter/features/onboarding/controller/windows_onboarding_controller.dart';
+import 'package:copypaste_flutter/features/onboarding/controller/linux_onboarding_controller.dart';
 import 'package:copypaste_flutter/features/onboarding/repository/windows_onboarding_store.dart';
+import 'package:copypaste_flutter/features/onboarding/repository/linux_onboarding_store.dart';
 import 'package:copypaste_flutter/app/shell/macos_window_header.dart';
 import 'package:copypaste_flutter/features/onboarding/controller/android_onboarding_controller.dart';
 import 'package:copypaste_flutter/features/onboarding/controller/macos_onboarding_controller.dart';
@@ -15,6 +17,7 @@ import 'package:copypaste_flutter/features/onboarding/repository/macos_onboardin
 import 'package:copypaste_flutter/platform/android/android_capture_setup_gateway.dart';
 import 'package:copypaste_flutter/platform/desktop/desktop_window_controller.dart';
 import 'package:copypaste_flutter/platform/macos/macos_setup_gateway.dart';
+import 'package:copypaste_flutter/platform/permissions/linux_integration.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:window_manager/window_manager.dart';
@@ -39,6 +42,7 @@ void main() {
       await tester.pumpWidget(
         CopyPasteRoot(
           windowsOnboardingController: _completedWindowsOnboarding(),
+          linuxOnboardingController: _completedLinuxOnboarding(),
           desktopWindow: desktopWindow,
           macosOnboardingController: onboarding,
           runtimeEnabled: false,
@@ -104,6 +108,7 @@ void main() {
       CopyPasteRoot(
         runtimeEnabled: false,
         macosOnboardingController: macos,
+        linuxOnboardingController: _completedLinuxOnboarding(),
         windowsOnboardingController: windows,
       ),
     );
@@ -127,6 +132,7 @@ void main() {
       await tester.pumpWidget(
         CopyPasteRoot(
           windowsOnboardingController: _completedWindowsOnboarding(),
+          linuxOnboardingController: _completedLinuxOnboarding(),
           desktopWindow: desktop,
           macosOnboardingController: onboarding,
           runtimeEnabled: false,
@@ -149,6 +155,7 @@ void main() {
     await tester.pumpWidget(
       CopyPasteRoot(
         windowsOnboardingController: _completedWindowsOnboarding(),
+        linuxOnboardingController: _completedLinuxOnboarding(),
         runtimeEnabled: false,
         macosOnboardingController: onboarding,
       ),
@@ -173,6 +180,7 @@ void main() {
     await tester.pumpWidget(
       CopyPasteRoot(
         windowsOnboardingController: _completedWindowsOnboarding(),
+        linuxOnboardingController: _completedLinuxOnboarding(),
         runtimeEnabled: false,
         androidOnboardingController: onboarding,
         macosOnboardingController: macosOnboarding,
@@ -196,6 +204,7 @@ void main() {
     await tester.pumpWidget(
       CopyPasteRoot(
         windowsOnboardingController: _completedWindowsOnboarding(),
+        linuxOnboardingController: _completedLinuxOnboarding(),
         desktopWindow: desktopWindow,
         macosOnboardingController: onboarding,
         runtimeEnabled: false,
@@ -222,6 +231,7 @@ void main() {
     await tester.pumpWidget(
       CopyPasteRoot(
         windowsOnboardingController: _completedWindowsOnboarding(),
+        linuxOnboardingController: _completedLinuxOnboarding(),
         desktopWindow: desktopWindow,
         macosOnboardingController: onboarding,
         runtimeEnabled: false,
@@ -262,6 +272,7 @@ void main() {
     await tester.pumpWidget(
       CopyPasteRoot(
         windowsOnboardingController: _completedWindowsOnboarding(),
+        linuxOnboardingController: _completedLinuxOnboarding(),
         desktopWindow: desktopWindow,
         macosOnboardingController: onboarding,
         runtimeEnabled: false,
@@ -294,6 +305,7 @@ void main() {
     await tester.pumpWidget(
       CopyPasteRoot(
         windowsOnboardingController: _completedWindowsOnboarding(),
+        linuxOnboardingController: _completedLinuxOnboarding(),
         desktopWindow: desktopWindow,
         macosOnboardingController: onboarding,
         runtimeEnabled: false,
@@ -490,4 +502,38 @@ WindowsOnboardingController _completedWindowsOnboarding() {
   );
   addTearDown(controller.dispose);
   return controller;
+}
+
+LinuxOnboardingController _completedLinuxOnboarding() {
+  final controller = LinuxOnboardingController(
+    store: MemoryLinuxOnboardingStore(complete: true),
+    integration: _ReadyLinuxIntegration(),
+  );
+  addTearDown(controller.dispose);
+  return controller;
+}
+
+class _ReadyLinuxIntegration implements LinuxIntegrationPort {
+  @override
+  Future<bool> registerCopypasteUri() async => true;
+
+  @override
+  Future<bool> openCompanionSetup() async => true;
+
+  @override
+  Future<bool> requestRemoteDesktop() async => true;
+
+  @override
+  Future<bool> setStartAtLogin(bool enabled) async => true;
+
+  @override
+  Future<LinuxIntegrationStatus> status() async => const LinuxIntegrationStatus(
+    session: LinuxDesktopSession.x11,
+    globalShortcuts: true,
+    remoteDesktop: LinuxRemoteDesktopState.unsupported,
+    companion: LinuxCompanionState.unavailable,
+    clipboard: true,
+    quickPaste: true,
+    screenshotProtection: false,
+  );
 }

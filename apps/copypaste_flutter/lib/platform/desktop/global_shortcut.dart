@@ -164,3 +164,136 @@ class HotKeyManagerDesktopShortcutRegistrar
     }
   }
 }
+
+/// Registers global shortcuts through the Linux desktop portal.
+///
+/// The native host owns session consent and Wayland activation tokens. It only
+/// reports activation after the portal has accepted the registration.
+class LinuxPortalDesktopShortcutRegistrar implements DesktopShortcutRegistrar {
+  LinuxPortalDesktopShortcutRegistrar({MethodChannel? channel})
+    : _channel =
+          channel ?? const MethodChannel('com.copypaste.app/linux_shortcuts') {
+    _channel.setMethodCallHandler(_handleMethodCall);
+  }
+
+  static const _shortcutId = 'copypaste.quick-paste';
+
+  final MethodChannel _channel;
+  Future<void> Function()? _callback;
+  String? _registeredId;
+  String? _registeredTriggerDescription;
+
+  /// The trigger confirmed by the desktop portal, when it reports one.
+  String? get registeredTriggerDescription => _registeredTriggerDescription;
+
+  @override
+  Future<void> register(
+    DesktopShortcut shortcut,
+    Future<void> Function() callback,
+  ) async {
+    if (!shortcut.isValid) {
+      throw ArgumentError.value(shortcut, 'shortcut', 'Shortcut is invalid.');
+    }
+    await unregister();
+    final supported = await _channel.invokeMethod<bool>('isSupported');
+    if (supported != true) {
+      throw PlatformException(code: 'shortcut_unavailable');
+    }
+    final result = await _channel.invokeMapMethod<String, Object?>('register', {
+      'id': _shortcutId,
+      'description': 'Open Quick Paste',
+      'preferredTrigger': shortcut.linuxPreferredTrigger,
+      'usage': shortcut.key.usbHidUsage,
+      'modifiers': shortcut.modifiers.map((modifier) => modifier.name).toList(),
+    });
+    if (result?['registered'] != true) {
+      throw PlatformException(
+        code: 'shortcut_registration_failed',
+        message: result?['reason'] as String?,
+      );
+    }
+    _registeredId = _shortcutId;
+    _registeredTriggerDescription = result?['triggerDescription'] as String?;
+    _callback = callback;
+  }
+
+  @override
+  Future<void> unregister() async {
+    final id = _registeredId;
+    if (id == null) return;
+    if (await _channel.invokeMethod<bool>('unregister', {'id': id}) != true) {
+      throw PlatformException(code: 'shortcut_unregistration_failed');
+    }
+    _registeredId = null;
+    _registeredTriggerDescription = null;
+    _callback = null;
+  }
+
+  Future<Object?> _handleMethodCall(MethodCall call) async {
+    if (call.method != 'activated') {
+      throw MissingPluginException(
+        'Unsupported Linux shortcut method: ${call.method}',
+      );
+    }
+    final arguments = call.arguments;
+    if (arguments is! Map<Object?, Object?> ||
+        arguments['id'] != _registeredId) {
+      return false;
+    }
+    final callback = _callback;
+    if (callback == null) return false;
+    unawaited(callback());
+    return true;
+  }
+}
+
+extension LinuxDesktopShortcutPresentation on DesktopShortcut {
+  /// A portable XDG/XKB hint; USB HID usage remains the binding source of truth.
+  String get linuxPreferredTrigger => [
+    for (final modifier in modifiers) modifier.linuxTriggerName,
+    _linuxKeySymbol,
+  ].join('+');
+
+  String get _linuxKeySymbol {
+    final label = HotKey(key: key).logicalKey.keyLabel;
+    if (RegExp(r'^[A-Za-z0-9]+$').hasMatch(label)) return label.toUpperCase();
+    return switch (key) {
+      PhysicalKeyboardKey.escape => 'ESC',
+      PhysicalKeyboardKey.backspace => 'BACKSPACE',
+      PhysicalKeyboardKey.tab => 'TAB',
+      PhysicalKeyboardKey.space => 'SPACE',
+      PhysicalKeyboardKey.enter || PhysicalKeyboardKey.numpadEnter => 'ENTER',
+      PhysicalKeyboardKey.arrowUp => 'UP',
+      PhysicalKeyboardKey.arrowDown => 'DOWN',
+      PhysicalKeyboardKey.arrowLeft => 'LEFT',
+      PhysicalKeyboardKey.arrowRight => 'RIGHT',
+      PhysicalKeyboardKey.home => 'HOME',
+      PhysicalKeyboardKey.end => 'END',
+      PhysicalKeyboardKey.pageUp => 'PAGEUP',
+      PhysicalKeyboardKey.pageDown => 'PAGEDOWN',
+      PhysicalKeyboardKey.insert => 'INSERT',
+      PhysicalKeyboardKey.delete => 'DELETE',
+      PhysicalKeyboardKey.minus => 'MINUS',
+      PhysicalKeyboardKey.equal => 'EQUAL',
+      PhysicalKeyboardKey.bracketLeft => 'BRACKETLEFT',
+      PhysicalKeyboardKey.bracketRight => 'BRACKETRIGHT',
+      PhysicalKeyboardKey.backslash => 'BACKSLASH',
+      PhysicalKeyboardKey.semicolon => 'SEMICOLON',
+      PhysicalKeyboardKey.quote => 'APOSTROPHE',
+      PhysicalKeyboardKey.backquote => 'GRAVE',
+      PhysicalKeyboardKey.comma => 'COMMA',
+      PhysicalKeyboardKey.period => 'PERIOD',
+      PhysicalKeyboardKey.slash => 'SLASH',
+      _ => 'HID_${key.usbHidUsage.toRadixString(16).toUpperCase()}',
+    };
+  }
+}
+
+extension on DesktopShortcutModifier {
+  String get linuxTriggerName => switch (this) {
+    DesktopShortcutModifier.control => 'CTRL',
+    DesktopShortcutModifier.shift => 'SHIFT',
+    DesktopShortcutModifier.alt => 'ALT',
+    DesktopShortcutModifier.meta => 'META',
+  };
+}

@@ -1,0 +1,388 @@
+name: Linux native qualification
+
+on:
+  workflow_call:
+    inputs:
+      artifact_run_id: {required: true, type: string}
+      previous_artifact_run_id: {required: false, type: string, default: ""}
+      supabase_module_run_id: {required: true, type: string}
+      semantic_search_module_run_id: {required: true, type: string}
+      ocr_module_run_id: {required: true, type: string}
+      compositor_runtime_run_id: {required: true, type: string}
+  workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: Successful production release run containing the exact current Linux packages
+        required: true
+        type: string
+      previous_artifact_run_id:
+        description: Successful earlier production release run; omit only when creating the first-install baseline
+        required: false
+        type: string
+        default: ""
+      supabase_module_run_id:
+        description: Successful unpublished Supabase module workflow run at this exact product commit
+        required: true
+        type: string
+      semantic_search_module_run_id:
+        description: Successful unpublished Semantic Search module workflow run at this exact product commit
+        required: true
+        type: string
+      ocr_module_run_id:
+        description: Successful unpublished OCR module workflow run at this exact product commit
+        required: true
+        type: string
+      compositor_runtime_run_id:
+        description: Successful exact-commit compositor sidecar runtime producer run
+        required: true
+        type: string
+
+concurrency:
+  group: linux-native-qualification-${{ inputs.artifact_run_id }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  source:
+    name: Verify exact artifact sources
+    runs-on: ubuntu-24.04
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+      version: ${{ steps.source.outputs.version }}
+      previous_version: ${{ steps.source.outputs.previous_version }}
+      upgrade_mode: ${{ steps.source.outputs.upgrade_mode }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+          PREVIOUS_ARTIFACT_RUN_ID: ${{ inputs.previous_artifact_run_id }}
+          SUPABASE_MODULE_RUN_ID: ${{ inputs.supabase_module_run_id }}
+          SEMANTIC_SEARCH_MODULE_RUN_ID: ${{ inputs.semantic_search_module_run_id }}
+          OCR_MODULE_RUN_ID: ${{ inputs.ocr_module_run_id }}
+          COMPOSITOR_RUNTIME_RUN_ID: ${{ inputs.compositor_runtime_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID" > "$RUNNER_TEMP/current-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/current-jobs.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/current-artifacts.json"
+          commit="$(jq -r '.head_sha' "$RUNNER_TEMP/current-run.json")"
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_SHA" == "$commit" ]] || {
+            echo "ERROR: dispatch this workflow from the exact commit that built artifact_run_id" >&2
+            exit 1
+          }
+          python3 scripts/release/verify-linux-artifact-source-run.py \
+            --run "$RUNNER_TEMP/current-run.json" --jobs "$RUNNER_TEMP/current-jobs.json" --artifacts "$RUNNER_TEMP/current-artifacts.json" \
+            --repository "$GITHUB_REPOSITORY" --commit "$commit"
+          upgrade_mode=first_install_baseline
+          previous_version=""
+          if [[ -n "$PREVIOUS_ARTIFACT_RUN_ID" ]]; then
+            [[ "$PREVIOUS_ARTIFACT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_ARTIFACT_RUN_ID" > "$RUNNER_TEMP/previous-run.json"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_ARTIFACT_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/previous-jobs.json"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_ARTIFACT_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/previous-artifacts.json"
+            previous_commit="$(jq -r '.head_sha' "$RUNNER_TEMP/previous-run.json")"
+            [[ "$previous_commit" =~ ^[0-9a-f]{40}$ ]]
+            python3 scripts/release/verify-linux-artifact-source-run.py \
+              --run "$RUNNER_TEMP/previous-run.json" --jobs "$RUNNER_TEMP/previous-jobs.json" --artifacts "$RUNNER_TEMP/previous-artifacts.json" \
+              --repository "$GITHUB_REPOSITORY" --commit "$previous_commit"
+            previous_version="$(git show "$previous_commit:apps/copypaste_flutter/pubspec.yaml" | awk '/^version:[[:space:]]*/ {print $2; exit}')"
+            previous_version="${previous_version%%+*}"
+            upgrade_mode=prior_release
+          fi
+          version="$(awk '/^version:[[:space:]]*/ {print $2; exit}' apps/copypaste_flutter/pubspec.yaml)"
+          version="${version%%+*}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          cargo_version="$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{gsub(/["[:space:]]/, "", $3); print $3; exit}' Cargo.toml)"
+          [[ "$version" == "$cargo_version" ]] || { echo "ERROR: Flutter and module-host app versions differ" >&2; exit 1; }
+          for module_source in "$SUPABASE_MODULE_RUN_ID:.github/workflows/provider-module.yml:supabase" "$SEMANTIC_SEARCH_MODULE_RUN_ID:.github/workflows/provider-module.yml:semantic-search" "$OCR_MODULE_RUN_ID:.github/workflows/ocr-module.yml:ocr"; do
+            IFS=: read -r module_run_id module_workflow module_name <<< "$module_source"
+            [[ "$module_run_id" =~ ^[1-9][0-9]*$ ]]
+            prefix="$RUNNER_TEMP/module-$module_name"
+            mkdir -p "$prefix"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$module_run_id" > "$prefix/run.json"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$module_run_id/jobs?per_page=100" > "$prefix/jobs.json"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$module_run_id/artifacts?per_page=100" > "$prefix/artifacts.json"
+            python3 scripts/release/verify-linux-module-source-run.py \
+              --run "$prefix/run.json" --jobs "$prefix/jobs.json" --artifacts "$prefix/artifacts.json" \
+              --repository "$GITHUB_REPOSITORY" --commit "$commit" --workflow "$module_workflow" --module "$module_name"
+          done
+          [[ "$COMPOSITOR_RUNTIME_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$COMPOSITOR_RUNTIME_RUN_ID" > "$RUNNER_TEMP/compositor-runtime-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$COMPOSITOR_RUNTIME_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/compositor-runtime-artifacts.json"
+          python3 scripts/release/verify-linux-compositor-runtime.py source \
+            --run "$RUNNER_TEMP/compositor-runtime-run.json" --artifacts "$RUNNER_TEMP/compositor-runtime-artifacts.json" \
+            --repository "$GITHUB_REPOSITORY" --commit "$commit"
+          [[ "$upgrade_mode" == first_install_baseline || "$previous_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          {
+            echo "commit=$commit"
+            echo "version=$version"
+            echo "previous_version=$previous_version"
+            echo "upgrade_mode=$upgrade_mode"
+          } >> "$GITHUB_OUTPUT"
+
+  scenario:
+    name: ${{ matrix.architecture }} ${{ matrix.desktop }} ${{ matrix.session }}
+    needs: source
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x86_64
+            runner: ubuntu-24.04
+            desktop: GNOME
+            session: x11
+            compositor_artifact: copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64
+          - architecture: x86_64
+            runner: ubuntu-24.04
+            desktop: GNOME
+            session: wayland
+            compositor_artifact: copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64
+          - architecture: x86_64
+            runner: ubuntu-24.04
+            desktop: KDE
+            session: x11
+            compositor_artifact: copypaste-compositor-runtime-kwin-6.0-fedora40-x86_64
+          - architecture: x86_64
+            runner: ubuntu-24.04
+            desktop: KDE
+            session: wayland
+            compositor_artifact: copypaste-compositor-runtime-kwin-6.0-fedora40-x86_64
+          - architecture: aarch64
+            runner: ubuntu-24.04-arm
+            desktop: GNOME
+            session: x11
+            compositor_artifact: copypaste-compositor-runtime-gnome-46-ubuntu24.04-aarch64
+          - architecture: aarch64
+            runner: ubuntu-24.04-arm
+            desktop: GNOME
+            session: wayland
+            compositor_artifact: copypaste-compositor-runtime-gnome-46-ubuntu24.04-aarch64
+          - architecture: aarch64
+            runner: ubuntu-24.04-arm
+            desktop: KDE
+            session: x11
+            compositor_artifact: copypaste-compositor-runtime-kwin-6.0-fedora40-aarch64
+          - architecture: aarch64
+            runner: ubuntu-24.04-arm
+            desktop: KDE
+            session: wayland
+            compositor_artifact: copypaste-compositor-runtime-kwin-6.0-fedora40-aarch64
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+      - name: Install disposable desktop scenario dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            dbus-user-session gnome-shell gnome-session gnome-keyring gnome-shell-extension-appindicator \
+            kde-config-screenlocker kwin-wayland kwin-x11 plasma-workspace \
+            libsecret-tools wl-clipboard wtype x11-utils xdotool xdg-desktop-portal \
+            xdg-desktop-portal-gnome xdg-desktop-portal-kde xvfb rpm cpio xclip python3-gi build-essential pkg-config libgtk-3-dev \
+            at-spi2-core python3-pyatspi ffmpeg qrencode v4l-utils
+      - name: Provision owned V4L2 loopback camera for this CI job
+        env:
+          COPYPASTE_QUALIFICATION_HEADLESS: "1"
+        run: |
+          set -euo pipefail
+          python3 scripts/release/provision-linux-v4l2loopback.py provision \
+            --state "$RUNNER_TEMP/copypaste-v4l2loopback.json" --environment "$GITHUB_ENV"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ matrix.compositor_artifact }}
+          path: compositor-runtime
+          run-id: ${{ inputs.compositor_runtime_run_id }}
+          github-token: ${{ github.token }}
+      - name: Bind the exact compositor sidecar runtime
+        run: |
+          set -euo pipefail
+          python3 scripts/release/compositor-runtime-archive.py extract \
+            --archive compositor-runtime/runtime.tar --output compositor-runtime/runtime
+          python3 scripts/release/verify-linux-compositor-runtime.py artifact \
+            --root compositor-runtime --desktop "${{ matrix.desktop }}" --architecture "${{ matrix.architecture }}" \
+            --commit "${{ needs.source.outputs.commit }}" --producer-run-id "${{ inputs.compositor_runtime_run_id }}" \
+            --output compositor-runtime/binding.json
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: production-linux-${{ matrix.architecture }}
+          path: current
+          run-id: ${{ inputs.artifact_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.source.outputs.upgrade_mode == 'prior_release'
+        with:
+          name: production-linux-x86_64
+          path: previous-artifacts/x86_64
+          run-id: ${{ inputs.previous_artifact_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.source.outputs.upgrade_mode == 'prior_release'
+        with:
+          name: production-linux-aarch64
+          path: previous-artifacts/aarch64
+          run-id: ${{ inputs.previous_artifact_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.source.outputs.upgrade_mode == 'prior_release'
+        with:
+          name: production-linux-${{ matrix.architecture }}
+          path: previous
+          run-id: ${{ inputs.previous_artifact_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: provider-supabase-linux-${{ matrix.architecture }}
+          path: module-downloads/supabase
+          run-id: ${{ inputs.supabase_module_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: provider-semantic-search-linux-${{ matrix.architecture }}
+          path: module-downloads/semantic-search
+          run-id: ${{ inputs.semantic_search_module_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ocr-linux-${{ matrix.architecture }}
+          path: module-downloads/ocr
+          run-id: ${{ inputs.ocr_module_run_id }}
+          github-token: ${{ github.token }}
+      - name: Authenticate signed modules and stage offline fixtures
+        run: |
+          set -euo pipefail
+          python3 scripts/release/stage-linux-module-qualification.py \
+            --downloads module-downloads --module-artifacts module-artifacts --module-fixtures module-fixtures \
+            --architecture "${{ matrix.architecture }}" --app-version "${{ needs.source.outputs.version }}" \
+            --commit "${{ needs.source.outputs.commit }}" \
+            --supabase-run-id "${{ inputs.supabase_module_run_id }}" \
+            --semantic-search-run-id "${{ inputs.semantic_search_module_run_id }}" \
+            --ocr-run-id "${{ inputs.ocr_module_run_id }}"
+      - name: Execute exact package scenarios in a nested desktop
+        run: |
+          set -euo pipefail
+          chmod +x scripts/release/run-linux-native-desktop-session.sh scripts/release/run-linux-native-scenarios.sh scripts/release/run-fedora-plasma6-qualification.sh
+          mkdir -p evidence
+          appimage="current/CopyPaste-v${{ needs.source.outputs.version }}-linux-${{ matrix.architecture }}.AppImage"
+          mkdir companion
+          (cd companion && APPIMAGE_EXTRACT_AND_RUN=1 "../$appimage" --appimage-extract >/dev/null)
+          companion_source="$PWD/companion/squashfs-root/usr/share/copypaste/desktop-integrations"
+          test -d "$companion_source"
+          producer=(python3 scripts/release/produce-linux-native-qualification.py
+            --artifacts current --version "${{ needs.source.outputs.version }}"
+            --architecture "${{ matrix.architecture }}" --desktop "${{ matrix.desktop }}" --session "${{ matrix.session }}"
+            --commit "${{ needs.source.outputs.commit }}" --source-run-id "$GITHUB_RUN_ID" --artifact-run-id "${{ inputs.artifact_run_id }}"
+            --driver scripts/release/run-linux-native-scenarios.sh --output evidence
+            --module-artifacts module-artifacts --module-fixtures module-fixtures
+            --compositor-runtime-binding compositor-runtime/binding.json)
+          if [[ "${{ needs.source.outputs.upgrade_mode }}" == prior_release ]]; then
+            producer+=(--previous-artifacts previous --previous-version "${{ needs.source.outputs.previous_version }}")
+          fi
+          if [[ "${{ matrix.desktop }}" == KDE ]]; then
+            fedora_producer=(python3 /work/scripts/release/produce-linux-native-qualification.py
+              --artifacts /artifacts --version "${{ needs.source.outputs.version }}"
+              --architecture "${{ matrix.architecture }}" --desktop KDE --session "${{ matrix.session }}"
+              --commit "${{ needs.source.outputs.commit }}" --source-run-id "$GITHUB_RUN_ID" --artifact-run-id "${{ inputs.artifact_run_id }}"
+              --driver /work/scripts/release/run-linux-native-scenarios.sh --output /evidence
+              --module-artifacts /module-artifacts --module-fixtures /module-fixtures
+              --compositor-runtime-binding /compositor-runtime/binding.json)
+            fedora_args=(--session "${{ matrix.session }}" --architecture "${{ matrix.architecture }}" --artifacts current --evidence evidence --companion-source "$companion_source" --module-artifacts module-artifacts --module-fixtures module-fixtures --compositor-runtime compositor-runtime --compositor-runtime-binding compositor-runtime/binding.json --v4l2-device "$COPYPASTE_QUALIFICATION_V4L2_DEVICE")
+            if [[ "${{ needs.source.outputs.upgrade_mode }}" == prior_release ]]; then
+              fedora_args+=(--previous-artifacts previous)
+              fedora_producer+=(--previous-artifacts /previous --previous-version "${{ needs.source.outputs.previous_version }}")
+            fi
+            scripts/release/run-fedora-plasma6-qualification.sh "${fedora_args[@]}" -- "${fedora_producer[@]}"
+          else
+            scripts/release/run-linux-native-desktop-session.sh \
+              --desktop GNOME --session "${{ matrix.session }}" --companion-source "$companion_source" \
+              --compositor-runtime compositor-runtime --compositor-runtime-binding compositor-runtime/binding.json -- "${producer[@]}"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: linux-native-row-${{ matrix.architecture }}-${{ matrix.desktop }}-${{ matrix.session }}
+          if-no-files-found: warn
+          path: evidence
+      - name: Remove owned V4L2 loopback camera
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 scripts/release/provision-linux-v4l2loopback.py cleanup \
+            --state "$RUNNER_TEMP/copypaste-v4l2loopback.json" --missing-ok
+
+  evidence:
+    name: Assemble verified Linux native qualification
+    needs: [source, scenario]
+    if: ${{ needs.scenario.result == 'success' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: linux-native-row-*
+          path: evidence
+          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: production-linux-x86_64
+          path: artifacts/x86_64
+          run-id: ${{ inputs.artifact_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: production-linux-aarch64
+          path: artifacts/aarch64
+          run-id: ${{ inputs.artifact_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.source.outputs.upgrade_mode == 'prior_release'
+        with:
+          name: production-linux-x86_64
+          path: previous-artifacts/x86_64
+          run-id: ${{ inputs.previous_artifact_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.source.outputs.upgrade_mode == 'prior_release'
+        with:
+          name: production-linux-aarch64
+          path: previous-artifacts/aarch64
+          run-id: ${{ inputs.previous_artifact_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: production-compositor-runtime
+          path: compositor-runtime
+          run-id: ${{ inputs.artifact_run_id }}
+          github-token: ${{ github.token }}
+      - name: Reject partial, stale, or forged matrix evidence
+        run: |
+          set -euo pipefail
+          mkdir artifacts/all
+          find artifacts -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) -exec cp {} artifacts/all/ \;
+          verify=(python3 scripts/release/verify-linux-native-qualification.py \
+            --root evidence --artifacts artifacts/all --version "${{ needs.source.outputs.version }}" \
+            --commit "${{ needs.source.outputs.commit }}" --source-run-id "$GITHUB_RUN_ID" --artifact-run-id "${{ inputs.artifact_run_id }}" \
+            --compositor-runtime compositor-runtime)
+          if [[ "${{ needs.source.outputs.upgrade_mode }}" == prior_release ]]; then
+            mkdir previous-artifacts/all
+            find previous-artifacts -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) -exec cp {} previous-artifacts/all/ \;
+            verify+=(--previous-artifacts previous-artifacts/all --previous-version "${{ needs.source.outputs.previous_version }}")
+          fi
+          "${verify[@]}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-native-qualification
+          if-no-files-found: error
+          path: evidence

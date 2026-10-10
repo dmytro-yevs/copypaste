@@ -10,6 +10,11 @@ import '../models/app_update_models.dart';
 import '../repository/app_update_repository.dart';
 
 class AppUpdateController extends ChangeNotifier {
+  static final Uri _releasePageFallback = Uri.https(
+    'github.com',
+    '/dmytro-yevs/copypaste/releases/latest',
+  );
+
   AppUpdateController({
     required AppUpdateRepository repository,
     required AppUpdatePlatform platform,
@@ -48,7 +53,12 @@ class AppUpdateController extends ChangeNotifier {
 
   Future<void> initialize() async {
     await check();
-    if (_disposed || _platform.target != AppUpdateTarget.android) return;
+    final target = _platform.target;
+    if (_disposed ||
+        (target != AppUpdateTarget.android &&
+            target != AppUpdateTarget.linux)) {
+      return;
+    }
     final previousPhase = _phase;
     _setPhase(AppUpdatePhase.installing);
     try {
@@ -72,10 +82,45 @@ class AppUpdateController extends ChangeNotifier {
     _message = null;
     try {
       final installed = Version.parse(await _platform.currentVersion());
-      final release = await _repository.findUpdate(
-        currentVersion: installed,
-        target: _platform.target,
-      );
+      final target = _platform.target;
+      AppUpdateAvailability? availability;
+      final AppRelease? release;
+      if (target == AppUpdateTarget.linux) {
+        availability = await _platform.availability();
+        if (!availability.available) {
+          // Automatic package installation is optional on Linux. Keep a
+          // verified GitHub release page available for manual installation.
+          final fallbackRelease = await _repository.findUpdate(
+            currentVersion: installed,
+            target: target,
+          );
+          if (_disposed) return;
+          _currentVersion = installed;
+          _release = fallbackRelease;
+          _downloaded = null;
+          _downloadProgress = 0;
+          _message = availability.reason;
+          _setPhase(AppUpdatePhase.unavailable);
+          return;
+        }
+        final installation = availability.linuxInstallation;
+        final repository = _repository;
+        if (installation == null || repository is! LinuxAppUpdateRepository) {
+          throw const AppUpdateException(
+            'This Linux installation cannot update automatically.',
+          );
+        }
+        release = await (repository as LinuxAppUpdateRepository)
+            .findLinuxUpdate(
+              currentVersion: installed,
+              installation: installation,
+            );
+      } else {
+        release = await _repository.findUpdate(
+          currentVersion: installed,
+          target: target,
+        );
+      }
       if (_disposed) return;
       _currentVersion = installed;
       _release = release;
@@ -85,7 +130,7 @@ class AppUpdateController extends ChangeNotifier {
         _setPhase(AppUpdatePhase.upToDate);
         return;
       }
-      final availability = await _platform.availability();
+      availability ??= await _platform.availability();
       if (_disposed) return;
       if (!availability.available) {
         _message = availability.reason;
@@ -151,14 +196,22 @@ class AppUpdateController extends ChangeNotifier {
   Future<void> _applyInstallResult(AppUpdateInstallResult result) async {
     switch (result) {
       case AppUpdateInstallResult.started:
-        _message = _platform.target == AppUpdateTarget.android
-            ? 'Continue in the Android system installer.'
-            : 'The installer is starting.';
+        _message = switch (_platform.target) {
+          AppUpdateTarget.android =>
+            'Continue in the Android system installer.',
+          AppUpdateTarget.linux => 'Continue in your system package manager.',
+          _ => 'The installer is starting.',
+        };
         _setPhase(AppUpdatePhase.installing);
         break;
       case AppUpdateInstallResult.permissionRequired:
-        _message =
-            'Allow CopyPaste to install apps in Android settings, then continue.';
+        _message = switch (_platform.target) {
+          AppUpdateTarget.android =>
+            'Allow CopyPaste to install apps in Android settings, then continue.',
+          AppUpdateTarget.linux =>
+            'Authenticate in your system package manager to install this update.',
+          _ => 'Allow CopyPaste to install this update, then continue.',
+        };
         _setPhase(AppUpdatePhase.permissionRequired);
         break;
       case AppUpdateInstallResult.restartRequired:
@@ -194,10 +247,10 @@ class AppUpdateController extends ChangeNotifier {
   }
 
   Future<void> openReleasePage() async {
-    final release = _release;
-    if (release == null) return;
     try {
-      await _platform.openReleasePage(release.releaseUri);
+      await _platform.openReleasePage(
+        _release?.releaseUri ?? _releasePageFallback,
+      );
     } on PlatformException {
       _fail('CopyPaste could not open the release page.');
     }
@@ -220,6 +273,15 @@ class AppUpdateController extends ChangeNotifier {
     'installation_interrupted' =>
       'The update installation was interrupted. Try again.',
     'installation_busy' => 'An update installation is already in progress.',
+    'invalid_arguments' => 'The update package details are invalid.',
+    'unsupported_installation' =>
+      'This Linux installation cannot update automatically.',
+    'verification_failed' =>
+      'The downloaded update failed its integrity check.',
+    'installer_launch_failed' =>
+      'CopyPaste could not start the system installer.',
+    'update_busy' => 'An update installation is already in progress.',
+    'open_failed' => 'CopyPaste could not open the release page.',
     _ => 'CopyPaste could not install the update.',
   };
 

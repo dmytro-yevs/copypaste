@@ -197,10 +197,11 @@ class FlutterDesktopWindowHost
       }
       icon
         ..icon = image
+        ..setTitle('CopyPaste')
         ..setTooltip('CopyPaste')
         ..setContextMenu(menu)
         ..setContextMenuTrigger(
-          Platform.isMacOS
+          (Platform.isMacOS || Platform.isLinux)
               ? ContextMenuTrigger.clicked
               : ContextMenuTrigger.rightClicked,
         );
@@ -229,7 +230,7 @@ class FlutterDesktopWindowHost
         }
       });
       trayListener = icon.addListener((event) {
-        if (Platform.isWindows &&
+        if ((Platform.isWindows || Platform.isLinux) &&
             (event is TrayIconClickedEvent ||
                 event is TrayIconDoubleClickedEvent)) {
           unawaited(onOpenRequested());

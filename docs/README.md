@@ -2,6 +2,7 @@
 
 - [Flutter foundation](flutter-foundation.md)
 - [Development](development.md)
+- [Linux platform contract](linux-platform.md)
 - [Cloud privacy](cloud-privacy.md)
 - [Supabase deployment](supabase-deployment.md)
 

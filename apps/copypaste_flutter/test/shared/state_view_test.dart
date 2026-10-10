@@ -84,6 +84,7 @@ void main() {
       TargetPlatform.android,
       TargetPlatform.macOS,
       TargetPlatform.windows,
+      TargetPlatform.linux,
     }),
   );
 

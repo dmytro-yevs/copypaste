@@ -11,6 +11,7 @@ import zipfile
 SPEC = importlib.util.spec_from_file_location("catalog", Path(__file__).parents[1] / "catalog.py")
 catalog = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(catalog)
+ROOT = Path(__file__).parents[3]
 
 
 class CatalogTest(unittest.TestCase):
@@ -35,21 +36,28 @@ class CatalogTest(unittest.TestCase):
         return ("untrusted comment: test\n" + base64.b64encode(b"ED" + self.key_id + signed).decode()
                 + "\ntrusted comment: " + comment + "\n" + base64.b64encode(global_signature).decode()).encode()
 
-    def packages(self, version="0.1.0", omit=None, inconsistent=False, tamper=False, platforms=None, schema=1):
+    def packages(self, version="0.1.0", omit=None, inconsistent=False, tamper=False,
+                 platforms=None, schema=1, distribution=None):
         paths = []
         for platform, architecture in sorted(catalog.REQUIRED_TARGETS):
+            if platforms is None and platform not in catalog.LEGACY_PLATFORMS:
+                continue
             if platforms is not None and platform not in platforms:
                 continue
             if (platform, architecture) == omit:
                 continue
-            suffix = {"macos": ".dylib", "windows": ".dll", "android": ".so"}[platform]
+            suffix = {"macos": ".dylib", "windows": ".dll", "linux": ".so", "android": ".so"}[platform]
             entrypoint = "bin/module" + suffix
             code = b"test-native-library"
+            files = [(entrypoint, code)]
+            if distribution is not None:
+                files.append(("assets/module-distribution.json", distribution))
             manifest = {
                 "schema_version": schema, "api_version": 1, "id": "copypaste.ocr", "title": "OCR",
                 "description": "Offline recognition.", "version": version, "app_versions": ">=1.0.0, <2.0.0",
                 "target": {"platform": platform, "architecture": architecture}, "entrypoint": entrypoint,
-                "files": [{"path": entrypoint, "size_bytes": len(code), "sha256": hashlib.sha256(code).hexdigest()}],
+                "files": [{"path": name, "size_bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+                          for name, data in files],
                 "commands": [], "preferences": [],
             }
             if inconsistent and platform == "windows":
@@ -62,7 +70,8 @@ class CatalogTest(unittest.TestCase):
             with zipfile.ZipFile(path, "w") as archive:
                 archive.writestr("manifest.json", body)
                 archive.writestr("manifest.json.sig", self.sign(body))
-                archive.writestr(entrypoint, b"tampered" if tamper else code)
+                for name, data in files:
+                    archive.writestr(name, b"tampered" if tamper and name == entrypoint else data)
             paths.append(path)
         return paths
 
@@ -71,10 +80,36 @@ class CatalogTest(unittest.TestCase):
         value = catalog.build_catalog(packages, "module-copypaste.ocr-v0.1.0", public_key=self.public_key)
         self.assertEqual(len(value["modules"][0]["artifacts"]), 5)
         with self.assertRaises(ValueError):
-            catalog.read_package(self.packages(schema=5)[0], self.public_key)
+            catalog.read_package(self.packages(schema=6)[0], self.public_key)
+
+    def test_linux_targets_preserve_published_legacy_catalog_entries(self):
+        previous = {
+            "schema_version": 1,
+            "modules": [{
+                "id": "copypaste.published", "version": "0.1.0",
+                "artifacts": [{"platform": "macos", "architecture": "aarch64"}],
+            }],
+        }
+        paths = self.packages(platforms=["macos", "windows", "linux", "android"], schema=5)
+        value = catalog.build_catalog(paths, "module-copypaste.ocr-v0.1.0", previous, self.public_key)
+        current = next(module for module in value["modules"] if module["id"] == "copypaste.ocr")
+        self.assertEqual(
+            {(artifact["platform"], artifact["architecture"]) for artifact in current["artifacts"]},
+            catalog.REQUIRED_TARGETS,
+        )
+        self.assertEqual(
+            {artifact["architecture"] for artifact in current["artifacts"] if artifact["platform"] == "linux"},
+            {"x86_64", "aarch64"},
+        )
+        with self.assertRaises(ValueError):
+            catalog.build_catalog(
+                self.packages(platforms=["macos", "windows", "linux", "android"], schema=4),
+                "module-copypaste.ocr-v0.1.0",
+                public_key=self.public_key,
+            )
 
     def test_signed_package_catalog_retains_other_modules_and_exact_targets(self):
-        paths = self.packages()
+        paths = self.packages(platforms=["macos", "windows", "linux", "android"], schema=5)
         previous = {"schema_version": 1, "modules": [
             {"id": "copypaste.other", "version": "1.0.0", "artifacts": []},
             {"id": "copypaste.ocr", "version": "0.0.9", "artifacts": []},
@@ -103,6 +138,26 @@ class CatalogTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             catalog.build_catalog(paths[:-1], "module-copypaste.ocr-v0.1.0", public_key=self.public_key)
 
+    def test_signed_distribution_metadata_matches_each_module_platform_contract(self):
+        for module in ("ocr", "semantic-search", "supabase"):
+            module_dir = ROOT / "modules" / module
+            manifest = json.loads((module_dir / "module.json").read_text())
+            distribution = (module_dir / "assets/module-distribution.json").read_bytes()
+            minimum_versions = json.loads(distribution)["minimum_system_versions"]
+            self.assertEqual(set(minimum_versions), set(manifest["supported_platforms"]))
+            self.assertEqual(minimum_versions["linux"], "2.39.0")
+            packages = self.packages(
+                schema=manifest["schema_version"],
+                platforms=manifest["supported_platforms"],
+                distribution=distribution,
+            )
+            for package in packages:
+                verified = catalog.read_package(package, self.public_key)
+                self.assertEqual(
+                    verified.minimum_system_version,
+                    minimum_versions[verified.manifest["target"]["platform"]],
+                )
+
     def test_rejects_tampering_foreign_signer_and_wrong_tag(self):
         with self.assertRaises(ValueError):
             catalog.read_package(self.packages(tamper=True)[0], self.public_key)
@@ -121,11 +176,18 @@ class CatalogTest(unittest.TestCase):
 
     def test_catalog_signature_authenticates_contents_and_filename(self):
         data = b'{"schema_version":1,"modules":[]}'
-        signature = self.sign(data, "modules.json")
-        catalog.verify_signature(data, signature, "modules.json", self.public_key)
-        for body, filename in [(data + b" ", "modules.json"), (data, "other.json")]:
+        legacy_signature = self.sign(data, "modules.json")
+        linux_signature = self.sign(data, "modules-v2.json")
+        catalog.verify_signature(data, legacy_signature, "modules.json", self.public_key)
+        catalog.verify_signature(data, linux_signature, "modules-v2.json", self.public_key)
+        for signature, filename in [
+                (legacy_signature, "modules-v2.json"),
+                (linux_signature, "modules.json"),
+                (legacy_signature, "other.json")]:
             with self.assertRaises(ValueError):
-                catalog.verify_signature(body, signature, filename, self.public_key)
+                catalog.verify_signature(data, signature, filename, self.public_key)
+        with self.assertRaises(ValueError):
+            catalog.verify_signature(data + b" ", legacy_signature, "modules.json", self.public_key)
 
 
 if __name__ == "__main__":

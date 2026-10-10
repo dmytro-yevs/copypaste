@@ -9,7 +9,8 @@ import subprocess
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from catalog import REPOSITORY, build_catalog, verify_signature
+from catalog import (LEGACY_CATALOG_NAME, LINUX_CATALOG_NAME, REPOSITORY,
+                     build_catalog, verify_signature)
 
 
 def download_optional(url, maximum_bytes):
@@ -23,6 +24,25 @@ def download_optional(url, maximum_bytes):
     if len(data) > maximum_bytes:
         raise ValueError("Published catalog metadata is too large")
     return data
+
+
+def load_published_catalog(name):
+    data = download_optional(f"{REPOSITORY}/modules/{name}", 2 * 1024 * 1024)
+    if data is None:
+        return None
+    signature = download_optional(f"{REPOSITORY}/modules/{name}.sig", 64 * 1024)
+    if signature is None:
+        raise ValueError(f"The existing {name} marketplace catalog is missing its signature")
+    verify_signature(data, base64.b64decode(signature.strip(), validate=True), name)
+    return json.loads(data)
+
+
+def previous_linux_catalog():
+    legacy = load_published_catalog(LEGACY_CATALOG_NAME)
+    if legacy is None:
+        return None
+    linux = load_published_catalog(LINUX_CATALOG_NAME)
+    return legacy if linux is None else linux
 
 
 def main():
@@ -44,15 +64,8 @@ def main():
         "gh", "release", "download", tag, "--repo", repository,
         "--pattern", "*.cpmodule", "--dir", str(packages),
     ], check=True)
-    previous_bytes = download_optional(f"{REPOSITORY}/modules/modules.json", 2 * 1024 * 1024)
-    previous = None
-    if previous_bytes is not None:
-        signature = download_optional(f"{REPOSITORY}/modules/modules.json.sig", 64 * 1024)
-        if signature is None:
-            raise ValueError("The existing marketplace catalog is missing its signature")
-        verify_signature(previous_bytes, base64.b64decode(signature.strip(), validate=True), "modules.json")
-        previous = json.loads(previous_bytes)
-    else:
+    previous = previous_linux_catalog()
+    if previous is None:
         # Only a confirmed missing release permits creation. Network or auth
         # failures must never turn an existing catalog into a fresh catalog.
         result = subprocess.run([
@@ -64,8 +77,9 @@ def main():
             raise ValueError("Could not confirm the marketplace release is absent")
         Path("dist/create-marketplace-release").touch()
     catalog = build_catalog(packages.glob("*.cpmodule"), tag, previous)
-    Path("dist/modules.json").write_text(json.dumps(catalog, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    print(f"Prepared {len(catalog['modules'])} marketplace modules")
+    Path(f"dist/{LINUX_CATALOG_NAME}").write_text(
+        json.dumps(catalog, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    print(f"Prepared {len(catalog['modules'])} Linux-capable marketplace modules")
 
 
 if __name__ == "__main__":
