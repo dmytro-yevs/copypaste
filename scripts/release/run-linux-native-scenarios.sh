@@ -10,6 +10,8 @@ ARCHITECTURE=""
 DESKTOP=""
 SESSION=""
 EVIDENCE_DIR=""
+MODULE_ARTIFACTS=""
+MODULE_FIXTURES=""
 FIRST_INSTALL_BASELINE=false
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -22,11 +24,13 @@ while [[ "$#" -gt 0 ]]; do
     --desktop) DESKTOP="$2"; shift 2 ;;
     --session) SESSION="$2"; shift 2 ;;
     --evidence-dir) EVIDENCE_DIR="$2"; shift 2 ;;
+    --module-artifacts) MODULE_ARTIFACTS="$2"; shift 2 ;;
+    --module-fixtures) MODULE_FIXTURES="$2"; shift 2 ;;
     *) echo "ERROR: unknown qualification argument: $1" >&2; exit 2 ;;
   esac
 done
 
-[[ -n "$ARTIFACTS" && -n "$VERSION" && -n "$ARCHITECTURE" && -n "$DESKTOP" && -n "$SESSION" && -n "$EVIDENCE_DIR" ]] || {
+[[ -n "$ARTIFACTS" && -n "$VERSION" && -n "$ARCHITECTURE" && -n "$DESKTOP" && -n "$SESSION" && -n "$EVIDENCE_DIR" && -n "$MODULE_ARTIFACTS" && -n "$MODULE_FIXTURES" ]] || {
   echo "ERROR: incomplete Linux native qualification invocation" >&2
   exit 2
 }
@@ -58,6 +62,10 @@ fi
 command -v busctl >/dev/null
 busctl --user status >/dev/null
 ARTIFACTS="$(cd "$ARTIFACTS" && pwd)"
+[[ -d "$MODULE_ARTIFACTS" && ! -L "$MODULE_ARTIFACTS" ]] || { echo "ERROR: module artifact staging directory is unavailable" >&2; exit 1; }
+[[ -d "$MODULE_FIXTURES" && ! -L "$MODULE_FIXTURES" ]] || { echo "ERROR: module fixture staging directory is unavailable" >&2; exit 1; }
+MODULE_ARTIFACTS="$(cd "$MODULE_ARTIFACTS" && pwd)"
+MODULE_FIXTURES="$(cd "$MODULE_FIXTURES" && pwd)"
 if [[ -n "$PREVIOUS_ARTIFACTS" ]]; then
   PREVIOUS_ARTIFACTS="$(cd "$PREVIOUS_ARTIFACTS" && pwd)"
 fi
@@ -115,7 +123,7 @@ fi
 export COPYPASTE_INSTALLED_FORMATS="AppImage,$native_format"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-args=(--artifacts "$ARTIFACTS" --version "$VERSION" --architecture "$ARCHITECTURE" --desktop "$DESKTOP" --session "$SESSION" --evidence-dir "$EVIDENCE_DIR")
+args=(--artifacts "$ARTIFACTS" --version "$VERSION" --architecture "$ARCHITECTURE" --desktop "$DESKTOP" --session "$SESSION" --evidence-dir "$EVIDENCE_DIR" --module-artifacts "$MODULE_ARTIFACTS" --module-fixtures "$MODULE_FIXTURES")
 if [[ "$FIRST_INSTALL_BASELINE" == true ]]; then
   args+=(--first-install-baseline)
 else
