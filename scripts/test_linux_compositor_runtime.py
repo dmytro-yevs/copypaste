@@ -50,8 +50,8 @@ class CompositorRuntimeSourceTest(unittest.TestCase):
             self.module.verify_source(self.run, duplicate, "owner/repo", "a" * 40)
 
     def test_requires_checked_out_baseline_revision_and_patch_bytes(self):
-        revision, patch = self.module.BASELINES["GNOME"]
-        source = {"revision": revision, "patch_sha256": self.module.sha256(ROOT / patch)}
+        revision, shell_revision, patch = self.module.BASELINES["GNOME"]
+        source = {"revision": revision, "shell_revision": shell_revision, "patch_sha256": self.module.sha256(ROOT / patch)}
         self.module.verify_baseline_source("GNOME", source)
         source["patch_sha256"] = "0" * 64
         with self.assertRaisesRegex(ValueError, "baseline"):
@@ -112,6 +112,10 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
         self.assertIn("verify-linux-compositor-runtime.py artifact", workflow)
         self.assertIn("--compositor-runtime-binding compositor-runtime/binding.json", workflow)
         self.assertIn("--compositor-runtime-binding /compositor-runtime/binding.json", workflow)
+        self.assertIn("at-spi2-core python3-pyatspi ffmpeg qrencode v4l-utils", workflow)
+        self.assertIn("COPYPASTE_QUALIFICATION_V4L2_DEVICE", workflow)
+        self.assertIn("--previous-artifacts previous-artifacts/all", workflow)
+        self.assertIn("--previous-version \"${{ needs.source.outputs.previous_version }}\"", workflow)
         for name in ("gnome-46-ubuntu24.04", "kwin-6.0-fedora40"):
             self.assertIn(name, workflow)
         for name in ("run-linux-native-desktop-session.sh", "run-fedora-plasma6-session.sh"):
@@ -124,6 +128,8 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
             self.assertIn("receipt-listed private compositor entrypoint", script)
         generic = (ROOT / "scripts/release/run-linux-native-desktop-session.sh").read_text(encoding="utf-8")
         self.assertIn("KDE qualification must use the Fedora", generic)
+        fedora_wrapper = (ROOT / "scripts/release/run-fedora-plasma6-qualification.sh").read_text(encoding="utf-8")
+        self.assertIn("--device \"$V4L2_DEVICE:$V4L2_DEVICE\"", fedora_wrapper)
 
 
 if __name__ == "__main__":
