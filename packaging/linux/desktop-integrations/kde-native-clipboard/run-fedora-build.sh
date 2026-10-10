@@ -11,15 +11,25 @@ case "$family" in 6.0|6.3|all) ;; *) echo "ERROR: use KWin bridge version 6.0, 6
 
 root="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 engine="${COPYPASTE_CONTAINER_ENGINE:-docker}"
-tag="copypaste-kwin-builder:fedora40"
 
-"$engine" build --platform "$platform" --file "$root/Dockerfile.fedora40-build" --tag "$tag" "$root"
-if [[ -n "$runtime_output" ]]; then
-  [[ ! -e "$runtime_output" ]] || { echo "ERROR: runtime output must not exist" >&2; exit 1; }
-  mkdir -p "$runtime_output"
-  "$engine" run --rm --platform "$platform" --volume "$root:/workspace:ro" --volume "$runtime_output:/output" "$tag" \
-    bash /workspace/verify-build.sh "$family" /output
-else
-  "$engine" run --rm --platform "$platform" --volume "$root:/workspace:ro" "$tag" \
-    bash /workspace/verify-build.sh "$family"
-fi
+build_one() {
+  local selected="$1" tag platform_tag
+  platform_tag="${platform//\//-}"
+  tag="copypaste-kwin-builder:fedora40-${selected}-${platform_tag}"
+  "$engine" build --platform "$platform" --build-arg "KWIN_FAMILY=$selected" \
+    --file "$root/Dockerfile.fedora40-build" --tag "$tag" "$root"
+  if [[ -n "$runtime_output" ]]; then
+    [[ ! -e "$runtime_output" ]] || { echo "ERROR: runtime output must not exist" >&2; exit 1; }
+    mkdir -p "$runtime_output"
+    "$engine" run --rm --platform "$platform" --volume "$root:/workspace:ro" --volume "$runtime_output:/output" "$tag" \
+      bash /workspace/verify-build.sh "$selected" /output
+  else
+    "$engine" run --rm --platform "$platform" --volume "$root:/workspace:ro" "$tag" \
+      bash /workspace/verify-build.sh "$selected"
+  fi
+}
+
+case "$family" in
+  all) build_one 6.0; build_one 6.3 ;;
+  6.0|6.3) build_one "$family" ;;
+esac
