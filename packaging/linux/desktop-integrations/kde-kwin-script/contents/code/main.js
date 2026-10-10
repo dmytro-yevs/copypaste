@@ -9,6 +9,8 @@ let awaitingShortcut = false;
 let awaitGeneration = 0;
 let restorePending = null;
 let deadlineTimer = null;
+let qualificationTimer = null;
+let qualificationClose = null;
 
 function newTransactionId() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, character => {
@@ -35,6 +37,34 @@ function isHostWindow(window) {
 
 function isQuickPasteWindow(window) {
     return isHostWindow(window) && window.caption === QUICK_PASTE_CAPTION;
+}
+
+function qualificationHostWindow(pid) {
+    return workspace.windowList().find(window => isHostWindow(window) && window.pid === pid);
+}
+
+function reportQualification(transaction, pid, mapped) {
+    callDBus(HOST_BUS_NAME, HOST_OBJECT_PATH, HOST_INTERFACE,
+        'QualificationObserved', transaction, pid, HOST_DESKTOP_FILE_NAME,
+        'main', mapped, () => {});
+}
+
+function awaitQualification() {
+    callDBus(HOST_BUS_NAME, HOST_OBJECT_PATH, HOST_INTERFACE,
+        'AwaitQualification', (transaction, action, pid) => {
+            if (!transaction || !action || !pid || qualificationClose?.transaction === transaction)
+                return;
+            const window = qualificationHostWindow(pid);
+            if (!window)
+                return;
+            if (action === 'close-main') {
+                qualificationClose = {transaction, pid, window};
+                reportQualification(transaction, pid, true);
+                window.closeWindow();
+            } else if (action === 'quick-paste' && workspace.activeWindow === window) {
+                beginQuickPaste();
+            }
+        });
 }
 
 function recoverAwaitForHostWindow(window) {
@@ -172,8 +202,16 @@ workspace.windowActivated.connect(window => {
         recoverAwaitForHostWindow(window);
 });
 workspace.windowRemoved.connect(window => {
+    if (qualificationClose?.window === window) {
+        reportQualification(qualificationClose.transaction, qualificationClose.pid, false);
+        qualificationClose = null;
+    }
     if (activeTransaction?.window === window)
         cancelTransaction(activeTransaction);
 });
 
 awaitQuickPaste();
+qualificationTimer = new QTimer();
+qualificationTimer.interval = 250;
+qualificationTimer.timeout.connect(awaitQualification);
+qualificationTimer.start();
