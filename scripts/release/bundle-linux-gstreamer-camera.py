@@ -224,6 +224,12 @@ def copy_licenses(destination: Path) -> list[dict[str, str]]:
     return records
 
 
+def refresh_plugin_records(appdir: Path, records: list[dict[str, str]]) -> None:
+    """Refresh manifest hashes after RPATH mutation changes plugin bytes."""
+    for record in records:
+        record["sha256"] = sha256(appdir / record["path"])
+
+
 def isolated_environment(*, appdir: Path, registry: Path) -> dict[str, str]:
     plugins = appdir / "usr/lib" / PLUGIN_DIR_NAME
     scanner = appdir / "usr/libexec" / SCANNER_DIR_NAME / "gst-plugin-scanner"
@@ -304,6 +310,7 @@ def bundle(*, appdir: Path, architecture: str, maximum_glibc: str, manifest: Pat
     for library in copied_runtime:
         patch_rpath(library, "$ORIGIN")
     patch_rpath(scanner, "$ORIGIN/../../lib/gstreamer-runtime")
+    refresh_plugin_records(appdir, plugin_records)
     license_records = copy_licenses(licenses)
     baseline = appdir / "usr/share/copypaste/gstreamer-camera-runtime-glibc.json"
     baseline.parent.mkdir(parents=True, exist_ok=True)

@@ -20,7 +20,8 @@ ASSERTIONS = {
     "clipboard_tiff", "clipboard_file", "privacy_confidential",
     "privacy_excluded_app", "privacy_private_mode", "quick_paste_hotkey",
     "quick_paste_focus_restore", "tray_window_notification",
-    "encrypted_restart_persistence", "pairing_sync", "modules",
+    "encrypted_restart_persistence", "pairing_sync", "camera_qr_scan",
+    "external_file_drag", "modules",
 }
 X11_KEYBOARD_ASSERTION = "native_x11_keyboard_input"
 WAYLAND_KEYBOARD_ASSERTION = "portal_keyboard_grant"
@@ -33,6 +34,82 @@ TRACE_PLACEHOLDERS = {
 MODULE_IDS = ("copypaste.ocr", "copypaste.semantic-search", "copypaste.supabase")
 IPC_OPERATIONS = {"list", "install", "set_preferences", "set_enabled", "invoke", "remove"}
 UPGRADE_CANARY_SHA256 = hashlib.sha256(b"copypaste-upgrade-canary").hexdigest()
+
+
+def verify_camera_media(records: object, runtimes: object, name: str) -> None:
+    """Require the redacted media sequence that drives and observes the installed scanner."""
+    if not isinstance(records, list):
+        raise ValueError(f"scenario trace camera evidence is invalid: {name}")
+    required = (
+        ("atspi_click", {"gui_pid", "target_name_sha256", "expected_name_sha256", "action"}),
+        ("v4l2_qr_feed", {"device", "frame_format", "source", "decoder", "payload"}),
+        ("atspi_click", {"gui_pid", "target_name_sha256", "expected_name_sha256", "action"}),
+        ("camera_qr_scan_observed", {"gui_pid", "pairing_state_name_sha256", "gstreamer_mapping_sha256", "camera_plugin_sha256", "gstreamer_library_sha256", "v4l2_plugin_sha256", "dependency"}),
+        ("v4l2_qr_feed_stopped", {"device"}),
+    )
+    formats = [runtime.get("format") if isinstance(runtime, dict) else None for runtime in runtimes] if isinstance(runtimes, list) else []
+    if formats not in (["AppImage", "deb"], ["AppImage", "rpm"]):
+        raise ValueError(f"scenario trace camera runtime coverage is invalid: {name}")
+    if len(records) != len(required) * len(formats):
+        raise ValueError(f"scenario trace camera evidence is incomplete: {name}")
+    expected_hashes = (
+        ("Scan QR", "Scan QR code"),
+        None,
+        ("Start scanner", "Confirm on both devices"),
+        "Confirm on both devices",
+        None,
+    )
+    for format_index, runtime_format in enumerate(formats):
+      sequence = records[format_index * 5:(format_index + 1) * 5]
+      gui_pids = set()
+      for record, (kind, fields), expectation in zip(sequence, required, expected_hashes):
+        if (not isinstance(record, dict) or record.get("schema") != 1 or record.get("kind") != kind
+                or record.get("runtime_format") != runtime_format or set(record) != {"schema", "kind", "runtime_format", *fields}):
+            raise ValueError(f"scenario trace camera media schema is invalid: {name}")
+        if kind == "atspi_click":
+            target, expected = expectation
+            if (not isinstance(record["gui_pid"], int) or record["gui_pid"] <= 0 or record["action"] != "click"
+                    or record["target_name_sha256"] != hashlib.sha256(target.encode("utf-8")).hexdigest()
+                    or record["expected_name_sha256"] != hashlib.sha256(expected.encode("utf-8")).hexdigest()):
+                raise ValueError(f"scenario trace did not drive installed scanner controls: {name}")
+            gui_pids.add(record["gui_pid"])
+        elif kind == "v4l2_qr_feed":
+            payload = record["payload"]
+            if (not isinstance(record["device"], str) or not re.fullmatch(r"video[0-9]+", record["device"])
+                    or record["frame_format"] != "yuyv422" or record["source"] != "camera_desktop"
+                    or record["decoder"] != "CameraPluginPairingSource/ZxingQrFrameDecoder"
+                    or not isinstance(payload, dict) or set(payload) != {"sha256", "size_bytes"}
+                    or not isinstance(payload["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", payload["sha256"])
+                    or not isinstance(payload["size_bytes"], int) or not 1 <= payload["size_bytes"] <= 8192):
+                raise ValueError(f"scenario trace camera feed evidence is invalid: {name}")
+        elif kind == "camera_qr_scan_observed":
+            if (not isinstance(record["gui_pid"], int) or record["gui_pid"] <= 0
+                    or record["pairing_state_name_sha256"] != hashlib.sha256(expectation.encode("utf-8")).hexdigest()
+                    or not all(isinstance(record[field], str) and re.fullmatch(r"[0-9a-f]{64}", record[field])
+                               for field in ("gstreamer_mapping_sha256", "camera_plugin_sha256", "gstreamer_library_sha256", "v4l2_plugin_sha256"))):
+                raise ValueError(f"scenario trace did not observe the installed scanner runtime: {name}")
+            dependency = record["dependency"]
+            expected_origin = "appimage_manifest" if runtime_format == "AppImage" else "distro_package"
+            if not isinstance(dependency, dict) or dependency.get("origin") != expected_origin or set(dependency) != {"origin", "gstreamer_library", "v4l2_plugin"}:
+                raise ValueError(f"scenario trace camera dependency origin is invalid: {name}")
+            for item in (dependency["gstreamer_library"], dependency["v4l2_plugin"]):
+                required_fields = {"sha256"} if runtime_format == "AppImage" else {"package", "version", "sha256"}
+                if not isinstance(item, dict) or set(item) != required_fields or not isinstance(item.get("sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"]):
+                    raise ValueError(f"scenario trace camera dependency evidence is invalid: {name}")
+                if runtime_format != "AppImage" and (not isinstance(item["package"], str) or not re.fullmatch(r"[A-Za-z0-9.+_-]+(?::(?:amd64|arm64))?", item["package"]) or not isinstance(item["version"], str) or not item["version"]):
+                    raise ValueError(f"scenario trace camera package dependency evidence is invalid: {name}")
+            if (dependency["gstreamer_library"]["sha256"] != record["gstreamer_library_sha256"]
+                    or dependency["v4l2_plugin"]["sha256"] != record["v4l2_plugin_sha256"]):
+                raise ValueError(f"scenario trace camera dependency hashes do not bind mapped libraries: {name}")
+            gui_pids.add(record["gui_pid"])
+        elif kind == "v4l2_qr_feed_stopped" and (
+            not isinstance(record["device"], str) or not re.fullmatch(r"video[0-9]+", record["device"])
+        ):
+            raise ValueError(f"scenario trace camera cleanup evidence is invalid: {name}")
+      if sequence[1]["device"] != sequence[4]["device"]:
+          raise ValueError(f"scenario trace camera cleanup used a different device: {name}")
+      if len(gui_pids) != 1:
+          raise ValueError(f"scenario trace camera runtime actors are inconsistent: {name}")
 
 
 def digest(path: Path) -> str:
@@ -227,6 +304,7 @@ def verify_trace(root: Path, receipt: dict, architecture: str, desktop: str, ses
                 raise ValueError(f"scenario trace module enable lifecycle is incomplete for {module_id}: {name}")
         if not any(row.get("module_id") == "copypaste.semantic-search" and row["operation"] == "set_preferences" for row in module_rows):
             raise ValueError(f"scenario trace semantic setup is missing: {name}")
+    verify_camera_media(trace.get("media"), trace.get("runtimes"), name)
     if covered != expected_assertions:
         raise ValueError(f"scenario trace does not execute every assertion: {name}")
     installation = trace.get("installation")
