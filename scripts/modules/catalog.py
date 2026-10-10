@@ -19,6 +19,9 @@ PUBLIC_KEY = re.search(
     (ROOT / "crates/copypaste-modules/src/lib.rs").read_text(),
 ).group(1)
 REPOSITORY = "https://github.com/dmytro-yevs/copypaste/releases/download"
+LEGACY_CATALOG_NAME = "modules.json"
+LINUX_CATALOG_NAME = "modules-v2.json"
+CATALOG_NAMES = {LEGACY_CATALOG_NAME, LINUX_CATALOG_NAME}
 REQUIRED_TARGETS = {
     ("macos", "aarch64"), ("windows", "x86_64"),
     ("linux", "x86_64"), ("linux", "aarch64"),
@@ -135,8 +138,13 @@ def read_package(path, public_key=PUBLIC_KEY):
             if archive.getinfo("assets/module-distribution.json").file_size > 64 * 1024:
                 raise ValueError("Module distribution metadata is too large")
             distribution = json.loads(archive.read("assets/module-distribution.json"))
-            minimum = distribution["minimum_system_versions"][platform]
-            version_tuple(minimum)
+            minimum_versions = distribution["minimum_system_versions"]
+            if (not isinstance(minimum_versions, dict) or
+                    set(minimum_versions) != set(supported_platforms(manifest))):
+                raise ValueError("Module distribution platforms do not match the signed manifest")
+            for version in minimum_versions.values():
+                version_tuple(version)
+            minimum = minimum_versions[platform]
     return VerifiedPackage(manifest, minimum)
 
 
@@ -223,15 +231,17 @@ def main():
     parser.add_argument("--previous-signature", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
-    if args.output.name != "modules.json":
-        raise ValueError("The catalog filename must be modules.json")
+    if args.output.name not in CATALOG_NAMES:
+        raise ValueError("Unsupported marketplace catalog filename")
     previous = None
     if args.previous_catalog:
         if not args.previous_signature:
             raise ValueError("The previous catalog signature is required")
+        if args.previous_catalog.name != args.output.name:
+            raise ValueError("The previous catalog filename does not match the output")
         data = args.previous_catalog.read_bytes()
         signature = base64.b64decode(args.previous_signature.read_text().strip(), validate=True)
-        verify_signature(data, signature, "modules.json")
+        verify_signature(data, signature, args.output.name)
         previous = json.loads(data)
     catalog = build_catalog(args.packages_dir.glob("*.cpmodule"), args.release_tag, previous)
     args.output.parent.mkdir(parents=True, exist_ok=True)

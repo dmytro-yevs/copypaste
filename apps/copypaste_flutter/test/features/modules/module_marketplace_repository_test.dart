@@ -256,6 +256,57 @@ void main() {
   );
 
   test(
+    'uses the normalized GNU libc version at the Linux marketplace boundary',
+    () async {
+      const channel = MethodChannel('test/modules/linux-system-version');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            channel,
+            (call) async => call.method == 'systemVersion' ? '2.39.0' : '1.0.6',
+          );
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null),
+      );
+      final platform = ModuleMarketplacePlatform(
+        appPlatform: MethodChannelAppUpdatePlatform(channel: channel),
+        systemChannel: channel,
+        currentAbi: () => Abi.linuxX64,
+      );
+      final target = await platform.currentTarget();
+      expect(target.platform, 'linux');
+      expect(target.systemVersion, Version.parse('2.39.0'));
+
+      final body = catalog();
+      for (final artifact
+          in ((body['modules'] as List).single as Map)['artifacts'] as List) {
+        if ((artifact as Map)['platform'] == 'linux') {
+          artifact['minimum_system_version'] = '2.39.0';
+        }
+      }
+      final supported = const ModuleCatalogParser()
+          .parse(jsonEncode(body), target)
+          .single;
+      expect(supported.canInstall, isTrue);
+      expect(supported.systemRequirement, 'glibc 2.39 or newer');
+
+      final older = const ModuleCatalogParser()
+          .parse(
+            jsonEncode(body),
+            ModuleMarketplaceTarget(
+              platform: 'linux',
+              architecture: 'x86_64',
+              appVersion: Version.parse('1.0.6'),
+              systemVersion: Version.parse('2.38.9'),
+            ),
+          )
+          .single;
+      expect(older.availability, ModuleAvailability.systemVersion);
+      expect(older.unavailableReason, 'Requires glibc 2.39 or newer.');
+    },
+  );
+
+  test(
     'rejects duplicate modules, duplicate targets, invalid metadata and foreign URLs',
     () {
       final malformed = <Map<String, Object>>[];
@@ -327,8 +378,10 @@ void main() {
       expect(await cache.exists(), isFalse);
       final body = utf8.encode(jsonEncode(catalog()));
       final (publicKey, signature) = await _sign(body);
-      client.routes['modules.json'] = _Response(body);
-      client.routes['modules.json.sig'] = _Response(utf8.encode(signature));
+      client.routes[moduleCatalogName] = _Response(body);
+      client.routes['$moduleCatalogName.sig'] = _Response(
+        utf8.encode(signature),
+      );
       final repository = GitHubModuleMarketplaceRepository(
         temporaryDirectory: () async => cache,
         currentTarget: () async => target,
@@ -362,7 +415,7 @@ void main() {
         throwsA(isA<ModulesException>()),
       );
       expect(await cache.list().toList(), isEmpty);
-      client.routes['modules.json'] = _Response(
+      client.routes[moduleCatalogName] = _Response(
         utf8.encode(jsonEncode({'schema_version': 1, 'modules': []})),
       );
       await expectLater(repository.list(), throwsA(isA<ModulesException>()));
@@ -384,34 +437,66 @@ void main() {
         client: client,
       );
       addTearDown(repository.dispose);
-      client.routes['modules.json'] = _Response(
+      client.routes[moduleCatalogName] = _Response(
         [],
         statusCode: 302,
         location: 'http://example.com/catalog',
       );
       await expectLater(repository.list(), throwsA(isA<ModulesException>()));
       expect(client.requests, hasLength(1));
-      client.routes['modules.json'] = _Response(
+      client.routes[moduleCatalogName] = _Response(
         List.filled(2 * 1024 * 1024 + 1, 0),
         contentLength: -1,
       );
       await expectLater(repository.list(), throwsA(isA<ModulesException>()));
       expect(await directory.list().toList(), isEmpty);
-      client.routes['modules.json'] = _Response([], statusCode: 404);
+      client.routes[moduleCatalogName] = _Response([], statusCode: 404);
       expect(await repository.list(), isEmpty);
       expect(await directory.list().toList(), isEmpty);
     },
   );
+
+  test(
+    'rejects a legacy catalog signature for the Linux-capable feed',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'marketplace-feed-signature-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final client = _Client();
+      final body = utf8.encode(jsonEncode(catalog()));
+      final (publicKey, legacySignature) = await _sign(
+        body,
+        fileName: 'modules.json',
+      );
+      client.routes[moduleCatalogName] = _Response(body);
+      client.routes['$moduleCatalogName.sig'] = _Response(
+        utf8.encode(legacySignature),
+      );
+      final repository = GitHubModuleMarketplaceRepository(
+        temporaryDirectory: () async => directory,
+        currentTarget: () async => target,
+        client: client,
+        signatureVerifier: MinisignVerifier(publicKeyBase64: publicKey),
+      );
+      addTearDown(repository.dispose);
+
+      await expectLater(repository.list(), throwsA(isA<ModulesException>()));
+    },
+  );
 }
 
-Future<(String, String)> _sign(List<int> data) async {
+Future<(String, String)> _sign(
+  List<int> data, {
+  String fileName = moduleCatalogName,
+}) async {
   final algorithm = Ed25519();
   final pair = await algorithm.newKeyPair();
   final publicKey = await pair.extractPublicKey();
   final keyId = List.filled(8, 1);
   final digest = await Blake2b(hashLengthInBytes: 64).hash(data);
   final signature = await algorithm.sign(digest.bytes, keyPair: pair);
-  const comment = 'timestamp:1\tfile:modules.json';
+  final comment = 'timestamp:1\tfile:$fileName';
   final global = await algorithm.sign([
     ...signature.bytes,
     ...utf8.encode(comment),

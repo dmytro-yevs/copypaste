@@ -33,12 +33,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           MODULE_RELEASE_TAG: ${{ inputs.module_release_tag }}
         run: python3 scripts/modules/prepare-marketplace.py
-      - name: Sign catalog
+      - name: Sign Linux-capable catalog
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: scripts/release/sign-update-artifact.sh dist/modules.json
-      - name: Publish authenticated catalog
+        run: scripts/release/sign-update-artifact.sh dist/modules-v2.json
+      - name: Publish authenticated Linux-capable catalog
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -46,4 +46,4 @@ jobs:
           if [[ -f dist/create-marketplace-release ]]; then
             gh release create modules --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false --title "Module marketplace" --notes "Signed catalog of optional first-party CopyPaste modules."
           fi
-          gh release upload modules dist/modules.json dist/modules.json.sig --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload modules dist/modules-v2.json dist/modules-v2.json.sig --repo "$GITHUB_REPOSITORY" --clobber

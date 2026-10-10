@@ -98,9 +98,14 @@ bounded streaming, SHA-256 verification, and private staging cleanup. The
 runtime then verifies the signed manifest and file inventory before activation.
 Installed management remains available when the marketplace is offline.
 
-The catalog lives in the `modules` GitHub Release as `modules.json` and its
-base64-encoded Minisign `modules.json.sig`, using the pinned release key. Catalog
-metadata is authenticated before rendering or resolving a package. Each entry
+The legacy catalog remains in the `modules` GitHub Release as `modules.json`
+and its base64-encoded Minisign `modules.json.sig`. Linux-capable clients use
+the separately signed `modules-v2.json` and `modules-v2.json.sig`, with the
+same pinned release key and each filename bound into its own signature. The
+legacy files are never regenerated or replaced. When the v2 catalog is first
+published, the publisher authenticates and copies the v1 catalog as its base
+before merging Linux-capable module releases. Catalog metadata is authenticated
+before rendering or resolving a package. Each entry
 contains ID, title, description, stable version, `app_versions`, and platform /
 architecture artifacts with a versioned release URL, compressed size, and
 SHA-256 and optional minimum system versions. All published modules appear;
