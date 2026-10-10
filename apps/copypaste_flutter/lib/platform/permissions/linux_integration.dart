@@ -12,6 +12,7 @@ class LinuxIntegrationStatus {
     required this.globalShortcuts,
     required this.remoteDesktop,
     required this.companion,
+    required this.clipboard,
     required this.quickPaste,
     required this.screenshotProtection,
   });
@@ -20,6 +21,7 @@ class LinuxIntegrationStatus {
   final bool globalShortcuts;
   final LinuxRemoteDesktopState remoteDesktop;
   final LinuxCompanionState companion;
+  final bool clipboard;
   final bool quickPaste;
   final bool screenshotProtection;
 
@@ -32,6 +34,7 @@ class LinuxIntegrationStatus {
         values['remoteDesktop'],
       ),
       companion: _enumValue(LinuxCompanionState.values, values['companion']),
+      clipboard: _boolValue(values, 'clipboard'),
       quickPaste: _boolValue(values, 'quickPaste'),
       screenshotProtection: _boolValue(values, 'screenshotProtection'),
     );

@@ -852,9 +852,11 @@ FlValue* integration_status() {
                                : "unsupported"));
   fl_value_set_string_take(response, "companion", fl_value_new_string(
       companion ? "active" : "unavailable"));
+  fl_value_set_string_take(response, "clipboard", fl_value_new_bool(
+      clipboard));
   fl_value_set_string_take(response, "quickPaste", fl_value_new_bool(
       x11 ? x11_quick_paste->input_available()
-          : wayland && companion && shortcut_active));
+          : wayland && companion && shortcut_active && remote_active));
   // Wayland and X11 do not provide a GTK client API for compositor-wide
   // screenshot exclusion. The UI must keep this unsupported rather than fake
   // a protected pairing context.

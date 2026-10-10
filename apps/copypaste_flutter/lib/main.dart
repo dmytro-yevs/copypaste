@@ -30,12 +30,15 @@ import 'platform/files/history_file_picker.dart';
 import 'features/history/repository/runtime_history_repository.dart';
 import 'features/history/repository/temporary_history_image_input.dart';
 import 'features/onboarding/controller/android_onboarding_controller.dart';
+import 'features/onboarding/controller/linux_onboarding_controller.dart';
 import 'features/onboarding/controller/macos_onboarding_controller.dart';
 import 'features/onboarding/controller/windows_onboarding_controller.dart';
 import 'features/onboarding/repository/android_onboarding_store.dart';
+import 'features/onboarding/repository/linux_onboarding_store.dart';
 import 'features/onboarding/repository/macos_onboarding_store.dart';
 import 'features/onboarding/repository/windows_onboarding_store.dart';
 import 'features/onboarding/view/android_onboarding_screen.dart';
+import 'features/onboarding/view/linux_onboarding_screen.dart';
 import 'features/onboarding/view/macos_onboarding_screen.dart';
 import 'features/onboarding/view/windows_onboarding_screen.dart';
 import 'features/quick_paste/quick_paste_app.dart';
@@ -135,6 +138,7 @@ class CopyPasteRoot extends StatefulWidget {
     this.desktopWindow,
     this.macosOnboardingController,
     this.androidOnboardingController,
+    this.linuxOnboardingController,
     this.windowsOnboardingController,
     this.appUpdateController,
     this.runtimeEnabled = true,
@@ -143,6 +147,7 @@ class CopyPasteRoot extends StatefulWidget {
   final DesktopWindowController? desktopWindow;
   final MacosOnboardingController? macosOnboardingController;
   final AndroidOnboardingController? androidOnboardingController;
+  final LinuxOnboardingController? linuxOnboardingController;
   final WindowsOnboardingController? windowsOnboardingController;
   final AppUpdateController? appUpdateController;
   final bool runtimeEnabled;
@@ -165,12 +170,15 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   ModulesController? _modulesController;
   MacosOnboardingController? _macosOnboarding;
   AndroidOnboardingController? _androidOnboarding;
+  LinuxOnboardingController? _linuxOnboarding;
   WindowsOnboardingController? _windowsOnboarding;
   bool _ownsMacosOnboarding = false;
   bool _ownsAndroidOnboarding = false;
+  bool _ownsLinuxOnboarding = false;
   bool _ownsWindowsOnboarding = false;
   bool _macosOnboardingReady = false;
   bool _androidOnboardingReady = false;
+  bool _linuxOnboardingReady = false;
   bool _windowsOnboardingReady = false;
   _RuntimeState _runtimeState = _RuntimeState.idle;
   String? _runtimeFailureMessage;
@@ -202,6 +210,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     });
     _configureMacosOnboarding();
     _configureAndroidOnboarding();
+    _configureLinuxOnboarding();
     _configureWindowsOnboarding();
     unawaited(_appUpdateController?.initialize());
     if (widget.runtimeEnabled) {
@@ -228,6 +237,10 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       'CopyPasteRoot cannot replace its Android onboarding controller.',
     );
     assert(
+      oldWidget.linuxOnboardingController == widget.linuxOnboardingController,
+      'CopyPasteRoot cannot replace its Linux onboarding controller.',
+    );
+    assert(
       oldWidget.windowsOnboardingController ==
           widget.windowsOnboardingController,
       'CopyPasteRoot cannot replace its Windows onboarding controller.',
@@ -251,6 +264,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     if (_ownsAndroidOnboarding) {
       _androidOnboarding?.dispose();
     }
+    if (_ownsLinuxOnboarding) {
+      _linuxOnboarding?.dispose();
+    }
     if (_ownsWindowsOnboarding) {
       _windowsOnboarding?.dispose();
     }
@@ -265,9 +281,11 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       _runtimeState == _RuntimeState.ready &&
       _macosOnboardingReady &&
       _androidOnboardingReady &&
+      _linuxOnboardingReady &&
       _windowsOnboardingReady &&
       (_macosOnboarding?.complete ?? true) &&
       (_androidOnboarding?.complete ?? true) &&
+      (_linuxOnboarding?.complete ?? true) &&
       (_windowsOnboarding?.complete ?? true) &&
       (_historyController?.canSuspend ?? true) &&
       _devicesController?.pairingEntryMode == null &&
@@ -418,6 +436,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
         _runtimeState != _RuntimeState.ready ||
         !(_macosOnboarding?.complete ?? true) ||
         !(_androidOnboarding?.complete ?? true) ||
+        !(_linuxOnboarding?.complete ?? true) ||
         !(_windowsOnboarding?.complete ?? true)) {
       return;
     }
@@ -585,6 +604,36 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     if (mounted) setState(() => _windowsOnboardingReady = true);
   }
 
+  void _configureLinuxOnboarding() {
+    final injected = widget.linuxOnboardingController;
+    if (!Platform.isLinux && injected == null) {
+      _linuxOnboardingReady = true;
+      return;
+    }
+    if (injected != null) {
+      _linuxOnboarding = injected;
+    } else {
+      _linuxOnboarding = LinuxOnboardingController(
+        store: SharedPreferencesLinuxOnboardingStore(),
+        integration: MethodChannelLinuxIntegrationPort(),
+      );
+      _ownsLinuxOnboarding = true;
+    }
+    final controller = _linuxOnboarding;
+    if (controller == null) {
+      _linuxOnboardingReady = true;
+      return;
+    }
+    unawaited(_initializeLinuxOnboarding(controller));
+  }
+
+  Future<void> _initializeLinuxOnboarding(
+    LinuxOnboardingController controller,
+  ) async {
+    await controller.initialize();
+    if (mounted) setState(() => _linuxOnboardingReady = true);
+  }
+
   Future<void> _finishOnboarding() async {
     _navigation.selectDestination(AppDestination.history);
     if (!mounted) return;
@@ -646,6 +695,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     final unifiedTitleBar = _usesUnifiedMacosTitleBar(windowReady);
     if (!_macosOnboardingReady ||
         !_androidOnboardingReady ||
+        !_linuxOnboardingReady ||
         !_windowsOnboardingReady) {
       return ShadcnApp(
         title: 'CopyPaste',
@@ -700,6 +750,20 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
         builder: AppTheme.builder,
         home: WindowsOnboardingScreen(
           controller: windowsOnboarding,
+          onFinished: _finishOnboarding,
+        ),
+      );
+    }
+    final linuxOnboarding = _linuxOnboarding;
+    if (linuxOnboarding != null && !linuxOnboarding.complete) {
+      return ShadcnApp(
+        title: 'Set up CopyPaste',
+        theme: AppTheme.light,
+        darkTheme: AppTheme.dark,
+        themeMode: AppTheme.mode,
+        builder: AppTheme.builder,
+        home: LinuxOnboardingScreen(
+          controller: linuxOnboarding,
           onFinished: _finishOnboarding,
         ),
       );
