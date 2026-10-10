@@ -45,9 +45,9 @@ class ClipboardFixture final : public QObject
     Q_CLASSINFO("D-Bus Interface", "app.copypaste.Clipboard")
 
 public Q_SLOTS:
-    Q_SCRIPTABLE uint Version() const
+    Q_SCRIPTABLE void Version(uint &version)
     {
-        return 2;
+        version = 2;
     }
 
     Q_SCRIPTABLE void Snapshot(qulonglong &generation, QStringList &mimeTypes, WriterIdentity &identity)
@@ -102,6 +102,22 @@ int main(int argc, char **argv)
         return 3;
     }
 
+    const auto versionPending = client.asyncCall(QDBusMessage::createMethodCall(QString(),
+                                                                                   QStringLiteral("/app/copypaste/Clipboard"),
+                                                                                   QStringLiteral("app.copypaste.Clipboard"),
+                                                                                   QStringLiteral("Version")),
+                                                 1'000);
+    QDBusPendingCallWatcher versionWatcher(versionPending);
+    QEventLoop versionReplyLoop;
+    QObject::connect(&versionWatcher, &QDBusPendingCallWatcher::finished, &versionReplyLoop, &QEventLoop::quit);
+    QTimer::singleShot(1'000, &versionReplyLoop, &QEventLoop::quit);
+    versionReplyLoop.exec();
+    const auto versionReply = versionWatcher.reply();
+    if (versionReply.type() == QDBusMessage::ErrorMessage || versionReply.signature() != QLatin1String("u") ||
+        versionReply.arguments().size() != 1 || versionReply.arguments().constFirst().toUInt() != 2) {
+        return 4;
+    }
+
     const auto pending = client.asyncCall(QDBusMessage::createMethodCall(QString(),
                                                                            QStringLiteral("/app/copypaste/Clipboard"),
                                                                            QStringLiteral("app.copypaste.Clipboard"),
@@ -116,15 +132,15 @@ int main(int argc, char **argv)
     const auto arguments = reply.arguments();
     if (reply.type() == QDBusMessage::ErrorMessage || reply.signature() != QLatin1String("tas(suus)") || arguments.size() != 3 ||
         arguments.at(0).toULongLong() != 7 || arguments.at(1).toStringList() != QStringList{QStringLiteral("text/plain")}) {
-        return 4;
+        return 5;
     }
     const auto identity = qdbus_cast<WriterIdentity>(arguments.at(2));
     if (identity.status != QLatin1String("verified") || identity.pid != 101 || identity.uid != 1000 ||
         identity.appId != QLatin1String("org.example.Writer")) {
-        return 5;
+        return 6;
     }
     if (mayReplyForOwnerEpoch(7, 8, false) || mayReplyForOwnerEpoch(7, 7, true) || !mayReplyForOwnerEpoch(7, 7, false)) {
-        return 6;
+        return 7;
     }
     const auto introspection = client.asyncCall(QDBusMessage::createMethodCall(QString(),
                                                                                  QStringLiteral("/app/copypaste/Clipboard"),
@@ -138,13 +154,13 @@ int main(int argc, char **argv)
     introspectionLoop.exec();
     const auto introspectionReply = introspectionWatcher.reply();
     if (introspectionReply.type() == QDBusMessage::ErrorMessage || introspectionReply.arguments().size() != 1) {
-        return 7;
+        return 8;
     }
     const auto xml = introspectionReply.arguments().constFirst().toString();
     for (const auto &member : {QStringLiteral("Version"), QStringLiteral("Snapshot"), QStringLiteral("Read"),
                                QStringLiteral("Write"), QStringLiteral("OwnerChanged")}) {
         if (!xml.contains(QStringLiteral("\"") + member + QStringLiteral("\""))) {
-            return 8;
+            return 9;
         }
     }
     QDBusConnection::disconnectFromBus(connectionName);

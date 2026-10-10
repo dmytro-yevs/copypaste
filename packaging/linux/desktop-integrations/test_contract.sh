@@ -61,6 +61,9 @@ for status in verified no-client no-app-id ambiguous; do
 done
 rg -F "meta_selection_source_get_writer_identity" "$gnome/native/copypaste-clipboard-source.c" >/dev/null
 rg -F "meta_selection_get_current_owner" "$gnome/native/copypaste-clipboard-source.c" >/dev/null
+rg -F "copypaste_clipboard_source_is_available" "$gnome/native/copypaste-clipboard-source.h" >/dev/null
+rg -F "return ensure_source_type (error) && resolve_mutter_api (error);" "$gnome/native/copypaste-clipboard-source.c" >/dev/null
+rg -F "clipboard_source_is_available(this._selection) === true" "$clipboard_bridge" >/dev/null
 rg -F "wl_resource_get_client" "$gnome/mutter/mutter-46-writer-identity.patch" >/dev/null
 rg -F "meta_wayland_surface_get_resource" "$gnome/mutter/mutter-46-writer-identity.patch" >/dev/null
 rg -F "window_app_id = meta_window_get_wm_class (window);" "$gnome/mutter/mutter-46-writer-identity.patch" >/dev/null

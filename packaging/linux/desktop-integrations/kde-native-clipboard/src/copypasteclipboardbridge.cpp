@@ -39,6 +39,7 @@ namespace KWin
 namespace
 {
 constexpr auto kDaemonBusName = "app.copypaste.Daemon";
+constexpr auto kGuiBusName = "app.copypaste.CopyPaste";
 constexpr auto kObjectPath = "/app/copypaste/Clipboard";
 constexpr uint kVersion = 2;
 constexpr uint kMaximumBytes = 4 * 1024 * 1024;
@@ -253,9 +254,12 @@ CopyPasteClipboardBridge::CopyPasteClipboardBridge(QObject *parent)
     selectionChanged(waylandServer()->seat()->selection());
 }
 
-uint CopyPasteClipboardBridge::Version() const
+void CopyPasteClipboardBridge::Version(uint &version)
 {
-    return kVersion;
+    if (!authorize(true)) {
+        return;
+    }
+    version = kVersion;
 }
 
 void CopyPasteClipboardBridge::Snapshot(qulonglong &generation, QStringList &mimeTypes, CopyPasteWriterIdentity &identity)
@@ -362,7 +366,7 @@ qulonglong CopyPasteClipboardBridge::Write(const QMap<QString, QByteArray> &payl
     return m_generation;
 }
 
-bool CopyPasteClipboardBridge::authorize()
+bool CopyPasteClipboardBridge::authorize(bool allowGui)
 {
     if (!calledFromDBus()) {
         return true;
@@ -373,14 +377,17 @@ bool CopyPasteClipboardBridge::authorize()
         fail(QStringLiteral("AccessDenied"));
         return false;
     }
-    QDBusMessage ownerRequest = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.DBus"),
-                                                                QStringLiteral("/org/freedesktop/DBus"),
-                                                                QStringLiteral("org.freedesktop.DBus"),
-                                                                QStringLiteral("GetNameOwner"));
-    ownerRequest.setArguments({QLatin1String(kDaemonBusName)});
-    const auto daemonOwner = bus.call(ownerRequest, QDBus::Block, kAuthorizerTimeoutMs);
-    if (daemonOwner.type() == QDBusMessage::ErrorMessage || daemonOwner.arguments().size() != 1 ||
-        daemonOwner.arguments().constFirst().toString() != sender) {
+    const auto ownsName = [&bus, &sender](const char *name) {
+        QDBusMessage ownerRequest = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.DBus"),
+                                                                    QStringLiteral("/org/freedesktop/DBus"),
+                                                                    QStringLiteral("org.freedesktop.DBus"),
+                                                                    QStringLiteral("GetNameOwner"));
+        ownerRequest.setArguments({QLatin1String(name)});
+        const auto owner = bus.call(ownerRequest, QDBus::Block, kAuthorizerTimeoutMs);
+        return owner.type() != QDBusMessage::ErrorMessage && owner.arguments().size() == 1 &&
+            owner.arguments().constFirst().toString() == sender;
+    };
+    if (!ownsName(kDaemonBusName) && (!allowGui || !ownsName(kGuiBusName))) {
         fail(QStringLiteral("AccessDenied"));
         return false;
     }

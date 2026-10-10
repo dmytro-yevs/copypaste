@@ -60,7 +60,7 @@ export class ClipboardBridge {
     async _versionAsync(invocation) {
         if (!await this._authorized(invocation, true))
             return;
-        if (this._destroyed)
+        if (!this._nativeAvailable())
             return this._error(invocation, 'Unavailable');
         this._reply(invocation, new GLib.Variant('(u)', [PROTOCOL_VERSION]));
     }
@@ -197,6 +197,16 @@ export class ClipboardBridge {
             return this._sourceFactory.clipboard_selection_owner(this._selection);
         } catch (_error) {
             return null;
+        }
+    }
+
+    _nativeAvailable() {
+        if (this._destroyed || !this._sourceFactory?.clipboard_source_is_available)
+            return false;
+        try {
+            return this._sourceFactory.clipboard_source_is_available(this._selection) === true;
+        } catch (_error) {
+            return false;
         }
     }
 

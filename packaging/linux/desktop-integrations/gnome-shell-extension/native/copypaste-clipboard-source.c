@@ -157,6 +157,18 @@ GObject *copypaste_clipboard_source_new (GVariant *payloads, GError **error) {
   return G_OBJECT (self);
 }
 
+gboolean copypaste_clipboard_source_is_available (GObject *selection,
+                                                   GError **error) {
+  GType selection_type = g_type_from_name ("MetaSelection");
+  if (!selection || !selection_type ||
+      !g_type_is_a (G_OBJECT_TYPE (selection), selection_type)) {
+    g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+                         "MetaSelection is unavailable");
+    return FALSE;
+  }
+  return ensure_source_type (error) && resolve_mutter_api (error);
+}
+
 GVariant *copypaste_clipboard_source_writer_identity (GObject *source,
                                                        GError **error) {
   guint32 uid = 0;
@@ -170,7 +182,7 @@ GVariant *copypaste_clipboard_source_writer_identity (GObject *source,
                          "Not a Mutter selection source");
     return NULL;
   }
-  if (!resolve_mutter_api (error) ||
+  if (!ensure_source_type (error) || !resolve_mutter_api (error) ||
       !writer_identity ((MetaSelectionSource *) source, &pid, &uid, &status, &app_id) || !status) {
     g_free (status);
     g_free (app_id);
@@ -184,12 +196,7 @@ GVariant *copypaste_clipboard_source_writer_identity (GObject *source,
 }
 
 GObject *copypaste_clipboard_selection_owner (GObject *selection, GError **error) {
-  if (!selection) {
-    g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
-                         "Missing Mutter selection");
-    return NULL;
-  }
-  if (!resolve_mutter_api (error))
+  if (!copypaste_clipboard_source_is_available (selection, error))
     return NULL;
   return G_OBJECT (current_owner ((MetaSelection *) selection, META_SELECTION_CLIPBOARD));
 }
