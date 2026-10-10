@@ -271,7 +271,7 @@ def drag_wayland(source: DragSource, gui_pid: int, environment: dict[str, str]) 
         raise FileDragQualificationError("Wayland display is unavailable")
     try:
         import pyatspi  # type: ignore[import-not-found]
-        from gi.repository import Gio, GLib  # type: ignore[import-not-found]
+        from gi.repository import Gdk, Gio, GLib  # type: ignore[import-not-found]
     except ImportError as error:
         raise FileDragQualificationError("PyGObject and AT-SPI are required for Wayland file-drag qualification") from error
     helper = load_wayland_portal()
@@ -279,6 +279,7 @@ def drag_wayland(source: DragSource, gui_pid: int, environment: dict[str, str]) 
         raise FileDragQualificationError("Wayland portal helper does not expose dynamic consent")
     source_bounds = wait_for(lambda: _atspi_bounds_or_none(pyatspi.Registry, source.process.pid, "Drag qualification file"), "GTK file-drag source is absent from the AT-SPI desktop")
     target_bounds = wait_for(lambda: _atspi_bounds_or_none(pyatspi.Registry, gui_pid, TARGET_TITLE), "installed CopyPaste window is absent from the AT-SPI desktop")
+    require_single_wayland_layout(Gdk, source_bounds, target_bounds)
     portal = helper.PortalKeyboard(Gio, GLib)
     pointer = PortalPointer(portal, helper, GLib)
     try:
@@ -309,6 +310,20 @@ def _atspi_bounds_or_none(registry: Any, pid: int, name: str) -> Bounds | None:
         return atspi_bounds(registry, pid, name)
     except FileDragQualificationError:
         return None
+
+
+def require_single_wayland_layout(gdk: Any, source: Bounds, target: Bounds) -> Bounds:
+    display = gdk.Display.get_default()
+    if display is None or display.get_n_monitors() != 1:
+        raise FileDragQualificationError("Wayland file drag requires one visible monitor")
+    geometry = display.get_monitor(0).get_geometry()
+    layout = Bounds(geometry.x, geometry.y, geometry.width, geometry.height)
+    if layout.x != 0 or layout.y != 0 or layout.width <= 0 or layout.height <= 0:
+        raise FileDragQualificationError("Wayland monitor layout does not have a nonnegative origin")
+    for point in (source.point(), target.point(horizontal=0.72)):
+        if not (layout.x <= point[0] < layout.x + layout.width and layout.y <= point[1] < layout.y + layout.height):
+            raise FileDragQualificationError("Wayland file-drag target is outside the visible monitor")
+    return layout
 
 
 def qualify(session: str, workspace: Path, gui_pid: int, environment: dict[str, str]) -> None:
