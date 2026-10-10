@@ -69,12 +69,27 @@ class LinuxNativeFileDragTest(unittest.TestCase):
     def test_source_activity_rejects_unknown_or_malformed_events(self):
         with tempfile.TemporaryDirectory() as directory:
             activity = Path(directory) / "activity.jsonl"
-            activity.write_text('{"event":"unknown"}\n', encoding="utf-8")
+            activity.write_text(
+                '{"event":"unknown","timestamp_us":1,"actions":0,"selected_action":0,"destination_window":false}\n',
+                encoding="utf-8",
+            )
             with self.assertRaisesRegex(drag.FileDragQualificationError, "unknown activity"):
                 drag.source_activity(activity)
             activity.write_text("not json\n", encoding="utf-8")
             with self.assertRaisesRegex(drag.FileDragQualificationError, "activity is invalid"):
                 drag.source_activity(activity)
+
+    def test_source_activity_requires_copy_negotiation_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            activity = Path(directory) / "activity.jsonl"
+            activity.write_text(
+                '{"event":"drag_armed","timestamp_us":1,"actions":0,"selected_action":0,"destination_window":false}\n'
+                '{"event":"drag_status_copy","timestamp_us":2,"actions":2,"selected_action":2,"destination_window":true}\n',
+                encoding="utf-8",
+            )
+            events = drag.source_activity(activity)
+            self.assertTrue(drag.activity_has(events, "drag_armed"))
+            self.assertTrue(drag.activity_has(events, "drag_status_copy"))
 
     def test_x11_requires_unique_target_window(self):
         result = mock.Mock(stdout=b"1\n2\n")
