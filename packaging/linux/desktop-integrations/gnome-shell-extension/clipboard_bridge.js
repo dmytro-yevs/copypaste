@@ -3,6 +3,7 @@ import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 
 const DAEMON_BUS_NAME = 'app.copypaste.Daemon';
+const GUI_BUS_NAME = 'app.copypaste.CopyPaste';
 const PATH = '/app/copypaste/Clipboard';
 const INTERFACE = 'app.copypaste.Clipboard';
 const MAX_BYTES = 4 * 1024 * 1024;
@@ -57,7 +58,7 @@ export class ClipboardBridge {
     }
 
     async _versionAsync(invocation) {
-        if (!await this._authorized(invocation))
+        if (!await this._authorized(invocation, true))
             return;
         if (this._destroyed)
             return this._error(invocation, 'Unavailable');
@@ -136,16 +137,17 @@ export class ClipboardBridge {
         this._reply(invocation, new GLib.Variant('(t)', [BigInt(this._sequence)]));
     }
 
-    async _authorized(invocation) {
+    async _authorized(invocation, allowGui = false) {
         if (this._destroyed) {
             this._error(invocation, 'Unavailable');
             return false;
         }
         try {
             const sender = invocation.get_sender();
-            const owner = await this._busCall('GetNameOwner', new GLib.Variant('(s)', [DAEMON_BUS_NAME]), '(s)');
+            const names = allowGui ? [DAEMON_BUS_NAME, GUI_BUS_NAME] : [DAEMON_BUS_NAME];
             const uid = await this._busCall('GetConnectionUnixUser', new GLib.Variant('(s)', [sender]), '(u)');
-            if (owner.deep_unpack()[0] !== sender || uid.deep_unpack()[0] !== new Gio.Credentials().get_unix_user())
+            const owners = await Promise.all(names.map(name => this._busCall('GetNameOwner', new GLib.Variant('(s)', [name]), '(s)').catch(() => null)));
+            if (!owners.some(owner => owner?.deep_unpack()[0] === sender) || uid.deep_unpack()[0] !== new Gio.Credentials().get_unix_user())
                 throw new Error('unauthorized');
             return true;
         } catch (_error) {
