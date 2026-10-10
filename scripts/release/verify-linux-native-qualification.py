@@ -153,6 +153,39 @@ def verify_trace(root: Path, receipt: dict, architecture: str, desktop: str, ses
             raise ValueError(f"scenario trace semantic setup is missing: {name}")
     if covered != expected_assertions:
         raise ValueError(f"scenario trace does not execute every assertion: {name}")
+    installation = trace.get("installation")
+    required_installation = {"formats", "packages", "appimage_extract_argv", "native_install_argv"}
+    if not isinstance(installation, dict) or set(installation) != required_installation:
+        raise ValueError(f"scenario trace has no actual package installation record: {name}")
+    formats = installation["formats"]
+    if formats not in (["AppImage", "deb"], ["AppImage", "rpm"]) or formats != receipt.get("installed_formats"):
+        raise ValueError(f"scenario trace installation formats differ: {name}")
+    expected_packages = {item.get("name"): item for item in receipt.get("packages", []) if isinstance(item, dict)}
+    selected = {package_name for package_name in expected_packages if package_name.rsplit(".", 1)[-1] in formats}
+    reported = installation["packages"]
+    reported_map = {item.get("name"): item for item in reported if isinstance(item, dict)} if isinstance(reported, list) else {}
+    if len(reported_map) != len(reported) or set(reported_map) != selected:
+        raise ValueError(f"scenario trace installation packages differ: {name}")
+    for package_name, item in reported_map.items():
+        format_name = package_name.rsplit(".", 1)[-1]
+        source_path = item.get("path")
+        if (not isinstance(source_path, str) or not Path(source_path).is_absolute() or Path(source_path).name != package_name
+                or item != {"format": format_name, "path": source_path, **expected_packages[package_name]}):
+            raise ValueError(f"scenario trace installation digest differs: {name}")
+    appimage = next(item for item in reported if item["format"] == "AppImage")
+    native = next(item for item in reported if item["format"] != "AppImage")
+    appimage_argv = installation["appimage_extract_argv"]
+    native_argv = installation["native_install_argv"]
+    if appimage_argv != ["env", "APPIMAGE_EXTRACT_AND_RUN=1", appimage["path"], "--appimage-extract"]:
+        raise ValueError(f"scenario trace installation commands are invalid: {name}")
+    expected_native_argv = (["sudo", "apt-get", "install", "--yes", native["path"]]
+                            if native["format"] == "deb" else ["sudo", "dnf", "--assumeyes", "install", native["path"]])
+    if native_argv != expected_native_argv:
+        raise ValueError(f"scenario trace native package manager command differs: {name}")
+    if not any(command["argv"] == appimage_argv and "package_install" in command["assertions"] for command in commands):
+        raise ValueError(f"scenario trace AppImage installation command was not executed: {name}")
+    if not any(command["argv"] == native_argv and "package_install" in command["assertions"] for command in commands):
+        raise ValueError(f"scenario trace native installation command was not executed: {name}")
     if receipt.get("trace") != {"name": name, "sha256": digest(path), "size_bytes": path.stat().st_size}:
         raise ValueError(f"receipt does not bind its scenario trace: {name}")
 
