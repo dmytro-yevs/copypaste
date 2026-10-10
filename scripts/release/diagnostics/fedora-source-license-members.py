@@ -27,6 +27,10 @@ NOTICE_MEMBER = re.compile(
 )
 
 
+def excerpt(value: bytes) -> str:
+    return value[:512].decode("utf-8", errors="replace")
+
+
 def closure_module() -> Any:
     root = Path(__file__).resolve().parents[3]
     spec = importlib.util.spec_from_file_location(
@@ -109,7 +113,7 @@ def inspect(module: Any, package: str, cache: Path) -> dict[str, object]:
     for member in cpio_members:
         content = module.cpio_member_bytes(source, member)
         if NOTICE_MEMBER.search(member):
-            notices.append({"container": "cpio", "path": member, "bytes": len(content)})
+            notices.append({"container": "cpio", "path": member, "bytes": len(content), "excerpt": excerpt(content)})
         queue.append((member, content, 0))
     inspected = 0
     while queue and inspected < MAX_NESTED_ARCHIVES:
@@ -123,7 +127,7 @@ def inspect(module: Any, package: str, cache: Path) -> dict[str, object]:
         archive_reports.append(report)
         for name, regular, size, nested in members:
             if regular and NOTICE_MEMBER.search(name):
-                notices.append({"container": container, "path": name, "bytes": size})
+                notices.append({"container": container, "path": name, "bytes": size, "excerpt": excerpt(nested)})
             if regular and depth < MAX_NESTED_DEPTH and nested and len(nested) <= 64 * 1024 * 1024:
                 queue.append((f"{container}!{name}", nested, depth + 1))
     return {
