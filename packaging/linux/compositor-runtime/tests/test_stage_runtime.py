@@ -253,8 +253,10 @@ class RuntimeStageTests(unittest.TestCase):
             stage_runtime.validate_payload(runtime, receipt)
 
             for record, key, value in ((standard, "standard_license_url", "https://invalid.example/license"),
+                                       (standard, "standard_license_url", {"unhashable": True}),
                                        (standard, "standard_license_sha256", "0" * 64),
                                        (standard, "sha256", "0" * 64),
+                                       (source, "license_source_member", "."),
                                        (source, "license_source_member", "../COPYING"),
                                        (source, "license_source_member", "licenses/./COPYING")):
                 broken = json.loads(json.dumps(manifest))

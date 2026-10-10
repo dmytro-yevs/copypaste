@@ -25,7 +25,7 @@ def safe_source_member(value: Any) -> bool:
     if not isinstance(value, str) or not value or len(value) > 512 or "\x00" in value:
         return False
     path = PurePosixPath(value)
-    return (str(path) == value and not path.is_absolute()
+    return (bool(path.parts) and str(path) == value and not path.is_absolute()
             and all(part not in {"", ".", ".."} for part in path.parts))
 
 
@@ -50,6 +50,8 @@ def validate_origin(record: Any) -> str | None:
         if set(record) != STANDARD_KEYS:
             return "standard-schema"
         url = record.get("standard_license_url")
+        if not isinstance(url, str):
+            return "standard-url"
         expected = CANONICAL_STANDARD_LICENSES.get(url)
         if expected is None:
             return "standard-url"
