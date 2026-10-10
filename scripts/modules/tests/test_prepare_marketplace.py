@@ -73,6 +73,24 @@ class PublicationPreparationTest(unittest.TestCase):
                 prepare.main()
             build.assert_not_called()
 
+    def test_v2_bootstraps_the_verified_legacy_catalog_without_rewriting_it(self):
+        legacy = b'{"schema_version":1,"modules":[]}'
+        signature = b"c2lnbmF0dXJl"
+        prepared = {"schema_version": 1, "modules": [{"id": "copypaste.ocr"}]}
+        with patch.object(prepare.subprocess, "run", side_effect=[
+                self.release(), subprocess.CompletedProcess([], 0)]), \
+                patch.object(prepare, "download_optional", side_effect=[
+                    legacy, signature, None]), \
+                patch.object(prepare, "verify_signature") as verify, \
+                patch.object(prepare, "build_catalog", return_value=prepared) as build:
+            prepare.main()
+        verify.assert_called_once_with(
+            legacy, b"signature", catalog.LEGACY_CATALOG_NAME)
+        self.assertEqual(build.call_args.args[2], json.loads(legacy))
+        self.assertEqual(
+            json.loads(Path("dist/modules-v2.json").read_text()), prepared)
+        self.assertFalse(Path("dist/modules.json").exists())
+
     def test_draft_and_prerelease_packages_cannot_become_public_catalog_entries(self):
         for draft, prerelease in [(True, False), (False, True)]:
             with patch.object(prepare.subprocess, "run", return_value=self.release(draft, prerelease)) as run:
