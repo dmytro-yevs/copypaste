@@ -37,6 +37,7 @@ TRACE_PLACEHOLDERS = {
     "desktop entry URI handler and icon verified",
 }
 IPC_PREFIX = "COPYPASTE_QUALIFICATION_IPC "
+INSTALL_PREFIX = "COPYPASTE_QUALIFICATION_INSTALL "
 MODULE_IDS = ("copypaste.ocr", "copypaste.semantic-search", "copypaste.supabase")
 IPC_OPERATIONS = {"list", "install", "set_preferences", "set_enabled", "invoke", "remove"}
 
@@ -64,7 +65,7 @@ def command_rows(stdout: str, expected_assertions: set[str]) -> list[dict]:
     for line in stdout.splitlines():
         if not line:
             continue
-        if line.startswith(IPC_PREFIX):
+        if line.startswith(IPC_PREFIX) or line.startswith(INSTALL_PREFIX):
             continue
         if not line.startswith("COPYPASTE_QUALIFICATION_COMMAND "):
             raise ValueError("scenario driver emitted unstructured output")
@@ -140,6 +141,43 @@ def trace_rows(stdout: str, expected_assertions: set[str]) -> tuple[list[dict], 
     return commands, ipc
 
 
+def installation_report(stdout: str, expected_packages: list[dict], artifacts: Path) -> dict:
+    records = [json.loads(line.removeprefix(INSTALL_PREFIX)) for line in stdout.splitlines() if line.startswith(INSTALL_PREFIX)]
+    if len(records) != 1:
+        raise ValueError("scenario driver must report exactly one actual package installation")
+    report = records[0]
+    required = {"formats", "packages", "appimage_extract_argv", "native_install_argv"}
+    if not isinstance(report, dict) or set(report) != required:
+        raise ValueError("scenario driver emitted an invalid package installation report")
+    formats = report["formats"]
+    if formats not in (["AppImage", "deb"], ["AppImage", "rpm"]):
+        raise ValueError("actual package installation report has invalid formats")
+    expected = {item["name"]: item for item in expected_packages}
+    selected = {name for name in expected if name.rsplit(".", 1)[-1] in formats}
+    packages = report["packages"]
+    package_map = {item.get("name"): item for item in packages if isinstance(item, dict)} if isinstance(packages, list) else {}
+    if len(package_map) != len(packages) or set(package_map) != selected:
+        raise ValueError("actual package installation report does not bind exact installed artifacts")
+    for name, item in package_map.items():
+        format_name = name.rsplit(".", 1)[-1]
+        expected_path = str((artifacts / name).resolve())
+        if item != {"format": format_name, "path": expected_path, **expected[name]}:
+            raise ValueError("actual package installation report has an invalid artifact digest")
+    appimage = next(item for item in packages if item["format"] == "AppImage")
+    native = next(item for item in packages if item["format"] != "AppImage")
+    appimage_path = appimage["path"]
+    native_path = native["path"]
+    if report["appimage_extract_argv"] != ["env", "APPIMAGE_EXTRACT_AND_RUN=1", appimage_path, "--appimage-extract"]:
+        raise ValueError("actual package installation report has no exact AppImage extraction command")
+    expected_native = (
+        ["sudo", "apt-get", "install", "--yes", native_path]
+        if native["format"] == "deb" else ["sudo", "dnf", "--assumeyes", "install", native_path]
+    )
+    if report["native_install_argv"] != expected_native:
+        raise ValueError("actual package installation report has no exact native package command")
+    return report
+
+
 def scenario_assertions(upgrade_mode: str, session: str) -> set[str]:
     assertions = ASSERTIONS if upgrade_mode == "prior_release" else FIRST_INSTALL_ASSERTIONS
     if session == "x11":
@@ -189,9 +227,6 @@ def produce(args: argparse.Namespace) -> Path:
     module_artifacts = staged_directory(args.module_artifacts, "module artifact")
     module_fixtures = staged_directory(args.module_fixtures, "module fixture")
     packages = artifact_inventory(args.artifacts.resolve(), args.version, args.architecture)
-    installed_formats = os.environ.get("COPYPASTE_INSTALLED_FORMATS", "").split(",")
-    if set(installed_formats) not in ({"AppImage", "deb"}, {"AppImage", "rpm"}):
-        raise ValueError("native scenario did not report one portable and one native installed format")
     upgrade_mode = "prior_release" if args.previous_artifacts is not None else "first_install_baseline"
     if upgrade_mode == "prior_release":
         if args.previous_version is None:
@@ -222,6 +257,11 @@ def produce(args: argparse.Namespace) -> Path:
     if result.returncode:
         raise RuntimeError(f"native scenario driver failed; full output: {log_path}")
     commands, ipc = trace_rows(result.stdout, expected_assertions)
+    installation = installation_report(result.stdout, packages, args.artifacts.resolve())
+    for argv in (installation["appimage_extract_argv"], installation["native_install_argv"]):
+        if not any(row["argv"] == argv and "package_install" in row["assertions"] for row in commands):
+            raise ValueError("actual package installation report lacks its executed command trace")
+    installed_formats = installation["formats"]
     trace_name = f"linux-native-{args.architecture}-{args.desktop.lower()}-{args.session}.trace.json"
     trace_path = output / trace_name
     trace_path.write_text(json.dumps({
@@ -230,6 +270,7 @@ def produce(args: argparse.Namespace) -> Path:
         "architecture": args.architecture, "desktop": args.desktop, "session": args.session,
         "upgrade_mode": upgrade_mode,
         "installed_formats": installed_formats,
+        "installation": installation,
         "environment": runtime_environment(),
         "commands": commands,
         "ipc": ipc,
