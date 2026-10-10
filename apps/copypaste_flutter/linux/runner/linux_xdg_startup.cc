@@ -23,6 +23,8 @@ constexpr char kDesktopFileName[] = "com.copypaste.CopyPaste.desktop";
 constexpr char kPackagedExecutable[] = "/usr/lib/copypaste/copypaste";
 constexpr char kApplicationId[] = "com.copypaste.CopyPaste";
 constexpr char kUriHandlerContentType[] = "x-scheme-handler/copypaste";
+constexpr char kExecLauncher[] = "/bin/sh";
+constexpr char kExecScript[] = "exec \"$0\" \"$@\"";
 
 bool is_regular_executable_owned_by(const std::string& path, uid_t owner) {
   struct stat metadata = {};
@@ -179,6 +181,22 @@ bool is_plain_executable_path(const gchar* value, std::string* executable) {
   return true;
 }
 
+bool decode_managed_exec(const std::string& value, std::string* executable) {
+  static constexpr char kUriFieldCode[] = " %U";
+  if (value.size() <= strlen(kUriFieldCode) ||
+      value.compare(value.size() - strlen(kUriFieldCode),
+                    strlen(kUriFieldCode), kUriFieldCode) != 0) {
+    return false;
+  }
+  const std::string argument =
+      value.substr(0, value.size() - strlen(kUriFieldCode));
+  if (decode_desktop_exec_argument(argument, executable)) return true;
+  const std::string prefix = std::string(kExecLauncher) + " -c " +
+      quote_desktop_exec_argument(kExecScript) + " ";
+  if (argument.compare(0, prefix.size(), prefix) != 0) return false;
+  return decode_desktop_exec_argument(argument.substr(prefix.size()), executable);
+}
+
 bool key_matches(GKeyFile* entry, const char* key, const char* expected) {
   g_autofree gchar* value =
       g_key_file_get_string(entry, "Desktop Entry", key, nullptr);
@@ -233,18 +251,9 @@ bool is_managed_desktop_entry(const gchar* contents, gsize length,
   g_autofree gchar* try_exec =
       g_key_file_get_string(entry, "Desktop Entry", "TryExec", nullptr);
   if (exec == nullptr || try_exec == nullptr) return false;
-  const std::string exec_value(exec);
-  static constexpr char kUriFieldCode[] = " %U";
-  if (exec_value.size() <= strlen(kUriFieldCode) ||
-      exec_value.compare(exec_value.size() - strlen(kUriFieldCode),
-                         strlen(kUriFieldCode), kUriFieldCode) != 0) {
-    return false;
-  }
-  const std::string quoted_exec =
-      exec_value.substr(0, exec_value.size() - strlen(kUriFieldCode));
   std::string executable;
   std::string try_executable;
-  if (!decode_desktop_exec_argument(quoted_exec, &executable)) return false;
+  if (!decode_managed_exec(exec, &executable)) return false;
   if (is_plain_executable_path(try_exec, &try_executable)) {
     return executable == try_executable;
   }
@@ -323,9 +332,11 @@ std::string LinuxXdgStartup::DesktopEntryForExecutable(
   g_key_file_set_string(entry, "Desktop Entry", "Name", "CopyPaste");
   g_key_file_set_string(entry, "Desktop Entry", "Comment",
                         "Encrypted clipboard history");
-  const std::string exec = quote_desktop_exec_argument(executable) + " %U";
-  // Exec needs Desktop Entry quoting first. GKeyFile then escapes that value
-  // for its own file syntax, preserving quotes, backslashes, and percent text.
+  const std::string exec = std::string(kExecLauncher) + " -c " +
+      quote_desktop_exec_argument(kExecScript) + " " +
+      quote_desktop_exec_argument(executable) + " %U";
+  // The fixed first token is loader-safe. The actual path is positional and
+  // receives URI field expansion only after the desktop entry is validated.
   g_key_file_set_string(entry, "Desktop Entry", "Exec", exec.c_str());
   g_key_file_set_string(entry, "Desktop Entry", "TryExec", executable.c_str());
   g_key_file_set_string(entry, "Desktop Entry", "Icon", kApplicationId);
