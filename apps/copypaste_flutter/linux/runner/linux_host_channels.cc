@@ -308,25 +308,6 @@ bool clipboard_version_active() {
   return false;
 }
 
-bool clipboard_version_active() {
-  g_autoptr(GError) error = nullptr;
-  g_autoptr(GDBusConnection) bus = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, &error);
-  if (bus == nullptr) return false;
-  for (const char* name : {"app.copypaste.GnomeIntegration", "org.kde.KWin"}) {
-    g_clear_error(&error);
-    g_autoptr(GVariant) owner_reply = g_dbus_connection_call_sync(bus, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetNameOwner", g_variant_new("(s)", name), G_VARIANT_TYPE("(s)"), G_DBUS_CALL_FLAGS_NONE, 500, nullptr, &error);
-    if (owner_reply == nullptr) continue;
-    const gchar* owner = nullptr; g_variant_get(owner_reply, "(&s)", &owner);
-    g_autoptr(GVariant) uid_reply = owner == nullptr ? nullptr : g_dbus_connection_call_sync(bus, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetConnectionUnixUser", g_variant_new("(s)", owner), G_VARIANT_TYPE("(u)"), G_DBUS_CALL_FLAGS_NONE, 500, nullptr, &error);
-    guint uid = 0; if (uid_reply == nullptr) continue; g_variant_get(uid_reply, "(u)", &uid); if (uid != static_cast<guint>(getuid())) continue;
-    g_autoptr(GVariant) version = g_dbus_connection_call_sync(bus, owner, "/app/copypaste/Clipboard", "app.copypaste.Clipboard", "Version", nullptr, G_VARIANT_TYPE("(u)"), G_DBUS_CALL_FLAGS_NONE, 500, nullptr, &error);
-    guint value = 0; if (version == nullptr) continue; g_variant_get(version, "(u)", &value); if (value != 2) continue;
-    g_autoptr(GVariant) current = g_dbus_connection_call_sync(bus, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetNameOwner", g_variant_new("(s)", name), G_VARIANT_TYPE("(s)"), G_DBUS_CALL_FLAGS_NONE, 500, nullptr, &error);
-    const gchar* now = nullptr; if (current != nullptr) g_variant_get(current, "(&s)", &now); if (g_strcmp0(owner, now) == 0) return true;
-  }
-  return false;
-}
-
 gint64 integer_argument(FlMethodCall* call, const gchar* name,
                         gint64 fallback = 0) {
   FlValue* args = fl_method_call_get_args(call);
@@ -1182,9 +1163,10 @@ void integration_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
   if (is_method(call, "status")) {
     FlValue* status = integration_status();
     g_autoptr(GError) error = nullptr;
-    const auto startup = LinuxXdgStartup::CreateForCurrentExecutable(&error);
+    const auto xdg_startup =
+        LinuxXdgStartup::CreateForCurrentExecutable(&error);
     const LinuxXdgStartupStatus startup_status =
-        startup ? startup->Status() : LinuxXdgStartupStatus{};
+        xdg_startup ? xdg_startup->Status() : LinuxXdgStartupStatus{};
     fl_value_set_string_take(status, "startAtLogin",
                              fl_value_new_bool(startup_status.start_at_login));
     fl_value_set_string_take(status, "uriRegistered",
@@ -1199,8 +1181,10 @@ void integration_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
       return;
     }
     g_autoptr(GError) error = nullptr;
-    const auto startup = LinuxXdgStartup::CreateForCurrentExecutable(&error);
-    if (!startup || !startup->SetStartAtLogin(fl_value_get_bool(enabled), &error)) {
+    const auto xdg_startup =
+        LinuxXdgStartup::CreateForCurrentExecutable(&error);
+    if (!xdg_startup ||
+        !xdg_startup->SetStartAtLogin(fl_value_get_bool(enabled), &error)) {
       failure(call, "xdg_failed", error == nullptr ? "XDG startup is unavailable."
                                                      : error->message);
       return;
@@ -1208,8 +1192,9 @@ void integration_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
     success(call, fl_value_new_bool(true));
   } else if (is_method(call, "registerCopypasteUri")) {
     g_autoptr(GError) error = nullptr;
-    const auto startup = LinuxXdgStartup::CreateForCurrentExecutable(&error);
-    if (!startup || !startup->RegisterCopypasteUri(&error)) {
+    const auto xdg_startup =
+        LinuxXdgStartup::CreateForCurrentExecutable(&error);
+    if (!xdg_startup || !xdg_startup->RegisterCopypasteUri(&error)) {
       failure(call, "xdg_failed", error == nullptr ? "XDG URI registration is unavailable."
                                                      : error->message);
       return;
