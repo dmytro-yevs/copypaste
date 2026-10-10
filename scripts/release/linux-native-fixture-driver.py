@@ -266,6 +266,36 @@ def appimage_prefix(artifact, workspace):
     return prefix
 
 
+def runtime_prefix(prefix):
+    prefix = prefix.resolve(strict=True)
+    if prefix.is_symlink() or not prefix.is_dir():
+        raise RuntimeError("qualified runtime prefix is unsafe")
+    for name in ("copypaste", "copypaste-daemon", "copypaste-cli"):
+        executable = prefix / name
+        if not executable.is_file() or executable.is_symlink() or not os.access(executable, os.X_OK):
+            raise RuntimeError("qualified runtime prefix is missing a required executable")
+    return prefix
+
+
+def sha256(path):
+    import hashlib
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def emit_runtime(format_name, prefix):
+    executables = {}
+    for name in ("copypaste", "copypaste-daemon", "copypaste-cli"):
+        path = prefix / name
+        executables[name] = {"path": str(path), "sha256": sha256(path), "size_bytes": path.stat().st_size}
+    print("COPYPASTE_QUALIFICATION_RUNTIME " + json.dumps({
+        "format": format_name, "gui_owned_daemon": True, "executables": executables,
+    }, separators=(",", ":")))
+
+
 def cli_item_count(status):
     count = status.get("item_count")
     if isinstance(count, bool) or not isinstance(count, int) or count < 0:
@@ -524,26 +554,22 @@ def main():
     parser.add_argument("--evidence-dir", required=True, type=Path)
     parser.add_argument("--module-artifacts", required=True, type=Path)
     parser.add_argument("--module-fixtures", required=True, type=Path)
+    parser.add_argument("--runtime-format", required=True, choices=("AppImage", "deb", "rpm"))
+    parser.add_argument("--runtime-prefix", required=True, type=Path)
     parser.add_argument("--previous-artifacts", type=Path)
     parser.add_argument("--previous-version")
     parser.add_argument("--first-install-baseline", action="store_true")
     args = parser.parse_args()
     if args.first_install_baseline == (args.previous_artifacts is not None):
         raise ValueError("select exactly one of a prior release or first-install baseline")
-    artifact = (args.artifacts / f"CopyPaste-v{args.version}-linux-{args.architecture}.AppImage").resolve()
-    if not artifact.is_file():
-        raise ValueError("exact AppImage is missing")
     args.evidence_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="copypaste-linux-native-") as temporary:
         workspace = Path(temporary)
         data_home = workspace / "data-home"
         write_source_desktop_entry(data_home)
-        previous = Path.cwd()
-        os.chdir(workspace)
-        try:
-            prefix = appimage_prefix(artifact.resolve(), workspace)
-        finally:
-            os.chdir(previous)
+        prefix = runtime_prefix(args.runtime_prefix)
+        args.evidence_dir = args.evidence_dir / args.runtime_format.lower()
+        args.evidence_dir.mkdir(mode=0o700)
         runtime_dir = workspace / "runtime"
         runtime_dir.mkdir(mode=0o700)
         environment = {
@@ -680,6 +706,7 @@ def main():
                 else:
                     run(["gdbus", "introspect", "--session", "--dest", "app.copypaste.CopyPaste", "--object-path", "/app/copypaste/WaylandIntegration"])
                     raise RuntimeError("Wayland companion authentication and portal keyboard grant require an enabled companion transaction")
+                emit_runtime(args.runtime_format, prefix)
             finally:
                 app.terminate()
                 try:

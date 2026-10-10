@@ -13,7 +13,7 @@ import json
 import os
 import re
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 ARCHITECTURES = ("x86_64", "aarch64")
@@ -38,6 +38,7 @@ TRACE_PLACEHOLDERS = {
 }
 IPC_PREFIX = "COPYPASTE_QUALIFICATION_IPC "
 INSTALL_PREFIX = "COPYPASTE_QUALIFICATION_INSTALL "
+RUNTIME_PREFIX = "COPYPASTE_QUALIFICATION_RUNTIME "
 MODULE_IDS = ("copypaste.ocr", "copypaste.semantic-search", "copypaste.supabase")
 IPC_OPERATIONS = {"list", "install", "set_preferences", "set_enabled", "invoke", "remove"}
 
@@ -65,7 +66,7 @@ def command_rows(stdout: str, expected_assertions: set[str]) -> list[dict]:
     for line in stdout.splitlines():
         if not line:
             continue
-        if line.startswith(IPC_PREFIX) or line.startswith(INSTALL_PREFIX):
+        if line.startswith(IPC_PREFIX) or line.startswith(INSTALL_PREFIX) or line.startswith(RUNTIME_PREFIX):
             continue
         if not line.startswith("COPYPASTE_QUALIFICATION_COMMAND "):
             raise ValueError("scenario driver emitted unstructured output")
@@ -178,6 +179,37 @@ def installation_report(stdout: str, expected_packages: list[dict], artifacts: P
     return report
 
 
+def runtime_reports(stdout: str, formats: list[str]) -> list[dict]:
+    reports = [json.loads(line.removeprefix(RUNTIME_PREFIX)) for line in stdout.splitlines() if line.startswith(RUNTIME_PREFIX)]
+    if len(reports) != 2 or [report.get("format") for report in reports] != formats:
+        raise ValueError("scenario driver must report each actual runtime format separately")
+    expected_names = {"copypaste", "copypaste-daemon", "copypaste-cli"}
+    baseline = None
+    for report in reports:
+        if set(report) != {"format", "gui_owned_daemon", "executables"} or report["gui_owned_daemon"] is not True:
+            raise ValueError("scenario driver emitted an invalid GUI runtime report")
+        executables = report["executables"]
+        if not isinstance(executables, dict) or set(executables) != expected_names:
+            raise ValueError("scenario runtime report has incomplete executables")
+        identity = {}
+        for name, item in executables.items():
+            if (not isinstance(item, dict) or set(item) != {"path", "sha256", "size_bytes"}
+                    or not isinstance(item["path"], str) or not Path(item["path"]).is_absolute()
+                    or Path(item["path"]).name != name or not isinstance(item["size_bytes"], int)
+                    or item["size_bytes"] <= 0 or not isinstance(item["sha256"], str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"])):
+                raise ValueError("scenario runtime report has invalid executable provenance")
+            if ((report["format"] == "AppImage" and "/squashfs-root/usr/lib/copypaste/" not in item["path"])
+                    or (report["format"] != "AppImage" and item["path"] != f"/usr/lib/copypaste/{name}")):
+                raise ValueError("scenario runtime report does not identify its installed format")
+            identity[name] = (item["sha256"], item["size_bytes"])
+        if baseline is None:
+            baseline = identity
+        elif identity != baseline:
+            raise ValueError("portable and installed-native runtime executables differ")
+    return reports
+
+
 def scenario_assertions(upgrade_mode: str, session: str) -> set[str]:
     assertions = ASSERTIONS if upgrade_mode == "prior_release" else FIRST_INSTALL_ASSERTIONS
     if session == "x11":
@@ -187,10 +219,13 @@ def scenario_assertions(upgrade_mode: str, session: str) -> set[str]:
     raise ValueError("unsupported session assertion contract")
 
 
-def attachment(path: Path) -> dict:
-    if not path.is_file() or path.is_symlink() or not SAFE_NAME.fullmatch(path.name):
+def attachment(path: Path, root: Path) -> dict:
+    name = path.relative_to(root).as_posix()
+    parts = PurePosixPath(name).parts
+    if (not path.is_file() or path.is_symlink() or not parts
+            or not all(SAFE_NAME.fullmatch(part) for part in parts)):
         raise ValueError(f"unsafe evidence attachment: {path}")
-    return {"name": path.name, "sha256": sha256(path), "size_bytes": path.stat().st_size}
+    return {"name": name, "sha256": sha256(path), "size_bytes": path.stat().st_size}
 
 
 def runtime_environment() -> dict:
@@ -213,6 +248,36 @@ def staged_directory(path: Path, label: str) -> Path:
     if path.is_symlink() or not resolved.is_dir():
         raise ValueError(f"{label} staging directory is unsafe")
     return resolved
+
+
+def compositor_runtime_binding(path: Path, commit: str, desktop: str, architecture: str, distribution: str, format_name: str) -> dict:
+    try:
+        resolved = path.resolve(strict=True)
+    except FileNotFoundError as error:
+        raise ValueError("compositor runtime binding is missing") from error
+    if path.is_symlink() or not resolved.is_file():
+        raise ValueError("compositor runtime binding is unsafe")
+    try:
+        binding = json.loads(resolved.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError("compositor runtime binding is not JSON") from error
+    required = {"schema", "producer_run_id", "commit", "runtime_id", "desktop", "architecture", "distribution", "format", "package", "runtime_receipt"}
+    if not isinstance(binding, dict) or set(binding) != required or binding.get("schema") != 1:
+        raise ValueError("compositor runtime binding schema is invalid")
+    if (binding.get("commit") != commit or binding.get("desktop") != desktop
+            or binding.get("architecture") != architecture or binding.get("distribution") != distribution
+            or binding.get("format") != format_name or not isinstance(binding.get("runtime_id"), str)
+            or not binding["runtime_id"] or not isinstance(binding.get("producer_run_id"), str)
+            or not re.fullmatch(r"[1-9][0-9]*", binding["producer_run_id"])):
+        raise ValueError("compositor runtime binding does not match this scenario")
+    for field in ("package", "runtime_receipt"):
+        item = binding[field]
+        if (not isinstance(item, dict) or set(item) != {"name", "sha256", "size_bytes"}
+                or not isinstance(item["name"], str) or not SAFE_NAME.fullmatch(item["name"])
+                or not isinstance(item["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"])
+                or not isinstance(item["size_bytes"], int) or item["size_bytes"] <= 0):
+            raise ValueError("compositor runtime binding artifact is invalid")
+    return binding
 
 
 def produce(args: argparse.Namespace) -> Path:
@@ -258,6 +323,12 @@ def produce(args: argparse.Namespace) -> Path:
         raise RuntimeError(f"native scenario driver failed; full output: {log_path}")
     commands, ipc = trace_rows(result.stdout, expected_assertions)
     installation = installation_report(result.stdout, packages, args.artifacts.resolve())
+    runtimes = runtime_reports(result.stdout, installation["formats"])
+    environment = runtime_environment()
+    binding = compositor_runtime_binding(
+        args.compositor_runtime_binding, args.commit, args.desktop, args.architecture,
+        environment["distribution"], installation["formats"][1],
+    )
     for argv in (installation["appimage_extract_argv"], installation["native_install_argv"]):
         if not any(row["argv"] == argv and "package_install" in row["assertions"] for row in commands):
             raise ValueError("actual package installation report lacks its executed command trace")
@@ -271,16 +342,18 @@ def produce(args: argparse.Namespace) -> Path:
         "upgrade_mode": upgrade_mode,
         "installed_formats": installed_formats,
         "installation": installation,
-        "environment": runtime_environment(),
+        "runtimes": runtimes,
+        "environment": environment,
         "commands": commands,
         "ipc": ipc,
+        "compositor_runtime": binding,
     }, indent=2) + "\n", encoding="utf-8")
-    attachments = [attachment(log_path), attachment(trace_path)]
-    for path in sorted(output.iterdir()):
+    attachments = [attachment(log_path, output), attachment(trace_path, output)]
+    for path in sorted(output.rglob("*")):
         if path in (log_path, trace_path):
             continue
         if path.is_file() and not path.is_symlink():
-            attachments.append(attachment(path))
+            attachments.append(attachment(path, output))
     receipt_name = f"linux-native-{args.architecture}-{args.desktop.lower()}-{args.session}.json"
     receipt_path = output / receipt_name
     receipt_path.write_text(json.dumps({
@@ -289,11 +362,12 @@ def produce(args: argparse.Namespace) -> Path:
         "architecture": args.architecture, "desktop": args.desktop, "session": args.session,
         "upgrade_mode": upgrade_mode,
         "installed_formats": installed_formats,
-        "environment": runtime_environment(),
+        "environment": environment,
         "packages": packages,
         "previous_packages": previous,
         "assertions": {name: True for name in sorted(expected_assertions)},
-        "trace": attachment(trace_path),
+        "compositor_runtime": binding,
+        "trace": attachment(trace_path, output),
         "evidence": attachments,
     }, indent=2) + "\n", encoding="utf-8")
     return receipt_path
@@ -315,6 +389,7 @@ def main() -> int:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--module-artifacts", required=True, type=Path)
     parser.add_argument("--module-fixtures", required=True, type=Path)
+    parser.add_argument("--compositor-runtime-binding", required=True, type=Path)
     args = parser.parse_args()
     print(produce(args))
     return 0

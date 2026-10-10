@@ -5,7 +5,7 @@ import argparse
 import hashlib
 import json
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Optional
 
 
@@ -42,14 +42,15 @@ def digest(path: Path) -> str:
 
 
 def regular_file(root: Path, name: str) -> Path:
-    if not isinstance(name, str) or not EVIDENCE_NAME.fullmatch(name):
+    parts = PurePosixPath(name).parts if isinstance(name, str) else ()
+    if not parts or any(part in (".", "..") or not EVIDENCE_NAME.fullmatch(part) for part in parts):
         raise ValueError("evidence attachment has an unsafe name")
     path = root / name
     try:
         resolved = path.resolve(strict=True)
     except FileNotFoundError as error:
         raise ValueError(f"evidence attachment is missing: {name}") from error
-    if resolved.parent != root.resolve() or path.is_symlink() or not resolved.is_file():
+    if root.resolve() not in resolved.parents or path.is_symlink() or not resolved.is_file():
         raise ValueError(f"evidence attachment is not a regular root file: {name}")
     return resolved
 
@@ -77,6 +78,25 @@ def assertion_set(upgrade_mode: object, session: object) -> set[str]:
     if session == "wayland":
         return assertions | {WAYLAND_KEYBOARD_ASSERTION}
     raise ValueError("evidence session is invalid")
+
+
+def verify_compositor_runtime(binding, receipt, native_format):
+    required = {"schema", "producer_run_id", "commit", "runtime_id", "desktop", "architecture", "distribution", "format", "package", "runtime_receipt"}
+    environment = receipt.get("environment")
+    if (not isinstance(binding, dict) or set(binding) != required or binding.get("schema") != 1
+            or binding.get("commit") != receipt.get("commit") or binding.get("desktop") != receipt.get("desktop")
+            or binding.get("architecture") != receipt.get("architecture") or not isinstance(environment, dict)
+            or binding.get("distribution") != environment.get("distribution") or binding.get("format") != native_format
+            or not isinstance(binding.get("producer_run_id"), str) or not re.fullmatch(r"[1-9][0-9]*", binding["producer_run_id"])
+            or not isinstance(binding.get("runtime_id"), str) or not binding["runtime_id"]):
+        raise ValueError("compositor runtime binding differs from its scenario")
+    for field in ("package", "runtime_receipt"):
+        item = binding.get(field)
+        if (not isinstance(item, dict) or set(item) != {"name", "sha256", "size_bytes"}
+                or not isinstance(item["name"], str) or not EVIDENCE_NAME.fullmatch(item["name"])
+                or not isinstance(item["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"])
+                or not isinstance(item["size_bytes"], int) or item["size_bytes"] <= 0):
+            raise ValueError("compositor runtime binding artifact is invalid")
 
 
 def verify_trace(root: Path, receipt: dict, architecture: str, desktop: str, session: str, version: str, commit: str, source_run_id: str, artifact_run_id: Optional[str], expected_assertions: set[str]) -> None:
@@ -186,6 +206,33 @@ def verify_trace(root: Path, receipt: dict, architecture: str, desktop: str, ses
         raise ValueError(f"scenario trace AppImage installation command was not executed: {name}")
     if not any(command["argv"] == native_argv and "package_install" in command["assertions"] for command in commands):
         raise ValueError(f"scenario trace native installation command was not executed: {name}")
+    runtimes = trace.get("runtimes")
+    if not isinstance(runtimes, list) or len(runtimes) != 2 or [row.get("format") if isinstance(row, dict) else None for row in runtimes] != formats:
+        raise ValueError(f"scenario trace has incomplete runtime records: {name}")
+    expected_names = {"copypaste", "copypaste-daemon", "copypaste-cli"}
+    baseline = None
+    for runtime in runtimes:
+        if set(runtime) != {"format", "gui_owned_daemon", "executables"} or runtime["gui_owned_daemon"] is not True:
+            raise ValueError(f"scenario runtime record is invalid: {name}")
+        executables = runtime["executables"]
+        if not isinstance(executables, dict) or set(executables) != expected_names:
+            raise ValueError(f"scenario runtime executable inventory is incomplete: {name}")
+        identity = {}
+        for executable, item in executables.items():
+            if (not isinstance(item, dict) or set(item) != {"path", "sha256", "size_bytes"}
+                    or not isinstance(item["path"], str) or not Path(item["path"]).is_absolute()
+                    or Path(item["path"]).name != executable or not isinstance(item["size_bytes"], int)
+                    or item["size_bytes"] <= 0 or not isinstance(item["sha256"], str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"])):
+                raise ValueError(f"scenario runtime executable provenance is invalid: {name}")
+            if ((runtime["format"] == "AppImage" and "/squashfs-root/usr/lib/copypaste/" not in item["path"])
+                    or (runtime["format"] != "AppImage" and item["path"] != f"/usr/lib/copypaste/{executable}")):
+                raise ValueError(f"scenario runtime record does not identify its installed format: {name}")
+            identity[executable] = (item["sha256"], item["size_bytes"])
+        if baseline is None:
+            baseline = identity
+        elif identity != baseline:
+            raise ValueError(f"portable and installed-native runtime executables differ: {name}")
     if receipt.get("trace") != {"name": name, "sha256": digest(path), "size_bytes": path.stat().st_size}:
         raise ValueError(f"receipt does not bind its scenario trace: {name}")
 
@@ -218,6 +265,11 @@ def verify(root: Path, artifacts: Path, version: str, commit: str, source_run_id
                 native_format = next(format_name for format_name in installed_formats if format_name != "AppImage")
                 if (native_format == "deb" and environment["distribution"] not in {"ubuntu", "debian"}) or (native_format == "rpm" and environment["distribution"] != "fedora"):
                     raise ValueError(f"evidence native package manager differs from runtime: {name}")
+                trace_path = regular_file(root, f"linux-native-{architecture}-{desktop.lower()}-{session}.trace.json")
+                trace = json.loads(trace_path.read_text(encoding="utf-8"))
+                if receipt.get("compositor_runtime") != trace.get("compositor_runtime"):
+                    raise ValueError(f"compositor runtime binding differs from trace: {name}")
+                verify_compositor_runtime(receipt.get("compositor_runtime"), receipt, native_format)
                 for format_name in installed_formats:
                     installed_coverage[(architecture, format_name)] += 1
                 expected_assertions = assertion_set(receipt.get("upgrade_mode"), session)

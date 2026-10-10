@@ -111,6 +111,10 @@ run_traced desktop_uri_icon test -x "$work/appimage-current/squashfs-root/AppRun
 run_traced desktop_uri_icon test -f "$work/appimage-current/squashfs-root/com.copypaste.CopyPaste.desktop"
 run_traced desktop_uri_icon grep -Fx 'MimeType=x-scheme-handler/copypaste;' "$work/appimage-current/squashfs-root/com.copypaste.CopyPaste.desktop"
 run_traced desktop_uri_icon test -f "$work/appimage-current/squashfs-root/com.copypaste.CopyPaste.png"
+appimage_prefix="$work/appimage-current/squashfs-root/usr/lib/copypaste"
+for executable in copypaste copypaste-daemon copypaste-cli; do
+  test -x "$appimage_prefix/$executable"
+done
 
 if [[ -f /etc/fedora-release ]]; then
   native_format=rpm
@@ -146,6 +150,11 @@ print("COPYPASTE_QUALIFICATION_INSTALL " + json.dumps({
 }, separators=(",", ":")))
 PY
 
+native_prefix="/usr/lib/copypaste"
+for executable in copypaste copypaste-daemon copypaste-cli; do
+  test -x "$native_prefix/$executable"
+done
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 args=(--artifacts "$ARTIFACTS" --version "$VERSION" --architecture "$ARCHITECTURE" --desktop "$DESKTOP" --session "$SESSION" --evidence-dir "$EVIDENCE_DIR" --module-artifacts "$MODULE_ARTIFACTS" --module-fixtures "$MODULE_FIXTURES")
 if [[ "$FIRST_INSTALL_BASELINE" == true ]]; then
@@ -153,4 +162,7 @@ if [[ "$FIRST_INSTALL_BASELINE" == true ]]; then
 else
   args+=(--previous-artifacts "$PREVIOUS_ARTIFACTS" --previous-version "$PREVIOUS_VERSION")
 fi
-exec python3 "$ROOT/scripts/release/linux-native-fixture-driver.py" "${args[@]}"
+python3 "$ROOT/scripts/release/linux-native-fixture-driver.py" "${args[@]}" \
+  --runtime-format AppImage --runtime-prefix "$appimage_prefix"
+python3 "$ROOT/scripts/release/linux-native-fixture-driver.py" "${args[@]}" \
+  --runtime-format "$native_format" --runtime-prefix "$native_prefix"
