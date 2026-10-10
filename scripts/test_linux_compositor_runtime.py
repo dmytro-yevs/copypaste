@@ -107,6 +107,10 @@ class InstalledRuntimeTest(unittest.TestCase):
 class CompositorRuntimeWorkflowTest(unittest.TestCase):
     def test_uses_authenticated_runtime_artifacts_and_generated_launchers(self):
         workflow = (ROOT / ".github/workflows/linux-native-qualification.yml").read_text(encoding="utf-8")
+        release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn("uses: ./.github/workflows/compositor-runtime.yml", release)
+        self.assertIn("TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}", release)
+        self.assertIn("TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}", release)
         self.assertIn("compositor_runtime_run_id:", workflow)
         self.assertIn("verify-linux-compositor-runtime.py source", workflow)
         self.assertIn("verify-linux-compositor-runtime.py artifact", workflow)
@@ -125,7 +129,9 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
             self.assertIn("copypaste-compositor-session-$runtime_id", script)
             self.assertNotIn("gnome-shell --headless", script)
             self.assertIn("COPYPASTE_COMPOSITOR_EXECUTION=stock-x11", script)
-            self.assertIn("receipt-listed private compositor entrypoint", script)
+            self.assertIn("COPYPASTE_COMPOSITOR_EXECUTION=private-wayland", script)
+            self.assertIn("COMPOSITOR_QUALIFICATION_ENTRYPOINT", script)
+            self.assertIn("record-linux-compositor-session.py", script)
             self.assertIn("COPYPASTE_COMPOSITOR_EXECUTION=private-wayland", script)
             self.assertIn("COMPOSITOR_QUALIFICATION_ENTRYPOINT", script)
             self.assertIn("record-linux-compositor-session.py", script)
