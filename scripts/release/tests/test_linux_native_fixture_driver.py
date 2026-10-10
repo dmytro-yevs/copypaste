@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import tempfile
 from types import SimpleNamespace
@@ -203,6 +204,33 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
                     driver.gui_daemon_data_dir(SimpleNamespace(pid=100), data_home)
             finally:
                 driver.PROC_ROOT = original
+
+    def test_pairing_uri_uses_the_live_peer_invitation_without_retaining_it(self):
+        uri = driver.pairing_uri_from_invite({
+            "code": "ABCDEFGH", "listen_addr": "192.0.2.1:47654", "pairing_id": "pairing-id",
+        })
+        self.assertTrue(uri.startswith("copypaste://pair/v2?"))
+        self.assertIn("address=192.0.2.1%3A47654", uri)
+
+    def test_pairing_uri_rejects_a_peer_invitation_without_identity(self):
+        with self.assertRaisesRegex(RuntimeError, "invalid"):
+            driver.pairing_uri_from_invite({
+                "code": "ABCDEFGH", "listen_addr": "192.0.2.1:47654", "pairing_id": "",
+            })
+
+    def test_pairing_uri_rejects_non_short_peer_code(self):
+        with self.assertRaisesRegex(RuntimeError, "short-code"):
+            driver.pairing_uri_from_invite({
+                "code": "secret-token", "listen_addr": "192.0.2.1:47654", "pairing_id": "pairing-id",
+            })
+
+    def test_camera_pairing_uri_is_owner_only_and_removed_as_a_regular_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "pairing-uri"
+            driver.write_private_pairing_uri(path, "copypaste://pair/v1?code=secret")
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            driver.remove_private_regular(path)
+            self.assertFalse(path.exists())
 
 
 if __name__ == "__main__":

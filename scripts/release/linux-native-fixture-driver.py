@@ -21,7 +21,7 @@ import importlib.util
 import re
 from contextlib import contextmanager
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urlencode, urlparse
 
 
 PROVIDER = Path(__file__).with_name("linux-clipboard-provider.py")
@@ -37,6 +37,7 @@ UPGRADE_CANARY = "copypaste-upgrade-canary"
 PROC_ROOT = Path("/proc")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 WAYLAND_INPUT_TARGET_TITLE = "CopyPaste Qualification Wayland Input Target"
+MEDIA_PREFIX = "COPYPASTE_QUALIFICATION_MEDIA "
 
 
 def module_qualification_helper():
@@ -69,6 +70,31 @@ def require_helper(path, description):
     if path.is_symlink() or not stat.S_ISREG(details.st_mode) or details.st_size <= 0:
         raise RuntimeError(f"{description} must be a regular file")
     return path
+
+
+def media_record(result, kind, runtime_format=None, emit=True):
+    """Validate and relay one redacted media-helper record to the producer."""
+    try:
+        records = [
+            json.loads(line.removeprefix(MEDIA_PREFIX))
+            for line in result.stdout.decode("utf-8").splitlines()
+            if line.startswith(MEDIA_PREFIX)
+        ]
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("native media helper emitted invalid evidence") from error
+    if len(records) != 1 or not isinstance(records[0], dict) or records[0].get("kind") != kind:
+        raise RuntimeError("native media helper emitted incomplete evidence")
+    if runtime_format is not None:
+        records[0]["runtime_format"] = runtime_format
+    if emit:
+        print(MEDIA_PREFIX + json.dumps(records[0], separators=(",", ":"), sort_keys=True))
+    return records[0]
+
+
+def run_media(*argv, kind, runtime_format=None, emit=True):
+    require_helper(NATIVE_MEDIA, "native media helper")
+    result = run([sys.executable, str(NATIVE_MEDIA), *argv])
+    return result, media_record(result, kind, runtime_format=runtime_format, emit=emit)
 
 
 def write_wayland_evidence(evidence_dir, name, receipt):
@@ -778,6 +804,118 @@ def require_pairing_sync(prefix, cli, environment, workspace, primary_socket):
             peer.wait(timeout=5)
 
 
+def pairing_uri_from_invite(invite):
+    """Serialize the versioned URI from the live peer invitation without logging it."""
+    if not isinstance(invite, dict):
+        raise RuntimeError("camera peer did not create a typed pairing invitation")
+    code = invite.get("code")
+    address = invite.get("listen_addr")
+    pairing_id = invite.get("pairing_id")
+    if (not isinstance(code, str) or not code or len(code) > 512
+            or not isinstance(address, str) or not address or len(address) > 256
+            or not isinstance(pairing_id, str) or not pairing_id):
+        raise RuntimeError("camera peer pairing invitation is invalid")
+    # `PairingManager::create_invite` always exposes a short PairingCode; the
+    # Rust PairingLink contract serializes that exact code as a v2 URI.
+    if not re.fullmatch(r"[A-Z0-9]{8}", code):
+        raise RuntimeError("camera peer pairing invitation does not use the current short-code contract")
+    return "copypaste://pair/v2?" + urlencode({"code": code, "address": address})
+
+
+def write_private_pairing_uri(path, uri):
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600)
+    except OSError as error:
+        raise RuntimeError("camera pairing URI path already exists") from error
+    try:
+        value = (uri + "\n").encode("utf-8")
+        if os.write(descriptor, value) != len(value):
+            raise RuntimeError("could not persist camera pairing URI")
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def remove_private_regular(path):
+    if not path.exists():
+        return
+    details = path.lstat()
+    if path.is_symlink() or not stat.S_ISREG(details.st_mode):
+        raise RuntimeError("camera qualification path is unsafe")
+    path.unlink()
+
+
+def require_camera_qr_scan(prefix, cli, environment, workspace, gui_pid, runtime_format):
+    """Scan a live peer's pairing URI through the installed GUI's V4L2 camera."""
+    device_value = os.environ.get("COPYPASTE_QUALIFICATION_V4L2_DEVICE")
+    if not isinstance(device_value, str) or not device_value:
+        raise RuntimeError("owned qualification V4L2 device is unavailable")
+    device = Path(device_value)
+    camera = workspace / "camera-qr"
+    camera.mkdir(mode=0o700)
+    if camera.is_symlink() or stat.S_IMODE(camera.stat().st_mode) != 0o700:
+        raise RuntimeError("camera qualification directory must be owner-only")
+    uri_file = camera / "pairing-uri"
+    ready_file = camera / "ready"
+    pid_file = camera / "feed.json"
+    peer_socket = workspace / "camera-peer.sock"
+    peer_data = workspace / "camera-peer-data"
+    peer_environment = {**environment, "COPYPASTE_SOCKET": str(peer_socket)}
+    peer = subprocess.Popen(
+        [str(prefix / "copypaste-daemon"), "--foreground", "--data-dir", str(peer_data), "--port", "0"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=peer_environment,
+    )
+    try:
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            try:
+                status(cli, peer_environment)
+                break
+            except (subprocess.CalledProcessError, json.JSONDecodeError, RuntimeError):
+                time.sleep(0.1)
+        else:
+            raise RuntimeError("camera peer daemon did not become ready")
+        response = ipc(peer_socket, "pair_create_invite", {})
+        uri = pairing_uri_from_invite(response.get("data", {}).get("pairing_invite"))
+        write_private_pairing_uri(uri_file, uri)
+        run_media(
+            "click", "--pid", str(gui_pid), "--target", "Devices", "--expect", "Nearby devices",
+            "--timeout-seconds", "8", kind="atspi_click", emit=False,
+        )
+        run_media(
+            "click", "--pid", str(gui_pid), "--target", "Scan QR", "--expect", "Scan QR code",
+            "--timeout-seconds", "8", kind="atspi_click", runtime_format=runtime_format,
+        )
+        run_media(
+            "feed-qr", "--uri-file", str(uri_file), "--device", str(device),
+            "--ready-file", str(ready_file), "--pid-file", str(pid_file), kind="v4l2_qr_feed", runtime_format=runtime_format,
+        )
+        run_media(
+            "click", "--pid", str(gui_pid), "--target", "Start scanner", "--expect", "Confirm on both devices",
+            "--timeout-seconds", "8", kind="atspi_click", runtime_format=runtime_format,
+        )
+        observed, _ = run_media(
+            "observe-camera", "--pid", str(gui_pid), "--expect", "Confirm on both devices",
+            "--runtime-prefix", str(prefix), "--runtime-format", runtime_format,
+            kind="camera_qr_scan_observed", runtime_format=runtime_format,
+        )
+        emit_result("camera_qr_scan", observed)
+    finally:
+        try:
+            if pid_file.exists():
+                run_media("stop-qr", "--pid-file", str(pid_file), kind="v4l2_qr_feed_stopped", runtime_format=runtime_format)
+        finally:
+            remove_private_regular(uri_file)
+            peer.terminate()
+            try:
+                peer.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                peer.kill()
+                peer.wait(timeout=5)
+
+
 def require_not_captured(cli, environment, workspace, evidence_dir, label, payloads, assertion=None, protected_mime=None):
     before = cli_item_count(status(cli, environment))
     with clipboard_provider(workspace, evidence_dir, label, payloads, environment) as activity:
@@ -989,6 +1127,7 @@ def main():
                         args, gui_pid=app.pid, cli=cli, environment=environment,
                         workspace=workspace, socket_path=runtime_socket,
                     )
+                require_camera_qr_scan(prefix, cli, environment, workspace, app.pid, args.runtime_format)
                 emit_runtime(args.runtime_format, prefix)
             finally:
                 app.terminate()

@@ -31,6 +31,7 @@ MAX_PAYLOAD_BYTES = 8192
 MAX_TIMEOUT_SECONDS = 20
 MEDIA_SCHEMA = 1
 VIDEO_DEVICE = re.compile(r"/dev/video[0-9]+$")
+PACKAGE_NAME = re.compile(r"[A-Za-z0-9.+_-]+(?::(?:amd64|arm64))?$")
 
 
 class MediaQualificationError(RuntimeError):
@@ -187,6 +188,110 @@ def click_accessible(registry: Any, *, pid: int, target: str, expected: str, tim
     raise MediaQualificationError("installed UI did not reach the expected state")
 
 
+def mapped_file(mappings: str, fragment: str) -> Path:
+    candidates = set()
+    for line in mappings.splitlines():
+        fields = line.split()
+        if len(fields) >= 6 and fragment in fields[-1] and fields[-1].startswith("/"):
+            candidates.add(Path(fields[-1]).resolve(strict=True))
+    if len(candidates) != 1:
+        raise MediaQualificationError(f"installed GUI did not map exactly one {fragment}")
+    return next(iter(candidates))
+
+
+def manifest_file(appdir: Path, item: dict[str, Any]) -> Path:
+    path = appdir / item.get("path", "")
+    try:
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(appdir)
+    except (OSError, ValueError) as error:
+        raise MediaQualificationError("AppImage camera manifest has an unsafe path") from error
+    if not resolved.is_file() or sha256(resolved) != item.get("sha256"):
+        raise MediaQualificationError("AppImage camera manifest does not bind shipped bytes")
+    return resolved
+
+
+def package_metadata(path: Path, runtime_format: str) -> dict[str, str]:
+    if runtime_format == "deb":
+        try:
+            owner = subprocess.run(["dpkg-query", "--search", str(path)], check=True, text=True, capture_output=True).stdout.split(": ", 1)[0].split(",", 1)[0]
+            version = subprocess.run(["dpkg-query", "--showformat=${Version}", "--show", owner], check=True, text=True, capture_output=True).stdout.strip()
+        except (OSError, subprocess.SubprocessError) as error:
+            raise MediaQualificationError("native camera dependency is not package-owned") from error
+    elif runtime_format == "rpm":
+        try:
+            owner = subprocess.run(["rpm", "-qf", "--qf", "%{NAME}", str(path)], check=True, text=True, capture_output=True).stdout.strip()
+            version = subprocess.run(["rpm", "-q", "--qf", "%{VERSION}-%{RELEASE}", owner], check=True, text=True, capture_output=True).stdout.strip()
+        except (OSError, subprocess.SubprocessError) as error:
+            raise MediaQualificationError("native camera dependency is not package-owned") from error
+    else:
+        raise MediaQualificationError("native camera format is invalid")
+    if not PACKAGE_NAME.fullmatch(owner) or not version or len(version) > 256:
+        raise MediaQualificationError("native camera package metadata is invalid")
+    return {"package": owner, "version": version, "sha256": sha256(path)}
+
+
+def packaged_camera_runtime(prefix: Path, runtime_format: str, mappings: str) -> tuple[dict[str, Path], dict[str, Any]]:
+    try:
+        prefix = prefix.resolve(strict=True)
+    except OSError as error:
+        raise MediaQualificationError("installed runtime prefix is unavailable") from error
+    if prefix.is_symlink() or not prefix.is_dir():
+        raise MediaQualificationError("installed runtime prefix is unsafe")
+    camera = prefix / "lib" / "libcamera_desktop_plugin.so"
+    regular_file(camera, maximum_size=64 * 1024 * 1024)
+    if runtime_format != "AppImage":
+        files = {"camera_plugin": camera, "gstreamer_library": mapped_file(mappings, "libgstreamer-1.0.so"), "v4l2_plugin": mapped_file(mappings, "libgstvideo4linux2.so")}
+        return files, {"origin": "distro_package", "gstreamer_library": package_metadata(files["gstreamer_library"], runtime_format), "v4l2_plugin": package_metadata(files["v4l2_plugin"], runtime_format)}
+    appdir = prefix.parents[2]
+    try:
+        manifest = json.loads((appdir / "usr/share/copypaste/gstreamer-camera-runtime.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise MediaQualificationError("AppImage camera manifest is unavailable") from error
+    if not isinstance(manifest, dict) or manifest.get("schema") != 1:
+        raise MediaQualificationError("AppImage camera manifest is invalid")
+    libraries = [item for item in manifest.get("runtime_libraries", []) if isinstance(item, dict) and Path(item.get("path", "")).name.startswith("libgstreamer-1.0.so")]
+    elements = [item for item in manifest.get("elements", []) if isinstance(item, dict) and item.get("element") == "v4l2src"]
+    if len(libraries) != 1 or len(elements) != 1 or not isinstance(manifest.get("camera_plugin"), dict):
+        raise MediaQualificationError("AppImage camera manifest is incomplete")
+    files = {"camera_plugin": manifest_file(appdir, manifest["camera_plugin"]), "gstreamer_library": manifest_file(appdir, libraries[0]), "v4l2_plugin": manifest_file(appdir, elements[0])}
+    return files, {"origin": "appimage_manifest", "gstreamer_library": {"sha256": sha256(files["gstreamer_library"])}, "v4l2_plugin": {"sha256": sha256(files["v4l2_plugin"])}}
+
+
+def gstreamer_mapping_sha256(mappings: str, runtime: dict[str, Path]) -> str:
+    """Return a redacted proof that this GUI mapped its packaged camera runtime."""
+    matches = []
+    for name, path in runtime.items():
+        resolved = str(path.resolve(strict=True))
+        matching = [line for line in mappings.splitlines() if resolved in line]
+        if not matching:
+            raise MediaQualificationError(f"installed GUI did not map the packaged {name.replace('_', ' ')}")
+        matches.extend(matching)
+    return hashlib.sha256("\n".join(matches).encode("utf-8")).hexdigest()
+
+
+def observe_camera_scan(registry: Any, *, pid: int, expected: str, runtime_prefix: Path, runtime_format: str) -> dict[str, Any]:
+    """Bind the public pairing state to the GUI process that mapped GStreamer."""
+    application = atspi_application(registry, pid)
+    if matching_accessible(application, expected) is None:
+        raise MediaQualificationError("installed UI did not expose the decoded pairing state")
+    try:
+        mappings = Path(f"/proc/{pid}/maps").read_text(encoding="utf-8")
+    except OSError as error:
+        raise MediaQualificationError("installed GUI mappings are unavailable") from error
+    runtime, dependency = packaged_camera_runtime(runtime_prefix, runtime_format, mappings)
+    return redacted_record(
+        "camera_qr_scan_observed",
+        gui_pid=pid,
+        pairing_state_name_sha256=hashlib.sha256(expected.encode("utf-8")).hexdigest(),
+        gstreamer_mapping_sha256=gstreamer_mapping_sha256(mappings, runtime),
+        camera_plugin_sha256=sha256(runtime["camera_plugin"]),
+        gstreamer_library_sha256=sha256(runtime["gstreamer_library"]),
+        v4l2_plugin_sha256=sha256(runtime["v4l2_plugin"]),
+        dependency=dependency,
+    )
+
+
 def v4l2_device(path: Path) -> None:
     if not VIDEO_DEVICE.fullmatch(str(path)):
         raise MediaQualificationError("virtual camera path is invalid")
@@ -325,6 +430,11 @@ def main(argv: list[str] | None = None) -> int:
     click.add_argument("--target", required=True)
     click.add_argument("--expect", required=True)
     click.add_argument("--timeout-seconds", type=int, default=8)
+    observe = commands.add_parser("observe-camera", help="bind decoded camera pairing state to the installed GUI")
+    observe.add_argument("--pid", required=True, type=int)
+    observe.add_argument("--expect", required=True)
+    observe.add_argument("--runtime-prefix", required=True, type=Path)
+    observe.add_argument("--runtime-format", required=True, choices=("AppImage", "deb", "rpm"))
     feed = commands.add_parser("feed-qr", help="feed a QR URI to an existing virtual camera")
     feed.add_argument("--uri-file", required=True, type=Path)
     feed.add_argument("--device", required=True, type=Path)
@@ -342,6 +452,15 @@ def main(argv: list[str] | None = None) -> int:
             except ImportError as error:
                 raise MediaQualificationError("python3-pyatspi is required for native UI qualification") from error
             emit(click_accessible(pyatspi.Registry, pid=args.pid, target=args.target, expected=args.expect, timeout_seconds=args.timeout_seconds))
+            return 0
+        if args.command == "observe-camera":
+            if args.pid <= 0:
+                raise MediaQualificationError("AT-SPI arguments are invalid")
+            try:
+                import pyatspi  # type: ignore[import-not-found]
+            except ImportError as error:
+                raise MediaQualificationError("python3-pyatspi is required for native UI qualification") from error
+            emit(observe_camera_scan(pyatspi.Registry, pid=args.pid, expected=args.expect, runtime_prefix=args.runtime_prefix, runtime_format=args.runtime_format))
             return 0
         if args.command == "stop-qr":
             emit(stop_qr_feed(args.pid_file))

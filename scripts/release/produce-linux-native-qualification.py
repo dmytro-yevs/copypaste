@@ -27,7 +27,8 @@ ASSERTIONS = {
     "clipboard_tiff", "clipboard_file", "privacy_confidential",
     "privacy_excluded_app", "privacy_private_mode", "quick_paste_hotkey",
     "quick_paste_focus_restore", "tray_window_notification",
-    "encrypted_restart_persistence", "pairing_sync", "modules",
+    "encrypted_restart_persistence", "pairing_sync", "camera_qr_scan",
+    "external_file_drag", "modules",
 }
 X11_KEYBOARD_ASSERTION = "native_x11_keyboard_input"
 WAYLAND_KEYBOARD_ASSERTION = "portal_keyboard_grant"
@@ -41,6 +42,7 @@ IPC_PREFIX = "COPYPASTE_QUALIFICATION_IPC "
 INSTALL_PREFIX = "COPYPASTE_QUALIFICATION_INSTALL "
 RUNTIME_PREFIX = "COPYPASTE_QUALIFICATION_RUNTIME "
 UPGRADE_PREFIX = "COPYPASTE_QUALIFICATION_UPGRADE "
+MEDIA_PREFIX = "COPYPASTE_QUALIFICATION_MEDIA "
 MODULE_IDS = ("copypaste.ocr", "copypaste.semantic-search", "copypaste.supabase")
 IPC_OPERATIONS = {"list", "install", "set_preferences", "set_enabled", "invoke", "remove"}
 UPGRADE_CANARY_SHA256 = hashlib.sha256(b"copypaste-upgrade-canary").hexdigest()
@@ -69,7 +71,7 @@ def command_rows(stdout: str, expected_assertions: set[str]) -> list[dict]:
     for line in stdout.splitlines():
         if not line:
             continue
-        if line.startswith(IPC_PREFIX) or line.startswith(INSTALL_PREFIX) or line.startswith(RUNTIME_PREFIX) or line.startswith(UPGRADE_PREFIX):
+        if line.startswith(IPC_PREFIX) or line.startswith(INSTALL_PREFIX) or line.startswith(RUNTIME_PREFIX) or line.startswith(UPGRADE_PREFIX) or line.startswith(MEDIA_PREFIX):
             continue
         if not line.startswith("COPYPASTE_QUALIFICATION_COMMAND "):
             raise ValueError("scenario driver emitted unstructured output")
@@ -90,6 +92,93 @@ def command_rows(stdout: str, expected_assertions: set[str]) -> list[dict]:
     if not rows:
         raise ValueError("scenario driver produced no executed-command trace")
     return rows
+
+
+def verify_camera_sequence(records: list[dict], runtime_format: str) -> None:
+    """Validate one redacted installed-runtime camera scan sequence."""
+    required = (
+        ("atspi_click", {"gui_pid", "target_name_sha256", "expected_name_sha256", "action"}),
+        ("v4l2_qr_feed", {"device", "frame_format", "source", "decoder", "payload"}),
+        ("atspi_click", {"gui_pid", "target_name_sha256", "expected_name_sha256", "action"}),
+        ("camera_qr_scan_observed", {"gui_pid", "pairing_state_name_sha256", "gstreamer_mapping_sha256", "camera_plugin_sha256", "gstreamer_library_sha256", "v4l2_plugin_sha256", "dependency"}),
+        ("v4l2_qr_feed_stopped", {"device"}),
+    )
+    expected_hashes = (
+        ("Scan QR", "Scan QR code"), None,
+        ("Start scanner", "Confirm on both devices"), "Confirm on both devices", None,
+    )
+    if len(records) != len(required):
+        raise ValueError("camera QR qualification has incomplete media evidence")
+    gui_pids = set()
+    for record, (kind, fields), expectation in zip(records, required, expected_hashes):
+        if (record.get("schema") != 1 or record.get("kind") != kind or record.get("runtime_format") != runtime_format
+                or set(record) != {"schema", "kind", "runtime_format", *fields}):
+            raise ValueError("camera QR qualification media schema is invalid")
+        if kind == "atspi_click":
+            target, expected = expectation
+            if (not isinstance(record["gui_pid"], int) or record["gui_pid"] <= 0 or record["action"] != "click"
+                    or record["target_name_sha256"] != hashlib.sha256(target.encode("utf-8")).hexdigest()
+                    or record["expected_name_sha256"] != hashlib.sha256(expected.encode("utf-8")).hexdigest()):
+                raise ValueError("camera QR qualification did not drive the installed scanner controls")
+            gui_pids.add(record["gui_pid"])
+        elif kind == "v4l2_qr_feed":
+            payload = record["payload"]
+            if (not isinstance(record["device"], str) or not re.fullmatch(r"video[0-9]+", record["device"])
+                    or record["frame_format"] != "yuyv422" or record["source"] != "camera_desktop"
+                    or record["decoder"] != "CameraPluginPairingSource/ZxingQrFrameDecoder"
+                    or not isinstance(payload, dict) or set(payload) != {"sha256", "size_bytes"}
+                    or not isinstance(payload["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", payload["sha256"])
+                    or not isinstance(payload["size_bytes"], int) or not 1 <= payload["size_bytes"] <= 8192):
+                raise ValueError("camera QR qualification feed evidence is invalid")
+        elif kind == "camera_qr_scan_observed":
+            if (not isinstance(record["gui_pid"], int) or record["gui_pid"] <= 0
+                    or record["pairing_state_name_sha256"] != hashlib.sha256(expectation.encode("utf-8")).hexdigest()
+                    or not all(isinstance(record[field], str) and re.fullmatch(r"[0-9a-f]{64}", record[field])
+                               for field in ("gstreamer_mapping_sha256", "camera_plugin_sha256", "gstreamer_library_sha256", "v4l2_plugin_sha256"))):
+                raise ValueError("camera QR qualification did not observe the installed scanner runtime")
+            dependency = record["dependency"]
+            expected_origin = "appimage_manifest" if runtime_format == "AppImage" else "distro_package"
+            if not isinstance(dependency, dict) or dependency.get("origin") != expected_origin or set(dependency) != {"origin", "gstreamer_library", "v4l2_plugin"}:
+                raise ValueError("camera QR qualification dependency origin is invalid")
+            for item in (dependency["gstreamer_library"], dependency["v4l2_plugin"]):
+                required_fields = {"sha256"} if runtime_format == "AppImage" else {"package", "version", "sha256"}
+                if not isinstance(item, dict) or set(item) != required_fields or not isinstance(item.get("sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"]):
+                    raise ValueError("camera QR qualification dependency evidence is invalid")
+                if runtime_format != "AppImage" and (not isinstance(item["package"], str) or not re.fullmatch(r"[A-Za-z0-9.+_-]+(?::(?:amd64|arm64))?", item["package"]) or not isinstance(item["version"], str) or not item["version"]):
+                    raise ValueError("camera QR qualification package dependency evidence is invalid")
+            if (dependency["gstreamer_library"]["sha256"] != record["gstreamer_library_sha256"]
+                    or dependency["v4l2_plugin"]["sha256"] != record["v4l2_plugin_sha256"]):
+                raise ValueError("camera QR qualification dependency hashes do not bind mapped libraries")
+            gui_pids.add(record["gui_pid"])
+        elif kind == "v4l2_qr_feed_stopped" and (
+            not isinstance(record["device"], str) or not re.fullmatch(r"video[0-9]+", record["device"])
+        ):
+            raise ValueError("camera QR qualification feed cleanup evidence is invalid")
+    if records[1]["device"] != records[4]["device"]:
+        raise ValueError("camera QR qualification cleanup targeted a different device")
+    if len(gui_pids) != 1:
+        raise ValueError("camera QR qualification did not retain one installed GUI actor")
+
+
+def media_rows(stdout: str, formats: list[str]) -> list[dict]:
+    records = []
+    for line in stdout.splitlines():
+        if not line.startswith(MEDIA_PREFIX):
+            continue
+        try:
+            record = json.loads(line.removeprefix(MEDIA_PREFIX))
+        except json.JSONDecodeError as error:
+            raise ValueError("native media helper emitted invalid JSON") from error
+        if not isinstance(record, dict):
+            raise ValueError("native media helper emitted an invalid record")
+        records.append(record)
+    if len(formats) != 2 or formats[0] != "AppImage" or formats[1] not in {"deb", "rpm"}:
+        raise ValueError("camera QR qualification has invalid installed runtime formats")
+    if len(records) != 5 * len(formats):
+        raise ValueError("camera QR qualification has incomplete media evidence")
+    for index, format_name in enumerate(formats):
+        verify_camera_sequence(records[index * 5:(index + 1) * 5], format_name)
+    return records
 
 
 def ipc_rows(stdout: str, expected_assertions: set[str]) -> list[dict]:
@@ -424,6 +513,7 @@ def produce(args: argparse.Namespace) -> Path:
         args.version, installation,
     ) if upgrade_mode == "prior_release" else None)
     runtimes = runtime_reports(result.stdout, installation["formats"])
+    media = media_rows(result.stdout, installation["formats"])
     environment = runtime_environment()
     binding = compositor_runtime_binding(
         args.compositor_runtime_binding, args.commit, args.desktop, args.architecture,
@@ -452,6 +542,7 @@ def produce(args: argparse.Namespace) -> Path:
         "environment": environment,
         "commands": commands,
         "ipc": ipc,
+        "media": media,
         "compositor_runtime": binding,
         "compositor_session": compositor_session,
     }, indent=2) + "\n", encoding="utf-8")
