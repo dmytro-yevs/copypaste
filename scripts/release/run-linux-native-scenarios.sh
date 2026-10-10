@@ -70,20 +70,147 @@ if [[ -n "$PREVIOUS_ARTIFACTS" ]]; then
   PREVIOUS_ARTIFACTS="$(cd "$PREVIOUS_ARTIFACTS" && pwd)"
 fi
 
+init_trace_logs() {
+  [[ -d "$EVIDENCE_DIR" && ! -L "$EVIDENCE_DIR" ]] || {
+    echo "ERROR: evidence directory is unavailable" >&2
+    exit 1
+  }
+  EVIDENCE_DIR="$(cd "$EVIDENCE_DIR" && pwd)"
+  TRACE_LOG_DIR="$EVIDENCE_DIR/command-output"
+  if [[ -e "$TRACE_LOG_DIR" ]]; then
+    [[ -d "$TRACE_LOG_DIR" && ! -L "$TRACE_LOG_DIR" ]] || {
+      echo "ERROR: command evidence directory is unsafe" >&2
+      exit 1
+    }
+  else
+    (umask 077 && mkdir "$TRACE_LOG_DIR")
+  fi
+  chmod 700 "$TRACE_LOG_DIR"
+}
+
 run_traced() {
   local assertion="$1"
   shift
-  local returncode=0
-  "$@" || returncode=$?
-  python3 - "$assertion" "$returncode" "$@" <<'PY'
+  local stdout_log
+  local stderr_log
+  local status_log
+  local wrapper_returncode=0
+  local command_returncode
+  local budget_exhausted
+  stdout_log="$(mktemp "$TRACE_LOG_DIR/command.stdout.XXXXXX")"
+  stderr_log="$(mktemp "$TRACE_LOG_DIR/command.stderr.XXXXXX")"
+  status_log="$(mktemp "$TRACE_LOG_DIR/command.status.XXXXXX")"
+  chmod 600 "$stdout_log" "$stderr_log" "$status_log"
+  python3 - "$stdout_log" "$stderr_log" "$status_log" -- "$@" <<'PY' || wrapper_returncode=$?
+import os
+import selectors
+import stat
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+MAX_CHUNK_BYTES = 1024 * 1024
+MAX_COMMAND_LOG_BYTES = 16 * 1024 * 1024
+
+
+def open_log(path):
+    flags = os.O_WRONLY | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags)
+    metadata = os.fstat(descriptor)
+    if not stat.S_ISREG(metadata.st_mode):
+        os.close(descriptor)
+        raise RuntimeError("command evidence log is not a regular file")
+    return os.fdopen(descriptor, "wb", closefd=True)
+
+
+class StreamLog:
+    def __init__(self, path):
+        self.path = Path(path)
+        self.stream = open_log(path)
+        self.size = 0
+
+    def rotate(self):
+        self.stream.close()
+        descriptor, path = tempfile.mkstemp(
+            prefix=f"{self.path.name}.chunk.", dir=str(self.path.parent),
+        )
+        os.fchmod(descriptor, 0o600)
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            os.close(descriptor)
+            raise RuntimeError("command evidence log chunk is not a regular file")
+        self.stream = os.fdopen(descriptor, "wb", closefd=True)
+        self.size = 0
+
+    def write(self, data, available):
+        captured = min(len(data), available)
+        data = memoryview(data)[:captured]
+        while data:
+            if self.size == MAX_CHUNK_BYTES:
+                self.rotate()
+            count = min(len(data), MAX_CHUNK_BYTES - self.size)
+            self.stream.write(data[:count])
+            self.size += count
+            data = data[count:]
+        return captured
+
+    def close(self):
+        self.stream.close()
+
+
+stdout_path, stderr_path, status_path, divider, *argv = sys.argv[1:]
+if divider != "--" or not argv:
+    raise RuntimeError("invalid command trace invocation")
+with open_log(status_path) as status_log:
+    stdout_log = StreamLog(stdout_path)
+    stderr_log = StreamLog(stderr_path)
+    process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ, stdout_log)
+    selector.register(process.stderr, selectors.EVENT_READ, stderr_log)
+    captured = 0
+    budget_exhausted = False
+    while selector.get_map():
+        for key, _ in selector.select():
+            chunk = key.fileobj.read1(64 * 1024)
+            if not chunk:
+                selector.unregister(key.fileobj)
+                continue
+            remaining = MAX_COMMAND_LOG_BYTES - captured
+            if remaining > 0:
+                captured += key.data.write(chunk, remaining)
+            budget_exhausted |= len(chunk) > remaining
+    returncode = process.wait()
+    stdout_log.close()
+    stderr_log.close()
+    shell_returncode = returncode if returncode >= 0 else 128 - returncode
+    status_log.write(f"{shell_returncode} {int(budget_exhausted)}\n".encode())
+    raise SystemExit(120 if budget_exhausted else shell_returncode)
+PY
+  if ! IFS=' ' read -r command_returncode budget_exhausted < "$status_log"; then
+    return "$wrapper_returncode"
+  fi
+  if [[ ! "$command_returncode" =~ ^[0-9]+$ || ! "$budget_exhausted" =~ ^[01]$ ]]; then
+    return "$wrapper_returncode"
+  fi
+  python3 - "$assertion" "$command_returncode" "$@" <<'PY'
 import json
 import sys
 print("COPYPASTE_QUALIFICATION_COMMAND " + json.dumps({
     "argv": sys.argv[3:], "returncode": int(sys.argv[2]), "assertions": [sys.argv[1]],
 }, separators=(",", ":")))
 PY
-  return "$returncode"
+  if [[ "$budget_exhausted" == 1 ]]; then
+    echo "ERROR: command output exceeded the 16 MiB evidence budget; captured chunks are in $TRACE_LOG_DIR" >&2
+    [[ "$command_returncode" != 0 ]] || return 120
+  fi
+  return "$command_returncode"
 }
+
+init_trace_logs
 
 current_package() { printf '%s/CopyPaste-v%s-linux-%s.%s' "$ARTIFACTS" "$VERSION" "$ARCHITECTURE" "$1"; }
 previous_package() { printf '%s/CopyPaste-v%s-linux-%s.%s' "$PREVIOUS_ARTIFACTS" "$PREVIOUS_VERSION" "$ARCHITECTURE" "$1"; }
