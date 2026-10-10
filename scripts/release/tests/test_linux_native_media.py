@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 import stat
 import tempfile
@@ -103,6 +104,86 @@ class LinuxNativeMediaTest(unittest.TestCase):
              mock.patch.object(media, "matching_accessible", return_value=None):
             with self.assertRaisesRegex(media.MediaQualificationError, "control is absent"):
                 media.click_accessible(mock.Mock(), pid=1, target="Scan QR", expected="Pair a device", timeout_seconds=1)
+
+    def test_camera_observation_binds_the_gui_pairing_state_and_gstreamer_mapping(self):
+        application = mock.Mock()
+        with mock.patch.object(media, "atspi_application", return_value=application), \
+             mock.patch.object(media, "matching_accessible", return_value=mock.Mock()), \
+             mock.patch.object(media, "packaged_camera_runtime", return_value=({
+                 "camera_plugin": Path("/camera"), "gstreamer_library": Path("/gstreamer"), "v4l2_plugin": Path("/v4l2"),
+             }, {"origin": "appimage_manifest", "gstreamer_library": {"sha256": "b" * 64}, "v4l2_plugin": {"sha256": "b" * 64}})), \
+             mock.patch.object(media, "gstreamer_mapping_sha256", return_value="a" * 64), \
+             mock.patch.object(media, "sha256", return_value="b" * 64), \
+             mock.patch.object(Path, "read_text", return_value="mapped runtime"):
+            record = media.observe_camera_scan(
+                mock.Mock(), pid=123, expected="Confirm on both devices", runtime_prefix=Path("/runtime"), runtime_format="AppImage",
+            )
+        self.assertEqual(record["kind"], "camera_qr_scan_observed")
+        self.assertEqual(record["gui_pid"], 123)
+        self.assertEqual(record["gstreamer_mapping_sha256"], "a" * 64)
+        self.assertNotIn("Confirm on both devices", str(record))
+
+    def test_camera_observation_rejects_absent_decoded_pairing_state(self):
+        with mock.patch.object(media, "atspi_application", return_value=mock.Mock()), \
+             mock.patch.object(media, "matching_accessible", return_value=None):
+            with self.assertRaisesRegex(media.MediaQualificationError, "decoded pairing state"):
+                media.observe_camera_scan(mock.Mock(), pid=123, expected="Confirm on both devices", runtime_prefix=Path("/runtime"), runtime_format="AppImage")
+
+    def test_appimage_runtime_uses_manifest_versioned_gstreamer_library(self):
+        with tempfile.TemporaryDirectory() as directory:
+            appdir = Path(directory)
+            prefix = appdir / "usr/lib/copypaste"
+            camera = prefix / "lib/libcamera_desktop_plugin.so"
+            library = appdir / "usr/lib/gstreamer-runtime/libgstreamer-1.0.so.0"
+            v4l2 = appdir / "usr/lib/gstreamer-1.0/libgstvideo4linux2.so.0"
+            for path in (camera, library, v4l2):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(path.name.encode("utf-8"))
+            (library.parent / "libgstreamer-1.0.so").symlink_to(library.name)
+            manifest = {
+                "schema": 1,
+                "camera_plugin": {"path": str(camera.relative_to(appdir)), "sha256": media.sha256(camera)},
+                "runtime_libraries": [{"path": str(library.relative_to(appdir)), "sha256": media.sha256(library)}],
+                "elements": [{"element": "v4l2src", "path": str(v4l2.relative_to(appdir)), "sha256": media.sha256(v4l2)}],
+            }
+            target = appdir / "usr/share/copypaste/gstreamer-camera-runtime.json"
+            target.parent.mkdir(parents=True)
+            target.write_text(json.dumps(manifest), encoding="utf-8")
+            runtime, dependency = media.packaged_camera_runtime(prefix, "AppImage", "")
+            self.assertEqual(runtime["gstreamer_library"], library.resolve())
+            self.assertEqual(dependency["origin"], "appimage_manifest")
+
+    def test_native_runtime_records_distro_owned_media_dependencies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            prefix = Path(directory) / "usr/lib/copypaste"
+            camera = prefix / "lib/libcamera_desktop_plugin.so"
+            camera.parent.mkdir(parents=True)
+            camera.write_bytes(b"camera")
+            gstreamer = Path(directory) / "libgstreamer-1.0.so.0"
+            v4l2 = Path(directory) / "libgstvideo4linux2.so"
+            gstreamer.write_bytes(b"gstreamer")
+            v4l2.write_bytes(b"v4l2")
+            with mock.patch.object(media, "mapped_file", side_effect=[gstreamer, v4l2]), \
+                 mock.patch.object(media, "package_metadata", return_value={"package": "gstreamer1", "version": "1.0", "sha256": "a" * 64}):
+                _, dependency = media.packaged_camera_runtime(prefix, "deb", "maps")
+            self.assertEqual(dependency["origin"], "distro_package")
+
+    def test_mapped_file_accepts_multiple_elf_map_segments_for_one_library(self):
+        with tempfile.TemporaryDirectory() as directory:
+            library = Path(directory) / "libgstreamer-1.0.so.0"
+            library.write_bytes(b"gstreamer")
+            maps = "\n".join(f"0000-0001 r--p 00000000 00:00 0 {library}" for _ in range(5))
+            self.assertEqual(media.mapped_file(maps, "libgstreamer-1.0.so"), library.resolve())
+
+    def test_debian_multiarch_owner_flows_into_native_dependency_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            library = Path(directory) / "libgstreamer-1.0.so.0"
+            library.write_bytes(b"gstreamer")
+            completed = [mock.Mock(stdout="libgstreamer1.0-0:amd64: /usr/lib/libgstreamer-1.0.so.0\n"), mock.Mock(stdout="1.26.0-1\n")]
+            with mock.patch.object(media.subprocess, "run", side_effect=completed):
+                metadata = media.package_metadata(library, "deb")
+            self.assertEqual(metadata["package"], "libgstreamer1.0-0:amd64")
+            self.assertEqual(metadata["version"], "1.26.0-1")
 
 
 if __name__ == "__main__":
