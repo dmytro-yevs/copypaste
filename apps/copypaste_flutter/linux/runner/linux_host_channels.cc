@@ -1166,7 +1166,7 @@ void integration_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
     const auto xdg_startup =
         LinuxXdgStartup::CreateForCurrentExecutable(&error);
     const LinuxXdgStartupStatus startup_status =
-        xdg_startup ? xdg_startup->Status() : LinuxXdgStartupStatus{};
+        xdg_startup ? xdg_startup->GetStatus() : LinuxXdgStartupStatus{};
     fl_value_set_string_take(status, "startAtLogin",
                              fl_value_new_bool(startup_status.start_at_login));
     fl_value_set_string_take(status, "uriRegistered",
