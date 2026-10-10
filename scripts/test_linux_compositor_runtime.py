@@ -210,6 +210,32 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
             script.index('DESTDIR="$mutter_runtime" meson install -C "$shell_build" --no-rebuild'),
         )
 
+    def test_private_shell_entrypoints_find_their_private_shell_library_on_both_supported_architectures(self):
+        script = (ROOT / "packaging/linux/desktop-integrations/gnome-shell-extension/mutter/build-private-shell.sh").read_text(encoding="utf-8")
+        private_library_path = (
+            'private_library_path="$root/lib:$root/lib64:$root/usr/lib:'
+            '$root/usr/lib/x86_64-linux-gnu:$root/usr/lib/x86_64-linux-gnu/gnome-shell:'
+            '$root/usr/lib/aarch64-linux-gnu:$root/usr/lib/aarch64-linux-gnu/gnome-shell"'
+        )
+        self.assertEqual(script.count(private_library_path), 2)
+        self.assertEqual(script.count('export LD_LIBRARY_PATH="$private_library_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"'), 2)
+
+    def test_gnome_fixture_scopes_private_libraries_to_the_compositor_and_waits_for_extensions_api(self):
+        script = (ROOT / "scripts/release/run-linux-native-desktop-session.sh").read_text(encoding="utf-8")
+        self.assertNotIn('export LD_LIBRARY_PATH="$native/lib', script)
+        self.assertIn('LD_LIBRARY_PATH="$compositor_library_path" gnome-shell --x11 --replace', script)
+        self.assertIn('LD_LIBRARY_PATH="$compositor_library_path" "$COMPOSITOR_QUALIFICATION_ENTRYPOINT"', script)
+        self.assertIn(
+            'wait_for \'gdbus call --session --dest org.gnome.Shell.Extensions '
+            '--object-path /org/gnome/Shell/Extensions --method '
+            'org.gnome.Shell.Extensions.ListExtensions >/dev/null 2>&1\'',
+            script,
+        )
+        self.assertLess(
+            script.index('org.gnome.Shell.Extensions.ListExtensions'),
+            script.index('session_phase=enable_appindicator'),
+        )
+
     def test_private_shell_revision_marker_is_not_receipt_listed_payload(self):
         script = (ROOT / "packaging/linux/desktop-integrations/gnome-shell-extension/mutter/verify-patch.sh").read_text(encoding="utf-8")
         marker = '"$runtime_output/.copypaste-gnome-shell-revision"'
@@ -249,6 +275,28 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
         self.assertIn("KDE qualification must use the Fedora", generic)
         fedora_wrapper = (ROOT / "scripts/release/run-fedora-plasma6-qualification.sh").read_text(encoding="utf-8")
         self.assertIn("--device \"$V4L2_DEVICE:$V4L2_DEVICE\"", fedora_wrapper)
+
+    def test_fedora_kde_scopes_private_libraries_to_the_compositor_child(self):
+        session = (ROOT / "scripts/release/run-fedora-plasma6-session.sh").read_text(encoding="utf-8")
+        private_libraries = (
+            'LD_LIBRARY_PATH="$runtime_root/lib:$runtime_root/lib64:$runtime_root/usr/lib:'
+            '$runtime_root/usr/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"'
+        )
+        self.assertIn(private_libraries + ' \\\n      "$COMPOSITOR_QUALIFICATION_ENTRYPOINT"', session)
+        self.assertNotIn('export ' + private_libraries, session)
+        self.assertLess(session.index(private_libraries), session.index('kpackagetool6 --version'))
+
+    def test_fedora_restores_only_root_owned_evidence_after_docker_returns(self):
+        wrapper = (ROOT / "scripts/release/run-fedora-plasma6-qualification.sh").read_text(encoding="utf-8")
+        self.assertIn('[[ ! -L "$EVIDENCE" ]]', wrapper)
+        self.assertIn('evidence_root="$(realpath -e -- "$EVIDENCE")"', wrapper)
+        self.assertIn('source_owner="$(stat --format=\'%u:%g\' "$ROOT")"', wrapper)
+        self.assertIn(
+            'find "$evidence_root" -xdev -depth -uid 0 -exec chown --no-dereference "$source_owner" {} +',
+            wrapper,
+        )
+        self.assertLess(wrapper.index('docker_status=$?'), wrapper.index('find "$evidence_root"'))
+        self.assertIn('exit "$docker_status"', wrapper)
 
 
 if __name__ == "__main__":

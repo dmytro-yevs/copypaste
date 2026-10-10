@@ -28,6 +28,8 @@ cat > "$entrypoint" <<'EOF'
 #!/bin/sh
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+private_library_path="$root/lib:$root/lib64:$root/usr/lib:$root/usr/lib/x86_64-linux-gnu:$root/usr/lib/x86_64-linux-gnu/gnome-shell:$root/usr/lib/aarch64-linux-gnu:$root/usr/lib/aarch64-linux-gnu/gnome-shell"
+export LD_LIBRARY_PATH="$private_library_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 exec "$root/bin/gnome-shell" --wayland
 EOF
 chmod 755 "$entrypoint"
@@ -37,6 +39,8 @@ cat > "$qualification_entrypoint" <<'EOF'
 set -eu
 [ "$#" -eq 0 ] || { echo "CopyPaste GNOME qualification session does not accept arguments" >&2; exit 64; }
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+private_library_path="$root/lib:$root/lib64:$root/usr/lib:$root/usr/lib/x86_64-linux-gnu:$root/usr/lib/x86_64-linux-gnu/gnome-shell:$root/usr/lib/aarch64-linux-gnu:$root/usr/lib/aarch64-linux-gnu/gnome-shell"
+export LD_LIBRARY_PATH="$private_library_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 exec "$root/bin/gnome-shell" --headless --virtual-monitor 1280x800
 EOF
 chmod 755 "$qualification_entrypoint"

@@ -38,6 +38,10 @@ done
 [[ "$V4L2_DEVICE" =~ ^/dev/video[0-9]+$ && -c "$V4L2_DEVICE" ]]
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+[[ ! -L "$EVIDENCE" ]] || { echo "ERROR: evidence directory must not be a symbolic link" >&2; exit 2; }
+evidence_root="$(realpath -e -- "$EVIDENCE")"
+[[ -d "$evidence_root" ]] || { echo "ERROR: evidence directory is unavailable" >&2; exit 2; }
+source_owner="$(stat --format='%u:%g' "$ROOT")"
 case "$ARCHITECTURE" in
   x86_64) platform=linux/amd64 ;;
   aarch64) platform=linux/arm64 ;;
@@ -52,6 +56,20 @@ mounts+=(--volume "$(cd "$COMPOSITOR_RUNTIME" && pwd):/compositor-runtime:ro")
 if [[ -n "$PREVIOUS_ARTIFACTS" ]]; then
   mounts+=(--volume "$(cd "$PREVIOUS_ARTIFACTS" && pwd):/previous:ro")
 fi
+set +e
 docker run --rm --platform "$platform" \
   --cap-add SYS_NICE --device "$V4L2_DEVICE:$V4L2_DEVICE" --env "COPYPASTE_QUALIFICATION_V4L2_DEVICE=$V4L2_DEVICE" "${mounts[@]}" --workdir /work "$image" \
   /work/scripts/release/run-fedora-plasma6-session.sh --session "$SESSION" --companion-source /companion --compositor-runtime /compositor-runtime --compositor-runtime-binding /compositor-runtime/$(basename "$COMPOSITOR_RUNTIME_BINDING") -- "$@"
+docker_status=$?
+set -e
+
+if find "$evidence_root" -xdev -depth -uid 0 -exec chown --no-dereference "$source_owner" {} +; then
+  restore_status=0
+else
+  restore_status=$?
+fi
+
+if [[ "$docker_status" -ne 0 ]]; then
+  exit "$docker_status"
+fi
+exit "$restore_status"
