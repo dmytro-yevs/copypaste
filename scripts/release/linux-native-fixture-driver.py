@@ -30,6 +30,7 @@ MODULE_QUALIFICATION = Path(__file__).with_name("linux-module-qualification.py")
 DESKTOP_ACCEPTANCE = Path(__file__).with_name("linux-desktop-acceptance.py")
 WAYLAND_QUICK_PASTE = Path(__file__).with_name("linux-wayland-quick-paste.py")
 NATIVE_MEDIA = Path(__file__).with_name("linux-native-media.py")
+EXTERNAL_FILE_DRAG = Path(__file__).with_name("linux-native-file-drag.py")
 SOURCE_APPLICATION_ID = "org.copypaste.QualificationSource"
 SOURCE_APPLICATION_NAME = "CopyPaste Qualification Source"
 CAPTURE_TIMEOUT_SECONDS = 8
@@ -633,6 +634,27 @@ def require_file_capture(cli, environment, workspace, evidence_dir, session):
     emit_result("clipboard_file", returned_uri)
 
 
+def require_external_file_drag(cli, environment, workspace, gui_pid, session):
+    """Drop a URI-list from a separate GTK client and observe its History item through the CLI."""
+    require_helper(EXTERNAL_FILE_DRAG, "external GTK file-drag helper")
+    before = cli_item_count(status(cli, environment))
+    before_ids = {item.get("id") for item in list_items(cli, environment)}
+    result = run(
+        [
+            sys.executable, str(EXTERNAL_FILE_DRAG), "--session", session,
+            "--workspace", str(workspace), "--gui-pid", str(gui_pid),
+        ],
+        env=environment,
+        timeout=45,
+    )
+    wait_for_count(cli, environment, before + 1)
+    item = newest_item(list_items(cli, environment), before_ids, "file")
+    details = item.get("file_details")
+    if not isinstance(details, dict) or details.get("filename") != "external-file-drag-fixture.txt" or details.get("size_bytes") != 51:
+        raise RuntimeError("external GTK file drag did not retain the expected History attachment")
+    emit_result("external_file_drag", result)
+
+
 def wait_for_window(name, environment):
     deadline = time.monotonic() + 8
     while time.monotonic() < deadline:
@@ -989,6 +1011,7 @@ def main():
                         args, gui_pid=app.pid, cli=cli, environment=environment,
                         workspace=workspace, socket_path=runtime_socket,
                     )
+                require_external_file_drag(cli, cli_environment, workspace, app.pid, args.session)
                 emit_runtime(args.runtime_format, prefix)
             finally:
                 app.terminate()
