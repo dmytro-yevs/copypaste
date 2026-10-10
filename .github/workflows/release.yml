@@ -620,6 +620,10 @@ jobs:
           PRODUCER_RUN_ID: ${{ inputs.compositor_runtime_run_id || github.run_id }}
         run: |
           set -euo pipefail
+          for archive in runtime-source/*/runtime.tar; do
+            python3 scripts/release/compositor-runtime-archive.py extract \
+              --archive "$archive" --output "$(dirname "$archive")/runtime"
+          done
           python3 scripts/release/stage-compositor-runtime-release.py stage \
             --source-root runtime-source --output runtime-public \
             --version "${{ needs.preflight.outputs.version }}" \
