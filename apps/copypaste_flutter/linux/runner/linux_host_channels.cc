@@ -1,5 +1,6 @@
 #include "linux_host_channels.h"
 #include "linux_gnome_shortcuts.h"
+#include "linux_glibc_version.h"
 #include "linux_packagekit.h"
 #include "linux_portal.h"
 #include "linux_restart_helper.h"
@@ -1080,6 +1081,15 @@ void integration_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
 void update_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
   if (is_method(call, "currentVersion")) {
     success(call, fl_value_new_string(COPYPASTE_VERSION));
+  } else if (is_method(call, "systemVersion")) {
+    const auto version = linux_glibc_version();
+    if (!version) {
+      failure(call, "system_version_unavailable",
+              "The GNU libc version is unavailable.");
+      return;
+    }
+    const std::string value = version->ToString();
+    success(call, fl_value_new_string(value.c_str()));
   } else if (is_method(call, "availability")) {
     if (g_getenv("APPIMAGE") != nullptr) {
       success(call, update_availability());
