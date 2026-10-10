@@ -27,9 +27,9 @@ git -C "$source_dir" apply --check "$patch"
 git -C "$source_dir" apply "$patch"
 meson setup --wipe "$build_dir" "$source_dir" --prefix /usr \
   "${test_options[@]}" -Dprofiler=false -Dinstalled_tests=false
-meson compile -C "$build_dir" "$target"
 if [[ -n "$runtime_output" ]]; then
   [[ ! -e "$runtime_output" ]] || { echo "ERROR: runtime output must not exist" >&2; exit 1; }
+  meson compile -C "$build_dir"
   mkdir -p "$runtime_output"
   DESTDIR="$runtime_output" meson install -C "$build_dir" --no-rebuild
   "$PWD/build-private-shell.sh" "$runtime_output"
@@ -41,5 +41,7 @@ if [[ -n "$runtime_output" ]]; then
     --private-entrypoint usr/libexec/copypaste-gnome-shell \
     --qualification-entrypoint usr/libexec/copypaste-gnome-shell-headless \
     --shell-revision "$(cat "$runtime_output/.copypaste-gnome-shell-revision")" --license-file "$source_dir/COPYING"
+else
+  meson compile -C "$build_dir" "$target"
 fi
 echo "verified Mutter $version commit $commit and installed immutable runtime=${runtime_output:-none}"
