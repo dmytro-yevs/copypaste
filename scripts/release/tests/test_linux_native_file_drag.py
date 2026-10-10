@@ -91,6 +91,49 @@ class LinuxNativeFileDragTest(unittest.TestCase):
             self.assertTrue(drag.activity_has(events, "drag_armed"))
             self.assertTrue(drag.activity_has(events, "drag_status_copy"))
 
+    def test_completed_reads_the_source_activity_file_before_checking_the_drop(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            activity = root / "activity.jsonl"
+            activity.write_text(
+                '{"event":"uri_list_requested","timestamp_us":1,"actions":2,"selected_action":2,"destination_window":true}\n'
+                '{"event":"drag_end","timestamp_us":2,"actions":2,"selected_action":2,"destination_window":true}\n',
+                encoding="utf-8",
+            )
+            source = drag.DragSource(mock.Mock(), root / "start", activity)
+            source.completed()
+            activity.write_text(
+                '{"event":"drag_end","timestamp_us":3,"actions":0,"selected_action":0,"destination_window":false}\n',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(drag.FileDragQualificationError, "not accepted"):
+                source.completed()
+
+    def test_wayland_sibling_loader_registers_its_module_for_future_dataclasses(self):
+        with tempfile.TemporaryDirectory() as directory:
+            helper = Path(directory) / "wayland-helper.py"
+            helper.write_text(
+                "from __future__ import annotations\n"
+                "from dataclasses import dataclass\n"
+                "@dataclass\n"
+                "class Receipt:\n"
+                "    prior: Receipt | None = None\n",
+                encoding="utf-8",
+            )
+            original = drag.WAYLAND_QUICK_PASTE
+            previous = sys.modules.get(drag.WAYLAND_PORTAL_MODULE)
+            drag.WAYLAND_QUICK_PASTE = helper
+            try:
+                module = drag.load_wayland_portal()
+                self.assertEqual(module.Receipt.__module__, drag.WAYLAND_PORTAL_MODULE)
+                self.assertIs(sys.modules[drag.WAYLAND_PORTAL_MODULE], module)
+            finally:
+                drag.WAYLAND_QUICK_PASTE = original
+                if previous is None:
+                    sys.modules.pop(drag.WAYLAND_PORTAL_MODULE, None)
+                else:
+                    sys.modules[drag.WAYLAND_PORTAL_MODULE] = previous
+
     def test_x11_requires_unique_target_window(self):
         result = mock.Mock(stdout=b"1\n2\n")
         with mock.patch.object(drag.subprocess, "run", return_value=result):
