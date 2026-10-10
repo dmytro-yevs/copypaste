@@ -39,6 +39,11 @@ targetRules = ["generic-api-key"]
 regexes = ['''^0123456789abcdef0123456789abcdef$''']
 
 [[allowlists]]
+description = "Minisign verification test fixture for a synthetic compositor companion package. It is a fixed public verification key and is never used as a signing credential."
+targetRules = ["generic-api-key"]
+regexes = ['''^R[W]Qf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3$''']
+
+[[allowlists]]
 description = "Slack-shaped fixture in the publication-redaction test. The value is never sent and the assertion requires its exact bytes to disappear."
 targetRules = ["slack-bot-token"]
 regexes = ['''^xoxb-123456789[0]-1234567890ABCDE[F]$''']
