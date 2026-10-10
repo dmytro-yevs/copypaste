@@ -159,8 +159,8 @@ jobs:
             sleep 0.05
           done
           [[ -f "$work/sink-ready" && -f "$work/source-ready" ]]
-          source_window="$(xdotool search --name '^CopyPaste Qualification File Drop Source$')"
-          sink_window="$(xdotool search --name '^CopyPaste Qualification File Drop Sink$')"
+          source_window="$(xdotool search --sync --name '^CopyPaste Qualification File Drop Source$')"
+          sink_window="$(xdotool search --sync --name '^CopyPaste Qualification File Drop Sink$')"
           xdotool windowmove "$source_window" 100 150
           xdotool windowmove "$sink_window" 760 150
           window_center() {
