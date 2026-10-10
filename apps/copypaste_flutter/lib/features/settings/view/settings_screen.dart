@@ -1543,7 +1543,7 @@ class _QuickPasteSection extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Enable the GNOME or KDE integration and allow keyboard control to paste into the previous app.',
+                        'Enable the signed GNOME or KDE companion and allow keyboard control to return to the previous app.',
                       ),
                       const Gap(AppSpacing.sm),
                       Wrap(
