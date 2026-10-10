@@ -214,7 +214,12 @@ workspace.windowRemoved.connect(window => {
 });
 
 awaitQuickPaste();
-qualificationTimer = new QTimer();
-qualificationTimer.interval = 250;
-qualificationTimer.timeout.connect(awaitQualification);
-qualificationTimer.start();
+callDBus(HOST_BUS_NAME, HOST_OBJECT_PATH, HOST_INTERFACE,
+    'QualificationEnabled', enabled => {
+        if (!enabled)
+            return;
+        qualificationTimer = new QTimer();
+        qualificationTimer.interval = 250;
+        qualificationTimer.timeout.connect(awaitQualification);
+        qualificationTimer.start();
+    });
