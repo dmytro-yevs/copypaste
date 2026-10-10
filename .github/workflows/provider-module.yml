@@ -105,7 +105,7 @@ jobs:
           curl --fail --location --retry 2 \
             "https://gitlab.gnome.org/GNOME/glib/-/raw/$glib_version/gio/gdesktopappinfo.c" \
             --output "$RUNNER_TEMP/gdesktopappinfo.c"
-          grep -n -E 'TryExec|parse_exec|g_find_program_in_path' \
+          grep -n -E 'try_exec|g_shell_parse_argv|g_find_program_for_path' \
             "$RUNNER_TEMP/gdesktopappinfo.c" > "$RUNNER_TEMP/gdesktopappinfo-excerpts.log"
           sed -n '1,240p' "$RUNNER_TEMP/gdesktopappinfo-excerpts.log"
           test "$loader_status" -eq 0
