@@ -10,6 +10,7 @@ redacted notification metadata from the desktop notification service.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -37,6 +38,7 @@ REPLY_SERIAL = re.compile(r"\breply_serial=(?P<serial>[0-9]+)\b")
 UINT32 = re.compile(r"^\s*uint32\s+(?P<value>[0-9]+)\s*$")
 QUOTED_STRING = re.compile(r'^s\s+"(?P<value>(?:[^"\\]|\\.)*)"\s*$')
 MONITOR_STRING = re.compile(r'^\s*string\s+"(?P<value>(?:[^"\\]|\\.)*)"\s*$')
+UNIQUE_NAME = re.compile(r"^:[0-9]+\.[0-9]+$")
 
 
 class AcceptanceError(RuntimeError):
@@ -123,8 +125,32 @@ def quoted_property(value: str, name: str) -> str:
     return bytes(match.group("value"), "utf-8").decode("unicode_escape")
 
 
+def busctl_value(environment: dict[str, str], method: str, argument: str) -> object:
+    result = require_ok(
+        run([
+            "busctl", "--user", "--json=short", "call", "org.freedesktop.DBus",
+            "/org/freedesktop/DBus", "org.freedesktop.DBus", method, "s", argument,
+        ], environment=environment),
+        f"read D-Bus credentials for {argument}",
+    )
+    try:
+        payload = json.loads(result.stdout)
+        value = payload["data"][0]
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError) as error:
+        raise AcceptanceError("D-Bus credentials were not machine-readable") from error
+    return value
+
+
+def require_bus_credentials(environment: dict[str, str], service: str, gui_pid: int) -> None:
+    pid = busctl_value(environment, "GetConnectionUnixProcessID", service)
+    uid = busctl_value(environment, "GetConnectionUnixUser", service)
+    if pid != gui_pid or uid != os.getuid():
+        raise AcceptanceError("StatusNotifierItem D-Bus credentials do not belong to the GUI process")
+
+
 def expect_tray(environment: dict[str, str], gui_pid: int) -> str:
     service = sni_service_for_pid(session_bus_names(environment), gui_pid)
+    require_bus_credentials(environment, service, gui_pid)
     if quoted_property(dbus_property(environment, service, "Title"), "Title") != COPYPASTE_TITLE:
         raise AcceptanceError("StatusNotifierItem title does not identify CopyPaste")
     if quoted_property(dbus_property(environment, service, "Status"), "Status") != "Active":
@@ -244,6 +270,8 @@ class NotificationTranscript:
 
     call_serial: int | None = None
     awaiting_app_name: bool = False
+    awaiting_reply_id: bool = False
+    server_owner: str = ""
     notification_id: int | None = None
 
     def consume(self, line: str) -> None:
@@ -260,31 +288,40 @@ class NotificationTranscript:
             return
         if self.call_serial is not None and "method return" in line:
             reply = REPLY_SERIAL.search(line)
-            if reply and int(reply.group("serial")) == self.call_serial:
-                self.awaiting_app_name = False
+            if (reply and int(reply.group("serial")) == self.call_serial and
+                    f"sender={self.server_owner}" in line):
+                self.awaiting_reply_id = True
                 return
-        if self.call_serial is not None:
+        if self.awaiting_reply_id:
             value = UINT32.fullmatch(line)
-            if value:
+            if value and int(value.group("value")) > 0:
                 self.notification_id = int(value.group("value"))
+                self.awaiting_reply_id = False
 
 
-def notification_monitor(environment: dict[str, str]) -> subprocess.Popen[str]:
+def notification_monitor(environment: dict[str, str]) -> tuple[subprocess.Popen[bytes], str]:
     require_ok(
         run(["busctl", "--user", "status", NOTIFICATIONS_NAME], environment=environment),
         "contact desktop notification server",
     )
-    return subprocess.Popen(
+    owner = busctl_value(environment, "GetNameOwner", NOTIFICATIONS_NAME)
+    if not isinstance(owner, str) or not UNIQUE_NAME.fullmatch(owner):
+        raise AcceptanceError("desktop notification service has no unique owner")
+    monitor = subprocess.Popen(
         [
             "dbus-monitor", "--session",
             "type='method_call',interface='org.freedesktop.Notifications',member='Notify'",
             "type='method_return',sender='org.freedesktop.Notifications'",
         ],
         env=environment,
-        text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
+    if monitor.stdout is None:
+        raise AcceptanceError("cannot read D-Bus notification observer output")
+    flags = fcntl.fcntl(monitor.stdout.fileno(), fcntl.F_GETFL)
+    fcntl.fcntl(monitor.stdout.fileno(), fcntl.F_SETFL, flags | os.O_NONBLOCK)
+    return monitor, owner
 
 
 def parse_capture_command(raw: str) -> list[str]:
@@ -321,7 +358,7 @@ def run_notification_capture(
     if decoded.get("ok") is not True:
         raise AcceptanceError("CopyPaste CLI did not enable capture notifications")
 
-    monitor = notification_monitor(environment)
+    monitor, owner = notification_monitor(environment)
     try:
         if monitor.stdout is None:
             raise AcceptanceError("cannot read D-Bus notification observer output")
@@ -329,7 +366,8 @@ def run_notification_capture(
         # GTK provider writes its controlled clipboard item.
         time.sleep(0.15)
         capture = require_ok(run(capture_command, environment=environment, timeout=20), "trigger controlled clipboard capture")
-        transcript = NotificationTranscript()
+        transcript = NotificationTranscript(server_owner=owner)
+        buffered = b""
         deadline = time.monotonic() + 8
         while time.monotonic() < deadline:
             readable, _, _ = select.select([monitor.stdout], [], [], min(0.1, deadline - time.monotonic()))
@@ -337,12 +375,15 @@ def run_notification_capture(
                 if monitor.poll() is not None:
                     raise AcceptanceError("D-Bus notification observer exited before a server reply")
                 continue
-            line = monitor.stdout.readline()
-            if not line:
-                raise AcceptanceError("D-Bus notification observer closed before a server reply")
-            transcript.consume(line.rstrip("\n"))
-            if transcript.notification_id is not None:
-                return transcript, capture
+            try:
+                buffered += os.read(monitor.stdout.fileno(), 4096)
+            except BlockingIOError:
+                continue
+            while b"\n" in buffered:
+                raw, buffered = buffered.split(b"\n", 1)
+                transcript.consume(raw.decode("utf-8", errors="replace"))
+                if transcript.notification_id is not None:
+                    return transcript, capture
         raise AcceptanceError("desktop notification server did not accept CopyPaste's captured-clip notification")
     finally:
         monitor.terminate()
