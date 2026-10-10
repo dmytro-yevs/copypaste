@@ -16,6 +16,7 @@ import tempfile
 import time
 import socket
 import stat
+import hashlib
 import importlib.util
 from contextlib import contextmanager
 from pathlib import Path
@@ -28,6 +29,7 @@ MODULE_QUALIFICATION = Path(__file__).with_name("linux-module-qualification.py")
 SOURCE_APPLICATION_ID = "org.copypaste.QualificationSource"
 SOURCE_APPLICATION_NAME = "CopyPaste Qualification Source"
 CAPTURE_TIMEOUT_SECONDS = 8
+UPGRADE_CANARY = "copypaste-upgrade-canary"
 PROC_ROOT = Path("/proc")
 
 
@@ -50,6 +52,43 @@ def emit_result(assertion, result):
     print("COPYPASTE_QUALIFICATION_COMMAND " + json.dumps({
         "argv": [str(value) for value in argv], "returncode": result.returncode, "assertions": [assertion],
     }, separators=(",", ":")))
+
+
+def qualification_workspace(path):
+    if path.is_symlink():
+        raise ValueError("qualification root must not be a symlink")
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    resolved = path.resolve(strict=True)
+    if resolved.is_symlink() or not resolved.is_dir() or stat.S_IMODE(resolved.stat().st_mode) != 0o700:
+        raise ValueError("qualification root must be an owner-only directory")
+    return resolved
+
+
+def canary_receipt(workspace, executable):
+    return workspace / "upgrade-canary.json"
+
+
+def seed_upgrade_canary(cli, environment, workspace, executable):
+    added = run([str(cli), "add", UPGRADE_CANARY], env=environment)
+    items = list_items(cli, environment)
+    item = next((item for item in items if item.get("content") == UPGRADE_CANARY), None)
+    if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+        raise RuntimeError("GUI-owned daemon did not retain the upgrade canary")
+    digest = hashlib.sha256(UPGRADE_CANARY.encode()).hexdigest()
+    canary_receipt(workspace, executable).write_text(json.dumps({"id": item["id"], "content_sha256": digest, "executable_sha256": hashlib.sha256(executable.read_bytes()).hexdigest()}), encoding="utf-8")
+    emit_result("package_upgrade", added)
+
+
+def verify_upgrade_canary(cli, environment, workspace, executable):
+    receipt = canary_receipt(workspace, executable)
+    if not receipt.is_file() or receipt.is_symlink():
+        return False
+    value = json.loads(receipt.read_text(encoding="utf-8"))
+    if value.get("content_sha256") != hashlib.sha256(UPGRADE_CANARY.encode()).hexdigest():
+        raise RuntimeError("upgrade canary receipt is invalid")
+    if not any(item.get("content") == UPGRADE_CANARY for item in list_items(cli, environment)):
+        raise RuntimeError("GUI-owned daemon did not retain the prior runtime canary")
+    return True
 
 
 def cli_json(cli, environment, *args):
@@ -556,6 +595,8 @@ def main():
     parser.add_argument("--module-fixtures", required=True, type=Path)
     parser.add_argument("--runtime-format", required=True, choices=("AppImage", "deb", "rpm"))
     parser.add_argument("--runtime-prefix", required=True, type=Path)
+    parser.add_argument("--qualification-root", type=Path)
+    parser.add_argument("--seed-upgrade-canary", action="store_true")
     parser.add_argument("--previous-artifacts", type=Path)
     parser.add_argument("--previous-version")
     parser.add_argument("--first-install-baseline", action="store_true")
@@ -563,8 +604,9 @@ def main():
     if args.first_install_baseline == (args.previous_artifacts is not None):
         raise ValueError("select exactly one of a prior release or first-install baseline")
     args.evidence_dir.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="copypaste-linux-native-") as temporary:
-        workspace = Path(temporary)
+    context = tempfile.TemporaryDirectory(prefix="copypaste-linux-native-") if args.qualification_root is None else None
+    with context if context is not None else contextmanager(lambda: (yield args.qualification_root))() as temporary:
+        workspace = Path(temporary) if args.qualification_root is None else qualification_workspace(temporary)
         data_home = workspace / "data-home"
         write_source_desktop_entry(data_home)
         prefix = runtime_prefix(args.runtime_prefix)
@@ -592,6 +634,10 @@ def main():
                     time.sleep(0.15)
             if observed_status is None:
                 raise RuntimeError("GUI-owned daemon did not become ready")
+            if args.seed_upgrade_canary:
+                seed_upgrade_canary(cli, cli_environment, workspace, prefix / "copypaste")
+                return
+            upgrading = verify_upgrade_canary(cli, cli_environment, workspace, prefix / "copypaste") if args.qualification_root else False
             if observed_status.get("capture_running") is not True:
                 raise RuntimeError("GUI-owned daemon did not report an active native clipboard backend")
             backend = observed_status.get("clipboard_backend")
@@ -676,6 +722,9 @@ def main():
                 if not isinstance(restart_page, dict) or not any(persisted in item.get("content", "") for item in restart_page.get("items", [])):
                     raise RuntimeError("encrypted history did not survive daemon restart")
                 emit_result("encrypted_restart_persistence", restart_items)
+                if upgrading:
+                    verify_upgrade_canary(cli, cli_environment, workspace, prefix / "copypaste")
+                    emit_result("package_upgrade", restart_items)
                 daemon_data = gui_daemon_data_dir(app, data_home)
                 def restart_gui_for_modules():
                     nonlocal app, runtime_socket, cli_environment, daemon_data
