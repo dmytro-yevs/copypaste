@@ -231,11 +231,28 @@ def safe_source_member(value: str) -> str | None:
 
 
 def cpio_member_bytes(archive: Path, member: str) -> bytes:
-    payload = subprocess.run(["rpm2cpio", str(archive)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
-    result = subprocess.run(["cpio", "--quiet", "-i", "--to-stdout", member], input=payload.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
-    if payload.returncode or result.returncode or len(result.stdout) > MAX_SOURCE_ARCHIVE_BYTES:
+    payload = bounded_rpm2cpio(archive)
+    result = subprocess.run(["cpio", "--quiet", "-i", "--to-stdout", member], input=payload, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    if result.returncode or len(result.stdout) > MAX_SOURCE_ARCHIVE_BYTES:
         raise ClosureError("exact source RPM member is unavailable or oversized")
     return result.stdout
+
+
+def bounded_rpm2cpio(archive: Path) -> bytes:
+    if archive.stat().st_size > MAX_SOURCE_ARCHIVE_BYTES:
+        raise ClosureError("exact source RPM archive is oversized")
+    process = subprocess.Popen(["rpm2cpio", str(archive)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert process.stdout is not None
+    output = bytearray()
+    while chunk := process.stdout.read(1024 * 1024):
+        output.extend(chunk)
+        if len(output) > MAX_SOURCE_ARCHIVE_BYTES:
+            process.kill()
+            process.wait()
+            raise ClosureError("exact source RPM payload is oversized")
+    if process.wait() != 0:
+        raise ClosureError("cannot read exact source RPM payload")
+    return bytes(output)
 
 
 def source_rpm_license_files(owner: tuple[str, str, str, str], destination: Path) -> list[tuple[tuple[str, str, str, str], str, bytes, str, str, str, str]]:
@@ -258,10 +275,10 @@ def source_rpm_license_files(owner: tuple[str, str, str, str], destination: Path
     source_evr = f"{epoch}:{version}-{release}" if epoch not in {"", "0", "(none)"} else f"{version}-{release}"
     if architecture != "src" or source_evr != evr or archive.name != f"{source_name}-{version}-{release}.src.rpm":
         raise ClosureError(f"exact source RPM provenance differs for {name}")
-    listing = subprocess.run(["rpm2cpio", str(archive)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
-    members_process = subprocess.run(["cpio", "-it"], input=listing.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
-    verbose_process = subprocess.run(["cpio", "-itv"], input=listing.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
-    if listing.returncode or members_process.returncode or verbose_process.returncode or len(listing.stdout) > MAX_SOURCE_ARCHIVE_BYTES:
+    listing = bounded_rpm2cpio(archive)
+    members_process = subprocess.run(["cpio", "-it"], input=listing, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    verbose_process = subprocess.run(["cpio", "-itv"], input=listing, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    if members_process.returncode or verbose_process.returncode:
         raise ClosureError(f"cannot inspect exact source RPM for {name}")
     members = [line.removeprefix("./") for line in members_process.stdout.decode(errors="replace").splitlines()]
     candidates: list[tuple[str, bytes]] = []
