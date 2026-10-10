@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import re
+import runpy
 from pathlib import Path, PurePosixPath
 from typing import Optional
 
@@ -97,6 +98,27 @@ def verify_compositor_runtime(binding, receipt, native_format):
                 or not isinstance(item["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"])
                 or not isinstance(item["size_bytes"], int) or item["size_bytes"] <= 0):
             raise ValueError("compositor runtime binding artifact is invalid")
+
+
+def verify_public_compositor_runtime(root: Path, version: str, commit: str) -> list[dict]:
+    helper = Path(__file__).with_name("stage-compositor-runtime-release.py")
+    receipt_path = root / "production-receipt.json"
+    if not helper.is_file() or helper.is_symlink() or not receipt_path.is_file() or receipt_path.is_symlink():
+        raise ValueError("signed public compositor runtime verifier or receipt is missing")
+    try:
+        public_receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError("public compositor runtime receipt is not JSON") from error
+    run_id = public_receipt.get("run_id") if isinstance(public_receipt, dict) else None
+    if not isinstance(run_id, int) or run_id <= 0:
+        raise ValueError("public compositor runtime receipt has no release run ID")
+    verified = runpy.run_path(str(helper))["verify_public"](root, version, commit, str(run_id))
+    if verified != public_receipt:
+        raise ValueError("public compositor runtime receipt differs from verified public assets")
+    companions = verified.get("companions")
+    if not isinstance(companions, list) or len(companions) != 4:
+        raise ValueError("public compositor runtime companion matrix is incomplete")
+    return companions
 
 
 def verify_trace(root: Path, receipt: dict, architecture: str, desktop: str, session: str, version: str, commit: str, source_run_id: str, artifact_run_id: Optional[str], expected_assertions: set[str]) -> None:
@@ -237,9 +259,10 @@ def verify_trace(root: Path, receipt: dict, architecture: str, desktop: str, ses
         raise ValueError(f"receipt does not bind its scenario trace: {name}")
 
 
-def verify(root: Path, artifacts: Path, version: str, commit: str, source_run_id: str, artifact_run_id: Optional[str] = None) -> None:
+def verify(root: Path, artifacts: Path, version: str, commit: str, source_run_id: str, artifact_run_id: Optional[str] = None, compositor_runtime: Optional[Path] = None) -> None:
     root = root.resolve(strict=True)
     artifacts = artifacts.resolve(strict=True)
+    companions = verify_public_compositor_runtime(compositor_runtime.resolve(strict=True), version, commit) if compositor_runtime else None
     seen = set()
     installed_coverage = {(architecture, format_name): 0 for architecture in ARCHITECTURES for format_name in FORMATS}
     for architecture in ARCHITECTURES:
@@ -270,6 +293,11 @@ def verify(root: Path, artifacts: Path, version: str, commit: str, source_run_id
                 if receipt.get("compositor_runtime") != trace.get("compositor_runtime"):
                     raise ValueError(f"compositor runtime binding differs from trace: {name}")
                 verify_compositor_runtime(receipt.get("compositor_runtime"), receipt, native_format)
+                if companions is not None:
+                    binding = receipt["compositor_runtime"]
+                    matches = [entry for entry in companions if entry.get("desktop") == desktop and entry.get("architecture") == architecture and entry.get("format") == native_format]
+                    if len(matches) != 1 or any(binding[field] != matches[0][field] for field in ("package", "runtime_receipt", "runtime_id")):
+                        raise ValueError(f"row compositor runtime binding differs from public signed companion: {name}")
                 for format_name in installed_formats:
                     installed_coverage[(architecture, format_name)] += 1
                 expected_assertions = assertion_set(receipt.get("upgrade_mode"), session)
@@ -312,8 +340,9 @@ def main() -> int:
     parser.add_argument("--commit", required=True)
     parser.add_argument("--source-run-id", required=True)
     parser.add_argument("--artifact-run-id")
+    parser.add_argument("--compositor-runtime", required=True, type=Path)
     args = parser.parse_args()
-    verify(args.root, args.artifacts, args.version, args.commit, args.source_run_id, args.artifact_run_id)
+    verify(args.root, args.artifacts, args.version, args.commit, args.source_run_id, args.artifact_run_id, args.compositor_runtime)
     print("verified full exact-artifact Linux desktop qualification")
     return 0
 
