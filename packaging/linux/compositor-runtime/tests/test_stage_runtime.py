@@ -289,8 +289,13 @@ class RuntimeStageTests(unittest.TestCase):
         self.assertEqual(private_elf_closure.safe_source_member("upstream/LICENSES/MIT.txt"), "upstream/LICENSES/MIT.txt")
         self.assertIsNone(private_elf_closure.safe_source_member("upstream/notes.txt"))
         self.assertIsNone(private_elf_closure.safe_source_member("../README"))
-        self.assertTrue(private_elf_closure.source_member_has_notice_text("README.rst", b"Copyright 2026 Example"))
+        self.assertTrue(private_elf_closure.source_member_has_notice_text("README.rst", b"Copyright 2026 Example. Permission is hereby granted."))
         self.assertFalse(private_elf_closure.source_member_has_notice_text("README.rst", b"Build this project with Meson."))
+
+    def test_source_header_notice_copies_only_a_leading_legal_banner(self) -> None:
+        source = b"/* Copyright 2026 Example. Permission is hereby granted. */\nint main(void) { return 0; }\n"
+        self.assertEqual(private_elf_closure.source_header_notice(source), b"/* Copyright 2026 Example. Permission is hereby granted. */")
+        self.assertIsNone(private_elf_closure.source_header_notice(b"/* Build helper. */\nCopyright 2026 Example."))
 
     def test_rpm_owner_reports_only_the_invalid_license_length(self) -> None:
         expression = "L" * 1025

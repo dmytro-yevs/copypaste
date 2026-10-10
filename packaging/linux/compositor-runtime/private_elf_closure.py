@@ -36,7 +36,10 @@ SAFE_LICENSE = re.compile(r"^[\x20-\x7e]{1,1024}$")
 SAFE_SONAME = re.compile(r"^[A-Za-z0-9._+-]{1,255}$")
 NOTICE_NAME = re.compile(r"^(?:LICENSE|LICENCE|COPYING|NOTICE|COPYRIGHT|README)(?:[._-].*)?$", re.IGNORECASE)
 README_NAME = re.compile(r"^README(?:[._-].*)?$", re.IGNORECASE)
-README_NOTICE_TEXT = re.compile(rb"(?:copyright|licen[cs]e|spdx-license-identifier|permission\s+is\s+hereby\s+granted|all\s+rights\s+reserved)", re.IGNORECASE)
+SPDX_IDENTIFIER = re.compile(rb"spdx-license-identifier\s*:\s*[^\r\n]+", re.IGNORECASE)
+COPYRIGHT = re.compile(rb"copyright", re.IGNORECASE)
+LEGAL_BANNER = re.compile(rb"(?:permission\s+is\s+hereby\s+granted|this\s+(?:program|library)\s+is\s+free\s+software|licensed\s+under\s+the\s+(?:gnu\s+)?(?:lesser\s+)?general\s+public\s+license)", re.IGNORECASE)
+LEADING_COMMENT = re.compile(rb"\A\s*/\*.*?\*/", re.DOTALL)
 MAX_SOURCE_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_LICENSE_BYTES = 4 * 1024 * 1024
 MAX_LICENSE_MEMBERS = 64
@@ -228,18 +231,40 @@ def rpm_installed_license_files(owner: tuple[str, str, str, str]) -> list[tuple[
     return records
 
 
-def safe_source_member(value: str) -> str | None:
+def safe_source_path(value: str) -> str | None:
     member = value.removeprefix("./")
     path = Path(member)
-    in_spdx_license_directory = any(part.lower() == "licenses" for part in path.parts)
-    if not member or path.is_absolute() or ".." in path.parts or (NOTICE_NAME.fullmatch(path.name) is None and not in_spdx_license_directory):
+    if not member or path.is_absolute() or ".." in path.parts:
         return None
     return member
 
 
+def safe_source_member(value: str) -> str | None:
+    member = safe_source_path(value)
+    if member is None:
+        return None
+    path = Path(member)
+    in_spdx_license_directory = any(part.lower() == "licenses" for part in path.parts)
+    if NOTICE_NAME.fullmatch(path.name) is None and not in_spdx_license_directory:
+        return None
+    return member
+
+
+def has_legal_notice(value: bytes) -> bool:
+    return SPDX_IDENTIFIER.search(value) is not None or (COPYRIGHT.search(value) is not None and LEGAL_BANNER.search(value) is not None)
+
+
 def source_member_has_notice_text(member: str, value: bytes) -> bool:
     """Require a legal-notice marker before treating a README as license text."""
-    return README_NAME.fullmatch(Path(member).name) is None or README_NOTICE_TEXT.search(value) is not None
+    return README_NAME.fullmatch(Path(member).name) is None or has_legal_notice(value)
+
+
+def source_header_notice(value: bytes) -> bytes | None:
+    """Return one leading source comment only when it is a complete legal banner."""
+    match = LEADING_COMMENT.match(value[:16 * 1024])
+    if match is None or not has_legal_notice(match.group()):
+        return None
+    return match.group()
 
 
 def cpio_member_bytes(archive: Path, member: str) -> bytes:
@@ -298,6 +323,7 @@ def source_rpm_license_files(owner: tuple[str, str, str, str], destination: Path
         raise ClosureError(f"cannot inspect exact source RPM for {name}")
     members = [line.removeprefix("./") for line in members_process.stdout.decode(errors="replace").splitlines()]
     candidates: list[tuple[str, bytes]] = []
+    header_candidates: list[tuple[str, bytes]] = []
     hints = [member for member in members if re.search(r"(?:LICENSE|LICENCE|COPYING|NOTICE)", member, re.IGNORECASE)][:16]
     for member in members:
         safe = safe_source_member(member)
@@ -315,15 +341,21 @@ def source_rpm_license_files(owner: tuple[str, str, str, str], destination: Path
             with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:*") as upstream:
                 for entry in upstream.getmembers():
                     safe = safe_source_member(entry.name)
-                    if safe is None or not entry.isfile() or entry.size > MAX_LICENSE_BYTES:
+                    source_path = safe_source_path(entry.name)
+                    if source_path is None or not entry.isfile() or entry.size > MAX_LICENSE_BYTES:
                         continue
                     handle = upstream.extractfile(entry)
-                    if handle is not None:
-                        value = handle.read(MAX_LICENSE_BYTES + 1)
-                        if source_member_has_notice_text(safe, value):
-                            candidates.append((safe, value))
+                    if handle is None:
+                        continue
+                    value = handle.read(MAX_LICENSE_BYTES + 1)
+                    if safe is not None and source_member_has_notice_text(safe, value):
+                        candidates.append((safe, value))
+                    elif not candidates and (notice := source_header_notice(value)) is not None:
+                        header_candidates.append((source_path, notice))
         except (tarfile.TarError, OSError):
             continue
+    if not candidates and header_candidates:
+        candidates.append(header_candidates[0])
     candidates = [(member, value) for member, value in candidates if len(value) <= MAX_LICENSE_BYTES]
     if not candidates or len(candidates) > MAX_LICENSE_MEMBERS:
         raise ClosureError(f"exact source RPM has no safe license or notice bytes for {name}: candidates={','.join(hints) or 'none'}")
