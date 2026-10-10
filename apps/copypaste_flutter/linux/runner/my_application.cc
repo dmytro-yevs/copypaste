@@ -69,7 +69,13 @@ void set_quick_paste_context(MyApplication* self, const gchar* argument) {
 }
 
 void first_frame_cb(MyApplication* self, FlView* view) {
-  gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
+  GtkWidget* window = gtk_widget_get_toplevel(GTK_WIDGET(view));
+  gtk_widget_show(window);
+  if (self->quick_paste) {
+    // Preserve the compositor's initial monitor/position. Clamp only the size
+    // after the surface exists; inspector changes can clamp its current frame.
+    resize_linux_quick_paste_window(GTK_WINDOW(window), false, false);
+  }
   self->flutter_ready = TRUE;
   dispatch_pending_pairing_uris(self);
 }
