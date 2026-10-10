@@ -6,6 +6,7 @@
 
 #include "flutter/generated_plugin_registrant.h"
 #include "linux_host_channels.h"
+#include "linux_quick_paste_window.h"
 
 struct _MyApplication {
   GtkApplication parent_instance;
@@ -84,13 +85,10 @@ static void my_application_activate(GApplication* application) {
   const bool quick_paste = self->quick_paste;
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
-  gtk_window_set_default_size(window, quick_paste ? 720 : 1280,
-                              quick_paste ? 520 : 720);
+  gtk_window_set_default_size(window, 1280, 720);
   gtk_window_set_title(window, quick_paste ? "CopyPaste Quick Paste" : "CopyPaste");
   if (quick_paste) {
-    gtk_window_set_role(window, "copypaste-quick-paste");
-    gtk_window_set_keep_above(window, TRUE);
-    gtk_window_set_type_hint(window, GDK_WINDOW_TYPE_HINT_DIALOG);
+    configure_linux_quick_paste_window(window);
   }
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
@@ -98,7 +96,7 @@ static void my_application_activate(GApplication* application) {
                                                 self->dart_entrypoint_arguments);
   FlView* view = fl_view_new(project);
   GdkRGBA background_color;
-  gdk_rgba_parse(&background_color, "#000000");
+  gdk_rgba_parse(&background_color, quick_paste ? "transparent" : "#000000");
   fl_view_set_background_color(view, &background_color);
   gtk_widget_show(GTK_WIDGET(view));
   gtk_container_add(GTK_CONTAINER(window), GTK_WIDGET(view));
