@@ -28,7 +28,7 @@ class LinuxXdgStartup {
       const std::string& executable, const std::string& config_home,
       const std::string& data_home, GError** error);
 
-  LinuxXdgStartupStatus Status() const;
+  LinuxXdgStartupStatus GetStatus() const;
   bool SetStartAtLogin(bool enabled, GError** error) const;
   bool RegisterCopypasteUri(GError** error) const;
 
