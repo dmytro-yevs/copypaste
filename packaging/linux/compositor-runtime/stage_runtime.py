@@ -110,6 +110,9 @@ def validate_receipt(receipt: dict[str, Any]) -> None:
     source = receipt.get("source")
     if not isinstance(source, dict) or not isinstance(source.get("revision"), str) or not re.fullmatch(r"[A-Za-z0-9._/+:-]{1,128}", source["revision"]) or not SHA256.fullmatch(source.get("patch_sha256", "")):
         raise ContractError("source revision and bridge patch digest are required")
+    license_info = receipt.get("upstream_license")
+    if not isinstance(license_info, dict) or license_info.get("spdx") != "GPL-2.0-or-later" or not isinstance(license_info.get("name"), str) or not SHA256.fullmatch(license_info.get("sha256", "")):
+        raise ContractError("upstream GPL license receipt is required")
     payload = receipt.get("payload")
     if not isinstance(payload, list) or not payload:
         raise ContractError("receipt payload is empty")
@@ -130,6 +133,8 @@ def validate_receipt(receipt: dict[str, Any]) -> None:
             target = safe_link_target(row.get("target"), relative)
             if sha256_bytes(target.encode("utf-8")) != row["sha256"]:
                 raise ContractError("payload symlink target digest differs")
+    if license_info["name"] not in paths or payload_by_path(receipt)[license_info["name"]].get("sha256") != license_info["sha256"]:
+        raise ContractError("upstream license bytes are not bound to runtime payload")
     launch = receipt.get("launch")
     if not isinstance(launch, dict) or launch.get("kind") not in {"private", "system-session"}:
         raise ContractError("launch kind is invalid")

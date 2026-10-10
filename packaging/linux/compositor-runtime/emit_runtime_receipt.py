@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""Emit a receipt for an installed private compositor runtime tree."""
+from __future__ import annotations
+
+import argparse, hashlib, json, os, platform, posixpath, re, shutil, subprocess, sys
+from pathlib import Path
+
+SAFE = re.compile(r"^[a-z0-9][a-z0-9.-]{1,63}$")
+SHA = re.compile(r"^[0-9a-f]{64}$")
+
+def digest(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+def os_release() -> dict[str, str]:
+    values = {}
+    for line in Path("/etc/os-release").read_text(encoding="utf-8").splitlines():
+        if "=" in line:
+            k, v = line.split("=", 1); values[k] = v.strip('"')
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", values.get("ID", "")) or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", values.get("VERSION_ID", "")):
+        raise ValueError("unsafe or missing distribution identity")
+    return {"id": values["ID"], "version": values["VERSION_ID"]}
+
+def architecture() -> str:
+    return {"x86_64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64"}.get(platform.machine(), "")
+
+def payload(root: Path) -> list[dict]:
+    rows = []
+    for path in sorted(root.rglob("*")):
+        if path.is_dir(): continue
+        relative = path.relative_to(root).as_posix()
+        if path.is_symlink():
+            target = os.readlink(path)
+            resolved = posixpath.normpath(posixpath.join(posixpath.dirname(relative), target))
+            if target.startswith("/") or resolved == ".." or resolved.startswith("../"):
+                raise ValueError(f"runtime symlink escapes: {relative}")
+            rows.append({"path": relative, "type": "symlink", "target": target, "sha256": hashlib.sha256(target.encode()).hexdigest()})
+        elif path.is_file():
+            rows.append({"path": relative, "type": "file", "mode": f"{path.stat().st_mode & 0o7777:04o}", "sha256": digest(path)})
+        else: raise ValueError(f"runtime member is unsafe: {relative}")
+    if not rows: raise ValueError("installed runtime is empty")
+    return rows
+
+def package_version(name: str) -> str:
+    if shutil.which("dpkg-query"):
+        return subprocess.check_output(["dpkg-query", "-W", "-f=${Version}", name], text=True).strip()
+    if shutil.which("rpm"):
+        return subprocess.check_output(["rpm", "-q", "--qf", "%{VERSION}-%{RELEASE}", name], text=True).strip()
+    raise ValueError("no package metadata query is available")
+
+def main() -> int:
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--runtime-dir", required=True, type=Path); p.add_argument("--output", required=True, type=Path)
+    p.add_argument("--runtime-id", required=True); p.add_argument("--desktop", choices=("GNOME", "KDE"), required=True)
+    p.add_argument("--source-revision", required=True); p.add_argument("--patch", required=True, type=Path)
+    p.add_argument("--glibc-floor", required=True); p.add_argument("--dependency", action="append", default=[])
+    p.add_argument("--private-entrypoint"); p.add_argument("--gnome-major", type=int)
+    p.add_argument("--license-file", required=True, type=Path); p.add_argument("--license-spdx", default="GPL-2.0-or-later")
+    a = p.parse_args()
+    try:
+        if not SAFE.fullmatch(a.runtime_id) or not re.fullmatch(r"[A-Za-z0-9._/+:-]{1,128}", a.source_revision) or not re.fullmatch(r"[0-9]+\.[0-9]+", a.glibc_floor): raise ValueError("invalid immutable runtime identity")
+        root = a.runtime_dir.resolve(strict=True)
+        if a.runtime_dir.is_symlink() or not root.is_dir() or not a.patch.is_file() or not a.license_file.is_file(): raise ValueError("runtime source inputs are unsafe")
+        deps=[]
+        for name in a.dependency:
+            if not re.fullmatch(r"[A-Za-z0-9.+_-]{1,80}", name): raise ValueError("unsafe dependency name")
+            deps.append({"name": name, "version": package_version(name)})
+        if not deps: raise ValueError("exact compositor package dependencies are required")
+        rows=payload(root)
+        paths={r["path"] for r in rows}
+        if a.desktop == "KDE":
+            if a.gnome_major or not a.private_entrypoint or a.private_entrypoint not in paths: raise ValueError("KDE requires an installed private entrypoint")
+            launch={"kind":"private", "entrypoint":a.private_entrypoint}
+        else:
+            if a.private_entrypoint:
+                if a.private_entrypoint not in paths: raise ValueError("GNOME private Shell entrypoint is not installed")
+                launch={"kind":"private","entrypoint":a.private_entrypoint}
+            else:
+                if a.gnome_major not in (46,47): raise ValueError("GNOME requires its expected Shell major")
+                shell="/usr/bin/gnome-shell"; session="/usr/bin/gnome-session"
+                version=subprocess.check_output([shell,"--version"],text=True).strip()
+                if not re.search(rf"\b{a.gnome_major}(?:\.|\b)",version): raise ValueError(f"system GNOME Shell does not match Mutter {a.gnome_major}: {version}")
+                launch={"kind":"system-session","command":[session,"--session=gnome"],"host_binaries":[{"path":session,"sha256":digest(Path(session))},{"path":shell,"sha256":digest(Path(shell))}]}
+        license_target=root / "usr/share/doc" / f"copypaste-compositor-runtime-{a.runtime_id}" / a.license_file.name
+        license_target.parent.mkdir(parents=True, exist_ok=True); shutil.copyfile(a.license_file, license_target)
+        rows=payload(root)
+        receipt={"schema":1,"runtime_id":a.runtime_id,"desktop":a.desktop,"architecture":architecture(),"distribution":os_release(),"glibc_floor":a.glibc_floor,"source":{"revision":a.source_revision,"patch_sha256":digest(a.patch)},"payload":rows,"launch":launch,"runtime_env":{},"package_dependencies":deps,"upstream_license":{"spdx":a.license_spdx,"name":license_target.relative_to(root).as_posix(),"sha256":digest(license_target)}}
+        if receipt["architecture"] not in {"x86_64","aarch64"}: raise ValueError("unsupported build architecture")
+        a.output.parent.mkdir(parents=True, exist_ok=True); a.output.write_text(json.dumps(receipt,indent=2)+"\n",encoding="utf-8")
+    except (OSError, subprocess.CalledProcessError, ValueError) as e:
+        print(f"ERROR: {e}",file=sys.stderr); return 1
+    print(f"emitted immutable runtime receipt: {a.output}"); return 0
+if __name__ == "__main__": raise SystemExit(main())
