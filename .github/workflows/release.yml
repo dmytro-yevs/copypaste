@@ -93,6 +93,7 @@ jobs:
           SUPABASE_MODULE_RUN_ID: ${{ inputs.supabase_module_run_id }}
           SEMANTIC_SEARCH_MODULE_RUN_ID: ${{ inputs.semantic_search_module_run_id }}
           OCR_MODULE_RUN_ID: ${{ inputs.ocr_module_run_id }}
+          LINUX_EVIDENCE_RUN_ID: ${{ inputs.linux_evidence_run_id }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -115,6 +116,7 @@ jobs:
           linux_qualification_only=false
           if [[ "${LINUX_QUALIFICATION_ONLY:-false}" == true ]]; then
             [[ "${REQUESTED_PUBLISH:-false}" == false ]]
+            [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && -z "${QUALIFIED_RUN_ID:-}" && -z "${LINUX_EVIDENCE_RUN_ID:-}" ]]
             for value in "$LINUX_ARTIFACT_RUN_ID" "$COMPOSITOR_RUNTIME_RUN_ID" "$SUPABASE_MODULE_RUN_ID" "$SEMANTIC_SEARCH_MODULE_RUN_ID" "$OCR_MODULE_RUN_ID"; do [[ "$value" =~ ^[1-9][0-9]*$ ]]; done
             linux_qualification_only=true
           fi
@@ -197,6 +199,12 @@ jobs:
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$LINUX_ARTIFACT_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/linux-source-artifacts.json"
             python3 scripts/release/verify-linux-artifact-source-run.py --run "$RUNNER_TEMP/linux-source-run.json" --jobs "$RUNNER_TEMP/linux-source-jobs.json" --artifacts "$RUNNER_TEMP/linux-source-artifacts.json" --repository "$GITHUB_REPOSITORY" --commit "$release_commit"
             linux_artifact_run_id="$LINUX_ARTIFACT_RUN_ID"
+          fi
+          if [[ "$linux_qualification_only" == true ]]; then
+            [[ "$publish" == false && "$GITHUB_REF_TYPE" != tag ]] || {
+              echo "ERROR: qualification-only staging must be an unpublished branch dispatch" >&2
+              exit 1
+            }
           fi
           {
             echo "version=$version"
@@ -664,19 +672,23 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$EVIDENCE_RUN_ID" > "$RUNNER_TEMP/linux-evidence-run.json"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$EVIDENCE_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/linux-evidence-jobs.json"
           jq -e --arg commit "$GITHUB_SHA" '
-            .head_sha == $commit and
-            .head_repository.full_name == env.GITHUB_REPOSITORY and
-            .path == ".github/workflows/linux-native-qualification.yml" and
-            .event == "workflow_dispatch" and .status == "completed" and .conclusion == "success"
+            .head_sha == $commit and .head_repository.full_name == env.GITHUB_REPOSITORY and
+            .status == "completed" and .conclusion == "success" and
+            ((.path == ".github/workflows/linux-native-qualification.yml" and .event == "workflow_dispatch") or
+             (.path == ".github/workflows/release.yml" and .event == "workflow_dispatch"))
           ' "$RUNNER_TEMP/linux-evidence-run.json" >/dev/null
-          jq -e '
+          if [[ "$(jq -r '.path' "$RUNNER_TEMP/linux-evidence-run.json")" == .github/workflows/linux-native-qualification.yml ]]; then prefix=''; else prefix='Run exact staged Linux native qualification / '; fi
+          jq -e --arg prefix "$prefix" '
             .total_count == (.jobs | length) and
             ([.jobs[] | select(.status == "completed" and .conclusion == "success") | .name] | unique) as $passed |
-            ["Verify exact artifact sources", "Assemble verified Linux native qualification",
+            [$prefix + "Verify exact artifact sources", $prefix + "Assemble verified Linux native qualification",
              "x86_64 GNOME x11", "x86_64 GNOME wayland", "x86_64 KDE x11", "x86_64 KDE wayland",
              "aarch64 GNOME x11", "aarch64 GNOME wayland", "aarch64 KDE x11", "aarch64 KDE wayland"] |
-            all(. as $name | $passed | index($name))
+            map($prefix + .) | all(. as $name | $passed | index($name))
           ' "$RUNNER_TEMP/linux-evidence-jobs.json" >/dev/null
+          if [[ -n "$prefix" ]]; then
+            jq -e '[.jobs[] | select(.name | test("^(macos|android|windows|Linux build|Build opt-in|Verify staged|Sign and bind|Linux full parity evidence|Publish stable)")) | .conclusion] | length > 0 and all(.[]; . == "skipped")' "$RUNNER_TEMP/linux-evidence-jobs.json" >/dev/null
+          fi
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
