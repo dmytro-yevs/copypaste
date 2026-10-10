@@ -64,6 +64,8 @@ guint bridge_timeout = 0;
 GPid bridge_child_pid = 0;
 std::string bridge_sender;
 std::string bridge_waiter_owner;
+std::string qualification_transaction;
+std::string qualification_action;
 
 constexpr char kBridgeName[] = "app.copypaste.CopyPaste";
 constexpr char kBridgePath[] = "/app/copypaste/WaylandIntegration";
@@ -179,6 +181,26 @@ bool authorised_child(const gchar* sender) {
   if (response == nullptr) return false;
   g_variant_get(response, "(u)", &pid);
   return pid == static_cast<guint>(bridge_child_pid);
+}
+
+bool qualification_enabled() {
+  return g_strcmp0(g_getenv("COPYPASTE_QUALIFICATION"), "1") == 0 &&
+      g_getenv("COPYPASTE_QUALIFICATION_CAPABILITY") != nullptr;
+}
+
+bool authorised_qualification(const gchar* sender, const gchar* capability) {
+  const gchar* expected = g_getenv("COPYPASTE_QUALIFICATION_CAPABILITY");
+  if (sender == nullptr || !qualification_enabled() || expected == nullptr ||
+      capability == nullptr || g_strcmp0(capability, expected) != 0) return false;
+  g_autoptr(GError) error = nullptr;
+  g_autoptr(GVariant) response = g_dbus_connection_call_sync(
+      bridge_connection, "org.freedesktop.DBus", "/org/freedesktop/DBus",
+      "org.freedesktop.DBus", "GetConnectionUnixUser", g_variant_new("(s)", sender),
+      G_VARIANT_TYPE("(u)"), G_DBUS_CALL_FLAGS_NONE, -1, nullptr, &error);
+  guint uid = static_cast<guint>(-1);
+  if (response == nullptr) return false;
+  g_variant_get(response, "(u)", &uid);
+  return uid == static_cast<guint>(getuid());
 }
 
 bool is_method(FlMethodCall* call, const char* method) {
@@ -1322,6 +1344,73 @@ void pairing_links_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
 void bridge_call(GDBusConnection*, const gchar* sender, const gchar*, const gchar*,
                  const gchar* method, GVariant* parameters,
                  GDBusMethodInvocation* invocation, gpointer) {
+  if (g_strcmp0(method, "StartQualification") == 0) {
+    const gchar* action = nullptr;
+    const gchar* capability = nullptr;
+    g_variant_get(parameters, "(&s&s)", &action, &capability);
+    if (!authorised_qualification(sender, capability)) {
+      g_dbus_method_invocation_return_dbus_error(
+          invocation, "app.copypaste.WaylandIntegration.Error.Unauthorized",
+          "Qualification capability is unavailable.");
+      return;
+    }
+    if (g_strcmp0(action, "close-main") != 0 &&
+        g_strcmp0(action, "quick-paste") != 0) {
+      g_dbus_method_invocation_return_dbus_error(
+          invocation, "app.copypaste.WaylandIntegration.Error.InvalidAction",
+          "Unknown qualification action.");
+      return;
+    }
+    qualification_transaction = g_uuid_string_random();
+    qualification_action = action;
+    g_dbus_connection_emit_signal(
+        bridge_connection, nullptr, kBridgePath, kBridgeInterface,
+        "QualificationRequested",
+        g_variant_new("(sus)", qualification_transaction.c_str(),
+                      static_cast<guint32>(getpid()), action), nullptr);
+    g_dbus_method_invocation_return_value(
+        invocation, g_variant_new("(s)", qualification_transaction.c_str()));
+    return;
+  }
+  if (g_strcmp0(method, "AwaitQualification") == 0) {
+    if (!authorised_companion(sender) || !qualification_enabled()) {
+      g_dbus_method_invocation_return_dbus_error(
+          invocation, "app.copypaste.WaylandIntegration.Error.Unauthorized",
+          "Qualification is unavailable.");
+      return;
+    }
+    g_dbus_method_invocation_return_value(
+        invocation, g_variant_new("(ssu)", qualification_transaction.c_str(),
+                                  qualification_action.c_str(), static_cast<guint32>(getpid())));
+    return;
+  }
+  if (g_strcmp0(method, "QualificationObserved") == 0) {
+    const gchar* transaction = nullptr;
+    guint32 pid = 0;
+    const gchar* app_id = nullptr;
+    const gchar* role = nullptr;
+    gboolean mapped = FALSE;
+    g_variant_get(parameters, "(&su&s&sb)", &transaction, &pid, &app_id, &role, &mapped);
+    if (!authorised_companion(sender) || transaction == nullptr ||
+        qualification_transaction != transaction || pid != static_cast<guint32>(getpid()) ||
+        app_id == nullptr || g_strcmp0(app_id, "com.copypaste.CopyPaste") != 0 ||
+        role == nullptr || strlen(role) > 128) {
+      g_dbus_method_invocation_return_dbus_error(
+          invocation, "app.copypaste.WaylandIntegration.Error.Unauthorized",
+          "Qualification observation is invalid.");
+      return;
+    }
+    g_dbus_connection_emit_signal(
+        bridge_connection, nullptr, kBridgePath, kBridgeInterface,
+        "QualificationObservation", g_variant_new("(susb)", transaction, pid, role, mapped),
+        nullptr);
+    if (!mapped) {
+      qualification_transaction.clear();
+      qualification_action.clear();
+    }
+    g_dbus_method_invocation_return_value(invocation, nullptr);
+    return;
+  }
   if (g_strcmp0(method, "OpenMain") == 0 ||
       g_strcmp0(method, "OpenSettings") == 0) {
     if (!authorised_child(sender)) {
@@ -1435,6 +1524,11 @@ void bridge_bus_acquired(GDBusConnection* connection, const gchar*, gpointer) {
       "<method name='QuickPasteInputReady'><arg type='s' direction='in'/><arg type='b' direction='out'/></method>"
       "<method name='OpenMain'><arg type='s' direction='in'/><arg type='b' direction='out'/></method>"
       "<method name='OpenSettings'><arg type='s' direction='in'/><arg type='b' direction='out'/></method>"
+      "<method name='StartQualification'><arg type='s' direction='in'/><arg type='s' direction='in'/><arg type='s' direction='out'/></method>"
+      "<method name='AwaitQualification'><arg type='s' direction='out'/><arg type='s' direction='out'/><arg type='u' direction='out'/></method>"
+      "<method name='QualificationObserved'><arg type='s' direction='in'/><arg type='u' direction='in'/><arg type='s' direction='in'/><arg type='s' direction='in'/><arg type='b' direction='in'/></method>"
+      "<signal name='QualificationRequested'><arg type='s'/><arg type='u'/><arg type='s'/></signal>"
+      "<signal name='QualificationObservation'><arg type='s'/><arg type='u'/><arg type='s'/><arg type='b'/></signal>"
       "<signal name='TransactionCancelled'><arg type='s'/></signal>"
       "</interface></node>";
   g_autoptr(GError) error = nullptr;

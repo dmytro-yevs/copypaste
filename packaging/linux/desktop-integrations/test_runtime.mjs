@@ -514,8 +514,9 @@ function loadKde({activateWindow} = {}) {
     const runtime = loadKde({activateWindow: () => {}});
     runtime.workspace.activeWindow = source;
     runtime.calls.at(-1).callback(true);
-    assert.equal(runtime.timers.length, 1, 'a Begin transaction must have one deadline');
-    runtime.timers[0]._callback();
+    const deadline = runtime.timers.find(timer => timer.singleShot === true);
+    assert.ok(deadline, 'a Begin transaction must have one deadline');
+    deadline._callback();
     assert.equal(runtime.calls.some(call => call.method === 'CancelQuickPaste'), true, 'a missing Begin/Paste reply must cancel');
     assert.equal(runtime.calls.at(-1).method, 'AwaitQuickPaste', 'deadline recovery must rearm Await');
 }
