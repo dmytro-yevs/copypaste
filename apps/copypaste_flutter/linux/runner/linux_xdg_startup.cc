@@ -21,7 +21,6 @@ namespace {
 
 constexpr char kDesktopFileName[] = "com.copypaste.CopyPaste.desktop";
 constexpr char kPackagedExecutable[] = "/usr/lib/copypaste/copypaste";
-constexpr char kManagedKey[] = "X-CopyPaste-Managed=true";
 constexpr char kApplicationId[] = "com.copypaste.CopyPaste";
 constexpr char kUriHandlerContentType[] = "x-scheme-handler/copypaste";
 
@@ -171,6 +170,15 @@ bool decode_desktop_exec_argument(const std::string& quoted,
   return true;
 }
 
+bool is_plain_executable_path(const gchar* value, std::string* executable) {
+  if (value == nullptr || !g_path_is_absolute(value) || *value == '\0' ||
+      std::strpbrk(value, "\n\r") != nullptr) {
+    return false;
+  }
+  *executable = value;
+  return true;
+}
+
 bool key_matches(GKeyFile* entry, const char* key, const char* expected) {
   g_autofree gchar* value =
       g_key_file_get_string(entry, "Desktop Entry", key, nullptr);
@@ -237,7 +245,7 @@ bool is_managed_desktop_entry(const gchar* contents, gsize length,
   std::string executable;
   std::string try_executable;
   return decode_desktop_exec_argument(quoted_exec, &executable) &&
-      decode_desktop_exec_argument(try_exec, &try_executable) &&
+      is_plain_executable_path(try_exec, &try_executable) &&
       executable == try_executable;
 }
 
@@ -305,22 +313,33 @@ std::string LinuxXdgStartup::desktop_entry_path() const {
 
 std::string LinuxXdgStartup::DesktopEntryForExecutable(
     const std::string& executable, bool autostart) {
-  std::string entry =
-      "[Desktop Entry]\n"
-      "Type=Application\n"
-      "Name=CopyPaste\n"
-      "Comment=Encrypted clipboard history\n"
-      "Exec=" + quote_desktop_exec_argument(executable) + " %U\n"
-      "TryExec=" + quote_desktop_exec_argument(executable) + "\n"
-      "Icon=com.copypaste.CopyPaste\n"
-      "Terminal=false\n"
-      "Categories=Utility;\n"
-      "StartupNotify=true\n"
-      "MimeType=x-scheme-handler/copypaste;\n"
-      "X-CopyPaste-ApplicationId=com.copypaste.CopyPaste\n";
-  if (autostart) entry.append("X-GNOME-Autostart-enabled=true\n");
-  entry.append(kManagedKey).append("\n");
-  return entry;
+  g_autoptr(GKeyFile) entry = g_key_file_new();
+  g_key_file_set_string(entry, "Desktop Entry", "Type", "Application");
+  g_key_file_set_string(entry, "Desktop Entry", "Name", "CopyPaste");
+  g_key_file_set_string(entry, "Desktop Entry", "Comment",
+                        "Encrypted clipboard history");
+  const std::string exec = quote_desktop_exec_argument(executable) + " %U";
+  // Exec needs Desktop Entry quoting first. GKeyFile then escapes that value
+  // for its own file syntax, preserving quotes, backslashes, and percent text.
+  g_key_file_set_string(entry, "Desktop Entry", "Exec", exec.c_str());
+  g_key_file_set_string(entry, "Desktop Entry", "TryExec", executable.c_str());
+  g_key_file_set_string(entry, "Desktop Entry", "Icon", kApplicationId);
+  g_key_file_set_string(entry, "Desktop Entry", "Terminal", "false");
+  g_key_file_set_string(entry, "Desktop Entry", "Categories", "Utility;");
+  g_key_file_set_string(entry, "Desktop Entry", "StartupNotify", "true");
+  const std::string mime_type = std::string(kUriHandlerContentType) + ";";
+  g_key_file_set_string(entry, "Desktop Entry", "MimeType",
+                        mime_type.c_str());
+  g_key_file_set_string(entry, "Desktop Entry", "X-CopyPaste-ApplicationId",
+                        kApplicationId);
+  if (autostart) {
+    g_key_file_set_string(entry, "Desktop Entry", "X-GNOME-Autostart-enabled",
+                          "true");
+  }
+  g_key_file_set_string(entry, "Desktop Entry", "X-CopyPaste-Managed", "true");
+  gsize length = 0;
+  g_autofree gchar* contents = g_key_file_to_data(entry, &length, nullptr);
+  return std::string(contents, length);
 }
 
 bool LinuxXdgStartup::owns_entry_for_current_executable(
