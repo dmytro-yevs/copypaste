@@ -47,6 +47,8 @@ jobs:
           - { platform: linux, architecture: x86_64, runner: ubuntu-24.04, library: libcopypaste_module_ocr.so, program: copypaste-module-qualification }
           - { platform: linux, architecture: aarch64, runner: ubuntu-24.04-arm, library: libcopypaste_module_ocr.so, program: copypaste-module-qualification }
     runs-on: ${{ matrix.runner }}
+    env:
+      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
     defaults:
       run:
         shell: bash
@@ -61,6 +63,9 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
+      - name: Select OpenSSL 3 for authenticated module metadata
+        if: matrix.platform == 'macos'
+        run: bash scripts/ci/use-macos-openssl3.sh
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: |
@@ -92,7 +97,7 @@ jobs:
           python3 scripts/modules/qualify-desktop.py --platform ${{ matrix.platform }} --package dist/CopyPasteModule-copypaste.ocr-v${{ needs.preflight.outputs.version }}-${{ matrix.platform }}-${{ matrix.architecture }}.cpmodule --program target/release/${{ matrix.program }} --app-version "$version" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --receipt dist/CopyPasteModule-copypaste.ocr-v${{ needs.preflight.outputs.version }}-${{ matrix.platform }}-${{ matrix.architecture }}.cpmodule.receipt.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ocr-${{ matrix.platform }}
+          name: ocr-${{ matrix.platform }}-${{ matrix.architecture }}
           if-no-files-found: error
           path: dist/*
 
