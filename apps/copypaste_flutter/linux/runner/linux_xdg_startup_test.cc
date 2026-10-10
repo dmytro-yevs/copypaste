@@ -3,6 +3,7 @@
 
 #include "linux_xdg_startup.h"
 
+#include <gio/gio.h>
 #include <glib.h>
 #include <glib/gstdio.h>
 
