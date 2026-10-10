@@ -104,7 +104,7 @@ void test_exec_escaping() {
       g_key_file_get_string(key_file, "Desktop Entry", "Exec", &error);
   g_assert_no_error(error);
   g_assert_cmpstr(exec, ==,
-                  "\"/tmp/Copy Paste\\\"quote\\\\slash%%code\" %U");
+                  "/bin/sh -c \"exec \\\"\\$0\\\" \\\"\\$@\\\"\" \"/tmp/Copy Paste\\\"quote\\\\slash%%code\" %U");
   g_autofree gchar* try_exec =
       g_key_file_get_string(key_file, "Desktop Entry", "TryExec", &error);
   g_assert_no_error(error);
@@ -252,10 +252,16 @@ void test_uri_registration_uses_private_xdg_home() {
 void test_desktop_entry_parses_special_executable() {
   fixture->clear_entries();
   const std::string executable =
-      fixture->root() + "/Copy Paste\"quote\\slash%handler";
+      fixture->root() + "/Copy Paste\"quote\\slash%=handler";
+  const std::string capture = fixture->root() + "/uri-capture";
   const int descriptor = open(executable.c_str(), O_WRONLY | O_CREAT | O_EXCL,
                               0700);
   g_assert_cmpint(descriptor, >=, 0);
+  static constexpr char kCaptureScript[] =
+      "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$COPYPASTE_XDG_URI_CAPTURE\"\n";
+  g_assert_cmpint(write(descriptor, kCaptureScript, sizeof(kCaptureScript) - 1),
+                  ==, static_cast<ssize_t>(sizeof(kCaptureScript) - 1));
+  g_assert_cmpint(fchmod(descriptor, 0700), ==, 0);
   g_assert_cmpint(close(descriptor), ==, 0);
   const std::string applications = fixture->data() + "/applications";
   g_assert_cmpint(g_mkdir_with_parents(applications.c_str(), 0700), ==, 0);
@@ -273,6 +279,24 @@ void test_desktop_entry_parses_special_executable() {
   g_assert_cmpstr(g_desktop_app_info_get_string(app_info, "TryExec"), ==,
                   executable.c_str());
   g_assert_true(g_app_info_supports_uris(G_APP_INFO(app_info)));
+  g_setenv("COPYPASTE_XDG_URI_CAPTURE", capture.c_str(), TRUE);
+  GList* uris = g_list_append(
+      nullptr, g_strdup("copypaste://pair/v1?code=A%25B&address=host%3A1"));
+  g_assert_true(g_app_info_launch_uris(G_APP_INFO(app_info), uris, nullptr,
+                                       &error));
+  g_list_free_full(uris, g_free);
+  g_assert_no_error(error);
+  gchar* received = nullptr;
+  gsize received_length = 0;
+  for (int attempt = 0; attempt < 100 && received == nullptr; ++attempt) {
+    g_usleep(10000);
+    g_file_get_contents(capture.c_str(), &received, &received_length, nullptr);
+  }
+  g_unsetenv("COPYPASTE_XDG_URI_CAPTURE");
+  g_assert_nonnull(received);
+  g_assert_cmpstr(received, ==,
+                  "copypaste://pair/v1?code=A%25B&address=host%3A1\n");
+  g_free(received);
 }
 #endif
 
