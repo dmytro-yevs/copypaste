@@ -9,6 +9,20 @@ diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
      compositor.cpp
      compositor_wayland.cpp
      compositor_x11.cpp
+diff --git a/src/xdgshellwindow.h b/src/xdgshellwindow.h
+--- a/src/xdgshellwindow.h
++++ b/src/xdgshellwindow.h
+@@ -127,0 +128,1 @@ public:
++    QString rawAppId() const;
+diff --git a/src/xdgshellwindow.cpp b/src/xdgshellwindow.cpp
+--- a/src/xdgshellwindow.cpp
++++ b/src/xdgshellwindow.cpp
+@@ -493,0 +494,5 @@ XdgToplevelInterface *XdgToplevelWindow::shellSurface() const
++QString XdgToplevelWindow::rawAppId() const
++{
++    return m_shellSurface->windowClass();
++}
++
 diff --git a/src/wayland_server.cpp b/src/wayland_server.cpp
 --- a/src/wayland_server.cpp
 +++ b/src/wayland_server.cpp
