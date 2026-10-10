@@ -138,6 +138,9 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
         producer = (ROOT / ".github/workflows/compositor-runtime.yml").read_text(encoding="utf-8")
         self.assertIn('"$(git rev-parse HEAD)" == "${{ inputs.commit }}"', producer)
         self.assertNotIn('"$GITHUB_SHA" == "${{ inputs.commit }}"', producer)
+        self.assertIn("COMPOSITOR_RUNTIME_COMMIT: ${{ inputs.commit }}", producer)
+        self.assertIn('"commit": os.environ["COMPOSITOR_RUNTIME_COMMIT"]', producer)
+        self.assertNotIn('"commit": os.environ["GITHUB_SHA"]', producer)
 
     def test_uses_authenticated_runtime_artifacts_and_generated_launchers(self):
         workflow = (ROOT / ".github/workflows/linux-native-qualification.yml").read_text(encoding="utf-8")
