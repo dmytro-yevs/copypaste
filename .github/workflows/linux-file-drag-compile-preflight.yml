@@ -10,6 +10,54 @@ permissions:
   contents: read
 
 jobs:
+  wayland-gdk:
+    name: ${{ matrix.architecture }} Wayland GDK display
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x86_64
+            runner: ubuntu-24.04
+          - architecture: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Open a controlled native Wayland display through GTK3
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends weston python3-gi gir1.2-gtk-3.0
+          runtime="$(mktemp -d)"
+          chmod 700 "$runtime"
+          export XDG_RUNTIME_DIR="$runtime"
+          export WAYLAND_DISPLAY=copypaste-gdk-probe
+          weston --backend=headless-backend.so --socket="$WAYLAND_DISPLAY" --width=1280 --height=800 >"$runtime/weston.log" 2>&1 &
+          weston_pid=$!
+          cleanup() {
+            kill "$weston_pid" 2>/dev/null || true
+            wait "$weston_pid" 2>/dev/null || true
+            rm -rf "$runtime"
+          }
+          trap cleanup EXIT
+          for _ in $(seq 1 100); do
+            [[ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]] && break
+            sleep 0.05
+          done
+          [[ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]]
+          python3 - <<'PY'
+          import gi
+          import os
+          gi.require_version("Gdk", "3.0")
+          from gi.repository import Gdk
+
+          display = Gdk.Display.open(os.environ["WAYLAND_DISPLAY"])
+          assert display is not None
+          assert display.get_name() == os.environ["WAYLAND_DISPLAY"]
+          assert display.get_n_monitors() == 1
+          geometry = display.get_monitor(0).get_geometry()
+          assert (geometry.x, geometry.y, geometry.width, geometry.height) == (0, 0, 1280, 800)
+          PY
   compile:
     name: ${{ matrix.architecture }} GTK source compile
     runs-on: ${{ matrix.runner }}
