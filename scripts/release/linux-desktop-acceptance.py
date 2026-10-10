@@ -32,6 +32,7 @@ MENU_INTERFACE = "com.canonical.dbusmenu"
 NOTIFICATIONS_NAME = "org.freedesktop.Notifications"
 NOTIFICATIONS_PATH = "/org/freedesktop/Notifications"
 COPYPASTE_TITLE = "CopyPaste"
+CLIPBOARD_PROVIDER = Path(__file__).with_name("linux-clipboard-provider.py").resolve()
 SNI_NAME = re.compile(r"^org\.kde\.StatusNotifierItem-(?P<pid>[1-9][0-9]*)-(?P<index>[1-9][0-9]*)$")
 SERIAL = re.compile(r"\bserial=(?P<serial>[0-9]+)\b")
 REPLY_SERIAL = re.compile(r"\breply_serial=(?P<serial>[0-9]+)\b")
@@ -146,6 +147,11 @@ def require_bus_credentials(environment: dict[str, str], service: str, gui_pid: 
     uid = busctl_value(environment, "GetConnectionUnixUser", service)
     if pid != gui_pid or uid != os.getuid():
         raise AcceptanceError("StatusNotifierItem D-Bus credentials do not belong to the GUI process")
+
+
+def require_bus_uid(environment: dict[str, str], service: str) -> None:
+    if busctl_value(environment, "GetConnectionUnixUser", service) != os.getuid():
+        raise AcceptanceError("D-Bus service is not owned by the qualification user")
 
 
 def expect_tray(environment: dict[str, str], gui_pid: int) -> str:
@@ -307,6 +313,7 @@ def notification_monitor(environment: dict[str, str]) -> tuple[subprocess.Popen[
     owner = busctl_value(environment, "GetNameOwner", NOTIFICATIONS_NAME)
     if not isinstance(owner, str) or not UNIQUE_NAME.fullmatch(owner):
         raise AcceptanceError("desktop notification service has no unique owner")
+    require_bus_uid(environment, owner)
     monitor = subprocess.Popen(
         [
             "dbus-monitor", "--session",
@@ -331,6 +338,11 @@ def parse_capture_command(raw: str) -> list[str]:
         raise AcceptanceError("capture command must be a JSON argv array") from error
     if not isinstance(value, list) or not value or not all(isinstance(item, str) and item for item in value):
         raise AcceptanceError("capture command must be a non-empty JSON argv array of strings")
+    if len(value) < 2 or Path(value[1]).resolve() != CLIPBOARD_PROVIDER:
+        raise AcceptanceError("capture command must invoke the repository GTK clipboard provider")
+    required = {"--helper", "--manifest", "--ready-file", "--activity-log"}
+    if not required <= set(value):
+        raise AcceptanceError("GTK clipboard provider command is incomplete")
     return value
 
 

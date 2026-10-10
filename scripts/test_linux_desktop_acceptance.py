@@ -82,9 +82,13 @@ class LinuxDesktopAcceptanceTest(unittest.TestCase):
         self.assertEqual(transcript.notification_id, 24)
 
     def test_capture_command_requires_real_argv(self):
-        self.assertEqual(MODULE.parse_capture_command('["/tmp/trigger", "--ready"]'), ["/tmp/trigger", "--ready"])
+        provider = str(MODULE.CLIPBOARD_PROVIDER)
+        command = ["python3", provider, "--helper", "/tmp/helper", "--manifest", "/tmp/manifest", "--ready-file", "/tmp/ready", "--activity-log", "/tmp/activity"]
+        self.assertEqual(MODULE.parse_capture_command(json.dumps(command)), command)
         with self.assertRaisesRegex(MODULE.AcceptanceError, "JSON argv"):
             MODULE.parse_capture_command('sh -c true')
+        with self.assertRaisesRegex(MODULE.AcceptanceError, "GTK clipboard provider"):
+            MODULE.parse_capture_command('["true"]')
 
 
 if __name__ == "__main__":

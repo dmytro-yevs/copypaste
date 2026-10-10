@@ -1393,10 +1393,15 @@ void bridge_call(GDBusConnection*, const gchar* sender, const gchar*, const gcha
     const gchar* role = nullptr;
     gboolean mapped = FALSE;
     g_variant_get(parameters, "(&su&s&sb)", &transaction, &pid, &app_id, &role, &mapped);
+    const bool main_surface = role != nullptr && g_strcmp0(role, "main") == 0 &&
+        pid == static_cast<guint32>(getpid());
+    const bool quick_paste_surface = role != nullptr &&
+        g_strcmp0(role, "quick-paste") == 0 && bridge_child_pid != 0 &&
+        pid == static_cast<guint32>(bridge_child_pid);
     if (!authorised_companion(sender) || transaction == nullptr ||
-        qualification_transaction != transaction || pid != static_cast<guint32>(getpid()) ||
+        qualification_transaction != transaction || (!main_surface && !quick_paste_surface) ||
         app_id == nullptr || g_strcmp0(app_id, "com.copypaste.CopyPaste") != 0 ||
-        role == nullptr || strlen(role) > 128) {
+        strlen(role) > 128) {
       g_dbus_method_invocation_return_dbus_error(
           invocation, "app.copypaste.WaylandIntegration.Error.Unauthorized",
           "Qualification observation is invalid.");
