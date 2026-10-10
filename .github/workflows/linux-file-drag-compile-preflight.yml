@@ -141,6 +141,11 @@ jobs:
             rm -rf "$work" "$sink_file"
           }
           trap cleanup EXIT
+          for _ in $(seq 1 100); do
+            xdpyinfo -display "$DISPLAY" >/dev/null 2>&1 && break
+            sleep 0.05
+          done
+          xdpyinfo -display "$DISPLAY" >/dev/null
           openbox --sm-disable >/dev/null 2>&1 &
           wm_pid=$!
           for _ in $(seq 1 100); do
