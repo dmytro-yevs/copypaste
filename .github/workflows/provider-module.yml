@@ -53,6 +53,10 @@ jobs:
               raise SystemExit('unexpected exact fixture connection shape')
           source = source.replace(old_connect, 'QDBusConnection::connectToPeer(server.address(), connectionName)')
           source = source.replace(old_disconnect, 'QDBusConnection::disconnectFromPeer(connectionName);')
+          marker = 'qDBusRegisterMetaType<WriterIdentity>();'
+          if source.count(marker) != 1:
+              raise SystemExit('unexpected exact fixture metatype registration shape')
+          source = source.replace(marker, marker + '\n    qRegisterMetaType<QMap<QString, QByteArray>>("QMap<QString,QByteArray>");')
           path.write_text(source)
           PY
             fi
@@ -125,6 +129,7 @@ jobs:
               QCoreApplication app(argc, argv);
               if (argc != 2) return 64;
               qDBusRegisterMetaType<WriterIdentity>();
+              qRegisterMetaType<QMap<QString, QByteArray>>("QMap<QString,QByteArray>");
               ClipboardFixture fixture;
               QDBusServer server(QStringLiteral("unix:tmpdir=%1").arg(QDir::tempPath()));
               if (!server.isConnected()) return 1;
@@ -165,8 +170,10 @@ jobs:
               if (snapshot.type() == QDBusMessage::ErrorMessage || snapshot.signature() != QLatin1String("tas(suus)") || snapshot.arguments().size() != 3 || snapshot.arguments().at(0).toULongLong() != 7 || snapshot.arguments().at(1).toStringList() != QStringList{QStringLiteral("text/plain")}) return 5;
               const auto identity = qdbus_cast<WriterIdentity>(snapshot.arguments().at(2));
               if (identity.status != QLatin1String("verified") || identity.pid != 101 || identity.uid != 1000 || identity.appId != QLatin1String("org.example.Writer")) return 6;
-              const auto xml = wait(client.asyncCall(QDBusMessage::createMethodCall(QString(), QStringLiteral("/app/copypaste/Clipboard"), QStringLiteral("org.freedesktop.DBus.Introspectable"), QStringLiteral("Introspect")), 1000));
-              if (xml.type() == QDBusMessage::ErrorMessage || xml.arguments().size() != 1 || !xml.arguments().constFirst().toString().contains(QStringLiteral("\"Version\""))) return 8;
+              const auto introspection = wait(client.asyncCall(QDBusMessage::createMethodCall(QString(), QStringLiteral("/app/copypaste/Clipboard"), QStringLiteral("org.freedesktop.DBus.Introspectable"), QStringLiteral("Introspect")), 1000));
+              if (introspection.type() == QDBusMessage::ErrorMessage || introspection.arguments().size() != 1) return 8;
+              const auto xml = introspection.arguments().constFirst().toString();
+              for (const auto &member : {QStringLiteral("Version"), QStringLiteral("Snapshot"), QStringLiteral("Read"), QStringLiteral("Write"), QStringLiteral("OwnerChanged")}) if (!xml.contains(QStringLiteral("\"") + member + QStringLiteral("\""))) return 9;
               if (peer) QDBusConnection::disconnectFromPeer(name); else QDBusConnection::disconnectFromBus(name);
               return 0;
           }
