@@ -36,7 +36,7 @@ class LinuxModuleSourceRunTest(unittest.TestCase):
             {"name": "desktop (linux, x86_64)", "status": "completed", "conclusion": "success"},
             {"name": "desktop (linux, aarch64)", "status": "completed", "conclusion": "success"},
         ]}
-        self.artifacts = {"artifacts": [
+        self.artifacts = {"total_count": 2, "artifacts": [
             {"name": f"provider-supabase-linux-{architecture}", "expired": False,
              "workflow_run": {"id": 123, "head_sha": "a" * 40}}
             for architecture in ("x86_64", "aarch64")
@@ -53,6 +53,21 @@ class LinuxModuleSourceRunTest(unittest.TestCase):
     def test_refuses_expired_or_unbound_artifact(self):
         self.artifacts["artifacts"][0]["expired"] = True
         with self.assertRaisesRegex(ValueError, "provenance"):
+            self.verify(self.run, self.jobs, self.artifacts, "owner/repo", "a" * 40,
+                        ".github/workflows/provider-module.yml", "supabase")
+
+    def test_refuses_truncated_artifact_inventory(self):
+        self.artifacts["total_count"] = 3
+        with self.assertRaisesRegex(ValueError, "inventory is incomplete"):
+            self.verify(self.run, self.jobs, self.artifacts, "owner/repo", "a" * 40,
+                        ".github/workflows/provider-module.yml", "supabase")
+
+    def test_refuses_duplicate_expected_artifact_even_if_one_is_unexpired(self):
+        duplicate = dict(self.artifacts["artifacts"][0])
+        duplicate["expired"] = True
+        self.artifacts["artifacts"].append(duplicate)
+        self.artifacts["total_count"] += 1
+        with self.assertRaisesRegex(ValueError, "exactly one artifact"):
             self.verify(self.run, self.jobs, self.artifacts, "owner/repo", "a" * 40,
                         ".github/workflows/provider-module.yml", "supabase")
 
