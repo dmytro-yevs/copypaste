@@ -73,8 +73,8 @@ class RuntimeStageTests(unittest.TestCase):
                 "libraries": [{"path": "usr/lib/libKDecoration2.so.6.0.0", "soname": "libKDecoration2.so.6", "sha256": digest(private_library.read_bytes()), "package": "kdecoration2", "evr": "5.115.0-1"}],
                 "packages": [{"name": "kdecoration2", "evr": "5.115.0-1", "source_rpm": "kdecoration2-5.115.0-1.src.rpm", "license": "LGPL-2.1-or-later"}],
                 "licenses": [
-                    {"package": "kdecoration2", "license_package": "kdecoration2", "license_evr": "5.115.0-1", "license_source_rpm": "kdecoration2-5.115.0-1.src.rpm", "license": "LGPL-2.1-or-later", "path": "usr/share/doc/copypaste-compositor-runtime-private-licenses/kdecoration2-LICENSE", "sha256": digest(closure_license.read_bytes())},
-                    {"package": "kdecoration2", "license_package": "kdecoration2", "license_evr": "5.115.0-1", "license_source_rpm": "kdecoration2-5.115.0-1.src.rpm", "license": "LGPL-2.1-or-later", "path": "usr/share/doc/copypaste-compositor-runtime-private-licenses/kdecoration2-NOTICE", "sha256": digest(closure_notice.read_bytes())},
+                    {"package": "kdecoration2", "license_package": "kdecoration2", "license_evr": "5.115.0-1", "license_source_rpm": "kdecoration2-5.115.0-1.src.rpm", "license": "LGPL-2.1-or-later", "path": "usr/share/doc/copypaste-compositor-runtime-private-licenses/kdecoration2-LICENSE", "sha256": digest(closure_license.read_bytes()), "license_origin": "installed-rpm"},
+                    {"package": "kdecoration2", "license_package": "kdecoration2", "license_evr": "5.115.0-1", "license_source_rpm": "kdecoration2-5.115.0-1.src.rpm", "license": "LGPL-2.1-or-later", "path": "usr/share/doc/copypaste-compositor-runtime-private-licenses/kdecoration2-NOTICE", "sha256": digest(closure_notice.read_bytes()), "license_origin": "installed-rpm"},
                 ],
             }), encoding="utf-8")
         rows = []
@@ -261,13 +261,18 @@ class RuntimeStageTests(unittest.TestCase):
                  mock.patch.object(private_elf_closure, "dynamic_search_directories", return_value=[]), \
                  mock.patch.object(private_elf_closure, "trusted_library", side_effect=lambda path: path), \
                  mock.patch.object(private_elf_closure, "rpm_owner", side_effect=lambda path: ("kdecoration2" if path == decoration else "kf6-kcoreaddons", "6.0.0-1", "kde-6.0.0-1.src.rpm", "LGPL-2.1-or-later")), \
-                 mock.patch.object(private_elf_closure, "rpm_license_files", side_effect=lambda owner: [(("kdecoration2-doc", "6.0.0-1", "kde-6.0.0-1.src.rpm", "LGPL-2.1-or-later"), license_source), (("kdecoration2-doc", "6.0.0-1", "kde-6.0.0-1.src.rpm", "LGPL-2.1-or-later"), notice_source)] if owner[0] == "kdecoration2" else [(("kf6-kcoreaddons", "6.0.0-1", "kde-6.0.0-1.src.rpm", "LGPL-2.1-or-later"), license_source)]):
+                 mock.patch.object(private_elf_closure, "rpm_installed_license_files", side_effect=lambda owner: [(("kdecoration2-doc", "6.0.0-1", "kde-6.0.0-1.src.rpm", "LGPL-2.1-or-later"), license_source), (("kdecoration2-doc", "6.0.0-1", "kde-6.0.0-1.src.rpm", "LGPL-2.1-or-later"), notice_source)] if owner[0] == "kdecoration2" else []), \
+                 mock.patch.object(private_elf_closure, "source_rpm_license_files", side_effect=lambda owner, _destination: [(owner, license_source, owner[2], "a" * 64)]):
                 manifest = private_elf_closure.copy_closure(runtime, [entrypoint])
 
             self.assertEqual([item["soname"] for item in manifest["libraries"]], ["libKDecoration2.so.6", "libKF6CoreAddons.so.6"])
             self.assertEqual({item["package"] for item in manifest["licenses"]}, {"kdecoration2", "kf6-kcoreaddons"})
             self.assertEqual(sum(item["package"] == "kdecoration2" for item in manifest["licenses"]), 2)
             self.assertEqual({item["license_package"] for item in manifest["licenses"] if item["package"] == "kdecoration2"}, {"kdecoration2-doc"})
+            self.assertEqual({item["license_origin"] for item in manifest["licenses"]}, {"installed-rpm", "source-rpm"})
+            source_record = next(item for item in manifest["licenses"] if item["package"] == "kf6-kcoreaddons")
+            self.assertEqual(source_record["license_archive"], "kde-6.0.0-1.src.rpm")
+            self.assertEqual(source_record["license_archive_sha256"], "a" * 64)
             self.assertEqual(os.readlink(runtime / "usr/lib/libKDecoration2.so.6"), "libKDecoration2.so.6.0.0")
 
     def test_rpm_owner_accepts_a_bounded_compound_license_expression(self) -> None:

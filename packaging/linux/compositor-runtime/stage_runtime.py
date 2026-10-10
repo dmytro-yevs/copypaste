@@ -286,12 +286,16 @@ def validate_private_elf_closure(runtime_root: Path, receipt: dict[str, Any]) ->
     license_paths: set[str] = set()
     receipt_licenses = {(item["name"], item["sha256"]) for item in receipt["upstream_licenses"]}
     for license_record in licenses:
-        if not isinstance(license_record, dict) or set(license_record) != {"package", "license_package", "license_evr", "license_source_rpm", "license", "path", "sha256"}:
+        base = {"package", "license_package", "license_evr", "license_source_rpm", "license", "path", "sha256", "license_origin"}
+        source = base | {"license_archive", "license_archive_sha256"}
+        if not isinstance(license_record, dict) or set(license_record) not in (base, source):
             raise ContractError("private ELF closure license metadata is invalid")
         package = license_record.get("package")
         path = license_record.get("path")
         if package not in package_by_name or license_record.get("license") != package_by_name[package]["license"] or not isinstance(license_record.get("license_package"), str) or not re.fullmatch(r"[A-Za-z0-9.+_-]{1,80}", license_record["license_package"]) or license_record.get("license_evr") != package_by_name[package]["evr"] or license_record.get("license_source_rpm") != package_by_name[package]["source_rpm"] or not isinstance(path, str) or not path.startswith("usr/share/doc/") or not SHA256.fullmatch(license_record.get("sha256", "")):
             raise ContractError("private ELF closure license metadata is invalid")
+        if license_record.get("license_origin") not in {"installed-rpm", "source-rpm"} or (license_record["license_origin"] == "source-rpm" and (license_record.get("license_archive") != license_record["license_source_rpm"] or not SHA256.fullmatch(license_record.get("license_archive_sha256", "")))):
+            raise ContractError("private ELF closure license origin is invalid")
         row = declared.get(path)
         if row is None or row.get("type") != "file" or row.get("sha256") != license_record["sha256"]:
             raise ContractError("private ELF closure license bytes are not bound to runtime payload")

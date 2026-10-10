@@ -18,6 +18,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 from collections import deque
 from pathlib import Path
 from typing import Iterable
@@ -198,6 +199,10 @@ def rpm_siblings(owner: tuple[str, str, str, str]) -> list[tuple[str, str, str, 
 
 
 def rpm_license_files(owner: tuple[str, str, str, str]) -> list[tuple[tuple[str, str, str, str], Path]]:
+    return rpm_installed_license_files(owner)
+
+
+def rpm_installed_license_files(owner: tuple[str, str, str, str]) -> list[tuple[tuple[str, str, str, str], Path]]:
     records = []
     for candidate in rpm_siblings(owner):
         paths = [Path(item) for item in run(["rpm", "-ql", candidate[0]]).splitlines()]
@@ -208,7 +213,59 @@ def rpm_license_files(owner: tuple[str, str, str, str]) -> list[tuple[tuple[str,
                 records.append((candidate, trusted_license(path)))
     records = sorted(set(records), key=lambda item: (item[0][0], str(item[1])))
     if not records:
-        raise ClosureError(f"bundled RPM {owner[0]} has no readable license or notice bytes in exact source siblings")
+        return []
+    return records
+
+
+def safe_source_member(value: str) -> str | None:
+    member = value.removeprefix("./")
+    path = Path(member)
+    if not member or path.is_absolute() or ".." in path.parts or not NOTICE_NAME.fullmatch(path.name):
+        return None
+    return member
+
+
+def source_rpm_license_files(owner: tuple[str, str, str, str], destination: Path) -> list[tuple[tuple[str, str, str, str], Path, str, str]]:
+    name, evr, source_rpm, _license = owner
+    source_dir = destination / source_rpm
+    if not source_dir.exists():
+        source_dir.mkdir(parents=True)
+        run(["dnf", "-q", "download", "--source", "--destdir", str(source_dir), source_rpm])
+    archives = [path for path in source_dir.iterdir() if path.is_file() and path.name == source_rpm]
+    if len(archives) != 1:
+        raise ClosureError(f"exact source RPM is unavailable for {name}")
+    archive = archives[0]
+    signature = subprocess.run(["rpm", "--checksig", str(archive)], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+    if signature.returncode:
+        raise ClosureError(f"exact source RPM signature is invalid for {name}")
+    identity = run(["rpm", "-qp", "--qf", "%{NAME}\t%{EVR}\t%{ARCH}\n", str(archive)]).splitlines()
+    if identity != [f"{name}\t{evr}\tsrc"]:
+        raise ClosureError(f"exact source RPM provenance differs for {name}")
+    listing = subprocess.run(["rpm2cpio", str(archive)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    members_process = subprocess.run(["cpio", "-it"], input=listing.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    if listing.returncode or members_process.returncode:
+        raise ClosureError(f"cannot inspect exact source RPM for {name}")
+    members = [member for line in members_process.stdout.decode(errors="replace").splitlines() if (member := safe_source_member(line)) is not None]
+    if not members:
+        raise ClosureError(f"exact source RPM has no safe license or notice bytes for {name}")
+    extract = source_dir / "extract"
+    extract.mkdir(exist_ok=True)
+    payload = subprocess.run(["rpm2cpio", str(archive)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    restored = subprocess.run(["cpio", "-idm", "--quiet", "--no-absolute-filenames", *members], input=payload.stdout, cwd=extract, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    if payload.returncode or restored.returncode:
+        raise ClosureError(f"cannot extract exact source RPM license bytes for {name}")
+    archive_hash = sha256(archive)
+    records = []
+    for member in sorted(set(members)):
+        path = extract / member
+        try:
+            details = path.lstat()
+            resolved = path.resolve(strict=True)
+        except OSError as error:
+            raise ClosureError(f"exact source RPM license member is unavailable for {name}") from error
+        if not stat.S_ISREG(details.st_mode) or details.st_nlink != 1 or not resolved.is_relative_to(extract):
+            raise ClosureError(f"exact source RPM license member is unsafe for {name}")
+        records.append((owner, path, source_rpm, archive_hash))
     return records
 
 
@@ -298,18 +355,30 @@ def copy_closure(runtime: Path, initial: Iterable[Path]) -> dict:
     licenses = []
     license_destination = runtime / "usr/share/doc/copypaste-compositor-runtime-private-licenses"
     license_destination.mkdir(parents=True, exist_ok=True)
-    for package in sorted(packages.values(), key=lambda item: item["name"]):
-        owner = (package["name"], package["evr"], package["source_rpm"], package["license"])
-        for index, (license_owner, source) in enumerate(rpm_license_files(owner)):
-            target = license_destination / f"{package['name']}-{index}-{source.name}"
-            if target.exists() or target.is_symlink():
-                raise ClosureError("private RPM license destination collides")
-            shutil.copyfile(source, target, follow_symlinks=False)
-            licenses.append({
-                "package": package["name"], "license_package": license_owner[0], "license_evr": license_owner[1],
-                "license_source_rpm": license_owner[2], "license": package["license"],
-                "path": target.relative_to(runtime).as_posix(), "sha256": sha256(target),
-            })
+    with tempfile.TemporaryDirectory(prefix="copypaste-compositor-source-rpms-") as temporary:
+        source_cache = Path(temporary)
+        for package in sorted(packages.values(), key=lambda item: item["name"]):
+            owner = (package["name"], package["evr"], package["source_rpm"], package["license"])
+            installed = rpm_installed_license_files(owner)
+            origin = "installed-rpm"
+            source_records: list[tuple[tuple[str, str, str, str], Path, str, str]] = []
+            if not installed:
+                origin = "source-rpm"
+                source_records = source_rpm_license_files(owner, source_cache)
+            records = [(record_owner, source, None, None) for record_owner, source in installed] if installed else source_records
+            for index, (license_owner, source, archive_name, archive_hash) in enumerate(records):
+                target = license_destination / f"{package['name']}-{index}-{source.name}"
+                if target.exists() or target.is_symlink():
+                    raise ClosureError("private RPM license destination collides")
+                shutil.copyfile(source, target, follow_symlinks=False)
+                record = {
+                    "package": package["name"], "license_package": license_owner[0], "license_evr": license_owner[1],
+                    "license_source_rpm": license_owner[2], "license": package["license"],
+                    "path": target.relative_to(runtime).as_posix(), "sha256": sha256(target), "license_origin": origin,
+                }
+                if origin == "source-rpm":
+                    record.update({"license_archive": archive_name, "license_archive_sha256": archive_hash})
+                licenses.append(record)
     manifest = {"schema": 1, "libraries": sorted(libraries, key=lambda item: item["path"]),
                 "packages": sorted(packages.values(), key=lambda item: item["name"]), "licenses": licenses}
     manifest_path = runtime / MANIFEST
