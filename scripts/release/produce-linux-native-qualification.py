@@ -32,6 +32,10 @@ X11_KEYBOARD_ASSERTION = "native_x11_keyboard_input"
 WAYLAND_KEYBOARD_ASSERTION = "portal_keyboard_grant"
 FIRST_INSTALL_ASSERTIONS = (ASSERTIONS - {"package_upgrade"}) | {"clean_install_baseline"}
 SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+TRACE_PLACEHOLDERS = {
+    "external-gtk-clipboard",
+    "desktop entry URI handler and icon verified",
+}
 
 
 def sha256(path: Path) -> str:
@@ -66,6 +70,8 @@ def command_rows(stdout: str, expected_assertions: set[str]) -> list[dict]:
             raise ValueError("scenario driver reported a failed command")
         if not all(isinstance(value, str) and value and len(value) <= 256 and "\n" not in value and "\r" not in value for value in row["argv"]):
             raise ValueError("scenario driver emitted unsafe command arguments")
+        if any(value in TRACE_PLACEHOLDERS for value in row["argv"]) or row["argv"][:2] == ["sh", "-ceu"]:
+            raise ValueError("scenario driver emitted a placeholder command trace")
         if not isinstance(row["assertions"], list) or not row["assertions"] or not all(item in expected_assertions for item in row["assertions"]):
             raise ValueError("scenario driver emitted invalid assertion coverage")
         rows.append(row)

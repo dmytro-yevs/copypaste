@@ -57,17 +57,24 @@ else
 fi
 command -v busctl >/dev/null
 busctl --user status >/dev/null
+ARTIFACTS="$(cd "$ARTIFACTS" && pwd)"
+if [[ -n "$PREVIOUS_ARTIFACTS" ]]; then
+  PREVIOUS_ARTIFACTS="$(cd "$PREVIOUS_ARTIFACTS" && pwd)"
+fi
 
-emit_command() {
+run_traced() {
   local assertion="$1"
   shift
-  python3 - "$assertion" "$@" <<'PY'
+  local returncode=0
+  "$@" || returncode=$?
+  python3 - "$assertion" "$returncode" "$@" <<'PY'
 import json
 import sys
 print("COPYPASTE_QUALIFICATION_COMMAND " + json.dumps({
-    "argv": sys.argv[2:], "returncode": 0, "assertions": [sys.argv[1]],
+    "argv": sys.argv[3:], "returncode": int(sys.argv[2]), "assertions": [sys.argv[1]],
 }, separators=(",", ":")))
 PY
+  return "$returncode"
 }
 
 current_package() { printf '%s/CopyPaste-v%s-linux-%s.%s' "$ARTIFACTS" "$VERSION" "$ARCHITECTURE" "$1"; }
@@ -87,24 +94,23 @@ trap cleanup_packages EXIT
 work="$(mktemp -d)"
 trap 'rm -rf "$work"; cleanup_packages' EXIT
 mkdir -p "$work/appimage-current"
-(cd "$work/appimage-current" && APPIMAGE_EXTRACT_AND_RUN=1 "$(current_package AppImage)" --appimage-extract >/dev/null)
-test -x "$work/appimage-current/squashfs-root/AppRun"
-test -f "$work/appimage-current/squashfs-root/com.copypaste.CopyPaste.desktop"
-grep -Fx 'MimeType=x-scheme-handler/copypaste;' "$work/appimage-current/squashfs-root/com.copypaste.CopyPaste.desktop"
-test -f "$work/appimage-current/squashfs-root/com.copypaste.CopyPaste.png"
-emit_command package_install "$(current_package AppImage)" --appimage-extract
-emit_command desktop_uri_icon sh -ceu 'desktop entry URI handler and icon verified'
+(
+  cd "$work/appimage-current"
+  run_traced package_install env APPIMAGE_EXTRACT_AND_RUN=1 "$(current_package AppImage)" --appimage-extract
+)
+run_traced desktop_uri_icon test -x "$work/appimage-current/squashfs-root/AppRun"
+run_traced desktop_uri_icon test -f "$work/appimage-current/squashfs-root/com.copypaste.CopyPaste.desktop"
+run_traced desktop_uri_icon grep -Fx 'MimeType=x-scheme-handler/copypaste;' "$work/appimage-current/squashfs-root/com.copypaste.CopyPaste.desktop"
+run_traced desktop_uri_icon test -f "$work/appimage-current/squashfs-root/com.copypaste.CopyPaste.png"
 
 if [[ -f /etc/fedora-release ]]; then
   native_format=rpm
-  sudo dnf --assumeyes install "$(current_package rpm)"
-  rpm -q copypaste >/dev/null
-  emit_command package_install sudo dnf --assumeyes install "$(current_package rpm)"
+  run_traced package_install sudo dnf --assumeyes install "$(current_package rpm)"
+  run_traced package_install rpm -q copypaste
 else
   native_format=deb
-  sudo apt-get install --yes "$(current_package deb)"
-  dpkg-query --show copypaste >/dev/null
-  emit_command package_install sudo apt-get install --yes "$(current_package deb)"
+  run_traced package_install sudo apt-get install --yes "$(current_package deb)"
+  run_traced package_install dpkg-query --show copypaste
 fi
 export COPYPASTE_INSTALLED_FORMATS="AppImage,$native_format"
 

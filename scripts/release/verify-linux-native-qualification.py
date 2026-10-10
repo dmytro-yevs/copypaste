@@ -25,6 +25,10 @@ X11_KEYBOARD_ASSERTION = "native_x11_keyboard_input"
 WAYLAND_KEYBOARD_ASSERTION = "portal_keyboard_grant"
 FIRST_INSTALL_ASSERTIONS = (ASSERTIONS - {"package_upgrade"}) | {"clean_install_baseline"}
 EVIDENCE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+TRACE_PLACEHOLDERS = {
+    "external-gtk-clipboard",
+    "desktop entry URI handler and icon verified",
+}
 
 
 def digest(path: Path) -> str:
@@ -97,6 +101,8 @@ def verify_trace(root: Path, receipt: dict, architecture: str, desktop: str, ses
         assertions = command.get("assertions")
         if not isinstance(argv, list) or not argv or not all(isinstance(value, str) and value and len(value) <= 256 and "\n" not in value and "\r" not in value for value in argv):
             raise ValueError(f"scenario trace command is invalid: {name}")
+        if any(value in TRACE_PLACEHOLDERS for value in argv) or argv[:2] == ["sh", "-ceu"]:
+            raise ValueError(f"scenario trace command is a placeholder: {name}")
         if not isinstance(assertions, list) or not assertions or not all(item in expected_assertions for item in assertions):
             raise ValueError(f"scenario trace assertions are invalid: {name}")
         covered.update(assertions)

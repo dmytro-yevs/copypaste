@@ -3,4 +3,7 @@
 set -euo pipefail
 
 export COPYPASTE_GNOME_FIXTURE=1
-dbus-run-session -- cargo test -p copypaste-daemon live_gnome_dbus_fixture -- --nocapture
+fixture_log=$(mktemp)
+trap 'rm -f "$fixture_log"' EXIT
+dbus-run-session -- cargo test --locked -p copypaste-daemon live_gnome_dbus_fixture -- --nocapture | tee "$fixture_log"
+grep -q 'test result: ok. 1 passed' "$fixture_log"

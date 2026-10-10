@@ -27,4 +27,5 @@ xdpyinfo -display "$display_number" >/dev/null
 export DISPLAY="$display_number"
 export XDG_DATA_HOME="$fixture_root"
 export COPYPASTE_X11_FIXTURE=1
-cargo test -p copypaste-daemon live_x11_fixture -- --test-threads=1 --nocapture
+cargo test --locked -p copypaste-daemon live_x11_fixture -- --test-threads=1 --nocapture | tee "$fixture_root/test.log"
+grep -q 'test result: ok. 3 passed' "$fixture_root/test.log"

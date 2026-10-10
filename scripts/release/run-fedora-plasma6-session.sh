@@ -3,15 +3,18 @@
 set -euo pipefail
 
 SESSION=""
+COMPANION_SOURCE=""
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --session) SESSION="$2"; shift 2 ;;
+    --companion-source) COMPANION_SOURCE="$2"; shift 2 ;;
     --) shift; break ;;
     *) echo "ERROR: unknown Fedora session argument: $1" >&2; exit 2 ;;
   esac
 done
 [[ "$SESSION" == x11 || "$SESSION" == wayland ]] || { echo "ERROR: session must be x11 or wayland" >&2; exit 2; }
 [[ "$#" -gt 0 ]] || { echo "ERROR: missing qualification command" >&2; exit 2; }
+[[ -d "$COMPANION_SOURCE" ]] || { echo "ERROR: exact packaged companion source is required" >&2; exit 2; }
 
 runtime="$(mktemp -d)"
 cleanup() {
@@ -40,6 +43,11 @@ if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
   export DBUS_SESSION_BUS_ADDRESS="${bus[0]}"
   dbus_pid="${bus[1]}"
 fi
+
+script="$COMPANION_SOURCE/kde-kwin-script"
+[[ -d "$script" ]] || { echo "ERROR: packaged KDE companion is missing" >&2; exit 1; }
+kpackagetool6 --type KWin/Script --install "$script"
+kwriteconfig6 --file "$XDG_CONFIG_HOME/kwinrc" --group Plugins --key copypaste-quick-pasteEnabled true
 
 wait_for() {
   local test_command="$1"
@@ -80,7 +88,10 @@ dbus-update-activation-environment \
   DBUS_SESSION_BUS_ADDRESS DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_DATA_HOME \
   XDG_CONFIG_HOME XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE
 keyring_password="$(openssl rand -hex 24)"
-printf '%s\n' "$keyring_password" | gnome-keyring-daemon --unlock >/dev/null
+printf '%s\n' "$keyring_password" | gnome-keyring-daemon --login >/dev/null
+eval "$(gnome-keyring-daemon --start --components=secrets)"
+printf '%s' "$keyring_password" | secret-tool store --label='CopyPaste qualification keyring' copypaste-qualification default >/dev/null
+secret-tool lookup copypaste-qualification default >/dev/null
 unset keyring_password
 plasmashell --replace >"$runtime/plasmashell.log" 2>&1 &
 shell_pid=$!

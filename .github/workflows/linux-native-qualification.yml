@@ -152,6 +152,11 @@ jobs:
           set -euo pipefail
           chmod +x scripts/release/run-linux-native-desktop-session.sh scripts/release/run-linux-native-scenarios.sh scripts/release/run-fedora-plasma6-qualification.sh
           mkdir -p evidence
+          appimage="current/CopyPaste-v${{ needs.source.outputs.version }}-linux-${{ matrix.architecture }}.AppImage"
+          mkdir companion
+          (cd companion && APPIMAGE_EXTRACT_AND_RUN=1 "../$appimage" --appimage-extract >/dev/null)
+          companion_source="$PWD/companion/squashfs-root/usr/share/copypaste/desktop-integrations"
+          test -d "$companion_source"
           producer=(python3 scripts/release/produce-linux-native-qualification.py
             --artifacts current --version "${{ needs.source.outputs.version }}"
             --architecture "${{ matrix.architecture }}" --desktop "${{ matrix.desktop }}" --session "${{ matrix.session }}"
@@ -166,7 +171,7 @@ jobs:
               --architecture "${{ matrix.architecture }}" --desktop KDE --session "${{ matrix.session }}"
               --commit "${{ needs.source.outputs.commit }}" --source-run-id "$GITHUB_RUN_ID" --artifact-run-id "${{ inputs.artifact_run_id }}"
               --driver /work/scripts/release/run-linux-native-scenarios.sh --output /evidence)
-            fedora_args=(--session "${{ matrix.session }}" --architecture "${{ matrix.architecture }}" --artifacts current --evidence evidence)
+            fedora_args=(--session "${{ matrix.session }}" --architecture "${{ matrix.architecture }}" --artifacts current --evidence evidence --companion-source "$companion_source")
             if [[ "${{ needs.source.outputs.upgrade_mode }}" == prior_release ]]; then
               fedora_args+=(--previous-artifacts previous)
               fedora_producer+=(--previous-artifacts /previous --previous-version "${{ needs.source.outputs.previous_version }}")
@@ -174,7 +179,7 @@ jobs:
             scripts/release/run-fedora-plasma6-qualification.sh "${fedora_args[@]}" -- "${fedora_producer[@]}"
           else
             scripts/release/run-linux-native-desktop-session.sh \
-              --desktop GNOME --session "${{ matrix.session }}" -- "${producer[@]}"
+              --desktop GNOME --session "${{ matrix.session }}" --companion-source "$companion_source" -- "${producer[@]}"
           fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
