@@ -59,7 +59,6 @@ function awaitQualification() {
                 return;
             if (action === 'close-main') {
                 qualificationClose = {transaction, pid, window};
-                reportQualification(transaction, pid, true);
                 window.closeWindow();
             } else if (action === 'quick-paste' && workspace.activeWindow === window) {
                 beginQuickPaste();

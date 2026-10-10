@@ -481,7 +481,7 @@ function loadKde({activateWindow} = {}) {
 
 {
     const runtime = loadKde();
-    const failedAwait = runtime.calls.at(-1);
+    const failedAwait = runtime.calls.find(call => call.method === 'AwaitQuickPaste');
     assert.equal(failedAwait.method, 'AwaitQuickPaste');
     runtime.signals.added({desktopFileName: 'com.copypaste.CopyPaste', deleted: false});
     assert.notEqual(runtime.calls.at(-1), failedAwait, 'a host window arrival must replace an await whose D-Bus error has no callback');
@@ -491,7 +491,7 @@ function loadKde({activateWindow} = {}) {
     const source = {deleted: false};
     const runtime = loadKde({activateWindow: (_window, workspace) => { workspace.activeWindow = {deleted: false}; }});
     runtime.workspace.activeWindow = source;
-    runtime.calls.at(-1).callback(true);
+    runtime.calls.filter(call => call.method === 'AwaitQuickPaste').at(-1).callback(true);
     runtime.calls.at(-1).callback(true);
     assert.equal(runtime.calls.some(call => call.method === 'PasteIntoRestoredWindow'), false, 'KWin must not paste without restored focus');
     runtime.signals.removed(source);
@@ -502,7 +502,7 @@ function loadKde({activateWindow} = {}) {
     const source = {deleted: false};
     const runtime = loadKde({activateWindow: () => {}});
     runtime.workspace.activeWindow = source;
-    runtime.calls.at(-1).callback(true);
+    runtime.calls.filter(call => call.method === 'AwaitQuickPaste').at(-1).callback(true);
     runtime.calls.at(-1).callback(true);
     runtime.workspace.activeWindow = source;
     runtime.signals.activated(source);
@@ -513,7 +513,7 @@ function loadKde({activateWindow} = {}) {
     const source = {deleted: false};
     const runtime = loadKde({activateWindow: () => {}});
     runtime.workspace.activeWindow = source;
-    runtime.calls.at(-1).callback(true);
+    runtime.calls.filter(call => call.method === 'AwaitQuickPaste').at(-1).callback(true);
     const deadline = runtime.timers.find(timer => timer.singleShot === true);
     assert.ok(deadline, 'a Begin transaction must have one deadline');
     deadline._callback();
@@ -526,7 +526,7 @@ function loadKde({activateWindow} = {}) {
     let restored = false;
     const runtime = loadKde({activateWindow: window => { if (window === source) restored = true; }});
     runtime.workspace.activeWindow = source;
-    runtime.calls.at(-1).callback(true);
+    runtime.calls.filter(call => call.method === 'AwaitQuickPaste').at(-1).callback(true);
     const quickPasteWindow = {desktopFileName: 'com.copypaste.CopyPaste', caption: 'CopyPaste Quick Paste', deleted: false};
     runtime.signals.added(quickPasteWindow);
     runtime.workspace.activeWindow = quickPasteWindow;
