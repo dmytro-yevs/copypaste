@@ -12,12 +12,12 @@ make_fixture() {
   if [[ "$version" == 6.0 ]]; then
     header_padding=123
     cpp_padding=488
-    wayland_padding=334
+    wayland_padding=366
     wayland_display_line=375
   else
     header_padding=133
     cpp_padding=519
-    wayland_padding=309
+    wayland_padding=370
     wayland_display_line=379
   fi
   mkdir -p "$tree/src"
