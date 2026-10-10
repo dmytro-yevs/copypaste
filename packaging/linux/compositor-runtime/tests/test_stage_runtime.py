@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -26,6 +27,14 @@ verify_spec = importlib.util.spec_from_file_location("verify_runtime_package", P
 assert verify_spec and verify_spec.loader
 verify_runtime_package = importlib.util.module_from_spec(verify_spec)
 verify_spec.loader.exec_module(verify_runtime_package)
+builder_spec = importlib.util.spec_from_file_location("build_companion_package", Path(__file__).parents[1] / "build_companion_package.py")
+assert builder_spec and builder_spec.loader
+build_companion_package = importlib.util.module_from_spec(builder_spec)
+builder_spec.loader.exec_module(build_companion_package)
+closure_spec = importlib.util.spec_from_file_location("private_elf_closure", Path(__file__).parents[1] / "private_elf_closure.py")
+assert closure_spec and closure_spec.loader
+private_elf_closure = importlib.util.module_from_spec(closure_spec)
+closure_spec.loader.exec_module(private_elf_closure)
 
 
 def digest(data: bytes) -> str:
@@ -48,6 +57,26 @@ class RuntimeStageTests(unittest.TestCase):
         license_file = runtime / "COPYING"
         if not license_file.exists():
             license_file.write_text("GPL-2.0-or-later", encoding="utf-8")
+        if desktop == "KDE":
+            private_library = runtime / "usr/lib/libKDecoration2.so.6.0.0"
+            private_library.parent.mkdir(parents=True, exist_ok=True)
+            private_library.write_text("private decoration ABI", encoding="utf-8")
+            closure_license = runtime / "usr/share/doc/copypaste-compositor-runtime-private-licenses/kdecoration2-LICENSE"
+            closure_license.parent.mkdir(parents=True, exist_ok=True)
+            closure_license.write_text("LGPL-2.1-or-later", encoding="utf-8")
+            closure_notice = runtime / "usr/share/doc/copypaste-compositor-runtime-private-licenses/kdecoration2-NOTICE"
+            closure_notice.write_text("KDecoration notice", encoding="utf-8")
+            closure_manifest = runtime / "usr/share/copypaste/compositor-runtime-private-closure.json"
+            closure_manifest.parent.mkdir(parents=True, exist_ok=True)
+            closure_manifest.write_text(json.dumps({
+                "schema": 1,
+                "libraries": [{"path": "usr/lib/libKDecoration2.so.6.0.0", "soname": "libKDecoration2.so.6", "sha256": digest(private_library.read_bytes()), "package": "kdecoration2", "evr": "5.115.0-1"}],
+                "packages": [{"name": "kdecoration2", "evr": "5.115.0-1", "license": "LGPL-2.1-or-later"}],
+                "licenses": [
+                    {"package": "kdecoration2", "license": "LGPL-2.1-or-later", "path": "usr/share/doc/copypaste-compositor-runtime-private-licenses/kdecoration2-LICENSE", "sha256": digest(closure_license.read_bytes())},
+                    {"package": "kdecoration2", "license": "LGPL-2.1-or-later", "path": "usr/share/doc/copypaste-compositor-runtime-private-licenses/kdecoration2-NOTICE", "sha256": digest(closure_notice.read_bytes())},
+                ],
+            }), encoding="utf-8")
         rows = []
         for path in sorted(runtime.rglob("*")):
             if path.is_dir():
@@ -60,12 +89,18 @@ class RuntimeStageTests(unittest.TestCase):
                 rows.append({"path": relative, "type": "file", "mode": f"{path.stat().st_mode & 0o7777:04o}", "sha256": digest(path.read_bytes())})
         distribution_id, distribution_version = os_release()
         qualification = launch["entrypoint"] if launch["kind"] == "private" else "bin/headless"
+        licenses = [{"spdx": "GPL-2.0-or-later", "name": "COPYING", "sha256": digest(license_file.read_bytes())}]
+        if desktop == "KDE":
+            closure_license = runtime / "usr/share/doc/copypaste-compositor-runtime-private-licenses/kdecoration2-LICENSE"
+            licenses.append({"spdx": "LGPL-2.1-or-later", "name": closure_license.relative_to(runtime).as_posix(), "sha256": digest(closure_license.read_bytes())})
+            closure_notice = runtime / "usr/share/doc/copypaste-compositor-runtime-private-licenses/kdecoration2-NOTICE"
+            licenses.append({"spdx": "LGPL-2.1-or-later", "name": closure_notice.relative_to(runtime).as_posix(), "sha256": digest(closure_notice.read_bytes())})
         return {
             "schema": 1, "runtime_id": "kwin-6.3-test", "desktop": desktop,
             "architecture": "x86_64", "distribution": {"id": distribution_id, "version": distribution_version},
             "glibc_floor": "2.39", "source": {"revision": "v6.3.0", "patch_sha256": "a" * 64},
-            "payload": rows, "launch": launch, "qualification": {"kind": "headless", "entrypoint": qualification}, "runtime_env": {}, "package_dependencies": [{"name": "kwin", "version": "6.3.0"}],
-            "upstream_licenses": [{"spdx": "GPL-2.0-or-later", "name": "COPYING", "sha256": digest(license_file.read_bytes())}],
+            "payload": rows, "launch": launch, "qualification": {"kind": "headless", "entrypoint": qualification}, "runtime_env": {}, "host_requirements": [],
+            "upstream_licenses": licenses,
         }
 
     @unittest.skipUnless(Path("/etc/os-release").is_file(), "launcher executes only in a Linux session")
@@ -145,7 +180,7 @@ class RuntimeStageTests(unittest.TestCase):
             with self.assertRaises(stage_runtime.ContractError):
                 stage_runtime.validate_receipt(receipt)
 
-    def test_receipt_requires_matching_package_dependencies(self) -> None:
+    def test_receipt_accepts_empty_host_requirements_but_rejects_exact_pin(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             runtime = root / "input"
@@ -154,9 +189,91 @@ class RuntimeStageTests(unittest.TestCase):
             executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             executable.chmod(0o755)
             receipt = self.make_receipt(runtime, {"kind": "private", "entrypoint": "bin/start"})
-            receipt["package_dependencies"] = []
+            receipt["host_requirements"] = [{"name": "plasma-workspace", "operator": "=", "version": "6.0"}]
             with self.assertRaises(stage_runtime.ContractError):
                 stage_runtime.validate_receipt(receipt)
+
+    def test_kde_closure_manifest_requires_every_bundled_rpm_license(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = root / "input"
+            (runtime / "bin").mkdir(parents=True)
+            executable = runtime / "bin/start"
+            executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            executable.chmod(0o755)
+            receipt = self.make_receipt(runtime, {"kind": "private", "entrypoint": "bin/start"})
+            receipt_path = root / "receipt.json"
+            receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+            stage_runtime.validate_payload(runtime, receipt)
+            manifest = runtime / "usr/share/copypaste/compositor-runtime-private-closure.json"
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            data["licenses"] = []
+            manifest.write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaises(stage_runtime.ContractError):
+                stage_runtime.validate_payload(runtime, receipt)
+
+    def test_rpm_safety_rejects_host_decoration_constraints_but_accepts_private_soname(self) -> None:
+        build_companion_package.rpm_desktop_safety(
+            requires="libKDecoration2.so.6()(64bit)\n", provides="libKDecoration2.so.6()(64bit)\n",
+            obsoletes="", conflicts="",
+        )
+        for key in ("requires", "obsoletes", "conflicts"):
+            values = {"requires": "kdecoration2 >= 5.0\n", "obsoletes": "kdecoration3\n", "conflicts": "kdecoration2\n"}
+            with self.assertRaises(stage_runtime.ContractError):
+                build_companion_package.rpm_desktop_safety(
+                    requires=values[key] if key == "requires" else "", provides="",
+                    obsoletes=values[key] if key == "obsoletes" else "", conflicts=values[key] if key == "conflicts" else "",
+                )
+
+    def test_private_elf_closure_follows_transitive_needed_libraries_and_records_rpm_licenses(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = root / "runtime"
+            entrypoint = runtime / "usr/bin/kwin_wayland"
+            entrypoint.parent.mkdir(parents=True)
+            entrypoint.write_bytes(b"\x7fELF KWin")
+            decoration = root / "libKDecoration2.so.6.0.0"
+            framework = root / "libKF6CoreAddons.so.6.0.0"
+            decoration.write_bytes(b"\x7fELF decoration")
+            framework.write_bytes(b"\x7fELF framework")
+            license_source = root / "LICENSE"
+            license_source.write_text("LGPL-2.1-or-later", encoding="utf-8")
+            notice_source = root / "NOTICE"
+            notice_source.write_text("Qt exception notice", encoding="utf-8")
+
+            def needed(path: Path) -> set[str]:
+                return {
+                    entrypoint: {"libKDecoration2.so.6"},
+                    decoration: {"libKF6CoreAddons.so.6"},
+                    framework: set(),
+                }[path]
+
+            def soname(path: Path) -> str | None:
+                return {
+                    entrypoint: None,
+                    decoration: "libKDecoration2.so.6",
+                    framework: "libKF6CoreAddons.so.6",
+                }[path]
+
+            with mock.patch.object(private_elf_closure, "library_cache", return_value={"libKDecoration2.so.6": decoration, "libKF6CoreAddons.so.6": framework}), \
+                 mock.patch.object(private_elf_closure, "needed", side_effect=needed), \
+                 mock.patch.object(private_elf_closure, "provided_soname", side_effect=soname), \
+                 mock.patch.object(private_elf_closure, "trusted_library", side_effect=lambda path: path), \
+                 mock.patch.object(private_elf_closure, "rpm_owner", side_effect=lambda path: ("kdecoration2" if path == decoration else "kf6-kcoreaddons", "6.0.0-1", "LGPL-2.1-or-later")), \
+                 mock.patch.object(private_elf_closure, "rpm_license_files", side_effect=lambda package: [license_source, notice_source] if package == "kdecoration2" else [license_source]):
+                manifest = private_elf_closure.copy_closure(runtime, [entrypoint])
+
+            self.assertEqual([item["soname"] for item in manifest["libraries"]], ["libKDecoration2.so.6", "libKF6CoreAddons.so.6"])
+            self.assertEqual({item["package"] for item in manifest["licenses"]}, {"kdecoration2", "kf6-kcoreaddons"})
+            self.assertEqual(sum(item["package"] == "kdecoration2" for item in manifest["licenses"]), 2)
+            self.assertEqual(os.readlink(runtime / "usr/lib/libKDecoration2.so.6"), "libKDecoration2.so.6.0.0")
+
+    def test_rpm_owner_accepts_a_bounded_compound_license_expression(self) -> None:
+        with mock.patch.object(private_elf_closure, "run", return_value="qtbase-gui\n6.7.0-1.fc40\nLGPL-3.0-only OR GPL-3.0-only WITH Qt-GPL-exception-1.0\n"):
+            self.assertEqual(
+                private_elf_closure.rpm_owner(Path("/usr/lib64/libQt6Core.so.6")),
+                ("qtbase-gui", "6.7.0-1.fc40", "LGPL-3.0-only OR GPL-3.0-only WITH Qt-GPL-exception-1.0"),
+            )
 
     def test_staged_package_has_no_vendor_replacement_path(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
