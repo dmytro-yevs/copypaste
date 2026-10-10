@@ -8,9 +8,9 @@ from pathlib import Path
 SAFE = re.compile(r"^[a-z0-9][a-z0-9.-]{1,63}$")
 SHA = re.compile(r"^[0-9a-f]{64}$")
 NAME = re.compile(r"^[A-Za-z0-9.+_-]{1,80}$")
-VERSION = re.compile(r"^[A-Za-z0-9.+:~_-]{1,120}$")
+VERSION = re.compile(r"^[A-Za-z0-9.+:~^_-]{1,120}$")
 LICENSE = re.compile(r"^[\x20-\x7e]{1,1024}$")
-SOURCE_RPM = re.compile(r"^[A-Za-z0-9.+:~_-]{1,160}\.src\.rpm$")
+SOURCE_RPM = re.compile(r"^[A-Za-z0-9.+:~^_-]{1,160}\.src\.rpm$")
 MANIFEST = Path("usr/share/copypaste/compositor-runtime-private-closure.json")
 
 def digest(path: Path) -> str:

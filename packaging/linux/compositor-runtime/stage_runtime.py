@@ -255,7 +255,7 @@ def validate_private_elf_closure(runtime_root: Path, receipt: dict[str, Any]) ->
         raise ContractError("private ELF closure manifest is incomplete")
     package_by_name: dict[str, dict[str, str]] = {}
     for package in packages:
-        if not isinstance(package, dict) or set(package) != {"name", "evr", "source_rpm", "license"} or not all(isinstance(package.get(key), str) for key in ("name", "evr", "source_rpm", "license")) or not re.fullmatch(r"[A-Za-z0-9.+_-]{1,80}", package["name"]) or not re.fullmatch(r"[A-Za-z0-9.+:~_-]{1,120}", package["evr"]) or not re.fullmatch(r"[A-Za-z0-9.+:~_-]{1,160}\.src\.rpm", package["source_rpm"]) or not LICENSE.fullmatch(package["license"]) or package["license"] != package["license"].strip():
+        if not isinstance(package, dict) or set(package) != {"name", "evr", "source_rpm", "license"} or not all(isinstance(package.get(key), str) for key in ("name", "evr", "source_rpm", "license")) or not re.fullmatch(r"[A-Za-z0-9.+_-]{1,80}", package["name"]) or not re.fullmatch(r"[A-Za-z0-9.+:~^_-]{1,120}", package["evr"]) or not re.fullmatch(r"[A-Za-z0-9.+:~^_-]{1,160}\.src\.rpm", package["source_rpm"]) or not LICENSE.fullmatch(package["license"]) or package["license"] != package["license"].strip():
             raise ContractError("private ELF closure package provenance is invalid")
         if package["name"] in package_by_name:
             raise ContractError("private ELF closure package provenance is ambiguous")

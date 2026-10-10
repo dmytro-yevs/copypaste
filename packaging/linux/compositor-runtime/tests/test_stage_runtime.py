@@ -284,6 +284,13 @@ class RuntimeStageTests(unittest.TestCase):
             with self.assertRaisesRegex(private_elf_closure.ClosureError, r"library=libproxy\.so\.0 field=license length=1025"):
                 private_elf_closure.rpm_owner(Path("/usr/lib64/libproxy.so.0"))
 
+    def test_rpm_owner_accepts_a_fedora_snapshot_evr_and_source_rpm(self) -> None:
+        with mock.patch.object(private_elf_closure, "run", return_value="libimobiledevice\t1.3.0^20230705git6fc41f5-4.fc40\tlibimobiledevice-1.3.0^20230705git6fc41f5-4.fc40.src.rpm\tLGPL-2.0-or-later\n"):
+            self.assertEqual(
+                private_elf_closure.rpm_owner(Path("/usr/lib64/libimobiledevice-1.0.so.6")),
+                ("libimobiledevice", "1.3.0^20230705git6fc41f5-4.fc40", "libimobiledevice-1.3.0^20230705git6fc41f5-4.fc40.src.rpm", "LGPL-2.0-or-later"),
+            )
+
     def test_rpm_siblings_require_an_exact_source_rpm_and_evr(self) -> None:
         owner = ("kwin-libs", "6.0.3.1-2.fc40", "kwin-6.0.3.1-2.fc40.src.rpm", "GPL-2.0-only")
         inventory = "\n".join((
