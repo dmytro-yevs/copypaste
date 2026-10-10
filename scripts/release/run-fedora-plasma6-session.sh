@@ -103,8 +103,8 @@ case "$SESSION" in
     ;;
   wayland)
     export COPYPASTE_COMPOSITOR_EXECUTION=private-wayland
-    export LD_LIBRARY_PATH="$runtime_root/lib:$runtime_root/lib64:$runtime_root/usr/lib:$runtime_root/usr/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    "$COMPOSITOR_QUALIFICATION_ENTRYPOINT" >"$runtime/kwin.log" 2>&1 &
+    LD_LIBRARY_PATH="$runtime_root/lib:$runtime_root/lib64:$runtime_root/usr/lib:$runtime_root/usr/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+      "$COMPOSITOR_QUALIFICATION_ENTRYPOINT" >"$runtime/kwin.log" 2>&1 &
     kwin_pid=$!
     wait_for 'kill -0 "$kwin_pid" 2>/dev/null'
     geometry_broker="$runtime/copypaste-wayland-geometry-broker"
