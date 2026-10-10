@@ -10,6 +10,8 @@ PREVIOUS_ARTIFACTS=""
 COMPANION_SOURCE=""
 MODULE_ARTIFACTS=""
 MODULE_FIXTURES=""
+COMPOSITOR_RUNTIME=""
+COMPOSITOR_RUNTIME_BINDING=""
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --session) SESSION="$2"; shift 2 ;;
@@ -20,6 +22,8 @@ while [[ "$#" -gt 0 ]]; do
     --companion-source) COMPANION_SOURCE="$2"; shift 2 ;;
     --module-artifacts) MODULE_ARTIFACTS="$2"; shift 2 ;;
     --module-fixtures) MODULE_FIXTURES="$2"; shift 2 ;;
+    --compositor-runtime) COMPOSITOR_RUNTIME="$2"; shift 2 ;;
+    --compositor-runtime-binding) COMPOSITOR_RUNTIME_BINDING="$2"; shift 2 ;;
     --) shift; break ;;
     *) echo "ERROR: unknown Fedora qualification argument: $1" >&2; exit 2 ;;
   esac
@@ -28,7 +32,7 @@ done
 [[ "$ARCHITECTURE" == x86_64 || "$ARCHITECTURE" == aarch64 ]]
 [[ -d "$ARTIFACTS" && -d "$EVIDENCE" && "$#" -gt 0 ]]
 [[ -z "$PREVIOUS_ARTIFACTS" || -d "$PREVIOUS_ARTIFACTS" ]]
-[[ -d "$COMPANION_SOURCE" && -d "$MODULE_ARTIFACTS" && -d "$MODULE_FIXTURES" ]]
+[[ -d "$COMPANION_SOURCE" && -d "$MODULE_ARTIFACTS" && -d "$MODULE_FIXTURES" && -d "$COMPOSITOR_RUNTIME" && -f "$COMPOSITOR_RUNTIME_BINDING" ]]
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 case "$ARCHITECTURE" in
@@ -41,9 +45,10 @@ mounts=(--volume "$ROOT:/work:ro" --volume "$(cd "$ARTIFACTS" && pwd):/artifacts
 mounts+=(--volume "$(cd "$COMPANION_SOURCE" && pwd):/companion:ro")
 mounts+=(--volume "$(cd "$MODULE_ARTIFACTS" && pwd):/module-artifacts:ro")
 mounts+=(--volume "$(cd "$MODULE_FIXTURES" && pwd):/module-fixtures:ro")
+mounts+=(--volume "$(cd "$COMPOSITOR_RUNTIME" && pwd):/compositor-runtime:ro")
 if [[ -n "$PREVIOUS_ARTIFACTS" ]]; then
   mounts+=(--volume "$(cd "$PREVIOUS_ARTIFACTS" && pwd):/previous:ro")
 fi
 docker run --rm --platform "$platform" \
   --cap-add SYS_NICE "${mounts[@]}" --workdir /work "$image" \
-  /work/scripts/release/run-fedora-plasma6-session.sh --session "$SESSION" --companion-source /companion -- "$@"
+  /work/scripts/release/run-fedora-plasma6-session.sh --session "$SESSION" --companion-source /companion --compositor-runtime /compositor-runtime --compositor-runtime-binding /compositor-runtime/$(basename "$COMPOSITOR_RUNTIME_BINDING") -- "$@"
