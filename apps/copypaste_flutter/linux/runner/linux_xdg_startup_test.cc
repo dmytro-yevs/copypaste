@@ -7,6 +7,10 @@
 #include <glib.h>
 #include <glib/gstdio.h>
 
+#if defined(__linux__)
+#include <gio/gdesktopappinfo.h>
+#endif
+
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -91,10 +95,24 @@ XdgFixture* fixture = nullptr;
 void test_exec_escaping() {
   const std::string entry = LinuxXdgStartup::DesktopEntryForExecutable(
       "/tmp/Copy Paste\"quote\\slash%code", false);
-  g_assert_nonnull(strstr(
-      entry.c_str(),
-      "Exec=\"/tmp/Copy Paste\\\"quote\\\\slash%%code\" %U\n"));
-  g_assert_nonnull(strstr(entry.c_str(), "MimeType=x-scheme-handler/copypaste;\n"));
+  g_autoptr(GKeyFile) key_file = g_key_file_new();
+  g_autoptr(GError) error = nullptr;
+  g_assert_true(g_key_file_load_from_data(key_file, entry.c_str(), entry.size(),
+                                          G_KEY_FILE_NONE, &error));
+  g_assert_no_error(error);
+  g_autofree gchar* exec =
+      g_key_file_get_string(key_file, "Desktop Entry", "Exec", &error);
+  g_assert_no_error(error);
+  g_assert_cmpstr(exec, ==,
+                  "\"/tmp/Copy Paste\\\"quote\\\\slash%%code\" %U");
+  g_autofree gchar* try_exec =
+      g_key_file_get_string(key_file, "Desktop Entry", "TryExec", &error);
+  g_assert_no_error(error);
+  g_assert_cmpstr(try_exec, ==, "/tmp/Copy Paste\"quote\\slash%code");
+  g_autofree gchar* mime_type =
+      g_key_file_get_string(key_file, "Desktop Entry", "MimeType", &error);
+  g_assert_no_error(error);
+  g_assert_cmpstr(mime_type, ==, "x-scheme-handler/copypaste;");
 }
 
 void test_autostart_is_owned_and_atomic() {
@@ -171,8 +189,9 @@ void test_uri_registration_uses_private_xdg_home() {
   fixture->clear_entries();
   const LinuxXdgStartup startup = fixture->startup();
   g_autoptr(GError) error = nullptr;
-  g_assert_true(startup.RegisterCopypasteUri(&error));
+  const bool registered = startup.RegisterCopypasteUri(&error);
   g_assert_no_error(error);
+  g_assert_true(registered);
   const std::string path = fixture->data() +
       "/applications/com.copypaste.CopyPaste.desktop";
   g_assert_true(g_file_test(path.c_str(), G_FILE_TEST_IS_REGULAR));
@@ -183,6 +202,34 @@ void test_uri_registration_uses_private_xdg_home() {
                   "com.copypaste.CopyPaste.desktop");
   g_assert_true(startup.GetStatus().uri_registered);
 }
+
+#if defined(__linux__)
+void test_desktop_entry_parses_special_executable() {
+  fixture->clear_entries();
+  const std::string executable =
+      fixture->root() + "/Copy Paste\"quote\\slash%handler";
+  const int descriptor = open(executable.c_str(), O_WRONLY | O_CREAT | O_EXCL,
+                              0700);
+  g_assert_cmpint(descriptor, >=, 0);
+  g_assert_cmpint(close(descriptor), ==, 0);
+  const std::string applications = fixture->data() + "/applications";
+  g_assert_cmpint(g_mkdir_with_parents(applications.c_str(), 0700), ==, 0);
+  const std::string desktop_path = applications +
+      "/com.copypaste.CopyPaste.desktop";
+  const std::string entry =
+      LinuxXdgStartup::DesktopEntryForExecutable(executable, false);
+  g_autoptr(GError) error = nullptr;
+  g_assert_true(g_file_set_contents(desktop_path.c_str(), entry.c_str(), -1,
+                                    &error));
+  g_assert_no_error(error);
+  g_autoptr(GDesktopAppInfo) app_info =
+      g_desktop_app_info_new_from_filename(desktop_path.c_str());
+  g_assert_nonnull(app_info);
+  g_assert_cmpstr(g_desktop_app_info_get_string(app_info, "TryExec"), ==,
+                  executable.c_str());
+  g_assert_true(g_app_info_supports_uris(G_APP_INFO(app_info)));
+}
+#endif
 
 void test_rejects_invalid_paths_and_uses_outer_appimage() {
   fixture->clear_entries();
@@ -230,6 +277,10 @@ int main(int argc, char** argv) {
                   test_autostart_is_owned_and_atomic);
   g_test_add_func("/linux/xdg_startup/uri_private_xdg",
                   test_uri_registration_uses_private_xdg_home);
+#if defined(__linux__)
+  g_test_add_func("/linux/xdg_startup/desktop_entry_special_executable",
+                  test_desktop_entry_parses_special_executable);
+#endif
   g_test_add_func("/linux/xdg_startup/invalid_paths_and_appimage",
                   test_rejects_invalid_paths_and_uses_outer_appimage);
   return g_test_run();
