@@ -144,5 +144,6 @@ class ProvisionLinuxV4L2Test(unittest.TestCase):
                 "linux-headers-6.8.0", "linux-modules-extra-6.8.0",
                 "v4l2loopback-dkms", "v4l-utils",
             ])
+            self.assertEqual(commands[3], ["sudo", "udevadm", "settle"])
             self.assertEqual(commands[-2:], [["sudo", "chown", f"{os.getuid()}:{os.getgid()}", "/dev/video42"], ["sudo", "chmod", "600", "/dev/video42"]])
             self.assertEqual(unwind.call_args.args[2], job_live)
