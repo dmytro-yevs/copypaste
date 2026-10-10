@@ -23,15 +23,15 @@ LinuxQuickPasteFrame linux_quick_paste_frame(
           width, height};
 }
 
-bool resize_linux_quick_paste_window(GtkWindow* window, bool inspector_visible) {
+bool resize_linux_quick_paste_window(GtkWindow* window, bool inspector_visible,
+                                    bool reposition) {
   if (window == nullptr) return false;
   GtkWidget* widget = GTK_WIDGET(window);
   GdkDisplay* display = gtk_widget_get_display(widget);
   if (display == nullptr) return false;
   GdkWindow* surface = gtk_widget_get_window(widget);
-  GdkMonitor* monitor = surface == nullptr
-      ? gdk_display_get_primary_monitor(display)
-      : gdk_display_get_monitor_at_window(display, surface);
+  if (surface == nullptr || !gtk_widget_get_mapped(widget)) return false;
+  GdkMonitor* monitor = gdk_display_get_monitor_at_window(display, surface);
   if (monitor == nullptr && gdk_display_get_n_monitors(display) > 0)
     monitor = gdk_display_get_monitor(display, 0);
   if (monitor == nullptr) return false;
@@ -40,7 +40,7 @@ bool resize_linux_quick_paste_window(GtkWindow* window, bool inspector_visible) 
   if (work.width <= 0 || work.height <= 0) return false;
   int x = work.x;
   int y = work.y;
-  if (surface != nullptr) gtk_window_get_position(window, &x, &y);
+  gtk_window_get_position(window, &x, &y);
   const auto frame = linux_quick_paste_frame(
       {x, y, kMenuWidth, kHeight}, {work.x, work.y, work.width, work.height},
       inspector_visible);
@@ -48,7 +48,7 @@ bool resize_linux_quick_paste_window(GtkWindow* window, bool inspector_visible) 
   gtk_window_resize(window, frame.width, frame.height);
   // Wayland positions top-levels through the compositor. GTK keeps the resize
   // contract there and applies the clamped position where the backend allows it.
-  gtk_window_move(window, frame.x, frame.y);
+  if (reposition) gtk_window_move(window, frame.x, frame.y);
   return true;
 }
 
@@ -64,5 +64,4 @@ void configure_linux_quick_paste_window(GtkWindow* window) {
   GdkVisual* visual = gdk_screen_get_rgba_visual(gtk_widget_get_screen(widget));
   if (visual != nullptr) gtk_widget_set_visual(widget, visual);
   gtk_widget_set_app_paintable(widget, TRUE);
-  resize_linux_quick_paste_window(window, false);
 }
