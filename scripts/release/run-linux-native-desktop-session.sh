@@ -21,7 +21,7 @@ done
 [[ "$#" -gt 0 ]] || { echo "ERROR: missing command for desktop session" >&2; exit 2; }
 [[ -d "$COMPANION_SOURCE" ]] || { echo "ERROR: exact packaged companion source is required" >&2; exit 2; }
 [[ -d "$COMPOSITOR_RUNTIME" && -f "$COMPOSITOR_RUNTIME_BINDING" && ! -L "$COMPOSITOR_RUNTIME" && ! -L "$COMPOSITOR_RUNTIME_BINDING" ]] || { echo "ERROR: authenticated compositor runtime input is required" >&2; exit 2; }
-case "$DESKTOP" in GNOME|KDE) ;; *) exit 2 ;; esac
+[[ "$DESKTOP" == GNOME ]] || { echo "ERROR: KDE qualification must use the Fedora sidecar session" >&2; exit 2; }
 case "$SESSION" in x11|wayland) ;; *) exit 2 ;; esac
 runtime_package="$(jq -er '.package.name | select(type == "string" and test("^[A-Za-z0-9._+-]+\\.deb$"))' "$COMPOSITOR_RUNTIME_BINDING")"
 runtime_id="$(jq -er '.runtime_id | select(type == "string" and test("^[a-z0-9.-]+$"))' "$COMPOSITOR_RUNTIME_BINDING")"
@@ -99,26 +99,18 @@ wait_for() {
 }
 
 if [[ "$SESSION" == x11 ]]; then
+  export COPYPASTE_COMPOSITOR_EXECUTION=stock-x11
   command -v Xvfb >/dev/null
   Xvfb ":$DISPLAY_NUMBER" -screen 0 1280x800x24 -nolisten tcp >"$RUNTIME/xserver.log" 2>&1 &
   display_pid=$!
   export DISPLAY=":$DISPLAY_NUMBER"
   wait_for 'xdpyinfo -display "$DISPLAY" >/dev/null 2>&1'
-  case "$DESKTOP" in
-    GNOME) "$COMPOSITOR_LAUNCHER" >"$RUNTIME/desktop.log" 2>&1 & ;;
-    KDE) kwin_x11 --replace >"$RUNTIME/desktop.log" 2>&1 & ;;
-  esac
+  gnome-shell --x11 --replace >"$RUNTIME/desktop.log" 2>&1 &
   desktop_pid=$!
   wait_for 'kill -0 "$desktop_pid" 2>/dev/null'
 else
-  case "$DESKTOP" in
-    GNOME) "$COMPOSITOR_LAUNCHER" >"$RUNTIME/desktop.log" 2>&1 & ;;
-    KDE) kwin_wayland --virtual --no-lockscreen >"$RUNTIME/desktop.log" 2>&1 & ;;
-  esac
-  desktop_pid=$!
-  wait_for 'kill -0 "$desktop_pid" 2>/dev/null'
-  wait_for 'find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name "wayland-*" | grep -q .'
-  export WAYLAND_DISPLAY="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'wayland-*' -printf '%f\n' | head -n1)"
+  echo "ERROR: Wayland qualification requires a reviewed receipt-listed private compositor entrypoint and loader observation" >&2
+  exit 1
 fi
 
 dbus-update-activation-environment \
