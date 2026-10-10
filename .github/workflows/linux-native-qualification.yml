@@ -181,7 +181,11 @@ jobs:
             dbus-user-session gnome-shell gnome-session gnome-keyring gnome-shell-extension-appindicator \
             kde-config-screenlocker kwin-wayland kwin-x11 plasma-workspace \
             libsecret-tools wl-clipboard wtype x11-utils xdotool xdg-desktop-portal \
-            xdg-desktop-portal-gnome xdg-desktop-portal-kde xvfb rpm cpio xclip python3-gi build-essential pkg-config libgtk-3-dev
+            xdg-desktop-portal-gnome xdg-desktop-portal-kde xvfb rpm cpio xclip python3-gi build-essential pkg-config libgtk-3-dev \
+            at-spi2-core python3-pyatspi ffmpeg qrencode v4l-utils
+          v4l2_device="${COPYPASTE_QUALIFICATION_V4L2_DEVICE:?A provisioned V4L2 loopback device is required}"
+          [[ "$v4l2_device" =~ ^/dev/video[0-9]+$ && -c "$v4l2_device" ]] || { echo "ERROR: qualification V4L2 device is unavailable" >&2; exit 1; }
+          echo "COPYPASTE_QUALIFICATION_V4L2_DEVICE=$v4l2_device" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: ${{ matrix.compositor_artifact }}
@@ -200,6 +204,20 @@ jobs:
           name: production-linux-${{ matrix.architecture }}
           path: current
           run-id: ${{ inputs.artifact_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.source.outputs.upgrade_mode == 'prior_release'
+        with:
+          name: production-linux-x86_64
+          path: previous-artifacts/x86_64
+          run-id: ${{ inputs.previous_artifact_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.source.outputs.upgrade_mode == 'prior_release'
+        with:
+          name: production-linux-aarch64
+          path: previous-artifacts/aarch64
+          run-id: ${{ inputs.previous_artifact_run_id }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         if: needs.source.outputs.upgrade_mode == 'prior_release'
@@ -264,7 +282,7 @@ jobs:
               --driver /work/scripts/release/run-linux-native-scenarios.sh --output /evidence
               --module-artifacts /module-artifacts --module-fixtures /module-fixtures
               --compositor-runtime-binding /compositor-runtime/binding.json)
-            fedora_args=(--session "${{ matrix.session }}" --architecture "${{ matrix.architecture }}" --artifacts current --evidence evidence --companion-source "$companion_source" --module-artifacts module-artifacts --module-fixtures module-fixtures --compositor-runtime compositor-runtime --compositor-runtime-binding compositor-runtime/binding.json)
+            fedora_args=(--session "${{ matrix.session }}" --architecture "${{ matrix.architecture }}" --artifacts current --evidence evidence --companion-source "$companion_source" --module-artifacts module-artifacts --module-fixtures module-fixtures --compositor-runtime compositor-runtime --compositor-runtime-binding compositor-runtime/binding.json --v4l2-device "$COPYPASTE_QUALIFICATION_V4L2_DEVICE")
             if [[ "${{ needs.source.outputs.upgrade_mode }}" == prior_release ]]; then
               fedora_args+=(--previous-artifacts previous)
               fedora_producer+=(--previous-artifacts /previous --previous-version "${{ needs.source.outputs.previous_version }}")
@@ -313,9 +331,16 @@ jobs:
           set -euo pipefail
           mkdir artifacts/all
           find artifacts -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) -exec cp {} artifacts/all/ \;
-          python3 scripts/release/verify-linux-native-qualification.py \
+          verify=(python3 scripts/release/verify-linux-native-qualification.py \
             --root evidence --artifacts artifacts/all --version "${{ needs.source.outputs.version }}" \
-            --commit "${{ needs.source.outputs.commit }}" --source-run-id "$GITHUB_RUN_ID" --artifact-run-id "${{ inputs.artifact_run_id }}"
+            --commit "${{ needs.source.outputs.commit }}" --source-run-id "$GITHUB_RUN_ID" --artifact-run-id "${{ inputs.artifact_run_id }}" \
+            --compositor-runtime compositor-runtime)
+          if [[ "${{ needs.source.outputs.upgrade_mode }}" == prior_release ]]; then
+            mkdir previous-artifacts/all
+            find previous-artifacts -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) -exec cp {} previous-artifacts/all/ \;
+            verify+=(--previous-artifacts previous-artifacts/all --previous-version "${{ needs.source.outputs.previous_version }}")
+          fi
+          "${verify[@]}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: linux-native-qualification
