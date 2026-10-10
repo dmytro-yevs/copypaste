@@ -745,6 +745,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                         appimage_argv = ["env", "APPIMAGE_EXTRACT_AND_RUN=1", appimage["path"], "--appimage-extract"]
                         native_argv = (["sudo", "apt-get", "install", "--yes", native["path"]]
                                        if native_format == "deb" else ["sudo", "dnf", "--assumeyes", "install", native["path"]])
+                        compositor_runtime = {"schema": 1, "producer_run_id": "1", "commit": "a" * 40, "runtime_id": "fixture", "desktop": desktop, "architecture": architecture, "distribution": "ubuntu" if desktop == "GNOME" else "fedora", "format": native_format, "package": {"name": "runtime-package", "sha256": "a" * 64, "size_bytes": 1}, "runtime_receipt": {"name": "runtime-receipt", "sha256": "b" * 64, "size_bytes": 1}}
                         trace = {
                             "schema": 1, "version": "1.2.3", "commit": "a" * 40,
                             "source_run_id": "123", "artifact_run_id": "456",
@@ -762,6 +763,11 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                                 "formats": ["AppImage", native_format], "packages": [appimage, native],
                                 "appimage_extract_argv": appimage_argv, "native_install_argv": native_argv,
                             },
+                            "runtimes": [
+                                {"format": "AppImage", "gui_owned_daemon": True, "executables": {name: {"path": f"/runtime/squashfs-root/usr/lib/copypaste/{name}", "sha256": "e" * 64, "size_bytes": 1} for name in ("copypaste", "copypaste-daemon", "copypaste-cli")}},
+                                {"format": native_format, "gui_owned_daemon": True, "executables": {name: {"path": f"/usr/lib/copypaste/{name}", "sha256": "e" * 64, "size_bytes": 1} for name in ("copypaste", "copypaste-daemon", "copypaste-cli")}},
+                            ],
+                            "compositor_runtime": compositor_runtime,
                         }
                         (root / trace_name).write_text(json.dumps(trace), encoding="utf-8")
                         trace_digest = hashlib.sha256((root / trace_name).read_bytes()).hexdigest()
@@ -773,6 +779,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                             "installed_formats": ["AppImage", "deb" if desktop == "GNOME" else "rpm"],
                             "environment": {"distribution": "ubuntu" if desktop == "GNOME" else "fedora", "distribution_version": "24.04"},
                             "assertions": {name: True for name in assertions},
+                            "compositor_runtime": compositor_runtime,
                             "packages": package_rows(architecture),
                             "trace": {"name": trace_name, "sha256": trace_digest, "size_bytes": (root / trace_name).stat().st_size},
                             "evidence": [{"name": trace_name, "sha256": trace_digest, "size_bytes": (root / trace_name).stat().st_size}],
@@ -796,6 +803,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
             rejects_trace(lambda trace: trace["installation"].update({"formats": ["AppImage", "deb", "deb"]}), "installation formats")
             rejects_trace(lambda trace: trace["installation"]["appimage_extract_argv"].append("--extra"), "installation commands")
             rejects_trace(lambda trace: trace["installation"]["native_install_argv"].__setitem__(-1, "/driver/substituted.deb"), "package manager command")
+            rejects_trace(lambda trace: trace["runtimes"][1]["executables"]["copypaste"].__setitem__("sha256", "f" * 64), "executables differ")
             trace = json.loads(trace_path.read_text())
             trace["commands"][0]["argv"] = ["unix-ipc", "modules"]
             trace_path.write_text(json.dumps(trace))
@@ -840,6 +848,8 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
             module_fixtures = root / "module-fixtures"
             module_artifacts.mkdir()
             module_fixtures.mkdir()
+            binding = root / "binding.json"
+            binding.write_text(json.dumps({"schema": 1, "producer_run_id": "1", "commit": "a" * 40, "runtime_id": "fixture", "desktop": "GNOME", "architecture": "x86_64", "distribution": producer["runtime_environment"]()["distribution"], "format": "deb", "package": {"name": "runtime.deb", "sha256": "a" * 64, "size_bytes": 1}, "runtime_receipt": {"name": "runtime.json", "sha256": "b" * 64, "size_bytes": 1}}), encoding="utf-8")
             driver = root / "driver.py"
             driver_assertions = producer["scenario_assertions"]("prior_release", "wayland")
             module_ipc = []
@@ -860,7 +870,8 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                 "print('COPYPASTE_QUALIFICATION_COMMAND '+json.dumps({'argv':native_argv,'returncode':0,'assertions':['package_install']}))\n"
                 "print('COPYPASTE_QUALIFICATION_COMMAND '+json.dumps({'argv':['probe'],'returncode':0,'assertions':" + repr(sorted(driver_assertions - {"modules", "package_install"})) + "}))\n"
                 "for row in " + repr(module_ipc) + ": print('COPYPASTE_QUALIFICATION_IPC '+json.dumps(row))\n"
-                "print('COPYPASTE_QUALIFICATION_INSTALL '+json.dumps({'formats':['AppImage','deb'],'packages':[package(appimage,'AppImage'),package(native,'deb')],'appimage_extract_argv':appimage_argv,'native_install_argv':native_argv}))\n",
+                "print('COPYPASTE_QUALIFICATION_INSTALL '+json.dumps({'formats':['AppImage','deb'],'packages':[package(appimage,'AppImage'),package(native,'deb')],'appimage_extract_argv':appimage_argv,'native_install_argv':native_argv}))\n"
+                "for format in ['AppImage','deb']: print('COPYPASTE_QUALIFICATION_RUNTIME '+json.dumps({'format':format,'gui_owned_daemon':True,'executables':{name:{'path':('/runtime/squashfs-root/usr/lib/copypaste/' if format=='AppImage' else '/usr/lib/copypaste/')+name,'sha256':'e'*64,'size_bytes':1} for name in ['copypaste','copypaste-daemon','copypaste-cli']}}))\n",
                 encoding="utf-8",
             )
             driver.chmod(0o755)
@@ -869,7 +880,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                 version="1.2.3", previous_version="1.2.2", architecture="x86_64",
                 desktop="GNOME", session="wayland", commit="a" * 40,
                 source_run_id="123", artifact_run_id="456", driver=driver, output=root / "evidence",
-                module_artifacts=module_artifacts, module_fixtures=module_fixtures,
+                module_artifacts=module_artifacts, module_fixtures=module_fixtures, compositor_runtime_binding=binding,
             ))
             receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
             self.assertEqual(receipt["artifact_run_id"], "456")
@@ -902,6 +913,8 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
             module_fixtures = root / "module-fixtures"
             module_artifacts.mkdir()
             module_fixtures.mkdir()
+            binding = root / "binding.json"
+            binding.write_text(json.dumps({"schema": 1, "producer_run_id": "1", "commit": "a" * 40, "runtime_id": "fixture", "desktop": "GNOME", "architecture": "x86_64", "distribution": producer["runtime_environment"]()["distribution"], "format": "deb", "package": {"name": "runtime.deb", "sha256": "a" * 64, "size_bytes": 1}, "runtime_receipt": {"name": "runtime.json", "sha256": "b" * 64, "size_bytes": 1}}), encoding="utf-8")
             driver = root / "driver"
             driver.write_text("fixture", encoding="utf-8")
             driver.chmod(0o755)
@@ -909,7 +922,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                 artifacts=current, previous_artifacts=None, version="1.2.3", previous_version=None,
                 architecture="x86_64", desktop="GNOME", session="x11", commit="a" * 40,
                 source_run_id="123", artifact_run_id="456", driver=driver, output=root / "evidence",
-                module_artifacts=module_artifacts, module_fixtures=module_fixtures,
+                module_artifacts=module_artifacts, module_fixtures=module_fixtures, compositor_runtime_binding=binding,
             )
             expected = producer["scenario_assertions"]("first_install_baseline", "x11")
             module_ipc = []
@@ -934,6 +947,10 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                     {"format": "deb", "name": native.name, "path": str(native.resolve()), "sha256": hashlib.sha256(native.read_bytes()).hexdigest(), "size_bytes": native.stat().st_size},
                 ], "appimage_extract_argv": appimage_argv, "native_install_argv": native_argv,
             })
+            output += "\n" + "\n".join("COPYPASTE_QUALIFICATION_RUNTIME " + json.dumps({
+                "format": format_name, "gui_owned_daemon": True,
+                "executables": {name: {"path": (f"/runtime/squashfs-root/usr/lib/copypaste/{name}" if format_name == "AppImage" else f"/usr/lib/copypaste/{name}"), "sha256": "e" * 64, "size_bytes": 1} for name in ("copypaste", "copypaste-daemon", "copypaste-cli")},
+            }) for format_name in ("AppImage", "deb"))
             completed = subprocess.CompletedProcess(["driver"], 0, stdout=output)
             with mock.patch.dict(os.environ, {}, clear=True), \
                     mock.patch.object(producer["subprocess"], "run", return_value=completed) as run:
