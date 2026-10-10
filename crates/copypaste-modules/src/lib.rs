@@ -3,6 +3,7 @@
 
 mod cloud_request;
 mod host;
+mod inference;
 mod input;
 mod manager;
 #[allow(unsafe_code)]
@@ -15,6 +16,11 @@ pub use copypaste_module_sdk::{
     ModuleCommand, ModuleField, ModuleFieldValue, ModuleOutput, ModuleTarget,
 };
 pub use host::ModuleHost;
+#[cfg(target_os = "android")]
+pub use inference::AndroidInferenceLauncher;
+pub use inference::{
+    run_inference_worker, DesktopInferenceLauncher, InferenceConnection, InferenceLauncher,
+};
 pub use manager::{InstalledModule, ModuleManager};
 pub use sync::SyncServices;
 
