@@ -77,7 +77,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends build-essential pkg-config libgtk-3-dev openbox xdotool xvfb
+          sudo apt-get install --yes --no-install-recommends build-essential pkg-config libgtk-3-dev openbox x11-utils xdotool xvfb
           cc -std=c11 -O2 -Wall -Wextra -Werror \
             scripts/release/linux-gtk-file-drop-source.c \
             -o /tmp/copypaste-gtk-file-drop-source \
