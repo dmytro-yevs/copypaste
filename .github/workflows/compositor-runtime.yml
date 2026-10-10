@@ -114,7 +114,7 @@ jobs:
       - name: Build receipt-listed private compositor runtime
         run: |
           set -euo pipefail
-          mkdir -p build/runtime-output artifact/runtime
+          mkdir -p artifact/runtime
           if [[ "${{ matrix.desktop }}" == GNOME ]]; then
             cd packaging/linux/desktop-integrations/gnome-shell-extension/mutter
             ./verify-patch.sh 46 "$RUNNER_TEMP/mutter-source" "$RUNNER_TEMP/mutter-build" "$GITHUB_WORKSPACE/build/runtime-output"

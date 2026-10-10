@@ -25,6 +25,10 @@ EXPECTED_JOBS = {
     )
     for architecture in ("x86_64", "aarch64")
 }
+CI_CANDIDATES = {
+    "linux-pr-release-candidate-x86_64",
+    "linux-pr-release-candidate-aarch64",
+}
 
 
 def verify(run: dict, jobs: dict, artifacts: dict, repository: str, commit: str) -> None:
@@ -51,18 +55,19 @@ def verify(run: dict, jobs: dict, artifacts: dict, repository: str, commit: str)
     required_jobs = EXPECTED_JOBS if direct else {"Compositor runtime metadata", *EXPECTED_JOBS}
     if not all(any(name == expected or name.endswith(f" / {expected}") for name in passed) for expected in required_jobs):
         raise ValueError("compositor runtime source did not pass every production runtime job")
-    names = {
-        artifact.get("name")
-        for artifact in artifacts.get("artifacts", [])
-        if artifact.get("expired") is False
-    }
-    if names != EXPECTED:
+    artifact_entries = artifacts.get("artifacts", [])
+    if not isinstance(artifact_entries, list):
+        raise ValueError("compositor runtime source artifact inventory is invalid")
+    allowed = EXPECTED | (CI_CANDIDATES if trusted_ci else set())
+    names = [artifact.get("name") for artifact in artifact_entries]
+    if set(names) != allowed or len(names) != len(allowed):
         raise ValueError("compositor runtime source artifact inventory is incomplete or ambiguous")
-    for artifact in artifacts.get("artifacts", []):
-        if artifact.get("name") in EXPECTED:
-            source = artifact.get("workflow_run", {})
-            if source.get("id") != run["id"] or source.get("head_sha") != commit:
-                raise ValueError("compositor runtime artifact provenance differs from its source run")
+    for artifact in artifact_entries:
+        if artifact.get("expired") is not False:
+            raise ValueError("compositor runtime source artifact is expired")
+        source = artifact.get("workflow_run", {})
+        if source.get("id") != run["id"] or source.get("head_sha") != commit:
+            raise ValueError("compositor runtime artifact provenance differs from its source run")
 
 
 def main() -> None:
