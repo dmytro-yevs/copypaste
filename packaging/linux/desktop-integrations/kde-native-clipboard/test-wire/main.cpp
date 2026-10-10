@@ -10,6 +10,8 @@
 #include <QMap>
 #include <QTimer>
 
+#include <optional>
+
 struct WriterIdentity {
     QString status;
     quint32 pid = 0;
@@ -81,13 +83,13 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    QDBusConnection peerConnection;
+    std::optional<QDBusConnection> peerConnection;
     bool registered = false;
     QEventLoop setupLoop;
     QObject::connect(&server, &QDBusServer::newConnection, &application, [&fixture, &peerConnection, &registered, &setupLoop](const QDBusConnection &connection) {
-        peerConnection = connection;
-        registered = peerConnection.registerObject(QStringLiteral("/app/copypaste/Clipboard"), &fixture,
-                                                   QDBusConnection::ExportScriptableSlots | QDBusConnection::ExportScriptableSignals);
+        peerConnection.emplace(connection);
+        registered = peerConnection->registerObject(QStringLiteral("/app/copypaste/Clipboard"), &fixture,
+                                                    QDBusConnection::ExportScriptableSlots | QDBusConnection::ExportScriptableSignals);
         setupLoop.quit();
     });
     QTimer::singleShot(1'000, &setupLoop, &QEventLoop::quit);
