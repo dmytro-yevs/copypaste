@@ -258,6 +258,7 @@ class RuntimeStageTests(unittest.TestCase):
             with mock.patch.object(private_elf_closure, "library_cache", return_value={"libKDecoration2.so.6": decoration, "libKF6CoreAddons.so.6": framework}), \
                  mock.patch.object(private_elf_closure, "needed", side_effect=needed), \
                  mock.patch.object(private_elf_closure, "provided_soname", side_effect=soname), \
+                 mock.patch.object(private_elf_closure, "dynamic_search_directories", return_value=[]), \
                  mock.patch.object(private_elf_closure, "trusted_library", side_effect=lambda path: path), \
                  mock.patch.object(private_elf_closure, "rpm_owner", side_effect=lambda path: ("kdecoration2" if path == decoration else "kf6-kcoreaddons", "6.0.0-1", "kde-6.0.0-1.src.rpm", "LGPL-2.1-or-later")), \
                  mock.patch.object(private_elf_closure, "rpm_license_files", side_effect=lambda owner: [(("kdecoration2-doc", "6.0.0-1", "kde-6.0.0-1.src.rpm", "LGPL-2.1-or-later"), license_source), (("kdecoration2-doc", "6.0.0-1", "kde-6.0.0-1.src.rpm", "LGPL-2.1-or-later"), notice_source)] if owner[0] == "kdecoration2" else [(("kf6-kcoreaddons", "6.0.0-1", "kde-6.0.0-1.src.rpm", "LGPL-2.1-or-later"), license_source)]):
@@ -289,6 +290,29 @@ class RuntimeStageTests(unittest.TestCase):
             self.assertEqual(
                 private_elf_closure.rpm_siblings(owner),
                 [("kwin-doc", "6.0.3.1-2.fc40", "kwin-6.0.3.1-2.fc40.src.rpm", "GPL-2.0-only"), owner],
+            )
+
+    def test_declared_runpath_resolves_before_the_global_library_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            dependency = directory / "libpxbackend-1.0.so"
+            dependency.write_bytes(b"private backend")
+            with mock.patch.object(private_elf_closure, "dynamic_search_directories", return_value=[directory]), \
+                 mock.patch.object(private_elf_closure, "trusted_library", side_effect=lambda path: path):
+                self.assertEqual(
+                    private_elf_closure.resolve_dependency(Path("/usr/lib64/libproxy.so.0"), "libpxbackend-1.0.so", {}),
+                    dependency,
+                )
+
+    def test_declared_search_path_rejects_escaped_directories(self) -> None:
+        readelf = " 0x000000000000001d (RUNPATH)            Library runpath: [/usr/lib64/libproxy:/usr/lib64/libproxy/../../etc]\n"
+        def trusted(path: Path) -> Path | None:
+            return Path("/trusted/libproxy") if str(path) == "/usr/lib64/libproxy" else None
+        with mock.patch.object(private_elf_closure, "run", return_value=readelf), \
+             mock.patch.object(private_elf_closure, "trusted_library_directory", side_effect=trusted):
+            self.assertEqual(
+                private_elf_closure.dynamic_search_directories(Path("/usr/lib64/libproxy.so.0")),
+                [Path("/trusted/libproxy")],
             )
 
     def test_staged_package_has_no_vendor_replacement_path(self) -> None:

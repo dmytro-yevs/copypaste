@@ -25,6 +25,7 @@ from typing import Iterable
 
 NEEDED = re.compile(r"\(NEEDED\).*\[(?P<soname>[^]]+)\]")
 SONAME = re.compile(r"\(SONAME\).*\[(?P<soname>[^]]+)\]")
+SEARCH_PATH = re.compile(r"\((?:RPATH|RUNPATH)\).*\[(?P<path>[^]]+)\]")
 SAFE_NAME = re.compile(r"^[A-Za-z0-9.+_-]{1,80}$")
 SAFE_EVR = re.compile(r"^[A-Za-z0-9.+:~_-]{1,120}$")
 SAFE_SOURCE_RPM = re.compile(r"^[A-Za-z0-9.+:~_-]{1,160}\.src\.rpm$")
@@ -102,6 +103,41 @@ def library_cache() -> dict[str, Path]:
         if SAFE_SONAME.fullmatch(library) and candidate.is_absolute() and candidate.exists():
             result.setdefault(library, candidate)
     return result
+
+
+def trusted_library_directory(path: Path) -> Path | None:
+    try:
+        resolved = path.resolve(strict=True)
+        details = resolved.stat()
+    except OSError:
+        return None
+    roots = ("/lib", "/lib64", "/usr/lib", "/usr/lib64")
+    if not stat.S_ISDIR(details.st_mode) or not any(str(resolved) == root or str(resolved).startswith(root + "/") for root in roots):
+        return None
+    return resolved
+
+
+def dynamic_search_directories(path: Path) -> list[Path]:
+    directories = []
+    for raw in SEARCH_PATH.findall(run(["readelf", "-d", str(path)])):
+        for item in raw.split(":"):
+            if "$" in item:
+                item = item.replace("$ORIGIN", str(path.parent))
+            if "$" in item or not item.startswith("/"):
+                continue
+            directory = trusted_library_directory(Path(item))
+            if directory is not None:
+                directories.append(directory)
+    return list(dict.fromkeys(directories))
+
+
+def resolve_dependency(source: Path, soname: str, cache: dict[str, Path]) -> Path | None:
+    for directory in dynamic_search_directories(source):
+        candidate = directory / soname
+        if candidate.exists() or candidate.is_symlink():
+            return trusted_library(candidate)
+    candidate = cache.get(soname)
+    return trusted_library(candidate) if candidate is not None else None
 
 
 def trusted_library(path: Path) -> Path:
@@ -209,9 +245,10 @@ def copy_closure(runtime: Path, initial: Iterable[Path]) -> dict:
             if dependency not in GLIBC_SONAMES:
                 if dependency in private_sonames:
                     continue
-                if dependency not in cache:
+                resolved = resolve_dependency(source, dependency, cache)
+                if resolved is None:
                     raise ClosureError(f"could not resolve dynamic dependency {dependency}")
-                queue.append((dependency, cache[dependency]))
+                queue.append((dependency, resolved))
     libraries: list[dict] = []
     packages: dict[str, dict] = {}
     copied: dict[Path, dict] = {}
@@ -240,9 +277,10 @@ def copy_closure(runtime: Path, initial: Iterable[Path]) -> dict:
             if dependency not in GLIBC_SONAMES:
                 if dependency in private_sonames:
                     continue
-                if dependency not in cache:
+                resolved = resolve_dependency(source, dependency, cache)
+                if resolved is None:
                     raise ClosureError(f"could not resolve dynamic dependency {dependency}")
-                queue.append((dependency, cache[dependency]))
+                queue.append((dependency, resolved))
     if not libraries:
         raise ClosureError("private compositor runtime has no non-glibc ELF closure")
     licenses = []
