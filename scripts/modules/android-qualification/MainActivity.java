@@ -11,6 +11,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** Runs the actual module host in app-private storage without Internet permission. */
 public final class MainActivity extends Activity {
     private static final AtomicBoolean started = new AtomicBoolean();
+    public static long[] openWorker() { return InferenceWorkerHost.openWorker(); }
+    public static void closeWorker(long id) { InferenceWorkerHost.closeWorker(id); }
     static { System.loadLibrary("copypaste_module_qualification"); }
     private static native String qualify(
         String packagePath, String fixtures, String data, String appVersion,
@@ -20,6 +22,7 @@ public final class MainActivity extends Activity {
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+        InferenceWorkerHost.initialize(getApplicationContext());
         // Activity recreation must not start a second workload in the same process.
         if (!started.compareAndSet(false, true)) return;
         new Thread(() -> {
