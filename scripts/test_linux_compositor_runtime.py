@@ -105,6 +105,14 @@ class InstalledRuntimeTest(unittest.TestCase):
 
 
 class CompositorRuntimeWorkflowTest(unittest.TestCase):
+    def test_producer_provisions_its_gnome_source_dependencies(self):
+        workflow = (ROOT / ".github/workflows/compositor-runtime.yml").read_text(encoding="utf-8")
+        self.assertIn("Types: deb-src", workflow)
+        self.assertIn("apt-get build-dep --yes --no-install-recommends mutter gnome-shell", workflow)
+        self.assertIn("libmutter-14-dev gobject-introspection libgirepository1.0-dev", workflow)
+        self.assertIn("TAURI_SIGNING_PRIVATE_KEY", workflow)
+        self.assertIn("workflow_call:", workflow)
+
     def test_uses_authenticated_runtime_artifacts_and_generated_launchers(self):
         workflow = (ROOT / ".github/workflows/linux-native-qualification.yml").read_text(encoding="utf-8")
         release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
@@ -129,9 +137,6 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
             self.assertIn("copypaste-compositor-session-$runtime_id", script)
             self.assertNotIn("gnome-shell --headless", script)
             self.assertIn("COPYPASTE_COMPOSITOR_EXECUTION=stock-x11", script)
-            self.assertIn("COPYPASTE_COMPOSITOR_EXECUTION=private-wayland", script)
-            self.assertIn("COMPOSITOR_QUALIFICATION_ENTRYPOINT", script)
-            self.assertIn("record-linux-compositor-session.py", script)
             self.assertIn("COPYPASTE_COMPOSITOR_EXECUTION=private-wayland", script)
             self.assertIn("COMPOSITOR_QUALIFICATION_ENTRYPOINT", script)
             self.assertIn("record-linux-compositor-session.py", script)
