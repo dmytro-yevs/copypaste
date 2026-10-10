@@ -75,6 +75,34 @@ install -m 755 "$NATIVE_SHIM/build/libcopypaste_clipboard_source.so" \
 install -m 644 "$NATIVE_SHIM/build/CopyPasteClipboard-1.0.typelib" \
   "$STAGE/usr/share/gnome-shell/extensions/copypaste-quick-paste@copypaste.app/native/typelib/"
 
+# Release jobs supply an immutable compositor compiler receipt plus its exact
+# output directory. PR packaging fixtures may omit them, but stable jobs fail
+# closed when COPYPASTE_REQUIRE_COMPOSITOR_RUNTIME=1. The sidecar only enters
+# native packages; AppImage deliberately strips it below.
+RUNTIME_RECEIPT="${COPYPASTE_COMPOSITOR_RUNTIME_RECEIPT:-}"
+RUNTIME_DIRECTORY="${COPYPASTE_COMPOSITOR_RUNTIME_DIRECTORY:-}"
+RUNTIME_RPM_FILES=""
+RUNTIME_DEB_DEPENDS=""
+RUNTIME_RPM_REQUIRES=""
+if [[ -n "$RUNTIME_RECEIPT" || -n "$RUNTIME_DIRECTORY" ]]; then
+  [[ -n "$RUNTIME_RECEIPT" && -n "$RUNTIME_DIRECTORY" ]] || {
+    echo "ERROR: compositor runtime receipt and directory must be supplied together" >&2
+    exit 1
+  }
+  python3 "$ROOT/packaging/linux/compositor-runtime/stage_runtime.py" \
+    --receipt "$RUNTIME_RECEIPT" --runtime-dir "$RUNTIME_DIRECTORY" \
+    --stage-root "$STAGE" --expected-architecture "$ARCHITECTURE"
+  runtime_id="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["runtime_id"])' "$RUNTIME_RECEIPT")"
+  python3 "$ROOT/packaging/linux/compositor-runtime/verify_runtime_package.py" \
+    --root "$STAGE" --runtime-id "$runtime_id"
+  RUNTIME_RPM_FILES=$'/usr/share/copypaste/compositor-runtime\n/usr/share/wayland-sessions'
+  RUNTIME_DEB_DEPENDS="$(python3 -c 'import json, sys; print(", ".join("{} (= {})".format(item["name"], item["version"]) for item in json.load(open(sys.argv[1], encoding="utf-8"))["package_dependencies"]))' "$RUNTIME_RECEIPT")"
+  RUNTIME_RPM_REQUIRES="$(python3 -c 'import json, sys; print("\n".join("Requires: {} = {}".format(item["name"], item["version"]) for item in json.load(open(sys.argv[1], encoding="utf-8"))["package_dependencies"]))' "$RUNTIME_RECEIPT")"
+elif [[ "${COPYPASTE_REQUIRE_COMPOSITOR_RUNTIME:-0}" == 1 ]]; then
+  echo "ERROR: stable Linux packaging requires an immutable compositor runtime receipt" >&2
+  exit 1
+fi
+
 DEB="$DIST/CopyPaste-v$VERSION-linux-$ARCHITECTURE.deb"
 install -d "$STAGE/DEBIAN"
 write_package_metadata deb
@@ -91,6 +119,9 @@ done < <(find "$STAGE/usr" -type f -print0)
 DEB_DEPENDS="$(cd "$SHLIB_WORK" && dpkg-shlibdeps -O -l"$STAGE/usr/lib/copypaste" "${shlib_inputs[@]}" \
   | sed -n 's/^shlibs:Depends=//p' | paste -sd, -)"
 [[ -n "$DEB_DEPENDS" ]] || { echo "ERROR: could not derive Debian runtime dependencies" >&2; exit 1; }
+if [[ -n "$RUNTIME_DEB_DEPENDS" ]]; then
+  DEB_DEPENDS="$DEB_DEPENDS, $RUNTIME_DEB_DEPENDS"
+fi
 cat > "$STAGE/DEBIAN/control" <<EOF
 Package: copypaste
 Version: $VERSION
@@ -115,6 +146,7 @@ Summary: Encrypted clipboard history
 License: MIT OR Apache-2.0
 BuildArch: $RPM_ARCH
 Requires: glibc >= 2.39
+$RUNTIME_RPM_REQUIRES
 
 %description
 CopyPaste keeps encrypted clipboard history locally and syncs only with paired devices.
@@ -132,6 +164,7 @@ cp -a %{_source_stage}/. %{buildroot}/
 /usr/share/kwin/scripts/copypaste-quick-paste
 /usr/share/copypaste/autostart/com.copypaste.CopyPaste.desktop
 /usr/share/copypaste/desktop-integrations/kde-native-clipboard
+$RUNTIME_RPM_FILES
 EOF
 write_package_metadata rpm
 rpmbuild -bb "$SPEC" --define "_topdir $TOPDIR" --define "_source_stage $STAGE" --define "_build_id_links none"
@@ -148,6 +181,11 @@ trap 'rm -rf "$STAGE" "$TOPDIR" "$APPDIR"' EXIT
 mkdir -p "$APPDIR/usr"
 write_package_metadata appimage
 cp -a "$STAGE/usr/." "$APPDIR/usr/"
+# A portable AppImage never installs or offers a compositor session. Its users
+# explicitly install a matching signed distribution companion instead.
+rm -rf "$APPDIR/usr/lib/copypaste/compositor-runtime" \
+  "$APPDIR/usr/share/copypaste/compositor-runtime" \
+  "$APPDIR/usr/share/wayland-sessions"
 mkdir -p "$APPDIR/usr/share/copypaste/desktop-integrations"
 cp -a "$INTEGRATIONS/manifest.json" "$APPDIR/usr/share/copypaste/desktop-integrations/"
 if [[ -f "$INTEGRATIONS/README.md" ]]; then
