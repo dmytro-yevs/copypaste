@@ -59,12 +59,13 @@ class RuntimeStageTests(unittest.TestCase):
             else:
                 rows.append({"path": relative, "type": "file", "mode": f"{path.stat().st_mode & 0o7777:04o}", "sha256": digest(path.read_bytes())})
         distribution_id, distribution_version = os_release()
+        qualification = launch["entrypoint"] if launch["kind"] == "private" else "bin/headless"
         return {
             "schema": 1, "runtime_id": "kwin-6.3-test", "desktop": desktop,
             "architecture": "x86_64", "distribution": {"id": distribution_id, "version": distribution_version},
             "glibc_floor": "2.39", "source": {"revision": "v6.3.0", "patch_sha256": "a" * 64},
-            "payload": rows, "launch": launch, "runtime_env": {}, "package_dependencies": [{"name": "kwin", "version": "6.3.0"}],
-            "upstream_license": {"spdx": "GPL-2.0-or-later", "name": "COPYING", "sha256": digest(license_file.read_bytes())},
+            "payload": rows, "launch": launch, "qualification": {"kind": "headless", "entrypoint": qualification}, "runtime_env": {}, "package_dependencies": [{"name": "kwin", "version": "6.3.0"}],
+            "upstream_licenses": [{"spdx": "GPL-2.0-or-later", "name": "COPYING", "sha256": digest(license_file.read_bytes())}],
         }
 
     @unittest.skipUnless(Path("/etc/os-release").is_file(), "launcher executes only in a Linux session")
@@ -128,6 +129,10 @@ class RuntimeStageTests(unittest.TestCase):
             runtime = root / "input"
             (runtime / "lib").mkdir(parents=True)
             (runtime / "lib/libmutter.so").write_bytes(b"private mutter")
+            (runtime / "bin").mkdir()
+            headless = runtime / "bin/headless"
+            headless.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            headless.chmod(0o755)
             receipt = self.make_receipt(runtime, {
                 "kind": "system-session", "command": ["/usr/bin/gnome-session", "--session=gnome"],
                 "host_binaries": [
