@@ -38,8 +38,18 @@ build_one() {
   cmake --build "$build" --parallel "${COPYPASTE_KWIN_BUILD_JOBS:-2}"
   if [[ -n "$runtime_output" ]]; then
     [[ "$requested" != all ]] || { echo "ERROR: export one KWin family per runtime output" >&2; exit 1; }
-    [[ ! -e "$runtime_output" ]] || { echo "ERROR: runtime output must not exist" >&2; exit 1; }
-    mkdir -p "$runtime_output"
+    [[ -d "$runtime_output" && ! -L "$runtime_output" ]] || {
+      echo "ERROR: runtime output must be an ordinary mounted directory" >&2
+      exit 1
+    }
+    first_entry="$(find "$runtime_output" -mindepth 1 -maxdepth 1 -print -quit)" || {
+      echo "ERROR: could not inspect runtime output" >&2
+      exit 1
+    }
+    [[ -z "$first_entry" ]] || {
+      echo "ERROR: runtime output must be empty" >&2
+      exit 1
+    }
     DESTDIR="$runtime_output" cmake --install "$build" --prefix /usr
     python3 "$root/../../compositor-runtime/private_elf_closure.py" \
       --runtime-dir "$runtime_output" --entrypoint usr/bin/kwin_wayland
