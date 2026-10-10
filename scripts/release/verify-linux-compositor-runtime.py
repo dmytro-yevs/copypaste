@@ -18,7 +18,7 @@ RUNTIMES = {
     ("KDE", "aarch64"): ("kwin", "6.0", "fedora", "40", "rpm"),
 }
 BASELINES = {
-    "GNOME": ("fe8d2be3f90f89f286c89b164c94a4f86552bc97", "packaging/linux/desktop-integrations/gnome-shell-extension/mutter/mutter-46-writer-identity.patch"),
+    "GNOME": ("fe8d2be3f90f89f286c89b164c94a4f86552bc97", "9fca03bb1544c85928041a935f4ce895333722f1", "packaging/linux/desktop-integrations/gnome-shell-extension/mutter/mutter-46-writer-identity.patch"),
     "KDE": ("1ddcb4e288c4f7dcecdc94efccd655b7e3666d30", "packaging/linux/desktop-integrations/kde-native-clipboard/patches/kwin-6.0.patch"),
 }
 
@@ -56,9 +56,12 @@ def artifact_name(desktop: str, architecture: str) -> str:
 
 
 def verify_baseline_source(desktop: str, source: dict) -> None:
-    revision, patch = BASELINES[desktop]
+    baseline = BASELINES[desktop]
+    revision, patch = baseline[0], baseline[-1]
     if source.get("revision") != revision or source.get("patch_sha256") != sha256(ROOT / patch):
         raise ValueError("producer source revision or patch bytes differ from the checked-out baseline")
+    if desktop == "GNOME" and source.get("shell_revision") != baseline[1]:
+        raise ValueError("producer private Shell revision differs from the checked-out baseline")
 
 
 def verify_source(run: dict, artifacts: dict, repository: str, commit: str) -> None:
@@ -134,7 +137,8 @@ def binding(root: Path, desktop: str, architecture: str, commit: str, producer_r
             or not isinstance(producer.get("glibc_floor"), str) or not re.fullmatch(r"[0-9]+\.[0-9]+", producer["glibc_floor"])):
         raise ValueError("producer receipt identity differs from the qualification target")
     source = producer["source"]
-    if not isinstance(source, dict) or set(source) != {"revision", "patch_sha256"} or not isinstance(source["revision"], str) or not SHA256.fullmatch(source.get("patch_sha256", "")):
+    expected_source_keys = {"revision", "patch_sha256", "shell_revision"} if desktop == "GNOME" else {"revision", "patch_sha256"}
+    if not isinstance(source, dict) or set(source) != expected_source_keys or not isinstance(source["revision"], str) or not SHA256.fullmatch(source.get("patch_sha256", "")):
         raise ValueError("producer receipt source provenance is invalid")
     verify_baseline_source(desktop, source)
     runtime = producer["runtime_receipt"]
