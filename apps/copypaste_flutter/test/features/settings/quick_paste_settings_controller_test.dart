@@ -116,6 +116,7 @@ void main() {
         globalShortcuts: true,
         remoteDesktop: LinuxRemoteDesktopState.consentRequired,
         companion: LinuxCompanionState.active,
+        clipboard: false,
         quickPaste: false,
         screenshotProtection: false,
       ),
@@ -138,6 +139,7 @@ void main() {
       globalShortcuts: true,
       remoteDesktop: LinuxRemoteDesktopState.active,
       companion: LinuxCompanionState.active,
+      clipboard: true,
       quickPaste: true,
       screenshotProtection: false,
     );
@@ -156,6 +158,7 @@ void main() {
               globalShortcuts: true,
               remoteDesktop: LinuxRemoteDesktopState.consentRequired,
               companion: LinuxCompanionState.disabled,
+              clipboard: false,
               quickPaste: false,
               screenshotProtection: false,
             ),
