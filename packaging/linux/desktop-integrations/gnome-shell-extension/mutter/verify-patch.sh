@@ -32,12 +32,12 @@ if [[ -n "$runtime_output" ]]; then
   [[ ! -e "$runtime_output" ]] || { echo "ERROR: runtime output must not exist" >&2; exit 1; }
   mkdir -p "$runtime_output"
   DESTDIR="$runtime_output" meson install -C "$build_dir" --no-rebuild
-  : "${COPYPASTE_GNOME_PRIVATE_SHELL_ENTRYPOINT:?runtime export requires a matching private GNOME Shell entrypoint installed in the same prefix}"
+  "$PWD/build-private-shell.sh" "$runtime_output"
   runtime_id="gnome-${version}-private-shell"
   python3 "$PWD/../../../compositor-runtime/emit_runtime_receipt.py" \
     --runtime-dir "$runtime_output" --output "$runtime_output/runtime-receipt.json" \
     --runtime-id "$runtime_id" --desktop GNOME --source-revision "$commit" \
     --patch "$patch" --glibc-floor 2.39 --dependency gnome-shell --dependency gnome-session \
-    --private-entrypoint "$COPYPASTE_GNOME_PRIVATE_SHELL_ENTRYPOINT" --license-file "$source_dir/COPYING"
+    --private-entrypoint usr/libexec/copypaste-gnome-shell --shell-revision "$(cat "$runtime_output/.copypaste-gnome-shell-revision")" --license-file "$source_dir/COPYING"
 fi
 echo "verified Mutter $version commit $commit and installed immutable runtime=${runtime_output:-none}"
