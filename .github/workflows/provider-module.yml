@@ -26,6 +26,10 @@ jobs:
           dkms status
           modinfo v4l2loopback
           dpkg-query -W -f='${binary:Package} ${Version}\n' "linux-headers-$kernel" "linux-modules-$kernel" "linux-modules-extra-$kernel" || true
+          apt-cache policy linux-azure linux-modules-extra-azure "linux-modules-extra-$kernel"
+          apt-cache search '^linux-modules-extra.*azure$'
+          apt-cache search "^linux-modules-extra-${kernel%%-*}"
+          apt-cache depends "linux-modules-$kernel" || true
           find "/lib/modules/$kernel" -type f \( -name 'v4l2loopback.ko*' -o -name 'videodev.ko*' \) -print
           if sudo modprobe v4l2loopback video_nr=42 card_label=CopyPasteQualification exclusive_caps=1; then
             sudo modprobe -r v4l2loopback
