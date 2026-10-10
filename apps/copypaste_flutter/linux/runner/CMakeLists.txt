@@ -11,6 +11,7 @@ add_executable(${BINARY_NAME}
   "linux_portal.cc"
   "linux_quick_paste_window.cc"
   "linux_restart_helper.cc"
+  "linux_release_page.cc"
   "linux_x11_quick_paste.cc"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
 )

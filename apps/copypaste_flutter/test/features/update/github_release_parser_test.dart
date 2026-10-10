@@ -9,6 +9,29 @@ import 'package:pub_semver/pub_semver.dart';
 void main() {
   const parser = GitHubReleaseParser();
 
+  test('release page fallback rejects credentials, ports and traversal', () {
+    for (final url in [
+      'https://github.com:444/dmytro-yevs/copypaste/releases/latest',
+      'https://user@github.com/dmytro-yevs/copypaste/releases/latest',
+      'https://github.com/dmytro-yevs/copypaste/releases/%2e%2e/issues',
+    ]) {
+      final raw = _release(
+        '1.0.1',
+        prerelease: false,
+        target: AppUpdateTarget.android,
+      )..['html_url'] = url;
+      final release = parser.latestFor(
+        jsonEncode([raw]),
+        currentVersion: Version.parse('1.0.0'),
+        target: AppUpdateTarget.macos,
+      );
+      expect(
+        release?.releaseUri.toString(),
+        'https://github.com/dmytro-yevs/copypaste/releases/tag/v1.0.1',
+      );
+    }
+  });
+
   test('stable installations ignore prereleases', () {
     final body = jsonEncode([
       _release('1.1.0-rc.1', prerelease: true, target: AppUpdateTarget.windows),

@@ -5,6 +5,7 @@
 #include "linux_portal.h"
 #include "linux_quick_paste_window.h"
 #include "linux_restart_helper.h"
+#include "linux_release_page.h"
 #include "linux_x11_quick_paste.h"
 
 #include <unistd.h>
@@ -1163,13 +1164,7 @@ void update_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
       return;
     }
     g_autoptr(GError) error = nullptr;
-    g_autoptr(GUri) uri = g_uri_parse(url, G_URI_FLAGS_ENCODED, &error);
-    const gchar* scheme = uri == nullptr ? nullptr : g_uri_get_scheme(uri);
-    const gchar* host = uri == nullptr ? nullptr : g_uri_get_host(uri);
-    const gchar* path = uri == nullptr ? nullptr : g_uri_get_path(uri);
-    if (uri == nullptr || g_strcmp0(scheme, "https") != 0 ||
-        g_strcmp0(host, "github.com") != 0 || path == nullptr ||
-        !g_str_has_prefix(path, "/dmytro-yevs/copypaste/releases/")) {
+    if (!is_linux_release_page_url(url)) {
       failure(call, "open_failed", "Release page URL is not trusted.");
       return;
     }
