@@ -62,6 +62,14 @@ impl ModuleHost {
             Some(crate::semantic_search::SearchBinding { store, changed });
     }
 
+    pub fn set_inference_launcher(
+        &self,
+        launcher: Arc<dyn crate::InferenceLauncher>,
+    ) -> Result<(), ModuleError> {
+        self.manager()?.set_inference_launcher(launcher);
+        Ok(())
+    }
+
     fn search_service(&self) -> Option<Arc<crate::semantic_search::SemanticSearch>> {
         let mut active = self.search.lock().ok()?;
         if let Some(service) = active.as_ref() {
