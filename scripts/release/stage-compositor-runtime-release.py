@@ -175,6 +175,9 @@ def stage(source_root: Path, destination: Path, version: str, commit: str, produ
                     raise ContractError(f"compositor runtime producer receipt has no package metadata: {name}")
                 package = artifact / package_meta["name"]
                 require_metadata(package_meta, package, "compositor runtime producer receipt does not bind package bytes")
+                expected_package_name = f"copypaste-compositor-runtime-{producer['runtime_id']}-v{version}-linux-{architecture}.{package_format}"
+                if package.name != expected_package_name:
+                    raise ContractError(f"compositor runtime package filename differs from producer receipt: {name}")
                 if package.suffix != f".{package_format}":
                     raise ContractError(f"compositor runtime package format differs from receipt: {name}")
                 licenses = producer.get("upstream_licenses")
