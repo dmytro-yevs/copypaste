@@ -28,6 +28,8 @@ RELATIVE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/+@-]{0,255}$")
 MODE = re.compile(r"^0[0-7]{3}$")
 DISTRO = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 ENV_KEYS = {"QT_PLUGIN_PATH", "QML2_IMPORT_PATH", "GIO_EXTRA_MODULES"}
+LICENSE = re.compile(r"^[\x20-\x7e]{1,240}$")
+CLOSURE_MANIFEST = "usr/share/copypaste/compositor-runtime-private-closure.json"
 
 
 class ContractError(ValueError):
@@ -136,8 +138,8 @@ def validate_receipt(receipt: dict[str, Any]) -> None:
             if sha256_bytes(target.encode("utf-8")) != row["sha256"]:
                 raise ContractError("payload symlink target digest differs")
     for license_info in licenses:
-        if not isinstance(license_info, dict) or license_info.get("spdx") != "GPL-2.0-or-later" or not isinstance(license_info.get("name"), str) or not SHA256.fullmatch(license_info.get("sha256", "")):
-            raise ContractError("upstream GPL license receipt is required")
+        if not isinstance(license_info, dict) or not isinstance(license_info.get("spdx"), str) or not LICENSE.fullmatch(license_info["spdx"]) or license_info["spdx"] != license_info["spdx"].strip() or not isinstance(license_info.get("name"), str) or not SHA256.fullmatch(license_info.get("sha256", "")):
+            raise ContractError("upstream license receipt is invalid")
         if license_info["name"] not in paths or payload_by_path(receipt)[license_info["name"]].get("sha256") != license_info["sha256"]:
             raise ContractError("upstream license bytes are not bound to runtime payload")
     launch = receipt.get("launch")
@@ -175,11 +177,21 @@ def validate_receipt(receipt: dict[str, Any]) -> None:
         raise ContractError("runtime environment contains an unsupported key")
     for key, value in runtime_env.items():
         safe_relative(value, f"runtime environment {key}")
-    dependencies = receipt.get("package_dependencies", [])
-    if not isinstance(dependencies, list) or not dependencies or not all(isinstance(item, dict) and set(item) == {"name", "version"} and isinstance(item["name"], str) and re.fullmatch(r"[A-Za-z0-9.+_-]{1,80}", item["name"]) and isinstance(item["version"], str) and re.fullmatch(r"[A-Za-z0-9.+:~_-]{1,120}", item["version"]) for item in dependencies):
-        raise ContractError("package dependencies are invalid")
-    if len({(item["name"], item["version"]) for item in dependencies}) != len(dependencies):
-        raise ContractError("package dependencies must be unique")
+    dependencies = receipt.get("host_requirements", [])
+    if not isinstance(dependencies, list):
+        raise ContractError("host requirements are invalid")
+    for item in dependencies:
+        if not isinstance(item, dict) or set(item) not in ({"name"}, {"name", "operator", "version"}) or not isinstance(item.get("name"), str) or not re.fullmatch(r"[A-Za-z0-9.+_-]{1,80}", item["name"]):
+            raise ContractError("host requirements are invalid")
+        if "operator" in item and (item["operator"] not in {">=", "<=", ">", "<"} or not isinstance(item.get("version"), str) or not re.fullmatch(r"[A-Za-z0-9.+:~_-]{1,120}", item["version"])):
+            raise ContractError("host requirements are invalid")
+    if len({json.dumps(item, sort_keys=True) for item in dependencies}) != len(dependencies):
+        raise ContractError("host requirements must be unique")
+    # Older package assembly callers read this field.  It remains present only
+    # as an empty compatibility list so no receipt can smuggle an exact desktop
+    # package pin through the legacy contract.
+    if "package_dependencies" in receipt and receipt["package_dependencies"] != []:
+        raise ContractError("legacy package dependencies must stay empty")
 
 
 def payload_by_path(receipt: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -220,7 +232,77 @@ def validate_payload(runtime_root: Path, receipt: dict[str, Any]) -> None:
     if actual != set(declared):
         missing = sorted(set(declared) - actual)
         raise ContractError(f"runtime input is missing bound file: {missing[0]}")
+    validate_private_elf_closure(runtime_root, receipt)
     validate_elf_metadata(runtime_root, receipt)
+
+
+def validate_private_elf_closure(runtime_root: Path, receipt: dict[str, Any]) -> None:
+    manifest_path = runtime_root / CLOSURE_MANIFEST
+    if not manifest_path.exists() and receipt["desktop"] != "KDE":
+        return
+    if not manifest_path.is_file() or manifest_path.is_symlink():
+        raise ContractError("private ELF closure manifest is missing or unsafe")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ContractError("private ELF closure manifest is invalid") from error
+    if not isinstance(manifest, dict) or set(manifest) != {"schema", "libraries", "packages", "licenses"} or manifest.get("schema") != 1:
+        raise ContractError("private ELF closure manifest schema is invalid")
+    libraries = manifest["libraries"]
+    packages = manifest["packages"]
+    licenses = manifest["licenses"]
+    if not isinstance(libraries, list) or not libraries or not isinstance(packages, list) or not packages or not isinstance(licenses, list) or not licenses:
+        raise ContractError("private ELF closure manifest is incomplete")
+    package_by_name: dict[str, dict[str, str]] = {}
+    for package in packages:
+        if not isinstance(package, dict) or set(package) != {"name", "evr", "license"} or not all(isinstance(package.get(key), str) for key in ("name", "evr", "license")) or not re.fullmatch(r"[A-Za-z0-9.+_-]{1,80}", package["name"]) or not re.fullmatch(r"[A-Za-z0-9.+:~_-]{1,120}", package["evr"]) or not LICENSE.fullmatch(package["license"]) or package["license"] != package["license"].strip():
+            raise ContractError("private ELF closure package provenance is invalid")
+        if package["name"] in package_by_name:
+            raise ContractError("private ELF closure package provenance is ambiguous")
+        package_by_name[package["name"]] = package
+    declared = payload_by_path(receipt)
+    library_paths: set[str] = set()
+    for library in libraries:
+        if not isinstance(library, dict) or set(library) != {"path", "soname", "sha256", "package", "evr"}:
+            raise ContractError("private ELF closure library metadata is invalid")
+        path = library.get("path")
+        if not isinstance(path, str) or not path.startswith("usr/lib/") or path in library_paths or not isinstance(library.get("soname"), str) or not re.fullmatch(r"[A-Za-z0-9._+-]{1,255}", library["soname"]) or not SHA256.fullmatch(library.get("sha256", "")) or library.get("package") not in package_by_name or library.get("evr") != package_by_name[library["package"]]["evr"]:
+            raise ContractError("private ELF closure library metadata is invalid")
+        row = declared.get(path)
+        if row is None or row.get("type") != "file" or row.get("sha256") != library["sha256"]:
+            raise ContractError("private ELF closure library bytes are not bound to runtime payload")
+        library_path = runtime_root / path
+        with library_path.open("rb") as handle:
+            is_elf = handle.read(4) == b"\x7fELF"
+        if is_elf:
+            readelf = shutil.which("readelf")
+            if readelf is None:
+                raise ContractError("readelf is required to verify private ELF closure SONAMEs")
+            output = subprocess.run([readelf, "-d", str(library_path)], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+            if output.returncode or re.findall(r"\(SONAME\).*\[([^]]+)\]", output.stdout) != [library["soname"]]:
+                raise ContractError("private ELF closure SONAME differs from its manifest")
+        library_paths.add(path)
+    license_packages: set[str] = set()
+    license_paths: set[str] = set()
+    receipt_licenses = {(item["name"], item["sha256"]) for item in receipt["upstream_licenses"]}
+    for license_record in licenses:
+        if not isinstance(license_record, dict) or set(license_record) != {"package", "license", "path", "sha256"}:
+            raise ContractError("private ELF closure license metadata is invalid")
+        package = license_record.get("package")
+        path = license_record.get("path")
+        if package not in package_by_name or license_record.get("license") != package_by_name[package]["license"] or not isinstance(path, str) or not path.startswith("usr/share/doc/") or not SHA256.fullmatch(license_record.get("sha256", "")):
+            raise ContractError("private ELF closure license metadata is invalid")
+        row = declared.get(path)
+        if row is None or row.get("type") != "file" or row.get("sha256") != license_record["sha256"]:
+            raise ContractError("private ELF closure license bytes are not bound to runtime payload")
+        if (path, license_record["sha256"]) not in receipt_licenses:
+            raise ContractError("private ELF closure license bytes are not bound to the license receipt")
+        if path in license_paths:
+            raise ContractError("private ELF closure license path is ambiguous")
+        license_packages.add(package)
+        license_paths.add(path)
+    if set(package_by_name) != {library["package"] for library in libraries} or set(package_by_name) != license_packages:
+        raise ContractError("private ELF closure does not account for every bundled RPM")
 
 
 def validate_elf_metadata(runtime_root: Path, receipt: dict[str, Any]) -> None:

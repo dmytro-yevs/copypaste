@@ -41,6 +41,8 @@ build_one() {
     [[ ! -e "$runtime_output" ]] || { echo "ERROR: runtime output must not exist" >&2; exit 1; }
     mkdir -p "$runtime_output"
     DESTDIR="$runtime_output" cmake --install "$build" --prefix /usr
+    python3 "$root/../../compositor-runtime/private_elf_closure.py" \
+      --runtime-dir "$runtime_output" --entrypoint usr/bin/kwin_wayland
     license="$source/LICENSES/GPL-2.0-or-later.txt"
     [[ -f "$license" ]] || { echo "ERROR: immutable KWin source license is missing" >&2; exit 1; }
     runtime_id="kwin-${family}-fedora40"
@@ -58,7 +60,6 @@ EOF
       --runtime-dir "$runtime_output" --output "$runtime_output/runtime-receipt.json" \
       --runtime-id "$runtime_id" --desktop KDE --source-revision "$expected" \
       --patch "$root/patches/kwin-${family}.patch" --glibc-floor 2.39 \
-      --dependency plasma-workspace --dependency kglobalaccel \
       --private-entrypoint usr/bin/kwin_wayland \
       --qualification-entrypoint usr/libexec/copypaste-kwin-headless --license-file "$license"
   fi

@@ -41,7 +41,7 @@ The compiler receipt uses schema 1:
   "payload": [{"path": "bin/start-plasma", "type": "file", "mode": "0755", "sha256": "<64 hex>"}],
   "launch": {"kind": "private", "entrypoint": "bin/start-plasma"},
   "runtime_env": {},
-  "package_dependencies": [{"name": "kwin", "version": "6.3.0"}],
+  "host_requirements": [],
   "upstream_licenses": [{"spdx": "GPL-2.0-or-later", "name": "usr/share/doc/copypaste/COPYING", "sha256": "<64 hex>"}]
 }
 ```
@@ -66,12 +66,14 @@ python3 packaging/linux/compositor-runtime/build_companion_package.py \
   --format rpm --output dist/copypaste-compositor-runtime-kwin-6.3-fedora40.rpm
 ```
 
-Build Debian and RPM companions in their matching distribution build roots,
-with receipts that pin that target's package versions. The builder creates
-`copypaste-compositor-runtime-<id>` and writes exact package dependencies from
-the receipt, so a vendor compositor/session upgrade cannot silently retain an
-incompatible sidecar. Repository signing happens after this build; unsigned
-outputs are not an install instruction.
+KWin producers write a payload-bound
+`usr/share/copypaste/compositor-runtime-private-closure.json`. It records every
+recursively discovered non-glibc ELF library, its SONAME, byte hash, owning RPM,
+and copied RPM license bytes. The launcher resolves that closure only through
+the private prefix. Companion packages may declare empty or compatible host
+requirements, never exact vendor desktop package pins; RPM inspection rejects
+host KDecoration or Plasma replacement constraints. Repository signing happens
+after this build; unsigned outputs are not an install instruction.
 
 `scripts/release/build-linux-packages.sh` accepts the same inputs through
 `COPYPASTE_COMPOSITOR_RUNTIME_RECEIPT` and

@@ -29,28 +29,56 @@ def package_name(runtime_id: str) -> str:
     return f"copypaste-compositor-runtime-{runtime_id}"
 
 
-def deb_dependencies(receipt: dict) -> str:
-    return ", ".join(f"{row['name']} (= {row['version']})" for row in receipt["package_dependencies"])
+def host_dependencies(receipt: dict, *, rpm: bool) -> str:
+    result = []
+    for requirement in receipt["host_requirements"]:
+        if "operator" not in requirement:
+            result.append(requirement["name"])
+        elif rpm:
+            result.append(f"{requirement['name']} {requirement['operator']} {requirement['version']}")
+        else:
+            result.append(f"{requirement['name']} ({requirement['operator']} {requirement['version']})")
+    return ", ".join(result)
 
 
 def rpm_requires(receipt: dict) -> str:
     rows = [f"Requires: glibc >= {receipt['glibc_floor']}"]
-    rows.extend(f"Requires: {row['name']} = {row['version']}" for row in receipt["package_dependencies"])
+    rows.extend(f"Requires: {requirement}" for requirement in host_dependencies(receipt, rpm=True).split(", ") if requirement)
     return "\n".join(rows)
+
+
+def rpm_desktop_safety(*, requires: str, provides: str, obsoletes: str, conflicts: str) -> None:
+    """Reject package-manager operations that could replace host decorations.
+
+    RPM generates SONAME requirements for the private closure.  A requirement
+    whose exact token is also provided by this package is private and safe; a
+    named KDecoration package requirement, conflict, or obsolete is not.
+    """
+    private_provides = {line.strip() for line in provides.splitlines() if line.strip()}
+    desktop_package = re.compile(r"(^|\s)(?:kdecorations?|kdecorations?[0-9._+-]*|plasma-workspace)(?:\s|[<>=()]|$)", re.IGNORECASE)
+    for label, values in (("Requires", requires), ("Obsoletes", obsoletes), ("Conflicts", conflicts)):
+        for item in (line.strip() for line in values.splitlines() if line.strip()):
+            if label == "Requires" and item in private_provides:
+                continue
+            if desktop_package.search(item):
+                raise ContractError(f"RPM {label} would constrain a host decoration or Plasma package: {item}")
 
 
 def build_deb(stage_root: Path, output: Path, release_version: str, receipt: dict) -> None:
     architecture = {"x86_64": "amd64", "aarch64": "arm64"}[receipt["architecture"]]
+    dependencies = host_dependencies(receipt, rpm=False)
     control = stage_root / "DEBIAN/control"
     control.parent.mkdir(parents=True, exist_ok=True)
-    control.write_text(
+    header = (
         f"Package: {package_name(receipt['runtime_id'])}\n"
         f"Version: {release_version}\n"
         "Section: utils\nPriority: optional\n"
         f"Architecture: {architecture}\n"
         "Maintainer: CopyPaste <support@copypaste.app>\n"
-        f"Depends: {deb_dependencies(receipt)}\n"
-        "Description: Opt-in CopyPaste compositor clipboard runtime\n"
+    )
+    control.write_text(
+        header + (f"Depends: {dependencies}\n" if dependencies else "")
+        + "Description: Opt-in CopyPaste compositor clipboard runtime\n"
         " Private compositor runtime exposed only as a separate login session.\n",
         encoding="utf-8",
     )
@@ -98,6 +126,15 @@ def verify_packaged_payload(package_format: str, package: Path, runtime_id: str)
         verify(root, runtime_id)
 
 
+def verify_rpm_desktop_safety(package: Path) -> None:
+    def query(flag: str) -> str:
+        completed = subprocess.run(["rpm", "-qp", flag, str(package)], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+        if completed.returncode:
+            raise ContractError(f"cannot inspect built RPM {flag}")
+        return completed.stdout
+    rpm_desktop_safety(requires=query("--requires"), provides=query("--provides"), obsoletes=query("--obsoletes"), conflicts=query("--conflicts"))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--receipt", required=True, type=Path)
@@ -129,6 +166,7 @@ def main() -> int:
                 build_deb(stage_root, args.output, args.version, receipt)
             else:
                 build_rpm(stage_root, args.output, args.version, receipt)
+                verify_rpm_desktop_safety(args.output)
             verify_packaged_payload(args.format, args.output, receipt["runtime_id"])
     except (ContractError, OSError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
