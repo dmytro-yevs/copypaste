@@ -284,6 +284,12 @@ class RuntimeStageTests(unittest.TestCase):
                 ("qtbase-gui", "6.7.0-1.fc40", "qtbase-6.7.0-1.fc40.src.rpm", expression),
             )
 
+    def test_source_notice_classifier_accepts_readme_and_spdx_license_paths(self) -> None:
+        self.assertEqual(private_elf_closure.safe_source_member("README.rst"), "README.rst")
+        self.assertEqual(private_elf_closure.safe_source_member("upstream/LICENSES/MIT.txt"), "upstream/LICENSES/MIT.txt")
+        self.assertIsNone(private_elf_closure.safe_source_member("upstream/notes.txt"))
+        self.assertIsNone(private_elf_closure.safe_source_member("../README"))
+
     def test_rpm_owner_reports_only_the_invalid_license_length(self) -> None:
         expression = "L" * 1025
         with mock.patch.object(private_elf_closure, "run", return_value=f"libproxy\t0.5.3-5.fc40\tlibproxy-0.5.3-5.fc40.src.rpm\t{expression}\n"):

@@ -34,7 +34,7 @@ SAFE_EVR = re.compile(r"^[A-Za-z0-9.+:~^_-]{1,120}$")
 SAFE_SOURCE_RPM = re.compile(r"^[A-Za-z0-9.+:~^_-]{1,160}\.src\.rpm$")
 SAFE_LICENSE = re.compile(r"^[\x20-\x7e]{1,1024}$")
 SAFE_SONAME = re.compile(r"^[A-Za-z0-9._+-]{1,255}$")
-NOTICE_NAME = re.compile(r"^(?:LICENSE|LICENCE|COPYING|NOTICE|COPYRIGHT)(?:[._-].*)?$", re.IGNORECASE)
+NOTICE_NAME = re.compile(r"^(?:LICENSE|LICENCE|COPYING|NOTICE|COPYRIGHT|README)(?:[._-].*)?$", re.IGNORECASE)
 MAX_SOURCE_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_LICENSE_BYTES = 4 * 1024 * 1024
 MAX_LICENSE_MEMBERS = 64
@@ -225,7 +225,8 @@ def rpm_installed_license_files(owner: tuple[str, str, str, str]) -> list[tuple[
 def safe_source_member(value: str) -> str | None:
     member = value.removeprefix("./")
     path = Path(member)
-    if not member or path.is_absolute() or ".." in path.parts or not NOTICE_NAME.fullmatch(path.name):
+    in_spdx_license_directory = any(part.lower() == "licenses" for part in path.parts)
+    if not member or path.is_absolute() or ".." in path.parts or (NOTICE_NAME.fullmatch(path.name) is None and not in_spdx_license_directory):
         return None
     return member
 
