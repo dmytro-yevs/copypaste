@@ -86,7 +86,7 @@ def build_source(workspace: Path, environment: dict[str, str]) -> Path:
 
 
 def x11_window(title: str, environment: dict[str, str]) -> str | None:
-    result = subprocess.run(["xdotool", "search", "--name", f"^{re.escape(title)}$"], env=environment, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    result = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", f"^{re.escape(title)}$"], env=environment, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     windows = result.stdout.decode("ascii", errors="ignore").splitlines()
     if len(windows) > 1:
         raise FileDragQualificationError(f"{title} window is not uniquely discoverable")
@@ -113,6 +113,12 @@ def require_x11_window_pid(window: str, gui_pid: int, environment: dict[str, str
         raise FileDragQualificationError("X11 CopyPaste window owner is invalid") from error
     if observed != gui_pid:
         raise FileDragQualificationError("X11 CopyPaste window is not owned by the installed GUI")
+
+
+def require_x11_focus(window: str, environment: dict[str, str]) -> None:
+    focused = run(["xdotool", "getwindowfocus"], environment).stdout.decode("ascii").strip()
+    if focused != window:
+        raise FileDragQualificationError("X11 file-drag source did not receive input focus")
 
 
 def source_activity(path: Path) -> set[str]:
@@ -192,6 +198,7 @@ def drag_x11(source: DragSource, gui_pid: int, environment: dict[str, str]) -> N
     source_point = x11_bounds(source_window, environment).point()
     target_point = x11_bounds(target_window, environment).point(horizontal=0.72)
     run(["xdotool", "windowactivate", "--sync", source_window], environment)
+    require_x11_focus(source_window, environment)
     run(["xdotool", "mousemove", "--sync", str(source_point[0]), str(source_point[1])], environment)
     run(["xdotool", "mousedown", "1"], environment)
     source.begin()

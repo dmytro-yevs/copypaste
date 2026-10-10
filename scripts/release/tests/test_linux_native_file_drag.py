@@ -87,6 +87,14 @@ class LinuxNativeFileDragTest(unittest.TestCase):
             with self.assertRaisesRegex(drag.FileDragQualificationError, "not owned"):
                 drag.require_x11_window_pid("100", 52, {})
 
+    def test_x11_drag_requires_source_focus(self):
+        result = __import__("subprocess").CompletedProcess(["xdotool"], 0, stdout=b"100\n")
+        with mock.patch.object(drag, "run", return_value=result):
+            drag.require_x11_focus("100", {})
+        with mock.patch.object(drag, "run", return_value=result):
+            with self.assertRaisesRegex(drag.FileDragQualificationError, "input focus"):
+                drag.require_x11_focus("101", {})
+
     def test_wayland_portal_pointer_requests_pointer_and_sends_evdev_button(self):
         calls = []
 
