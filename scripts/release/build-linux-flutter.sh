@@ -64,6 +64,10 @@ BUNDLE="${bundles[0]}"
   echo "ERROR: Flutter Linux release bundle has no copypaste executable" >&2
   exit 1
 }
+[[ "$("$BUNDLE/copypaste" --version)" == "$VERSION" ]] || {
+  echo "ERROR: Linux runner version differs from the release version" >&2
+  exit 1
+}
 install -m 755 "$ROOT/target/release/copypaste-daemon" "$BUNDLE/copypaste-daemon"
 install -m 755 "$ROOT/target/release/copypaste" "$BUNDLE/copypaste-cli"
 

@@ -604,6 +604,13 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
             self.assertEqual(len(receipt["packages"]), 3)
             self.assertTrue(all(item["size_bytes"] == len(b"current") for item in receipt["packages"]))
             self.assertEqual(receipt["trace"]["name"], "linux-native-x86_64-gnome-wayland.trace.json")
+            placeholder = "COPYPASTE_QUALIFICATION_COMMAND " + json.dumps({
+                "argv": ["sh", "-ceu", "desktop entry URI handler and icon verified"],
+                "returncode": 0,
+                "assertions": [next(iter(driver_assertions))],
+            })
+            with self.assertRaisesRegex(ValueError, "placeholder command"):
+                producer["command_rows"](placeholder, driver_assertions)
 
 
 if __name__ == "__main__":
