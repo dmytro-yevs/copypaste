@@ -12,6 +12,29 @@ case "$family" in 6.0|6.3|all) ;; *) echo "ERROR: use KWin bridge version 6.0, 6
 root="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 engine="${COPYPASTE_CONTAINER_ENGINE:-docker}"
 
+prepare_runtime_output() {
+  if [[ -e "$runtime_output" || -L "$runtime_output" ]]; then
+    [[ -d "$runtime_output" && ! -L "$runtime_output" ]] || {
+      echo "ERROR: runtime output must be an ordinary directory" >&2
+      exit 1
+    }
+    first_entry="$(find "$runtime_output" -mindepth 1 -maxdepth 1 -print -quit)" || {
+      echo "ERROR: could not inspect runtime output" >&2
+      exit 1
+    }
+    [[ -z "$first_entry" ]] || {
+      echo "ERROR: runtime output must be empty" >&2
+      exit 1
+    }
+  else
+    mkdir -p "$runtime_output"
+  fi
+}
+
+if [[ -n "$runtime_output" ]]; then
+  prepare_runtime_output
+fi
+
 build_one() {
   local selected="$1" tag platform_tag
   platform_tag="${platform//\//-}"
@@ -19,8 +42,6 @@ build_one() {
   "$engine" build --platform "$platform" --build-arg "KWIN_FAMILY=$selected" \
     --file "$root/Dockerfile.fedora40-build" --tag "$tag" "$root"
   if [[ -n "$runtime_output" ]]; then
-    [[ ! -e "$runtime_output" ]] || { echo "ERROR: runtime output must not exist" >&2; exit 1; }
-    mkdir -p "$runtime_output"
     "$engine" run --rm --platform "$platform" --volume "$root:/workspace:ro" --volume "$runtime_output:/output" "$tag" \
       bash /workspace/verify-build.sh "$selected" /output
   else

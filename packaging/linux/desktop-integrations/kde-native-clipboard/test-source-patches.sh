@@ -156,8 +156,43 @@ rg -F 'dnf config-manager --set-disabled updates updates-source' "$root/Dockerfi
 rg -F '6.3)' "$root/Dockerfile.fedora40-build" >/dev/null
 rg -F 'dnf config-manager --set-enabled fedora-source updates-source' "$root/Dockerfile.fedora40-build" >/dev/null
 rg -F -- '--build-arg "KWIN_FAMILY=$selected"' "$root/run-fedora-build.sh" >/dev/null
+rg -F 'prepare_runtime_output()' "$root/run-fedora-build.sh" >/dev/null
+rg -F 'runtime output must be empty' "$root/run-fedora-build.sh" >/dev/null
+rg -F 'runtime output must be an ordinary mounted directory' "$root/verify-build.sh" >/dev/null
+rg -F 'runtime output must be empty' "$root/verify-build.sh" >/dev/null
 rg -F 'cmake --build' "$root/verify-build.sh" >/dev/null
 rg -F 'Version() == 2' "$root/DISTRIBUTION.md" >/dev/null
+fake_engine="$work/container-engine"
+fake_log="$work/container-engine.log"
+cat > "$fake_engine" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$1" >> "$COPYPASTE_FAKE_ENGINE_LOG"
+if [[ "$1" == run ]]; then
+  output=""
+  previous=""
+  for argument in "$@"; do
+    if [[ "$previous" == --volume && "$argument" == *:/output ]]; then
+      output="${argument%:/output}"
+    fi
+    previous="$argument"
+  done
+  [[ -d "$output" && -z "$(find "$output" -mindepth 1 -maxdepth 1 -print -quit)" ]]
+fi
+EOF
+chmod +x "$fake_engine"
+runtime_output="$work/runtime-output"
+COPYPASTE_CONTAINER_ENGINE="$fake_engine" COPYPASTE_FAKE_ENGINE_LOG="$fake_log" \
+  "$root/run-fedora-build.sh" linux/amd64 6.0 "$runtime_output"
+[[ -d "$runtime_output" && -z "$(find "$runtime_output" -mindepth 1 -maxdepth 1 -print -quit)" ]]
+test "$(wc -l < "$fake_log" | tr -d '[:space:]')" = 2
+touch "$runtime_output/prepopulated"
+if COPYPASTE_CONTAINER_ENGINE="$fake_engine" COPYPASTE_FAKE_ENGINE_LOG="$fake_log" \
+  "$root/run-fedora-build.sh" linux/amd64 6.0 "$runtime_output" >/dev/null 2>&1; then
+  echo "ERROR: runtime handoff accepted prepopulated output" >&2
+  exit 1
+fi
+test "$(wc -l < "$fake_log" | tr -d '[:space:]')" = 2
 if [[ "${COPYPASTE_VERIFY_QT_WIRE:-0}" == 1 ]]; then
   wire_build="$work/wire-build"
   cmake -S "$root/test-wire" -B "$wire_build" -DCMAKE_PREFIX_PATH="${COPYPASTE_QT_PREFIX:?set COPYPASTE_QT_PREFIX to a Qt 6 SDK prefix}"
