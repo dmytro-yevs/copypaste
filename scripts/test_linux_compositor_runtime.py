@@ -304,7 +304,7 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
         self.assertIn('evidence_root="$(realpath -e -- "$EVIDENCE")"', wrapper)
         self.assertIn('source_owner="$(stat --format=\'%u:%g\' "$ROOT")"', wrapper)
         self.assertIn(
-            'find "$evidence_root" -xdev -depth -uid 0 -exec chown --no-dereference "$source_owner" {} +',
+            'sudo find "$evidence_root" -xdev -depth -uid 0 -exec chown --no-dereference "$source_owner" {} +',
             wrapper,
         )
         self.assertLess(wrapper.index('docker_status=$?'), wrapper.index('find "$evidence_root"'))
