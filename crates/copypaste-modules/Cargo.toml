@@ -28,3 +28,6 @@ zip = { version = "8", default-features = false, features = ["deflate"] }
 [dev-dependencies]
 wiremock = "=0.6.5"
 minisign = "0.9"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21.1"
