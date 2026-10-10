@@ -9,7 +9,8 @@ SAFE = re.compile(r"^[a-z0-9][a-z0-9.-]{1,63}$")
 SHA = re.compile(r"^[0-9a-f]{64}$")
 NAME = re.compile(r"^[A-Za-z0-9.+_-]{1,80}$")
 VERSION = re.compile(r"^[A-Za-z0-9.+:~_-]{1,120}$")
-LICENSE = re.compile(r"^[\x20-\x7e]{1,240}$")
+LICENSE = re.compile(r"^[\x20-\x7e]{1,1024}$")
+SOURCE_RPM = re.compile(r"^[A-Za-z0-9.+:~_-]{1,160}\.src\.rpm$")
 MANIFEST = Path("usr/share/copypaste/compositor-runtime-private-closure.json")
 
 def digest(path: Path) -> str:
@@ -71,11 +72,11 @@ def closure_licenses(root: Path) -> list[dict[str, str]]:
         raise ValueError("private ELF closure manifest has no RPM license records")
     result = []
     for item in licenses:
-        if not isinstance(item, dict) or set(item) != {"package", "license", "path", "sha256"}:
+        if not isinstance(item, dict) or set(item) != {"package", "license_package", "license_evr", "license_source_rpm", "license", "path", "sha256"}:
             raise ValueError("private ELF closure license record is invalid")
         path = item["path"]
         if (not isinstance(path, str) or path.startswith("/") or ".." in Path(path).parts
-                or not NAME.fullmatch(item["package"]) or not LICENSE.fullmatch(item["license"]) or item["license"] != item["license"].strip()
+                or not NAME.fullmatch(item["package"]) or not NAME.fullmatch(item["license_package"]) or not VERSION.fullmatch(item["license_evr"]) or not SOURCE_RPM.fullmatch(item["license_source_rpm"]) or not LICENSE.fullmatch(item["license"]) or item["license"] != item["license"].strip()
                 or not SHA.fullmatch(item["sha256"])):
             raise ValueError("private ELF closure license metadata is unsafe")
         source = root / path

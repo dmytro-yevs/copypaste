@@ -27,8 +27,10 @@ NEEDED = re.compile(r"\(NEEDED\).*\[(?P<soname>[^]]+)\]")
 SONAME = re.compile(r"\(SONAME\).*\[(?P<soname>[^]]+)\]")
 SAFE_NAME = re.compile(r"^[A-Za-z0-9.+_-]{1,80}$")
 SAFE_EVR = re.compile(r"^[A-Za-z0-9.+:~_-]{1,120}$")
-SAFE_LICENSE = re.compile(r"^[\x20-\x7e]{1,240}$")
+SAFE_SOURCE_RPM = re.compile(r"^[A-Za-z0-9.+:~_-]{1,160}\.src\.rpm$")
+SAFE_LICENSE = re.compile(r"^[\x20-\x7e]{1,1024}$")
 SAFE_SONAME = re.compile(r"^[A-Za-z0-9._+-]{1,255}$")
+NOTICE_NAME = re.compile(r"^(?:LICENSE|LICENCE|COPYING|NOTICE|COPYRIGHT)(?:[._-].*)?$", re.IGNORECASE)
 GLIBC_SONAMES = {
     "libc.so.6", "libdl.so.2", "libm.so.6", "libpthread.so.0", "librt.so.1",
     "libutil.so.1", "libresolv.so.2", "libnsl.so.1", "ld-linux-x86-64.so.2",
@@ -113,22 +115,53 @@ def trusted_library(path: Path) -> Path:
     return resolved
 
 
-def rpm_owner(path: Path) -> tuple[str, str, str]:
-    package = run(["rpm", "-qf", "--qf", "%{NAME}\n%{EVR}\n%{LICENSE}\n", str(path)]).splitlines()
-    if (len(package) != 3 or not SAFE_NAME.fullmatch(package[0])
-            or not SAFE_EVR.fullmatch(package[1])
-            or not SAFE_LICENSE.fullmatch(package[2])
-            or package[2] != package[2].strip()):
+def rpm_provenance(arguments: list[str]) -> tuple[str, str, str, str]:
+    package = run(["rpm", *arguments, "--qf", "%{NAME}\t%{EVR}\t%{SOURCERPM}\t%{LICENSE}\n"])
+    rows = package.splitlines()
+    if len(rows) != 1:
         raise ClosureError("bundled ELF library has unsafe or unavailable RPM provenance")
-    return package[0], package[1], package[2]
+    values = rows[0].split("\t")
+    if (len(values) != 4 or not SAFE_NAME.fullmatch(values[0])
+            or not SAFE_EVR.fullmatch(values[1]) or not SAFE_SOURCE_RPM.fullmatch(values[2])
+            or not SAFE_LICENSE.fullmatch(values[3]) or values[3] != values[3].strip()):
+        raise ClosureError("bundled ELF library has unsafe or unavailable RPM provenance")
+    return values[0], values[1], values[2], values[3]
 
 
-def rpm_license_files(package: str) -> list[Path]:
-    candidates = [Path(item) for item in run(["rpm", "-ql", package]).splitlines()]
-    candidates = sorted({trusted_license(item) for item in candidates if str(item).startswith("/usr/share/licenses/") and item.is_file()})
-    if not candidates:
-        raise ClosureError(f"bundled RPM {package} has no readable license bytes")
-    return candidates
+def rpm_owner(path: Path) -> tuple[str, str, str, str]:
+    return rpm_provenance(["-qf", str(path)])
+
+
+def rpm_siblings(owner: tuple[str, str, str, str]) -> list[tuple[str, str, str, str]]:
+    name, evr, source_rpm, _license = owner
+    output = run(["rpm", "-qa", "--qf", "%{NAME}\t%{EVR}\t%{SOURCERPM}\t%{LICENSE}\n"])
+    siblings = {owner}
+    for line in output.splitlines():
+        values = line.split("\t")
+        if len(values) != 4:
+            raise ClosureError("installed RPM provenance inventory is malformed")
+        candidate = tuple(values)
+        if candidate[1:3] != (evr, source_rpm):
+            continue
+        if not SAFE_NAME.fullmatch(candidate[0]) or not SAFE_LICENSE.fullmatch(candidate[3]) or candidate[3] != candidate[3].strip():
+            raise ClosureError("installed RPM sibling provenance is unsafe")
+        siblings.add(candidate)
+    return sorted(siblings)
+
+
+def rpm_license_files(owner: tuple[str, str, str, str]) -> list[tuple[tuple[str, str, str, str], Path]]:
+    records = []
+    for candidate in rpm_siblings(owner):
+        paths = [Path(item) for item in run(["rpm", "-ql", candidate[0]]).splitlines()]
+        for path in paths:
+            in_license_root = str(path).startswith("/usr/share/licenses/")
+            in_doc_root = str(path).startswith("/usr/share/doc/") and NOTICE_NAME.fullmatch(path.name) is not None
+            if (in_license_root or in_doc_root) and path.is_file():
+                records.append((candidate, trusted_license(path)))
+    records = sorted(set(records), key=lambda item: (item[0][0], str(item[1])))
+    if not records:
+        raise ClosureError(f"bundled RPM {owner[0]} has no readable license or notice bytes in exact source siblings")
+    return records
 
 
 def trusted_license(path: Path) -> Path:
@@ -137,7 +170,7 @@ def trusted_license(path: Path) -> Path:
         details = resolved.stat()
     except OSError as error:
         raise ClosureError("bundled RPM license is unavailable") from error
-    if not stat.S_ISREG(details.st_mode) or not str(resolved).startswith("/usr/share/licenses/"):
+    if not stat.S_ISREG(details.st_mode) or not (str(resolved).startswith("/usr/share/licenses/") or str(resolved).startswith("/usr/share/doc/")):
         raise ClosureError("bundled RPM license escapes trusted license root")
     return resolved
 
@@ -192,7 +225,7 @@ def copy_closure(runtime: Path, initial: Iterable[Path]) -> dict:
         library_soname = soname(source)
         link(destination, requested, bundled.name)
         link(destination, library_soname, bundled.name)
-        package, evr, license_expression = rpm_owner(source)
+        package, evr, source_rpm, license_expression = rpm_owner(source)
         row = {
             "path": bundled.relative_to(runtime).as_posix(),
             "soname": library_soname,
@@ -202,7 +235,7 @@ def copy_closure(runtime: Path, initial: Iterable[Path]) -> dict:
         }
         copied[source] = row
         libraries.append(row)
-        packages.setdefault(package, {"name": package, "evr": evr, "license": license_expression})
+        packages.setdefault(package, {"name": package, "evr": evr, "source_rpm": source_rpm, "license": license_expression})
         for dependency in sorted(needed(source)):
             if dependency not in GLIBC_SONAMES:
                 if dependency in private_sonames:
@@ -216,13 +249,15 @@ def copy_closure(runtime: Path, initial: Iterable[Path]) -> dict:
     license_destination = runtime / "usr/share/doc/copypaste-compositor-runtime-private-licenses"
     license_destination.mkdir(parents=True, exist_ok=True)
     for package in sorted(packages.values(), key=lambda item: item["name"]):
-        for index, source in enumerate(rpm_license_files(package["name"])):
+        owner = (package["name"], package["evr"], package["source_rpm"], package["license"])
+        for index, (license_owner, source) in enumerate(rpm_license_files(owner)):
             target = license_destination / f"{package['name']}-{index}-{source.name}"
             if target.exists() or target.is_symlink():
                 raise ClosureError("private RPM license destination collides")
             shutil.copyfile(source, target, follow_symlinks=False)
             licenses.append({
-                "package": package["name"], "license": package["license"],
+                "package": package["name"], "license_package": license_owner[0], "license_evr": license_owner[1],
+                "license_source_rpm": license_owner[2], "license": package["license"],
                 "path": target.relative_to(runtime).as_posix(), "sha256": sha256(target),
             })
     manifest = {"schema": 1, "libraries": sorted(libraries, key=lambda item: item["path"]),

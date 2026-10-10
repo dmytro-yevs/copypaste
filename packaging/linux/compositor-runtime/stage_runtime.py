@@ -28,7 +28,7 @@ RELATIVE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/+@-]{0,255}$")
 MODE = re.compile(r"^0[0-7]{3}$")
 DISTRO = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 ENV_KEYS = {"QT_PLUGIN_PATH", "QML2_IMPORT_PATH", "GIO_EXTRA_MODULES"}
-LICENSE = re.compile(r"^[\x20-\x7e]{1,240}$")
+LICENSE = re.compile(r"^[\x20-\x7e]{1,1024}$")
 CLOSURE_MANIFEST = "usr/share/copypaste/compositor-runtime-private-closure.json"
 
 
@@ -255,7 +255,7 @@ def validate_private_elf_closure(runtime_root: Path, receipt: dict[str, Any]) ->
         raise ContractError("private ELF closure manifest is incomplete")
     package_by_name: dict[str, dict[str, str]] = {}
     for package in packages:
-        if not isinstance(package, dict) or set(package) != {"name", "evr", "license"} or not all(isinstance(package.get(key), str) for key in ("name", "evr", "license")) or not re.fullmatch(r"[A-Za-z0-9.+_-]{1,80}", package["name"]) or not re.fullmatch(r"[A-Za-z0-9.+:~_-]{1,120}", package["evr"]) or not LICENSE.fullmatch(package["license"]) or package["license"] != package["license"].strip():
+        if not isinstance(package, dict) or set(package) != {"name", "evr", "source_rpm", "license"} or not all(isinstance(package.get(key), str) for key in ("name", "evr", "source_rpm", "license")) or not re.fullmatch(r"[A-Za-z0-9.+_-]{1,80}", package["name"]) or not re.fullmatch(r"[A-Za-z0-9.+:~_-]{1,120}", package["evr"]) or not re.fullmatch(r"[A-Za-z0-9.+:~_-]{1,160}\.src\.rpm", package["source_rpm"]) or not LICENSE.fullmatch(package["license"]) or package["license"] != package["license"].strip():
             raise ContractError("private ELF closure package provenance is invalid")
         if package["name"] in package_by_name:
             raise ContractError("private ELF closure package provenance is ambiguous")
@@ -286,11 +286,11 @@ def validate_private_elf_closure(runtime_root: Path, receipt: dict[str, Any]) ->
     license_paths: set[str] = set()
     receipt_licenses = {(item["name"], item["sha256"]) for item in receipt["upstream_licenses"]}
     for license_record in licenses:
-        if not isinstance(license_record, dict) or set(license_record) != {"package", "license", "path", "sha256"}:
+        if not isinstance(license_record, dict) or set(license_record) != {"package", "license_package", "license_evr", "license_source_rpm", "license", "path", "sha256"}:
             raise ContractError("private ELF closure license metadata is invalid")
         package = license_record.get("package")
         path = license_record.get("path")
-        if package not in package_by_name or license_record.get("license") != package_by_name[package]["license"] or not isinstance(path, str) or not path.startswith("usr/share/doc/") or not SHA256.fullmatch(license_record.get("sha256", "")):
+        if package not in package_by_name or license_record.get("license") != package_by_name[package]["license"] or not isinstance(license_record.get("license_package"), str) or not re.fullmatch(r"[A-Za-z0-9.+_-]{1,80}", license_record["license_package"]) or license_record.get("license_evr") != package_by_name[package]["evr"] or license_record.get("license_source_rpm") != package_by_name[package]["source_rpm"] or not isinstance(path, str) or not path.startswith("usr/share/doc/") or not SHA256.fullmatch(license_record.get("sha256", "")):
             raise ContractError("private ELF closure license metadata is invalid")
         row = declared.get(path)
         if row is None or row.get("type") != "file" or row.get("sha256") != license_record["sha256"]:

@@ -71,10 +71,10 @@ class RuntimeStageTests(unittest.TestCase):
             closure_manifest.write_text(json.dumps({
                 "schema": 1,
                 "libraries": [{"path": "usr/lib/libKDecoration2.so.6.0.0", "soname": "libKDecoration2.so.6", "sha256": digest(private_library.read_bytes()), "package": "kdecoration2", "evr": "5.115.0-1"}],
-                "packages": [{"name": "kdecoration2", "evr": "5.115.0-1", "license": "LGPL-2.1-or-later"}],
+                "packages": [{"name": "kdecoration2", "evr": "5.115.0-1", "source_rpm": "kdecoration2-5.115.0-1.src.rpm", "license": "LGPL-2.1-or-later"}],
                 "licenses": [
-                    {"package": "kdecoration2", "license": "LGPL-2.1-or-later", "path": "usr/share/doc/copypaste-compositor-runtime-private-licenses/kdecoration2-LICENSE", "sha256": digest(closure_license.read_bytes())},
-                    {"package": "kdecoration2", "license": "LGPL-2.1-or-later", "path": "usr/share/doc/copypaste-compositor-runtime-private-licenses/kdecoration2-NOTICE", "sha256": digest(closure_notice.read_bytes())},
+                    {"package": "kdecoration2", "license_package": "kdecoration2", "license_evr": "5.115.0-1", "license_source_rpm": "kdecoration2-5.115.0-1.src.rpm", "license": "LGPL-2.1-or-later", "path": "usr/share/doc/copypaste-compositor-runtime-private-licenses/kdecoration2-LICENSE", "sha256": digest(closure_license.read_bytes())},
+                    {"package": "kdecoration2", "license_package": "kdecoration2", "license_evr": "5.115.0-1", "license_source_rpm": "kdecoration2-5.115.0-1.src.rpm", "license": "LGPL-2.1-or-later", "path": "usr/share/doc/copypaste-compositor-runtime-private-licenses/kdecoration2-NOTICE", "sha256": digest(closure_notice.read_bytes())},
                 ],
             }), encoding="utf-8")
         rows = []
@@ -259,20 +259,36 @@ class RuntimeStageTests(unittest.TestCase):
                  mock.patch.object(private_elf_closure, "needed", side_effect=needed), \
                  mock.patch.object(private_elf_closure, "provided_soname", side_effect=soname), \
                  mock.patch.object(private_elf_closure, "trusted_library", side_effect=lambda path: path), \
-                 mock.patch.object(private_elf_closure, "rpm_owner", side_effect=lambda path: ("kdecoration2" if path == decoration else "kf6-kcoreaddons", "6.0.0-1", "LGPL-2.1-or-later")), \
-                 mock.patch.object(private_elf_closure, "rpm_license_files", side_effect=lambda package: [license_source, notice_source] if package == "kdecoration2" else [license_source]):
+                 mock.patch.object(private_elf_closure, "rpm_owner", side_effect=lambda path: ("kdecoration2" if path == decoration else "kf6-kcoreaddons", "6.0.0-1", "kde-6.0.0-1.src.rpm", "LGPL-2.1-or-later")), \
+                 mock.patch.object(private_elf_closure, "rpm_license_files", side_effect=lambda owner: [(("kdecoration2-doc", "6.0.0-1", "kde-6.0.0-1.src.rpm", "LGPL-2.1-or-later"), license_source), (("kdecoration2-doc", "6.0.0-1", "kde-6.0.0-1.src.rpm", "LGPL-2.1-or-later"), notice_source)] if owner[0] == "kdecoration2" else [(("kf6-kcoreaddons", "6.0.0-1", "kde-6.0.0-1.src.rpm", "LGPL-2.1-or-later"), license_source)]):
                 manifest = private_elf_closure.copy_closure(runtime, [entrypoint])
 
             self.assertEqual([item["soname"] for item in manifest["libraries"]], ["libKDecoration2.so.6", "libKF6CoreAddons.so.6"])
             self.assertEqual({item["package"] for item in manifest["licenses"]}, {"kdecoration2", "kf6-kcoreaddons"})
             self.assertEqual(sum(item["package"] == "kdecoration2" for item in manifest["licenses"]), 2)
+            self.assertEqual({item["license_package"] for item in manifest["licenses"] if item["package"] == "kdecoration2"}, {"kdecoration2-doc"})
             self.assertEqual(os.readlink(runtime / "usr/lib/libKDecoration2.so.6"), "libKDecoration2.so.6.0.0")
 
     def test_rpm_owner_accepts_a_bounded_compound_license_expression(self) -> None:
-        with mock.patch.object(private_elf_closure, "run", return_value="qtbase-gui\n6.7.0-1.fc40\nLGPL-3.0-only OR GPL-3.0-only WITH Qt-GPL-exception-1.0\n"):
+        expression = "BSD-2-Clause AND BSD-3-Clause AND CC0-1.0 AND GPL-2.0-only AND GPL-2.0-or-later AND GPL-3.0-only AND GPL-3.0-or-later AND LGPL-2.0-only AND LGPL-2.0-or-later AND LGPL-2.1-only AND LGPL-2.1-or-later AND LGPL-3.0-only AND (GPL-2.0-only OR GPL-3.0-only) AND (LGPL-2.1-only OR LGPL-3.0-only) AND MIT"
+        with mock.patch.object(private_elf_closure, "run", return_value=f"qtbase-gui\t6.7.0-1.fc40\tqtbase-6.7.0-1.fc40.src.rpm\t{expression}\n"):
             self.assertEqual(
                 private_elf_closure.rpm_owner(Path("/usr/lib64/libQt6Core.so.6")),
-                ("qtbase-gui", "6.7.0-1.fc40", "LGPL-3.0-only OR GPL-3.0-only WITH Qt-GPL-exception-1.0"),
+                ("qtbase-gui", "6.7.0-1.fc40", "qtbase-6.7.0-1.fc40.src.rpm", expression),
+            )
+
+    def test_rpm_siblings_require_an_exact_source_rpm_and_evr(self) -> None:
+        owner = ("kwin-libs", "6.0.3.1-2.fc40", "kwin-6.0.3.1-2.fc40.src.rpm", "GPL-2.0-only")
+        inventory = "\n".join((
+            "kwin-libs\t6.0.3.1-2.fc40\tkwin-6.0.3.1-2.fc40.src.rpm\tGPL-2.0-only",
+            "kwin-doc\t6.0.3.1-2.fc40\tkwin-6.0.3.1-2.fc40.src.rpm\tGPL-2.0-only",
+            "kwin-old-doc\t6.0.2-1.fc40\tkwin-6.0.2-1.fc40.src.rpm\tGPL-2.0-only",
+            "unrelated\t6.0.3.1-2.fc40\tunrelated-6.0.3.1-2.fc40.src.rpm\tMIT",
+        )) + "\n"
+        with mock.patch.object(private_elf_closure, "run", return_value=inventory):
+            self.assertEqual(
+                private_elf_closure.rpm_siblings(owner),
+                [("kwin-doc", "6.0.3.1-2.fc40", "kwin-6.0.3.1-2.fc40.src.rpm", "GPL-2.0-only"), owner],
             )
 
     def test_staged_package_has_no_vendor_replacement_path(self) -> None:
