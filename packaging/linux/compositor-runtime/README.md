@@ -42,7 +42,7 @@ The compiler receipt uses schema 1:
   "launch": {"kind": "private", "entrypoint": "bin/start-plasma"},
   "runtime_env": {},
   "package_dependencies": [{"name": "kwin", "version": "6.3.0"}],
-  "upstream_license": {"spdx": "GPL-2.0-or-later", "name": "usr/share/doc/copypaste/COPYING", "sha256": "<64 hex>"}
+  "upstream_licenses": [{"spdx": "GPL-2.0-or-later", "name": "usr/share/doc/copypaste/COPYING", "sha256": "<64 hex>"}]
 }
 ```
 

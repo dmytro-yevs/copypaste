@@ -112,8 +112,8 @@ def validate_receipt(receipt: dict[str, Any]) -> None:
         raise ContractError("source revision and bridge patch digest are required")
     if receipt.get("desktop") == "GNOME" and receipt.get("launch", {}).get("kind") == "private" and not re.fullmatch(r"[0-9a-f]{40}", source.get("shell_revision", "")):
         raise ContractError("private GNOME Shell revision is required")
-    license_info = receipt.get("upstream_license")
-    if not isinstance(license_info, dict) or license_info.get("spdx") != "GPL-2.0-or-later" or not isinstance(license_info.get("name"), str) or not SHA256.fullmatch(license_info.get("sha256", "")):
+    licenses = receipt.get("upstream_licenses")
+    if not isinstance(licenses, list) or not licenses:
         raise ContractError("upstream GPL license receipt is required")
     payload = receipt.get("payload")
     if not isinstance(payload, list) or not payload:
@@ -135,8 +135,11 @@ def validate_receipt(receipt: dict[str, Any]) -> None:
             target = safe_link_target(row.get("target"), relative)
             if sha256_bytes(target.encode("utf-8")) != row["sha256"]:
                 raise ContractError("payload symlink target digest differs")
-    if license_info["name"] not in paths or payload_by_path(receipt)[license_info["name"]].get("sha256") != license_info["sha256"]:
-        raise ContractError("upstream license bytes are not bound to runtime payload")
+    for license_info in licenses:
+        if not isinstance(license_info, dict) or license_info.get("spdx") != "GPL-2.0-or-later" or not isinstance(license_info.get("name"), str) or not SHA256.fullmatch(license_info.get("sha256", "")):
+            raise ContractError("upstream GPL license receipt is required")
+        if license_info["name"] not in paths or payload_by_path(receipt)[license_info["name"]].get("sha256") != license_info["sha256"]:
+            raise ContractError("upstream license bytes are not bound to runtime payload")
     launch = receipt.get("launch")
     if not isinstance(launch, dict) or launch.get("kind") not in {"private", "system-session"}:
         raise ContractError("launch kind is invalid")
@@ -158,6 +161,15 @@ def validate_receipt(receipt: dict[str, Any]) -> None:
             guarded_paths.add(binary["path"])
         if guarded_paths != {"/usr/bin/gnome-session", "/usr/bin/gnome-shell"}:
             raise ContractError("system session launch must guard GNOME Shell and session manager")
+    qualification = receipt.get("qualification")
+    if not isinstance(qualification, dict) or qualification.get("kind") != "headless":
+        raise ContractError("receipt requires a headless qualification entrypoint")
+    qualification_entrypoint = safe_relative(qualification.get("entrypoint"), "qualification entrypoint")
+    if qualification_entrypoint not in paths:
+        raise ContractError("qualification entrypoint is not in payload")
+    entrypoint = payload_by_path(receipt)[qualification_entrypoint]
+    if entrypoint.get("type") != "file" or int(entrypoint.get("mode", "0"), 8) & 0o111 == 0:
+        raise ContractError("qualification entrypoint must be executable")
     runtime_env = receipt.get("runtime_env", {})
     if not isinstance(runtime_env, dict) or set(runtime_env) - ENV_KEYS:
         raise ContractError("runtime environment contains an unsupported key")

@@ -355,6 +355,26 @@ def compositor_runtime_binding(path: Path, commit: str, desktop: str, architectu
     return binding
 
 
+def compositor_session_record(binding_path: Path, binding: dict, session: str, output: Path) -> dict | None:
+    if session != "wayland":
+        return None
+    source_name = os.environ.get("COPYPASTE_COMPOSITOR_SESSION_RECORD", "")
+    source = Path(source_name)
+    if not source.is_file() or source.is_symlink():
+        raise ValueError("private Wayland compositor session record is missing")
+    record = json.loads(source.read_text(encoding="utf-8"))
+    if (not isinstance(record, dict) or record.get("schema") != 1 or record.get("session") != "wayland"
+            or record.get("runtime_id") != binding["runtime_id"] or record.get("desktop") != binding["desktop"]
+            or record.get("binding_sha256") != sha256(binding_path) or not record.get("mapped_private_libraries")):
+        raise ValueError("private Wayland compositor session record is invalid")
+    prefix = f"linux-compositor-{binding['architecture']}-{binding['desktop'].lower()}-{session}"
+    binding_copy = output / f"{prefix}.binding.json"
+    record_copy = output / f"{prefix}.session.json"
+    binding_copy.write_bytes(binding_path.read_bytes())
+    record_copy.write_bytes(source.read_bytes())
+    return {"binding": attachment(binding_copy, output), "record": attachment(record_copy, output)}
+
+
 def produce(args: argparse.Namespace) -> Path:
     if args.architecture not in ARCHITECTURES or args.desktop not in DESKTOPS or args.session not in SESSIONS:
         raise ValueError("unsupported Linux qualification matrix coordinate")
@@ -408,6 +428,7 @@ def produce(args: argparse.Namespace) -> Path:
         args.compositor_runtime_binding, args.commit, args.desktop, args.architecture,
         environment["distribution"], installation["formats"][1],
     )
+    compositor_session = compositor_session_record(args.compositor_runtime_binding, binding, args.session, output)
     for argv in (installation["appimage_extract_argv"], installation["native_install_argv"]):
         if not any(row["argv"] == argv and "package_install" in row["assertions"] for row in commands):
             raise ValueError("actual package installation report lacks its executed command trace")
@@ -431,6 +452,7 @@ def produce(args: argparse.Namespace) -> Path:
         "commands": commands,
         "ipc": ipc,
         "compositor_runtime": binding,
+        "compositor_session": compositor_session,
     }, indent=2) + "\n", encoding="utf-8")
     attachments = [attachment(log_path, output), attachment(trace_path, output)]
     for path in sorted(output.rglob("*")):
@@ -452,6 +474,7 @@ def produce(args: argparse.Namespace) -> Path:
         "upgrade": upgrade,
         "assertions": {name: True for name in sorted(expected_assertions)},
         "compositor_runtime": binding,
+        "compositor_session": compositor_session,
         "trace": attachment(trace_path, output),
         "evidence": attachments,
     }, indent=2) + "\n", encoding="utf-8")
