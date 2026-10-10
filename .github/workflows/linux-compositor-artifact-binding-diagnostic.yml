@@ -1,0 +1,142 @@
+name: Linux compositor artifact binding diagnostic
+
+on:
+  push:
+    branches: [codex/linux-compositor-artifact-binding-diagnostic]
+    paths: [.github/workflows/linux-compositor-artifact-binding-diagnostic.yml]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  verify:
+    name: ${{ matrix.desktop }} ${{ matrix.architecture }} immutable artifact
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - desktop: GNOME
+            architecture: x86_64
+            artifact: copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64
+          - desktop: GNOME
+            architecture: aarch64
+            artifact: copypaste-compositor-runtime-gnome-46-ubuntu24.04-aarch64
+          - desktop: KDE
+            architecture: x86_64
+            artifact: copypaste-compositor-runtime-kwin-6.0-fedora40-x86_64
+          - desktop: KDE
+            architecture: aarch64
+            artifact: copypaste-compositor-runtime-kwin-6.0-fedora40-aarch64
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Fail-closed hosted-Linux environment probe
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          {
+            echo "runner_name=${RUNNER_NAME}"
+            echo "runner_os=${RUNNER_OS}"
+            echo "runner_arch=${RUNNER_ARCH}"
+            uname -a
+            cat /etc/os-release
+            command -v python3
+            python3 --version
+            command -v readelf
+            readelf --version | head -1
+            command -v sha256sum
+            sha256sum --version | head -1
+          } | tee evidence/environment-probe.txt
+          test "$RUNNER_OS" = Linux
+          test "$RUNNER_ARCH" = X64
+          test -x "$(command -v readelf)"
+          test -x "$(command -v sha256sum)"
+
+      - name: Authenticate exact producer source and inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/38081580080" > evidence/producer-run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/38081580080/artifacts?per_page=100" > evidence/producer-artifacts.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/38081580080/jobs?per_page=100" > evidence/producer-jobs.json
+          python3 scripts/release/verify-linux-compositor-runtime.py source \
+            --run evidence/producer-run.json --artifacts evidence/producer-artifacts.json \
+            --repository "$GITHUB_REPOSITORY" --commit 65f43634b38fb669a5b4477eabb0e71a573eb0cb
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: producer-original
+          run-id: 38081580080
+          github-token: ${{ github.token }}
+
+      - name: Normalize only the obsolete checksum sidecar in a disposable copy
+        run: |
+          set -euo pipefail
+          test -d producer-original
+          cp -a producer-original producer-diagnostic-copy
+          receipt="producer-original/compositor-runtime-producer-receipt.json"
+          package="$(python3 - "$receipt" <<'PY'
+          import json, sys
+          value = json.load(open(sys.argv[1], encoding="utf-8"))["package"]["name"]
+          assert isinstance(value, str) and "/" not in value and value
+          print(value)
+          PY
+          )"
+          original_checksum="producer-original/$package.sha256"
+          normalized_checksum="producer-diagnostic-copy/$package.sha256"
+          test -f "$original_checksum"
+          cp "$original_checksum" evidence/original-package.sha256
+          sha256sum "producer-original/$package" producer-original/runtime.tar "$receipt" | awk '{print $1}' > evidence/original-immutable-inputs.sha256
+          package="producer-diagnostic-copy/$package"
+          # This is the exact canonical checksum command from commit 180f03bc.
+          (cd "$(dirname "$package")" && sha256sum "$(basename "$package")") > "$package.sha256"
+          cp "$normalized_checksum" evidence/normalized-package.sha256
+          if cmp --silent evidence/original-package.sha256 evidence/normalized-package.sha256; then
+            echo "ERROR: expected the historical path-prefixed checksum sidecar to differ" >&2
+            exit 1
+          fi
+          diff --unified evidence/original-package.sha256 evidence/normalized-package.sha256 > evidence/checksum-sidecar.diff || test "$?" = 1
+          sha256sum "producer-diagnostic-copy/$(basename "$package")" producer-diagnostic-copy/runtime.tar producer-diagnostic-copy/compositor-runtime-producer-receipt.json | awk '{print $1}' > evidence/diagnostic-copy-immutable-inputs.sha256
+          diff --unified evidence/original-immutable-inputs.sha256 evidence/diagnostic-copy-immutable-inputs.sha256 > evidence/immutable-inputs.diff || test "$?" = 1
+          test ! -s evidence/immutable-inputs.diff
+
+      - name: Verify all artifact guards with GNU readelf and bind the exact target
+        run: |
+          set -euo pipefail
+          start_ns="$(date +%s%N)"
+          python3 scripts/release/compositor-runtime-archive.py extract \
+            --archive producer-diagnostic-copy/runtime.tar --output producer-diagnostic-copy/runtime
+          python3 scripts/release/verify-linux-compositor-runtime.py artifact \
+            --root producer-diagnostic-copy --desktop "${{ matrix.desktop }}" --architecture "${{ matrix.architecture }}" \
+            --commit 65f43634b38fb669a5b4477eabb0e71a573eb0cb --producer-run-id 38081580080 \
+            --output evidence/binding.json
+          end_ns="$(date +%s%N)"
+          python3 - "$start_ns" "$end_ns" "${{ matrix.desktop }}" "${{ matrix.architecture }}" "${{ matrix.artifact }}" <<'PY' > evidence/validation-receipt.json
+          import json, sys
+          start, end, desktop, architecture, artifact = sys.argv[1:]
+          print(json.dumps({
+              "schema": 1,
+              "validation_kind": "static immutable-artifact binding",
+              "commit": "65f43634b38fb669a5b4477eabb0e71a573eb0cb",
+              "producer_run_id": 38081580080,
+              "desktop": desktop,
+              "architecture": architecture,
+              "artifact": artifact,
+              "elapsed_ms": (int(end) - int(start)) // 1_000_000,
+              "package_runtime_bytes": "unchanged; only the disposable checksum sidecar was normalized",
+              "readelf": "required by verify-linux-compositor-runtime.py payload validation",
+              "native_ui_accessibility_process_scenario": "not exercised by this static artifact validation",
+          }, sort_keys=True))
+          PY
+
+      - name: Capture static validation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-compositor-artifact-binding-${{ matrix.desktop }}-${{ matrix.architecture }}
+          if-no-files-found: warn
+          path: evidence
