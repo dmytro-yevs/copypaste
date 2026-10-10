@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import base64
 from pathlib import Path
 from copy import deepcopy
 import hashlib
@@ -332,12 +333,65 @@ class ReleaseSafetyTest(unittest.TestCase):
                 package.with_name(package.name + ".sha256").write_text(
                     f"{module['digest'](package)}  {package.name}\n"
                 )
-            receipt = module["verify_public"](public, release_version, commit, "789")
+            receipt = module["verify_public"](
+                public,
+                release_version,
+                commit,
+                "789",
+                signature_validator=lambda _package, _signature: None,
+            )
             self.assertEqual(receipt["producer_run_id"], 456)
             self.assertEqual(len(receipt["companions"]), 4)
+            (public / "unlisted").write_bytes(b"must not publish")
+            with self.assertRaisesRegex(ValueError, "unlisted file"):
+                module["verify_public"](
+                    public,
+                    release_version,
+                    commit,
+                    "789",
+                    signature_validator=lambda _package, _signature: None,
+                )
+            (public / "unlisted").unlink()
             packages[0].write_bytes(b"tampered")
             with self.assertRaisesRegex(ValueError, "changed after staging"):
-                module["verify_public"](public, release_version, commit, "789")
+                module["verify_public"](
+                    public,
+                    release_version,
+                    commit,
+                    "789",
+                    signature_validator=lambda _package, _signature: None,
+                )
+
+    def test_compositor_runtime_signature_requires_a_valid_pinned_envelope(self):
+        module = runpy.run_path(
+            str(ROOT / "scripts/release/stage-compositor-runtime-release.py")
+        )
+        fixture_key = 'RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3'
+        fixture_signature = '\n'.join((
+            'untrusted comment: signature from minisign secret key',
+            'RUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=',
+            'trusted comment: timestamp:1556193335\tfile:test',
+            'y/rUw2y8/hOUYjZU71eHp/Wo1KZ40fGy2VJEDl34XMJM+TX48Ss/17u3IvIfbVR1FkZZSNCisQbuQY+bHwhEBg==',
+            '',
+        ))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / 'test'
+            package.write_bytes(b'test')
+            signature = root / 'test.sig'
+            signature.write_text(base64.b64encode(fixture_signature.encode()).decode())
+            module['verify_package_signature'](
+                package,
+                signature,
+                public_key=fixture_key,
+            )
+            signature.write_text('not-a-signature')
+            with self.assertRaisesRegex(ValueError, 'pinned updater key'):
+                module['verify_package_signature'](
+                    package,
+                    signature,
+                    public_key=fixture_key,
+                )
 
     def test_publication_preserves_existing_bytes_and_uploads_only_missing_files(self):
         missing = runpy.run_path(str(ROOT / "scripts/release/publish-release.py"))["missing_assets"]

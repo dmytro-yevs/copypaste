@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
+import os
 import re
+import runpy
 import shutil
 import sys
 from pathlib import Path
@@ -22,6 +25,7 @@ COORDINATES = (
     ("kde", "KDE", "6.0", "fedora40", "fedora", "40", "rpm"),
 )
 ARCHITECTURES = ("x86_64", "aarch64")
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class ContractError(ValueError):
@@ -74,6 +78,40 @@ def copy_checked(source: Path, destination: Path) -> Path:
     if source.stat().st_size != destination.stat().st_size or digest(source) != digest(destination):
         raise ContractError("compositor runtime copy changed package bytes")
     return destination
+
+
+def updater_public_key() -> str:
+    source = (ROOT / "apps/copypaste_flutter/lib/shared/security/minisign_verifier.dart").read_text(
+        encoding="utf-8"
+    )
+    match = re.search(r"copyPasteUpdaterPublicKey\s*=\s*\n?\s*'([^']+)'", source)
+    if match is None:
+        raise ContractError("the pinned updater public key is unavailable")
+    return match.group(1)
+
+
+def verify_package_signature(package: Path, signature: Path, *, public_key: str | None = None) -> None:
+    """Verify the same Minisign envelope the updater accepts for this filename."""
+    try:
+        verifier = runpy.run_path(str(ROOT / "scripts/modules/catalog.py"))["verify_signature"]
+        openssl3 = Path("/opt/homebrew/opt/openssl@3/bin")
+        original_path = os.environ.get("PATH", "")
+        if openssl3.is_dir():
+            os.environ["PATH"] = f"{openssl3}{os.pathsep}{original_path}"
+        try:
+            encoded_signature = regular(
+                signature, "compositor runtime signature is missing"
+            ).read_bytes()
+            verifier(
+                regular(package, "compositor runtime package is missing").read_bytes(),
+                base64.b64decode(encoded_signature, validate=True),
+                package.name,
+                public_key or updater_public_key(),
+            )
+        finally:
+            os.environ["PATH"] = original_path
+    except (ValueError, OSError) as error:
+        raise ContractError("compositor runtime signature does not match the pinned updater key") from error
 
 
 def stage(source_root: Path, destination: Path, version: str, commit: str, producer_run_id: str) -> None:
@@ -186,7 +224,14 @@ def stage(source_root: Path, destination: Path, version: str, commit: str, produ
         raise
 
 
-def verify_public(root: Path, version: str, commit: str, release_run_id: str) -> dict:
+def verify_public(
+    root: Path,
+    version: str,
+    commit: str,
+    release_run_id: str,
+    *,
+    signature_validator: object = verify_package_signature,
+) -> dict:
     if not VERSION.fullmatch(version) or not COMMIT.fullmatch(commit):
         raise ContractError("invalid release identity")
     if not re.fullmatch(r"[1-9][0-9]*", release_run_id):
@@ -208,6 +253,7 @@ def verify_public(root: Path, version: str, commit: str, release_run_id: str) ->
     }
     actual = set()
     public = []
+    required_names = {"compositor-runtime-release-sources.json"}
     for entry in entries:
         if not isinstance(entry, dict):
             raise ContractError("compositor runtime source manifest entry is invalid")
@@ -230,21 +276,34 @@ def verify_public(root: Path, version: str, commit: str, release_run_id: str) ->
         expected_digest = f"{digest(package)}  {package.name}\n"
         if digest_receipt.read_text(encoding="utf-8") != expected_digest:
             raise ContractError("compositor runtime SHA-256 receipt does not bind package bytes")
+        if not callable(signature_validator):
+            raise ContractError("compositor runtime signature verifier is invalid")
+        signature_validator(package, signature)
+        required_names.update((package.name, signature.name, digest_receipt.name))
         for key in ("producer_receipt", "runtime_receipt"):
             item = entry.get(key)
             if not isinstance(item, dict) or not isinstance(item.get("name"), str):
                 raise ContractError("compositor runtime source manifest has invalid receipt metadata")
             require_metadata(item, root / item["name"], "compositor runtime source receipt bytes changed after staging")
+            required_names.add(item["name"])
         for license_meta in entry.get("licenses", []):
             if not isinstance(license_meta, dict) or not isinstance(license_meta.get("name"), str):
                 raise ContractError("compositor runtime source manifest has invalid license metadata")
             require_metadata(license_meta, root / license_meta["name"], "compositor runtime license bytes changed after staging")
+            required_names.add(license_meta["name"])
         public.extend([
             metadata(package), metadata(signature), metadata(digest_receipt),
             entry["producer_receipt"], entry["runtime_receipt"], *entry.get("licenses", []),
         ])
     if actual != expected:
         raise ContractError("compositor runtime public package matrix is incomplete or ambiguous")
+    entries_on_disk = list(root.iterdir())
+    if any(not path.is_file() or path.is_symlink() for path in entries_on_disk):
+        raise ContractError("compositor runtime public inventory contains an unlisted file")
+    actual_names = {path.name for path in entries_on_disk}
+    allowed_names = required_names | {"production-receipt.json"}
+    if actual_names != required_names and actual_names != allowed_names:
+        raise ContractError("compositor runtime public inventory contains an unlisted file")
     public.append(metadata(manifest_path))
     receipt = {
         "schema": 1,
