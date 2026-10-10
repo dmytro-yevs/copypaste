@@ -572,7 +572,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ needs.preflight.outputs.release_commit }}
+          ref: ${{ github.sha }}
       - name: Verify trusted exact-source runtime producer run
         env:
           GH_TOKEN: ${{ github.token }}
@@ -595,7 +595,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ needs.preflight.outputs.release_commit }}
+          ref: ${{ github.sha }}
       - id: flutter
         run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/setup-flutter
@@ -672,7 +672,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ needs.preflight.outputs.release_commit }}
+          ref: ${{ github.sha }}
       - name: Require an evidence source run
         env:
           EVIDENCE_RUN_ID: ${{ inputs.linux_evidence_run_id }}

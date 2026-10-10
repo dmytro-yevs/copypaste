@@ -352,6 +352,17 @@ class ReleaseSafetyTest(unittest.TestCase):
         self.assertIn("flutter pub get --enforce-lockfile", job)
         self.assertLess(job.index("flutter pub get --enforce-lockfile"), job.index("tool/verify_update_signature.dart"))
 
+    def test_script_jobs_checkout_the_trigger_commit_after_preflight_binding(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        preflight = workflow.split("  preflight:\n", 1)[1].split("\n  linux-native-bootstrap:\n", 1)[0]
+        self.assertIn('release_commit="$GITHUB_SHA"', preflight)
+        self.assertIn('reuse_qualified=true', preflight)
+        for job in ("compositor-runtime-external", "compositor-runtime-public", "linux-full-parity-evidence"):
+            section = workflow.split(f"  {job}:\n", 1)[1]
+            self.assertIn("needs.preflight.outputs.reuse_qualified != 'true'", section)
+            self.assertIn("ref: ${{ github.sha }}", section)
+            self.assertNotIn("ref: ${{ needs.preflight.outputs.release_commit }}", section)
+
     def test_compositor_runtime_public_receipt_binds_signed_package_bytes(self):
         module = runpy.run_path(
             str(ROOT / "scripts/release/stage-compositor-runtime-release.py")
