@@ -40,28 +40,31 @@ class LinuxNativeFileDragTest(unittest.TestCase):
             def get_monitor(self, _index):
                 return Monitor()
 
-        class Gdk:
-            class Display:
-                @staticmethod
-                def get_default():
-                    return Display()
-
         source = drag.Bounds(100, 150, 320, 96)
         target = drag.Bounds(600, 120, 480, 600)
-        self.assertEqual(drag.require_single_wayland_layout(Gdk, source, target), drag.Bounds(0, 0, 1280, 720))
+        self.assertEqual(drag.require_single_wayland_layout(Display(), source, target), drag.Bounds(0, 0, 1280, 720))
 
         class MultiDisplay(Display):
             def get_n_monitors(self):
                 return 2
 
-        class MultiGdk:
+        with self.assertRaisesRegex(drag.FileDragQualificationError, "one visible monitor"):
+            drag.require_single_wayland_layout(MultiDisplay(), source, target)
+
+    def test_wayland_display_must_open_the_requested_socket(self):
+        class Display:
+            def get_name(self):
+                return "wayland-0"
+
+        class Gdk:
             class Display:
                 @staticmethod
-                def get_default():
-                    return MultiDisplay()
+                def open(name):
+                    return Display() if name == "wayland-0" else None
 
-        with self.assertRaisesRegex(drag.FileDragQualificationError, "one visible monitor"):
-            drag.require_single_wayland_layout(MultiGdk, source, target)
+        self.assertIsInstance(drag.open_wayland_display(Gdk, "wayland-0"), Display)
+        with self.assertRaisesRegex(drag.FileDragQualificationError, "requested Wayland display"):
+            drag.open_wayland_display(Gdk, "wayland-1")
 
     def test_source_activity_rejects_unknown_or_malformed_events(self):
         with tempfile.TemporaryDirectory() as directory:
