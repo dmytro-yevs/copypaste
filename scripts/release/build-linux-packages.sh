@@ -131,6 +131,7 @@ cp -a %{_source_stage}/. %{buildroot}/
 /usr/share/gnome-shell/extensions/copypaste-quick-paste@copypaste.app
 /usr/share/kwin/scripts/copypaste-quick-paste
 /usr/share/copypaste/autostart/com.copypaste.CopyPaste.desktop
+/usr/share/copypaste/desktop-integrations/kde-native-clipboard
 EOF
 write_package_metadata rpm
 rpmbuild -bb "$SPEC" --define "_topdir $TOPDIR" --define "_source_stage $STAGE" --define "_build_id_links none"
