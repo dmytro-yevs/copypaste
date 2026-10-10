@@ -106,6 +106,7 @@ jobs:
           sink_window="$(xdotool search --name '^CopyPaste Qualification File Drop Sink$')"
           xdotool windowmove "$source_window" 100 150
           xdotool windowmove "$sink_window" 760 150
+          xdotool windowfocus "$source_window"
           xdotool mousemove --sync 260 198
           xdotool mousedown 1
           : >"$work/start"
@@ -120,6 +121,7 @@ jobs:
             [[ "$(cat "$work/result" 2>/dev/null || true)" == "received" ]] && break
             sleep 0.05
           done
+          cat "$work/activity"
           [[ "$(cat "$work/result")" == "received" ]]
       - name: Compile the GTK source in pinned Fedora 40
         run: |
