@@ -48,6 +48,7 @@ def main() -> int:
     queue = deque(initial)
     seen = set()
     host_libraries = 0
+    failures = []
     while queue:
         source = queue.popleft()
         if source in seen:
@@ -58,23 +59,22 @@ def main() -> int:
                 continue
             resolved = closure.resolve_dependency(source, dependency, cache)
             if resolved is None:
-                print(json.dumps({"failure": "unresolved", "introducer": str(source), "soname": dependency}, sort_keys=True))
-                return 1
+                failures.append({"failure": "unresolved", "introducer": str(source), "soname": dependency})
+                continue
             if resolved not in seen:
                 try:
                     owner = closure.rpm_owner(resolved)
                     closure.rpm_license_files(owner)
                 except closure.ClosureError as error:
-                    print(json.dumps({
+                    failures.append({
                         "failure": str(error),
                         "library": str(resolved),
                         "rpm": raw_rpm_fields(resolved),
-                    }, sort_keys=True))
-                    return 1
+                    })
                 host_libraries += 1
                 queue.append(resolved)
-    print(json.dumps({"host_libraries": host_libraries, "status": "ok"}, sort_keys=True))
-    return 0
+    print(json.dumps({"failures": failures, "host_libraries": host_libraries, "status": "failed" if failures else "ok"}, sort_keys=True))
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
