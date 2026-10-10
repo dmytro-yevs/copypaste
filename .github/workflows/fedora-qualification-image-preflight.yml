@@ -1,0 +1,33 @@
+name: Fedora qualification image preflight
+
+on:
+  push:
+    branches:
+      - codex/fedora-qualification-image-preflight
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.architecture }} image build
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x86_64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - architecture: aarch64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Build the pinned Fedora qualification image and run its media probes
+        run: |
+          set -euo pipefail
+          docker build --platform "${{ matrix.platform }}" \
+            --file packaging/linux/Dockerfile.fedora-native-qualification \
+            --tag "copypaste-fedora-qualification-preflight:${{ matrix.architecture }}" .
