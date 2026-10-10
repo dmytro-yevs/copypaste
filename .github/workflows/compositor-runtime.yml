@@ -145,7 +145,7 @@ jobs:
           package="$(find artifact -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \) -print -quit)"
           test -n "$package"
           scripts/release/sign-update-artifact.sh "$package"
-          sha256sum "$package" > "$package.sha256"
+          (cd "$(dirname "$package")" && sha256sum "$(basename "$package")") > "$package.sha256"
           python3 - "$package" artifact/runtime-receipt.json artifact/compositor-runtime-producer-receipt.json <<'PY'
           import hashlib, json, os, sys
           from pathlib import Path
