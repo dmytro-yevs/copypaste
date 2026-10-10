@@ -7,35 +7,53 @@
 #include <gtk/gtk.h>
 
 #include <string.h>
+#include <unistd.h>
 
 static const char kTitle[] = "CopyPaste Qualification Wayland Input Target";
 
 struct State {
   const char* ready_path;
   const char* result_path;
+  const char* marker;
   gboolean ready;
+  gboolean marker_received;
+  guint focus_events;
 };
 
-static void write_result(GtkEditable* editable, gpointer data) {
-  const struct State* state = data;
+static void write_state(const struct State* state) {
+  gchar* value = g_strdup_printf(
+      "{\"focus_events\":%u,\"marker_received\":%s}\n",
+      state->focus_events, state->marker_received ? "true" : "false");
   GError* error = NULL;
-  if (!g_file_set_contents(state->result_path,
-                           gtk_entry_get_text(GTK_ENTRY(editable)), -1, &error)) {
+  if (!g_file_set_contents(state->result_path, value, -1, &error)) {
     g_clear_error(&error);
   }
+  g_free(value);
+}
+
+static void write_result(GtkEditable* editable, gpointer data) {
+  struct State* state = data;
+  if (g_strcmp0(gtk_entry_get_text(GTK_ENTRY(editable)), state->marker) == 0) {
+    state->marker_received = TRUE;
+  }
+  write_state(state);
 }
 
 static gboolean focused(GtkWidget* widget, GdkEventFocus* event, gpointer data) {
   (void)widget;
   (void)event;
   struct State* state = data;
+  state->focus_events += 1;
+  write_state(state);
   if (state->ready) return FALSE;
   GError* error = NULL;
-  if (g_file_set_contents(state->ready_path, "focused\n", -1, &error)) {
+  gchar* ready = g_strdup_printf("focused pid=%ld\n", (long)getpid());
+  if (g_file_set_contents(state->ready_path, ready, -1, &error)) {
     state->ready = TRUE;
   } else {
     g_clear_error(&error);
   }
+  g_free(ready);
   return FALSE;
 }
 
@@ -55,12 +73,17 @@ static void activate(GtkApplication* application, gpointer data) {
 int main(int argc, char** argv) {
   const char* ready_path = NULL;
   const char* result_path = NULL;
+  const char* marker = "copypaste-wayland-quick-paste-fixture";
   for (int index = 1; index + 1 < argc; index += 2) {
     if (strcmp(argv[index], "--ready-file") == 0) ready_path = argv[index + 1];
     if (strcmp(argv[index], "--result-file") == 0) result_path = argv[index + 1];
+    if (strcmp(argv[index], "--marker") == 0) marker = argv[index + 1];
   }
-  if (ready_path == NULL || result_path == NULL) return 2;
-  struct State state = {ready_path, result_path, FALSE};
+  if (ready_path == NULL || result_path == NULL || strlen(marker) == 0 || strlen(marker) > 512) return 2;
+  for (const char* value = marker; *value != '\0'; ++value) {
+    if ((unsigned char)*value < 0x20 || (unsigned char)*value > 0x7e) return 2;
+  }
+  struct State state = {ready_path, result_path, marker, FALSE, FALSE, 0};
   GtkApplication* application = gtk_application_new(
       "org.copypaste.QualificationWaylandInputTarget", G_APPLICATION_NON_UNIQUE);
   g_signal_connect(application, "activate", G_CALLBACK(activate), &state);
