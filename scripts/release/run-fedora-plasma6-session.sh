@@ -26,6 +26,10 @@ dnf --assumeyes install "$COMPOSITOR_RUNTIME/$runtime_package"
 rpm -q "copypaste-compositor-runtime-$runtime_id" >/dev/null
 python3 /work/scripts/release/verify-linux-compositor-runtime.py installed --binding "$COMPOSITOR_RUNTIME_BINDING" --root /
 COMPOSITOR_LAUNCHER="/usr/lib/copypaste/compositor-runtime/bin/copypaste-compositor-session-$runtime_id"
+runtime_root="/usr/lib/copypaste/compositor-runtime/$runtime_id"
+qualification_entrypoint="$(jq -er '.qualification.entrypoint | select(type == "string" and test("^[A-Za-z0-9._/+@-]+$"))' "/usr/share/copypaste/compositor-runtime/$runtime_id.receipt.json")"
+COMPOSITOR_QUALIFICATION_ENTRYPOINT="$runtime_root/$qualification_entrypoint"
+[[ -x "$COMPOSITOR_QUALIFICATION_ENTRYPOINT" ]] || { echo "ERROR: receipt-listed KWin qualification entrypoint is missing" >&2; exit 1; }
 
 runtime="$(mktemp -d)"
 cleanup() {
@@ -88,8 +92,17 @@ case "$SESSION" in
     xprop -root -display "$DISPLAY" >/dev/null
     ;;
   wayland)
-    echo "ERROR: Wayland qualification requires a reviewed receipt-listed private compositor entrypoint and loader observation" >&2
-    exit 1
+    export COPYPASTE_COMPOSITOR_EXECUTION=private-wayland
+    export LD_LIBRARY_PATH="$runtime_root/lib:$runtime_root/lib64:$runtime_root/usr/lib:$runtime_root/usr/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    "$COMPOSITOR_QUALIFICATION_ENTRYPOINT" >"$runtime/kwin.log" 2>&1 &
+    kwin_pid=$!
+    wait_for 'kill -0 "$kwin_pid" 2>/dev/null'
+    wait_for 'find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name "wayland-*" | grep -q .'
+    export WAYLAND_DISPLAY="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'wayland-*' -printf '%f\n' | head -n1)"
+    export COPYPASTE_COMPOSITOR_SESSION_RECORD="$runtime/compositor-session-record.json"
+    python3 /work/scripts/release/record-linux-compositor-session.py \
+      --binding "$COMPOSITOR_RUNTIME_BINDING" --root / --pid "$kwin_pid" --session wayland \
+      --output "$COPYPASTE_COMPOSITOR_SESSION_RECORD"
     ;;
 esac
 
