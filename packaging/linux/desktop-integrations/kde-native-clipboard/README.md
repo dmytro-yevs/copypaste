@@ -64,16 +64,16 @@ The source bundle is not qualification evidence. Hosted Linux must build and
 run the exact patched compositor in a disposable Fedora 40 container for each
 immutable upstream release below:
 
-| KWin release | Immutable ref | Bridge patch argument |
-| --- | --- | --- |
-| 6.0.0 | `1ddcb4e288c4f7dcecdc94efccd655b7e3666d30` | `6.0` |
-| 6.3.0 | `3e19ea5a1bd69fa619aa5fd3c1b285e5b9168b5b` | `6.3` |
+| KWin release | Immutable ref | Bridge patch argument | Fedora 40 dependency root |
+| --- | --- | --- | --- |
+| 6.0.0 | `1ddcb4e288c4f7dcecdc94efccd655b7e3666d30` | `6.0` | Base and `fedora-source`; KDecoration2 contract. |
+| 6.3.0 | `3e19ea5a1bd69fa619aa5fd3c1b285e5b9168b5b` | `6.3` | Base, updates, and both source repositories; KDecoration3 contract. |
 
-The pinned Fedora 40 builder uses its base and `fedora-source` repositories; it
-disables `updates` and `updates-source` so KWin 6.0 builds against its matching
-`KDecoration2` CMake contract rather than a later KDecoration release. The
-container installs `dnf-plugins-core`, runs `dnf builddep --assumeyes kwin`, and
-installs `cmake`, `ninja-build`, `git`,
+The builder creates one image per KWin family. The 6.0 image uses only Fedora
+40 base and `fedora-source` so its required KDecoration2 contract is present.
+The 6.3 image retains the Fedora updates set that supplies its required
+KDecoration3 and KF6 versions. Both images run `dnf builddep --assumeyes kwin`
+and install `cmake`, `ninja-build`, `git`,
 `dbus-daemon`, `dbus-tools`, `plasma-workspace-x11`, `kwin-wayland`, and
 `wl-clipboard`. It clones the selected ref with `git -c protocol.version=2
 clone --filter=blob:none`, verifies `HEAD` exactly, applies this source bundle,
