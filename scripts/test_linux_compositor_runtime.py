@@ -144,6 +144,16 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
         self.assertIn('"commit": os.environ["COMPOSITOR_RUNTIME_COMMIT"]', producer)
         self.assertNotIn('"commit": os.environ["GITHUB_SHA"]', producer)
 
+    def test_mutter_runtime_export_builds_all_install_targets_before_installing(self):
+        script = (ROOT / "packaging/linux/desktop-integrations/gnome-shell-extension/mutter/verify-patch.sh").read_text(encoding="utf-8")
+        runtime_branch = script.index('if [[ -n "$runtime_output" ]]; then')
+        full_build = script.index('meson compile -C "$build_dir"\n', runtime_branch)
+        install = script.index('DESTDIR="$runtime_output" meson install -C "$build_dir" --no-rebuild', runtime_branch)
+        bridge_build = script.index('meson compile -C "$build_dir" "$target"', install)
+        self.assertLess(runtime_branch, full_build)
+        self.assertLess(full_build, install)
+        self.assertLess(install, bridge_build)
+
     def test_uses_authenticated_runtime_artifacts_and_generated_launchers(self):
         workflow = (ROOT / ".github/workflows/linux-native-qualification.yml").read_text(encoding="utf-8")
         release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
