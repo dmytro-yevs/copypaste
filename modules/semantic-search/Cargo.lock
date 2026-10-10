@@ -110,7 +110,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-module-semantic-search"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "copypaste-module-sdk",
  "ort",
