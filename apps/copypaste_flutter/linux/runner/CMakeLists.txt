@@ -6,6 +6,7 @@ add_executable(${BINARY_NAME}
   "my_application.cc"
   "linux_host_channels.cc"
   "linux_gnome_shortcuts.cc"
+  "linux_glibc_version.cc"
   "linux_packagekit.cc"
   "linux_portal.cc"
   "linux_restart_helper.cc"
