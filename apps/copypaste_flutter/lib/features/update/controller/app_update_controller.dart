@@ -10,6 +10,11 @@ import '../models/app_update_models.dart';
 import '../repository/app_update_repository.dart';
 
 class AppUpdateController extends ChangeNotifier {
+  static final Uri _releasePageFallback = Uri.https(
+    'github.com',
+    '/dmytro-yevs/copypaste/releases/latest',
+  );
+
   AppUpdateController({
     required AppUpdateRepository repository,
     required AppUpdatePlatform platform,
@@ -83,8 +88,15 @@ class AppUpdateController extends ChangeNotifier {
       if (target == AppUpdateTarget.linux) {
         availability = await _platform.availability();
         if (!availability.available) {
+          // Automatic package installation is optional on Linux. Keep a
+          // verified GitHub release page available for manual installation.
+          final fallbackRelease = await _repository.findUpdate(
+            currentVersion: installed,
+            target: target,
+          );
+          if (_disposed) return;
           _currentVersion = installed;
-          _release = null;
+          _release = fallbackRelease;
           _downloaded = null;
           _downloadProgress = 0;
           _message = availability.reason;
@@ -193,8 +205,13 @@ class AppUpdateController extends ChangeNotifier {
         _setPhase(AppUpdatePhase.installing);
         break;
       case AppUpdateInstallResult.permissionRequired:
-        _message =
-            'Allow CopyPaste to install apps in Android settings, then continue.';
+        _message = switch (_platform.target) {
+          AppUpdateTarget.android =>
+            'Allow CopyPaste to install apps in Android settings, then continue.',
+          AppUpdateTarget.linux =>
+            'Authenticate in your system package manager to install this update.',
+          _ => 'Allow CopyPaste to install this update, then continue.',
+        };
         _setPhase(AppUpdatePhase.permissionRequired);
         break;
       case AppUpdateInstallResult.restartRequired:
@@ -230,10 +247,10 @@ class AppUpdateController extends ChangeNotifier {
   }
 
   Future<void> openReleasePage() async {
-    final release = _release;
-    if (release == null) return;
     try {
-      await _platform.openReleasePage(release.releaseUri);
+      await _platform.openReleasePage(
+        _release?.releaseUri ?? _releasePageFallback,
+      );
     } on PlatformException {
       _fail('CopyPaste could not open the release page.');
     }
