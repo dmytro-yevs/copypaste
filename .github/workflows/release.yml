@@ -23,6 +23,11 @@ on:
         required: false
         type: string
         default: ""
+      compositor_runtime_run_id:
+        description: Completed exact-source compositor runtime producer run for an explicit staging release
+        required: false
+        type: string
+        default: ""
   push:
     tags: ["v*"]
 
@@ -47,6 +52,7 @@ jobs:
       reuse_qualified: ${{ steps.version.outputs.reuse_qualified }}
       linux_required: ${{ steps.version.outputs.linux_required }}
       linux_artifact_run_id: ${{ steps.version.outputs.linux_artifact_run_id }}
+      compositor_runtime_required: ${{ steps.version.outputs.compositor_runtime_required }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -56,6 +62,7 @@ jobs:
           REQUESTED_PUBLISH: ${{ inputs.publish }}
           QUALIFIED_RUN_ID: ${{ inputs.qualified_run_id }}
           LINUX_ARTIFACT_RUN_ID: ${{ inputs.linux_artifact_run_id }}
+          COMPOSITOR_RUNTIME_RUN_ID: ${{ inputs.compositor_runtime_run_id }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -74,14 +81,19 @@ jobs:
           artifact_run_id="$GITHUB_RUN_ID"
           reuse_qualified=false
           linux_artifact_run_id="$GITHUB_RUN_ID"
+          compositor_runtime_required=false
           if [[ -n "${QUALIFIED_RUN_ID:-}" ]]; then
             [[ "$QUALIFIED_RUN_ID" =~ ^[1-9][0-9]*$ ]]
             [[ "${REQUESTED_PUBLISH:-false}" == true ]]
             git fetch origin "refs/tags/v$version:refs/tags/v$version"
             release_commit="$(git rev-list -n 1 "v$version")"
             linux_required=false
+            compositor_runtime_required=false
             if git cat-file -e "$release_commit:packaging/linux/release-contract.json" 2>/dev/null; then
               linux_required=true
+            fi
+            if git cat-file -e "$release_commit:.github/workflows/compositor-runtime.yml" 2>/dev/null; then
+              compositor_runtime_required=true
             fi
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFIED_RUN_ID" > "$RUNNER_TEMP/source-run.json"
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFIED_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/source-jobs.json"
@@ -103,6 +115,7 @@ jobs:
             fi
             qualified_args=(--run "$RUNNER_TEMP/source-run.json" --jobs "$RUNNER_TEMP/source-jobs.json" --artifacts "$RUNNER_TEMP/source-artifacts.json" --repository "$GITHUB_REPOSITORY" --commit "$release_commit")
             if [[ "$linux_required" == true ]]; then qualified_args+=(--require-linux); fi
+            if [[ "$compositor_runtime_required" == true ]]; then qualified_args+=(--require-compositor-runtime); fi
             if [[ "$linux_required" == true ]]; then qualified_args+=(--linux-origin-run "$RUNNER_TEMP/linux-origin-run.json" --linux-origin-jobs "$RUNNER_TEMP/linux-origin-jobs.json" --linux-origin-artifacts "$RUNNER_TEMP/linux-origin-artifacts.json" --linux-receipt "$RUNNER_TEMP/linux-origin-receipt.json"); fi
             python3 scripts/release/verify-qualified-run.py "${qualified_args[@]}"
             artifact_run_id="$QUALIFIED_RUN_ID"
@@ -121,6 +134,24 @@ jobs:
             if git cat-file -e "$release_commit:packaging/linux/release-contract.json" 2>/dev/null; then
               linux_required=true
             fi
+          fi
+          if git cat-file -e "$release_commit:.github/workflows/compositor-runtime.yml" 2>/dev/null; then
+            compositor_runtime_required=true
+            [[ "$linux_required" == true ]] || {
+              echo "ERROR: compositor runtime contract requires Linux release artifacts" >&2
+              exit 1
+            }
+          fi
+          if [[ -n "${COMPOSITOR_RUNTIME_RUN_ID:-}" ]]; then
+            [[ "$COMPOSITOR_RUNTIME_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+            [[ "$compositor_runtime_required" == true ]] || {
+              echo "ERROR: compositor_runtime_run_id is only valid for a compositor runtime release contract" >&2
+              exit 1
+            }
+            [[ "$reuse_qualified" != true ]] || {
+              echo "ERROR: a previously qualified release already binds its compositor runtime companions" >&2
+              exit 1
+            }
           fi
           if [[ -n "${LINUX_ARTIFACT_RUN_ID:-}" ]]; then
             [[ "$LINUX_ARTIFACT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
@@ -141,6 +172,7 @@ jobs:
             echo "reuse_qualified=$reuse_qualified"
             echo "linux_required=$linux_required"
             echo "linux_artifact_run_id=$linux_artifact_run_id"
+            echo "compositor_runtime_required=$compositor_runtime_required"
           } >> "$GITHUB_OUTPUT"
 
   macos:
@@ -461,10 +493,109 @@ jobs:
             dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.runtime-baseline.json
             dist/production-receipt.json
 
+  compositor-runtime-build:
+    name: Build opt-in compositor runtime companions
+    needs: preflight
+    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && inputs.compositor_runtime_run_id == ''
+    uses: ./.github/workflows/compositor-runtime.yml
+    with:
+      version: ${{ needs.preflight.outputs.version }}
+      source_run_id: ${{ github.run_id }}
+      commit: ${{ needs.preflight.outputs.release_commit }}
+
+  compositor-runtime-external:
+    name: Verify staged compositor runtime companions
+    needs: preflight
+    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && inputs.compositor_runtime_run_id != ''
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.preflight.outputs.release_commit }}
+      - name: Verify trusted exact-source runtime producer run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNTIME_RUN_ID: ${{ inputs.compositor_runtime_run_id }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUNTIME_RUN_ID" > "$RUNNER_TEMP/runtime-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUNTIME_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/runtime-jobs.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUNTIME_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/runtime-artifacts.json"
+          python3 scripts/release/verify-compositor-runtime-source-run.py \
+            --run "$RUNNER_TEMP/runtime-run.json" --jobs "$RUNNER_TEMP/runtime-jobs.json" \
+            --artifacts "$RUNNER_TEMP/runtime-artifacts.json" --repository "$GITHUB_REPOSITORY" \
+            --commit "${{ needs.preflight.outputs.release_commit }}"
+
+  compositor-runtime-public:
+    name: Sign and bind opt-in compositor runtime companions
+    needs: [preflight, compositor-runtime-build, compositor-runtime-external]
+    if: ${{ always() && needs.preflight.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && (needs.compositor-runtime-build.result == 'success' || needs.compositor-runtime-external.result == 'success') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.preflight.outputs.release_commit }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: inputs.compositor_runtime_run_id == ''
+        with:
+          pattern: copypaste-compositor-runtime-*
+          path: runtime-source
+      - name: Download verified staged compositor runtime companions
+        if: inputs.compositor_runtime_run_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNTIME_RUN_ID: ${{ inputs.compositor_runtime_run_id }}
+        run: |
+          set -euo pipefail
+          for artifact in \
+            copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64 \
+            copypaste-compositor-runtime-gnome-46-ubuntu24.04-aarch64 \
+            copypaste-compositor-runtime-kde-6.0-fedora40-x86_64 \
+            copypaste-compositor-runtime-kde-6.0-fedora40-aarch64; do
+            gh run download "$RUNTIME_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$artifact" --dir "runtime-source/$artifact"
+          done
+      - name: Stage exact runtime producer outputs
+        env:
+          PRODUCER_RUN_ID: ${{ inputs.compositor_runtime_run_id || github.run_id }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release/stage-compositor-runtime-release.py stage \
+            --source-root runtime-source --output runtime-public \
+            --version "${{ needs.preflight.outputs.version }}" \
+            --commit "${{ needs.preflight.outputs.release_commit }}" \
+            --producer-run-id "$PRODUCER_RUN_ID"
+      - name: Sign exact runtime companion packages
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/release/sign-update-artifact.sh
+          shopt -s nullglob
+          packages=(runtime-public/*.deb runtime-public/*.rpm)
+          (( ${#packages[@]} == 4 ))
+          for package in "${packages[@]}"; do
+            scripts/release/sign-update-artifact.sh "$package"
+            (cd apps/copypaste_flutter && dart --disable-dart-dev --packages=.dart_tool/package_config.json tool/verify_update_signature.dart "../../$package" "../../$package.sig")
+            (cd runtime-public && sha256sum "$(basename "$package")" > "$(basename "$package").sha256")
+          done
+      - name: Bind public companion signatures and receipts
+        run: |
+          set -euo pipefail
+          python3 scripts/release/stage-compositor-runtime-release.py finalize \
+            --root runtime-public --version "${{ needs.preflight.outputs.version }}" \
+            --commit "${{ needs.preflight.outputs.release_commit }}" --release-run-id "$GITHUB_RUN_ID" \
+            --output runtime-public/production-receipt.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: production-compositor-runtime
+          if-no-files-found: error
+          path: runtime-public
+
   linux-full-parity-evidence:
     name: Linux full parity evidence gate
-    needs: [preflight, linux]
-    if: ${{ always() && needs.preflight.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_required == 'true' && (needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) }}
+    needs: [preflight, linux, compositor-runtime-public]
+    if: ${{ always() && needs.preflight.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_required == 'true' && (needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success') }}
     runs-on: ubuntu-24.04
     steps:
       - name: Require an evidence source run
@@ -512,20 +643,28 @@ jobs:
           path: exact-artifacts/aarch64
           run-id: ${{ needs.preflight.outputs.linux_artifact_run_id }}
           github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.preflight.outputs.compositor_runtime_required == 'true'
+        with:
+          name: production-compositor-runtime
+          path: compositor-runtime
       - name: Verify full exact-artifact Linux desktop evidence
         run: |
           set -euo pipefail
           mkdir exact-artifacts/all
           find exact-artifacts -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) -exec cp {} exact-artifacts/all/ \;
-          python3 scripts/release/verify-linux-native-qualification.py \
-            --root native-evidence --artifacts exact-artifacts/all \
-            --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA" \
-            --source-run-id "${{ inputs.linux_evidence_run_id }}" \
-            --artifact-run-id "${{ needs.preflight.outputs.linux_artifact_run_id }}"
+          args=(--root native-evidence --artifacts exact-artifacts/all
+            --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA"
+            --source-run-id "${{ inputs.linux_evidence_run_id }}"
+            --artifact-run-id "${{ needs.preflight.outputs.linux_artifact_run_id }}")
+          if [[ "${{ needs.preflight.outputs.compositor_runtime_required }}" == true ]]; then
+            args+=(--compositor-runtime compositor-runtime)
+          fi
+          python3 scripts/release/verify-linux-native-qualification.py "${args[@]}"
 
   qualify:
-    needs: [preflight, macos, android, windows, linux, linux-full-parity-evidence]
-    if: ${{ always() && needs.preflight.result == 'success' && (needs.preflight.outputs.reuse_qualified == 'true' || (needs.macos.result == 'success' && needs.android.result == 'success' && needs.windows.result == 'success' && (needs.preflight.outputs.linux_required != 'true' || ((needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && needs.linux-full-parity-evidence.result == 'success')))) }}
+    needs: [preflight, macos, android, windows, linux, compositor-runtime-public, linux-full-parity-evidence]
+    if: ${{ always() && needs.preflight.result == 'success' && (needs.preflight.outputs.reuse_qualified == 'true' || (needs.macos.result == 'success' && needs.android.result == 'success' && needs.windows.result == 'success' && (needs.preflight.outputs.linux_required != 'true' || ((needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && needs.linux-full-parity-evidence.result == 'success' && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success'))))) }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -566,6 +705,11 @@ jobs:
           path: qualified/linux-aarch64
           run-id: ${{ needs.preflight.outputs.linux_artifact_run_id }}
           github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true'
+        with:
+          name: production-compositor-runtime
+          path: qualified/compositor-runtime
       - name: Assemble one Linux qualification receipt
         if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_required == 'true'
         run: |
@@ -581,6 +725,7 @@ jobs:
           set -euo pipefail
           args=(--root qualified --version "${{ needs.preflight.outputs.version }}" --commit "${{ needs.preflight.outputs.release_commit }}" --run-id "${{ needs.preflight.outputs.artifact_run_id }}")
           if [[ "${{ needs.preflight.outputs.linux_required }}" == true ]]; then args+=(--require-linux); fi
+          if [[ "${{ needs.preflight.outputs.compositor_runtime_required }}" == true ]]; then args+=(--require-compositor-runtime); fi
           if [[ "${{ needs.preflight.outputs.linux_artifact_run_id }}" != "$GITHUB_RUN_ID" ]]; then args+=(--linux-origin-run-id "${{ needs.preflight.outputs.linux_artifact_run_id }}"); fi
           python3 scripts/release/verify-artifact-receipts.py "${args[@]}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
