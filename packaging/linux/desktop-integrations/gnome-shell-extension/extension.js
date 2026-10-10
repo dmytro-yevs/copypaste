@@ -58,6 +58,18 @@ export default class CopyPasteQuickPasteExtension extends Extension {
                 }
             }
         );
+        this._qualificationSignalId = this._bus.signal_subscribe(
+            HOST_BUS_NAME,
+            HOST_INTERFACE,
+            'QualificationRequested',
+            HOST_OBJECT_PATH,
+            null,
+            Gio.DBusSignalFlags.NONE,
+            (_connection, _sender, _path, _interface, _signal, parameters) => {
+                const [transactionId, pid, action] = parameters.deep_unpack();
+                this._runQualification(transactionId, pid, action);
+            }
+        );
     }
 
     disable() {
@@ -74,6 +86,8 @@ export default class CopyPasteQuickPasteExtension extends Extension {
         this._shortcutBridge = null;
         if (this._cancelSignalId)
             this._bus.signal_unsubscribe(this._cancelSignalId);
+        if (this._qualificationSignalId)
+            this._bus.signal_unsubscribe(this._qualificationSignalId);
         if (this._windowCreatedId)
             global.display.disconnect(this._windowCreatedId);
         if (this._focusWindowId)
@@ -83,6 +97,7 @@ export default class CopyPasteQuickPasteExtension extends Extension {
         if (this._busOwnerId)
             Gio.bus_unown_name(this._busOwnerId);
         this._cancelSignalId = 0;
+        this._qualificationSignalId = 0;
         this._windowCreatedId = 0;
         this._focusWindowId = 0;
         this._hostWatchId = 0;
@@ -181,6 +196,49 @@ export default class CopyPasteQuickPasteExtension extends Extension {
             }
             this._restoreThenPaste(pending);
         }, () => this._cancelTransaction(pending));
+    }
+
+    _runQualification(transactionId, pid, action) {
+        if (!this._canCallHost() || typeof transactionId !== 'string' ||
+            !Number.isInteger(pid) || pid <= 0)
+            return;
+        const window = global.get_window_actors()
+            .map(actor => actor.meta_window)
+            .find(candidate => candidate && candidate.get_pid?.() === pid &&
+                candidate.get_gtk_application_id?.() === QUICK_PASTE_APPLICATION_ID);
+        if (!window)
+            return;
+        if (action === 'close-main') {
+            this._reportQualification(transactionId, pid, true);
+            const unmanaging = window.connect('unmanaging', () => {
+                this._reportQualification(transactionId, pid, false);
+            });
+            try {
+                window.delete(global.get_current_time());
+            } catch (_error) {
+                window.disconnect(unmanaging);
+            }
+            return;
+        }
+        if (action === 'quick-paste' && global.display.focus_window === window)
+            this._beginQuickPaste();
+    }
+
+    _reportQualification(transactionId, pid, mapped) {
+        this._bus.call(
+            HOST_BUS_NAME,
+            HOST_OBJECT_PATH,
+            HOST_INTERFACE,
+            'QualificationObserved',
+            new GLib.Variant('(sussb)', [transactionId, pid, QUICK_PASTE_APPLICATION_ID, 'main', mapped]),
+            null,
+            Gio.DBusCallFlags.NONE,
+            2000,
+            null,
+            (connection, result) => {
+                try { connection.call_finish(result); } catch (_error) {}
+            }
+        );
     }
 
     _restoreThenPaste(pending) {
