@@ -58,6 +58,17 @@ pub(crate) fn resolve_owner(
     Some(SourceApp { id, name })
 }
 
+/// Resolve a compositor-provided desktop application ID to its installed
+/// desktop entry. The ID is evidence from the compositor; this only supplies
+/// its display label and never derives an identity from desktop state.
+pub(crate) fn resolve_desktop_id(id: &str) -> Option<SourceApp> {
+    valid_desktop_id(id).then_some(())?;
+    Some(SourceApp {
+        id: id.to_owned(),
+        name: desktop_for_class(id)?,
+    })
+}
+
 /// ICCCM WM_CLASS is `instance NUL class NUL`. The class (not the instance)
 /// is the desktop-file convention and is usable only as a bounded package ID.
 fn wm_class(bytes: &[u8]) -> Option<String> {

@@ -161,6 +161,7 @@ impl X11Clipboard {
 pub(super) enum LinuxClipboard {
     X11(X11Clipboard),
     Gnome(gnome::GnomeClipboard),
+    Kwin(gnome::GnomeClipboard),
     Wayland(wayland::WaylandClipboard),
 }
 
@@ -169,6 +170,8 @@ impl LinuxClipboard {
         if is_wayland_session() {
             if is_gnome_session() {
                 Ok(Self::Gnome(gnome::GnomeClipboard::new(data_dir)?))
+            } else if is_kde_session() {
+                Ok(Self::Kwin(gnome::GnomeClipboard::new_kwin(data_dir)?))
             } else {
                 Ok(Self::Wayland(wayland::WaylandClipboard::new(data_dir)?))
             }
@@ -199,6 +202,20 @@ fn is_gnome_session() -> bool {
             .to_string_lossy()
             .to_ascii_lowercase()
             .contains("gnome")
+    })
+}
+
+fn is_kde_session() -> bool {
+    [
+        "XDG_CURRENT_DESKTOP",
+        "XDG_SESSION_DESKTOP",
+        "DESKTOP_SESSION",
+    ]
+    .into_iter()
+    .filter_map(std::env::var_os)
+    .any(|value| {
+        let value = value.to_string_lossy().to_ascii_lowercase();
+        value.contains("kde") || value.contains("plasma")
     })
 }
 impl Drop for X11Clipboard {
@@ -267,6 +284,7 @@ impl ClipboardSource for LinuxClipboard {
         match self {
             Self::X11(source) => source.poll(),
             Self::Gnome(source) => source.poll(),
+            Self::Kwin(source) => source.poll(),
             Self::Wayland(source) => source.poll(),
         }
     }
@@ -274,6 +292,7 @@ impl ClipboardSource for LinuxClipboard {
         match self {
             Self::X11(source) => source.poll_with_policy(policy),
             Self::Gnome(source) => source.poll_with_policy(policy),
+            Self::Kwin(source) => source.poll_with_policy(policy),
             Self::Wayland(source) => source.poll_with_policy(policy),
         }
     }
@@ -281,6 +300,7 @@ impl ClipboardSource for LinuxClipboard {
         match self {
             Self::X11(source) => source.changed(),
             Self::Gnome(source) => source.changed(),
+            Self::Kwin(source) => source.changed(),
             Self::Wayland(source) => source.changed(),
         }
     }
@@ -288,6 +308,7 @@ impl ClipboardSource for LinuxClipboard {
         match self {
             Self::X11(source) => source.set_contents(text),
             Self::Gnome(source) => source.set_contents(text),
+            Self::Kwin(source) => source.set_contents(text),
             Self::Wayland(source) => source.set_contents(text),
         }
     }
@@ -303,6 +324,9 @@ impl ClipboardSource for LinuxClipboard {
             Self::Gnome(source) => {
                 source.set_binary_contents(item_id, content_type, bytes, metadata)
             }
+            Self::Kwin(source) => {
+                source.set_binary_contents(item_id, content_type, bytes, metadata)
+            }
             Self::Wayland(source) => {
                 source.set_binary_contents(item_id, content_type, bytes, metadata)
             }
@@ -312,6 +336,7 @@ impl ClipboardSource for LinuxClipboard {
         match self {
             Self::X11(source) => source.backend_name(),
             Self::Gnome(source) => source.backend_name(),
+            Self::Kwin(source) => source.backend_name(),
             Self::Wayland(source) => source.backend_name(),
         }
     }
