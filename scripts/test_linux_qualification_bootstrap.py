@@ -58,7 +58,7 @@ class LinuxQualificationBootstrapTest(unittest.TestCase):
         self.assertIn("Run exact staged Linux native qualification /", helper)
         gate = workflow.split("  linux-full-parity-evidence:\n", 1)[1].split("  qualify:\n", 1)[0]
         self.assertLess(gate.index("actions/checkout"), gate.index("verify-linux-qualification-evidence-source.py"))
-        self.assertIn("ref: ${{ needs.preflight.outputs.release_commit }}", gate)
+        self.assertIn("ref: ${{ github.sha }}", gate)
 
     def test_native_workflow_is_callable_and_downloads_public_runtime_for_final_verification(self):
         workflow = (ROOT / ".github/workflows/linux-native-qualification.yml").read_text(encoding="utf-8")
@@ -70,6 +70,15 @@ class LinuxQualificationBootstrapTest(unittest.TestCase):
         self.assertEqual(evidence.count("path: previous-artifacts/x86_64"), 1)
         self.assertEqual(evidence.count("path: previous-artifacts/aarch64"), 1)
         self.assertIn("run-id: ${{ inputs.previous_artifact_run_id }}", evidence)
+
+    def test_script_jobs_checkout_the_trigger_commit_after_source_binding(self):
+        workflow = (ROOT / ".github/workflows/linux-native-qualification.yml").read_text(encoding="utf-8")
+        source = workflow.split("  source:\n", 1)[1].split("\n  scenario:\n", 1)[0]
+        self.assertIn('[[ "$GITHUB_SHA" == "$commit" ]]', source)
+        for job in ("scenario", "evidence"):
+            section = workflow.split(f"  {job}:\n", 1)[1]
+            self.assertIn("ref: ${{ github.sha }}", section)
+            self.assertNotIn("ref: ${{ needs.source.outputs.commit }}", section)
 
 
 if __name__ == "__main__":
