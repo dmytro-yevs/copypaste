@@ -289,6 +289,8 @@ class RuntimeStageTests(unittest.TestCase):
         self.assertEqual(private_elf_closure.safe_source_member("upstream/LICENSES/MIT.txt"), "upstream/LICENSES/MIT.txt")
         self.assertIsNone(private_elf_closure.safe_source_member("upstream/notes.txt"))
         self.assertIsNone(private_elf_closure.safe_source_member("../README"))
+        self.assertTrue(private_elf_closure.source_member_has_notice_text("README.rst", b"Copyright 2026 Example"))
+        self.assertFalse(private_elf_closure.source_member_has_notice_text("README.rst", b"Build this project with Meson."))
 
     def test_rpm_owner_reports_only_the_invalid_license_length(self) -> None:
         expression = "L" * 1025
@@ -338,6 +340,16 @@ class RuntimeStageTests(unittest.TestCase):
             self.assertEqual(
                 private_elf_closure.dynamic_search_directories(Path("/usr/lib64/libproxy.so.0")),
                 [Path("/trusted/libproxy")],
+            )
+
+    def test_declared_search_path_expands_braced_origin(self) -> None:
+        readelf = " 0x000000000000001d (RUNPATH)            Library runpath: [${ORIGIN}:$ORIGIN]\n"
+        source = Path("/usr/lib64/libproxy/libproxy.so.0")
+        with mock.patch.object(private_elf_closure, "run", return_value=readelf), \
+             mock.patch.object(private_elf_closure, "trusted_library_directory", side_effect=lambda path: path):
+            self.assertEqual(
+                private_elf_closure.dynamic_search_directories(source),
+                [source.parent],
             )
 
     def test_staged_package_has_no_vendor_replacement_path(self) -> None:

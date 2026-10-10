@@ -35,6 +35,8 @@ SAFE_SOURCE_RPM = re.compile(r"^[A-Za-z0-9.+:~^_-]{1,160}\.src\.rpm$")
 SAFE_LICENSE = re.compile(r"^[\x20-\x7e]{1,1024}$")
 SAFE_SONAME = re.compile(r"^[A-Za-z0-9._+-]{1,255}$")
 NOTICE_NAME = re.compile(r"^(?:LICENSE|LICENCE|COPYING|NOTICE|COPYRIGHT|README)(?:[._-].*)?$", re.IGNORECASE)
+README_NAME = re.compile(r"^README(?:[._-].*)?$", re.IGNORECASE)
+README_NOTICE_TEXT = re.compile(rb"(?:copyright|licen[cs]e|spdx-license-identifier|permission\s+is\s+hereby\s+granted|all\s+rights\s+reserved)", re.IGNORECASE)
 MAX_SOURCE_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_LICENSE_BYTES = 4 * 1024 * 1024
 MAX_LICENSE_MEMBERS = 64
@@ -123,12 +125,16 @@ def trusted_library_directory(path: Path) -> Path | None:
     return resolved
 
 
+def expand_origin(path: Path, value: str) -> str:
+    return value.replace("${ORIGIN}", str(path.parent)).replace("$ORIGIN", str(path.parent))
+
+
 def dynamic_search_directories(path: Path) -> list[Path]:
     directories = []
     for raw in SEARCH_PATH.findall(run(["readelf", "-d", str(path)])):
         for item in raw.split(":"):
             if "$" in item:
-                item = item.replace("$ORIGIN", str(path.parent))
+                item = expand_origin(path, item)
             if "$" in item or not item.startswith("/"):
                 continue
             directory = trusted_library_directory(Path(item))
@@ -231,6 +237,11 @@ def safe_source_member(value: str) -> str | None:
     return member
 
 
+def source_member_has_notice_text(member: str, value: bytes) -> bool:
+    """Require a legal-notice marker before treating a README as license text."""
+    return README_NAME.fullmatch(Path(member).name) is None or README_NOTICE_TEXT.search(value) is not None
+
+
 def cpio_member_bytes(archive: Path, member: str) -> bytes:
     payload = bounded_rpm2cpio(archive)
     result = subprocess.run(["cpio", "--quiet", "-i", "--to-stdout", member], input=payload, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
@@ -295,7 +306,7 @@ def source_rpm_license_files(owner: tuple[str, str, str, str], destination: Path
             fields = verbose.split()
             if len(fields) >= 2 and fields[1] == "1":
                 value = cpio_member_bytes(archive, member)
-                if len(value) <= MAX_LICENSE_BYTES:
+                if len(value) <= MAX_LICENSE_BYTES and source_member_has_notice_text(safe, value):
                     candidates.append((safe, value))
         if not member.lower().endswith((".tar", ".tar.gz", ".tar.xz", ".tar.bz2")):
             continue
@@ -308,7 +319,9 @@ def source_rpm_license_files(owner: tuple[str, str, str, str], destination: Path
                         continue
                     handle = upstream.extractfile(entry)
                     if handle is not None:
-                        candidates.append((safe, handle.read(MAX_LICENSE_BYTES + 1)))
+                        value = handle.read(MAX_LICENSE_BYTES + 1)
+                        if source_member_has_notice_text(safe, value):
+                            candidates.append((safe, value))
         except (tarfile.TarError, OSError):
             continue
     candidates = [(member, value) for member, value in candidates if len(value) <= MAX_LICENSE_BYTES]
