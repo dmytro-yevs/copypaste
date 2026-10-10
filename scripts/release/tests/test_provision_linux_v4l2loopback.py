@@ -133,5 +133,10 @@ class ProvisionLinuxV4L2Test(unittest.TestCase):
                  mock.patch.object(tool, "unwind_provision") as unwind:
                 with self.assertRaisesRegex(RuntimeError, "chmod failed"):
                     tool.provision(state, environment)
+            self.assertEqual(commands[1], [
+                "sudo", "apt-get", "install", "--yes", "--no-install-recommends",
+                "linux-headers-6.8.0", "linux-modules-extra-6.8.0",
+                "v4l2loopback-dkms", "v4l-utils",
+            ])
             self.assertEqual(commands[-2:], [["sudo", "chown", f"{os.getuid()}:{os.getgid()}", "/dev/video42"], ["sudo", "chmod", "600", "/dev/video42"]])
             self.assertEqual(unwind.call_args.args[2], job_live)

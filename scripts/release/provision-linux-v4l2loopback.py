@@ -140,7 +140,7 @@ def provision(state: Path, environment: Path) -> None:
     if not re.fullmatch(r"[A-Za-z0-9._+-]+", kernel):
         raise RuntimeError("kernel release is unsafe")
     command(["sudo", "apt-get", "update"])
-    command(["sudo", "apt-get", "install", "--yes", "--no-install-recommends", f"linux-headers-{kernel}", "v4l2loopback-dkms", "v4l-utils"])
+    command(["sudo", "apt-get", "install", "--yes", "--no-install-recommends", f"linux-headers-{kernel}", f"linux-modules-extra-{kernel}", "v4l2loopback-dkms", "v4l-utils"])
     uid = os.getuid(); gid = os.getgid()
     write_state(state, state_base(uid, gid, "prepared"))
     created = False
