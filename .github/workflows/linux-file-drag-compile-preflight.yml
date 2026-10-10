@@ -77,7 +77,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends build-essential pkg-config libgtk-3-dev xdotool xvfb
+          sudo apt-get install --yes --no-install-recommends build-essential pkg-config libgtk-3-dev openbox xdotool xvfb
           cc -std=c11 -O2 -Wall -Wextra -Werror \
             scripts/release/linux-gtk-file-drop-source.c \
             -o /tmp/copypaste-gtk-file-drop-source \
@@ -130,15 +130,23 @@ jobs:
           work="$(mktemp -d)"
           source_pid=""
           sink_pid=""
+          wm_pid=""
           Xvfb :99 -screen 0 1280x720x24 >/dev/null 2>&1 &
           xvfb_pid=$!
           export DISPLAY=:99
           cleanup() {
-            kill "$source_pid" "$sink_pid" "$xvfb_pid" 2>/dev/null || true
-            wait "$source_pid" "$sink_pid" "$xvfb_pid" 2>/dev/null || true
+            kill "$source_pid" "$sink_pid" "$wm_pid" "$xvfb_pid" 2>/dev/null || true
+            wait "$source_pid" "$sink_pid" "$wm_pid" "$xvfb_pid" 2>/dev/null || true
             rm -rf "$work" "$sink_file"
           }
           trap cleanup EXIT
+          openbox --sm-disable >/dev/null 2>&1 &
+          wm_pid=$!
+          for _ in $(seq 1 100); do
+            xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q window && break
+            sleep 0.05
+          done
+          xprop -root _NET_SUPPORTING_WM_CHECK | grep -q window
           /tmp/copypaste-gtk-file-drop-sink --ready-file "$work/sink-ready" --result-file "$work/result" >/dev/null 2>&1 &
           sink_pid=$!
           touch "$work/fixture"
@@ -162,7 +170,7 @@ jobs:
           }
           read -r source_x source_y <<<"$(window_center "$source_window")"
           read -r sink_x sink_y <<<"$(window_center "$sink_window")"
-          xdotool windowfocus "$source_window"
+          xdotool windowactivate --sync "$source_window"
           xdotool mousemove --sync "$source_x" "$source_y"
           xdotool mousedown 1
           : >"$work/start"
