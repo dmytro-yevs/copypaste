@@ -26,6 +26,7 @@ from typing import Any
 
 SOURCE = Path(__file__).with_name("linux-gtk-file-drop-source.c")
 WAYLAND_QUICK_PASTE = Path(__file__).with_name("linux-wayland-quick-paste.py")
+WAYLAND_PORTAL_MODULE = "copypaste_qualification_wayland_portal"
 MAX_FIXTURE_BYTES = 8 * 1024
 SOURCE_TITLE = "CopyPaste Qualification File Drop Source"
 TARGET_TITLE = "CopyPaste"
@@ -166,7 +167,10 @@ class DragSource:
         wait_for(lambda: True if activity_has(source_activity(self.activity), "drag_status_copy") else None, "GTK file drag target did not negotiate copy")
 
     def completed(self) -> None:
-        events = wait_for(lambda: candidate if activity_has(candidate, "drag_end") else None, "GTK file drag did not report its outcome")
+        events = wait_for(
+            lambda: candidate if activity_has(candidate := source_activity(self.activity), "drag_end") else None,
+            "GTK file drag did not report its outcome",
+        )
         accepted = next(event for event in events if event["event"] == "drag_end")
         if accepted["selected_action"] != 2 or not activity_has(events, "uri_list_requested"):
             raise FileDragQualificationError("GTK file drag was not accepted by the target")
@@ -228,11 +232,20 @@ def drag_x11(source: DragSource, gui_pid: int, environment: dict[str, str]) -> N
 
 def load_wayland_portal() -> Any:
     require_regular(WAYLAND_QUICK_PASTE, "Wayland portal helper")
-    spec = importlib.util.spec_from_file_location("linux_wayland_quick_paste", WAYLAND_QUICK_PASTE)
+    spec = importlib.util.spec_from_file_location(WAYLAND_PORTAL_MODULE, WAYLAND_QUICK_PASTE)
     if spec is None or spec.loader is None:
         raise FileDragQualificationError("Wayland portal helper is unavailable")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    previous = sys.modules.get(WAYLAND_PORTAL_MODULE)
+    sys.modules[WAYLAND_PORTAL_MODULE] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        if previous is None:
+            sys.modules.pop(WAYLAND_PORTAL_MODULE, None)
+        else:
+            sys.modules[WAYLAND_PORTAL_MODULE] = previous
+        raise
     return module
 
 
