@@ -67,6 +67,9 @@ preferences immediately; package deletion finishes after restart. Shared
 Settings exposes `Restart CopyPaste`: desktop restarts the owned daemon and
 Android restarts the application process through ProcessPhoenix. A module that
 was never loaded can be removed immediately without restart.
+Search providers pin their native code in the inference worker instead of the
+application runtime, so their removal completes after worker termination without
+restarting CopyPaste.
 
 One manager serializes lifecycle mutations. Each module has its own execution
 lock, so long commands do not block commands in other modules. Disable, update,
@@ -133,7 +136,9 @@ execution evidence. Publication requires the three platform receipts and all
 five authenticated packages, then dispatches the signed catalog update.
 
 There is no third-party trust UI.
-Native first-party code runs inside the owning runtime process: this is not a
+Search-provider inference runs in a dedicated local worker process; its native
+code and process-global runtimes exit after 60 seconds of idle time. Other
+native first-party modules run inside the owning runtime process: this is not a
 sandbox, and manifest declarations cannot restrict native OS access. A native
 crash can terminate that process. Third-party execution requires an explicit
 isolation design before it can be enabled.

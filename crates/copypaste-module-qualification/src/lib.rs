@@ -43,6 +43,18 @@ pub fn qualify(
     commit: &str,
     run_id: &str,
 ) -> Result<Receipt, String> {
+    qualify_with_inference(package, fixtures, data, app_version, commit, run_id, None)
+}
+
+pub(crate) fn qualify_with_inference(
+    package: &Path,
+    fixtures: &Path,
+    data: &Path,
+    app_version: &str,
+    commit: &str,
+    run_id: &str,
+    launcher: Option<std::sync::Arc<dyn copypaste_modules::InferenceLauncher>>,
+) -> Result<Receipt, String> {
     if commit.len() != 40
         || !commit.bytes().all(|value| value.is_ascii_hexdigit())
         || run_id.is_empty()
@@ -53,6 +65,9 @@ pub fn qualify(
     let target = ModuleTarget::current().ok_or("Unsupported native qualification target.")?;
     let manager = ModuleManager::open(data, app_version, target, MODULE_RELEASE_PUBLIC_KEY)
         .map_err(|error| error.to_string())?;
+    if let Some(launcher) = launcher {
+        manager.set_inference_launcher(launcher);
+    }
     let installed = manager
         .install(package)
         .map_err(|error| error.to_string())?;
@@ -66,7 +81,7 @@ pub fn qualify(
         .remove(&installed.id)
         .map_err(|error| error.to_string())?;
     let pending = manager.list().map_err(|error| error.to_string())?;
-    let restart_required = installed.id != "copypaste.supabase";
+    let restart_required = installed.id == "copypaste.ocr";
     if restart_required {
         if pending.len() != 1 || !pending[0].restart_required || pending[0].enabled {
             return Err(
@@ -80,7 +95,7 @@ pub fn qualify(
             .invoke(&installed.id, "status", BTreeMap::new())
             .is_ok()
     {
-        return Err("Instance-scoped sync module removal must finish immediately.".into());
+        return Err("Module removal must finish immediately after worker teardown.".into());
     }
     let mut source = fs::File::open(package).map_err(|error| error.to_string())?;
     let mut hash = Sha256::new();

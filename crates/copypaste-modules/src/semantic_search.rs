@@ -15,7 +15,24 @@ use std::{
     time::{Duration, Instant},
 };
 
-type CachedQuery = (String, String, Vec<f32>);
+struct CachedQuery {
+    scope: String,
+    text: String,
+    vector: Option<Vec<f32>>,
+    completed: Instant,
+}
+
+#[derive(Clone)]
+struct PendingQuery {
+    scope: String,
+    text: String,
+}
+#[derive(Default)]
+struct QueryQueue {
+    queued: VecDeque<PendingQuery>,
+    active: Option<PendingQuery>,
+}
+const QUERY_CAPACITY: usize = 32;
 pub(crate) type ChangeCallback = Arc<dyn Fn() + Send + Sync>;
 
 pub(crate) struct SearchBinding {
@@ -32,6 +49,7 @@ pub(crate) struct SemanticSearch {
     wake: (Mutex<()>, Condvar),
     worker: Mutex<Option<JoinHandle<()>>>,
     queries: Mutex<VecDeque<CachedQuery>>,
+    pending: Mutex<QueryQueue>,
 }
 
 impl SemanticSearch {
@@ -45,6 +63,7 @@ impl SemanticSearch {
             wake: (Mutex::new(()), Condvar::new()),
             worker: Mutex::new(None),
             queries: Mutex::new(VecDeque::new()),
+            pending: Mutex::new(QueryQueue::default()),
         });
         let service = Arc::clone(&owner);
         let worker = std::thread::Builder::new()
@@ -66,6 +85,7 @@ impl SemanticSearch {
     pub fn shutdown(&self) {
         self.stopped.store(true, Ordering::Release);
         self.wake.1.notify_all();
+        self.manager.stop_inference();
         if let Some(worker) = self
             .worker
             .lock()
@@ -122,60 +142,65 @@ impl SemanticSearch {
                 .store
                 .query_history_bounded_for_device(query, after, limit, budget, device);
         };
-        self.notify();
-        let mut matches = SemanticMatches {
-            scope: config.scope.clone(),
-            scores: Vec::new(),
-        };
-        if self.ready.load(Ordering::Acquire) {
-            let raw = query.search.as_deref().unwrap_or_default();
-            let text = raw.chars().take(1024).collect::<String>();
-            let cached = self
+        let text = query
+            .search
+            .as_deref()
+            .unwrap_or_default()
+            .chars()
+            .take(1024)
+            .collect::<String>();
+        let (vector, retry) = {
+            let cache = self
                 .queries
                 .lock()
-                .unwrap_or_else(|error| error.into_inner())
+                .unwrap_or_else(|error| error.into_inner());
+            match cache
                 .iter()
-                .find(|(scope, key, _)| scope == &config.scope && key == &text)
-                .map(|(_, _, vector)| vector.clone());
-            let vector = if cached.is_none() && !self.manager.search_loaded(&config.id) {
-                self.ready.store(false, Ordering::Release);
-                self.notify();
-                Err(ModuleError::State)
-            } else {
-                cached.map(Ok).unwrap_or_else(|| {
-                    let vectors = self.embeddings(&config, "query", &text)?;
-                    if vectors.len() != 1 {
-                        return Err(ModuleError::Invalid(
-                            "The search query returned too many embeddings.".into(),
-                        ));
-                    }
-                    vectors.into_iter().next().ok_or(ModuleError::State)
-                })
-            };
-            if let Ok(vector) = vector {
-                let mut cache = self
-                    .queries
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner());
-                if !cache
-                    .iter()
-                    .any(|(scope, key, _)| scope == &config.scope && key == &text)
-                {
-                    cache.push_back((config.scope.clone(), text, vector.clone()));
-                    while cache.len() > 32 {
-                        cache.pop_front();
-                    }
-                }
-                drop(cache);
-                if let Ok(found) = self.store.semantic_matches(
-                    &config.scope,
-                    &vector,
-                    config.model.minimum_similarity,
-                ) {
-                    matches = found;
-                }
+                .find(|entry| entry.scope == config.scope && entry.text == text)
+            {
+                Some(entry) => (
+                    entry.vector.clone(),
+                    entry.vector.is_none() && entry.completed.elapsed() >= Duration::from_secs(5),
+                ),
+                None => (None, true),
             }
+        };
+        if retry {
+            let mut pending = self
+                .pending
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if !pending
+                .queued
+                .iter()
+                .any(|entry| entry.scope == config.scope && entry.text == text)
+                && !pending
+                    .active
+                    .as_ref()
+                    .is_some_and(|entry| entry.scope == config.scope && entry.text == text)
+            {
+                pending.queued.push_front(PendingQuery {
+                    scope: config.scope.clone(),
+                    text,
+                });
+                let capacity = QUERY_CAPACITY - usize::from(pending.active.is_some());
+                pending.queued.truncate(capacity);
+            }
+            drop(pending);
+            self.notify();
         }
+        // Foreground reads never load a model or wait for inference. Cached
+        // query vectors remain usable after the inference process has exited.
+        let matches = vector
+            .and_then(|vector| {
+                self.store
+                    .semantic_matches(&config.scope, &vector, config.model.minimum_similarity)
+                    .ok()
+            })
+            .unwrap_or_else(|| SemanticMatches {
+                scope: config.scope.clone(),
+                scores: Vec::new(),
+            });
         // Revalidate admission after inference. Disabled modules contribute no
         // late results, while ordinary lexical search remains available.
         self.manager
@@ -212,7 +237,53 @@ impl SemanticSearch {
                         .clear();
                     let _ = self.store.prune_semantic_index(&config.id, &config.scope);
                 }
-                if let Ok(Some(work)) = self.store.semantic_work(&config.scope) {
+                let pending = {
+                    let mut pending = self
+                        .pending
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner());
+                    pending.queued.retain(|entry| entry.scope == config.scope);
+                    let next = pending.queued.pop_front();
+                    pending.active = next.clone();
+                    next
+                };
+                if let Some(query) = pending {
+                    let vector = self
+                        .embeddings(&config, "query", &query.text)
+                        .ok()
+                        .filter(|vectors| vectors.len() == 1)
+                        .and_then(|mut vectors| vectors.pop());
+                    let published = self
+                        .manager
+                        .search_lease(&config, || {
+                            let mut cache = self
+                                .queries
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner());
+                            cache.retain(|entry| {
+                                entry.scope != config.scope || entry.text != query.text
+                            });
+                            cache.push_back(CachedQuery {
+                                scope: config.scope.clone(),
+                                text: query.text,
+                                vector,
+                                completed: Instant::now(),
+                            });
+                            while cache.len() > QUERY_CAPACITY {
+                                cache.pop_front();
+                            }
+                            Ok(())
+                        })
+                        .is_ok();
+                    self.pending
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .active = None;
+                    if published {
+                        (self.changed)();
+                    }
+                    did_work = true;
+                } else if let Ok(Some(work)) = self.store.semantic_work(&config.scope) {
                     let result =
                         self.embeddings(&config, "passage", &work.text)
                             .and_then(|vectors| {
@@ -235,21 +306,10 @@ impl SemanticSearch {
                             dirty = false;
                         }
                     }
-                } else if !self.ready.load(Ordering::Acquire)
-                    && self
-                        .manager
-                        .invoke(
-                            &config.id,
-                            &config.command,
-                            BTreeMap::from([
-                                ("text".into(), serde_json::Value::String("search".into())),
-                                ("role".into(), serde_json::Value::String("query".into())),
-                            ]),
-                        )
-                        .is_ok()
-                {
+                } else {
+                    // Index coverage does not depend on a resident inference
+                    // process. Empty/already indexed history requires no warm-up.
                     self.ready.store(true, Ordering::Release);
-                    (self.changed)();
                 }
                 if !did_work {
                     if dirty {
@@ -264,12 +324,23 @@ impl SemanticSearch {
             } else {
                 self.ready.store(false, Ordering::Release);
                 current.clear();
+                *self
+                    .pending
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()) = QueryQueue::default();
                 self.queries
                     .lock()
                     .unwrap_or_else(|error| error.into_inner())
                     .clear();
             }
             // Yield admission to foreground search between bounded fragments.
+            if self
+                .pending
+                .lock()
+                .is_ok_and(|pending| !pending.queued.is_empty())
+            {
+                continue;
+            }
             if let Ok(lock) = self.wake.0.lock() {
                 let _ = self.wake.1.wait_timeout(
                     lock,
@@ -376,6 +447,11 @@ mod native_tests {
         let data = directory.path().join("host");
         let manager =
             Arc::new(ModuleManager::open(&data, "1.0.11", target, &key.pk.to_base64()).unwrap());
+        manager.set_inference_launcher(Arc::new(crate::DesktopInferenceLauncher::new(
+            PathBuf::from(
+                std::env::var_os("COPYPASTE_INFERENCE_WORKER").expect("candidate inference worker"),
+            ),
+        )));
         assert!(!manager.install(&package).unwrap().enabled);
         for model in &provider.models {
             let destination =
@@ -390,7 +466,7 @@ mod native_tests {
             }
         }
         let keys = copypaste_core::Keyring::from_secret(&[41; 32]);
-        let store = Store::open_in_memory(&keys.db_key()).unwrap();
+        let store = Store::open(&directory.path().join("history.db"), &keys.db_key()).unwrap();
         let texts = [
             "Apartment lease rent for October",
             "Chocolate cake recipe with walnuts",
@@ -475,6 +551,19 @@ mod native_tests {
                 .search(query.search.as_deref().unwrap(), 10)
                 .unwrap()
                 .is_empty());
+            let _ = service.query(&query, None, 10, usize::MAX, None).unwrap();
+            let started = Instant::now();
+            while !service.queries.lock().unwrap().iter().any(|entry| {
+                entry.scope == scope
+                    && Some(entry.text.as_str()) == query.search.as_deref()
+                    && entry.vector.is_some()
+            }) {
+                assert!(
+                    started.elapsed() < Duration::from_secs(20),
+                    "native query embedding must complete"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
             let page = service.query(&query, None, 10, usize::MAX, None).unwrap();
             let found: Vec<_> = page.items.iter().map(|item| item.id.clone()).collect();
             for id in relevant {
@@ -500,7 +589,14 @@ mod native_tests {
             .is_empty());
         manager.remove(&manifest.id).unwrap();
         store.clear_semantic_index(&manifest.id).unwrap();
-        assert!(manager.list().unwrap()[0].restart_required);
+        assert!(
+            manager.list().unwrap().is_empty(),
+            "worker-owned code must not require an application restart"
+        );
         service.shutdown();
     }
 }
+
+#[cfg(test)]
+#[path = "semantic_search_tests.rs"]
+mod tests;

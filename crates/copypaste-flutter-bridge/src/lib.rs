@@ -1,11 +1,12 @@
 //! Generated Flutter boundary over the existing CopyPaste runtime contracts.
 //!
-//! Desktop calls retain the daemon's private IPC transport. Android deliberately
-//! has no IPC or clipboard fallback: its in-process runtime is wired separately
-//! before any product call is enabled.
+//! Desktop calls retain the daemon's private IPC transport. Android owns an
+//! in-process history runtime and a separate bounded inference service.
 
 mod api;
 mod client;
+#[cfg(target_os = "android")]
+mod inference_android;
 mod native_pairing_abi;
 mod protected;
 mod runtime;

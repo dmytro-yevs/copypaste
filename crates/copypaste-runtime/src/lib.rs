@@ -78,6 +78,12 @@ impl ClipboardWriter for UnavailableClipboard {
 }
 
 impl Runtime {
+    pub fn set_inference_launcher(
+        &self,
+        launcher: Arc<dyn copypaste_modules::InferenceLauncher>,
+    ) -> Result<(), copypaste_modules::ModuleError> {
+        self.modules.set_inference_launcher(launcher)
+    }
     /// Opens only application-owned paths. The platform host must initialize
     /// its keystore before calling this constructor.
     pub fn open(data_dir: &Path, device_name: &str, port: u16) -> Result<Self, RuntimeError> {

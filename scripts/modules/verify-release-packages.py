@@ -53,7 +53,7 @@ def verify_receipts(directory, module, commit, run_id):
                 or receipt["package_sha256"] != hashlib.sha256(package.read_bytes()).hexdigest()
                 or receipt["package_size_bytes"] != package.stat().st_size
                 or receipt["cases_passed"] != 3 or not receipt["signature_verified"]
-                or receipt["restart_required"] != (module["id"] != "copypaste.supabase")
+                or receipt["restart_required"] != (module["id"] == "copypaste.ocr")
                 or not receipt["removal_completed_after_restart"]):
             raise ValueError(f"Native evidence does not qualify the exact {platform}/{architecture} package")
         if platform == "linux" and not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", receipt.get("glibc_floor", "")):

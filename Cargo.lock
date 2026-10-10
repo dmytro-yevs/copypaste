@@ -822,6 +822,7 @@ version = "1.0.23"
 dependencies = [
  "copypaste-core",
  "copypaste-ipc",
+ "copypaste-modules",
  "copypaste-p2p",
  "copypaste-runtime",
  "flutter_rust_bridge",
@@ -907,6 +908,7 @@ dependencies = [
  "copypaste-module-sdk",
  "copypaste-sync",
  "hex",
+ "jni",
  "libloading",
  "minisign",
  "minisign-verify",
