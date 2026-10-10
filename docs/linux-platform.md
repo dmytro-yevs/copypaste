@@ -32,6 +32,13 @@ Source attribution follows the existing best-effort contract: it must never
 invent an application identity. Source exclusions must remain safe when the
 OS cannot establish the producer.
 
+When a compositor has verified a source desktop ID, its displayed label may
+fall back to that exact ID if a desktop entry is missing. The icon resolver uses
+the bounded Freedesktop theme chain, including inherited themes, `hicolor`,
+256px PNGs, and scalable SVGs rasterized to the shared PNG limits. It never
+uses a PID, title, foreground window, or an unbounded external image reference
+to fill missing source metadata.
+
 Production device secrets belong in the desktop Secret Service. A missing or
 locked service must not select the development plaintext-file backend or mint
 a replacement identity for existing history. Test keyrings must be disposable
