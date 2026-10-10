@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -121,16 +122,29 @@ def require_x11_focus(window: str, environment: dict[str, str]) -> None:
         raise FileDragQualificationError("X11 file-drag source did not receive input focus")
 
 
-def source_activity(path: Path) -> set[str]:
+def source_activity(path: Path) -> list[dict[str, object]]:
     if not path.is_file() or path.is_symlink():
-        return set()
+        return []
     try:
-        events = {re.fullmatch(r'\{"event":"([a-z_]+)"\}', line).group(1) for line in path.read_text(encoding="utf-8").splitlines()}
-    except (OSError, UnicodeError, AttributeError):
+        events = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    except (OSError, UnicodeError, json.JSONDecodeError):
         raise FileDragQualificationError("GTK file-drag source activity is invalid") from None
-    if not events <= {"drag_started", "uri_list_requested", "drag_completed", "drag_not_accepted", "drag_begin_failed"}:
+    expected = {"event", "timestamp_us", "actions", "selected_action", "destination_window"}
+    names = {"drag_armed", "drag_begin", "drag_failed", "drag_status_copy", "drag_end", "uri_list_requested"}
+    if any(
+        not isinstance(event, dict) or set(event) != expected or event["event"] not in names
+        or not isinstance(event["timestamp_us"], int) or event["timestamp_us"] <= 0
+        or not isinstance(event["actions"], int) or event["actions"] < 0
+        or not isinstance(event["selected_action"], int) or event["selected_action"] < 0
+        or not isinstance(event["destination_window"], bool)
+        for event in events
+    ):
         raise FileDragQualificationError("GTK file-drag source emitted an unknown activity")
     return events
+
+
+def activity_has(events: list[dict[str, object]], name: str) -> bool:
+    return any(event["event"] == name for event in events)
 
 
 @dataclass
@@ -143,15 +157,18 @@ class DragSource:
         if self.start.exists() or self.start.is_symlink():
             raise FileDragQualificationError("GTK file-drag source start path already exists")
         self.start.write_text("start\n", encoding="ascii")
-        wait_for(lambda: "drag_started" if "drag_started" in source_activity(self.activity) else None, "GTK file drag did not start")
+        wait_for(lambda: True if activity_has(source_activity(self.activity), "drag_armed") else None, "GTK file drag did not arm")
+
+    def started(self) -> None:
+        wait_for(lambda: True if activity_has(source_activity(self.activity), "drag_begin") else None, "GTK file drag did not begin from the pointer press")
+
+    def copied(self) -> None:
+        wait_for(lambda: True if activity_has(source_activity(self.activity), "drag_status_copy") else None, "GTK file drag target did not negotiate copy")
 
     def completed(self) -> None:
-        events = wait_for(
-            lambda: (candidate if {"drag_completed", "drag_not_accepted", "drag_begin_failed"} & candidate else None)
-            if (candidate := source_activity(self.activity)) else None,
-            "GTK file drag did not report its outcome",
-        )
-        if "drag_completed" not in events or "uri_list_requested" not in events:
+        events = wait_for(lambda: candidate if activity_has(candidate, "drag_end") else None, "GTK file drag did not report its outcome")
+        accepted = next(event for event in events if event["event"] == "drag_end")
+        if accepted["selected_action"] != 2 or not activity_has(events, "uri_list_requested"):
             raise FileDragQualificationError("GTK file drag was not accepted by the target")
 
     def close(self) -> None:
@@ -200,9 +217,11 @@ def drag_x11(source: DragSource, gui_pid: int, environment: dict[str, str]) -> N
     run(["xdotool", "windowactivate", "--sync", source_window], environment)
     require_x11_focus(source_window, environment)
     run(["xdotool", "mousemove", "--sync", str(source_point[0]), str(source_point[1])], environment)
-    run(["xdotool", "mousedown", "1"], environment)
     source.begin()
+    run(["xdotool", "mousedown", "1"], environment)
+    source.started()
     run(["xdotool", "mousemove", "--sync", str(target_point[0]), str(target_point[1])], environment)
+    source.copied()
     run(["xdotool", "mouseup", "1"], environment)
     source.completed()
 
@@ -304,9 +323,11 @@ def drag_wayland(source: DragSource, gui_pid: int, environment: dict[str, str]) 
         # source using the source's AT-SPI screen coordinates.
         pointer.motion(-10000, -10000)
         pointer.motion(*source_point)
-        pointer.button(1)
         source.begin()
+        pointer.button(1)
+        source.started()
         pointer.motion(target_point[0] - source_point[0], target_point[1] - source_point[1])
+        source.copied()
         pointer.button(0)
         source.completed()
         if portal.require_gui_owner(gui_pid) != gui_owner:

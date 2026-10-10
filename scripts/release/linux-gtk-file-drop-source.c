@@ -21,6 +21,8 @@ typedef struct {
   const char* start_path;
   gchar* uri_list;
   gsize uri_list_size;
+  GdkDragContext* context;
+  gboolean armed;
   gboolean started;
 } State;
 
@@ -39,10 +41,15 @@ static gboolean write_once(const char* path, const char* value) {
   return success;
 }
 
-static void activity(const State* state, const char* event) {
+static void activity(const State* state, const char* event, GdkDragContext* context) {
   int descriptor = open(state->activity_path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
   if (descriptor < 0) return;
-  dprintf(descriptor, "{\"event\":\"%s\"}\n", event);
+  const guint actions = context == NULL ? 0 : gdk_drag_context_get_actions(context);
+  const guint selected = context == NULL ? 0 : gdk_drag_context_get_selected_action(context);
+  const gboolean destination = context != NULL && gdk_drag_context_get_dest_window(context) != NULL;
+  dprintf(descriptor, "{\"event\":\"%s\",\"timestamp_us\":%" G_GINT64_FORMAT
+          ",\"actions\":%u,\"selected_action\":%u,\"destination_window\":%s}\n",
+          event, g_get_monotonic_time(), actions, selected, destination ? "true" : "false");
   fsync(descriptor);
   close(descriptor);
 }
@@ -56,30 +63,61 @@ static void provide(GtkWidget* widget, GdkDragContext* context, GtkSelectionData
   const State* state = data;
   gtk_selection_data_set(selection, gdk_atom_intern("text/uri-list", FALSE), 8,
                          (const guchar*)state->uri_list, (gint)state->uri_list_size);
-  activity(state, "uri_list_requested");
+  activity(state, "uri_list_requested", context);
 }
 
 static void end_drag(GtkWidget* widget, GdkDragContext* context, gpointer data) {
   (void)widget;
   State* state = data;
-  activity(state, gdk_drag_context_get_selected_action(context) == GDK_ACTION_COPY ? "drag_completed" : "drag_not_accepted");
+  activity(state, "drag_end", context);
+  g_clear_object(&state->context);
 }
 
-static gboolean start_drag(gpointer data) {
+static void begin_drag(GtkWidget* widget, GdkDragContext* context, gpointer data) {
+  (void)widget;
+  activity(data, "drag_begin", context);
+}
+
+static gboolean failed_drag(GtkWidget* widget, GdkDragContext* context, GtkDragResult result, gpointer data) {
+  (void)widget;
+  (void)result;
   State* state = data;
-  if (state->started || !g_file_test(state->start_path, G_FILE_TEST_IS_REGULAR)) return G_SOURCE_CONTINUE;
-  state->started = TRUE;
-  GtkWidget* source = g_object_get_data(G_OBJECT(g_application_get_default()), "source-button");
-  GtkTargetEntry target = {(gchar*)"text/uri-list", 0, 0};
-  GtkTargetList* targets = gtk_target_list_new(&target, 1);
-  GdkDragContext* context = gtk_drag_begin_with_coordinates(source, targets, GDK_ACTION_COPY, 1, NULL, -1, -1);
-  gtk_target_list_unref(targets);
-  if (context == NULL) {
-    activity(state, "drag_begin_failed");
+  activity(state, "drag_failed", context);
+  return FALSE;
+}
+
+static gboolean drag_status(gpointer data) {
+  State* state = data;
+  if (state->context == NULL) return G_SOURCE_REMOVE;
+  if (gdk_drag_context_get_selected_action(state->context) == GDK_ACTION_COPY) {
+    activity(state, "drag_status_copy", state->context);
     return G_SOURCE_REMOVE;
   }
-  activity(state, "drag_started");
+  return G_SOURCE_CONTINUE;
+}
+
+static gboolean arm_drag(gpointer data) {
+  State* state = data;
+  if (state->armed || !g_file_test(state->start_path, G_FILE_TEST_IS_REGULAR)) return G_SOURCE_CONTINUE;
+  state->armed = TRUE;
+  activity(state, "drag_armed", NULL);
   return G_SOURCE_REMOVE;
+}
+
+static gboolean start_drag(GtkWidget* source, GdkEventButton* event, gpointer data) {
+  State* state = data;
+  if (!state->armed || state->started || event->button != 1) return FALSE;
+  state->started = TRUE;
+  GdkDragContext* context = gtk_drag_begin_with_coordinates(
+      source, gtk_drag_source_get_target_list(source), GDK_ACTION_COPY, event->button,
+      (GdkEvent*)event, (gint)event->x, (gint)event->y);
+  if (context == NULL) {
+    activity(state, "drag_failed", NULL);
+    return TRUE;
+  }
+  state->context = g_object_ref(context);
+  g_timeout_add(20, drag_status, state);
+  return TRUE;
 }
 
 static void activate(GtkApplication* application, gpointer data) {
@@ -91,12 +129,14 @@ static void activate(GtkApplication* application, gpointer data) {
   gtk_drag_source_set(source, GDK_BUTTON1_MASK, NULL, 0, GDK_ACTION_COPY);
   GtkTargetEntry target = {(gchar*)"text/uri-list", 0, 0};
   gtk_drag_source_set_target_list(source, gtk_target_list_new(&target, 1));
+  g_signal_connect(source, "button-press-event", G_CALLBACK(start_drag), state);
+  g_signal_connect(source, "drag-begin", G_CALLBACK(begin_drag), state);
   g_signal_connect(source, "drag-data-get", G_CALLBACK(provide), state);
   g_signal_connect(source, "drag-end", G_CALLBACK(end_drag), state);
+  g_signal_connect(source, "drag-failed", G_CALLBACK(failed_drag), state);
   gtk_container_add(GTK_CONTAINER(window), source);
-  g_object_set_data(G_OBJECT(application), "source-button", source);
   gtk_widget_show_all(window);
-  g_timeout_add(50, start_drag, state);
+  g_timeout_add(20, arm_drag, state);
 }
 
 int main(int argc, char** argv) {
