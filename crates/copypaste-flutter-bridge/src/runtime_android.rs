@@ -19,10 +19,11 @@ use jni::{
 /// Keeps the application context alive for as long as Rust can access Android
 /// Keystore or other context-backed services.
 static APPLICATION_CONTEXT: OnceLock<GlobalRef> = OnceLock::new();
-static JAVA_VM: OnceLock<JavaVM> = OnceLock::new();
+pub(crate) static JAVA_VM: OnceLock<Arc<JavaVM>> = OnceLock::new();
 // Retain the app class while Java supplies its loader. Native sync workers
 // cannot resolve application classes through FindClass on attached threads.
 static CLIPBOARD_HOST_CLASS: OnceLock<GlobalRef> = OnceLock::new();
+pub(crate) static INFERENCE_HOST_CLASS: OnceLock<GlobalRef> = OnceLock::new();
 static RUNTIME: OnceLock<Arc<copypaste_runtime::Runtime>> = OnceLock::new();
 static SMS_NETWORK_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
@@ -39,6 +40,20 @@ pub extern "system" fn Java_com_copypaste_app_MainActivity_initializeNdkContext(
     class: JClass,
     context: JObject,
 ) {
+    if INFERENCE_HOST_CLASS.get().is_none() {
+        let class = env
+            .find_class("com/copypaste/app/InferenceWorkerHost")
+            .and_then(|class| env.new_global_ref(class));
+        match class {
+            Ok(class) => {
+                let _ = INFERENCE_HOST_CLASS.set(class);
+            }
+            Err(_) => {
+                let _ = env.exception_clear();
+                return;
+            }
+        }
+    }
     if CLIPBOARD_HOST_CLASS.get().is_none() {
         let Ok(class) = env.new_global_ref(class) else {
             return;
@@ -57,7 +72,7 @@ pub extern "system" fn Java_com_copypaste_app_MainActivity_initializeNdkContext(
         tracing::error!("could not access the Android Java VM");
         return;
     };
-    let _ = JAVA_VM.set(java_vm);
+    let _ = JAVA_VM.set(Arc::new(java_vm));
 
     if APPLICATION_CONTEXT.set(application_context).is_ok() {
         let application_context = APPLICATION_CONTEXT
@@ -128,6 +143,19 @@ pub extern "system" fn Java_com_copypaste_app_MainActivity_initializeRuntime(
         Arc::new(AndroidClipboard),
     ) {
         Ok(runtime) => {
+            let (Some(vm), Some(host)) = (JAVA_VM.get(), INFERENCE_HOST_CLASS.get()) else {
+                return;
+            };
+            if runtime
+                .set_inference_launcher(Arc::new(copypaste_modules::AndroidInferenceLauncher::new(
+                    Arc::clone(vm),
+                    host.clone(),
+                )))
+                .is_err()
+            {
+                tracing::error!("could not initialize the Android inference launcher");
+                return;
+            }
             let _ = RUNTIME.set(Arc::new(runtime));
         }
         Err(error) => tracing::error!(%error, "could not open Android runtime"),
