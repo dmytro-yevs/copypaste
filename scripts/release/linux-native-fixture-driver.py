@@ -108,7 +108,7 @@ def gtk_provider_helper(workspace, environment):
 @contextmanager
 def clipboard_provider(workspace, evidence_dir, label, payloads, environment):
     """Offer real MIME data from a visible GTK client until the assertion ends."""
-    if not PROVIDER.is_file() or not os.access(PROVIDER, os.X_OK):
+    if not PROVIDER.is_file() or PROVIDER.is_symlink():
         raise RuntimeError("native clipboard provider is unavailable")
     helper = gtk_provider_helper(workspace, environment)
     directory = workspace / f"provider-{time.monotonic_ns()}"
