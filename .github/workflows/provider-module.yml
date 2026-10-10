@@ -98,7 +98,11 @@ jobs:
           COPYPASTE_SEMANTIC_MODELS: ${{ runner.temp }}/module-fixtures
           COPYPASTE_SEMANTIC_LIBRARY: ${{ github.workspace }}/modules/semantic-search/target/release/${{ matrix.prefix }}${{ needs.preflight.outputs.library }}.${{ matrix.suffix }}
           COPYPASTE_SEMANTIC_RUNTIME: ${{ github.workspace }}/modules/semantic-search/native/${{ matrix.platform }}/${{ matrix.architecture }}/${{ matrix.runtime }}
-        run: cargo +1.96 test --locked -p copypaste-modules signed_semantic_package -- --ignored --nocapture
+        run: |
+          cargo +1.96 build --release --locked -p copypaste-daemon
+          worker="$GITHUB_WORKSPACE/target/release/copypaste-daemon"
+          if [[ "${{ matrix.platform }}" == windows ]]; then worker="$worker.exe"; fi
+          COPYPASTE_INFERENCE_WORKER="$worker" cargo +1.96 test --locked -p copypaste-modules signed_semantic_package -- --ignored --nocapture
       - name: Sign target package
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
