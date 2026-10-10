@@ -66,6 +66,20 @@ std::string variant_string(GVariant* dictionary, const char* key) {
   return value == nullptr ? std::string() : g_variant_get_string(value, nullptr);
 }
 
+std::string variant_object_path(GVariant* dictionary, const char* key) {
+  if (dictionary == nullptr) {
+    return {};
+  }
+  g_autoptr(GVariant) value = g_variant_lookup_value(dictionary, key, nullptr);
+  if (value == nullptr ||
+      (!g_variant_is_of_type(value, G_VARIANT_TYPE_OBJECT_PATH) &&
+       !g_variant_is_of_type(value, G_VARIANT_TYPE_STRING))) {
+    return {};
+  }
+  const gchar* path = g_variant_get_string(value, nullptr);
+  return path != nullptr && g_variant_is_object_path(path) ? path : std::string();
+}
+
 guint variant_uint(GVariant* dictionary, const char* key) {
   if (dictionary == nullptr) {
     return 0;
@@ -389,8 +403,11 @@ struct LinuxPortal::Impl : public std::enable_shared_from_this<LinuxPortal::Impl
   }
 
   void with_parent_identifier(std::function<void(std::string)> complete) {
-    GdkWindow* window = parent == nullptr ? nullptr :
-        gtk_widget_get_window(GTK_WIDGET(parent));
+    if (parent == nullptr) {
+      complete({});
+      return;
+    }
+    GdkWindow* window = gtk_widget_get_window(GTK_WIDGET(parent));
     if (window == nullptr) {
       complete({});
       return;
@@ -440,8 +457,8 @@ struct LinuxPortal::Impl : public std::enable_shared_from_this<LinuxPortal::Impl
     *subscription = g_dbus_connection_signal_subscribe(
         connection, kPortalName, kSession, "Closed", path.c_str(), nullptr,
         G_DBUS_SIGNAL_FLAGS_NONE,
-        [](GDBusConnection*, const gchar*, const gchar*, const gchar*,
-           const gchar* object_path, GVariant*, gpointer data) {
+        [](GDBusConnection*, const gchar*, const gchar* object_path,
+           const gchar*, const gchar*, GVariant*, gpointer data) {
           const auto owner = *static_cast<std::shared_ptr<Impl>*>(data);
           if (owner->remote_session == object_path) {
             owner->remote_active = false;
@@ -529,7 +546,7 @@ void LinuxPortal::request_remote_desktop(std::function<void(bool)> done) {
   portal->remote_request_in_flight = true;
   portal->with_parent_identifier(
       [portal, done = std::move(done)](std::string parent_identifier) mutable {
-        if (parent_identifier.empty()) {
+        if (parent_identifier.empty() && portal->parent != nullptr) {
           portal->remote_request_in_flight = false;
           done(false);
           return;
@@ -548,7 +565,8 @@ void LinuxPortal::request_remote_desktop(std::function<void(bool)> done) {
             done(false);
             return;
           }
-          const std::string session = variant_string(results, "session_handle");
+          const std::string session =
+              variant_object_path(results, "session_handle");
           if (session.empty()) {
             portal->remote_request_in_flight = false;
             done(false);
@@ -627,7 +645,7 @@ void LinuxPortal::register_shortcut(const ShortcutRequest& request,
   portal->shortcut_id.clear();
   portal->with_parent_identifier(
       [portal, request, done = std::move(done)](std::string parent_identifier) mutable {
-        if (parent_identifier.empty()) {
+        if (parent_identifier.empty() && portal->parent != nullptr) {
           done({false, {}, "The application window is not ready for portal consent."});
           return;
         }
@@ -641,7 +659,7 @@ void LinuxPortal::register_shortcut(const ShortcutRequest& request,
                          done = std::move(done)](guint response,
                                                   GVariant* results) mutable {
           const std::string session = response == 0
-              ? variant_string(results, "session_handle") : std::string();
+              ? variant_object_path(results, "session_handle") : std::string();
           if (session.empty()) {
             done({false, {}, "The portal did not create a shortcut session."});
             return;
