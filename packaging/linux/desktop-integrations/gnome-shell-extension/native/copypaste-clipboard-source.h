@@ -15,6 +15,17 @@ G_BEGIN_DECLS
 GObject *copypaste_clipboard_source_new (GVariant *payloads, GError **error);
 
 /**
+ * copypaste_clipboard_source_is_available:
+ * @selection: (not nullable): the actual Mutter selection service
+ * @error: (out) (optional): return location for a #GError
+ *
+ * Returns: whether the loaded Mutter process exposes the required patched
+ * symbols and compatible selection-source ABI.
+ */
+gboolean copypaste_clipboard_source_is_available (GObject *selection,
+                                                   GError **error);
+
+/**
  * copypaste_clipboard_source_writer_identity:
  * @source: (not nullable): the actual Mutter selection source
  * @error: (out) (optional): return location for a #GError
