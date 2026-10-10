@@ -8,13 +8,17 @@ trap 'rm -rf "$work"' EXIT
 
 make_fixture() {
   local version="$1"
-  local tree="$work/$version" header_padding cpp_padding
+  local tree="$work/$version" header_padding cpp_padding wayland_padding wayland_display_line
   if [[ "$version" == 6.0 ]]; then
     header_padding=123
     cpp_padding=488
+    wayland_padding=334
+    wayland_display_line=375
   else
     header_padding=133
     cpp_padding=519
+    wayland_padding=309
+    wayland_display_line=379
   fi
   mkdir -p "$tree/src"
   printf 'set(PROJECT_VERSION "%s.0")\n' "$version" > "$tree/CMakeLists.txt"
@@ -76,6 +80,16 @@ bool WaylandServer::init(const QString &socketName)
 }
 EOF
   fi
+  awk -v padding="$wayland_padding" '
+    { print }
+    /bool WaylandServer::init/ { in_init = 1; next }
+    in_init && $0 == "{" {
+      for (line_number = 0; line_number < padding; ++line_number) print ""
+      in_init = 0
+    }
+  ' "$tree/src/wayland_server.cpp" > "$tree/src/wayland_server.cpp.padded"
+  mv "$tree/src/wayland_server.cpp.padded" "$tree/src/wayland_server.cpp"
+  test "$(rg -n -F 'm_display->createShm();' "$tree/src/wayland_server.cpp" | cut -d: -f1)" = "$wayland_display_line"
   {
     for _ in $(seq 1 "$header_padding"); do printf '\n'; done
     cat <<'EOF'
