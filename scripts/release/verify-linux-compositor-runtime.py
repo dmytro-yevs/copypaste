@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 import re
+import sys
 from pathlib import Path
 
 
@@ -98,13 +99,17 @@ def safe_file(root: Path, name: str, label: str) -> Path:
 
 
 def stage_runtime_module():
-    spec = importlib.util.spec_from_file_location(
-        "compositor_stage_runtime", ROOT / "packaging/linux/compositor-runtime/stage_runtime.py",
-    )
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    stage_path = ROOT / "packaging/linux/compositor-runtime/stage_runtime.py"
+    original_sys_path = sys.path.copy()
+    try:
+        sys.path.insert(0, str(stage_path.parent))
+        spec = importlib.util.spec_from_file_location("compositor_stage_runtime", stage_path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        sys.path[:] = original_sys_path
 
 
 def session_descriptor_text(receipt: dict) -> str:
