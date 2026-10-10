@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include <glib/gstdio.h>
+#include <gio/gio.h>
 #include <gdk/gdk.h>
 #if defined(GDK_WINDOWING_WAYLAND)
 #include <gdk/gdkwayland.h>
@@ -1154,6 +1155,28 @@ void update_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
       success(call, fl_value_new_string("restart_required"));
     }
   } else if (is_method(call, "restoreInstallation")) {
+    success(call);
+  } else if (is_method(call, "openReleasePage")) {
+    const gchar* url = string_argument(call, "url");
+    if (url == nullptr) {
+      failure(call, "invalid_arguments", "Release page URL is required.");
+      return;
+    }
+    g_autoptr(GError) error = nullptr;
+    g_autoptr(GUri) uri = g_uri_parse(url, G_URI_FLAGS_ENCODED, &error);
+    const gchar* scheme = uri == nullptr ? nullptr : g_uri_get_scheme(uri);
+    const gchar* host = uri == nullptr ? nullptr : g_uri_get_host(uri);
+    const gchar* path = uri == nullptr ? nullptr : g_uri_get_path(uri);
+    if (uri == nullptr || g_strcmp0(scheme, "https") != 0 ||
+        g_strcmp0(host, "github.com") != 0 || path == nullptr ||
+        !g_str_has_prefix(path, "/dmytro-yevs/copypaste/releases/")) {
+      failure(call, "open_failed", "Release page URL is not trusted.");
+      return;
+    }
+    if (!g_app_info_launch_default_for_uri(url, nullptr, &error)) {
+      failure(call, "open_failed", error == nullptr ? "Could not open release page." : error->message);
+      return;
+    }
     success(call);
   } else {
     unsupported(call);
