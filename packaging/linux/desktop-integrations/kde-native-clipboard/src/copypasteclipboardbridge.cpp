@@ -361,7 +361,11 @@ qulonglong CopyPasteClipboardBridge::Write(const QMap<QString, QByteArray> &payl
         return 0;
     }
     auto *source = new MemoryDataSource(payloads, this);
+#if defined(COPYPASTE_KWIN_6_0)
+    waylandServer()->seat()->setSelection(source);
+#else
     waylandServer()->seat()->setSelection(source, waylandServer()->display()->nextSerial());
+#endif
     // setSelection synchronously emits selectionChanged. The source has no client,
     // so its status remains no-client and callers will not attribute it to another app.
     return m_generation;
