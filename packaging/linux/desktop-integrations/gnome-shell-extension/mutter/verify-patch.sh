@@ -32,7 +32,7 @@ if [[ -n "$runtime_output" ]]; then
   meson compile -C "$build_dir"
   mkdir -p "$runtime_output"
   DESTDIR="$runtime_output" meson install -C "$build_dir" --no-rebuild
-  "$PWD/build-private-shell.sh" "$runtime_output"
+  bash "$PWD/build-private-shell.sh" "$runtime_output"
   runtime_id="gnome-${version}-private-shell"
   python3 "$PWD/../../../compositor-runtime/emit_runtime_receipt.py" \
     --runtime-dir "$runtime_output" --output "$runtime_output/runtime-receipt.json" \

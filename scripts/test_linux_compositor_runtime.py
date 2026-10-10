@@ -154,6 +154,10 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
         self.assertLess(full_build, install)
         self.assertLess(install, bridge_build)
 
+    def test_mutter_export_invokes_the_nonexecutable_private_shell_builder_with_bash(self):
+        script = (ROOT / "packaging/linux/desktop-integrations/gnome-shell-extension/mutter/verify-patch.sh").read_text(encoding="utf-8")
+        self.assertIn('bash "$PWD/build-private-shell.sh" "$runtime_output"', script)
+
     def test_uses_authenticated_runtime_artifacts_and_generated_launchers(self):
         workflow = (ROOT / ".github/workflows/linux-native-qualification.yml").read_text(encoding="utf-8")
         release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
