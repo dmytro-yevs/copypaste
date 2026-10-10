@@ -562,7 +562,6 @@ fn watch_clipboard(
                     mimes.to_vec(),
                     SourceIdentity::from_wire(identity.0, identity.1, identity.2, identity.3),
                 );
-                state.active = true;
             }
         }
         if let Ok(mut state) = state.lock() {
@@ -901,6 +900,21 @@ mod tests {
         assert!(clipboard.changed(), "fixture OwnerChanged was not observed");
     }
 
+    fn wait_for_sequence(clipboard: &GnomeClipboard, sequence: u64) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if clipboard
+                .state
+                .lock()
+                .is_ok_and(|state| state.sequence == sequence)
+            {
+                return;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        panic!("fixture OwnerChanged did not advance to sequence {sequence}");
+    }
+
     #[test]
     fn live_gnome_dbus_fixture_reads_writes_and_bounds_stalled_calls() {
         if std::env::var_os("COPYPASTE_GNOME_FIXTURE") != Some("1".into()) {
@@ -1067,10 +1081,11 @@ mod tests {
         original.update_identity(("verified".into(), 100, 1000, "org.example.NewWriter".into()));
         original.update_value("text/plain;charset=utf-8", b"new bridge text");
         original.update_owner(2, vec!["text/plain;charset=utf-8".into()]);
-        wait_for_change(&mut clipboard);
+        wait_for_sequence(&clipboard, 2);
         snapshot_release
             .send(())
             .expect("release stalled fixture Snapshot");
+        wait_for_change(&mut clipboard);
         let capture = clipboard
             .poll()
             .expect("new OwnerChanged capture survived stale Snapshot");
