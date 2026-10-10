@@ -262,7 +262,7 @@ class RuntimeStageTests(unittest.TestCase):
                  mock.patch.object(private_elf_closure, "trusted_library", side_effect=lambda path: path), \
                  mock.patch.object(private_elf_closure, "rpm_owner", side_effect=lambda path: ("kdecoration2" if path == decoration else "kf6-kcoreaddons", "6.0.0-1", "kde-6.0.0-1.src.rpm", "LGPL-2.1-or-later")), \
                  mock.patch.object(private_elf_closure, "rpm_installed_license_files", side_effect=lambda owner: [(("kdecoration2-doc", "6.0.0-1", "kde-6.0.0-1.src.rpm", "LGPL-2.1-or-later"), license_source), (("kdecoration2-doc", "6.0.0-1", "kde-6.0.0-1.src.rpm", "LGPL-2.1-or-later"), notice_source)] if owner[0] == "kdecoration2" else []), \
-                 mock.patch.object(private_elf_closure, "source_rpm_license_files", side_effect=lambda owner, _destination: [(owner, license_source, owner[2], "a" * 64)]):
+                 mock.patch.object(private_elf_closure, "source_rpm_license_files", side_effect=lambda owner, _destination: [(owner, "LICENSE", license_source.read_bytes(), owner[2], "a" * 64, "kde", owner[1])]):
                 manifest = private_elf_closure.copy_closure(runtime, [entrypoint])
 
             self.assertEqual([item["soname"] for item in manifest["libraries"]], ["libKDecoration2.so.6", "libKF6CoreAddons.so.6"])
@@ -273,6 +273,7 @@ class RuntimeStageTests(unittest.TestCase):
             source_record = next(item for item in manifest["licenses"] if item["package"] == "kf6-kcoreaddons")
             self.assertEqual(source_record["license_archive"], "kde-6.0.0-1.src.rpm")
             self.assertEqual(source_record["license_archive_sha256"], "a" * 64)
+            self.assertEqual(source_record["license_archive_supplier"], "kde")
             self.assertEqual(os.readlink(runtime / "usr/lib/libKDecoration2.so.6"), "libKDecoration2.so.6.0.0")
 
     def test_rpm_owner_accepts_a_bounded_compound_license_expression(self) -> None:
