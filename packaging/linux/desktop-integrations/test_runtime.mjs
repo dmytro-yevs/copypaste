@@ -191,6 +191,79 @@ function loadShortcutBridge() {
     return {bus, state, bridge: new ShortcutBridge(bus)};
 }
 
+function loadClipboardBridge({nativeAvailable = true, exposeAvailability = true} = {}) {
+    const source = fs.readFileSync(new URL('gnome-shell-extension/clipboard_bridge.js', root), 'utf8')
+        .replace(/^import .*;\n/gm, '')
+        .replace('export class ', 'class ');
+    const state = {
+        calls: [],
+        daemonOwner: ':1.daemon',
+        guiOwner: ':1.gui',
+        inventoryCalls: 0,
+    };
+    class Variant {
+        constructor(_type, value) { this.value = value; }
+        deep_unpack() { return this.value; }
+    }
+    const selection = {
+        connect() { return 1; },
+        disconnect() {},
+        get_mimetypes() {
+            state.inventoryCalls += 1;
+            return ['text/plain'];
+        },
+    };
+    const connection = {
+        call(...args) {
+            const method = args[3];
+            const [name] = args[4].deep_unpack();
+            state.calls.push({method, name});
+            let reply;
+            if (method === 'GetNameOwner') {
+                reply = [name === 'app.copypaste.Daemon' ? state.daemonOwner :
+                    name === 'app.copypaste.CopyPaste' ? state.guiOwner : ''];
+            } else if (method === 'GetConnectionUnixUser') {
+                reply = [1000];
+            } else {
+                throw new Error(`unexpected D-Bus call: ${method}`);
+            }
+            args[9](connection, {value: new Variant('', reply)});
+        },
+        call_finish(result) { return result.value; },
+    };
+    const Gio = {
+        DBusCallFlags: {NONE: 0},
+        Credentials: class { get_unix_user() { return 1000; } },
+        VariantType: class { constructor(type) { this.type = type; } },
+        DBusExportedObject: {
+            wrapJSObject(_xml, handlers) {
+                state.handlers = handlers;
+                return {export() {}, unexport() {}, emit_signal() {}};
+            },
+        },
+    };
+    const GLib = {Variant, VariantType: class { constructor(type) { this.type = type; } }};
+    const Meta = {SelectionType: {CLIPBOARD: 1}};
+    const factory = {};
+    if (exposeAvailability)
+        factory.clipboard_source_is_available = receivedSelection => receivedSelection === selection && nativeAvailable;
+    const ClipboardBridge = new Function('Gio', 'GLib', 'Meta', 'global', `${source}; return ClipboardBridge;`)(
+        Gio, GLib, Meta, {display: {get_selection: () => selection}}
+    );
+    return {bridge: new ClipboardBridge(connection, factory), state};
+}
+
+async function invokeClipboard(runtime, method = 'VersionAsync', params = [], sender = ':1.daemon') {
+    let reply;
+    const invocation = {
+        get_sender: () => sender,
+        return_value: value => { reply = {value: value.deep_unpack()}; },
+        return_dbus_error: (_name, code) => { reply = {error: code}; },
+    };
+    await runtime.state.handlers[method](params, invocation);
+    return reply;
+}
+
 async function invokeShortcut(runtime, method, params, sender = ':1.host') {
     let reply;
     const invocation = {
@@ -315,6 +388,27 @@ async function invokeShortcut(runtime, method, params, sender = ':1.host') {
     assert.equal(runtime.state.unexports, 1, 'destroy unexports the D-Bus object');
     runtime.state.activated(null, 1);
     assert.equal(runtime.state.signals.length, 1, 'destroyed bridges never emit late activations');
+}
+
+{
+    const runtime = loadClipboardBridge({nativeAvailable: false});
+    const reply = await invokeClipboard(runtime);
+    assert.equal(reply.error, 'Unavailable', 'Version rejects a loaded native shim without the patched Mutter ABI');
+    assert.equal(runtime.state.inventoryCalls, 0, 'Version checks native availability without reading the clipboard snapshot');
+}
+
+{
+    const runtime = loadClipboardBridge({exposeAvailability: false});
+    const reply = await invokeClipboard(runtime);
+    assert.equal(reply.error, 'Unavailable', 'Version rejects a shim that does not export native availability');
+}
+
+{
+    const runtime = loadClipboardBridge();
+    assert.deepEqual((await invokeClipboard(runtime)).value, [2], 'the daemon owner may complete the native v2 handshake');
+    assert.deepEqual((await invokeClipboard(runtime, 'VersionAsync', [], ':1.gui')).value, [2], 'the GUI owner may complete the native v2 handshake');
+    assert.equal((await invokeClipboard(runtime, 'VersionAsync', [], ':1.other')).error, 'AccessDenied', 'foreign session peers cannot probe the clipboard bridge');
+    assert.equal((await invokeClipboard(runtime, 'SnapshotAsync', [], ':1.gui')).error, 'AccessDenied', 'the GUI owner cannot access clipboard payload metadata');
 }
 
 {

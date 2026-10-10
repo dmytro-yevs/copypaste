@@ -18,7 +18,7 @@ The bridge registers on KWin's existing session service (`org.kde.KWin`) at
 
 | Method or signal | Signature | Rule |
 | --- | --- | --- |
-| `Version` | `() -> u` | Always returns `2`. |
+| `Version` | `() -> u` | Returns `2` only to the current GUI or daemon session-bus owner. |
 | `Snapshot` | `() -> t, as, (s u u s)` | Returns exactly three top-level out arguments: generation, MIME names, and writer identity. |
 | `Read` | `(t s u) -> ay` | Reads only the supplied generation and MIME name. A replacement before completion is `StaleSelection`. |
 | `Write` | `(a{say}) -> t` | Creates a bounded KWin-owned selection source. |
@@ -36,8 +36,10 @@ compositor reads Wayland credentials from that same client before any payload
 read. The daemon must fail closed unless `status == "verified"`.
 
 Only the current unique owner of `app.copypaste.Daemon` with the KWin session
-UID can invoke the bridge. `Read` is bounded to 4 MiB and two seconds; `Write`
-allows at most 64 MIME types, 4 MiB each, and 32 MiB in total. The bridge
+UID can invoke `Snapshot`, `Read`, or `Write`. `Version` also accepts the
+current unique `app.copypaste.CopyPaste` GUI owner with that UID. `Read` is
+bounded to 4 MiB and two seconds; `Write` allows at most 64 MIME types, 4 MiB
+each, and 32 MiB in total. The bridge
 returns `AccessDenied`, `StaleSelection`, `UnsupportedMime`, `TooLarge`, or
 `Unavailable` as D-Bus errors. Authorization gives each D-Bus name and UID
 lookup a 250 ms bound. It allows one pending read and eight pending writes per

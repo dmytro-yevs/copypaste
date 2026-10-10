@@ -40,7 +40,7 @@ public:
     explicit CopyPasteClipboardBridge(QObject *parent = nullptr);
 
 public Q_SLOTS:
-    Q_SCRIPTABLE uint Version() const;
+    Q_SCRIPTABLE void Version(uint &version);
     Q_SCRIPTABLE void Snapshot(qulonglong &generation, QStringList &mimeTypes, CopyPasteWriterIdentity &identity);
     Q_SCRIPTABLE QByteArray Read(qulonglong generation, const QString &mimeType, uint maxBytes);
     Q_SCRIPTABLE qulonglong Write(const QMap<QString, QByteArray> &payloads);
@@ -55,7 +55,7 @@ private:
         CopyPasteWriterIdentity identity;
     };
 
-    bool authorize();
+    bool authorize(bool allowGui = false);
     void fail(const QString &code);
     bool isValidMimeType(const QString &mimeType) const;
     bool hasValidInventory(const AbstractDataSource *source) const;
