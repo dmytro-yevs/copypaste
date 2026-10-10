@@ -101,6 +101,39 @@ def verify_compositor_runtime(binding, receipt, native_format):
             raise ValueError("compositor runtime binding artifact is invalid")
 
 
+def verify_compositor_session(root: Path, receipt: dict) -> None:
+    if receipt.get("session") != "wayland":
+        if receipt.get("compositor_session") is not None:
+            raise ValueError("X11 qualification must not claim private Wayland compositor evidence")
+        return
+    value = receipt.get("compositor_session")
+    if not isinstance(value, dict) or set(value) != {"binding", "record"}:
+        raise ValueError("private Wayland compositor evidence is incomplete")
+    files = {}
+    for key in ("binding", "record"):
+        item = value[key]
+        if not isinstance(item, dict) or set(item) != {"name", "sha256", "size_bytes"}:
+            raise ValueError("private Wayland compositor attachment metadata is invalid")
+        path = regular_file(root, item["name"])
+        if item != {"name": path.name, "sha256": digest(path), "size_bytes": path.stat().st_size}:
+            raise ValueError("private Wayland compositor attachment differs")
+        files[key] = path
+    binding = json.loads(files["binding"].read_text(encoding="utf-8"))
+    record = json.loads(files["record"].read_text(encoding="utf-8"))
+    if binding != receipt.get("compositor_runtime"):
+        raise ValueError("private Wayland compositor binding differs from scenario")
+    required = {"schema", "binding_sha256", "session", "runtime_id", "desktop", "pid", "executable", "mapped_private_libraries"}
+    if (not isinstance(record, dict) or set(record) != required or record.get("schema") != 1
+            or record.get("binding_sha256") != digest(files["binding"]) or record.get("session") != "wayland"
+            or record.get("runtime_id") != binding.get("runtime_id") or record.get("desktop") != binding.get("desktop")
+            or not isinstance(record.get("pid"), int) or record["pid"] <= 1
+            or not isinstance(record.get("mapped_private_libraries"), list) or not record["mapped_private_libraries"]):
+        raise ValueError("private Wayland compositor session record is invalid")
+    marker = "libmutter" if binding["desktop"] == "GNOME" else "libkwin"
+    if not any(isinstance(item, dict) and marker in str(item.get("path", "")).lower() for item in record["mapped_private_libraries"]):
+        raise ValueError("private compositor library mapping is missing")
+
+
 def verify_public_compositor_runtime(root: Path, version: str, commit: str) -> list[dict]:
     helper = Path(__file__).with_name("stage-compositor-runtime-release.py")
     receipt_path = root / "production-receipt.json"
@@ -364,7 +397,10 @@ def verify(root: Path, artifacts: Path, version: str, commit: str, source_run_id
                 trace = json.loads(trace_path.read_text(encoding="utf-8"))
                 if receipt.get("compositor_runtime") != trace.get("compositor_runtime"):
                     raise ValueError(f"compositor runtime binding differs from trace: {name}")
+                if receipt.get("compositor_session") != trace.get("compositor_session"):
+                    raise ValueError(f"compositor session evidence differs from trace: {name}")
                 verify_compositor_runtime(receipt.get("compositor_runtime"), receipt, native_format)
+                verify_compositor_session(root, receipt)
                 if companions is not None:
                     binding = receipt["compositor_runtime"]
                     matches = [entry for entry in companions if entry.get("desktop") == desktop and entry.get("architecture") == architecture and entry.get("format") == native_format]
