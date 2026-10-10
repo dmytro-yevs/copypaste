@@ -130,10 +130,10 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
-            dbus-user-session gnome-shell gnome-session gnome-keyring \
+            dbus-user-session gnome-shell gnome-session gnome-keyring gnome-shell-extension-appindicator \
             kde-config-screenlocker kwin-wayland kwin-x11 plasma-workspace \
             libsecret-tools wl-clipboard wtype x11-utils xdotool xdg-desktop-portal \
-            xdg-desktop-portal-gnome xdg-desktop-portal-kde xvfb rpm cpio xclip python3-gi
+            xdg-desktop-portal-gnome xdg-desktop-portal-kde xvfb rpm cpio xclip python3-gi build-essential pkg-config libgtk-3-dev
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: production-linux-${{ matrix.architecture }}
@@ -173,7 +173,7 @@ jobs:
             fi
             scripts/release/run-fedora-plasma6-qualification.sh "${fedora_args[@]}" -- "${fedora_producer[@]}"
           else
-            dbus-run-session -- scripts/release/run-linux-native-desktop-session.sh \
+            scripts/release/run-linux-native-desktop-session.sh \
               --desktop GNOME --session "${{ matrix.session }}" -- "${producer[@]}"
           fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
