@@ -236,6 +236,62 @@ jobs:
       - name: Run X11, GNOME bridge, portal, PackageKit, restart, companion, and Wayland fixtures
         run: ./scripts/ci/test-linux-native-fixtures.sh
 
+  linux-mutter-bridges:
+    name: Mutter ${{ matrix.mutter }} bridge (${{ matrix.architecture }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        mutter: [46, 47]
+        architecture: [x86_64, aarch64]
+        include:
+          - { architecture: x86_64, runner: ubuntu-24.04 }
+          - { architecture: aarch64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Install upstream Mutter build dependencies
+        run: |
+          set -euo pipefail
+          sudo python3 - <<'PY'
+          import re
+          from pathlib import Path
+          source = Path('/etc/apt/sources.list.d/ubuntu.sources').read_text()
+          source, count = re.subn(r'^Types: deb$', 'Types: deb-src', source, flags=re.MULTILINE)
+          if not count:
+              raise ValueError('Ubuntu source repository configuration is unavailable')
+          Path('/etc/apt/sources.list.d/copypaste-mutter.sources').write_text(source)
+          PY
+          sudo apt-get update
+          sudo apt-get build-dep --yes --no-install-recommends mutter
+          sudo apt-get install --yes --no-install-recommends \
+            git meson ninja-build libmutter-14-dev gobject-introspection libgirepository1.0-dev
+      - name: Compile the stock-header shim and introspection metadata
+        run: make -C packaging/linux/desktop-integrations/gnome-shell-extension/native
+      - name: Compile the pinned patched Mutter library
+        working-directory: packaging/linux/desktop-integrations/gnome-shell-extension/mutter
+        run: ./verify-patch.sh "${{ matrix.mutter }}" "$RUNNER_TEMP/mutter-source" "$RUNNER_TEMP/mutter-build"
+
+  linux-kwin-bridges:
+    name: KWin ${{ matrix.kwin }} bridge (${{ matrix.architecture }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        kwin: ['6.0', '6.3']
+        architecture: [x86_64, aarch64]
+        include:
+          - { architecture: x86_64, runner: ubuntu-24.04, container_platform: linux/amd64 }
+          - { architecture: aarch64, runner: ubuntu-24.04-arm, container_platform: linux/arm64 }
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Compile and exercise the private Qt D-Bus wire fixture
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends cmake ninja-build qt6-base-dev dbus-x11
+          packaging/linux/desktop-integrations/kde-native-clipboard/test-wire.sh
+      - name: Compile the pinned patched KWin in an isolated Fedora builder
+        run: packaging/linux/desktop-integrations/kde-native-clipboard/run-fedora-build.sh "${{ matrix.container_platform }}" "${{ matrix.kwin }}"
+
   linux-pr-release-candidate:
     name: Linux release candidate (${{ matrix.architecture }})
     if: github.event_name == 'pull_request'
