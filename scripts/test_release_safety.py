@@ -286,7 +286,19 @@ class ReleaseSafetyTest(unittest.TestCase):
             {"name": "Compositor runtime metadata", "status": "completed", "conclusion": "success"},
             *[{"name": f"Compositor runtime producer / {row['name']}", "status": "completed", "conclusion": "success"} for row in jobs["jobs"]],
         ]}
-        verify(ci_run, ci_jobs, artifacts, "owner/repo", "commit")
+        ci_artifacts = {"artifacts": [*artifacts["artifacts"], *[
+            {"name": name, "expired": False, "workflow_run": {"id": 987, "head_sha": "commit"}}
+            for name in ("linux-pr-release-candidate-x86_64", "linux-pr-release-candidate-aarch64")
+        ]]}
+        verify(ci_run, ci_jobs, ci_artifacts, "owner/repo", "commit")
+        ci_artifacts["artifacts"][-1]["expired"] = True
+        with self.assertRaisesRegex(ValueError, "expired"):
+            verify(ci_run, ci_jobs, ci_artifacts, "owner/repo", "commit")
+        ci_artifacts["artifacts"][-1]["expired"] = False
+        ci_artifacts["artifacts"].append({"name": "unknown-artifact", "expired": False, "workflow_run": {"id": 987, "head_sha": "commit"}})
+        with self.assertRaisesRegex(ValueError, "inventory"):
+            verify(ci_run, ci_jobs, ci_artifacts, "owner/repo", "commit")
+        ci_artifacts["artifacts"].pop()
         ci_run["head_sha"] = "merge-commit"
         with self.assertRaisesRegex(ValueError, "trusted dispatch"):
             verify(ci_run, ci_jobs, artifacts, "owner/repo", "commit")

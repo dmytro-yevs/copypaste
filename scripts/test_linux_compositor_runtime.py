@@ -124,6 +124,8 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
         self.assertIn("libmutter-14-dev gobject-introspection libgirepository1.0-dev", workflow)
         self.assertIn("TAURI_SIGNING_PRIVATE_KEY", workflow)
         self.assertIn("workflow_call:", workflow)
+        self.assertIn("mkdir -p artifact/runtime", workflow)
+        self.assertNotIn("mkdir -p build/runtime-output", workflow)
 
     def test_ci_calls_the_producer_only_for_same_repository_pull_requests(self):
         workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
