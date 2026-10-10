@@ -18,6 +18,7 @@ void main() {
           'globalShortcuts': true,
           'remoteDesktop': 'active',
           'companion': 'active',
+          'clipboard': true,
           'quickPaste': true,
           'screenshotProtection': false,
         },
@@ -37,6 +38,7 @@ void main() {
     expect(status.globalShortcuts, isTrue);
     expect(status.remoteDesktop, LinuxRemoteDesktopState.active);
     expect(status.companion, LinuxCompanionState.active);
+    expect(status.clipboard, isTrue);
     expect(status.quickPaste, isTrue);
     expect(status.screenshotProtection, isFalse);
   });
