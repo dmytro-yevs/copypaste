@@ -655,7 +655,7 @@ checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 
 [[package]]
 name = "copypaste-cli"
-version = "1.0.23"
+version = "1.0.24"
 dependencies = [
  "backon",
  "clap",
@@ -672,11 +672,11 @@ dependencies = [
 
 [[package]]
 name = "copypaste-clock"
-version = "1.0.23"
+version = "1.0.24"
 
 [[package]]
 name = "copypaste-cloud"
-version = "1.0.23"
+version = "1.0.24"
 dependencies = [
  "argon2",
  "backon",
@@ -710,7 +710,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-core"
-version = "1.0.23"
+version = "1.0.24"
 dependencies = [
  "android-native-keyring-store",
  "base64",
@@ -754,7 +754,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-daemon"
-version = "1.0.23"
+version = "1.0.24"
 dependencies = [
  "anyhow",
  "backon",
@@ -810,7 +810,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-feedback"
-version = "1.0.23"
+version = "1.0.24"
 dependencies = [
  "tracing",
  "winsafe",
@@ -818,7 +818,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-flutter-bridge"
-version = "1.0.23"
+version = "1.0.24"
 dependencies = [
  "copypaste-core",
  "copypaste-ipc",
@@ -843,14 +843,14 @@ dependencies = [
 
 [[package]]
 name = "copypaste-fs"
-version = "1.0.23"
+version = "1.0.24"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "copypaste-ipc"
-version = "1.0.23"
+version = "1.0.24"
 dependencies = [
  "copypaste-module-sdk",
  "directories",
@@ -900,7 +900,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-modules"
-version = "1.0.23"
+version = "1.0.24"
 dependencies = [
  "copypaste-core",
  "copypaste-fs",
@@ -927,7 +927,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-p2p"
-version = "1.0.23"
+version = "1.0.24"
 dependencies = [
  "chacha20poly1305",
  "copypaste-clock",
@@ -962,7 +962,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-payload"
-version = "1.0.23"
+version = "1.0.24"
 dependencies = [
  "base64",
  "copypaste-ipc",
@@ -973,14 +973,14 @@ dependencies = [
 
 [[package]]
 name = "copypaste-retry"
-version = "1.0.23"
+version = "1.0.24"
 dependencies = [
  "backon",
 ]
 
 [[package]]
 name = "copypaste-runtime"
-version = "1.0.23"
+version = "1.0.24"
 dependencies = [
  "base64",
  "copypaste-core",
@@ -997,7 +997,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-runtime-log"
-version = "1.0.23"
+version = "1.0.24"
 dependencies = [
  "anyhow",
  "copypaste-clock",
@@ -1012,7 +1012,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-source-app"
-version = "1.0.23"
+version = "1.0.24"
 dependencies = [
  "base64",
  "image",
@@ -1027,7 +1027,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-sync"
-version = "1.0.23"
+version = "1.0.24"
 dependencies = [
  "base64",
  "copypaste-core",

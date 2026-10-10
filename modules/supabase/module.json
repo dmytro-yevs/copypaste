@@ -4,8 +4,8 @@
   "id": "copypaste.supabase",
   "title": "Supabase Sync",
   "description": "Sync encrypted clipboard history across macOS, Android, and Windows with your Supabase project.",
-  "version": "0.1.0",
-  "app_versions": ">=1.0.11, <2.0.0",
+  "version": "0.1.1",
+  "app_versions": ">=1.0.24, <2.0.0",
   "supported_platforms": [
     "macos",
     "android",
