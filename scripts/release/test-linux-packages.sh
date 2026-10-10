@@ -70,6 +70,9 @@ run_architecture() {
         test ! -e "$root/etc/xdg/autostart/com.copypaste.CopyPaste.desktop"
         test -f "$root/usr/share/gnome-shell/extensions/copypaste-quick-paste@copypaste.app/metadata.json"
         test -f "$root/usr/share/kwin/scripts/copypaste-quick-paste/metadata.desktop"
+        test -x "$root/usr/share/copypaste/desktop-integrations/kde-native-clipboard/apply-to-kwin-source.sh"
+        test -f "$root/usr/share/copypaste/desktop-integrations/kde-native-clipboard/patches/kwin-6.0.patch"
+        test -f "$root/usr/share/copypaste/desktop-integrations/kde-native-clipboard/patches/kwin-6.3.patch"
       done
       grep -F "\"kind\": \"deb\"" /tmp/deb/usr/lib/copypaste/package-metadata.json
       grep -F "\"kind\": \"rpm\"" /tmp/rpm/usr/lib/copypaste/package-metadata.json

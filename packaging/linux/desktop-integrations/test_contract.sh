@@ -5,6 +5,7 @@ root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 manifest="$root/manifest.json"
 gnome="$root/gnome-shell-extension"
 kde="$root/kde-kwin-script"
+native_kde="$root/kde-native-clipboard"
 
 jq -e '
   .schemaVersion == 1 and
@@ -20,7 +21,10 @@ jq -e '
     .packageId == "copypaste-quick-paste" and
     .hostDesktopFileName == "com.copypaste.CopyPaste" and
     .enable == "user" and
-    .supportedPlasmaVersions == ["6"])
+    .supportedPlasmaVersions == ["6"] and
+    .nativeClipboard.source == "kde-native-clipboard" and
+    .nativeClipboard.supportedKWinSourceVersions == ["6.0", "6.3"] and
+    .nativeClipboard.install == "distribution-source-package-only")
 ' "$manifest" >/dev/null
 
 jq -e '
@@ -101,3 +105,4 @@ kde_activate=$(rg -n -F "workspace.activateWindow(pending.window)" "$kde/content
 [ "$kde_activate" -gt 0 ]
 
 node "$root/test_runtime.mjs"
+"$native_kde/test-source-patches.sh"

@@ -55,7 +55,8 @@ EOF
 
 install -d "$STAGE/usr/lib/copypaste" "$STAGE/usr/bin" \
   "$STAGE/usr/share/applications" "$STAGE/usr/share/icons/hicolor/256x256/apps" \
-  "$STAGE/usr/share/gnome-shell/extensions" "$STAGE/usr/share/kwin/scripts"
+  "$STAGE/usr/share/gnome-shell/extensions" "$STAGE/usr/share/kwin/scripts" \
+  "$STAGE/usr/share/copypaste/desktop-integrations"
 cp -a "$BUNDLE/." "$STAGE/usr/lib/copypaste/"
 ln -s ../lib/copypaste/copypaste "$STAGE/usr/bin/copypaste"
 ln -s ../lib/copypaste/copypaste-cli "$STAGE/usr/bin/copypaste-cli"
@@ -65,6 +66,7 @@ install -m 644 "$DESKTOP_TEMPLATE" "$STAGE/usr/share/copypaste/autostart/com.cop
 install -m 644 "$ICON" "$STAGE/usr/share/icons/hicolor/256x256/apps/com.copypaste.CopyPaste.png"
 cp -a "$INTEGRATIONS/gnome-shell-extension" "$STAGE/usr/share/gnome-shell/extensions/copypaste-quick-paste@copypaste.app"
 cp -a "$INTEGRATIONS/kde-kwin-script" "$STAGE/usr/share/kwin/scripts/copypaste-quick-paste"
+cp -a "$INTEGRATIONS/kde-native-clipboard" "$STAGE/usr/share/copypaste/desktop-integrations/kde-native-clipboard"
 rm -rf "$STAGE/usr/share/gnome-shell/extensions/copypaste-quick-paste@copypaste.app/native/build"
 install -d "$STAGE/usr/share/gnome-shell/extensions/copypaste-quick-paste@copypaste.app/native/lib" \
   "$STAGE/usr/share/gnome-shell/extensions/copypaste-quick-paste@copypaste.app/native/typelib"
