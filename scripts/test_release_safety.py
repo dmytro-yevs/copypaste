@@ -485,7 +485,10 @@ class ReleaseSafetyTest(unittest.TestCase):
         fixture = (ROOT / "scripts/release/linux-native-fixture-driver.py").read_text(encoding="utf-8")
         self.assertIn("set_private_mode", fixture)
         self.assertIn("encrypted_restart_persistence", fixture)
-        self.assertIn("WaylandIntegration", fixture)
+        self.assertIn("linux-desktop-acceptance.py", fixture)
+        self.assertIn("linux-wayland-quick-paste.py", fixture)
+        self.assertIn("portal_keyboard_grant", fixture)
+        self.assertNotIn("Wayland companion authentication and portal keyboard grant require", fixture)
 
     def test_linux_arm64_flutter_bootstrap_uses_the_pinned_source_revision(self):
         action = (ROOT / ".github/actions/setup-flutter/action.yml").read_text(encoding="utf-8")

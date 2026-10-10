@@ -18,6 +18,7 @@ import socket
 import stat
 import hashlib
 import importlib.util
+import re
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -26,11 +27,16 @@ from urllib.parse import unquote, urlparse
 PROVIDER = Path(__file__).with_name("linux-clipboard-provider.py")
 X11_INPUT_TARGET = Path(__file__).with_name("linux-x11-input-target.c")
 MODULE_QUALIFICATION = Path(__file__).with_name("linux-module-qualification.py")
+DESKTOP_ACCEPTANCE = Path(__file__).with_name("linux-desktop-acceptance.py")
+WAYLAND_QUICK_PASTE = Path(__file__).with_name("linux-wayland-quick-paste.py")
+NATIVE_MEDIA = Path(__file__).with_name("linux-native-media.py")
 SOURCE_APPLICATION_ID = "org.copypaste.QualificationSource"
 SOURCE_APPLICATION_NAME = "CopyPaste Qualification Source"
 CAPTURE_TIMEOUT_SECONDS = 8
 UPGRADE_CANARY = "copypaste-upgrade-canary"
 PROC_ROOT = Path("/proc")
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
+WAYLAND_INPUT_TARGET_TITLE = "CopyPaste Qualification Wayland Input Target"
 
 
 def module_qualification_helper():
@@ -49,9 +55,220 @@ def run(argv, *, input_bytes=None, env=None, timeout=15):
 
 def emit_result(assertion, result):
     argv = result.args if isinstance(result.args, list) else [result.args]
+    assertions = [assertion] if isinstance(assertion, str) else assertion
     print("COPYPASTE_QUALIFICATION_COMMAND " + json.dumps({
-        "argv": [str(value) for value in argv], "returncode": result.returncode, "assertions": [assertion],
+        "argv": [str(value) for value in argv], "returncode": result.returncode, "assertions": assertions,
     }, separators=(",", ":")))
+
+
+def require_helper(path, description):
+    try:
+        details = path.lstat()
+    except OSError as error:
+        raise RuntimeError(f"{description} is unavailable") from error
+    if path.is_symlink() or not stat.S_ISREG(details.st_mode) or details.st_size <= 0:
+        raise RuntimeError(f"{description} must be a regular file")
+    return path
+
+
+def write_wayland_evidence(evidence_dir, name, receipt):
+    target = evidence_dir / name
+    if target.exists() or target.is_symlink():
+        raise RuntimeError("Wayland qualification evidence path already exists")
+    target.write_text(json.dumps(receipt, separators=(",", ":"), sort_keys=True) + "\n", encoding="utf-8")
+    os.chmod(target, 0o600)
+
+
+def require_sha256(value, description):
+    if not isinstance(value, str) or not SHA256.fullmatch(value):
+        raise RuntimeError(f"{description} is invalid")
+
+
+def require_wayland_text(value, description):
+    if not isinstance(value, str) or not value or len(value) > 128 or any(ord(character) < 0x20 for character in value):
+        raise RuntimeError(f"{description} is invalid")
+    return value
+
+
+def wayland_quick_paste_inputs(args):
+    fields = (
+        "app_permission_target", "app_permission_expect", "app_allow_target", "app_allow_expect",
+        "portal_allow_target", "portal_allow_expect",
+    )
+    values = {field: require_wayland_text(getattr(args, f"wayland_{field}"), field.replace("_", " ")) for field in fields}
+    for field in ("app_portal_dialog_pid", "portal_dialog_pid"):
+        value = getattr(args, f"wayland_{field}")
+        if type(value) is not int or value <= 0:
+            raise RuntimeError(f"{field.replace('_', ' ')} is invalid")
+        values[field] = value
+    return values
+
+
+def wayland_desktop_receipt(path, *, desktop, gui_pid):
+    try:
+        details = path.lstat()
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("Wayland desktop acceptance evidence is invalid") from error
+    if stat.S_ISLNK(details.st_mode) or not stat.S_ISREG(details.st_mode):
+        raise RuntimeError("Wayland desktop acceptance evidence is invalid")
+    required = {"schema", "desktop", "session", "gui_pid", "tray", "window", "notification", "history", "commands"}
+    if not isinstance(value, dict) or set(value) != required:
+        raise RuntimeError("Wayland desktop acceptance evidence is invalid")
+    if value["schema"] != 1 or value["desktop"] != desktop or value["session"] != "wayland" or value["gui_pid"] != gui_pid:
+        raise RuntimeError("Wayland desktop acceptance evidence does not bind the GUI")
+    tray = value["tray"]
+    window = value["window"]
+    notification = value["notification"]
+    history = value["history"]
+    commands = value["commands"]
+    if (not isinstance(tray, dict) or set(tray) != {"service", "menu_path", "open_item_id"}
+            or not isinstance(tray["service"], str) or not tray["service"]
+            or not isinstance(tray["menu_path"], list) or not all(type(item) is int and item >= 0 for item in tray["menu_path"])
+            or type(tray["open_item_id"]) is not int or tray["open_item_id"] < 0
+            or window != {"observer": "compositor_dbus_signal", "hide_show": "dbusmenu_open"}
+            or not isinstance(notification, dict) or type(notification.get("server_reply_id")) is not int or notification["server_reply_id"] <= 0
+            or not isinstance(history, dict) or type(history.get("new_item_count")) is not int or history["new_item_count"] < 1
+            or not isinstance(commands, list) or len(commands) != 2):
+        raise RuntimeError("Wayland desktop acceptance evidence is incomplete")
+    require_sha256(notification.get("capture_command_sha256"), "Wayland capture command digest")
+    menu_command, capture_command = commands
+    if (not isinstance(menu_command, dict) or set(menu_command) != {"argv", "returncode"}
+            or menu_command.get("returncode") != 0 or not isinstance(menu_command["argv"], list) or not menu_command["argv"]
+            or not all(isinstance(item, str) and item for item in menu_command["argv"])):
+        raise RuntimeError("Wayland desktop acceptance command evidence is invalid")
+    if (not isinstance(capture_command, dict) or set(capture_command) != {"argv_sha256", "returncode"}
+            or capture_command.get("returncode") != 0):
+        raise RuntimeError("Wayland desktop acceptance command evidence is invalid")
+    require_sha256(capture_command["argv_sha256"], "Wayland desktop acceptance command digest")
+    return value
+
+
+def wayland_quick_paste_receipt(value, *, gui_pid, inputs, marker):
+    required = {"schema", "kind", "actors", "target", "portal", "atspi"}
+    if not isinstance(value, dict) or set(value) != required or value.get("schema") != 1 or value.get("kind") != "wayland_quick_paste":
+        raise RuntimeError("Wayland Quick Paste receipt is invalid")
+    actors = value["actors"]
+    target = value["target"]
+    portal = value["portal"]
+    atspi = value["atspi"]
+    expected_actors = {
+        "gui_pid": gui_pid,
+        "app_portal_dialog_pid": inputs["app_portal_dialog_pid"],
+        "portal_dialog_pid": inputs["portal_dialog_pid"],
+    }
+    if type(gui_pid) is not int or gui_pid <= 0:
+        raise RuntimeError("Wayland Quick Paste GUI actor is invalid")
+    if not isinstance(actors, dict) or set(actors) != {"gui_pid", "app_portal_dialog_pid", "portal_dialog_pid", "input_target_pid"}:
+        raise RuntimeError("Wayland Quick Paste receipt actor identity is invalid")
+    if any(actors.get(name) != pid for name, pid in expected_actors.items()) or type(actors["input_target_pid"]) is not int or actors["input_target_pid"] <= 0:
+        raise RuntimeError("Wayland Quick Paste receipt actor identity does not match the requested actors")
+    if actors["input_target_pid"] in expected_actors.values():
+        raise RuntimeError("Wayland Quick Paste target actor is not separate")
+    if (not isinstance(target, dict) or set(target) != {"pid", "title_sha256", "marker_sha256"}
+            or target["pid"] != actors["input_target_pid"]):
+        raise RuntimeError("Wayland Quick Paste target evidence is invalid")
+    require_sha256(target["title_sha256"], "Wayland Quick Paste target title digest")
+    if target["title_sha256"] != hashlib.sha256(WAYLAND_INPUT_TARGET_TITLE.encode("utf-8")).hexdigest():
+        raise RuntimeError("Wayland Quick Paste target title digest does not match")
+    if target["marker_sha256"] != hashlib.sha256(marker.encode("utf-8")).hexdigest():
+        raise RuntimeError("Wayland Quick Paste target marker digest does not match")
+    if (not isinstance(portal, dict) or set(portal) != {"input_calls", "session_sha256"}
+            or type(portal["input_calls"]) is not int or portal["input_calls"] < 8):
+        raise RuntimeError("Wayland Quick Paste portal evidence is invalid")
+    require_sha256(portal["session_sha256"], "Wayland Quick Paste portal session digest")
+    if not isinstance(atspi, dict) or set(atspi) != {"application_click_sha256", "application_consent_sha256", "portal_click_sha256"}:
+        raise RuntimeError("Wayland Quick Paste media evidence is invalid")
+    for name, digest in atspi.items():
+        require_sha256(digest, f"Wayland Quick Paste {name}")
+    return value
+
+
+def wayland_helper_receipt(output):
+    records = []
+    prefix = "COPYPASTE_QUALIFICATION_WAYLAND "
+    for line in output.splitlines():
+        if line.startswith(prefix):
+            try:
+                records.append(json.loads(line.removeprefix(prefix)))
+            except json.JSONDecodeError as error:
+                raise RuntimeError("Wayland Quick Paste helper emitted invalid JSON") from error
+        elif line:
+            raise RuntimeError("Wayland Quick Paste helper emitted unstructured output")
+    if len(records) != 1:
+        raise RuntimeError("Wayland Quick Paste helper did not emit exactly one receipt")
+    return records[0]
+
+
+def desktop_acceptance_capture_command(workspace, environment):
+    """Build the real GTK source command invoked by the tray observer."""
+    require_helper(PROVIDER, "native clipboard provider")
+    helper = gtk_provider_helper(workspace, environment)
+    directory = workspace / f"desktop-acceptance-{time.monotonic_ns()}"
+    directory.mkdir(mode=0o700)
+    payload = directory / "payload"
+    payload.write_bytes(b"copypaste-desktop-notification-fixture")
+    os.chmod(payload, 0o600)
+    manifest = directory / "manifest.json"
+    manifest.write_text(json.dumps({
+        "application_id": SOURCE_APPLICATION_ID,
+        "offers": [{"mime": "text/plain;charset=utf-8", "path": str(payload)}],
+    }, separators=(",", ":")), encoding="utf-8")
+    os.chmod(manifest, 0o600)
+    return [
+        sys.executable, str(PROVIDER), "--helper", str(helper), "--manifest", str(manifest),
+        "--ready-file", str(directory / "ready"), "--activity-log", str(directory / "activity.jsonl"),
+        "--hold-seconds", "8",
+    ]
+
+
+def require_wayland_qualification(args, *, gui_pid, cli, environment, workspace, socket_path):
+    """Exercise actual tray, portal, and AT-SPI actors before emitting Wayland assertions."""
+    inputs = wayland_quick_paste_inputs(args)
+    tray_helper = require_helper(args.wayland_desktop_acceptance_helper, "Wayland desktop acceptance helper")
+    quick_paste_helper = require_helper(args.wayland_quick_paste_helper, "Wayland Quick Paste helper")
+    actor = require_helper(args.wayland_actor, "Wayland AT-SPI actor")
+    capture_command = desktop_acceptance_capture_command(workspace, environment)
+    tray_result = run(
+        [
+            sys.executable, str(tray_helper), "--gui-pid", str(gui_pid), "--desktop", args.desktop,
+            "--session", "wayland", "--cli", str(cli), "--socket", str(socket_path),
+            "--capture-command", json.dumps(capture_command, separators=(",", ":")),
+            "--evidence-dir", str(args.evidence_dir),
+        ],
+        env=environment,
+        timeout=45,
+    )
+    wayland_desktop_receipt(
+        args.evidence_dir / "linux-desktop-acceptance.json", desktop=args.desktop, gui_pid=gui_pid,
+    )
+    emit_result("tray_window_notification", tray_result)
+
+    marker = "copypaste-wayland-quick-paste-fixture"
+    quick_paste_result = run(
+        [
+            sys.executable, str(quick_paste_helper), "--gui-pid", str(gui_pid),
+            "--workspace", str(workspace), "--marker", marker, "--actor", str(actor),
+            "--app-permission-target", inputs["app_permission_target"],
+            "--app-permission-expect", inputs["app_permission_expect"],
+            "--app-portal-dialog-pid", str(inputs["app_portal_dialog_pid"]),
+            "--app-allow-target", inputs["app_allow_target"],
+            "--app-allow-expect", inputs["app_allow_expect"],
+            "--portal-dialog-pid", str(inputs["portal_dialog_pid"]),
+            "--portal-allow-target", inputs["portal_allow_target"],
+            "--portal-allow-expect", inputs["portal_allow_expect"],
+        ],
+        env=environment,
+        timeout=75,
+    )
+    receipt = wayland_quick_paste_receipt(
+        wayland_helper_receipt(quick_paste_result.stdout.decode("utf-8")),
+        gui_pid=gui_pid, inputs=inputs, marker=marker,
+    )
+    write_wayland_evidence(args.evidence_dir, "wayland-quick-paste.json", receipt)
+    emit_result(
+        ["quick_paste_hotkey", "quick_paste_focus_restore", "portal_keyboard_grant"], quick_paste_result,
+    )
 
 
 def qualification_workspace(path):
@@ -600,6 +817,17 @@ def main():
     parser.add_argument("--previous-artifacts", type=Path)
     parser.add_argument("--previous-version")
     parser.add_argument("--first-install-baseline", action="store_true")
+    parser.add_argument("--wayland-desktop-acceptance-helper", type=Path, default=DESKTOP_ACCEPTANCE)
+    parser.add_argument("--wayland-quick-paste-helper", type=Path, default=WAYLAND_QUICK_PASTE)
+    parser.add_argument("--wayland-actor", type=Path, default=NATIVE_MEDIA)
+    parser.add_argument("--wayland-app-permission-target")
+    parser.add_argument("--wayland-app-permission-expect")
+    parser.add_argument("--wayland-app-portal-dialog-pid", type=int)
+    parser.add_argument("--wayland-app-allow-target")
+    parser.add_argument("--wayland-app-allow-expect")
+    parser.add_argument("--wayland-portal-dialog-pid", type=int)
+    parser.add_argument("--wayland-portal-allow-target")
+    parser.add_argument("--wayland-portal-allow-expect")
     args = parser.parse_args()
     if args.first_install_baseline == (args.previous_artifacts is not None):
         raise ValueError("select exactly one of a prior release or first-install baseline")
@@ -757,8 +985,10 @@ def main():
                 if args.session == "x11":
                     require_x11_quick_paste(cli, cli_environment, workspace)
                 else:
-                    run(["gdbus", "introspect", "--session", "--dest", "app.copypaste.CopyPaste", "--object-path", "/app/copypaste/WaylandIntegration"])
-                    raise RuntimeError("Wayland companion authentication and portal keyboard grant require an enabled companion transaction")
+                    require_wayland_qualification(
+                        args, gui_pid=app.pid, cli=cli, environment=environment,
+                        workspace=workspace, socket_path=runtime_socket,
+                    )
                 emit_runtime(args.runtime_format, prefix)
             finally:
                 app.terminate()
