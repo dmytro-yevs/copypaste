@@ -27,6 +27,10 @@ from typing import Any
 SOURCE = Path(__file__).with_name("linux-gtk-file-drop-source.c")
 WAYLAND_QUICK_PASTE = Path(__file__).with_name("linux-wayland-quick-paste.py")
 WAYLAND_PORTAL_MODULE = "copypaste_qualification_wayland_portal"
+GEOMETRY_BUS_NAME = "app.copypaste.QualificationGeometry"
+GEOMETRY_OBJECT_PATH = "/app/copypaste/QualificationGeometry"
+GEOMETRY_INTERFACE = "app.copypaste.QualificationGeometry"
+GEOMETRY_OWNER_PID_ENV = "COPYPASTE_QUALIFICATION_GEOMETRY_OWNER_PID"
 MAX_FIXTURE_BYTES = 8 * 1024
 SOURCE_TITLE = "CopyPaste Qualification File Drop Source"
 TARGET_TITLE = "CopyPaste"
@@ -47,6 +51,16 @@ class Bounds:
 
     def point(self, horizontal: float = 0.5, vertical: float = 0.5) -> tuple[int, int]:
         return (self.x + max(1, int(self.width * horizontal)), self.y + max(1, int(self.height * vertical)))
+
+    def contains(self, point: tuple[int, int]) -> bool:
+        return self.x <= point[0] < self.x + self.width and self.y <= point[1] < self.y + self.height
+
+
+@dataclass(frozen=True)
+class CompositorGeometry:
+    frame: Bounds
+    buffer: Bounds
+    stacking: int
 
 
 def require_regular(path: Path, description: str, maximum: int = 256 * 1024) -> Path:
@@ -250,6 +264,7 @@ def load_wayland_portal() -> Any:
 
 
 def atspi_bounds(registry: Any, pid: int, name: str) -> Bounds:
+    """Return one AT-SPI window-local rectangle for the PID-bound named node."""
     try:
         desktop = registry.getDesktop(0)
         def node_pid(node: Any) -> int | None:
@@ -258,17 +273,99 @@ def atspi_bounds(registry: Any, pid: int, name: str) -> Bounds:
             return value if isinstance(value, int) else None
         application = next(candidate for candidate in (desktop.getChildAtIndex(index) for index in range(desktop.childCount)) if node_pid(candidate) == pid)
         nodes = [application]
+        matches = []
         while nodes:
             node = nodes.pop()
             if node.name == name:
-                rect = node.queryComponent().getExtents(0)
+                # ATK_XY_WINDOW is relative to the client toplevel. GTK3's
+                # Wayland SCREEN coordinates are a per-client fake root.
+                rect = node.queryComponent().getExtents(1)
                 bounds = Bounds(rect.x, rect.y, rect.width, rect.height)
                 if bounds.width >= 32 and bounds.height >= 32:
-                    return bounds
+                    matches.append(bounds)
             nodes.extend(node.getChildAtIndex(index) for index in range(node.childCount))
+        if len(matches) == 1:
+            return matches[0]
     except Exception:
         pass
     raise FileDragQualificationError(f"accessible bounds for {name} are unavailable")
+
+
+def compositor_geometry(Gio: Any, GLib: Any, pid: int, title: str) -> CompositorGeometry:
+    if pid <= 0 or not title:
+        raise FileDragQualificationError("compositor geometry identity is invalid")
+    try:
+        connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        owner = geometry_owner(connection, Gio, GLib)
+        reply = connection.call_sync(
+            GEOMETRY_BUS_NAME, GEOMETRY_OBJECT_PATH, GEOMETRY_INTERFACE, "Lookup",
+            GLib.Variant("(us)", (pid, title)), GLib.VariantType("(iiiiiiiii)"),
+            Gio.DBusCallFlags.NONE, 2000, None,
+        )
+        values = reply.unpack()
+        if not isinstance(values, tuple) or len(values) != 9 or not all(isinstance(value, int) for value in values):
+            raise ValueError("invalid reply")
+        geometry = CompositorGeometry(Bounds(*values[:4]), Bounds(*values[4:8]), values[8])
+        if geometry_owner(connection, Gio, GLib) != owner:
+            raise ValueError("geometry owner changed")
+    except Exception as error:
+        raise FileDragQualificationError(f"compositor geometry for {title} is unavailable") from error
+    for rect in (geometry.frame, geometry.buffer):
+        if rect.width < 32 or rect.height < 32:
+            raise FileDragQualificationError(f"compositor geometry for {title} is unusable")
+    return geometry
+
+
+def geometry_owner(connection: Any, Gio: Any, GLib: Any) -> str:
+    try:
+        expected_pid = int(os.environ[GEOMETRY_OWNER_PID_ENV])
+        if expected_pid <= 1:
+            raise ValueError("invalid expected owner")
+        owner_reply = connection.call_sync(
+            "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetNameOwner",
+            GLib.Variant("(s)", (GEOMETRY_BUS_NAME,)), GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE, 2000, None,
+        )
+        owner = owner_reply.unpack()[0]
+        pid_reply = connection.call_sync(
+            "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetConnectionUnixProcessID",
+            GLib.Variant("(s)", (owner,)), GLib.VariantType("(u)"), Gio.DBusCallFlags.NONE, 2000, None,
+        )
+        if not isinstance(owner, str) or not owner or pid_reply.unpack() != (expected_pid,):
+            raise ValueError("unexpected owner")
+        return owner
+    except Exception as error:
+        raise FileDragQualificationError("compositor geometry owner is unavailable") from error
+
+
+def absolute_atspi_bounds(local: Bounds, geometry: CompositorGeometry, title: str) -> Bounds:
+    if local.x < 0 or local.y < 0 or local.width < 32 or local.height < 32:
+        raise FileDragQualificationError(f"accessible local bounds for {title} are invalid")
+    if local.x + local.width > geometry.buffer.width or local.y + local.height > geometry.buffer.height:
+        raise FileDragQualificationError(f"accessible local bounds for {title} exceed its compositor buffer")
+    return Bounds(geometry.buffer.x + local.x, geometry.buffer.y + local.y, local.width, local.height)
+
+
+def compositor_owns_point(Gio: Any, GLib: Any, pid: int, title: str, point: tuple[int, int]) -> bool:
+    try:
+        connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        owner = geometry_owner(connection, Gio, GLib)
+        reply = connection.call_sync(
+            GEOMETRY_BUS_NAME, GEOMETRY_OBJECT_PATH, GEOMETRY_INTERFACE, "PointBelongsTo",
+            GLib.Variant("(usii)", (pid, title, *point)), GLib.VariantType("(b)"),
+            Gio.DBusCallFlags.NONE, 2000, None,
+        )
+        values = reply.unpack()
+        return geometry_owner(connection, Gio, GLib) == owner and isinstance(values, tuple) and len(values) == 1 and values[0] is True
+    except Exception as error:
+        raise FileDragQualificationError(f"compositor hit test for {title} is unavailable") from error
+
+
+def owned_point(Gio: Any, GLib: Any, pid: int, title: str, bounds: Bounds) -> tuple[int, int]:
+    for horizontal, vertical in ((0.5, 0.5), (0.72, 0.5), (0.28, 0.5), (0.5, 0.28), (0.5, 0.72)):
+        point = bounds.point(horizontal, vertical)
+        if compositor_owns_point(Gio, GLib, pid, title, point):
+            return point
+    raise FileDragQualificationError(f"no compositor-visible injection point is available for {title}")
 
 
 class PortalPointer:
@@ -318,10 +415,14 @@ def drag_wayland(source: DragSource, gui_pid: int, environment: dict[str, str]) 
     helper = load_wayland_portal()
     if not hasattr(helper, "PortalKeyboard") or not hasattr(helper, "click_owned_portal_consent") or not hasattr(helper, "token"):
         raise FileDragQualificationError("Wayland portal helper does not expose dynamic consent")
-    source_bounds = wait_for(lambda: _atspi_bounds_or_none(pyatspi.Registry, source.process.pid, "Drag qualification file"), "GTK file-drag source is absent from the AT-SPI desktop")
-    target_bounds = wait_for(lambda: _atspi_bounds_or_none(pyatspi.Registry, gui_pid, TARGET_TITLE), "installed CopyPaste window is absent from the AT-SPI desktop")
+    source_local = wait_for(lambda: _atspi_bounds_or_none(pyatspi.Registry, source.process.pid, "Drag qualification file"), "GTK file-drag source is absent from the AT-SPI desktop")
+    target_local = wait_for(lambda: _atspi_bounds_or_none(pyatspi.Registry, gui_pid, TARGET_TITLE), "installed CopyPaste window is absent from the AT-SPI desktop")
+    source_geometry = wait_for(lambda: _compositor_geometry_or_none(Gio, GLib, source.process.pid, SOURCE_TITLE), "GTK file-drag source is absent from compositor geometry")
+    target_geometry = wait_for(lambda: _compositor_geometry_or_none(Gio, GLib, gui_pid, TARGET_TITLE), "installed CopyPaste window is absent from compositor geometry")
+    source_bounds = absolute_atspi_bounds(source_local, source_geometry, SOURCE_TITLE)
+    target_bounds = absolute_atspi_bounds(target_local, target_geometry, TARGET_TITLE)
     display = open_wayland_display(Gdk, environment["WAYLAND_DISPLAY"])
-    require_single_wayland_layout(display, source_bounds, target_bounds)
+    require_single_wayland_layout(display, source_geometry, target_geometry, source_bounds, target_bounds)
     portal = helper.PortalKeyboard(Gio, GLib)
     pointer = PortalPointer(portal, helper, GLib)
     try:
@@ -329,8 +430,13 @@ def drag_wayland(source: DragSource, gui_pid: int, environment: dict[str, str]) 
         pointer.grant(lambda: helper.click_owned_portal_consent(portal))
         if portal.require_gui_owner(gui_pid) != gui_owner:
             raise FileDragQualificationError("CopyPaste GUI D-Bus owner changed before file drag")
-        source_point = source_bounds.point()
-        target_point = target_bounds.point(horizontal=0.72)
+        source_geometry = compositor_geometry(Gio, GLib, source.process.pid, SOURCE_TITLE)
+        target_geometry = compositor_geometry(Gio, GLib, gui_pid, TARGET_TITLE)
+        source_bounds = absolute_atspi_bounds(source_local, source_geometry, SOURCE_TITLE)
+        target_bounds = absolute_atspi_bounds(target_local, target_geometry, TARGET_TITLE)
+        require_single_wayland_layout(display, source_geometry, target_geometry, source_bounds, target_bounds)
+        source_point = owned_point(Gio, GLib, source.process.pid, SOURCE_TITLE, source_bounds)
+        target_point = owned_point(Gio, GLib, gui_pid, TARGET_TITLE, target_bounds)
         # Relative portal motion has no public query for the current pointer.
         # First clamp it to the desktop origin, then move to the external GTK
         # source using the source's AT-SPI screen coordinates.
@@ -356,6 +462,13 @@ def _atspi_bounds_or_none(registry: Any, pid: int, name: str) -> Bounds | None:
         return None
 
 
+def _compositor_geometry_or_none(Gio: Any, GLib: Any, pid: int, title: str) -> CompositorGeometry | None:
+    try:
+        return compositor_geometry(Gio, GLib, pid, title)
+    except FileDragQualificationError:
+        return None
+
+
 def open_wayland_display(gdk: Any, name: str) -> Any:
     try:
         display = gdk.Display.open(name)
@@ -366,16 +479,20 @@ def open_wayland_display(gdk: Any, name: str) -> Any:
     return display
 
 
-def require_single_wayland_layout(display: Any, source: Bounds, target: Bounds) -> Bounds:
+def require_single_wayland_layout(display: Any, source: CompositorGeometry, target: CompositorGeometry,
+                                  source_bounds: Bounds, target_bounds: Bounds) -> Bounds:
     if display.get_n_monitors() != 1:
         raise FileDragQualificationError("Wayland file drag requires one visible monitor")
     geometry = display.get_monitor(0).get_geometry()
     layout = Bounds(geometry.x, geometry.y, geometry.width, geometry.height)
     if layout.x != 0 or layout.y != 0 or layout.width <= 0 or layout.height <= 0:
         raise FileDragQualificationError("Wayland monitor layout does not have a nonnegative origin")
-    for point in (source.point(), target.point(horizontal=0.72)):
-        if not (layout.x <= point[0] < layout.x + layout.width and layout.y <= point[1] < layout.y + layout.height):
-            raise FileDragQualificationError("Wayland file-drag target is outside the visible monitor")
+    def inside(rect: Bounds) -> bool:
+        return (layout.x <= rect.x and layout.y <= rect.y and rect.x + rect.width <= layout.x + layout.width
+                and rect.y + rect.height <= layout.y + layout.height)
+    for rect in (source.frame, target.frame, source_bounds, target_bounds):
+        if not inside(rect):
+            raise FileDragQualificationError("Wayland file-drag geometry is outside the visible monitor")
     return layout
 
 

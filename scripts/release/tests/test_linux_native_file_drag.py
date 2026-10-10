@@ -40,16 +40,82 @@ class LinuxNativeFileDragTest(unittest.TestCase):
             def get_monitor(self, _index):
                 return Monitor()
 
-        source = drag.Bounds(100, 150, 320, 96)
-        target = drag.Bounds(600, 120, 480, 600)
-        self.assertEqual(drag.require_single_wayland_layout(Display(), source, target), drag.Bounds(0, 0, 1280, 720))
+        source = drag.CompositorGeometry(drag.Bounds(100, 150, 320, 96), drag.Bounds(100, 150, 320, 96), 1)
+        target = drag.CompositorGeometry(drag.Bounds(600, 120, 480, 600), drag.Bounds(600, 120, 480, 600), 2)
+        self.assertEqual(
+            drag.require_single_wayland_layout(Display(), source, target, source.buffer, target.buffer),
+            drag.Bounds(0, 0, 1280, 720),
+        )
 
         class MultiDisplay(Display):
             def get_n_monitors(self):
                 return 2
 
         with self.assertRaisesRegex(drag.FileDragQualificationError, "one visible monitor"):
-            drag.require_single_wayland_layout(MultiDisplay(), source, target)
+            drag.require_single_wayland_layout(MultiDisplay(), source, target, source.buffer, target.buffer)
+
+    def test_wayland_geometry_composes_window_local_accessibility_bounds_from_buffer_origin(self):
+        geometry = drag.CompositorGeometry(drag.Bounds(100, 120, 320, 96), drag.Bounds(92, 112, 336, 112), 3)
+        self.assertEqual(
+            drag.absolute_atspi_bounds(drag.Bounds(8, 8, 200, 72), geometry, "source"),
+            drag.Bounds(100, 120, 200, 72),
+        )
+        with self.assertRaisesRegex(drag.FileDragQualificationError, "exceed"):
+            drag.absolute_atspi_bounds(drag.Bounds(300, 8, 72, 72), geometry, "source")
+
+    def test_wayland_compositor_geometry_uses_the_pid_and_title_bound_fixture_interface(self):
+        calls = []
+
+        class Reply:
+            @staticmethod
+            def unpack():
+                return (10, 20, 300, 200, 4, 8, 312, 216, 9)
+
+        class Connection:
+            @staticmethod
+            def call_sync(*args):
+                calls.append(args)
+                if args[3] == "GetNameOwner":
+                    return type("Owner", (), {"unpack": staticmethod(lambda: (":1.1",))})()
+                if args[3] == "GetConnectionUnixProcessID":
+                    return type("Pid", (), {"unpack": staticmethod(lambda: (42,))})()
+                return Reply()
+
+        class Gio:
+            class BusType:
+                SESSION = "session"
+
+            class DBusCallFlags:
+                NONE = "none"
+
+            @staticmethod
+            def bus_get_sync(bus_type, _cancellable):
+                self.assertEqual(bus_type, Gio.BusType.SESSION)
+                return Connection()
+
+        class GLib:
+            @staticmethod
+            def Variant(signature, values):
+                return (signature, values)
+
+            @staticmethod
+            def VariantType(signature):
+                return signature
+
+        with mock.patch.dict(drag.os.environ, {drag.GEOMETRY_OWNER_PID_ENV: "42"}):
+            geometry = drag.compositor_geometry(Gio, GLib, 77, "CopyPaste")
+        self.assertEqual(geometry.buffer, drag.Bounds(4, 8, 312, 216))
+        lookup = next(call for call in calls if call[3] == "Lookup")
+        self.assertEqual(lookup[0:4], (drag.GEOMETRY_BUS_NAME, drag.GEOMETRY_OBJECT_PATH, drag.GEOMETRY_INTERFACE, "Lookup"))
+        self.assertEqual(lookup[4], ("(us)", (77, "CopyPaste")))
+
+    def test_wayland_injection_points_require_compositor_hit_testing(self):
+        bounds = drag.Bounds(100, 100, 200, 100)
+        with mock.patch.object(drag, "compositor_owns_point", side_effect=[False, True]):
+            self.assertEqual(drag.owned_point(None, None, 7, "CopyPaste", bounds), (244, 150))
+        with mock.patch.object(drag, "compositor_owns_point", return_value=False):
+            with self.assertRaisesRegex(drag.FileDragQualificationError, "compositor-visible"):
+                drag.owned_point(None, None, 7, "CopyPaste", bounds)
 
     def test_wayland_display_must_open_the_requested_socket(self):
         class Display:
