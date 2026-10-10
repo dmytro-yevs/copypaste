@@ -24,6 +24,13 @@ distribution companion, then chooses the separate session at login. The same
 Version 2 handshake gates clipboard capture for AppImage, `.deb`, and `.rpm`
 installs on both architectures.
 
+The KWin 6.0 runtime keeps its KDecoration2 dependency closure inside its
+private prefix. Its production receipt must list the actual KDecoration2
+SONAME closure found by the producer, and the package validation must show that
+its RPM has no `Requires`, `Obsoletes`, or `Conflicts` on the vendor
+`kdecoration` packages. Installing this private runtime must never downgrade or
+replace a user's KDecoration3 desktop.
+
 The package must never overwrite `/usr/bin/kwin_wayland`, register an
 `alternatives` target, change a display manager default, enable a service, or
 restart a compositor. Its installation only makes the session visible. The user
