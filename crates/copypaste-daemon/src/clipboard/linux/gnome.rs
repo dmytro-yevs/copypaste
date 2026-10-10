@@ -5,6 +5,7 @@
 //! another clipboard implementation exists.
 
 use std::collections::HashMap;
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -70,6 +71,7 @@ struct State {
     owned_sequence: Option<u64>,
     mimes: Vec<String>,
     source: Option<SourceIdentity>,
+    owner: Option<String>,
 }
 
 pub(in crate::clipboard) struct GnomeClipboard {
@@ -316,7 +318,15 @@ fn worker(commands: mpsc::Receiver<Command>, state: Arc<Mutex<State>>, bridge: B
             let _ = connection.close();
             return;
         }
-        let proxy = Proxy::new(&connection, bridge.service, PATH, INTERFACE).ok();
+        let owner = state
+            .lock()
+            .ok()
+            .and_then(|state| state.active.then(|| state.owner.clone()).flatten());
+        let proxy = owner.as_deref().and_then(|owner| {
+            owner_is_current(&connection, bridge, owner)
+                .then(|| Proxy::new(&connection, owner, PATH, INTERFACE).ok())
+                .flatten()
+        });
         match command {
             Command::Read {
                 sequence,
@@ -326,13 +336,39 @@ fn worker(commands: mpsc::Receiver<Command>, state: Arc<Mutex<State>>, bridge: B
             } => {
                 let bytes = proxy
                     .as_ref()
-                    .and_then(|proxy| proxy.call("Read", &(sequence, mime.as_str(), limit)).ok());
+                    .and_then(|proxy| proxy.call("Read", &(sequence, mime.as_str(), limit)).ok())
+                    .filter(|_| {
+                        owner.as_deref().is_some_and(|owner| {
+                            owner_is_current(&connection, bridge, owner)
+                                && state.lock().is_ok_and(|state| {
+                                    state.active && state.owner.as_deref() == Some(owner)
+                                })
+                        })
+                    });
+                if bytes.is_none() {
+                    if let Some(owner) = owner.as_deref() {
+                        invalidate_owner(&state, Some(owner));
+                    }
+                }
                 let _ = reply.send(bytes);
             }
             Command::Write { values, reply } => {
                 let sequence = proxy
                     .as_ref()
-                    .and_then(|proxy| proxy.call("Write", &(values,)).ok());
+                    .and_then(|proxy| proxy.call("Write", &(values,)).ok())
+                    .filter(|_| {
+                        owner.as_deref().is_some_and(|owner| {
+                            owner_is_current(&connection, bridge, owner)
+                                && state.lock().is_ok_and(|state| {
+                                    state.active && state.owner.as_deref() == Some(owner)
+                                })
+                        })
+                    });
+                if sequence.is_none() {
+                    if let Some(owner) = owner.as_deref() {
+                        invalidate_owner(&state, Some(owner));
+                    }
+                }
                 let _ = reply.send(sequence);
             }
             Command::Stop => unreachable!("Stop returned before proxy dispatch"),
@@ -341,46 +377,107 @@ fn worker(commands: mpsc::Receiver<Command>, state: Arc<Mutex<State>>, bridge: B
 }
 
 fn activate(connection: &Connection, state: &Arc<Mutex<State>>, bridge: Bridge) {
-    let Ok(proxy) = Proxy::new(connection, bridge.service, PATH, INTERFACE) else {
+    let Some(epoch) = state.lock().ok().map(|state| state.epoch) else {
+        return;
+    };
+    let Some(owner) = verified_service_owner(connection, bridge) else {
+        return;
+    };
+    if let Ok(mut state) = state.lock() {
+        if state.epoch != epoch {
+            return;
+        }
+        state.active = false;
+        state.watching = false;
+        state.dirty = false;
+        state.sequence = 0;
+        state.owned_sequence = None;
+        state.mimes.clear();
+        state.source = None;
+        state.owner = Some(owner.clone());
+    } else {
+        return;
+    }
+    let (ready, subscribed) = mpsc::sync_channel(1);
+    watch_clipboard(
+        connection.clone(),
+        Arc::clone(state),
+        epoch,
+        owner.clone(),
+        ready,
+    );
+    if subscribed.recv_timeout(RPC_TIMEOUT).is_err() {
+        invalidate_owner(state, Some(&owner));
+        return;
+    }
+    let Ok(proxy) = Proxy::new(connection, owner.as_str(), PATH, INTERFACE) else {
+        invalidate_owner(state, Some(&owner));
         return;
     };
     let Ok(version) = proxy.call::<_, _, u32>("Version", &()) else {
+        invalidate_owner(state, Some(&owner));
         return;
     };
     if version != BRIDGE_VERSION {
+        invalidate_owner(state, Some(&owner));
         return;
     }
     let Ok((sequence, mimes, identity)) =
         proxy.call::<_, _, (u64, Vec<String>, (String, u32, u32, String))>("Snapshot", &())
     else {
+        invalidate_owner(state, Some(&owner));
         return;
     };
-    if !valid_mimes(&mimes) {
+    if !valid_mimes(&mimes) || !owner_is_current(connection, bridge, &owner) {
+        invalidate_owner(state, Some(&owner));
         return;
     }
     let source = SourceIdentity::from_wire(identity.0, identity.1, identity.2, identity.3);
-    let epoch = if let Ok(mut state) = state.lock() {
+    if let Ok(mut state) = state.lock() {
+        if state.epoch != epoch || state.owner.as_deref() != Some(owner.as_str()) {
+            return;
+        }
         state.active = true;
-        state.watching = false;
+        state.watching = true;
         state.dirty = false;
         state.sequence = sequence;
         state.mimes = mimes;
         state.source = source;
-        state.epoch
-    } else {
-        return;
+    }
+}
+
+fn verified_service_owner(connection: &Connection, bridge: Bridge) -> Option<String> {
+    let Ok(bus) = Proxy::new(
+        connection,
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+    ) else {
+        return None;
     };
-    let (ready, subscribed) = mpsc::sync_channel(1);
-    watch_clipboard(connection.clone(), Arc::clone(state), epoch, ready, bridge);
-    if subscribed.recv_timeout(RPC_TIMEOUT).is_err() {
-        invalidate(state);
-        return;
-    }
-    if let Ok(mut state) = state.lock() {
-        if state.epoch == epoch && state.active {
-            state.watching = true;
-        }
-    }
+    let Ok(owner) = bus.call::<_, _, String>("GetNameOwner", &(bridge.service,)) else {
+        return None;
+    };
+    let Ok(uid) = bus.call::<_, _, u32>("GetConnectionUnixUser", &(owner.as_str(),)) else {
+        return None;
+    };
+    std::fs::metadata("/proc/self")
+        .ok()
+        .filter(|current| current.uid() == uid)
+        .map(|_| owner)
+}
+
+fn owner_is_current(connection: &Connection, bridge: Bridge, expected: &str) -> bool {
+    let Ok(bus) = Proxy::new(
+        connection,
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+    ) else {
+        return false;
+    };
+    bus.call::<_, _, String>("GetNameOwner", &(bridge.service,))
+        .is_ok_and(|owner| owner == expected)
 }
 
 fn watch_service(connection: Connection, state: Arc<Mutex<State>>, bridge: Bridge) {
@@ -416,11 +513,11 @@ fn watch_clipboard(
     connection: Connection,
     state: Arc<Mutex<State>>,
     epoch: u64,
+    owner: String,
     ready: mpsc::SyncSender<()>,
-    bridge: Bridge,
 ) {
     thread::spawn(move || {
-        let Ok(proxy) = Proxy::new(&connection, bridge.service, PATH, INTERFACE) else {
+        let Ok(proxy) = Proxy::new(&connection, owner.as_str(), PATH, INTERFACE) else {
             return;
         };
         let Ok(signals) = proxy.receive_signal("OwnerChanged") else {
@@ -433,13 +530,15 @@ fn watch_clipboard(
                     .body()
                     .deserialize::<(u64, Vec<String>, (String, u32, u32, String))>()
             else {
-                continue;
+                invalidate_owner(&state, Some(&owner));
+                break;
             };
             if !valid_mimes(&mimes) {
-                continue;
+                invalidate_owner(&state, Some(&owner));
+                break;
             }
             if let Ok(mut state) = state.lock() {
-                if state.epoch != epoch || !state.active {
+                if state.epoch != epoch || state.owner.as_deref() != Some(owner.as_str()) {
                     break;
                 }
                 apply_owner_changed(
@@ -452,7 +551,7 @@ fn watch_clipboard(
             }
         }
         if let Ok(mut state) = state.lock() {
-            if state.epoch == epoch {
+            if state.epoch == epoch && state.owner.as_deref() == Some(owner.as_str()) {
                 state.epoch = state.epoch.wrapping_add(1);
                 state.active = false;
                 state.watching = false;
@@ -461,6 +560,7 @@ fn watch_clipboard(
                 state.owned_sequence = None;
                 state.mimes.clear();
                 state.source = None;
+                state.owner = None;
             }
         }
     });
@@ -476,13 +576,32 @@ fn invalidate(state: &Arc<Mutex<State>>) {
         state.owned_sequence = None;
         state.mimes.clear();
         state.source = None;
+        state.owner = None;
     }
 }
 
+fn invalidate_owner(state: &Arc<Mutex<State>>, owner: Option<&str>) {
+    let Ok(mut state) = state.lock() else {
+        return;
+    };
+    if owner.is_some_and(|owner| state.owner.as_deref() != Some(owner)) {
+        return;
+    }
+    state.epoch = state.epoch.wrapping_add(1);
+    state.active = false;
+    state.watching = false;
+    state.dirty = false;
+    state.sequence = 0;
+    state.owned_sequence = None;
+    state.mimes.clear();
+    state.source = None;
+    state.owner = None;
+}
+
 fn current_epoch(state: &Arc<Mutex<State>>, epoch: u64, sequence: u64) -> bool {
-    state
-        .lock()
-        .is_ok_and(|state| state.active && state.epoch == epoch && state.sequence == sequence)
+    state.lock().is_ok_and(|state| {
+        state.active && state.owner.is_some() && state.epoch == epoch && state.sequence == sequence
+    })
 }
 
 fn apply_owner_changed(
@@ -580,7 +699,11 @@ mod tests {
         identity: (String, u32, u32, String),
         values: HashMap<String, Vec<u8>>,
         writes: Vec<HashMap<String, Vec<u8>>>,
+        reads: usize,
         stall_reads: bool,
+        snapshots: usize,
+        completed_snapshots: usize,
+        stall_snapshots: bool,
     }
 
     struct FixtureBridge(Arc<Mutex<BridgeState>>);
@@ -600,12 +723,25 @@ mod tests {
         }
 
         fn snapshot(&self) -> (u64, Vec<String>, (String, u32, u32, String)) {
-            let state = self.0.lock().expect("fixture bridge state");
-            (state.sequence, state.mimes.clone(), state.identity.clone())
+            let mut state = self.0.lock().expect("fixture bridge state");
+            state.snapshots += 1;
+            if state.stall_snapshots {
+                drop(state);
+                thread::sleep(RPC_TIMEOUT + Duration::from_secs(1));
+                self.0
+                    .lock()
+                    .expect("fixture bridge state")
+                    .completed_snapshots += 1;
+                return (0, Vec::new(), ("no-client".into(), 0, 0, String::new()));
+            }
+            let snapshot = (state.sequence, state.mimes.clone(), state.identity.clone());
+            state.completed_snapshots += 1;
+            snapshot
         }
 
         fn read(&self, sequence: u64, mime: &str, limit: u32) -> Vec<u8> {
-            let state = self.0.lock().expect("fixture bridge state");
+            let mut state = self.0.lock().expect("fixture bridge state");
+            state.reads += 1;
             if state.stall_reads {
                 drop(state);
                 thread::sleep(RPC_TIMEOUT + Duration::from_secs(1));
@@ -628,10 +764,11 @@ mod tests {
         _runtime: tokio::runtime::Runtime,
         connection: Connection,
         state: Arc<Mutex<BridgeState>>,
+        service: &'static str,
     }
 
     impl BridgeFixture {
-        fn start() -> Self {
+        fn start(bridge: Bridge) -> Self {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
                 .enable_all()
@@ -650,7 +787,7 @@ mod tests {
             }));
             let connection = Connection::session().expect("fixture session bus");
             connection
-                .request_name(GNOME_BRIDGE)
+                .request_name(bridge.service)
                 .expect("fixture bridge name");
             connection
                 .object_server()
@@ -660,6 +797,7 @@ mod tests {
                 _runtime: runtime,
                 connection,
                 state,
+                service: bridge.service,
             }
         }
 
@@ -692,6 +830,16 @@ mod tests {
             drop(state);
             self.owner_changed(sequence, mimes);
         }
+
+        fn update_identity(&self, identity: (String, u32, u32, String)) {
+            self.state.lock().expect("fixture bridge state").identity = identity;
+        }
+
+        fn release_name(&self) {
+            self.connection
+                .release_name(self.service)
+                .expect("release fixture bridge name");
+        }
     }
 
     fn wait_for_active(clipboard: &GnomeClipboard) {
@@ -722,17 +870,60 @@ mod tests {
         if std::env::var_os("COPYPASTE_GNOME_FIXTURE") != Some("1".into()) {
             return;
         }
-        let fixture = BridgeFixture::start();
+        for bridge in [GNOME, KWIN] {
+            live_bridge_fixture(bridge);
+            stale_snapshot_owner_replacement_fixture(bridge);
+        }
+    }
+
+    fn live_bridge_fixture(bridge: Bridge) {
+        let fixture = BridgeFixture::start(bridge);
         let directory = tempfile::tempdir().expect("fixture data dir");
-        let mut clipboard = GnomeClipboard::new(directory.path()).expect("GNOME clipboard");
+        let mut clipboard =
+            GnomeClipboard::with_bridge(directory.path(), bridge).expect("compositor clipboard");
         wait_for_active(&clipboard);
 
         fixture.update_owner(2, vec!["text/plain;charset=utf-8".into()]);
         wait_for_change(&mut clipboard);
         let capture = clipboard.poll().expect("capture bridge text");
         assert_eq!(capture.content, "bridge text");
+        assert_eq!(capture.app_bundle_id.as_deref(), Some("org.example.Writer"));
 
+        fixture.update_identity(("verified".into(), 100, 1000, "org.example.Other".into()));
         fixture.update_owner(3, vec!["text/plain;charset=utf-8".into()]);
+        wait_for_change(&mut clipboard);
+        let capture = clipboard.poll().expect("capture changed writer");
+        assert_eq!(capture.app_bundle_id.as_deref(), Some("org.example.Other"));
+
+        let excluded = copypaste_ipc::ConfigData {
+            excluded_app_bundle_ids: vec!["org.example.Writer".into()],
+            ..Default::default()
+        };
+        for (sequence, identity) in [
+            (
+                4,
+                ("verified".into(), 99, 1000, "org.example.Writer".into()),
+            ),
+            (5, ("no-app-id".into(), 99, 1000, String::new())),
+            (6, ("ambiguous".into(), 99, 1000, String::new())),
+            (7, ("verified".into(), 99, 1000, "../invalid".into())),
+        ] {
+            fixture.update_identity(identity);
+            fixture.update_owner(sequence, vec!["text/plain;charset=utf-8".into()]);
+            wait_for_change(&mut clipboard);
+            let reads = fixture.state.lock().expect("fixture bridge state").reads;
+            assert!(clipboard
+                .poll_with_policy(CapturePolicy::new(&excluded))
+                .is_none());
+            assert_eq!(
+                fixture.state.lock().expect("fixture bridge state").reads,
+                reads,
+                "source policy sent Read for sequence {sequence}",
+            );
+        }
+
+        fixture.update_identity(("verified".into(), 99, 1000, "org.example.Writer".into()));
+        fixture.update_owner(8, vec!["text/plain;charset=utf-8".into()]);
         wait_for_change(&mut clipboard);
         let private = copypaste_ipc::ConfigData {
             private_mode: true,
@@ -748,7 +939,7 @@ mod tests {
 
         {
             let mut bridge = fixture.state.lock().expect("fixture bridge state");
-            bridge.sequence = 4;
+            bridge.sequence = 9;
             bridge.mimes = vec![
                 KDE_PASSWORD_MANAGER_HINT.into(),
                 "text/plain;charset=utf-8".into(),
@@ -758,7 +949,7 @@ mod tests {
                 .insert(KDE_PASSWORD_MANAGER_HINT.into(), b"secret".to_vec());
         }
         fixture.owner_changed(
-            4,
+            9,
             vec![
                 KDE_PASSWORD_MANAGER_HINT.into(),
                 "text/plain;charset=utf-8".into(),
@@ -790,7 +981,7 @@ mod tests {
             .expect("fixture bridge state")
             .stall_reads = true;
         fixture.update_owner(
-            6,
+            10,
             vec![
                 KDE_PASSWORD_MANAGER_HINT.into(),
                 "text/plain;charset=utf-8".into(),
@@ -808,9 +999,78 @@ mod tests {
             "stalled bridge Read exceeded the bounded caller wait"
         );
         drop(clipboard);
-        let replacement =
-            GnomeClipboard::new(directory.path()).expect("replacement GNOME clipboard");
+        let replacement = GnomeClipboard::with_bridge(directory.path(), bridge)
+            .expect("replacement compositor clipboard");
         wait_for_active(&replacement);
+        fixture.release_name();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if replacement
+                .state
+                .lock()
+                .is_ok_and(|state| !state.active && state.source.is_none())
+            {
+                return;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        panic!("companion owner loss retained source provenance");
+    }
+
+    fn stale_snapshot_owner_replacement_fixture(bridge: Bridge) {
+        let original = BridgeFixture::start(bridge);
+        original
+            .state
+            .lock()
+            .expect("fixture bridge state")
+            .stall_snapshots = true;
+        let directory = tempfile::tempdir().expect("fixture data dir");
+        let clipboard =
+            GnomeClipboard::with_bridge(directory.path(), bridge).expect("compositor clipboard");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if original
+                .state
+                .lock()
+                .is_ok_and(|state| state.snapshots == 1)
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            original
+                .state
+                .lock()
+                .expect("fixture bridge state")
+                .snapshots,
+            1,
+            "the original owner never received Snapshot",
+        );
+        original.release_name();
+        let _replacement = BridgeFixture::start(bridge);
+        wait_for_active(&clipboard);
+        let state = clipboard.state.lock().expect("clipboard state");
+        assert_eq!(
+            state.source.as_ref().map(|source| source.app_id.as_str()),
+            Some("org.example.Writer")
+        );
+        assert!(state.owner.is_some());
+        drop(state);
+        let deadline = Instant::now() + REQUEST_TIMEOUT + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if original
+                .state
+                .lock()
+                .is_ok_and(|state| state.completed_snapshots == 1)
+            {
+                let state = clipboard.state.lock().expect("clipboard state");
+                assert!(state.active && state.source.is_some());
+                return;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        panic!("stalled original Snapshot did not finish");
     }
 
     #[test]
@@ -874,6 +1134,56 @@ mod tests {
     }
 
     #[test]
+    fn owner_transitions_replace_and_protocol_loss_clears_provenance() {
+        let mut state = State {
+            active: true,
+            sequence: 40,
+            source: SourceIdentity::from_wire(
+                "verified".into(),
+                40,
+                1000,
+                "org.example.First".into(),
+            ),
+            ..State::default()
+        };
+        apply_owner_changed(
+            &mut state,
+            41,
+            vec!["text/plain;charset=utf-8".into()],
+            SourceIdentity::from_wire("verified".into(), 41, 1000, "org.example.Second".into()),
+        );
+        assert_eq!(
+            state.source.as_ref().map(|source| source.app_id.as_str()),
+            Some("org.example.Second")
+        );
+
+        // A stale sequence cannot replace metadata from the current owner.
+        apply_owner_changed(
+            &mut state,
+            40,
+            vec!["text/plain;charset=utf-8".into()],
+            None,
+        );
+        assert_eq!(
+            state.source.as_ref().map(|source| source.app_id.as_str()),
+            Some("org.example.Second")
+        );
+
+        // A valid frame with malformed identity is a new owner but has no
+        // provenance. Exclusion policy therefore fails before Read.
+        apply_owner_changed(
+            &mut state,
+            42,
+            vec!["text/plain;charset=utf-8".into()],
+            SourceIdentity::from_wire("verified".into(), 42, 1000, "../invalid".into()),
+        );
+        assert!(state.source.is_none());
+        let state = Arc::new(Mutex::new(state));
+        invalidate(&state);
+        assert!(state.lock().expect("state").source.is_none());
+    }
+
+    #[test]
     fn service_loss_fences_stale_read_and_resets_capture_cursor() {
         let state = Arc::new(Mutex::new(State {
             active: true,
@@ -883,6 +1193,7 @@ mod tests {
             sequence: 42,
             owned_sequence: None,
             mimes: vec!["text/plain;charset=utf-8".into()],
+            owner: Some(":1.42".into()),
             ..State::default()
         }));
         assert!(current_epoch(&state, 7, 42));
