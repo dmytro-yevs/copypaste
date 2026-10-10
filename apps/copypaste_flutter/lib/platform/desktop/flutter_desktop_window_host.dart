@@ -197,10 +197,11 @@ class FlutterDesktopWindowHost
       }
       icon
         ..icon = image
+        ..setTitle('CopyPaste')
         ..setTooltip('CopyPaste')
         ..setContextMenu(menu)
         ..setContextMenuTrigger(
-          Platform.isMacOS
+          (Platform.isMacOS || Platform.isLinux)
               ? ContextMenuTrigger.clicked
               : ContextMenuTrigger.rightClicked,
         );
