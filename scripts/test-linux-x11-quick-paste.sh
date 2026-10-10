@@ -66,5 +66,6 @@ read -r -a pkg_config_flags <<< "$(pkg-config --cflags --libs gtk+-3.0 x11 xtst)
   "${source_file}" "${implementation_file}" "${pkg_config_flags[@]}" \
   -o "${build_dir}/linux_x11_quick_paste_test"
 
-GDK_BACKEND=x11 G_DEBUG="${G_DEBUG:+${G_DEBUG},}fatal-warnings" \
+dbus-run-session -- env GDK_BACKEND=x11 \
+  G_DEBUG="${G_DEBUG:+${G_DEBUG},}fatal-warnings" \
   "${build_dir}/linux_x11_quick_paste_test" "$@"

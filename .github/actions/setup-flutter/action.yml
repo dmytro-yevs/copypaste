@@ -113,6 +113,8 @@ runs:
         }
         echo "FLUTTER_ROOT=$root" >> "$GITHUB_ENV"
         echo "$root/bin" >> "$GITHUB_PATH"
+        # Bootstrap emits progress on stdout; warm it before parsing machine JSON.
+        "$root/bin/flutter" --version
         "$root/bin/flutter" --version --machine > "$RUNNER_TEMP/flutter-arm64-version.json"
         cat "$RUNNER_TEMP/flutter-arm64-version.json"
         python3 - "$RUNNER_TEMP/flutter-arm64-version.json" <<'PY'
