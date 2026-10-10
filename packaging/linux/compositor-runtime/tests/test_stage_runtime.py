@@ -212,11 +212,15 @@ class RuntimeStageTests(unittest.TestCase):
             with self.assertRaises(stage_runtime.ContractError):
                 stage_runtime.validate_payload(runtime, receipt)
 
-    def test_rpm_safety_rejects_host_decoration_constraints_but_accepts_private_soname(self) -> None:
-        build_companion_package.rpm_desktop_safety(
-            requires="libKDecoration2.so.6()(64bit)\n", provides="libKDecoration2.so.6()(64bit)\n",
-            obsoletes="", conflicts="",
-        )
+    def test_rpm_contract_rejects_private_elf_capabilities_and_host_decoration_constraints(self) -> None:
+        for requires, provides in (
+            ("libKDecoration2.so.6()(64bit)\n", ""),
+            ("", "libQt6Core.so.6(Qt_6)(64bit)\n"),
+        ):
+            with self.assertRaises(stage_runtime.ContractError):
+                build_companion_package.rpm_desktop_safety(
+                    requires=requires, provides=provides, obsoletes="", conflicts="",
+                )
         for key in ("requires", "obsoletes", "conflicts"):
             values = {"requires": "kdecoration2 >= 5.0\n", "obsoletes": "kdecoration3\n", "conflicts": "kdecoration2\n"}
             with self.assertRaises(stage_runtime.ContractError):
@@ -224,6 +228,30 @@ class RuntimeStageTests(unittest.TestCase):
                     requires=values[key] if key == "requires" else "", provides="",
                     obsoletes=values[key] if key == "obsoletes" else "", conflicts=values[key] if key == "conflicts" else "",
                 )
+
+    def test_rpm_spec_owns_launcher_and_preserves_private_payload_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = root / "input"
+            (runtime / "bin").mkdir(parents=True)
+            executable = runtime / "bin/start"
+            executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            executable.chmod(0o755)
+            receipt = self.make_receipt(runtime, {"kind": "private", "entrypoint": "bin/start"})
+            receipt["host_requirements"] = [{"name": "plasma-workspace"}]
+            spec = build_companion_package.rpm_spec("1.2.3", receipt)
+            runtime_id = receipt["runtime_id"]
+            self.assertIn(f"/usr/lib/copypaste/compositor-runtime/bin/copypaste-compositor-session-{runtime_id}\n", spec)
+            self.assertIn("%global __requires_exclude_from ^/usr/lib/copypaste/compositor-runtime/.*$", spec)
+            self.assertIn("%global __provides_exclude_from ^/usr/lib/copypaste/compositor-runtime/.*$", spec)
+            for macro in ("__brp_strip", "__brp_strip_comment_note", "__brp_strip_lto", "__brp_strip_static_archive"):
+                self.assertIn(f"%global {macro} %{{nil}}", spec)
+            self.assertIn("Requires: glibc >= 2.39", spec)
+            self.assertIn("Requires: plasma-workspace", spec)
+            build_companion_package.rpm_desktop_safety(
+                requires="glibc >= 2.39\nplasma-workspace\n", provides="copypaste-compositor-runtime-test\n",
+                obsoletes="", conflicts="", allowed_host_requires={"plasma-workspace"},
+            )
 
     def test_private_elf_closure_follows_transitive_needed_libraries_and_records_rpm_licenses(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
