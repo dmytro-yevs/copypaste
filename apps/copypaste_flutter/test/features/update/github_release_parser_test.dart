@@ -100,6 +100,28 @@ void main() {
     }
   });
 
+  test(
+    'Linux without an automatic package installation retains the release page',
+    () {
+      final release = parser.latestFor(
+        jsonEncode([
+          _release('1.0.1', prerelease: false, target: AppUpdateTarget.linux),
+        ]),
+        currentVersion: Version.parse('1.0.0'),
+        target: AppUpdateTarget.linux,
+      );
+
+      expect(release?.version, Version.parse('1.0.1'));
+      expect(release?.asset, isNull);
+      expect(
+        release?.releaseUri,
+        Uri.parse(
+          'https://github.com/dmytro-yevs/copypaste/releases/tag/v1.0.1',
+        ),
+      );
+    },
+  );
+
   for (final package in LinuxAppUpdatePackage.values) {
     for (final architecture in LinuxAppUpdateArchitecture.values) {
       test(

@@ -349,7 +349,13 @@ class GitHubReleaseParser {
               androidArchitecture: androidArchitecture,
               linuxInstallation: linuxInstallation,
             );
-      if (target != AppUpdateTarget.macos && asset == null) continue;
+      final releasePageOnly =
+          target == AppUpdateTarget.linux && linuxInstallation == null;
+      if (target != AppUpdateTarget.macos &&
+          !releasePageOnly &&
+          asset == null) {
+        continue;
+      }
       final candidate = AppRelease(
         version: version,
         releaseUri: releaseUri,
