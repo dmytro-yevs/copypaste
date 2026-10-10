@@ -3,6 +3,7 @@
 #include "linux_glibc_version.h"
 #include "linux_packagekit.h"
 #include "linux_portal.h"
+#include "linux_quick_paste_window.h"
 #include "linux_restart_helper.h"
 #include "linux_x11_quick_paste.h"
 
@@ -880,7 +881,26 @@ void quick_paste_context_call(FlMethodChannel* channel, FlMethodCall* call, gpoi
     success(call, fl_value_new_bool(acknowledged));
     if (acknowledged) quit_context_when_idle();
   } else if (is_method(call, "setInspectorVisible")) {
-    success(call, fl_value_new_bool(presentation_matches(call)));
+    FlValue* args = fl_method_call_get_args(call);
+    FlValue* visible = args != nullptr && fl_value_get_type(args) == FL_VALUE_TYPE_MAP
+        ? fl_value_lookup_string(args, "visible") : nullptr;
+    if (!presentation_matches(call) || visible == nullptr ||
+        fl_value_get_type(visible) != FL_VALUE_TYPE_BOOL) {
+      success(call, fl_value_new_bool(false));
+      return;
+    }
+    GtkWindow* context = nullptr;
+    for (GList* item = gtk_application_get_windows(state->application);
+         item != nullptr; item = item->next) {
+      GtkWindow* window = GTK_WINDOW(item->data);
+      if (g_strcmp0(gtk_window_get_role(window), "copypaste-quick-paste") == 0) {
+        context = window;
+        break;
+      }
+    }
+    const bool resized = resize_linux_quick_paste_window(
+        context, fl_value_get_bool(visible));
+    success(call, fl_value_new_bool(resized && presentation_matches(call)));
   } else if (is_method(call, "accessibilityGranted") ||
              is_method(call, "requestAccessibility")) {
     const bool x11 = x11_quick_paste != nullptr && x11_quick_paste->input_available();
