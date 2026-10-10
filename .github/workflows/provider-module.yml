@@ -1,246 +1,206 @@
-name: Build and publish provider module
+name: Linux Qt wire diagnostic
 
 on:
   workflow_dispatch:
-    inputs:
-      module:
-        description: First-party module to publish
-        required: true
-        type: choice
-        options: [supabase, semantic-search]
-      publish:
-        description: Publish qualified packages and update the signed marketplace
-        required: true
-        type: boolean
-        default: false
-
-concurrency:
-  group: provider-module-${{ inputs.module }}
-  cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  preflight:
+  diagnose:
+    name: Compare Qt D-Bus fixture connection modes
     runs-on: ubuntu-24.04
-    outputs:
-      version: ${{ steps.metadata.outputs.version }}
-      app_version: ${{ steps.metadata.outputs.app_version }}
-      library: ${{ steps.metadata.outputs.library }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - id: metadata
-        env:
-          MODULE: ${{ inputs.module }}
+      - name: Install diagnostic dependencies
         run: |
-          python3 - <<'PY'
-          import json, os, tomllib
-          from pathlib import Path
-          name = os.environ["MODULE"]
-          if name not in {"supabase", "semantic-search"}:
-              raise ValueError("Unknown first-party provider module")
-          module = json.loads(Path(f"modules/{name}/module.json").read_text())
-          application = tomllib.loads(Path("Cargo.toml").read_text())["workspace"]["package"]["version"]
-          if module["id"] != f"copypaste.{name}":
-              raise ValueError("Module directory and signed identity must match")
-          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-              output.write(f"version={module['version']}\napp_version={application}\nlibrary=copypaste_module_{name.replace(chr(45), chr(95))}\n")
-          PY
-  desktop:
-    needs: preflight
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { platform: macos, architecture: aarch64, runner: macos-14, prefix: lib, suffix: dylib, runtime: libonnxruntime.dylib, program: copypaste-module-qualification }
-          - { platform: windows, architecture: x86_64, runner: windows-2022, prefix: '', suffix: dll, runtime: onnxruntime.dll, program: copypaste-module-qualification.exe }
-          - { platform: linux, architecture: x86_64, runner: ubuntu-24.04, prefix: lib, suffix: so, runtime: libonnxruntime.so, program: copypaste-module-qualification }
-          - { platform: linux, architecture: aarch64, runner: ubuntu-24.04-arm, prefix: lib, suffix: so, runtime: libonnxruntime.so, program: copypaste-module-qualification }
-    runs-on: ${{ matrix.runner }}
-    env:
-      OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
-        with:
-          toolchain: "1.96"
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.12"
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "22"
-      - name: Select OpenSSL 3 for authenticated module metadata
-        if: matrix.platform == 'macos'
-        run: bash scripts/ci/use-macos-openssl3.sh
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          workspaces: |
-            .
-            modules/${{ inputs.module }}
-      - name: Prepare checksum-pinned semantic runtime and models
-        if: inputs.module == 'semantic-search'
-        run: |
-          python3 modules/ocr/scripts/prepare-runtime.py --platform ${{ matrix.platform }} --architecture ${{ matrix.architecture }} --destination modules/semantic-search/native --cache "$RUNNER_TEMP/module-runtime"
-          python3 scripts/modules/fetch-search-models.py --sources modules/semantic-search/assets/search-models.json --destination "$RUNNER_TEMP/module-fixtures"
-      - name: Build native module and qualification host
-        run: |
-          cargo +1.96 build --manifest-path modules/${{ inputs.module }}/Cargo.toml --release --locked --lib
-          cargo +1.96 build --release --locked -p copypaste-module-qualification
-          cargo +1.96 test --manifest-path modules/${{ inputs.module }}/Cargo.toml --locked --lib
-      - name: Qualify encrypted synchronization boundary
-        if: inputs.module == 'supabase'
-        run: cargo +1.96 test --locked -p copypaste-modules --test supabase
-      - name: Qualify real-model encrypted indexing
-        if: inputs.module == 'semantic-search'
-        env:
-          COPYPASTE_SEMANTIC_MODELS: ${{ runner.temp }}/module-fixtures
-          COPYPASTE_SEMANTIC_LIBRARY: ${{ github.workspace }}/modules/semantic-search/target/release/${{ matrix.prefix }}${{ needs.preflight.outputs.library }}.${{ matrix.suffix }}
-          COPYPASTE_SEMANTIC_RUNTIME: ${{ github.workspace }}/modules/semantic-search/native/${{ matrix.platform }}/${{ matrix.architecture }}/${{ matrix.runtime }}
-        run: |
-          cargo +1.96 build --release --locked -p copypaste-daemon
-          worker="$GITHUB_WORKSPACE/target/release/copypaste-daemon"
-          if [[ "${{ matrix.platform }}" == windows ]]; then worker="$worker.exe"; fi
-          COPYPASTE_INFERENCE_WORKER="$worker" cargo +1.96 test --locked -p copypaste-modules signed_semantic_package -- --ignored --nocapture
-      - name: Sign target package
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          mkdir -p dist
-          python3 scripts/modules/package.py --module-dir modules/${{ inputs.module }} --library modules/${{ inputs.module }}/target/release/${{ matrix.prefix }}${{ needs.preflight.outputs.library }}.${{ matrix.suffix }} --platform ${{ matrix.platform }} --architecture ${{ matrix.architecture }} --output dist/CopyPasteModule-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}-${{ matrix.platform }}-${{ matrix.architecture }}.cpmodule
-      - name: Qualify exact production package
-        run: |
-          fixtures="scripts/modules/fixtures"
-          if [[ "${{ inputs.module }}" == "semantic-search" ]]; then fixtures="$RUNNER_TEMP/module-fixtures"; fi
-          version="$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{gsub(/["[:space:]]/, "", $3); print $3; exit}' Cargo.toml)"
-          python3 scripts/modules/qualify-desktop.py --platform ${{ matrix.platform }} --fixtures "$fixtures" --package dist/CopyPasteModule-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}-${{ matrix.platform }}-${{ matrix.architecture }}.cpmodule --program target/release/${{ matrix.program }} --app-version "$version" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --receipt dist/CopyPasteModule-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}-${{ matrix.platform }}-${{ matrix.architecture }}.cpmodule.receipt.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: provider-${{ inputs.module }}-${{ matrix.platform }}-${{ matrix.architecture }}
-          if-no-files-found: error
-          path: dist/*
-
-  android:
-    needs: preflight
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { architecture: arm, target: armv7-linux-androideabi }
-          - { architecture: aarch64, target: aarch64-linux-android }
-          - { architecture: x86_64, target: x86_64-linux-android }
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
-        with:
-          toolchain: "1.96"
-          targets: ${{ matrix.target }}
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.12"
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "22"
-      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
-        with:
-          distribution: temurin
-          java-version: "25"
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          workspaces: |
-            .
-            modules/${{ inputs.module }}
-      - name: Prepare Android toolchain
-        run: |
-          python3 - <<'PYTHON'
-          import os, subprocess
-          subprocess.run([os.environ["ANDROID_HOME"] + "/cmdline-tools/latest/bin/sdkmanager", "--licenses"], input="y\n" * 100, text=True, check=True)
-          PYTHON
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.13846066" "platforms;android-36" "build-tools;36.0.0"
-      - name: Prepare checksum-pinned semantic runtime
-        if: inputs.module == 'semantic-search'
-        run: |
-          bash scripts/ci/use-ubuntu-https-archive.sh
+          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y patchelf
-          python3 modules/ocr/scripts/prepare-runtime.py --platform android --architecture ${{ matrix.architecture }} --destination modules/semantic-search/native --cache "$RUNNER_TEMP/module-runtime" --ndk "$ANDROID_HOME/ndk/29.0.13846066"
-      - name: Stage both real models for offline Android inference
-        if: inputs.module == 'semantic-search' && matrix.architecture == 'x86_64'
-        run: python3 scripts/modules/fetch-search-models.py --sources modules/semantic-search/assets/search-models.json --destination "$RUNNER_TEMP/module-fixtures"
-      - name: Build and verify target ABI
-        run: python3 scripts/modules/build-android-module.py --module-dir modules/${{ inputs.module }} --library-name lib${{ needs.preflight.outputs.library }}.so --architecture ${{ matrix.architecture }} --ndk "$ANDROID_HOME/ndk/29.0.13846066"
-      - name: Sign target package
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          sudo apt-get install --yes --no-install-recommends cmake ninja-build qt6-base-dev strace
+      - name: Build and trace the exact fixture and disposable controls
+        shell: bash
         run: |
-          mkdir -p dist
-          python3 scripts/modules/package.py --module-dir modules/${{ inputs.module }} --library modules/${{ inputs.module }}/target/${{ matrix.target }}/release/lib${{ needs.preflight.outputs.library }}.so --platform android --architecture ${{ matrix.architecture }} --output dist/CopyPasteModule-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}-android-${{ matrix.architecture }}.cpmodule
-      - name: Build app-private native qualification APK
-        if: matrix.architecture == 'x86_64'
-        run: |
-          fixtures="scripts/modules/fixtures"
-          if [[ "${{ inputs.module }}" == "semantic-search" ]]; then fixtures="$RUNNER_TEMP/module-fixtures"; fi
-          python3 scripts/modules/build-android-qualification.py --fixtures "$fixtures" --sdk "$ANDROID_HOME" --library target/x86_64-linux-android/release/libcopypaste_module_qualification.so --package dist/CopyPasteModule-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}-android-x86_64.cpmodule --output dist/provider-qualification.apk
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: provider-${{ inputs.module }}-android-${{ matrix.architecture }}
-          if-no-files-found: error
-          path: dist/*
+          set -euo pipefail
+          source_root="$GITHUB_WORKSPACE/packaging/linux/desktop-integrations/kde-native-clipboard/test-wire"
+          evidence="$RUNNER_TEMP/qt-wire-evidence"
+          mkdir -p "$evidence"
+          phase() { printf 'PHASE %s %s\n' "$1" "$(date --iso-8601=seconds)" | tee -a "$evidence/phases.log" >&2; }
+          phase source
+          git rev-parse HEAD | tee "$evidence/source-commit.txt"
+          sha256sum "$source_root/main.cpp" "$source_root/CMakeLists.txt" | tee "$evidence/source-sha256.txt"
+          qmake6 -v | tee "$evidence/qt-version.txt"
+          cmake --version | sed -n '1p' | tee "$evidence/cmake-version.txt"
+          printf 'runner=%s\narch=%s\n' "$(uname -srvmo)" "$(uname -m)" | tee "$evidence/environment.txt"
 
-  android-native:
-    needs: [preflight, android]
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
-        with:
-          distribution: temurin
-          java-version: "25"
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: provider-${{ inputs.module }}-android-x86_64
-          path: dist
-      - name: Enable emulator acceleration
-        run: sudo chmod 666 /dev/kvm
-      - uses: ReactiveCircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2
-        with:
-          api-level: 36
-          arch: x86_64
-          target: default
-          disable-animations: true
-          script: python3 scripts/modules/qualify-android.py --apk dist/provider-qualification.apk --app-version "$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{gsub(/["[:space:]]/, "", $3); print $3; exit}' Cargo.toml)" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --receipt dist/CopyPasteModule-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}-android-x86_64.cpmodule.receipt.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: provider-${{ inputs.module }}-android-native
-          if-no-files-found: error
-          path: dist/*.receipt.json
+          build_variant() {
+            local name="$1" mode="$2" directory="$RUNNER_TEMP/qt-wire-$name"
+            phase "build-$name"
+            rm -rf "$directory"
+            mkdir -p "$directory"
+            cp "$source_root/CMakeLists.txt" "$directory/CMakeLists.txt"
+            cp "$source_root/main.cpp" "$directory/main.cpp"
+            if [[ "$mode" == peer ]]; then
+              python3 - "$directory/main.cpp" <<'PY'
+          from pathlib import Path
+          import sys
+          path = Path(sys.argv[1])
+          source = path.read_text()
+          old_connect = 'QDBusConnection::connectToBus(server.address(), connectionName)'
+          old_disconnect = 'QDBusConnection::disconnectFromBus(connectionName);'
+          if source.count(old_connect) != 1 or source.count(old_disconnect) != 1:
+              raise SystemExit('unexpected exact fixture connection shape')
+          source = source.replace(old_connect, 'QDBusConnection::connectToPeer(server.address(), connectionName)')
+          source = source.replace(old_disconnect, 'QDBusConnection::disconnectFromPeer(connectionName);')
+          path.write_text(source)
+          PY
+            fi
+            sha256sum "$directory/main.cpp" > "$evidence/$name-source-sha256.txt"
+            cmake -S "$directory" -B "$directory/build" -G Ninja -DCMAKE_BUILD_TYPE=Release >"$evidence/$name-configure.log" 2>&1
+            cmake --build "$directory/build" --parallel 2 >"$evidence/$name-build.log" 2>&1
+            printf '%s' "$directory/build/copypaste-kwin-clipboard-wire-fixture"
+          }
 
-  publish:
-    needs: [preflight, desktop, android, android-native]
-    if: inputs.publish
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-      actions: write
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+          run_fixture() {
+            local name="$1" executable="$2"
+            phase "run-$name"
+            set +e
+            timeout --signal=TERM --kill-after=2s 10s strace -ff -tt -s 256 -o "$evidence/$name.strace" "$executable" >"$evidence/$name.log" 2>&1
+            local status=$?
+            set -e
+            printf '%s\n' "$status" > "$evidence/$name-exit-status.txt"
+            printf 'RESULT %s exit=%s\n' "$name" "$status" | tee -a "$evidence/phases.log"
+          }
+
+          baseline="$(build_variant same-process-bus bus)"
+          run_fixture same-process-bus "$baseline"
+          peer="$(build_variant same-process-peer peer)"
+          run_fixture same-process-peer "$peer"
+
+          phase build-split-control
+          split="$RUNNER_TEMP/qt-wire-split"
+          rm -rf "$split"
+          mkdir -p "$split"
+          cat > "$split/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.21)
+          project(copypaste_qt_wire_split_control LANGUAGES CXX)
+          find_package(Qt6 REQUIRED COMPONENTS Core DBus)
+          set(CMAKE_AUTOMOC ON)
+          qt_add_executable(copypaste-qt-wire-server server.cpp)
+          qt_add_executable(copypaste-qt-wire-client client.cpp)
+          target_link_libraries(copypaste-qt-wire-server PRIVATE Qt6::Core Qt6::DBus)
+          target_link_libraries(copypaste-qt-wire-client PRIVATE Qt6::Core Qt6::DBus)
+          target_compile_features(copypaste-qt-wire-server PRIVATE cxx_std_17)
+          target_compile_features(copypaste-qt-wire-client PRIVATE cxx_std_17)
+          CMAKE
+          cat > "$split/server.cpp" <<'CPP'
+          #include <QCoreApplication>
+          #include <QDBusArgument>
+          #include <QDBusConnection>
+          #include <QDBusMetaType>
+          #include <QDBusServer>
+          #include <QDir>
+          #include <QFile>
+          #include <QMap>
+          #include <QTextStream>
+          #include <QTimer>
+          #include <optional>
+          struct WriterIdentity { QString status; quint32 pid = 0; quint32 uid = 0; QString appId; };
+          Q_DECLARE_METATYPE(WriterIdentity)
+          QDBusArgument &operator<<(QDBusArgument &a, const WriterIdentity &i) { a.beginStructure(); a << i.status << i.pid << i.uid << i.appId; a.endStructure(); return a; }
+          const QDBusArgument &operator>>(const QDBusArgument &a, WriterIdentity &i) { a.beginStructure(); a >> i.status >> i.pid >> i.uid >> i.appId; a.endStructure(); return a; }
+          class ClipboardFixture final : public QObject {
+              Q_OBJECT
+              Q_CLASSINFO("D-Bus Interface", "app.copypaste.Clipboard")
+          public Q_SLOTS:
+              Q_SCRIPTABLE void Version(uint &version) { version = 2; }
+              Q_SCRIPTABLE void Snapshot(qulonglong &generation, QStringList &mimes, WriterIdentity &identity) { generation = 7; mimes = {QStringLiteral("text/plain")}; identity = {QStringLiteral("verified"), 101, 1000, QStringLiteral("org.example.Writer")}; }
+              Q_SCRIPTABLE QByteArray Read(qulonglong, const QString &, uint) { return {}; }
+              Q_SCRIPTABLE qulonglong Write(const QMap<QString, QByteArray> &) { return 8; }
+          Q_SIGNALS:
+              Q_SCRIPTABLE void OwnerChanged(qulonglong generation, const QStringList &mimes, const WriterIdentity &identity);
+          };
+          int main(int argc, char **argv) {
+              QCoreApplication app(argc, argv);
+              if (argc != 2) return 64;
+              qDBusRegisterMetaType<WriterIdentity>();
+              ClipboardFixture fixture;
+              QDBusServer server(QStringLiteral("unix:tmpdir=%1").arg(QDir::tempPath()));
+              if (!server.isConnected()) return 1;
+              std::optional<QDBusConnection> connection;
+              QObject::connect(&server, &QDBusServer::newConnection, &app, [&fixture, &connection](const QDBusConnection &accepted) { connection.emplace(accepted); connection->registerObject(QStringLiteral("/app/copypaste/Clipboard"), &fixture, QDBusConnection::ExportScriptableSlots | QDBusConnection::ExportScriptableSignals); });
+              QTimer::singleShot(0, &app, [&server, path = QString::fromLocal8Bit(argv[1])] { QFile file(path); if (file.open(QIODevice::WriteOnly | QIODevice::Text)) QTextStream(&file) << server.address() << Qt::endl; });
+              return app.exec();
+          }
+          #include "server.moc"
+          CPP
+          cat > "$split/client.cpp" <<'CPP'
+          #include <QCoreApplication>
+          #include <QDBusArgument>
+          #include <QDBusConnection>
+          #include <QDBusMessage>
+          #include <QDBusMetaType>
+          #include <QDBusPendingCallWatcher>
+          #include <QEventLoop>
+          #include <QTimer>
+          struct WriterIdentity { QString status; quint32 pid = 0; quint32 uid = 0; QString appId; };
+          Q_DECLARE_METATYPE(WriterIdentity)
+          QDBusArgument &operator<<(QDBusArgument &a, const WriterIdentity &i) { a.beginStructure(); a << i.status << i.pid << i.uid << i.appId; a.endStructure(); return a; }
+          const QDBusArgument &operator>>(const QDBusArgument &a, WriterIdentity &i) { a.beginStructure(); a >> i.status >> i.pid >> i.uid >> i.appId; a.endStructure(); return a; }
+          QDBusMessage request(const QString &method) { return QDBusMessage::createMethodCall(QString(), QStringLiteral("/app/copypaste/Clipboard"), QStringLiteral("app.copypaste.Clipboard"), method); }
+          QDBusMessage wait(QDBusPendingCall call) { QDBusPendingCallWatcher watcher(call); QEventLoop loop; QObject::connect(&watcher, &QDBusPendingCallWatcher::finished, &loop, &QEventLoop::quit); QTimer::singleShot(1000, &loop, &QEventLoop::quit); loop.exec(); return watcher.reply(); }
+          int main(int argc, char **argv) {
+              QCoreApplication app(argc, argv);
+              if (argc != 3) return 64;
+              qDBusRegisterMetaType<WriterIdentity>();
+              const QString name = QStringLiteral("copypaste-qt-wire-split-client");
+              const bool peer = QByteArray(argv[1]) == "peer";
+              const QString address = QString::fromLocal8Bit(argv[2]);
+              const auto client = peer ? QDBusConnection::connectToPeer(address, name) : QDBusConnection::connectToBus(address, name);
+              if (!client.isConnected()) return 2;
+              const auto version = wait(client.asyncCall(request(QStringLiteral("Version")), 1000));
+              if (version.type() == QDBusMessage::ErrorMessage || version.signature() != QLatin1String("u") || version.arguments().size() != 1 || version.arguments().constFirst().toUInt() != 2) return 4;
+              const auto snapshot = wait(client.asyncCall(request(QStringLiteral("Snapshot")), 1000));
+              if (snapshot.type() == QDBusMessage::ErrorMessage || snapshot.signature() != QLatin1String("tas(suus)") || snapshot.arguments().size() != 3 || snapshot.arguments().at(0).toULongLong() != 7 || snapshot.arguments().at(1).toStringList() != QStringList{QStringLiteral("text/plain")}) return 5;
+              const auto identity = qdbus_cast<WriterIdentity>(snapshot.arguments().at(2));
+              if (identity.status != QLatin1String("verified") || identity.pid != 101 || identity.uid != 1000 || identity.appId != QLatin1String("org.example.Writer")) return 6;
+              const auto xml = wait(client.asyncCall(QDBusMessage::createMethodCall(QString(), QStringLiteral("/app/copypaste/Clipboard"), QStringLiteral("org.freedesktop.DBus.Introspectable"), QStringLiteral("Introspect")), 1000));
+              if (xml.type() == QDBusMessage::ErrorMessage || xml.arguments().size() != 1 || !xml.arguments().constFirst().toString().contains(QStringLiteral("\"Version\""))) return 8;
+              if (peer) QDBusConnection::disconnectFromPeer(name); else QDBusConnection::disconnectFromBus(name);
+              return 0;
+          }
+          CPP
+          sha256sum "$split/CMakeLists.txt" "$split/server.cpp" "$split/client.cpp" > "$evidence/split-control-sha256.txt"
+          cmake -S "$split" -B "$split/build" -G Ninja -DCMAKE_BUILD_TYPE=Release >"$evidence/split-configure.log" 2>&1
+          cmake --build "$split/build" --parallel 2 >"$evidence/split-build.log" 2>&1
+
+          run_split() {
+            local mode="$1" address="$RUNNER_TEMP/qt-wire-$mode.address"
+            rm -f "$address"
+            phase "run-split-$mode-server"
+            timeout --signal=TERM --kill-after=2s 20s strace -ff -tt -s 256 -o "$evidence/split-$mode-server.strace" "$split/build/copypaste-qt-wire-server" "$address" >"$evidence/split-$mode-server.log" 2>&1 &
+            local server_pid=$!
+            for _ in $(seq 1 50); do [[ -s "$address" ]] && break; sleep 0.1; done
+            if [[ ! -s "$address" ]]; then
+              printf '%s\n' 125 > "$evidence/split-$mode-client-exit-status.txt"
+              printf 'RESULT split-%s exit=125 address-unavailable\n' "$mode" | tee -a "$evidence/phases.log"
+            else
+              phase "run-split-$mode-client"
+              set +e
+              timeout --signal=TERM --kill-after=2s 10s strace -ff -tt -s 256 -o "$evidence/split-$mode-client.strace" "$split/build/copypaste-qt-wire-client" "$mode" "$(<"$address")" >"$evidence/split-$mode-client.log" 2>&1
+              local status=$?
+              set -e
+              printf '%s\n' "$status" > "$evidence/split-$mode-client-exit-status.txt"
+              printf 'RESULT split-%s exit=%s\n' "$mode" "$status" | tee -a "$evidence/phases.log"
+            fi
+            kill "$server_pid" 2>/dev/null || true
+            wait "$server_pid" 2>/dev/null || true
+          }
+          run_split bus
+          run_split peer
+          phase complete
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
         with:
-          pattern: provider-${{ inputs.module }}-*
-          merge-multiple: true
-          path: dist
-      - name: Verify authenticated packages and native receipts
-        run: python3 scripts/modules/verify-release-packages.py --directory dist --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --release-tag module-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}
-      - name: Publish qualified module release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create module-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }} dist/*.cpmodule dist/*.receipt.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false --title "CopyPaste ${{ inputs.module }} ${{ needs.preflight.outputs.version }}" --notes "Optional first-party ${{ inputs.module }} module. Production-signed packages and exact native qualification receipts for macOS, Windows, Linux x86_64/aarch64, and Android."
-          gh workflow run module-marketplace.yml --repo "$GITHUB_REPOSITORY" --ref module-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }} -f module_release_tag=module-copypaste.${{ inputs.module }}-v${{ needs.preflight.outputs.version }}
+          name: linux-qt-wire-diagnostic-${{ github.run_id }}
+          if-no-files-found: error
+          path: ${{ runner.temp }}/qt-wire-evidence
