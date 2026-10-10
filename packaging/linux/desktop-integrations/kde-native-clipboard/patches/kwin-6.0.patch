@@ -1,0 +1,24 @@
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -40,6 +40,7 @@ target_sources(kwin PRIVATE
+     client_machine.cpp
+     colors/colordevice.cpp
+     colors/colormanager.cpp
++    copypasteclipboardbridge.cpp
+     compositor.cpp
+     compositor_wayland.cpp
+     compositor_x11.cpp
+diff --git a/src/wayland_server.cpp b/src/wayland_server.cpp
+--- a/src/wayland_server.cpp
++++ b/src/wayland_server.cpp
+@@ -9,0 +10 @@
++#include "copypasteclipboardbridge.h"
+@@ -375,6 +376,7 @@ bool WaylandServer::init(const QString &socketName)
+     m_display->createShm();
+     m_seat = new SeatInterface(m_display, m_display);
+     new PointerGesturesV1Interface(m_display, m_display);
++    new CopyPasteClipboardBridge(this);
+     new PointerConstraintsV1Interface(m_display, m_display);
+     new RelativePointerManagerV1Interface(m_display, m_display);
+     m_dataDeviceManager = new DataDeviceManagerInterface(m_display, m_display);
