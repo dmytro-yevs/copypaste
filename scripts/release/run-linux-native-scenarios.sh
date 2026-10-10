@@ -88,6 +88,9 @@ PY
 current_package() { printf '%s/CopyPaste-v%s-linux-%s.%s' "$ARTIFACTS" "$VERSION" "$ARCHITECTURE" "$1"; }
 previous_package() { printf '%s/CopyPaste-v%s-linux-%s.%s' "$PREVIOUS_ARTIFACTS" "$PREVIOUS_VERSION" "$ARCHITECTURE" "$1"; }
 for format in AppImage deb rpm; do [[ -f "$(current_package "$format")" ]] || { echo "ERROR: exact current $format package is required" >&2; exit 1; }; done
+if [[ "$FIRST_INSTALL_BASELINE" == false ]]; then
+  for format in AppImage deb rpm; do [[ -f "$(previous_package "$format")" ]] || { echo "ERROR: exact prior $format package is required" >&2; exit 1; }; done
+fi
 
 cleanup_packages() {
   sudo dpkg --purge copypaste >/dev/null 2>&1 || true
@@ -101,6 +104,61 @@ trap cleanup_packages EXIT
 # manager with dependency resolution; there is no --nodeps escape hatch.
 work="$(mktemp -d)"
 trap 'rm -rf "$work"; cleanup_packages' EXIT
+if [[ -f /etc/fedora-release ]]; then
+  native_format=rpm
+else
+  native_format=deb
+fi
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+args=(--artifacts "$ARTIFACTS" --version "$VERSION" --architecture "$ARCHITECTURE" --desktop "$DESKTOP" --session "$SESSION" --evidence-dir "$EVIDENCE_DIR" --module-artifacts "$MODULE_ARTIFACTS" --module-fixtures "$MODULE_FIXTURES")
+if [[ "$FIRST_INSTALL_BASELINE" == true ]]; then
+  args+=(--first-install-baseline)
+else
+  args+=(--previous-artifacts "$PREVIOUS_ARTIFACTS" --previous-version "$PREVIOUS_VERSION")
+fi
+record_seed_source() {
+  local executable="$1"
+  local profile="$2"
+  python3 - "$executable" "$profile/prior-source.json" <<'PY'
+import hashlib
+import json
+import os
+import sys
+from pathlib import Path
+
+executable, output = sys.argv[1:]
+digest = hashlib.sha256()
+with open(executable, "rb") as source:
+    for block in iter(lambda: source.read(1024 * 1024), b""):
+        digest.update(block)
+Path(output).write_text(json.dumps({
+    "path": os.path.realpath(executable),
+    "sha256": digest.hexdigest(),
+    "size_bytes": os.path.getsize(executable),
+}, separators=(",", ":")), encoding="utf-8")
+PY
+}
+
+if [[ "$FIRST_INSTALL_BASELINE" == false ]]; then
+  mkdir -p "$work/appimage-prior"
+  prior_appimage_extract_argv=(env APPIMAGE_EXTRACT_AND_RUN=1 "$(previous_package AppImage)" --appimage-extract)
+  (
+    cd "$work/appimage-prior"
+    run_traced package_upgrade "${prior_appimage_extract_argv[@]}"
+  )
+  prior_appimage_prefix="$work/appimage-prior/squashfs-root/usr/lib/copypaste"
+  for executable in copypaste copypaste-daemon copypaste-cli; do
+    test -x "$prior_appimage_prefix/$executable"
+  done
+  appimage_profile="$work/appimage-upgrade"
+  install -d -m 700 "$appimage_profile"
+  python3 "$ROOT/scripts/release/linux-native-fixture-driver.py" "${args[@]}" \
+    --runtime-format AppImage --runtime-prefix "$prior_appimage_prefix" \
+    --qualification-root "$appimage_profile" --seed-upgrade-canary
+  record_seed_source "$prior_appimage_prefix/copypaste" "$appimage_profile"
+fi
+
 mkdir -p "$work/appimage-current"
 appimage_extract_argv=(env APPIMAGE_EXTRACT_AND_RUN=1 "$(current_package AppImage)" --appimage-extract)
 (
@@ -116,8 +174,27 @@ for executable in copypaste copypaste-daemon copypaste-cli; do
   test -x "$appimage_prefix/$executable"
 done
 
-if [[ -f /etc/fedora-release ]]; then
-  native_format=rpm
+if [[ "$FIRST_INSTALL_BASELINE" == false ]]; then
+  if [[ "$native_format" == rpm ]]; then
+    prior_native_install_argv=(sudo dnf --assumeyes install "$(previous_package rpm)")
+  else
+    prior_native_install_argv=(sudo apt-get install --yes "$(previous_package deb)")
+  fi
+  run_traced package_upgrade "${prior_native_install_argv[@]}"
+  if [[ "$native_format" == rpm ]]; then
+    run_traced package_upgrade rpm -q copypaste
+  else
+    run_traced package_upgrade dpkg-query --show copypaste
+  fi
+  native_profile="$work/native-upgrade"
+  install -d -m 700 "$native_profile"
+  python3 "$ROOT/scripts/release/linux-native-fixture-driver.py" "${args[@]}" \
+    --runtime-format "$native_format" --runtime-prefix /usr/lib/copypaste \
+    --qualification-root "$native_profile" --seed-upgrade-canary
+  record_seed_source /usr/lib/copypaste/copypaste "$native_profile"
+fi
+
+if [[ "$native_format" == rpm ]]; then
   native_install_argv=(sudo dnf --assumeyes install "$(current_package rpm)")
   run_traced package_install "${native_install_argv[@]}"
   run_traced package_install rpm -q copypaste
@@ -155,14 +232,70 @@ for executable in copypaste copypaste-daemon copypaste-cli; do
   test -x "$native_prefix/$executable"
 done
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-args=(--artifacts "$ARTIFACTS" --version "$VERSION" --architecture "$ARCHITECTURE" --desktop "$DESKTOP" --session "$SESSION" --evidence-dir "$EVIDENCE_DIR" --module-artifacts "$MODULE_ARTIFACTS" --module-fixtures "$MODULE_FIXTURES")
-if [[ "$FIRST_INSTALL_BASELINE" == true ]]; then
-  args+=(--first-install-baseline)
-else
-  args+=(--previous-artifacts "$PREVIOUS_ARTIFACTS" --previous-version "$PREVIOUS_VERSION")
+appimage_driver_args=(--runtime-format AppImage --runtime-prefix "$appimage_prefix")
+native_driver_args=(--runtime-format "$native_format" --runtime-prefix "$native_prefix")
+if [[ "$FIRST_INSTALL_BASELINE" == false ]]; then
+  appimage_driver_args+=(--qualification-root "$appimage_profile")
+  native_driver_args+=(--qualification-root "$native_profile")
 fi
-python3 "$ROOT/scripts/release/linux-native-fixture-driver.py" "${args[@]}" \
-  --runtime-format AppImage --runtime-prefix "$appimage_prefix"
-python3 "$ROOT/scripts/release/linux-native-fixture-driver.py" "${args[@]}" \
-  --runtime-format "$native_format" --runtime-prefix "$native_prefix"
+python3 "$ROOT/scripts/release/linux-native-fixture-driver.py" "${args[@]}" "${appimage_driver_args[@]}"
+python3 "$ROOT/scripts/release/linux-native-fixture-driver.py" "${args[@]}" "${native_driver_args[@]}"
+
+if [[ "$FIRST_INSTALL_BASELINE" == false ]]; then
+  python3 - "$VERSION" "$PREVIOUS_VERSION" "$native_format" \
+    "$(current_package AppImage)" "$(current_package "$native_format")" \
+    "$(previous_package AppImage)" "$(previous_package "$native_format")" \
+    "$appimage_profile" "$native_profile" <<'PY'
+import hashlib
+import json
+import os
+import sys
+
+(version, previous_version, native_format, current_appimage, current_native,
+ previous_appimage, previous_native, appimage_profile, native_profile) = sys.argv[1:]
+
+def package(path, format_name):
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return {"format": format_name, "name": os.path.basename(path), "path": os.path.realpath(path), "sha256": digest.hexdigest(), "size_bytes": os.path.getsize(path)}
+
+def seed(format_name, profile):
+    source_path = os.path.join(profile, "prior-source.json")
+    with open(source_path, encoding="utf-8") as source_file:
+        source = json.load(source_file)
+    if (not isinstance(source, dict) or set(source) != {"path", "sha256", "size_bytes"}
+            or not isinstance(source["path"], str) or not os.path.isabs(source["path"])
+            or not isinstance(source["sha256"], str) or len(source["sha256"]) != 64
+            or not isinstance(source["size_bytes"], int) or source["size_bytes"] <= 0):
+        raise SystemExit("ERROR: prior source executable record is invalid")
+    receipt_path = os.path.join(profile, "upgrade-canary.json")
+    with open(receipt_path, encoding="utf-8") as receipt_file:
+        receipt = json.load(receipt_file)
+    if (set(receipt) != {"id", "content_sha256", "executable_sha256"}
+            or receipt["executable_sha256"] != source["sha256"]):
+        raise SystemExit("ERROR: prior canary receipt does not bind its source executable")
+    return {"format": format_name, "source_executable": source, "canary": receipt}
+
+def transition(release_version, appimage, native):
+    appimage_record = package(appimage, "AppImage")
+    native_record = package(native, native_format)
+    return {
+        "version": release_version,
+        "packages": [appimage_record, native_record],
+        "appimage_extract_argv": ["env", "APPIMAGE_EXTRACT_AND_RUN=1", appimage_record["path"], "--appimage-extract"],
+        "native_install_argv": (["sudo", "apt-get", "install", "--yes", native_record["path"]]
+                               if native_format == "deb" else ["sudo", "dnf", "--assumeyes", "install", native_record["path"]]),
+    }
+
+print("COPYPASTE_QUALIFICATION_UPGRADE " + json.dumps({
+    "prior": transition(previous_version, previous_appimage, previous_native),
+    "current": transition(version, current_appimage, current_native),
+    "seeds": [
+        seed("AppImage", appimage_profile),
+        seed(native_format, native_profile),
+    ],
+}, separators=(",", ":")))
+PY
+fi

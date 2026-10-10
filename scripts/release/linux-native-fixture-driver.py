@@ -613,14 +613,18 @@ def main():
         args.evidence_dir = args.evidence_dir / args.runtime_format.lower()
         args.evidence_dir.mkdir(mode=0o700)
         runtime_dir = workspace / "runtime"
-        runtime_dir.mkdir(mode=0o700)
+        runtime_dir.mkdir(mode=0o700, exist_ok=True)
+        if runtime_dir.is_symlink() or stat.S_IMODE(runtime_dir.stat().st_mode) != 0o700:
+            raise RuntimeError("qualification runtime directory must be owner-only")
         environment = {
             **os.environ,
             "COPYPASTE_QUALIFICATION": "1",
             "XDG_DATA_HOME": str(data_home),
             "TMPDIR": str(runtime_dir),
         }
-        app, runtime_socket = start_gui_runtime(prefix / "copypaste", environment, runtime_dir, set())
+        app, runtime_socket = start_gui_runtime(
+            prefix / "copypaste", environment, runtime_dir, set(runtime_dir.glob("cp-*.sock")),
+        )
         try:
             cli_environment = {**environment, "COPYPASTE_SOCKET": str(runtime_socket)}
             cli = prefix / "copypaste-cli"

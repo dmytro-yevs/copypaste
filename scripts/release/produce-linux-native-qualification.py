@@ -39,8 +39,10 @@ TRACE_PLACEHOLDERS = {
 IPC_PREFIX = "COPYPASTE_QUALIFICATION_IPC "
 INSTALL_PREFIX = "COPYPASTE_QUALIFICATION_INSTALL "
 RUNTIME_PREFIX = "COPYPASTE_QUALIFICATION_RUNTIME "
+UPGRADE_PREFIX = "COPYPASTE_QUALIFICATION_UPGRADE "
 MODULE_IDS = ("copypaste.ocr", "copypaste.semantic-search", "copypaste.supabase")
 IPC_OPERATIONS = {"list", "install", "set_preferences", "set_enabled", "invoke", "remove"}
+UPGRADE_CANARY_SHA256 = hashlib.sha256(b"copypaste-upgrade-canary").hexdigest()
 
 
 def sha256(path: Path) -> str:
@@ -66,7 +68,7 @@ def command_rows(stdout: str, expected_assertions: set[str]) -> list[dict]:
     for line in stdout.splitlines():
         if not line:
             continue
-        if line.startswith(IPC_PREFIX) or line.startswith(INSTALL_PREFIX) or line.startswith(RUNTIME_PREFIX):
+        if line.startswith(IPC_PREFIX) or line.startswith(INSTALL_PREFIX) or line.startswith(RUNTIME_PREFIX) or line.startswith(UPGRADE_PREFIX):
             continue
         if not line.startswith("COPYPASTE_QUALIFICATION_COMMAND "):
             raise ValueError("scenario driver emitted unstructured output")
@@ -176,6 +178,79 @@ def installation_report(stdout: str, expected_packages: list[dict], artifacts: P
     )
     if report["native_install_argv"] != expected_native:
         raise ValueError("actual package installation report has no exact native package command")
+    return report
+
+
+def upgrade_report(stdout: str, previous_packages: list[dict], previous_artifacts: Path,
+                   previous_version: str, version: str, installation: dict) -> dict:
+    records = [json.loads(line.removeprefix(UPGRADE_PREFIX)) for line in stdout.splitlines() if line.startswith(UPGRADE_PREFIX)]
+    if len(records) != 1:
+        raise ValueError("scenario driver must report exactly one prior-to-current upgrade")
+    report = records[0]
+    required = {"prior", "current", "seeds"}
+    if not isinstance(report, dict) or set(report) != required:
+        raise ValueError("scenario driver emitted an invalid upgrade report")
+    for label, expected_version, expected_inventory, directory in (
+        ("prior", previous_version, previous_packages, previous_artifacts),
+        ("current", version, None, None),
+    ):
+        transition = report[label]
+        if not isinstance(transition, dict) or set(transition) != {"version", "packages", "appimage_extract_argv", "native_install_argv"}:
+            raise ValueError(f"upgrade report has invalid {label} transition")
+        if transition["version"] != expected_version:
+            raise ValueError(f"upgrade report has the wrong {label} version")
+        if label == "current":
+            if transition != {
+                "version": version,
+                "packages": installation["packages"],
+                "appimage_extract_argv": installation["appimage_extract_argv"],
+                "native_install_argv": installation["native_install_argv"],
+            }:
+                raise ValueError("upgrade report current transition differs from installation")
+            continue
+        expected = {item["name"]: item for item in expected_inventory}
+        native_format = installation["formats"][1]
+        selected = {name for name in expected if name.rsplit(".", 1)[-1] in ("AppImage", native_format)}
+        packages = transition["packages"]
+        package_map = {item.get("name"): item for item in packages if isinstance(item, dict)} if isinstance(packages, list) else {}
+        if len(package_map) != len(packages) or set(package_map) != selected:
+            raise ValueError("upgrade report does not bind exact prior artifacts")
+        for name, item in package_map.items():
+            format_name = name.rsplit(".", 1)[-1]
+            expected_path = str((directory / name).resolve())
+            if item != {"format": format_name, "path": expected_path, **expected[name]}:
+                raise ValueError("upgrade report has an invalid prior artifact digest")
+        appimage = next(item for item in packages if item["format"] == "AppImage")
+        native = next(item for item in packages if item["format"] != "AppImage")
+        if transition["appimage_extract_argv"] != ["env", "APPIMAGE_EXTRACT_AND_RUN=1", appimage["path"], "--appimage-extract"]:
+            raise ValueError("upgrade report has no exact prior AppImage extraction command")
+        expected_native = (["sudo", "apt-get", "install", "--yes", native["path"]]
+                           if native_format == "deb" else ["sudo", "dnf", "--assumeyes", "install", native["path"]])
+        if transition["native_install_argv"] != expected_native:
+            raise ValueError("upgrade report has no exact prior native package command")
+    seeds = report["seeds"]
+    native_format = installation["formats"][1]
+    if not isinstance(seeds, list) or len(seeds) != 2 or {seed.get("format") for seed in seeds if isinstance(seed, dict)} != {"AppImage", native_format}:
+        raise ValueError("upgrade report has incomplete canary seed records")
+    for seed in seeds:
+        if not isinstance(seed, dict) or set(seed) != {"format", "source_executable", "canary"}:
+            raise ValueError("upgrade report has an invalid canary seed record")
+        executable = seed["source_executable"]
+        canary = seed["canary"]
+        if (not isinstance(executable, dict) or set(executable) != {"path", "sha256", "size_bytes"}
+                or not isinstance(executable["path"], str) or not Path(executable["path"]).is_absolute()
+                or not isinstance(executable["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", executable["sha256"])
+                or not isinstance(executable["size_bytes"], int) or executable["size_bytes"] <= 0):
+            raise ValueError("upgrade report has invalid canary source executable")
+        expected_suffix = ("/appimage-prior/squashfs-root/usr/lib/copypaste/copypaste"
+                           if seed["format"] == "AppImage" else "/usr/lib/copypaste/copypaste")
+        if not executable["path"].endswith(expected_suffix):
+            raise ValueError("upgrade report canary source does not identify the prior runtime")
+        if (not isinstance(canary, dict) or set(canary) != {"id", "content_sha256", "executable_sha256"}
+                or not isinstance(canary["id"], str) or not canary["id"] or len(canary["id"]) > 256
+                or canary["content_sha256"] != UPGRADE_CANARY_SHA256
+                or canary["executable_sha256"] != executable["sha256"]):
+            raise ValueError("upgrade report canary does not bind its prior executable")
     return report
 
 
@@ -323,6 +398,10 @@ def produce(args: argparse.Namespace) -> Path:
         raise RuntimeError(f"native scenario driver failed; full output: {log_path}")
     commands, ipc = trace_rows(result.stdout, expected_assertions)
     installation = installation_report(result.stdout, packages, args.artifacts.resolve())
+    upgrade = (upgrade_report(
+        result.stdout, previous, args.previous_artifacts.resolve(), args.previous_version,
+        args.version, installation,
+    ) if upgrade_mode == "prior_release" else None)
     runtimes = runtime_reports(result.stdout, installation["formats"])
     environment = runtime_environment()
     binding = compositor_runtime_binding(
@@ -332,6 +411,10 @@ def produce(args: argparse.Namespace) -> Path:
     for argv in (installation["appimage_extract_argv"], installation["native_install_argv"]):
         if not any(row["argv"] == argv and "package_install" in row["assertions"] for row in commands):
             raise ValueError("actual package installation report lacks its executed command trace")
+    if upgrade is not None:
+        for argv in (upgrade["prior"]["appimage_extract_argv"], upgrade["prior"]["native_install_argv"]):
+            if not any(row["argv"] == argv and "package_upgrade" in row["assertions"] and "package_install" not in row["assertions"] for row in commands):
+                raise ValueError("actual prior package command lacks its upgrade trace")
     installed_formats = installation["formats"]
     trace_name = f"linux-native-{args.architecture}-{args.desktop.lower()}-{args.session}.trace.json"
     trace_path = output / trace_name
@@ -342,6 +425,7 @@ def produce(args: argparse.Namespace) -> Path:
         "upgrade_mode": upgrade_mode,
         "installed_formats": installed_formats,
         "installation": installation,
+        "upgrade": upgrade,
         "runtimes": runtimes,
         "environment": environment,
         "commands": commands,
@@ -365,6 +449,7 @@ def produce(args: argparse.Namespace) -> Path:
         "environment": environment,
         "packages": packages,
         "previous_packages": previous,
+        "upgrade": upgrade,
         "assertions": {name: True for name in sorted(expected_assertions)},
         "compositor_runtime": binding,
         "trace": attachment(trace_path, output),

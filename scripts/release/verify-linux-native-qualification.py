@@ -32,6 +32,7 @@ TRACE_PLACEHOLDERS = {
 }
 MODULE_IDS = ("copypaste.ocr", "copypaste.semantic-search", "copypaste.supabase")
 IPC_OPERATIONS = {"list", "install", "set_preferences", "set_enabled", "invoke", "remove"}
+UPGRADE_CANARY_SHA256 = hashlib.sha256(b"copypaste-upgrade-canary").hexdigest()
 
 
 def digest(path: Path) -> str:
@@ -121,7 +122,7 @@ def verify_public_compositor_runtime(root: Path, version: str, commit: str) -> l
     return companions
 
 
-def verify_trace(root: Path, receipt: dict, architecture: str, desktop: str, session: str, version: str, commit: str, source_run_id: str, artifact_run_id: Optional[str], expected_assertions: set[str]) -> None:
+def verify_trace(root: Path, receipt: dict, architecture: str, desktop: str, session: str, version: str, commit: str, source_run_id: str, artifact_run_id: Optional[str], expected_assertions: set[str], previous_version: Optional[str], expected_previous: Optional[dict[str, dict]]) -> None:
     name = f"linux-native-{architecture}-{desktop.lower()}-{session}.trace.json"
     path = regular_file(root, name)
     trace = json.loads(path.read_text(encoding="utf-8"))
@@ -212,7 +213,7 @@ def verify_trace(root: Path, receipt: dict, architecture: str, desktop: str, ses
         format_name = package_name.rsplit(".", 1)[-1]
         source_path = item.get("path")
         if (not isinstance(source_path, str) or not Path(source_path).is_absolute() or Path(source_path).name != package_name
-                or item != {"format": format_name, "path": source_path, **expected_packages[package_name]}):
+                or item != {"format": format_name, "name": package_name, "path": source_path, **expected_packages[package_name]}):
             raise ValueError(f"scenario trace installation digest differs: {name}")
     appimage = next(item for item in reported if item["format"] == "AppImage")
     native = next(item for item in reported if item["format"] != "AppImage")
@@ -228,6 +229,71 @@ def verify_trace(root: Path, receipt: dict, architecture: str, desktop: str, ses
         raise ValueError(f"scenario trace AppImage installation command was not executed: {name}")
     if not any(command["argv"] == native_argv and "package_install" in command["assertions"] for command in commands):
         raise ValueError(f"scenario trace native installation command was not executed: {name}")
+    upgrade = trace.get("upgrade")
+    if receipt.get("upgrade") != upgrade:
+        raise ValueError(f"scenario trace upgrade record differs from its receipt: {name}")
+    if receipt.get("upgrade_mode") == "first_install_baseline":
+        if upgrade is not None:
+            raise ValueError(f"first-install scenario has an unexpected upgrade record: {name}")
+    else:
+        if previous_version is None or expected_previous is None:
+            raise ValueError(f"prior-release scenario lacks exact prior artifacts: {name}")
+        if not isinstance(upgrade, dict) or set(upgrade) != {"prior", "current", "seeds"}:
+            raise ValueError(f"scenario trace has no prior-to-current upgrade record: {name}")
+        current = upgrade["current"]
+        if current != {
+            "version": version,
+            "packages": installation["packages"],
+            "appimage_extract_argv": installation["appimage_extract_argv"],
+            "native_install_argv": installation["native_install_argv"],
+        }:
+            raise ValueError(f"scenario trace upgrade current transition differs from installation: {name}")
+        prior = upgrade["prior"]
+        if (not isinstance(prior, dict) or set(prior) != {"version", "packages", "appimage_extract_argv", "native_install_argv"}
+                or prior["version"] != previous_version):
+            raise ValueError(f"scenario trace prior upgrade transition is invalid: {name}")
+        prior_packages = prior["packages"]
+        prior_map = {item.get("name"): item for item in prior_packages if isinstance(item, dict)} if isinstance(prior_packages, list) else {}
+        selected_prior = {package_name for package_name in expected_previous if package_name.rsplit(".", 1)[-1] in formats}
+        if len(prior_map) != len(prior_packages) or set(prior_map) != selected_prior:
+            raise ValueError(f"scenario trace prior upgrade packages differ: {name}")
+        for package_name, item in prior_map.items():
+            format_name = package_name.rsplit(".", 1)[-1]
+            source_path = item.get("path")
+            if (not isinstance(source_path, str) or not Path(source_path).is_absolute() or Path(source_path).name != package_name
+                    or item != {"format": format_name, "name": package_name, "path": source_path, **expected_previous[package_name]}):
+                raise ValueError(f"scenario trace prior upgrade digest differs: {name}")
+        prior_appimage = next(item for item in prior_packages if item["format"] == "AppImage")
+        prior_native = next(item for item in prior_packages if item["format"] != "AppImage")
+        expected_prior_appimage = ["env", "APPIMAGE_EXTRACT_AND_RUN=1", prior_appimage["path"], "--appimage-extract"]
+        expected_prior_native = (["sudo", "apt-get", "install", "--yes", prior_native["path"]]
+                                 if prior_native["format"] == "deb" else ["sudo", "dnf", "--assumeyes", "install", prior_native["path"]])
+        if prior["appimage_extract_argv"] != expected_prior_appimage or prior["native_install_argv"] != expected_prior_native:
+            raise ValueError(f"scenario trace prior upgrade commands are invalid: {name}")
+        for argv in (expected_prior_appimage, expected_prior_native):
+            if not any(command["argv"] == argv and "package_upgrade" in command["assertions"] and "package_install" not in command["assertions"] for command in commands):
+                raise ValueError(f"scenario trace prior package command was not executed as an upgrade: {name}")
+        seeds = upgrade["seeds"]
+        if not isinstance(seeds, list) or len(seeds) != 2 or {seed.get("format") for seed in seeds if isinstance(seed, dict)} != set(formats):
+            raise ValueError(f"scenario trace upgrade canary seeds are incomplete: {name}")
+        for seed in seeds:
+            if not isinstance(seed, dict) or set(seed) != {"format", "source_executable", "canary"}:
+                raise ValueError(f"scenario trace upgrade canary seed is invalid: {name}")
+            executable = seed["source_executable"]
+            canary = seed["canary"]
+            if (not isinstance(executable, dict) or set(executable) != {"path", "sha256", "size_bytes"}
+                    or not isinstance(executable["path"], str) or not Path(executable["path"]).is_absolute()
+                    or not isinstance(executable["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", executable["sha256"])
+                    or not isinstance(executable["size_bytes"], int) or executable["size_bytes"] <= 0):
+                raise ValueError(f"scenario trace upgrade canary source is invalid: {name}")
+            suffix = "/appimage-prior/squashfs-root/usr/lib/copypaste/copypaste" if seed["format"] == "AppImage" else "/usr/lib/copypaste/copypaste"
+            if not executable["path"].endswith(suffix):
+                raise ValueError(f"scenario trace upgrade canary source is not the prior runtime: {name}")
+            if (not isinstance(canary, dict) or set(canary) != {"id", "content_sha256", "executable_sha256"}
+                    or not isinstance(canary["id"], str) or not canary["id"]
+                    or canary["content_sha256"] != UPGRADE_CANARY_SHA256
+                    or canary["executable_sha256"] != executable["sha256"]):
+                raise ValueError(f"scenario trace upgrade canary does not bind its source: {name}")
     runtimes = trace.get("runtimes")
     if not isinstance(runtimes, list) or len(runtimes) != 2 or [row.get("format") if isinstance(row, dict) else None for row in runtimes] != formats:
         raise ValueError(f"scenario trace has incomplete runtime records: {name}")
@@ -259,14 +325,20 @@ def verify_trace(root: Path, receipt: dict, architecture: str, desktop: str, ses
         raise ValueError(f"receipt does not bind its scenario trace: {name}")
 
 
-def verify(root: Path, artifacts: Path, version: str, commit: str, source_run_id: str, artifact_run_id: Optional[str] = None, compositor_runtime: Optional[Path] = None) -> None:
+def verify(root: Path, artifacts: Path, version: str, commit: str, source_run_id: str, artifact_run_id: Optional[str] = None, compositor_runtime: Optional[Path] = None, previous_artifacts: Optional[Path] = None, previous_version: Optional[str] = None) -> None:
     root = root.resolve(strict=True)
     artifacts = artifacts.resolve(strict=True)
+    if (previous_artifacts is None) != (previous_version is None):
+        raise ValueError("prior artifact directory and version must be supplied together")
+    if previous_artifacts is not None:
+        previous_artifacts = previous_artifacts.resolve(strict=True)
     companions = verify_public_compositor_runtime(compositor_runtime.resolve(strict=True), version, commit) if compositor_runtime else None
     seen = set()
     installed_coverage = {(architecture, format_name): 0 for architecture in ARCHITECTURES for format_name in FORMATS}
     for architecture in ARCHITECTURES:
         expected = expected_packages(artifacts, version, architecture)
+        expected_previous = (expected_packages(previous_artifacts, previous_version, architecture)
+                             if previous_artifacts is not None else None)
         for desktop in DESKTOPS:
             for session in SESSIONS:
                 name = f"linux-native-{architecture}-{desktop.lower()}-{session}.json"
@@ -313,6 +385,18 @@ def verify(root: Path, artifacts: Path, version: str, commit: str, source_run_id
                 for package_name, package in package_map.items():
                     if package != {"name": package_name, **expected[package_name]}:
                         raise ValueError(f"evidence package does not bind exact artifact bytes: {name}")
+                previous_packages = receipt.get("previous_packages")
+                if receipt.get("upgrade_mode") == "prior_release":
+                    if expected_previous is None:
+                        raise ValueError(f"prior-release evidence lacks exact prior artifacts: {name}")
+                    previous_map = {package.get("name"): package for package in previous_packages if isinstance(package, dict)} if isinstance(previous_packages, list) else {}
+                    if len(previous_map) != len(previous_packages) or set(previous_map) != set(expected_previous):
+                        raise ValueError(f"evidence prior package inventory does not match its architecture: {name}")
+                    for package_name, package in previous_map.items():
+                        if package != {"name": package_name, **expected_previous[package_name]}:
+                            raise ValueError(f"evidence prior package does not bind exact artifact bytes: {name}")
+                elif previous_packages != []:
+                    raise ValueError(f"first-install evidence has unexpected prior packages: {name}")
                 evidence = receipt.get("evidence")
                 if not isinstance(evidence, list) or not evidence:
                     raise ValueError(f"evidence attachments are missing: {name}")
@@ -324,7 +408,7 @@ def verify(root: Path, artifacts: Path, version: str, commit: str, source_run_id
                     if item["name"] in evidence_names or item["sha256"] != digest(path) or item["size_bytes"] != path.stat().st_size:
                         raise ValueError(f"evidence attachment differs from its receipt: {name}")
                     evidence_names.add(item["name"])
-                verify_trace(root, receipt, architecture, desktop, session, version, commit, source_run_id, artifact_run_id, expected_assertions)
+                verify_trace(root, receipt, architecture, desktop, session, version, commit, source_run_id, artifact_run_id, expected_assertions, previous_version, expected_previous)
                 seen.add(identity)
     if len(seen) != len(ARCHITECTURES) * len(DESKTOPS) * len(SESSIONS):
         raise ValueError("native qualification matrix is incomplete")
@@ -341,8 +425,10 @@ def main() -> int:
     parser.add_argument("--source-run-id", required=True)
     parser.add_argument("--artifact-run-id")
     parser.add_argument("--compositor-runtime", required=True, type=Path)
+    parser.add_argument("--previous-artifacts", type=Path)
+    parser.add_argument("--previous-version")
     args = parser.parse_args()
-    verify(args.root, args.artifacts, args.version, args.commit, args.source_run_id, args.artifact_run_id, args.compositor_runtime)
+    verify(args.root, args.artifacts, args.version, args.commit, args.source_run_id, args.artifact_run_id, args.compositor_runtime, args.previous_artifacts, args.previous_version)
     print("verified full exact-artifact Linux desktop qualification")
     return 0
 
