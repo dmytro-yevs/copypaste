@@ -2,6 +2,12 @@ name: Wayland AT-SPI diagnostic
 
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/wayland-atspi-probe]
+    paths: [.github/workflows/wayland-atspi-diagnostic.yml]
+
+permissions:
+  contents: read
 
 jobs:
   bus:
@@ -16,7 +22,7 @@ jobs:
           set -euo pipefail
           if command -v apt-get >/dev/null; then
             apt-get update
-            DEBIAN_FRONTEND=noninteractive apt-get install --yes at-spi2-core dbus systemd
+            DEBIAN_FRONTEND=noninteractive apt-get install --yes at-spi2-core dbus systemd libglib2.0-bin
           else
             dnf --assumeyes install at-spi2-core dbus-daemon systemd
           fi
