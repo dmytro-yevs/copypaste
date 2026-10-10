@@ -114,6 +114,7 @@ EOF
 }
 
 bash -n "$root/apply-to-kwin-source.sh"
+rg -F 'patch --batch --forward --fuzz=0 -p1 --directory "$source_root"' "$root/apply-to-kwin-source.sh" >/dev/null
 bash -n "$root/verify-build.sh"
 bash -n "$root/run-fedora-build.sh"
 rg -F 'FROM fedora:40@sha256:' "$root/Dockerfile.fedora40-build" >/dev/null
