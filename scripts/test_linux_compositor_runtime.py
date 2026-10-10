@@ -223,6 +223,7 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
     def test_gnome_fixture_scopes_private_libraries_to_the_compositor_and_waits_for_extensions_api(self):
         script = (ROOT / "scripts/release/run-linux-native-desktop-session.sh").read_text(encoding="utf-8")
         self.assertNotIn('export LD_LIBRARY_PATH="$native/lib', script)
+        self.assertIn('export GI_TYPELIB_PATH="$private_typelib_path:$native/typelib${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"', script)
         self.assertIn('LD_LIBRARY_PATH="$compositor_library_path" gnome-shell --x11 --replace', script)
         self.assertIn('LD_LIBRARY_PATH="$compositor_library_path" "$COMPOSITOR_QUALIFICATION_ENTRYPOINT"', script)
         self.assertIn(
