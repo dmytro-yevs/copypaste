@@ -87,6 +87,31 @@ class CompositorRuntimeSourceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "baseline"):
             self.module.verify_baseline_source("GNOME", source)
 
+    def test_binding_accepts_the_producer_workflows_exact_family_version(self):
+        for desktop in ("GNOME", "KDE"):
+            with self.subTest(desktop=desktop), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                family, version, distro, distro_version, package_format = self.module.runtime_identity(desktop, "x86_64")
+                producer = {
+                    "schema": 1, "commit": "a" * 40, "producer_run_id": 7,
+                    "source_run_id": 7, "version": "1.0.24", "architecture": "x86_64",
+                    "desktop": desktop, "family": version,
+                    "distribution": {"id": distro, "version": distro_version},
+                    "format": package_format, "runtime_receipt": {}, "package": {},
+                    "source": {}, "glibc_floor": "2.39", "runtime_id": "test-runtime",
+                    "upstream_licenses": [],
+                }
+                path = root / "compositor-runtime-producer-receipt.json"
+                path.write_text(json.dumps(producer), encoding="utf-8")
+                # The valid workflow identity must reach the next, independent source guard.
+                with self.assertRaisesRegex(ValueError, "source provenance"):
+                    self.module.binding(root, desktop, "x86_64", "a" * 40, "7")
+                for invalid in (family, "999"):
+                    producer["family"] = invalid
+                    path.write_text(json.dumps(producer), encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "receipt identity"):
+                        self.module.binding(root, desktop, "x86_64", "a" * 40, "7")
+
 
 class InstalledRuntimeTest(unittest.TestCase):
     def setUp(self):
