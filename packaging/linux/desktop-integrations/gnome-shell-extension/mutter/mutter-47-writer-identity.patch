@@ -34,6 +34,17 @@
  MetaSelectionSource *
  meta_selection_get_current_owner (MetaSelection     *selection,
                                    MetaSelectionType  selection_type)
+--- a/src/core/meta-selection-private.h	2026-10-10 12:46:57
++++ b/src/core/meta-selection-private.h	2026-10-10 12:46:44
+@@ -22,8 +22,4 @@
+ 
+ #include "meta/meta-selection.h"
+ 
+-MetaSelectionSource *
+-  meta_selection_get_current_owner (MetaSelection     *selection,
+-                                    MetaSelectionType  selection_type);
+-
+ MetaDisplay * meta_selection_get_display (MetaSelection *selection);
 --- a/src/wayland/meta-selection-source-wayland.c	2026-10-10 12:46:58
 +++ b/src/wayland/meta-selection-source-wayland.c	2026-10-10 12:49:52
 @@ -21,8 +21,16 @@
