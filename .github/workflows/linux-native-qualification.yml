@@ -207,6 +207,8 @@ jobs:
       - name: Bind the exact compositor sidecar runtime
         run: |
           set -euo pipefail
+          python3 scripts/release/compositor-runtime-archive.py extract \
+            --archive compositor-runtime/runtime.tar --output compositor-runtime/runtime
           python3 scripts/release/verify-linux-compositor-runtime.py artifact \
             --root compositor-runtime --desktop "${{ matrix.desktop }}" --architecture "${{ matrix.architecture }}" \
             --commit "${{ needs.source.outputs.commit }}" --producer-run-id "${{ inputs.compositor_runtime_run_id }}" \

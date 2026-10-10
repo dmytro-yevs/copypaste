@@ -350,11 +350,12 @@ class ReleaseSafetyTest(unittest.TestCase):
                 for architecture in module["ARCHITECTURES"]:
                     artifact = source / module["coordinate_name"](short, family, distribution, architecture)
                     artifact.mkdir()
-                    package = artifact / f"copypaste-compositor-runtime-{short}-{family}-{distribution}-{architecture}.{package_format}"
+                    runtime_id = f"{short}-{family}-{architecture}"
+                    package = artifact / f"copypaste-compositor-runtime-{runtime_id}-v{release_version}-linux-{architecture}.{package_format}"
                     package.write_bytes(f"{desktop}-{architecture}".encode())
                     runtime = artifact / "runtime-receipt.json"
                     runtime.write_text(json.dumps({
-                        "schema": 1, "runtime_id": f"{short}-{family}-{architecture}",
+                        "schema": 1, "runtime_id": runtime_id,
                         "desktop": desktop, "architecture": architecture,
                         "distribution": {"id": distribution_id, "version": distribution_version},
                         "glibc_floor": "2.39",
@@ -367,7 +368,7 @@ class ReleaseSafetyTest(unittest.TestCase):
                         "source_run_id": 123, "version": release_version,
                         "architecture": architecture, "desktop": desktop, "family": family,
                         "distribution": {"id": distribution_id, "version": distribution_version},
-                        "format": package_format, "runtime_id": f"{short}-{family}-{architecture}",
+                        "format": package_format, "runtime_id": runtime_id,
                         "glibc_floor": "2.39", "source": {"revision": "source", "patch_sha256": patch},
                         "runtime_receipt": module["metadata"](runtime),
                         "package": module["metadata"](package),
@@ -378,6 +379,7 @@ class ReleaseSafetyTest(unittest.TestCase):
             module["stage"](source, public, release_version, commit, "456")
             packages = sorted(path for path in public.iterdir() if path.suffix in (".deb", ".rpm"))
             self.assertEqual(len(packages), 4)
+            self.assertTrue(all(f"-v{release_version}-linux-" in path.name for path in packages))
             for package in packages:
                 package.with_name(package.name + ".sig").write_bytes(b"signature")
                 package.with_name(package.name + ".sha256").write_text(

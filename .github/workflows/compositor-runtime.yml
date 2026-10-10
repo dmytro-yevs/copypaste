@@ -127,10 +127,14 @@ jobs:
           cp build/runtime-output/runtime-receipt.json artifact/runtime-receipt.json
           cp -a build/runtime-output/. artifact/runtime/
           rm -f artifact/runtime/runtime-receipt.json
+          python3 scripts/release/compositor-runtime-archive.py pack --root artifact/runtime --output artifact/runtime.tar
+          rm -rf artifact/runtime
+          runtime_id="$(python3 -c 'import json, re, sys; value = json.load(open(sys.argv[1], encoding="utf-8"))["runtime_id"]; assert re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,63}", value); print(value)' artifact/runtime-receipt.json)"
+          python3 scripts/release/compositor-runtime-archive.py extract --archive artifact/runtime.tar --output artifact/runtime
           python3 packaging/linux/compositor-runtime/build_companion_package.py \
             --receipt artifact/runtime-receipt.json --runtime-dir artifact/runtime --version "${{ inputs.version }}" \
             --format "${{ matrix.package_format }}" \
-            --output "artifact/copypaste-compositor-runtime-${{ matrix.desktop == 'GNOME' && 'gnome-46-ubuntu24.04' || 'kwin-6.0-fedora40' }}-v${{ inputs.version }}-linux-${{ matrix.architecture }}.${{ matrix.package_format }}"
+            --output "artifact/copypaste-compositor-runtime-$runtime_id-v${{ inputs.version }}-linux-${{ matrix.architecture }}.${{ matrix.package_format }}"
       - name: Sign and bind immutable producer files
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -166,6 +170,7 @@ jobs:
               "upstream_licenses": licenses,
           }, indent=2) + "\n", encoding="utf-8")
           PY
+          rm -rf artifact/runtime
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}
