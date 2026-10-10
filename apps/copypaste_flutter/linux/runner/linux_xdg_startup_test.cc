@@ -12,6 +12,16 @@
 #include <unistd.h>
 
 #include <string>
+#include <type_traits>
+#include <utility>
+
+// Xlib defines Status as a macro after the runner includes this adapter.
+// This compile-only assertion preserves that include order in the fixture.
+#define Status int
+static_assert(std::is_same_v<
+              decltype(std::declval<LinuxXdgStartup>().GetStatus()),
+              LinuxXdgStartupStatus>);
+#undef Status
 
 namespace {
 
@@ -90,7 +100,7 @@ void test_exec_escaping() {
 void test_autostart_is_owned_and_atomic() {
   fixture->clear_entries();
   const LinuxXdgStartup startup = fixture->startup();
-  g_assert_false(startup.Status().start_at_login);
+  g_assert_false(startup.GetStatus().start_at_login);
 
   g_autoptr(GError) error = nullptr;
   g_assert_true(startup.SetStartAtLogin(true, &error));
@@ -105,7 +115,7 @@ void test_autostart_is_owned_and_atomic() {
       LinuxXdgStartup::DesktopEntryForExecutable(fixture->executable(), true);
   g_assert_cmpstr(contents, ==, expected.c_str());
   g_free(contents);
-  g_assert_true(startup.Status().start_at_login);
+  g_assert_true(startup.GetStatus().start_at_login);
 
   g_assert_true(startup.SetStartAtLogin(false, &error));
   g_assert_no_error(error);
@@ -139,7 +149,7 @@ void test_autostart_is_owned_and_atomic() {
       LinuxXdgStartup::DesktopEntryForExecutable(old_appimage, true);
   g_assert_true(g_file_set_contents(path.c_str(), old_entry.c_str(), -1, &error));
   g_assert_no_error(error);
-  g_assert_false(startup.Status().start_at_login);
+  g_assert_false(startup.GetStatus().start_at_login);
   g_assert_true(startup.SetStartAtLogin(true, &error));
   g_assert_no_error(error);
   gchar* updated_contents = nullptr;
@@ -151,7 +161,7 @@ void test_autostart_is_owned_and_atomic() {
       LinuxXdgStartup::DesktopEntryForExecutable(fixture->executable(), true);
   g_assert_cmpstr(updated_contents, ==, current_entry.c_str());
   g_free(updated_contents);
-  g_assert_true(startup.Status().start_at_login);
+  g_assert_true(startup.GetStatus().start_at_login);
   g_assert_true(startup.SetStartAtLogin(false, &error));
   g_assert_no_error(error);
   g_assert_false(g_file_test(path.c_str(), G_FILE_TEST_EXISTS));
@@ -171,7 +181,7 @@ void test_uri_registration_uses_private_xdg_home() {
   g_assert_nonnull(handler);
   g_assert_cmpstr(g_app_info_get_id(handler), ==,
                   "com.copypaste.CopyPaste.desktop");
-  g_assert_true(startup.Status().uri_registered);
+  g_assert_true(startup.GetStatus().uri_registered);
 }
 
 void test_rejects_invalid_paths_and_uses_outer_appimage() {
