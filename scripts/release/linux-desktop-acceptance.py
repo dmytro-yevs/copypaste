@@ -31,6 +31,12 @@ MENU_PATH = "/StatusNotifierItem/Menu"
 MENU_INTERFACE = "com.canonical.dbusmenu"
 NOTIFICATIONS_NAME = "org.freedesktop.Notifications"
 NOTIFICATIONS_PATH = "/org/freedesktop/Notifications"
+HOST_BUS_NAME = "app.copypaste.CopyPaste"
+HOST_OBJECT_PATH = "/app/copypaste/WaylandIntegration"
+HOST_INTERFACE = "app.copypaste.WaylandIntegration"
+DBUS_NAME = "org.freedesktop.DBus"
+DBUS_PATH = "/org/freedesktop/DBus"
+DBUS_INTERFACE = "org.freedesktop.DBus"
 COPYPASTE_TITLE = "CopyPaste"
 CLIPBOARD_PROVIDER = Path(__file__).with_name("linux-clipboard-provider.py").resolve()
 SNI_NAME = re.compile(r"^org\.kde\.StatusNotifierItem-(?P<pid>[1-9][0-9]*)-(?P<index>[1-9][0-9]*)$")
@@ -350,13 +356,44 @@ def parse_capture_command(raw: str) -> list[str]:
     return value
 
 
+def history_item_count(cli: Path, environment: dict[str, str]) -> int:
+    """Read the daemon's redacted history count through the packaged CLI."""
+    response = require_ok(
+        run([str(cli), "--json", "status"], environment=environment),
+        "read CopyPaste history count",
+    )
+    try:
+        payload = json.loads(response.stdout)
+        status = payload["data"]["status"]
+        count = status["item_count"]
+    except (json.JSONDecodeError, KeyError, TypeError) as error:
+        raise AcceptanceError("CopyPaste CLI did not return a typed history count") from error
+    if (
+        not isinstance(payload, dict) or not isinstance(status, dict) or
+        payload.get("ok") is not True or type(count) is not int or count < 0
+    ):
+        raise AcceptanceError("CopyPaste CLI did not return a typed history count")
+    return count
+
+
+def wait_for_history_capture(cli: Path, environment: dict[str, str], previous_count: int) -> int:
+    deadline = time.monotonic() + 8
+    observed = previous_count
+    while time.monotonic() < deadline:
+        observed = history_item_count(cli, environment)
+        if observed > previous_count:
+            return observed
+        time.sleep(0.15)
+    raise AcceptanceError(f"controlled clipboard provider did not create a new history item; saw {observed}")
+
+
 def run_notification_capture(
     environment: dict[str, str],
     cli: Path,
     socket_path: Path,
     capture_command: list[str],
     gui_pid: int,
-) -> tuple[NotificationTranscript, CommandResult]:
+) -> tuple[NotificationTranscript, CommandResult, int]:
     cli_environment = {**environment, "COPYPASTE_SOCKET": str(socket_path)}
     config = require_ok(
         run(
@@ -374,6 +411,7 @@ def run_notification_capture(
         raise AcceptanceError("CopyPaste CLI did not acknowledge notification settings as JSON") from error
     if decoded.get("ok") is not True:
         raise AcceptanceError("CopyPaste CLI did not enable capture notifications")
+    before_count = history_item_count(cli, cli_environment)
 
     monitor, owner = notification_monitor(environment)
     try:
@@ -383,6 +421,7 @@ def run_notification_capture(
         # GTK provider writes its controlled clipboard item.
         time.sleep(0.15)
         capture = require_ok(run(capture_command, environment=environment, timeout=20), "trigger controlled clipboard capture")
+        after_count = wait_for_history_capture(cli, cli_environment, before_count)
         transcript = NotificationTranscript(server_owner=owner)
         buffered = b""
         deadline = time.monotonic() + 8
@@ -402,7 +441,7 @@ def run_notification_capture(
                 if transcript.call_serial is not None and not transcript.awaiting_app_name and transcript.caller_owner:
                     require_bus_credentials(environment, transcript.caller_owner, gui_pid)
                 if transcript.notification_id is not None:
-                    return transcript, capture
+                    return transcript, capture, after_count
         raise AcceptanceError("desktop notification server did not accept CopyPaste's captured-clip notification")
     finally:
         monitor.terminate()
@@ -418,8 +457,163 @@ def command_digest(argv: Sequence[str]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def start_wayland_qualification(action: str) -> str:
-    """Start a guarded compositor transaction without placing its capability in argv."""
+def gio_bus_value(connection: object, gio: object, glib: object, method: str, name: str) -> object:
+    """Read one D-Bus daemon credential through the same session connection."""
+    reply = connection.call_sync(
+        DBUS_NAME, DBUS_PATH, DBUS_INTERFACE, method, glib.Variant("(s)", (name,)),
+        None, gio.DBusCallFlags.NONE, 2000, None,
+    )
+    values = reply.unpack()
+    if not isinstance(values, tuple) or len(values) != 1:
+        raise AcceptanceError("D-Bus credentials were not machine-readable")
+    return values[0]
+
+
+def require_wayland_gui_owner(connection: object, gio: object, glib: object, gui_pid: int) -> str:
+    """Capture and verify the GUI's current unique session-bus owner."""
+    owner = gio_bus_value(connection, gio, glib, "GetNameOwner", HOST_BUS_NAME)
+    if not isinstance(owner, str) or not UNIQUE_NAME.fullmatch(owner):
+        raise AcceptanceError("CopyPaste GUI has no unique session-bus owner")
+    pid = gio_bus_value(connection, gio, glib, "GetConnectionUnixProcessID", owner)
+    uid = gio_bus_value(connection, gio, glib, "GetConnectionUnixUser", owner)
+    if type(pid) is not int or type(uid) is not int or pid != gui_pid or uid != os.getuid():
+        raise AcceptanceError("CopyPaste GUI D-Bus credentials do not belong to the GUI process")
+    return owner
+
+
+class WaylandQualificationObserver:
+    """Bind an ordered close-to-tray observation to one GUI D-Bus owner."""
+
+    def __init__(self, connection: object, gio: object, glib: object, gui_owner: str, gui_pid: int):
+        self.connection = connection
+        self.gio = gio
+        self.glib = glib
+        self.gui_owner = gui_owner
+        self.gui_pid = gui_pid
+        self.transaction = ""
+        self.expected_mapped: bool | None = None
+        self.observation: tuple[str, int, str, bool] | None = None
+        self.failure: AcceptanceError | None = None
+        self.loop: object | None = None
+        self.subscription = 0
+        self.pending_observations: list[tuple[str, tuple[str, int, str, bool]]] = []
+
+    def subscribe(self) -> None:
+        self.subscription = self.connection.signal_subscribe(
+            self.gui_owner, HOST_INTERFACE, "QualificationObservation", HOST_OBJECT_PATH,
+            None, self.gio.DBusSignalFlags.NONE, self._on_observation,
+        )
+        if not self.subscription:
+            raise AcceptanceError("could not subscribe to CopyPaste Wayland qualification observations")
+
+    def close(self) -> None:
+        if self.subscription:
+            self.connection.signal_unsubscribe(self.subscription)
+            self.subscription = 0
+
+    def start(self, action: str, capability: str) -> str:
+        # A compositor can answer the request before the synchronous method
+        # returns. Arm the first required observation before making that call.
+        self.expected_mapped = False
+        reply = self.connection.call_sync(
+            HOST_BUS_NAME, HOST_OBJECT_PATH, HOST_INTERFACE, "StartQualification",
+            self.glib.Variant("(ss)", (action, capability)), self.glib.VariantType.new("(s)"),
+            self.gio.DBusCallFlags.NONE, 2000, None,
+        )
+        values = reply.unpack()
+        if not isinstance(values, tuple) or len(values) != 1 or not isinstance(values[0], str) or not values[0]:
+            raise AcceptanceError("Wayland qualification did not return a transaction")
+        self.transaction = values[0]
+        for sender, observation in self.pending_observations:
+            self._accept_observation(sender, observation)
+        self.pending_observations.clear()
+        return self.transaction
+
+    def _fail(self, message: str) -> None:
+        self.failure = AcceptanceError(message)
+        if self.loop is not None:
+            self.loop.quit()
+
+    def _accept_observation(self, sender: str, values: tuple[str, int, str, bool]) -> None:
+        if sender != self.gui_owner:
+            self._fail("Wayland qualification observation came from an unexpected GUI owner")
+            return
+        if (
+            not isinstance(values, tuple) or len(values) != 4 or type(values[0]) is not str or
+            type(values[1]) is not int or type(values[2]) is not str or type(values[3]) is not bool
+        ):
+            self._fail("Wayland qualification observation was not machine-readable")
+            return
+        transaction, pid, role, mapped = values
+        if transaction != self.transaction:
+            self._fail("Wayland qualification observation belongs to a stale transaction")
+            return
+        if pid != self.gui_pid or role != "main":
+            self._fail("Wayland qualification observation does not identify the GUI main surface")
+            return
+        if self.expected_mapped is None or mapped != self.expected_mapped:
+            self._fail("Wayland qualification observations arrived out of order")
+            return
+        self.observation = (transaction, pid, role, mapped)
+        if self.loop is not None:
+            self.loop.quit()
+
+    def _on_observation(
+        self, _connection: object, sender: str, _path: str, _interface: str, _signal: str,
+        parameters: object,
+    ) -> None:
+        if sender != self.gui_owner:
+            self._fail("Wayland qualification observation came from an unexpected GUI owner")
+            return
+        try:
+            # Recheck both name ownership and process credentials for every signal.
+            if require_wayland_gui_owner(self.connection, self.gio, self.glib, self.gui_pid) != self.gui_owner:
+                self._fail("CopyPaste GUI D-Bus owner changed during Wayland qualification")
+                return
+            values = parameters.unpack()
+        except AcceptanceError as error:
+            self._fail(str(error))
+            return
+        except Exception:
+            self._fail("Wayland qualification observation was not machine-readable")
+            return
+        if not self.transaction:
+            if self.expected_mapped is None:
+                self._fail("Wayland qualification observation arrived before its expected phase")
+                return
+            self.pending_observations.append((sender, values))
+            return
+        self._accept_observation(sender, values)
+
+    def await_mapped(self, expected_mapped: bool) -> tuple[str, int, str, bool]:
+        self.expected_mapped = expected_mapped
+        if self.failure is not None:
+            raise self.failure
+        if self.observation is not None and self.observation[3] == expected_mapped:
+            return self.observation
+        self.observation = None
+        loop = self.glib.MainLoop()
+        self.loop = loop
+
+        def timed_out() -> bool:
+            self._fail("timed out waiting for authenticated Wayland qualification observation")
+            return False
+
+        timeout = self.glib.timeout_add(8000, timed_out)
+        try:
+            loop.run()
+        finally:
+            self.loop = None
+            self.glib.source_remove(timeout)
+        if self.failure is not None:
+            raise self.failure
+        if self.observation is None:
+            raise AcceptanceError("Wayland qualification observer stopped without an observation")
+        return self.observation
+
+
+def start_wayland_qualification(action: str, gui_pid: int) -> WaylandQualificationObserver:
+    """Subscribe before starting a guarded transaction; capability stays in D-Bus body only."""
     if action not in {"close-main", "quick-paste"}:
         raise AcceptanceError("unsupported Wayland qualification action")
     capability = os.environ.get("COPYPASTE_QUALIFICATION_CAPABILITY")
@@ -430,16 +624,27 @@ def start_wayland_qualification(action: str) -> str:
     except ImportError as error:
         raise AcceptanceError("PyGObject is required for capability-safe Wayland qualification") from error
     connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-    reply = connection.call_sync(
-        "app.copypaste.CopyPaste", "/app/copypaste/WaylandIntegration",
-        "app.copypaste.WaylandIntegration", "StartQualification",
-        GLib.Variant("(ss)", (action, capability)), GLib.VariantType.new("(s)"),
-        Gio.DBusCallFlags.NONE, 2000, None,
-    )
-    transaction, = reply.unpack()
-    if not isinstance(transaction, str) or not transaction:
-        raise AcceptanceError("Wayland qualification did not return a transaction")
-    return transaction
+    owner = require_wayland_gui_owner(connection, Gio, GLib, gui_pid)
+    observer = WaylandQualificationObserver(connection, Gio, GLib, owner, gui_pid)
+    observer.subscribe()
+    try:
+        observer.start(action, capability)
+    except Exception:
+        observer.close()
+        raise
+    return observer
+
+
+def verify_wayland_close_to_tray(environment: dict[str, str], service: str, open_item: int, gui_pid: int) -> CommandResult:
+    """Observe compositor remove/create around the real tray Open menu event."""
+    observer = start_wayland_qualification("close-main", gui_pid)
+    try:
+        observer.await_mapped(False)
+        menu_command = invoke_menu_item(environment, service, open_item)
+        observer.await_mapped(True)
+        return menu_command
+    finally:
+        observer.close()
 
 
 def write_evidence(path: Path, evidence: dict) -> None:
@@ -459,22 +664,22 @@ def qualify(args: argparse.Namespace) -> None:
     layout = dbus_menu_layout(environment, service)
     open_item = menu_item_id(layout, "Open")
 
-    if args.session != "x11":
-        raise AcceptanceError(
-            "native Wayland window lifecycle observation is unavailable: the product exposes no "
-            "compositor-visible window control or observer contract for the GUI PID"
-        )
-    for program in ("xdotool", "xprop", "xwininfo"):
-        require_program(program, environment)
-    window = x11_window_for_pid(environment, args.gui_pid)
-    if x11_map_state(environment, window) != "IsViewable":
-        raise AcceptanceError("CopyPaste X11 window is not visible before its close-to-tray action")
-    require_ok(run(["xdotool", "windowclose", window], environment=environment), "request CopyPaste window close")
-    wait_for_x11_map_state(environment, window, "IsUnMapped")
-    menu_command = invoke_menu_item(environment, service, open_item)
-    wait_for_x11_map_state(environment, window, "IsViewable")
+    if args.session == "x11":
+        for program in ("xdotool", "xprop", "xwininfo"):
+            require_program(program, environment)
+        window = x11_window_for_pid(environment, args.gui_pid)
+        if x11_map_state(environment, window) != "IsViewable":
+            raise AcceptanceError("CopyPaste X11 window is not visible before its close-to-tray action")
+        require_ok(run(["xdotool", "windowclose", window], environment=environment), "request CopyPaste window close")
+        wait_for_x11_map_state(environment, window, "IsUnMapped")
+        menu_command = invoke_menu_item(environment, service, open_item)
+        wait_for_x11_map_state(environment, window, "IsViewable")
+        window_evidence = {"id": window, "hide_show": "dbusmenu_open"}
+    else:
+        menu_command = verify_wayland_close_to_tray(environment, service, open_item, args.gui_pid)
+        window_evidence = {"observer": "compositor_dbus_signal", "hide_show": "dbusmenu_open"}
 
-    notification, capture = run_notification_capture(
+    notification, capture, history_count = run_notification_capture(
         environment, args.cli, args.socket, parse_capture_command(args.capture_command), args.gui_pid,
     )
     if notification.notification_id is None:
@@ -491,11 +696,12 @@ def qualify(args: argparse.Namespace) -> None:
                 "menu_path": MENU_PATH,
                 "open_item_id": open_item,
             },
-            "window": {"id": window, "hide_show": "dbusmenu_open"},
+            "window": window_evidence,
             "notification": {
                 "server_reply_id": notification.notification_id,
                 "capture_command_sha256": command_digest(capture.argv),
             },
+            "history": {"new_item_count": history_count},
             "commands": [
                 {"argv": list(menu_command.argv), "returncode": menu_command.returncode},
                 {"argv_sha256": command_digest(capture.argv), "returncode": capture.returncode},
