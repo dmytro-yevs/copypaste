@@ -77,6 +77,7 @@ int main(int argc, char **argv)
 {
     QCoreApplication application(argc, argv);
     qDBusRegisterMetaType<WriterIdentity>();
+    qDBusRegisterMetaType<QMap<QString, QByteArray>>();
     ClipboardFixture fixture;
     QDBusServer server(QStringLiteral("unix:tmpdir=%1").arg(QDir::tempPath()));
     if (!server.isConnected()) {
@@ -95,7 +96,7 @@ int main(int argc, char **argv)
     QTimer::singleShot(1'000, &setupLoop, &QEventLoop::quit);
 
     const QString connectionName = QStringLiteral("copypaste-kwin-wire-fixture-client");
-    const auto client = QDBusConnection::connectToBus(server.address(), connectionName);
+    const auto client = QDBusConnection::connectToPeer(server.address(), connectionName);
     if (!client.isConnected()) {
         return 2;
     }
@@ -165,7 +166,7 @@ int main(int argc, char **argv)
             return 9;
         }
     }
-    QDBusConnection::disconnectFromBus(connectionName);
+    QDBusConnection::disconnectFromPeer(connectionName);
     return 0;
 }
 

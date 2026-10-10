@@ -152,6 +152,10 @@ rg -F 'bool CopyPasteClipboardBridge::authorize(bool allowGui)' "$root/src/copyp
 rg -F 'if (!authorize(true))' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
 rg -F 'kGuiBusName = "app.copypaste.CopyPaste"' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
 test "$(rg -F -c 'if (!authorize())' "$root/src/copypasteclipboardbridge.cpp")" = 3
+rg -F 'qDBusRegisterMetaType<QMap<QString, QByteArray>>();' "$root/test-wire/main.cpp" >/dev/null
+rg -F 'qDBusRegisterMetaType<QMap<QString, QByteArray>>();' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
+rg -F 'QDBusConnection::connectToPeer(server.address(), connectionName)' "$root/test-wire/main.cpp" >/dev/null
+rg -F 'QDBusConnection::disconnectFromPeer(connectionName);' "$root/test-wire/main.cpp" >/dev/null
 rg -F 'hasMissingAppId' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
 rg -F 'QStringLiteral("ambiguous")' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
 rg -F 'QStringLiteral("no-app-id")' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
