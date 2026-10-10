@@ -25,7 +25,9 @@ static void write_result(GtkEditable* editable, gpointer data) {
   }
 }
 
-static gboolean focused(GtkWidget*, GdkEventFocus*, gpointer data) {
+static gboolean focused(GtkWidget* widget, GdkEventFocus* event, gpointer data) {
+  (void)widget;
+  (void)event;
   struct State* state = data;
   if (state->ready) return FALSE;
   GError* error = NULL;
