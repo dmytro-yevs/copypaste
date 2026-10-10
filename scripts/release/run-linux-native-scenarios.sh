@@ -102,9 +102,10 @@ trap cleanup_packages EXIT
 work="$(mktemp -d)"
 trap 'rm -rf "$work"; cleanup_packages' EXIT
 mkdir -p "$work/appimage-current"
+appimage_extract_argv=(env APPIMAGE_EXTRACT_AND_RUN=1 "$(current_package AppImage)" --appimage-extract)
 (
   cd "$work/appimage-current"
-  run_traced package_install env APPIMAGE_EXTRACT_AND_RUN=1 "$(current_package AppImage)" --appimage-extract
+  run_traced package_install "${appimage_extract_argv[@]}"
 )
 run_traced desktop_uri_icon test -x "$work/appimage-current/squashfs-root/AppRun"
 run_traced desktop_uri_icon test -f "$work/appimage-current/squashfs-root/com.copypaste.CopyPaste.desktop"
@@ -113,14 +114,37 @@ run_traced desktop_uri_icon test -f "$work/appimage-current/squashfs-root/com.co
 
 if [[ -f /etc/fedora-release ]]; then
   native_format=rpm
-  run_traced package_install sudo dnf --assumeyes install "$(current_package rpm)"
+  native_install_argv=(sudo dnf --assumeyes install "$(current_package rpm)")
+  run_traced package_install "${native_install_argv[@]}"
   run_traced package_install rpm -q copypaste
 else
   native_format=deb
-  run_traced package_install sudo apt-get install --yes "$(current_package deb)"
+  native_install_argv=(sudo apt-get install --yes "$(current_package deb)")
+  run_traced package_install "${native_install_argv[@]}"
   run_traced package_install dpkg-query --show copypaste
 fi
-export COPYPASTE_INSTALLED_FORMATS="AppImage,$native_format"
+python3 - "$(current_package AppImage)" "$(current_package "$native_format")" "$native_format" "${appimage_extract_argv[@]}" -- "${native_install_argv[@]}" <<'PY'
+import hashlib
+import json
+import sys
+
+appimage, native, native_format, *argv = sys.argv[1:]
+divider = argv.index("--")
+appimage_argv = argv[:divider]
+native_argv = argv[divider + 1:]
+def package(path, format_name):
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return {"format": format_name, "name": path.rsplit("/", 1)[-1], "path": __import__("os").path.realpath(path), "sha256": digest.hexdigest(), "size_bytes": __import__("os").path.getsize(path)}
+print("COPYPASTE_QUALIFICATION_INSTALL " + json.dumps({
+    "formats": ["AppImage", native_format],
+    "packages": [package(appimage, "AppImage"), package(native, native_format)],
+    "appimage_extract_argv": appimage_argv,
+    "native_install_argv": native_argv,
+}, separators=(",", ":")))
+PY
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 args=(--artifacts "$ARTIFACTS" --version "$VERSION" --architecture "$ARCHITECTURE" --desktop "$DESKTOP" --session "$SESSION" --evidence-dir "$EVIDENCE_DIR" --module-artifacts "$MODULE_ARTIFACTS" --module-fixtures "$MODULE_FIXTURES")
