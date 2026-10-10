@@ -277,7 +277,9 @@ def drag_wayland(source: DragSource, gui_pid: int, environment: dict[str, str]) 
     if not environment.get("WAYLAND_DISPLAY"):
         raise FileDragQualificationError("Wayland display is unavailable")
     try:
+        import gi  # type: ignore[import-not-found]
         import pyatspi  # type: ignore[import-not-found]
+        gi.require_version("Gdk", "3.0")
         from gi.repository import Gdk, Gio, GLib  # type: ignore[import-not-found]
     except ImportError as error:
         raise FileDragQualificationError("PyGObject and AT-SPI are required for Wayland file-drag qualification") from error
@@ -286,7 +288,8 @@ def drag_wayland(source: DragSource, gui_pid: int, environment: dict[str, str]) 
         raise FileDragQualificationError("Wayland portal helper does not expose dynamic consent")
     source_bounds = wait_for(lambda: _atspi_bounds_or_none(pyatspi.Registry, source.process.pid, "Drag qualification file"), "GTK file-drag source is absent from the AT-SPI desktop")
     target_bounds = wait_for(lambda: _atspi_bounds_or_none(pyatspi.Registry, gui_pid, TARGET_TITLE), "installed CopyPaste window is absent from the AT-SPI desktop")
-    require_single_wayland_layout(Gdk, source_bounds, target_bounds)
+    display = open_wayland_display(Gdk, environment["WAYLAND_DISPLAY"])
+    require_single_wayland_layout(display, source_bounds, target_bounds)
     portal = helper.PortalKeyboard(Gio, GLib)
     pointer = PortalPointer(portal, helper, GLib)
     try:
@@ -319,9 +322,18 @@ def _atspi_bounds_or_none(registry: Any, pid: int, name: str) -> Bounds | None:
         return None
 
 
-def require_single_wayland_layout(gdk: Any, source: Bounds, target: Bounds) -> Bounds:
-    display = gdk.Display.get_default()
-    if display is None or display.get_n_monitors() != 1:
+def open_wayland_display(gdk: Any, name: str) -> Any:
+    try:
+        display = gdk.Display.open(name)
+    except Exception as error:
+        raise FileDragQualificationError("could not open the requested Wayland display") from error
+    if display is None or display.get_name() != name:
+        raise FileDragQualificationError("GDK did not open the requested Wayland display")
+    return display
+
+
+def require_single_wayland_layout(display: Any, source: Bounds, target: Bounds) -> Bounds:
+    if display.get_n_monitors() != 1:
         raise FileDragQualificationError("Wayland file drag requires one visible monitor")
     geometry = display.get_monitor(0).get_geometry()
     layout = Bounds(geometry.x, geometry.y, geometry.width, geometry.height)
