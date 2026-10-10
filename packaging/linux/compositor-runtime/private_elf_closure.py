@@ -260,17 +260,11 @@ def source_rpm_license_files(owner: tuple[str, str, str, str], destination: Path
     source_dir = destination / source_rpm
     if not source_dir.exists():
         source_dir.mkdir(parents=True)
-        attempts = [source_rpm, source_rpm.removesuffix(".src.rpm")]
-        errors = []
-        for request in dict.fromkeys(attempts):
-            command = ["dnf", "-q", "download", "--source", "--destdir", str(source_dir), request]
-            completed = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
-            if completed.returncode == 0:
-                break
-            errors.append({"request": request, "exit": completed.returncode, "output": completed.stdout[:512].replace("\n", " ")})
-        else:
-            detail = "; ".join(f"request={item['request']} exit={item['exit']} output={item['output']!r}" for item in errors)
-            raise ClosureError(f"exact source RPM download failed for {name}: {detail}")
+        request = source_rpm.removesuffix(".src.rpm")
+        command = ["dnf", "-q", "download", "--source", "--destdir", str(source_dir), request]
+        completed = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+        if completed.returncode:
+            raise ClosureError(f"exact source RPM download failed for {name}: request={request} exit={completed.returncode} output={completed.stdout[:512].replace(chr(10), ' ')!r}")
     archives = [path for path in source_dir.iterdir() if path.is_file() and path.name == source_rpm]
     if len(archives) != 1:
         raise ClosureError(f"exact source RPM is unavailable for {name}")
@@ -278,13 +272,13 @@ def source_rpm_license_files(owner: tuple[str, str, str, str], destination: Path
     signature = subprocess.run(["rpm", "--checksig", "--verbose", str(archive)], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
     if signature.returncode or re.search(r"Signature.*: OK", signature.stdout, re.IGNORECASE) is None:
         raise ClosureError(f"exact source RPM signature is invalid for {name}")
-    identity = run(["rpm", "-qp", "--qf", "%{NAME}\t%{EPOCHNUM}\t%{VERSION}\t%{RELEASE}\t%{ARCH}\n", str(archive)]).splitlines()
+    identity = run(["rpm", "-qp", "--qf", "%{NAME}\t%{EPOCHNUM}\t%{VERSION}\t%{RELEASE}\t%{ARCH}\t%{SOURCEPACKAGE}\n", str(archive)]).splitlines()
     if len(identity) != 1:
         raise ClosureError(f"exact source RPM provenance differs for {name}")
-    source_name, epoch, version, release, architecture = identity[0].split("\t")
+    source_name, epoch, version, release, architecture, source_package = identity[0].split("\t")
     source_evr = f"{epoch}:{version}-{release}" if epoch not in {"", "0", "(none)"} else f"{version}-{release}"
-    if architecture != "src" or source_evr != evr or archive.name != f"{source_name}-{version}-{release}.src.rpm":
-        raise ClosureError(f"exact source RPM provenance differs for {name}: expected={source_rpm}/{evr} header={source_name}/{source_evr}/{architecture}")
+    if source_package != "1" or source_evr != evr or archive.name != f"{source_name}-{version}-{release}.src.rpm":
+        raise ClosureError(f"exact source RPM provenance differs for {name}: expected={source_rpm}/{evr} header={source_name}/{source_evr}/{architecture}/{source_package}")
     listing = bounded_rpm2cpio(archive)
     members_process = subprocess.run(["cpio", "-it"], input=listing, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
     verbose_process = subprocess.run(["cpio", "-itv"], input=listing, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
