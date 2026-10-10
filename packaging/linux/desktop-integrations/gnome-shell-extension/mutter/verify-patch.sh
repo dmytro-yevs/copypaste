@@ -38,6 +38,8 @@ if [[ -n "$runtime_output" ]]; then
     --runtime-dir "$runtime_output" --output "$runtime_output/runtime-receipt.json" \
     --runtime-id "$runtime_id" --desktop GNOME --source-revision "$commit" \
     --patch "$patch" --glibc-floor 2.39 --dependency gnome-shell --dependency gnome-session \
-    --private-entrypoint usr/libexec/copypaste-gnome-shell --shell-revision "$(cat "$runtime_output/.copypaste-gnome-shell-revision")" --license-file "$source_dir/COPYING"
+    --private-entrypoint usr/libexec/copypaste-gnome-shell \
+    --qualification-entrypoint usr/libexec/copypaste-gnome-shell-headless \
+    --shell-revision "$(cat "$runtime_output/.copypaste-gnome-shell-revision")" --license-file "$source_dir/COPYING"
 fi
 echo "verified Mutter $version commit $commit and installed immutable runtime=${runtime_output:-none}"

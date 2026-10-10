@@ -31,6 +31,16 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 exec "$root/bin/gnome-shell" --wayland
 EOF
 chmod 755 "$entrypoint"
+qualification_entrypoint="$mutter_runtime/usr/libexec/copypaste-gnome-shell-headless"
+cat > "$qualification_entrypoint" <<'EOF'
+#!/bin/sh
+set -eu
+[ "$#" -eq 0 ] || { echo "CopyPaste GNOME qualification session does not accept arguments" >&2; exit 64; }
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+exec "$root/bin/gnome-shell" --headless --virtual-monitor 1280x800
+EOF
+chmod 755 "$qualification_entrypoint"
 test -x "$mutter_runtime/usr/bin/gnome-shell"
 test -x "$entrypoint"
+test -x "$qualification_entrypoint"
 printf '%s\n' "$shell_commit" > "$mutter_runtime/.copypaste-gnome-shell-revision"

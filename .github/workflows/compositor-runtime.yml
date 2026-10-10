@@ -1,0 +1,160 @@
+name: Compositor runtime producer
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable CopyPaste version for immutable companion package names
+        required: true
+        type: string
+      commit:
+        description: Exact source commit to build
+        required: true
+        type: string
+      source_run_id:
+        description: Release run that requested these source artifacts
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      commit:
+        required: true
+        type: string
+      source_run_id:
+        required: true
+        type: string
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: true
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.desktop }} ${{ matrix.family }} ${{ matrix.distribution }} (${{ matrix.architecture }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - desktop: GNOME
+            family: "46"
+            distribution: Ubuntu 24.04
+            distribution_id: ubuntu
+            distribution_version: "24.04"
+            architecture: x86_64
+            runner: ubuntu-24.04
+            package_format: deb
+            artifact: copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64
+            platform: linux/amd64
+          - desktop: GNOME
+            family: "46"
+            distribution: Ubuntu 24.04
+            distribution_id: ubuntu
+            distribution_version: "24.04"
+            architecture: aarch64
+            runner: ubuntu-24.04-arm
+            package_format: deb
+            artifact: copypaste-compositor-runtime-gnome-46-ubuntu24.04-aarch64
+            platform: linux/arm64
+          - desktop: KDE
+            family: "6.0"
+            distribution: Fedora 40
+            distribution_id: fedora
+            distribution_version: "40"
+            architecture: x86_64
+            runner: ubuntu-24.04
+            package_format: rpm
+            artifact: copypaste-compositor-runtime-kwin-6.0-fedora40-x86_64
+            platform: linux/amd64
+          - desktop: KDE
+            family: "6.0"
+            distribution: Fedora 40
+            distribution_id: fedora
+            distribution_version: "40"
+            architecture: aarch64
+            runner: ubuntu-24.04-arm
+            package_format: rpm
+            artifact: copypaste-compositor-runtime-kwin-6.0-fedora40-aarch64
+            platform: linux/arm64
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.commit }}
+      - name: Check immutable producer identity
+        run: |
+          set -euo pipefail
+          [[ "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "${{ inputs.commit }}" =~ ^[0-9a-f]{40}$ && "$GITHUB_SHA" == "${{ inputs.commit }}" ]]
+          [[ "${{ inputs.source_run_id }}" =~ ^[1-9][0-9]*$ ]]
+      - name: Install GNOME build tools
+        if: matrix.desktop == 'GNOME'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends build-essential dpkg-dev git meson ninja-build pkg-config python3 rpm
+      - name: Build receipt-listed private compositor runtime
+        run: |
+          set -euo pipefail
+          mkdir -p build/runtime-output artifact/runtime
+          if [[ "${{ matrix.desktop }}" == GNOME ]]; then
+            cd packaging/linux/desktop-integrations/gnome-shell-extension/mutter
+            ./verify-patch.sh 46 "$RUNNER_TEMP/mutter-source" "$RUNNER_TEMP/mutter-build" "$GITHUB_WORKSPACE/build/runtime-output"
+          else
+            cd packaging/linux/desktop-integrations/kde-native-clipboard
+            ./run-fedora-build.sh "${{ matrix.platform }}" 6.0 "$GITHUB_WORKSPACE/build/runtime-output"
+          fi
+          cd "$GITHUB_WORKSPACE"
+          test -f build/runtime-output/runtime-receipt.json
+          cp build/runtime-output/runtime-receipt.json artifact/runtime-receipt.json
+          cp -a build/runtime-output/. artifact/runtime/
+          rm -f artifact/runtime/runtime-receipt.json
+          python3 packaging/linux/compositor-runtime/build_companion_package.py \
+            --receipt artifact/runtime-receipt.json --runtime-dir artifact/runtime --version "${{ inputs.version }}" \
+            --format "${{ matrix.package_format }}" \
+            --output "artifact/copypaste-compositor-runtime-${{ matrix.desktop == 'GNOME' && 'gnome-46-ubuntu24.04' || 'kwin-6.0-fedora40' }}-v${{ inputs.version }}-linux-${{ matrix.architecture }}.${{ matrix.package_format }}"
+      - name: Sign and bind immutable producer files
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          package="$(find artifact -maxdepth 1 -type f \( -name '*.deb' -o -name '*.rpm' \) -print -quit)"
+          test -n "$package"
+          scripts/release/sign-update-artifact.sh "$package"
+          sha256sum "$package" > "$package.sha256"
+          python3 - "$package" artifact/runtime-receipt.json artifact/compositor-runtime-producer-receipt.json <<'PY'
+          import hashlib, json, os, sys
+          from pathlib import Path
+          package, runtime_path, output = map(Path, sys.argv[1:])
+          runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+          def meta(path):
+              h = hashlib.sha256(path.read_bytes()).hexdigest()
+              return {"name": path.name, "sha256": h, "size_bytes": path.stat().st_size}
+          licenses = []
+          for item in runtime["upstream_licenses"]:
+              path = Path("artifact/runtime") / item["name"]
+              target = Path("artifact") / path.name
+              target.write_bytes(path.read_bytes())
+              licenses.append(meta(target))
+          output.write_text(json.dumps({
+              "schema": 1, "commit": os.environ["GITHUB_SHA"], "producer_run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "source_run_id": int("${{ inputs.source_run_id }}"), "version": "${{ inputs.version }}",
+              "architecture": "${{ matrix.architecture }}", "desktop": "${{ matrix.desktop }}", "family": "${{ matrix.family }}",
+              "distribution": {"id": "${{ matrix.distribution_id }}", "version": "${{ matrix.distribution_version }}"},
+              "format": "${{ matrix.package_format }}", "runtime_id": runtime["runtime_id"], "glibc_floor": runtime["glibc_floor"],
+              "source": runtime["source"], "runtime_receipt": meta(runtime_path), "package": meta(package),
+              "upstream_licenses": licenses,
+          }, indent=2) + "\n", encoding="utf-8")
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.artifact }}
+          if-no-files-found: error
+          path: artifact

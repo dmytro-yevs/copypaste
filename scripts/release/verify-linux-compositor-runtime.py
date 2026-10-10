@@ -69,7 +69,7 @@ def verify_source(run: dict, artifacts: dict, repository: str, commit: str) -> N
         type(run.get("id")) is not int or run.get("head_sha") != commit
         or run.get("head_repository", {}).get("full_name") != repository
         or run.get("path") != ".github/workflows/compositor-runtime.yml"
-        or run.get("event") != "workflow_dispatch" or run.get("status") != "completed"
+        or run.get("event") not in {"workflow_dispatch", "workflow_call"} or run.get("status") != "completed"
         or run.get("conclusion") != "success"
     ):
         raise ValueError("compositor runtime source is not a successful exact-commit producer run")
@@ -125,10 +125,10 @@ def binding(root: Path, desktop: str, architecture: str, commit: str, producer_r
         raise ValueError("compositor runtime artifact root is unsafe")
     producer = read_json(root / "compositor-runtime-producer-receipt.json", "producer receipt")
     family, family_version, distro, distro_version, package_format = runtime_identity(desktop, architecture)
-    required = {"schema", "commit", "producer_run_id", "version", "architecture", "desktop", "family", "distribution", "format", "runtime_receipt", "package", "source", "glibc_floor", "runtime_id"}
+    required = {"schema", "commit", "producer_run_id", "source_run_id", "version", "architecture", "desktop", "family", "distribution", "format", "runtime_receipt", "package", "source", "glibc_floor", "runtime_id", "upstream_licenses"}
     if set(producer) != required or producer.get("schema") != 1:
         raise ValueError("producer receipt schema is invalid")
-    if (producer.get("commit") != commit or producer.get("producer_run_id") != producer_run_id
+    if (producer.get("commit") != commit or str(producer.get("producer_run_id")) != producer_run_id
             or producer.get("architecture") != architecture or producer.get("desktop") != desktop
             or producer.get("family") != family or producer.get("format") != package_format
             or producer.get("distribution") != {"id": distro, "version": distro_version}
@@ -155,6 +155,15 @@ def binding(root: Path, desktop: str, architecture: str, commit: str, producer_r
     checksum_path = safe_file(root, package_path.name + ".sha256", "companion package checksum")
     if checksum_path.read_text(encoding="utf-8") != f"{package['sha256']}  {package_path.name}\n":
         raise ValueError("companion package checksum file differs")
+    licenses = producer["upstream_licenses"]
+    if not isinstance(licenses, list) or not licenses:
+        raise ValueError("producer receipt has no upstream license records")
+    for license_meta in licenses:
+        if not isinstance(license_meta, dict) or set(license_meta) != {"name", "sha256", "size_bytes"}:
+            raise ValueError("producer license metadata is invalid")
+        license_path = safe_file(root, license_meta["name"], "upstream license")
+        if license_meta != {"name": license_path.name, "sha256": sha256(license_path), "size_bytes": license_path.stat().st_size}:
+            raise ValueError("producer license bytes differ")
     module = stage_runtime_module()
     receipt = module.read_receipt(runtime_path)
     module.validate_receipt(receipt)

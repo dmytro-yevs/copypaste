@@ -44,12 +44,23 @@ build_one() {
     license="$source/LICENSES/GPL-2.0-or-later.txt"
     [[ -f "$license" ]] || { echo "ERROR: immutable KWin source license is missing" >&2; exit 1; }
     runtime_id="kwin-${family}-fedora40"
+    qualification_entrypoint="$runtime_output/usr/libexec/copypaste-kwin-headless"
+    install -d "$(dirname "$qualification_entrypoint")"
+    cat > "$qualification_entrypoint" <<'EOF'
+#!/bin/sh
+set -eu
+[ "$#" -eq 0 ] || { echo "CopyPaste KWin qualification session does not accept arguments" >&2; exit 64; }
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+exec "$root/bin/kwin_wayland" --virtual --no-lockscreen
+EOF
+    chmod 755 "$qualification_entrypoint"
     python3 "$root/../../compositor-runtime/emit_runtime_receipt.py" \
       --runtime-dir "$runtime_output" --output "$runtime_output/runtime-receipt.json" \
       --runtime-id "$runtime_id" --desktop KDE --source-revision "$expected" \
       --patch "$root/patches/kwin-${family}.patch" --glibc-floor 2.39 \
       --dependency plasma-workspace --dependency kglobalaccel \
-      --private-entrypoint usr/bin/kwin_wayland --license-file "$license"
+      --private-entrypoint usr/bin/kwin_wayland \
+      --qualification-entrypoint usr/libexec/copypaste-kwin-headless --license-file "$license"
   fi
 }
 
