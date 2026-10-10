@@ -67,7 +67,7 @@ def build_rpm(stage_root: Path, output: Path, release_version: str, receipt: dic
         runtime_id = receipt["runtime_id"]
         spec.write_text(
             f"Name: {package_name(runtime_id)}\nVersion: {release_version}\nRelease: 1%{{?dist}}\n"
-            "Summary: Opt-in CopyPaste compositor clipboard runtime\nLicense: MIT OR Apache-2.0\n"
+            "Summary: Opt-in CopyPaste compositor clipboard runtime\nLicense: GPL-2.0-or-later\n"
             f"BuildArch: {architecture}\n{rpm_requires(receipt)}\n\n"
             "%description\nPrivate compositor runtime exposed only as a separate login session.\n\n"
             "%install\ncp -a %{_source_stage}/. %{buildroot}/\n\n%files\n"
@@ -81,6 +81,21 @@ def build_rpm(stage_root: Path, output: Path, release_version: str, receipt: dic
         if len(outputs) != 1:
             raise ContractError("RPM build produced an unexpected output set")
         shutil.move(str(outputs[0]), output)
+
+
+def verify_packaged_payload(package_format: str, package: Path, runtime_id: str) -> None:
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        if package_format == "deb":
+            run(["dpkg-deb", "-x", str(package), str(root)])
+        else:
+            unpack = subprocess.run(["rpm2cpio", str(package)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+            if unpack.returncode:
+                raise ContractError("cannot extract built RPM for payload verification")
+            restore = subprocess.run(["cpio", "-idm", "--quiet"], input=unpack.stdout, cwd=root, check=False)
+            if restore.returncode:
+                raise ContractError("cannot restore built RPM for payload verification")
+        verify(root, runtime_id)
 
 
 def main() -> int:
@@ -114,6 +129,7 @@ def main() -> int:
                 build_deb(stage_root, args.output, args.version, receipt)
             else:
                 build_rpm(stage_root, args.output, args.version, receipt)
+            verify_packaged_payload(args.format, args.output, receipt["runtime_id"])
     except (ContractError, OSError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
