@@ -21,9 +21,13 @@ void main() {
           'clipboard': true,
           'quickPaste': true,
           'screenshotProtection': false,
+          'startAtLogin': false,
+          'uriRegistered': false,
         },
         'requestRemoteDesktop' => true,
         'openCompanionSetup' => true,
+        'setStartAtLogin' => true,
+        'registerCopypasteUri' => true,
         _ => null,
       };
     });
@@ -41,6 +45,8 @@ void main() {
     expect(status.clipboard, isTrue);
     expect(status.quickPaste, isTrue);
     expect(status.screenshotProtection, isFalse);
+    expect(status.startAtLogin, isFalse);
+    expect(status.uriRegistered, isFalse);
   });
 
   test(
@@ -48,6 +54,8 @@ void main() {
     () async {
       expect(await port.requestRemoteDesktop(), isTrue);
       expect(await port.openCompanionSetup(), isTrue);
+      expect(await port.setStartAtLogin(true), isTrue);
+      expect(await port.registerCopypasteUri(), isTrue);
     },
   );
 
