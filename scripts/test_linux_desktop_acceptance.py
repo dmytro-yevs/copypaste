@@ -50,7 +50,7 @@ class LinuxDesktopAcceptanceTest(unittest.TestCase):
             MODULE.menu_item_id(layout, "Settings")
 
     def test_notification_transcript_keeps_only_server_reply_metadata(self):
-        transcript = MODULE.NotificationTranscript()
+        transcript = MODULE.NotificationTranscript(server_owner=':1.9')
         transcript.consume(
             "method call time=1.0 sender=:1.5 -> destination=org.freedesktop.Notifications serial=71 "
             "path=/org/freedesktop/Notifications; interface=org.freedesktop.Notifications; member=Notify"
@@ -64,6 +64,22 @@ class LinuxDesktopAcceptanceTest(unittest.TestCase):
         self.assertEqual(transcript.notification_id, 24)
         evidence = json.dumps({"server_reply_id": transcript.notification_id})
         self.assertNotIn("sensitive clipboard body", evidence)
+
+    def test_notification_body_uint32_cannot_be_a_server_reply(self):
+        transcript = MODULE.NotificationTranscript(server_owner=':1.9')
+        transcript.consume(
+            "method call sender=:1.5 -> destination=org.freedesktop.Notifications serial=71 "
+            "path=/org/freedesktop/Notifications; interface=org.freedesktop.Notifications; member=Notify"
+        )
+        transcript.consume(' string "CopyPaste"')
+        transcript.consume(' uint32 999')
+        self.assertIsNone(transcript.notification_id)
+        transcript.consume('method return sender=:1.8 -> destination=:1.5 serial=72 reply_serial=71')
+        transcript.consume(' uint32 24')
+        self.assertIsNone(transcript.notification_id)
+        transcript.consume('method return sender=:1.9 -> destination=:1.5 serial=72 reply_serial=71')
+        transcript.consume(' uint32 24')
+        self.assertEqual(transcript.notification_id, 24)
 
     def test_capture_command_requires_real_argv(self):
         self.assertEqual(MODULE.parse_capture_command('["/tmp/trigger", "--ready"]'), ["/tmp/trigger", "--ready"])
