@@ -209,6 +209,7 @@ export default class CopyPasteQuickPasteExtension extends Extension {
         if (!window)
             return;
         if (action === 'close-main') {
+            this._qualification = {transactionId, pid};
             this._reportQualification(transactionId, pid, true);
             const unmanaging = window.connect('unmanaging', () => {
                 this._reportQualification(transactionId, pid, false);
@@ -306,6 +307,10 @@ export default class CopyPasteQuickPasteExtension extends Extension {
     }
 
     _watchQuickPasteWindow(window) {
+        const qualification = this._qualification;
+        if (qualification && window?.get_pid?.() === qualification.pid &&
+            window.get_gtk_application_id?.() === QUICK_PASTE_APPLICATION_ID)
+            this._reportQualification(qualification.transactionId, qualification.pid, true);
         const pending = this._activeTransaction;
         if (!pending || !window || pending.watchIds.has(window))
             return;

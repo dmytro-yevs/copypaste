@@ -399,6 +399,30 @@ def command_digest(argv: Sequence[str]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def start_wayland_qualification(action: str) -> str:
+    """Start a guarded compositor transaction without placing its capability in argv."""
+    if action not in {"close-main", "quick-paste"}:
+        raise AcceptanceError("unsupported Wayland qualification action")
+    capability = os.environ.get("COPYPASTE_QUALIFICATION_CAPABILITY")
+    if not capability:
+        raise AcceptanceError("Wayland qualification capability is unavailable")
+    try:
+        from gi.repository import Gio, GLib  # type: ignore[import-not-found]
+    except ImportError as error:
+        raise AcceptanceError("PyGObject is required for capability-safe Wayland qualification") from error
+    connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    reply = connection.call_sync(
+        "app.copypaste.CopyPaste", "/app/copypaste/WaylandIntegration",
+        "app.copypaste.WaylandIntegration", "StartQualification",
+        GLib.Variant("(ss)", (action, capability)), GLib.VariantType.new("(s)"),
+        Gio.DBusCallFlags.NONE, 2000, None,
+    )
+    transaction, = reply.unpack()
+    if not isinstance(transaction, str) or not transaction:
+        raise AcceptanceError("Wayland qualification did not return a transaction")
+    return transaction
+
+
 def write_evidence(path: Path, evidence: dict) -> None:
     path.mkdir(parents=True, exist_ok=True)
     target = path / "linux-desktop-acceptance.json"
