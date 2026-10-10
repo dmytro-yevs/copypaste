@@ -147,7 +147,7 @@ jobs:
             xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q window && break
             sleep 0.05
           done
-          xprop -root _NET_SUPPORTING_WM_CHECK | grep -q window
+          kill -0 "$wm_pid"
           /tmp/copypaste-gtk-file-drop-sink --ready-file "$work/sink-ready" --result-file "$work/result" >/dev/null 2>&1 &
           sink_pid=$!
           touch "$work/fixture"
