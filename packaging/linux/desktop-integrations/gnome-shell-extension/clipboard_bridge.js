@@ -29,7 +29,7 @@ export class ClipboardBridge {
         this._destroyed = false;
         this._replied = new WeakSet();
         this._impl = Gio.DBusExportedObject.wrapJSObject(XML, {
-            VersionAsync: (_params, invocation) => this._reply(invocation, new GLib.Variant('(u)', [PROTOCOL_VERSION])),
+            VersionAsync: (_params, invocation) => this._versionAsync(invocation),
             SnapshotAsync: (params, invocation) => this._snapshotAsync(params, invocation),
             ReadAsync: (params, invocation) => this._readAsync(params, invocation),
             WriteAsync: (params, invocation) => this._writeAsync(params, invocation),
@@ -54,6 +54,14 @@ export class ClipboardBridge {
             this._selection.disconnect(this._ownerChangedId);
         this._ownerChangedId = 0;
         this._impl.unexport();
+    }
+
+    async _versionAsync(invocation) {
+        if (!await this._authorized(invocation))
+            return;
+        if (this._destroyed)
+            return this._error(invocation, 'Unavailable');
+        this._reply(invocation, new GLib.Variant('(u)', [PROTOCOL_VERSION]));
     }
 
     async _snapshotAsync(_params, invocation) {
