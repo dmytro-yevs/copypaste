@@ -42,39 +42,46 @@ jobs:
           #include <unistd.h>
           #include <string>
 
-          int main(int argc, char** argv) {
-            if (argc != 2) return 64;
-            const std::string root(argv[1]);
-            const std::string executable = root + "/Copy Paste%handler";
+          int inspect(const std::string& root, const std::string& label) {
+            const std::string executable = root + "/" + label;
             const int fd = open(executable.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0700);
             if (fd < 0 || close(fd) != 0) return 65;
             const std::string entry = LinuxXdgStartup::DesktopEntryForExecutable(executable, false);
-            const std::string path = root + "/com.copypaste.CopyPaste.desktop";
+            const std::string path = root + "/" + label + ".desktop";
             g_autoptr(GError) error = nullptr;
             if (!g_file_set_contents(path.c_str(), entry.c_str(), entry.size(), &error)) {
-              g_printerr("ENTRY_WRITE_ERROR %s\n", error->message);
+              g_printerr("ENTRY_WRITE_ERROR %s %s\n", label.c_str(), error->message);
               return 66;
             }
-            g_print("SERIALIZED_ENTRY_BEGIN\n%sSERIALIZED_ENTRY_END\n", entry.c_str());
+            g_print("SERIALIZED_ENTRY_BEGIN %s\n%sSERIALIZED_ENTRY_END %s\n", label.c_str(), entry.c_str(), label.c_str());
             g_autoptr(GKeyFile) key_file = g_key_file_new();
             if (!g_key_file_load_from_data(key_file, entry.c_str(), entry.size(), G_KEY_FILE_NONE, &error)) {
-              g_printerr("KEYFILE_ERROR %s\n", error->message);
+              g_printerr("KEYFILE_ERROR %s %s\n", label.c_str(), error->message);
               return 67;
             }
             for (const char* key : {"Exec", "TryExec", "MimeType"}) {
               g_autofree gchar* value = g_key_file_get_string(key_file, "Desktop Entry", key, &error);
               if (value == nullptr) {
-                g_printerr("KEY_VALUE_ERROR %s %s\n", key, error->message);
+                g_printerr("KEY_VALUE_ERROR %s %s %s\n", label.c_str(), key, error->message);
                 return 68;
               }
-              g_print("KEY_%s=%s\n", key, value);
+              g_print("KEY_%s_%s=%s\n", label.c_str(), key, value);
             }
             g_autoptr(GDesktopAppInfo) app = g_desktop_app_info_new_from_filename(path.c_str());
-            g_print("DESKTOP_APP_INFO=%s\n", app == nullptr ? "null" : "loaded");
+            g_print("DESKTOP_APP_INFO_%s=%s\n", label.c_str(), app == nullptr ? "null" : "loaded");
             if (app != nullptr) {
-              g_print("SUPPORTS_URIS=%s\n", g_app_info_supports_uris(G_APP_INFO(app)) ? "true" : "false");
+              g_print("SUPPORTS_URIS_%s=%s\n", label.c_str(), g_app_info_supports_uris(G_APP_INFO(app)) ? "true" : "false");
             }
             return app == nullptr ? 69 : 0;
+          }
+          int main(int argc, char** argv) {
+            if (argc != 2) return 64;
+            const std::string root(argv[1]);
+            int result = 0;
+            for (const char* label : {"plain-handler", "space handler", "percent%handler", "quote\"handler", "backslash\\handler", "space percent%handler"}) {
+              result = inspect(root, label) == 0 ? result : 69;
+            }
+            return result;
           }
           CPP
           read -r -a gio_flags <<< "$(pkg-config --cflags --libs gio-unix-2.0 gio-2.0 glib-2.0)"
@@ -86,8 +93,10 @@ jobs:
           loader_status=${PIPESTATUS[0]}
           set -e
           set +e
-          desktop-file-validate "$diagnostic_root/com.copypaste.CopyPaste.desktop" 2>&1 | tee "$RUNNER_TEMP/desktop-file-validate.log"
-          validate_status=${PIPESTATUS[0]}
+          validate_status=0
+          for desktop in "$diagnostic_root"/*.desktop; do
+            desktop-file-validate "$desktop" || validate_status=1
+          done
           set -e
           echo "LOADER_STATUS=$loader_status"
           echo "DESKTOP_FILE_VALIDATE_STATUS=$validate_status"
@@ -96,7 +105,7 @@ jobs:
           curl --fail --location --retry 2 \
             "https://gitlab.gnome.org/GNOME/glib/-/raw/$glib_version/gio/gdesktopappinfo.c" \
             --output "$RUNNER_TEMP/gdesktopappinfo.c"
-          rg -n -C 3 'TryExec|parse_exec|g_find_program_in_path' \
+          grep -n -E 'TryExec|parse_exec|g_find_program_in_path' \
             "$RUNNER_TEMP/gdesktopappinfo.c" > "$RUNNER_TEMP/gdesktopappinfo-excerpts.log"
           sed -n '1,240p' "$RUNNER_TEMP/gdesktopappinfo-excerpts.log"
           test "$loader_status" -eq 0
