@@ -143,10 +143,14 @@ rg -F 'kAuthorizerTimeoutMs = 250' "$root/src/copypasteclipboardbridge.cpp" >/de
 rg -F 'cancelPendingTransfers();' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
 rg -F '++m_daemonOwnerEpoch;' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
 rg -F 'bridge->m_daemonOwnerEpoch != daemonOwnerEpoch' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
-for export in 'Q_SCRIPTABLE uint Version() const;' 'Q_SCRIPTABLE void Snapshot(' 'Q_SCRIPTABLE QByteArray Read(' \
+for export in 'Q_SCRIPTABLE void Version(uint &version);' 'Q_SCRIPTABLE void Snapshot(' 'Q_SCRIPTABLE QByteArray Read(' \
     'Q_SCRIPTABLE qulonglong Write(' 'Q_SCRIPTABLE void OwnerChanged('; do
   rg -F "$export" "$root/src/copypasteclipboardbridge.h" >/dev/null
 done
+rg -F 'bool CopyPasteClipboardBridge::authorize(bool allowGui)' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
+rg -F 'if (!authorize(true))' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
+rg -F 'kGuiBusName = "app.copypaste.CopyPaste"' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
+test "$(rg -F -c 'if (!authorize())' "$root/src/copypasteclipboardbridge.cpp")" = 3
 rg -F 'hasMissingAppId' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
 rg -F 'QStringLiteral("ambiguous")' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
 rg -F 'QStringLiteral("no-app-id")' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
