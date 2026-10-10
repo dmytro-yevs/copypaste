@@ -335,6 +335,16 @@ class ReleaseSafetyTest(unittest.TestCase):
         verifier = runpy.run_path(str(ROOT / "scripts/release/verify-compositor-runtime-source-run.py"))
         self.assertTrue(expected <= verifier["EXPECTED"])
 
+    def test_compositor_runtime_public_prepares_the_pinned_dart_verifier(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        start = workflow.index("  compositor-runtime-public:\n")
+        end = workflow.index("\n  linux-full-parity-evidence:", start)
+        job = workflow[start:end]
+        self.assertIn("uses: ./.github/actions/setup-flutter", job)
+        self.assertIn("version: ${{ steps.flutter.outputs.version }}", job)
+        self.assertIn("flutter pub get --enforce-lockfile", job)
+        self.assertLess(job.index("flutter pub get --enforce-lockfile"), job.index("tool/verify_update_signature.dart"))
+
     def test_compositor_runtime_public_receipt_binds_signed_package_bytes(self):
         module = runpy.run_path(
             str(ROOT / "scripts/release/stage-compositor-runtime-release.py")
