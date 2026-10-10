@@ -15,7 +15,7 @@ jq -e '
   (.integrations[] | select(.id == "gnome-shell") |
     .extensionId == "copypaste-quick-paste@copypaste.app" and
     .enable == "user" and
-    .supportedShellVersions == ["46", "47", "48"]) and
+    .supportedShellVersions == ["46", "47"]) and
   (.integrations[] | select(.id == "kde-kwin") |
     .packageId == "copypaste-quick-paste" and
     .hostDesktopFileName == "com.copypaste.CopyPaste" and
@@ -47,6 +47,23 @@ clipboard_bridge="$gnome/clipboard_bridge.js"
 rg -F "app.copypaste.Daemon" "$clipboard_bridge" >/dev/null
 rg -F "const MAX_BYTES = 4 * 1024 * 1024" "$clipboard_bridge" >/dev/null
 rg -F "const MAX_WRITE_TOTAL_BYTES = 32 * 1024 * 1024" "$clipboard_bridge" >/dev/null
+rg -F 'type="(suus)"' "$clipboard_bridge" >/dev/null
+rg -F "const PROTOCOL_VERSION = 2" "$clipboard_bridge" >/dev/null
+rg -F "this._identity = this._writerIdentity(this._currentOwner())" "$clipboard_bridge" >/dev/null
+rg -F "['no-client', 0, 0, '']" "$clipboard_bridge" >/dev/null
+rg -F "const [status, pid, uid, appId]" "$clipboard_bridge" >/dev/null
+for status in verified no-client no-app-id ambiguous; do
+  rg -F "\"$status\"" "$gnome/mutter/mutter-46-writer-identity.patch" >/dev/null
+done
+rg -F "meta_selection_source_get_writer_identity" "$gnome/native/copypaste-clipboard-source.c" >/dev/null
+rg -F "meta_selection_get_current_owner" "$gnome/native/copypaste-clipboard-source.c" >/dev/null
+rg -F "wl_resource_get_client" "$gnome/mutter/mutter-46-writer-identity.patch" >/dev/null
+rg -F "meta_wayland_surface_get_resource" "$gnome/mutter/mutter-46-writer-identity.patch" >/dev/null
+rg -F "window_app_id = meta_window_get_wm_class (window);" "$gnome/mutter/mutter-46-writer-identity.patch" >/dev/null
+if rg -F "meta_window_get_gtk_application_id" "$gnome/mutter/mutter-46-writer-identity.patch"; then
+  echo "Mutter writer bridge must use the Wayland app-id WM_CLASS field." >&2
+  exit 1
+fi
 rg -F "const MAX_MIMES = 64" "$clipboard_bridge" >/dev/null
 for error in AccessDenied StaleSelection UnsupportedMime TooLarge Unavailable; do
   rg -F "$error" "$clipboard_bridge" >/dev/null
