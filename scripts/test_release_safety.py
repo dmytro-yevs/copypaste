@@ -1064,6 +1064,49 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "typed IPC"):
                 producer["command_rows"](fake_ipc, driver_assertions)
 
+    def test_linux_native_command_trace_logs_noisy_output_without_breaking_typed_stdout(self):
+        scenario = (ROOT / "scripts/release/run-linux-native-scenarios.sh").read_text(encoding="utf-8")
+        init = re.search(r"^init_trace_logs\(\) \{.*?^\}\n", scenario, re.MULTILINE | re.DOTALL)
+        trace = re.search(r"^run_traced\(\) \{.*?^\}\n", scenario, re.MULTILINE | re.DOTALL)
+        self.assertIsNotNone(init)
+        self.assertIsNotNone(trace)
+        producer = runpy.run_path(str(ROOT / "scripts/release/produce-linux-native-qualification.py"))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            harness = root / "trace-harness.sh"
+            harness.write_text(
+                "#!/usr/bin/env bash\nset -euo pipefail\nEVIDENCE_DIR=$1\n"
+                + init.group(0)
+                + trace.group(0)
+                + "init_trace_logs\nset +e\n"
+                + "run_traced package_install bash -c 'printf success-out; printf success-err >&2'\nsuccess=$?\n"
+                + "run_traced package_install python3 -c 'import sys; sys.stdout.write(\"x\" * (1024 * 1024 + 1) + \"-stdout-end\"); sys.stderr.write(\"y\" * (1024 * 1024 + 1) + \"-stderr-end\")'\noversized=$?\n"
+                + "run_traced package_install bash -c 'printf failure-out; printf failure-err >&2; exit 23'\nfailure=$?\n"
+                + "set -e\nprintf 'RESULT %s %s %s\\n' \"$success\" \"$oversized\" \"$failure\" >&2\n",
+                encoding="utf-8",
+            )
+            harness.chmod(0o700)
+            evidence = root / "evidence"
+            evidence.mkdir(mode=0o700)
+            completed = subprocess.run([str(harness), str(evidence)], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(completed.stdout.count("COPYPASTE_QUALIFICATION_COMMAND "), 3)
+            success_record, oversized_record, failure_record = completed.stdout.splitlines()
+            self.assertEqual(len(producer["command_rows"]("\n".join((success_record, oversized_record)), {"package_install"})), 2)
+            with self.assertRaisesRegex(ValueError, "failed command"):
+                producer["command_rows"](failure_record, {"package_install"})
+            self.assertIn("RESULT 0 0 23", completed.stderr)
+            logs = sorted((evidence / "command-output").glob("command.*"))
+            self.assertEqual(len(logs), 11)
+            contents = {path.read_text(encoding="utf-8") for path in logs if ".status." not in path.name}
+            self.assertTrue({"success-out", "success-err", "failure-out", "failure-err"} <= contents)
+            stdout = b"".join(path.read_bytes() for path in sorted((evidence / "command-output").glob("command.stdout.*")))
+            stderr = b"".join(path.read_bytes() for path in sorted((evidence / "command-output").glob("command.stderr.*")))
+            self.assertIn(b"x" * (1024 * 1024 + 1) + b"-stdout-end", stdout)
+            self.assertIn(b"y" * (1024 * 1024 + 1) + b"-stderr-end", stderr)
+            self.assertTrue(all(path.stat().st_size <= 1024 * 1024 for path in logs if ".status." not in path.name))
+            self.assertTrue(all(path.is_file() and not path.is_symlink() and path.stat().st_mode & 0o077 == 0 for path in logs))
+
     def test_linux_native_producer_forwards_resolved_module_staging_paths(self):
         producer = runpy.run_path(str(ROOT / "scripts/release/produce-linux-native-qualification.py"))
         with tempfile.TemporaryDirectory() as directory:
