@@ -6,6 +6,7 @@ import json
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 
 
@@ -73,22 +74,57 @@ class LinuxWaylandQuickPasteTest(unittest.TestCase):
     def test_receipt_binds_every_actor_pid_and_rejects_weak_input_proof(self):
         digest = 'a' * 64
         record = module.receipt(
-            gui_pid=11, app_portal_dialog_pid=12, portal_dialog_pid=13, input_target_pid=14,
+            gui_pid=11, portal_dialog_pid=13, input_target_pid=14,
             marker='fixture', portal_input_calls=8, portal_session_digest=digest,
-            app_click_digest=digest, app_consent_digest=digest, portal_click_digest=digest,
+            portal_click_digest=digest,
         )
         self.assertEqual(record['actors'], {
             'gui_pid': 11,
-            'app_portal_dialog_pid': 12,
             'portal_dialog_pid': 13,
             'input_target_pid': 14,
         })
         with self.assertRaisesRegex(module.QuickPasteQualificationError, 'proof'):
             module.receipt(
-                gui_pid=11, app_portal_dialog_pid=12, portal_dialog_pid=13, input_target_pid=14,
+                gui_pid=11, portal_dialog_pid=13, input_target_pid=14,
                 marker='fixture', portal_input_calls=7, portal_session_digest=digest,
-                app_click_digest=digest, app_consent_digest=digest, portal_click_digest=digest,
+                portal_click_digest=digest,
             )
+
+    def test_default_portal_action_accepts_only_one_modal_default_control(self):
+        class State:
+            def __init__(self, *values):
+                self.values = set(values)
+
+            def contains(self, value):
+                return value in self.values
+
+        class Action:
+            nActions = 1
+
+            def getName(self, _index):
+                return 'click'
+
+        class Node:
+            def __init__(self, *states, children=()):
+                self._state = State(*states)
+                self._children = list(children)
+                self.childCount = len(self._children)
+
+            def getState(self):
+                return self._state
+
+            def getChildAtIndex(self, index):
+                return self._children[index]
+
+            def queryAction(self):
+                return Action()
+
+        atspi = SimpleNamespace(STATE_MODAL='modal', STATE_DEFAULT='default', STATE_SHOWING='showing', STATE_VISIBLE='visible', STATE_ENABLED='enabled')
+        default = Node('default', 'showing', 'visible', 'enabled')
+        application = Node(children=(Node('modal', children=(default,)),))
+        self.assertEqual(module.default_portal_action(application, atspi), (default, 0))
+        second = Node('default', 'showing', 'visible', 'enabled')
+        self.assertIsNone(module.default_portal_action(Node(children=(Node('modal', children=(default, second)),)), atspi))
 
     def test_portal_response_received_during_call_is_not_lost(self):
         class Reply:

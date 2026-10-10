@@ -22,14 +22,7 @@ SPEC.loader.exec_module(driver)
 class LinuxNativeFixtureDriverTest(unittest.TestCase):
     def wayland_inputs(self, **overrides):
         values = {
-            "wayland_app_permission_target": "Enable Quick Paste",
-            "wayland_app_permission_expect": "Grant permission",
-            "wayland_app_portal_dialog_pid": 4322,
-            "wayland_app_allow_target": "Allow",
-            "wayland_app_allow_expect": "Permission granted",
-            "wayland_portal_dialog_pid": 4323,
-            "wayland_portal_allow_target": "Allow",
-            "wayland_portal_allow_expect": "Keyboard granted",
+            "wayland_app_permission_target": "Allow keyboard control",
         }
         values.update(overrides)
         return SimpleNamespace(**values)
@@ -40,7 +33,6 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             "kind": "wayland_quick_paste",
             "actors": {
                 "gui_pid": 4321,
-                "app_portal_dialog_pid": 4322,
                 "portal_dialog_pid": 4323,
                 "input_target_pid": 4324,
             },
@@ -51,8 +43,6 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             },
             "portal": {"input_calls": 8, "session_sha256": "b" * 64},
             "atspi": {
-                "application_click_sha256": "c" * 64,
-                "application_consent_sha256": "d" * 64,
                 "portal_click_sha256": "e" * 64,
             },
         }
@@ -75,11 +65,13 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             ],
         }
 
-    def test_wayland_inputs_reject_missing_or_invalid_explicit_dialog_pids(self):
-        with self.assertRaisesRegex(RuntimeError, "portal dialog pid is invalid"):
-            driver.wayland_quick_paste_inputs(self.wayland_inputs(wayland_portal_dialog_pid=None))
-        with self.assertRaisesRegex(RuntimeError, "app portal dialog pid is invalid"):
-            driver.wayland_quick_paste_inputs(self.wayland_inputs(wayland_app_portal_dialog_pid=0))
+    def test_wayland_inputs_only_accept_the_installed_product_control(self):
+        self.assertEqual(
+            driver.wayland_quick_paste_inputs(self.wayland_inputs()),
+            {"app_permission_target": "Allow keyboard control"},
+        )
+        with self.assertRaisesRegex(RuntimeError, "app permission target is invalid"):
+            driver.wayland_quick_paste_inputs(self.wayland_inputs(wayland_app_permission_target=""))
 
     def test_wayland_quick_paste_receipt_binds_every_actor_and_media_proof(self):
         inputs = driver.wayland_quick_paste_inputs(self.wayland_inputs())
@@ -90,7 +82,7 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             ),
             receipt,
         )
-        receipt["actors"]["portal_dialog_pid"] = 9876
+        receipt["actors"]["gui_pid"] = 9876
         with self.assertRaisesRegex(RuntimeError, "does not match"):
             driver.wayland_quick_paste_receipt(
                 receipt, gui_pid=4321, inputs=inputs, marker="copypaste-wayland-quick-paste-fixture",
@@ -117,7 +109,7 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "capture command digest"):
                 driver.wayland_desktop_receipt(path, desktop="GNOME", gui_pid=4321)
 
-    def test_wayland_wiring_passes_explicit_actors_and_preserves_media_receipt(self):
+    def test_wayland_wiring_resolves_portal_actors_at_runtime(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             evidence = root / "evidence"
@@ -145,11 +137,65 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
                     args, gui_pid=4321, cli=root / "copypaste-cli", environment={}, workspace=root, socket_path=root / "socket",
                 )
             command = run.call_args_list[1].args[0]
-            self.assertEqual(command[command.index("--app-portal-dialog-pid") + 1], "4322")
-            self.assertEqual(command[command.index("--portal-dialog-pid") + 1], "4323")
+            self.assertEqual(command[command.index("--app-permission-target") + 1], "Allow keyboard control")
+            self.assertFalse(any(argument.startswith("--portal-dialog") or argument.startswith("--app-portal-dialog") for argument in command))
             written = json.loads((evidence / "wayland-quick-paste.json").read_text(encoding="utf-8"))
             self.assertEqual(written["actors"]["input_target_pid"], 4324)
-            self.assertEqual(set(written["atspi"]), {"application_click_sha256", "application_consent_sha256", "portal_click_sha256"})
+            self.assertEqual(set(written["atspi"]), {"portal_click_sha256"})
+
+    def test_linux_onboarding_drives_the_installed_x11_flow_without_seeding_preferences(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            actor = root / "actor.py"
+            actor.write_text("# actor\n", encoding="utf-8")
+            args = SimpleNamespace(session="x11", wayland_actor=actor)
+            probe = subprocess.CompletedProcess(
+                ["python3", str(actor)], 0,
+                stdout=("COPYPASTE_QUALIFICATION_MEDIA " + json.dumps({
+                    "kind": "atspi_probe", "gui_pid": 4321,
+                    "target_name_sha256": hashlib.sha256(b"History").hexdigest(), "present": False,
+                }) + "\n").encode(),
+            )
+            result = subprocess.CompletedProcess(["python3", str(actor)], 0, stdout=b"")
+            with mock.patch.object(driver, "run", side_effect=[probe, *([result] * 7)]) as run:
+                driver.require_linux_onboarding(args, gui_pid=4321, environment={})
+            commands = [call.args[0] for call in run.call_args_list[1:]]
+            self.assertEqual([command[2] for command in commands], ["click", "observe", "observe", "click", "observe", "click", "observe"])
+            self.assertEqual(
+                [command[command.index("--target") + 1] for command in commands],
+                ["Continue", "Set up your Linux desktop", "Quick Paste is ready.", "Continue", "Get started", "Get started", "History"],
+            )
+
+    def test_workflow_producer_needs_no_external_wayland_consent_metadata(self):
+        workflow = (ROOT / ".github/workflows/linux-native-qualification.yml").read_text(encoding="utf-8")
+        producer = (ROOT / "scripts/release/produce-linux-native-qualification.py").read_text(encoding="utf-8")
+        fixture = (ROOT / "scripts/release/linux-native-fixture-driver.py").read_text(encoding="utf-8")
+        self.assertIn("produce-linux-native-qualification.py", workflow)
+        self.assertIn('"--session", args.session', producer)
+        self.assertNotIn("--wayland-app-portal-dialog-pid", workflow)
+        self.assertNotIn("--wayland-portal-dialog-pid", producer)
+        self.assertIn('default="Allow keyboard control"', fixture)
+
+    def test_completed_profile_is_recognized_after_the_final_gui_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            actor = root / "actor.py"
+            actor.write_text("# actor\n", encoding="utf-8")
+            args = SimpleNamespace(session="x11", wayland_actor=actor)
+            probe = subprocess.CompletedProcess(
+                ["python3", str(actor)], 0,
+                stdout=("COPYPASTE_QUALIFICATION_MEDIA " + json.dumps({
+                    "kind": "atspi_probe", "gui_pid": 4321,
+                    "target_name_sha256": hashlib.sha256(b"History").hexdigest(), "present": True,
+                }) + "\n").encode(),
+            )
+            with mock.patch.object(driver, "run", return_value=probe) as run:
+                driver.require_linux_onboarding(args, gui_pid=4321, environment={})
+            self.assertEqual(run.call_count, 1)
+        fixture = (ROOT / "scripts/release/linux-native-fixture-driver.py").read_text(encoding="utf-8")
+        final_onboarding = fixture.rindex("require_linux_onboarding(args, gui_pid=app.pid")
+        self.assertLess(fixture.index("runtime_socket = require_modules("), final_onboarding)
+        self.assertLess(final_onboarding, fixture.rindex("require_pairing_sync("))
 
     def test_discovers_only_the_gui_owned_explicit_data_directory_under_xdg_data(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -91,17 +91,17 @@ def require_wayland_text(value, description):
 
 
 def wayland_quick_paste_inputs(args):
-    fields = (
-        "app_permission_target", "app_permission_expect", "app_allow_target", "app_allow_expect",
-        "portal_allow_target", "portal_allow_expect",
-    )
-    values = {field: require_wayland_text(getattr(args, f"wayland_{field}"), field.replace("_", " ")) for field in fields}
-    for field in ("app_portal_dialog_pid", "portal_dialog_pid"):
-        value = getattr(args, f"wayland_{field}")
-        if type(value) is not int or value <= 0:
-            raise RuntimeError(f"{field.replace('_', ' ')} is invalid")
-        values[field] = value
-    return values
+    """Return the installed product control used to request its own consent.
+
+    Portal dialogs are owned by the desktop session, not by a workflow input.
+    The Wayland helper resolves their D-Bus/AT-SPI process identity immediately
+    before each consent action.
+    """
+    return {
+        "app_permission_target": require_wayland_text(
+            args.wayland_app_permission_target, "app permission target",
+        ),
+    }
 
 
 def wayland_desktop_receipt(path, *, desktop, gui_pid):
@@ -152,18 +152,15 @@ def wayland_quick_paste_receipt(value, *, gui_pid, inputs, marker):
     target = value["target"]
     portal = value["portal"]
     atspi = value["atspi"]
-    expected_actors = {
-        "gui_pid": gui_pid,
-        "app_portal_dialog_pid": inputs["app_portal_dialog_pid"],
-        "portal_dialog_pid": inputs["portal_dialog_pid"],
-    }
     if type(gui_pid) is not int or gui_pid <= 0:
         raise RuntimeError("Wayland Quick Paste GUI actor is invalid")
-    if not isinstance(actors, dict) or set(actors) != {"gui_pid", "app_portal_dialog_pid", "portal_dialog_pid", "input_target_pid"}:
+    if not isinstance(actors, dict) or set(actors) != {"gui_pid", "portal_dialog_pid", "input_target_pid"}:
         raise RuntimeError("Wayland Quick Paste receipt actor identity is invalid")
-    if any(actors.get(name) != pid for name, pid in expected_actors.items()) or type(actors["input_target_pid"]) is not int or actors["input_target_pid"] <= 0:
-        raise RuntimeError("Wayland Quick Paste receipt actor identity does not match the requested actors")
-    if actors["input_target_pid"] in expected_actors.values():
+    if actors.get("gui_pid") != gui_pid or any(type(actors.get(name)) is not int or actors[name] <= 0 for name in (
+        "portal_dialog_pid", "input_target_pid",
+    )):
+        raise RuntimeError("Wayland Quick Paste receipt actor identity does not match the discovered actors")
+    if actors["input_target_pid"] in {gui_pid, actors["portal_dialog_pid"]}:
         raise RuntimeError("Wayland Quick Paste target actor is not separate")
     if (not isinstance(target, dict) or set(target) != {"pid", "title_sha256", "marker_sha256"}
             or target["pid"] != actors["input_target_pid"]):
@@ -177,7 +174,7 @@ def wayland_quick_paste_receipt(value, *, gui_pid, inputs, marker):
             or type(portal["input_calls"]) is not int or portal["input_calls"] < 8):
         raise RuntimeError("Wayland Quick Paste portal evidence is invalid")
     require_sha256(portal["session_sha256"], "Wayland Quick Paste portal session digest")
-    if not isinstance(atspi, dict) or set(atspi) != {"application_click_sha256", "application_consent_sha256", "portal_click_sha256"}:
+    if not isinstance(atspi, dict) or set(atspi) != {"portal_click_sha256"}:
         raise RuntimeError("Wayland Quick Paste media evidence is invalid")
     for name, digest in atspi.items():
         require_sha256(digest, f"Wayland Quick Paste {name}")
@@ -198,6 +195,90 @@ def wayland_helper_receipt(output):
     if len(records) != 1:
         raise RuntimeError("Wayland Quick Paste helper did not emit exactly one receipt")
     return records[0]
+
+
+def wayland_permission_receipt(output, *, gui_pid):
+    prefix = "COPYPASTE_QUALIFICATION_WAYLAND_PERMISSION "
+    records = [json.loads(line.removeprefix(prefix)) for line in output.splitlines() if line.startswith(prefix)]
+    if len(records) != 1 or any(line and not line.startswith(prefix) for line in output.splitlines()):
+        raise RuntimeError("Wayland onboarding permission helper emitted invalid output")
+    record = records[0]
+    if (not isinstance(record, dict) or set(record) != {"schema", "gui_pid", "dialog_pid", "click_sha256", "consent_sha256"}
+            or record.get("schema") != 1 or record.get("gui_pid") != gui_pid
+            or type(record.get("dialog_pid")) is not int or record["dialog_pid"] <= 0):
+        raise RuntimeError("Wayland onboarding permission evidence is invalid")
+    require_sha256(record["click_sha256"], "Wayland onboarding click digest")
+    require_sha256(record["consent_sha256"], "Wayland onboarding consent digest")
+    return record
+
+
+def atspi_action(actor, command, gui_pid, target, environment):
+    result = run(
+        [sys.executable, str(actor), command, "--pid", str(gui_pid), "--target", target],
+        env=environment,
+    )
+    return hashlib.sha256(result.stdout).hexdigest()
+
+
+def atspi_present(actor, gui_pid, target, environment):
+    result = run(
+        [sys.executable, str(actor), "probe", "--pid", str(gui_pid), "--target", target],
+        env=environment,
+    )
+    prefix = "COPYPASTE_QUALIFICATION_MEDIA "
+    lines = result.stdout.decode("utf-8").splitlines()
+    if len(lines) != 1 or not lines[0].startswith(prefix):
+        raise RuntimeError("AT-SPI probe emitted invalid output")
+    record = json.loads(lines[0].removeprefix(prefix))
+    if (not isinstance(record, dict) or record.get("kind") != "atspi_probe" or record.get("gui_pid") != gui_pid
+            or record.get("target_name_sha256") != hashlib.sha256(target.encode("utf-8")).hexdigest()
+            or type(record.get("present")) is not bool):
+        raise RuntimeError("AT-SPI probe evidence is invalid")
+    return record["present"]
+
+
+def require_linux_onboarding(args, *, gui_pid, environment):
+    """Complete the installed Linux onboarding before feature qualification."""
+    actor = require_helper(args.wayland_actor, "Linux onboarding AT-SPI actor")
+    if atspi_present(actor, gui_pid, "History", environment):
+        if args.session != "wayland":
+            return
+        atspi_action(actor, "click", gui_pid, "Settings", environment)
+        atspi_action(actor, "observe", gui_pid, "Quick Paste", environment)
+        if atspi_present(actor, gui_pid, "Allow keyboard control", environment):
+            helper = require_helper(args.wayland_quick_paste_helper, "Wayland Quick Paste helper")
+            permission = run(
+                [
+                    sys.executable, str(helper), "--grant-product-permission", "--gui-pid", str(gui_pid),
+                    "--actor", str(actor), "--app-permission-target", wayland_quick_paste_inputs(args)["app_permission_target"],
+                ], env=environment,
+            )
+            receipt = wayland_permission_receipt(permission.stdout.decode("utf-8"), gui_pid=gui_pid)
+            write_wayland_evidence(args.evidence_dir, "wayland-onboarding-permission.json", receipt)
+        atspi_action(actor, "click", gui_pid, "History", environment)
+        atspi_action(actor, "observe", gui_pid, "History", environment)
+        return
+    atspi_action(actor, "click", gui_pid, "Continue", environment)
+    atspi_action(actor, "observe", gui_pid, "Set up your Linux desktop", environment)
+    if args.session == "wayland":
+        helper = require_helper(args.wayland_quick_paste_helper, "Wayland Quick Paste helper")
+        permission = run(
+            [
+                sys.executable, str(helper), "--grant-product-permission", "--gui-pid", str(gui_pid),
+                "--actor", str(actor), "--app-permission-target", wayland_quick_paste_inputs(args)["app_permission_target"],
+                "--require-granted-text",
+            ],
+            env=environment,
+        )
+        receipt = wayland_permission_receipt(permission.stdout.decode("utf-8"), gui_pid=gui_pid)
+        write_wayland_evidence(args.evidence_dir, "wayland-onboarding-permission.json", receipt)
+        atspi_action(actor, "observe", gui_pid, "The authenticated Clipboard v2 bridge is ready.", environment)
+        atspi_action(actor, "observe", gui_pid, "Keyboard control is allowed for Quick Paste.", environment)
+    atspi_action(actor, "observe", gui_pid, "Quick Paste is ready.", environment)
+    atspi_action(actor, "click", gui_pid, "Continue", environment)
+    atspi_action(actor, "observe", gui_pid, "Get started", environment)
+    atspi_action(actor, "click", gui_pid, "Get started", environment)
+    atspi_action(actor, "observe", gui_pid, "History", environment)
 
 
 def desktop_acceptance_capture_command(workspace, environment):
@@ -250,13 +331,6 @@ def require_wayland_qualification(args, *, gui_pid, cli, environment, workspace,
             sys.executable, str(quick_paste_helper), "--gui-pid", str(gui_pid),
             "--workspace", str(workspace), "--marker", marker, "--actor", str(actor),
             "--app-permission-target", inputs["app_permission_target"],
-            "--app-permission-expect", inputs["app_permission_expect"],
-            "--app-portal-dialog-pid", str(inputs["app_portal_dialog_pid"]),
-            "--app-allow-target", inputs["app_allow_target"],
-            "--app-allow-expect", inputs["app_allow_expect"],
-            "--portal-dialog-pid", str(inputs["portal_dialog_pid"]),
-            "--portal-allow-target", inputs["portal_allow_target"],
-            "--portal-allow-expect", inputs["portal_allow_expect"],
         ],
         env=environment,
         timeout=75,
@@ -820,14 +894,7 @@ def main():
     parser.add_argument("--wayland-desktop-acceptance-helper", type=Path, default=DESKTOP_ACCEPTANCE)
     parser.add_argument("--wayland-quick-paste-helper", type=Path, default=WAYLAND_QUICK_PASTE)
     parser.add_argument("--wayland-actor", type=Path, default=NATIVE_MEDIA)
-    parser.add_argument("--wayland-app-permission-target")
-    parser.add_argument("--wayland-app-permission-expect")
-    parser.add_argument("--wayland-app-portal-dialog-pid", type=int)
-    parser.add_argument("--wayland-app-allow-target")
-    parser.add_argument("--wayland-app-allow-expect")
-    parser.add_argument("--wayland-portal-dialog-pid", type=int)
-    parser.add_argument("--wayland-portal-allow-target")
-    parser.add_argument("--wayland-portal-allow-expect")
+    parser.add_argument("--wayland-app-permission-target", default="Allow keyboard control")
     args = parser.parse_args()
     if args.first_install_baseline == (args.previous_artifacts is not None):
         raise ValueError("select exactly one of a prior release or first-install baseline")
@@ -978,6 +1045,7 @@ def main():
                     runtime_socket, args.module_artifacts, args.module_fixtures,
                     daemon_data, args.architecture, args.version, args.evidence_dir, restart_gui_for_modules,
                 )
+                require_linux_onboarding(args, gui_pid=app.pid, environment=environment)
                 require_pairing_sync(prefix, cli, environment, workspace, runtime_socket)
 
                 # The remaining assertions deliberately execute their public probes and fail if the exact product

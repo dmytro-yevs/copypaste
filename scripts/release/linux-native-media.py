@@ -159,7 +159,8 @@ def action_index(node: Any, action_name: str) -> int | None:
     return None
 
 
-def click_accessible(registry: Any, *, pid: int, target: str, expected: str, timeout_seconds: int) -> dict[str, Any]:
+def invoke_accessible(registry: Any, *, pid: int, target: str) -> dict[str, Any]:
+    """Invoke one installed control and report the action acknowledgement."""
     application = atspi_application(registry, pid)
     button = matching_accessible(application, target)
     if button is None:
@@ -173,18 +174,48 @@ def click_accessible(registry: Any, *, pid: int, target: str, expected: str, tim
         raise MediaQualificationError("AT-SPI click failed") from error
     if performed is not True:
         raise MediaQualificationError("AT-SPI click was not accepted")
+    return redacted_record(
+        "atspi_click",
+        gui_pid=pid,
+        target_name_sha256=hashlib.sha256(target.encode("utf-8")).hexdigest(),
+        action="click",
+    )
+
+
+def click_accessible(registry: Any, *, pid: int, target: str, expected: str, timeout_seconds: int) -> dict[str, Any]:
+    record = invoke_accessible(registry, pid=pid, target=target)
+    application = atspi_application(registry, pid)
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         if matching_accessible(application, expected) is not None:
-            return redacted_record(
-                "atspi_click",
-                gui_pid=pid,
-                target_name_sha256=hashlib.sha256(target.encode("utf-8")).hexdigest(),
-                expected_name_sha256=hashlib.sha256(expected.encode("utf-8")).hexdigest(),
-                action="click",
-            )
+            return {**record, "expected_name_sha256": hashlib.sha256(expected.encode("utf-8")).hexdigest()}
         time.sleep(0.1)
     raise MediaQualificationError("installed UI did not reach the expected state")
+
+
+def observe_accessible(registry: Any, *, pid: int, target: str, timeout_seconds: int) -> dict[str, Any]:
+    """Require an installed accessible state without invoking another action."""
+    application = atspi_application(registry, pid)
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if matching_accessible(application, target) is not None:
+            return redacted_record(
+                "atspi_observe",
+                gui_pid=pid,
+                target_name_sha256=hashlib.sha256(target.encode("utf-8")).hexdigest(),
+            )
+        time.sleep(0.1)
+    raise MediaQualificationError("installed UI did not reach the required state")
+
+
+def probe_accessible(registry: Any, *, pid: int, target: str) -> dict[str, Any]:
+    application = atspi_application(registry, pid)
+    return redacted_record(
+        "atspi_probe",
+        gui_pid=pid,
+        target_name_sha256=hashlib.sha256(target.encode("utf-8")).hexdigest(),
+        present=matching_accessible(application, target) is not None,
+    )
 
 
 def v4l2_device(path: Path) -> None:
@@ -323,8 +354,15 @@ def main(argv: list[str] | None = None) -> int:
     click = commands.add_parser("click", help="perform one named AT-SPI click in the installed GUI")
     click.add_argument("--pid", required=True, type=int)
     click.add_argument("--target", required=True)
-    click.add_argument("--expect", required=True)
+    click.add_argument("--expect")
     click.add_argument("--timeout-seconds", type=int, default=8)
+    observe = commands.add_parser("observe", help="require one named AT-SPI state in the installed GUI")
+    observe.add_argument("--pid", required=True, type=int)
+    observe.add_argument("--target", required=True)
+    observe.add_argument("--timeout-seconds", type=int, default=8)
+    probe = commands.add_parser("probe", help="report whether one named installed AT-SPI state is present")
+    probe.add_argument("--pid", required=True, type=int)
+    probe.add_argument("--target", required=True)
     feed = commands.add_parser("feed-qr", help="feed a QR URI to an existing virtual camera")
     feed.add_argument("--uri-file", required=True, type=Path)
     feed.add_argument("--device", required=True, type=Path)
@@ -341,7 +379,28 @@ def main(argv: list[str] | None = None) -> int:
                 import pyatspi  # type: ignore[import-not-found]
             except ImportError as error:
                 raise MediaQualificationError("python3-pyatspi is required for native UI qualification") from error
-            emit(click_accessible(pyatspi.Registry, pid=args.pid, target=args.target, expected=args.expect, timeout_seconds=args.timeout_seconds))
+            if args.expect is None:
+                emit(invoke_accessible(pyatspi.Registry, pid=args.pid, target=args.target))
+            else:
+                emit(click_accessible(pyatspi.Registry, pid=args.pid, target=args.target, expected=args.expect, timeout_seconds=args.timeout_seconds))
+            return 0
+        if args.command == "observe":
+            if args.pid <= 0 or not 1 <= args.timeout_seconds <= MAX_TIMEOUT_SECONDS:
+                raise MediaQualificationError("AT-SPI arguments are invalid")
+            try:
+                import pyatspi  # type: ignore[import-not-found]
+            except ImportError as error:
+                raise MediaQualificationError("python3-pyatspi is required for native UI qualification") from error
+            emit(observe_accessible(pyatspi.Registry, pid=args.pid, target=args.target, timeout_seconds=args.timeout_seconds))
+            return 0
+        if args.command == "probe":
+            if args.pid <= 0:
+                raise MediaQualificationError("AT-SPI arguments are invalid")
+            try:
+                import pyatspi  # type: ignore[import-not-found]
+            except ImportError as error:
+                raise MediaQualificationError("python3-pyatspi is required for native UI qualification") from error
+            emit(probe_accessible(pyatspi.Registry, pid=args.pid, target=args.target))
             return 0
         if args.command == "stop-qr":
             emit(stop_qr_feed(args.pid_file))
