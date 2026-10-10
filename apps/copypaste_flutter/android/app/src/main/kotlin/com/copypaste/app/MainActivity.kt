@@ -65,6 +65,7 @@ class MainActivity : FlutterActivity() {
         @Synchronized
         internal fun ensureRuntime(context: Context) {
             instance = context.applicationContext
+            InferenceWorkerHost.initialize(context)
             initializeNdkContext(context.applicationContext)
             initializeRuntime(context.filesDir.resolve("runtime").absolutePath,
                 Build.MODEL, Build.MODEL, Build.VERSION.RELEASE,

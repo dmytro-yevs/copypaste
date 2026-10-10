@@ -8,7 +8,7 @@ use std::path::Path;
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_copypaste_qualification_MainActivity_qualify(
     mut environment: JNIEnv,
-    _class: JClass,
+    class: JClass,
     package: JString,
     fixtures: JString,
     data: JString,
@@ -50,13 +50,24 @@ pub extern "system" fn Java_com_copypaste_qualification_MainActivity_qualify(
             super::finish_after_restart(Path::new(&data), &app_version)?;
             return Ok("{\"removal_completed_after_restart\":true}".into());
         }
-        let receipt = super::qualify(
+        let vm = std::sync::Arc::new(
+            environment
+                .get_java_vm()
+                .map_err(|error| error.to_string())?,
+        );
+        let host = environment
+            .new_global_ref(class)
+            .map_err(|error| error.to_string())?;
+        let launcher =
+            std::sync::Arc::new(copypaste_modules::AndroidInferenceLauncher::new(vm, host));
+        let receipt = super::qualify_with_inference(
             Path::new(&package),
             Path::new(&fixtures),
             Path::new(&data),
             &app_version,
             &commit,
             &run_id,
+            Some(launcher),
         )?;
         serde_json::to_string(&receipt).map_err(|error| error.to_string())
     })();
@@ -69,5 +80,21 @@ pub extern "system" fn Java_com_copypaste_qualification_MainActivity_qualify(
             let _ = environment.throw_new("java/lang/IllegalStateException", error);
             std::ptr::null_mut()
         }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_copypaste_qualification_InferenceWorkerService_runWorker(
+    _environment: JNIEnv,
+    _class: JClass,
+    descriptor: jni::sys::jint,
+) {
+    use std::os::{fd::FromRawFd, unix::net::UnixStream};
+    if descriptor < 0 {
+        return;
+    }
+    let reader = unsafe { UnixStream::from_raw_fd(descriptor) };
+    if let Ok(writer) = reader.try_clone() {
+        let _ = copypaste_modules::run_inference_worker(reader, writer);
     }
 }

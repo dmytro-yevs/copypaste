@@ -67,6 +67,8 @@ pub struct ModuleManager {
     state: Mutex<State>,
     mutation: Mutex<()>,
     sync_services: Mutex<Option<Arc<crate::SyncServices>>>,
+    inference: crate::inference::InferenceClient,
+    worker_identity: crate::inference::WorkerIdentity,
 }
 
 impl ModuleManager {
@@ -108,11 +110,25 @@ impl ModuleManager {
             }),
             mutation: Mutex::new(()),
             sync_services: Mutex::new(None),
+            inference: crate::inference::InferenceClient::new(),
+            worker_identity: crate::inference::WorkerIdentity {
+                app_version: app_version.into(),
+                target,
+                public_key: public_key.into(),
+            },
         })
     }
 
     fn directory(&self, id: &str, version: &str) -> PathBuf {
         self.root.join("packages").join(id).join(version)
+    }
+
+    pub fn set_inference_launcher(&self, launcher: Arc<dyn crate::InferenceLauncher>) {
+        self.inference.set_launcher(launcher);
+    }
+
+    pub(crate) fn stop_inference(&self) {
+        self.inference.stop(None);
     }
 
     fn manifest(&self, id: &str, record: &Record) -> Result<ModuleManifest, ModuleError> {
@@ -258,6 +274,9 @@ impl ModuleManager {
             return Err(error);
         }
         let previous = state.loaded.remove(&manifest.id);
+        if manifest.search_provider.is_some() {
+            self.inference.stop(Some(&manifest.id));
+        }
         state.registry = registry;
         drop(state);
         if let Some(previous) = previous {
@@ -294,6 +313,9 @@ impl ModuleManager {
         record.enabled = enabled;
         self.persist(&registry)?;
         state.registry = registry;
+        if !enabled {
+            self.inference.stop(Some(id));
+        }
         let previous = if !enabled {
             state.loaded.remove(id)
         } else {
@@ -358,6 +380,9 @@ impl ModuleManager {
         });
         record.preferences = preferences;
         // Release model sessions before replacing repaired model files on Windows.
+        if manifest.search_provider.is_some() && (!same_search_model || prepared.is_some()) {
+            self.inference.stop(Some(id));
+        }
         let previous = if !same_search_model || prepared.is_some() {
             state.loaded.remove(id)
         } else {
@@ -429,12 +454,6 @@ impl ModuleManager {
         Ok(None)
     }
 
-    pub(crate) fn search_loaded(&self, id: &str) -> bool {
-        self.state
-            .lock()
-            .is_ok_and(|state| state.loaded.contains_key(id))
-    }
-
     /// Hold admission only through storage publication, not model inference.
     /// Other modules' network commands cannot block a search inference call.
     pub(crate) fn search_lease<T>(
@@ -472,6 +491,7 @@ impl ModuleManager {
         // can leave unused files, but can never reactivate a removed module.
         self.persist(&registry)?;
         let previous = state.loaded.remove(id);
+        self.inference.stop(Some(id));
         state.registry = registry;
         drop(state);
         if let Some(previous) = previous {
@@ -729,6 +749,18 @@ impl ModuleManager {
             arguments: resolve_fields(&command.arguments, &arguments)?,
             preferences: resolve_fields(&manifest.preferences, &record.preferences)?,
         };
+        if manifest.search_provider.is_some() {
+            let generation = self.inference.generation();
+            let request = crate::inference::InferenceRequest {
+                identity: self.worker_identity.clone(),
+                id: id.into(),
+                package_dir: self.directory(id, &record.version),
+                data_dir: self.root.join("data").join(id),
+                invocation,
+            };
+            drop(state);
+            return self.inference.invoke(request, generation);
+        }
         state.sequence = state.sequence.saturating_add(1);
         let last_used = state.sequence;
         let loaded = state.loaded.entry(id.into()).or_insert_with(|| Loaded {

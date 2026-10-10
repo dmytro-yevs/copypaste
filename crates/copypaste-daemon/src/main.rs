@@ -47,6 +47,16 @@ pub use crate::state::AppState;
 pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() -> anyhow::Result<()> {
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|arg| arg == "--inference-worker")
+    {
+        return copypaste_modules::run_inference_worker(
+            std::io::stdin().lock(),
+            std::io::stdout().lock(),
+        )
+        .map_err(Into::into);
+    }
     #[cfg(target_os = "macos")]
     {
         macos_workspace::run(run())
