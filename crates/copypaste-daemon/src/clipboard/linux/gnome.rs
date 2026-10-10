@@ -72,6 +72,17 @@ struct State {
     mimes: Vec<String>,
     source: Option<SourceIdentity>,
     owner: Option<String>,
+    #[cfg(test)]
+    watch_diagnostics: WatchDiagnostics,
+}
+
+#[cfg(test)]
+#[derive(Default, Debug)]
+struct WatchDiagnostics {
+    subscription_ready: bool,
+    frames: u64,
+    applied: u64,
+    rejection: Option<&'static str>,
 }
 
 pub(in crate::clipboard) struct GnomeClipboard {
@@ -538,22 +549,42 @@ fn watch_clipboard(
         let Ok(signals) = proxy.receive_signal("OwnerChanged") else {
             return;
         };
+        #[cfg(test)]
+        if let Ok(mut state) = state.lock() {
+            state.watch_diagnostics.subscription_ready = true;
+        }
         let _ = ready.send(());
         for signal in signals {
+            #[cfg(test)]
+            if let Ok(mut state) = state.lock() {
+                state.watch_diagnostics.frames += 1;
+            }
             let Ok((sequence, mimes, identity)) =
                 signal
                     .body()
                     .deserialize::<(u64, Vec<String>, (String, u32, u32, String))>()
             else {
+                #[cfg(test)]
+                if let Ok(mut state) = state.lock() {
+                    state.watch_diagnostics.rejection = Some("body");
+                }
                 invalidate_owner(&state, Some(&owner));
                 break;
             };
             if !valid_mimes(&mimes) {
+                #[cfg(test)]
+                if let Ok(mut state) = state.lock() {
+                    state.watch_diagnostics.rejection = Some("mimes");
+                }
                 invalidate_owner(&state, Some(&owner));
                 break;
             }
             if let Ok(mut state) = state.lock() {
                 if state.epoch != epoch || state.owner.as_deref() != Some(owner.as_str()) {
+                    #[cfg(test)]
+                    {
+                        state.watch_diagnostics.rejection = Some("owner");
+                    }
                     break;
                 }
                 apply_owner_changed(
@@ -562,6 +593,10 @@ fn watch_clipboard(
                     mimes.to_vec(),
                     SourceIdentity::from_wire(identity.0, identity.1, identity.2, identity.3),
                 );
+                #[cfg(test)]
+                {
+                    state.watch_diagnostics.applied += 1;
+                }
             }
         }
         if let Ok(mut state) = state.lock() {
@@ -725,14 +760,6 @@ mod tests {
 
     #[zbus::interface(name = "app.copypaste.Clipboard")]
     impl FixtureBridge {
-        #[zbus(signal)]
-        async fn owner_changed(
-            emitter: &zbus::object_server::SignalEmitter<'_>,
-            sequence: u64,
-            mimes: Vec<String>,
-            identity: (String, u32, u32, String),
-        ) -> zbus::Result<()>;
-
         fn version(&self) -> u32 {
             BRIDGE_VERSION
         }
@@ -826,18 +853,14 @@ mod tests {
                 .expect("fixture bridge state")
                 .identity
                 .clone();
-            let interface = self
-                .connection
-                .object_server()
-                .interface::<_, FixtureBridge>(PATH)
-                .expect("fixture bridge interface");
-            self._runtime
-                .block_on(FixtureBridge::owner_changed(
-                    interface.signal_emitter(),
-                    sequence,
-                    mimes,
-                    identity,
-                ))
+            self.connection
+                .emit_signal(
+                    None::<&str>,
+                    PATH,
+                    INTERFACE,
+                    "OwnerChanged",
+                    &(sequence, mimes, identity),
+                )
                 .expect("fixture owner signal");
         }
 
@@ -897,7 +920,21 @@ mod tests {
         while !clipboard.changed() && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(1));
         }
-        assert!(clipboard.changed(), "fixture OwnerChanged was not observed");
+        assert!(
+            clipboard.changed(),
+            "fixture OwnerChanged was not observed: {}",
+            clipboard.state.lock().map_or_else(
+                |_| "state lock poisoned".into(),
+                |state| format!(
+                    "active={} watching={} sequence={} owner={:?} diagnostics={:?}",
+                    state.active,
+                    state.watching,
+                    state.sequence,
+                    state.owner,
+                    state.watch_diagnostics,
+                )
+            )
+        );
     }
 
     fn wait_for_sequence(clipboard: &GnomeClipboard, sequence: u64) {
