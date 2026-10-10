@@ -23,4 +23,4 @@ target="$source_root/src"
 
 cp "$root/src/copypasteclipboardbridge.cpp" "$target/"
 cp "$root/src/copypasteclipboardbridge.h" "$target/"
-patch --batch --forward --directory "$source_root" --input "$root/patches/kwin-${version}.patch"
+patch --batch --forward --fuzz=0 -p1 --directory "$source_root" --input "$root/patches/kwin-${version}.patch"
