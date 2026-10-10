@@ -155,6 +155,7 @@ def provision(state: Path, environment: Path) -> None:
         created = True
         if not device_is_character(DEVICE):
             raise RuntimeError("v4l2loopback did not create the requested character device")
+        command(["sudo", "udevadm", "settle"])
         live = read_live_device()
         replace_state(state, {**state_base(uid, gid, "loaded"), "live": live})
         command(["sudo", "chown", f"{uid}:{gid}", str(DEVICE)])
