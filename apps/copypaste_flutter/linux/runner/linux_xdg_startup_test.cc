@@ -165,6 +165,11 @@ void test_uri_registration_uses_private_xdg_home() {
   const std::string path = fixture->data() +
       "/applications/com.copypaste.CopyPaste.desktop";
   g_assert_true(g_file_test(path.c_str(), G_FILE_TEST_IS_REGULAR));
+  g_autoptr(GAppInfo) handler = g_app_info_get_default_for_type(
+      "x-scheme-handler/copypaste", TRUE);
+  g_assert_nonnull(handler);
+  g_assert_cmpstr(g_app_info_get_id(handler), ==,
+                  "com.copypaste.CopyPaste.desktop");
   g_assert_true(startup.Status().uri_registered);
 }
 
