@@ -306,7 +306,14 @@ fn worker(commands: mpsc::Receiver<Command>, state: Arc<Mutex<State>>, bridge: B
     if connection.request_name(DAEMON).is_err() {
         return;
     }
-    watch_service(connection.clone(), Arc::clone(&state), bridge);
+    // Subscribe before resolving the first owner.  Otherwise a bridge that
+    // appears between those two operations can be the only owner transition
+    // we never observe, leaving this adapter inactive until another restart.
+    let (ready, subscribed) = mpsc::sync_channel(1);
+    watch_service(connection.clone(), Arc::clone(&state), bridge, ready);
+    if subscribed.recv_timeout(RPC_TIMEOUT).is_err() {
+        return;
+    }
     activate(&connection, &state, bridge);
     loop {
         let command = match commands.recv_timeout(RPC_TIMEOUT) {
@@ -439,10 +446,12 @@ fn activate(connection: &Connection, state: &Arc<Mutex<State>>, bridge: Bridge) 
         }
         state.active = true;
         state.watching = true;
-        state.dirty = false;
-        state.sequence = sequence;
-        state.mimes = mimes;
-        state.source = source;
+        if state.sequence <= sequence {
+            state.dirty = false;
+            state.sequence = sequence;
+            state.mimes = mimes;
+            state.source = source;
+        }
     }
 }
 
@@ -480,7 +489,12 @@ fn owner_is_current(connection: &Connection, bridge: Bridge, expected: &str) -> 
         .is_ok_and(|owner| owner == expected)
 }
 
-fn watch_service(connection: Connection, state: Arc<Mutex<State>>, bridge: Bridge) {
+fn watch_service(
+    connection: Connection,
+    state: Arc<Mutex<State>>,
+    bridge: Bridge,
+    ready: mpsc::SyncSender<()>,
+) {
     thread::spawn(move || {
         let Ok(proxy) = Proxy::new(
             &connection,
@@ -493,6 +507,7 @@ fn watch_service(connection: Connection, state: Arc<Mutex<State>>, bridge: Bridg
         let Ok(signals) = proxy.receive_signal("NameOwnerChanged") else {
             return;
         };
+        let _ = ready.send(());
         for signal in signals {
             let Ok((name, _old, new)) = signal.body().deserialize::<(String, String, String)>()
             else {
@@ -703,7 +718,8 @@ mod tests {
         stall_reads: bool,
         snapshots: usize,
         completed_snapshots: usize,
-        stall_snapshots: bool,
+        snapshot_started: Option<mpsc::Sender<()>>,
+        snapshot_release: Option<mpsc::Receiver<()>>,
     }
 
     struct FixtureBridge(Arc<Mutex<BridgeState>>);
@@ -725,16 +741,19 @@ mod tests {
         fn snapshot(&self) -> (u64, Vec<String>, (String, u32, u32, String)) {
             let mut state = self.0.lock().expect("fixture bridge state");
             state.snapshots += 1;
-            if state.stall_snapshots {
-                drop(state);
-                thread::sleep(RPC_TIMEOUT + Duration::from_secs(1));
-                self.0
-                    .lock()
-                    .expect("fixture bridge state")
-                    .completed_snapshots += 1;
-                return (0, Vec::new(), ("no-client".into(), 0, 0, String::new()));
-            }
             let snapshot = (state.sequence, state.mimes.clone(), state.identity.clone());
+            let started = state.snapshot_started.take();
+            let release = state.snapshot_release.take();
+            if let Some(started) = started {
+                let _ = started.send(());
+            }
+            if let Some(release) = release {
+                drop(state);
+                release
+                    .recv_timeout(RPC_TIMEOUT.saturating_sub(Duration::from_millis(100)))
+                    .expect("release stalled fixture Snapshot");
+                state = self.0.lock().expect("fixture bridge state");
+            }
             state.completed_snapshots += 1;
             snapshot
         }
@@ -835,6 +854,23 @@ mod tests {
             self.state.lock().expect("fixture bridge state").identity = identity;
         }
 
+        fn update_value(&self, mime: &str, value: &[u8]) {
+            self.state
+                .lock()
+                .expect("fixture bridge state")
+                .values
+                .insert(mime.into(), value.into());
+        }
+
+        fn stall_next_snapshot(&self) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
+            let (started, started_receiver) = mpsc::channel();
+            let (release_sender, release) = mpsc::channel();
+            let mut state = self.state.lock().expect("fixture bridge state");
+            state.snapshot_started = Some(started);
+            state.snapshot_release = Some(release);
+            (started_receiver, release_sender)
+        }
+
         fn release_name(&self) {
             self.connection
                 .release_name(self.service)
@@ -872,7 +908,8 @@ mod tests {
         }
         for bridge in [GNOME, KWIN] {
             live_bridge_fixture(bridge);
-            stale_snapshot_owner_replacement_fixture(bridge);
+            owner_changed_during_stalled_snapshot_fixture(bridge);
+            owner_switch_during_stalled_snapshot_fixture(bridge);
         }
     }
 
@@ -1017,60 +1054,55 @@ mod tests {
         panic!("companion owner loss retained source provenance");
     }
 
-    fn stale_snapshot_owner_replacement_fixture(bridge: Bridge) {
+    fn owner_changed_during_stalled_snapshot_fixture(bridge: Bridge) {
         let original = BridgeFixture::start(bridge);
-        original
-            .state
-            .lock()
-            .expect("fixture bridge state")
-            .stall_snapshots = true;
+        original.update_owner(1, vec!["text/plain;charset=utf-8".into()]);
+        let (snapshot_started, snapshot_release) = original.stall_next_snapshot();
+        let directory = tempfile::tempdir().expect("fixture data dir");
+        let mut clipboard =
+            GnomeClipboard::with_bridge(directory.path(), bridge).expect("compositor clipboard");
+        snapshot_started
+            .recv_timeout(RPC_TIMEOUT)
+            .expect("fixture Snapshot did not stall");
+        original.update_identity(("verified".into(), 100, 1000, "org.example.NewWriter".into()));
+        original.update_value("text/plain;charset=utf-8", b"new bridge text");
+        original.update_owner(2, vec!["text/plain;charset=utf-8".into()]);
+        wait_for_change(&mut clipboard);
+        snapshot_release
+            .send(())
+            .expect("release stalled fixture Snapshot");
+        let capture = clipboard
+            .poll()
+            .expect("new OwnerChanged capture survived stale Snapshot");
+        assert_eq!(capture.content, "new bridge text");
+        assert_eq!(
+            capture.app_bundle_id.as_deref(),
+            Some("org.example.NewWriter")
+        );
+    }
+
+    fn owner_switch_during_stalled_snapshot_fixture(bridge: Bridge) {
+        let original = BridgeFixture::start(bridge);
+        original.update_owner(1, vec!["text/plain;charset=utf-8".into()]);
+        let (snapshot_started, snapshot_release) = original.stall_next_snapshot();
         let directory = tempfile::tempdir().expect("fixture data dir");
         let clipboard =
             GnomeClipboard::with_bridge(directory.path(), bridge).expect("compositor clipboard");
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while Instant::now() < deadline {
-            if original
-                .state
-                .lock()
-                .is_ok_and(|state| state.snapshots == 1)
-            {
-                break;
-            }
-            thread::sleep(Duration::from_millis(5));
-        }
-        assert_eq!(
-            original
-                .state
-                .lock()
-                .expect("fixture bridge state")
-                .snapshots,
-            1,
-            "the original owner never received Snapshot",
-        );
+        snapshot_started
+            .recv_timeout(RPC_TIMEOUT)
+            .expect("fixture Snapshot did not stall");
         original.release_name();
-        let _replacement = BridgeFixture::start(bridge);
+        let replacement = BridgeFixture::start(bridge);
         wait_for_active(&clipboard);
-        let state = clipboard.state.lock().expect("clipboard state");
-        assert_eq!(
-            state.source.as_ref().map(|source| source.app_id.as_str()),
-            Some("org.example.Writer")
-        );
-        assert!(state.owner.is_some());
-        drop(state);
-        let deadline = Instant::now() + REQUEST_TIMEOUT + Duration::from_secs(2);
-        while Instant::now() < deadline {
-            if original
-                .state
-                .lock()
-                .is_ok_and(|state| state.completed_snapshots == 1)
-            {
-                let state = clipboard.state.lock().expect("clipboard state");
-                assert!(state.active && state.source.is_some());
-                return;
-            }
-            thread::sleep(Duration::from_millis(5));
-        }
-        panic!("stalled original Snapshot did not finish");
+        snapshot_release
+            .send(())
+            .expect("release stale owner Snapshot");
+        replacement.update_value("text/plain;charset=utf-8", b"replacement bridge text");
+        replacement.update_owner(2, vec!["text/plain;charset=utf-8".into()]);
+        let mut clipboard = clipboard;
+        wait_for_change(&mut clipboard);
+        let capture = clipboard.poll().expect("replacement OwnerChanged capture");
+        assert_eq!(capture.content, "replacement bridge text");
     }
 
     #[test]
