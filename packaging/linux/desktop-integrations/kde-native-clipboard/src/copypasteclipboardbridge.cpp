@@ -238,6 +238,7 @@ CopyPasteClipboardBridge::CopyPasteClipboardBridge(QObject *parent)
     : QObject(parent)
 {
     qDBusRegisterMetaType<CopyPasteWriterIdentity>();
+    qDBusRegisterMetaType<QMap<QString, QByteArray>>();
     const auto bus = QDBusConnection::sessionBus();
     bus.registerObject(QLatin1String(kObjectPath), this,
                        QDBusConnection::ExportScriptableSlots | QDBusConnection::ExportScriptableSignals);
