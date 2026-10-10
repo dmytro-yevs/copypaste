@@ -31,9 +31,10 @@ def run(argv, *, input_bytes=None, env=None, timeout=15):
                           check=True, timeout=timeout, env=env)
 
 
-def emit(assertion, argv):
+def emit_result(assertion, result):
+    argv = result.args if isinstance(result.args, list) else [result.args]
     print("COPYPASTE_QUALIFICATION_COMMAND " + json.dumps({
-        "argv": [str(value) for value in argv], "returncode": 0, "assertions": [assertion],
+        "argv": [str(value) for value in argv], "returncode": result.returncode, "assertions": [assertion],
     }, separators=(",", ":")))
 
 
@@ -206,7 +207,7 @@ def external_clipboard_bytes(session, mime, environment):
         command = ["xclip", "-selection", "clipboard", "-t", mime, "-o"]
     else:
         command = ["wl-paste", "--no-newline", "--type", mime]
-    return run(command, env=environment).stdout
+    return run(command, env=environment)
 
 
 def require_source_identity(item):
@@ -233,9 +234,9 @@ def require_capture(cli, environment, workspace, evidence_dir, session, mime, pa
         require_source_identity(item)
         run([str(cli), "--json", "copy", item["id"]], env=environment)
         copied = external_clipboard_bytes(session, mime, environment)
-        if copied != payload:
+        if copied.stdout != payload:
             raise RuntimeError(f"native backend did not preserve {mime} bytes on paste")
-    emit(assertion, [str(PROVIDER), "--manifest", "external-gtk-clipboard", "copypaste-cli", "copy"])
+    emit_result(assertion, copied)
 
 
 def require_file_capture(cli, environment, workspace, evidence_dir, session):
@@ -250,14 +251,14 @@ def require_file_capture(cli, environment, workspace, evidence_dir, session):
         require_source_identity(item)
         run([str(cli), "--json", "copy", item["id"]], env=environment)
         returned_uri = external_clipboard_bytes(session, "text/uri-list", environment)
-        parsed = urlparse(returned_uri.decode("utf-8").strip())
+        parsed = urlparse(returned_uri.stdout.decode("utf-8").strip())
         returned_file = Path(unquote(parsed.path))
         if parsed.scheme != "file" or returned_file.read_bytes() != payload:
             raise RuntimeError("native backend did not preserve file payload bytes on paste")
-    emit("clipboard_file", [str(PROVIDER), "--manifest", "external-gtk-clipboard", "copypaste-cli", "copy"])
+    emit_result("clipboard_file", returned_uri)
 
 
-def require_not_captured(cli, environment, workspace, evidence_dir, label, payloads, protected_mime=None):
+def require_not_captured(cli, environment, workspace, evidence_dir, label, payloads, assertion=None, protected_mime=None):
     before = cli_item_count(status(cli, environment))
     with clipboard_provider(workspace, evidence_dir, label, payloads, environment) as activity:
         deadline = time.monotonic() + 3
@@ -272,6 +273,11 @@ def require_not_captured(cli, environment, workspace, evidence_dir, label, paylo
             if "x-kde-passwordManagerHint" not in requests:
                 raise RuntimeError("native backend did not inspect the confidential clipboard hint")
             assert_secret_payload_was_not_requested(activity, protected_mime)
+        final_status = run([str(cli), "--json", "status"], env=environment)
+        if cli_item_count(response_variant(json.loads(final_status.stdout), "status")) != before:
+            raise RuntimeError("privacy-protected clipboard content was captured")
+    if assertion is not None:
+        emit_result(assertion, final_status)
 
 
 def main():
@@ -333,8 +339,11 @@ def main():
                 time.sleep(1)
                 if app.poll() is not None:
                     raise RuntimeError("packaged GUI exited before it could show a window")
-                emit("daemon_cli_gui", ["copypaste-daemon", "copypaste-cli", "copypaste"])
                 cli = prefix / "copypaste-cli"
+                gui_status = run([str(cli), "--json", "status"], env=environment)
+                if not isinstance(response_variant(json.loads(gui_status.stdout), "status"), dict):
+                    raise RuntimeError("packaged daemon status has an invalid shape")
+                emit_result("daemon_cli_gui", gui_status)
                 require_capture(cli, environment, workspace, args.evidence_dir, args.session, "text/plain;charset=utf-8", b"copypaste-native-text-fixture", "text", "clipboard_text")
                 require_capture(cli, environment, workspace, args.evidence_dir, args.session, "text/html", b"<b>copypaste-native-html-fixture</b>", "text/html", "clipboard_html")
                 require_capture(cli, environment, workspace, args.evidence_dir, args.session, "text/rtf", b"{\\rtf1 copypaste native rtf fixture}", "text/rtf", "clipboard_rtf")
@@ -367,9 +376,9 @@ def main():
                         "text/plain;charset=utf-8": confidential,
                         "x-kde-passwordManagerHint": b"secret",
                     },
+                    "privacy_confidential",
                     protected_mime="text/plain;charset=utf-8",
                 )
-                emit("privacy_confidential", [str(PROVIDER), "x-kde-passwordManagerHint", "copypaste-cli", "status"])
 
                 response = ipc(socket, "set_private_mode", {"enabled": True})
                 if response.get("data", {}).get("private_mode", {}).get("private_mode") is not True:
@@ -390,10 +399,9 @@ def main():
                 if not isinstance(configured, dict):
                     raise RuntimeError("daemon did not acknowledge the source exclusion")
                 try:
-                    require_not_captured(cli, environment, workspace, args.evidence_dir, "privacy-excluded-source", {"text/plain;charset=utf-8": b"copypaste-excluded-source-fixture"})
+                    require_not_captured(cli, environment, workspace, args.evidence_dir, "privacy-excluded-source", {"text/plain;charset=utf-8": b"copypaste-excluded-source-fixture"}, "privacy_excluded_app")
                 finally:
                     response_variant(cli_json(cli, environment, "config", "set", "--excluded-apps", ""), "config")
-                emit("privacy_excluded_app", ["copypaste-cli", "config", "set", "--excluded-apps", SOURCE_APPLICATION_ID])
 
                 # A restart must retain a non-sensitive persisted history entry.
                 persisted = "copypaste-restart-fixture"
@@ -403,9 +411,11 @@ def main():
                 daemon = subprocess.Popen([str(prefix / "copypaste-daemon"), "--foreground", "--data-dir", str(data), "--port", "0"],
                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=environment)
                 time.sleep(1)
-                if not any(persisted in item.get("content", "") for item in list_items(cli, environment)):
+                restart_items = run([str(cli), "--json", "list", "--limit", "100"], env=environment)
+                restart_page = response_variant(json.loads(restart_items.stdout), "page")
+                if not isinstance(restart_page, dict) or not any(persisted in item.get("content", "") for item in restart_page.get("items", [])):
                     raise RuntimeError("encrypted history did not survive daemon restart")
-                emit("encrypted_restart_persistence", ["copypaste-daemon", "copypaste-cli", "search"])
+                emit_result("encrypted_restart_persistence", restart_items)
 
                 # The remaining assertions deliberately execute their public probes and fail if the exact product
                 # does not expose an observable successful result. They are never converted into fixture booleans.
