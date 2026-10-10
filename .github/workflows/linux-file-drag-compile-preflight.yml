@@ -127,6 +127,7 @@ jobs:
           EOF
           cc -std=c11 -O2 -Wall -Wextra -Werror "$source_file" -o /tmp/copypaste-gtk-file-drop-source $(pkg-config --cflags --libs gtk+-3.0)
           cc -std=c11 -O2 -Wall -Wextra -Werror "$sink_file" -o /tmp/copypaste-gtk-file-drop-sink $(pkg-config --cflags --libs gtk+-3.0)
+          set -x
           work="$(mktemp -d)"
           source_pid=""
           sink_pid=""
