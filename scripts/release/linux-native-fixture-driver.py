@@ -15,12 +15,14 @@ import sys
 import tempfile
 import time
 import socket
+import stat
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 
 PROVIDER = Path(__file__).with_name("linux-clipboard-provider.py")
+X11_INPUT_TARGET = Path(__file__).with_name("linux-x11-input-target.c")
 SOURCE_APPLICATION_ID = "org.copypaste.QualificationSource"
 SOURCE_APPLICATION_NAME = "CopyPaste Qualification Source"
 CAPTURE_TIMEOUT_SECONDS = 8
@@ -104,6 +106,81 @@ def gtk_provider_helper(workspace, environment):
     if not helper.is_file() or helper.is_symlink() or not os.access(helper, os.X_OK):
         raise RuntimeError("GTK3 clipboard provider build did not create an executable")
     return helper
+
+
+def x11_input_target_helper(workspace, environment):
+    """Build the external GTK input target used to observe XTEST paste."""
+    if not X11_INPUT_TARGET.is_file() or X11_INPUT_TARGET.is_symlink():
+        raise RuntimeError("X11 input target source is unavailable")
+    helper = workspace / "x11-input-target"
+    flags = run(["pkg-config", "--cflags", "--libs", "gtk+-3.0"], env=environment).stdout.decode("utf-8").split()
+    run(["cc", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror", str(X11_INPUT_TARGET), "-o", str(helper), *flags], env=environment, timeout=30)
+    if not helper.is_file() or helper.is_symlink() or not os.access(helper, os.X_OK):
+        raise RuntimeError("X11 input target build did not create an executable")
+    return helper
+
+
+@contextmanager
+def x11_input_target(workspace, environment):
+    helper = x11_input_target_helper(workspace, environment)
+    directory = workspace / f"x11-input-{time.monotonic_ns()}"
+    directory.mkdir(mode=0o700)
+    ready = directory / "ready"
+    result = directory / "result"
+    target = subprocess.Popen(
+        [str(helper), "--ready-file", str(ready), "--result-file", str(result)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=environment,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not ready.is_file() and target.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if target.poll() is not None or ready.read_text(encoding="utf-8") != "ready\n":
+            raise RuntimeError("X11 input target did not become ready")
+        target_window = wait_for_window("CopyPaste Qualification Input Target", environment)
+        run(["xdotool", "windowactivate", "--sync", target_window], env=environment)
+        yield target_window, result
+    finally:
+        target.terminate()
+        try:
+            target.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            target.kill()
+            target.wait(timeout=5)
+
+
+def wait_for_gui_socket(runtime_dir, previous):
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        candidates = [
+            path for path in runtime_dir.glob("cp-*.sock")
+            if path not in previous and path.exists() and stat.S_ISSOCK(path.stat().st_mode)
+        ]
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            raise RuntimeError("packaged GUI created more than one runtime socket")
+        time.sleep(0.1)
+    raise RuntimeError("packaged GUI did not expose its app-owned runtime socket")
+
+
+def start_gui_runtime(executable, environment, runtime_dir, previous_sockets):
+    app = subprocess.Popen([str(executable)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=environment)
+    try:
+        socket_path = wait_for_gui_socket(runtime_dir, previous_sockets)
+        if app.poll() is not None:
+            raise RuntimeError("packaged GUI exited before its runtime became ready")
+        return app, socket_path
+    except BaseException:
+        app.terminate()
+        try:
+            app.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            app.kill()
+            app.wait(timeout=5)
+        raise
 
 
 @contextmanager
@@ -258,6 +335,133 @@ def require_file_capture(cli, environment, workspace, evidence_dir, session):
     emit_result("clipboard_file", returned_uri)
 
 
+def wait_for_window(name, environment):
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        result = subprocess.run(["xdotool", "search", "--name", name], stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, env=environment)
+        windows = result.stdout.decode("utf-8").splitlines()
+        if len(windows) == 1 and windows[0].isdigit():
+            return windows[0]
+        if len(windows) > 1:
+            raise RuntimeError(f"{name} window is not uniquely discoverable")
+        time.sleep(0.1)
+    raise RuntimeError(f"{name} window did not appear")
+
+
+def require_x11_quick_paste(cli, environment, workspace):
+    """Drive the packaged global shortcut through an external GTK input field."""
+    marker = "copypaste-x11-quick-paste-fixture"
+    run([str(cli), "add", marker], env=environment)
+    with x11_input_target(workspace, environment) as (target_window, result_file):
+        # The target owns focus before the real global shortcut is sent.
+        before_focus = run(["xdotool", "getwindowfocus"], env=environment)
+        if before_focus.stdout.decode("utf-8").strip() != target_window:
+            raise RuntimeError("X11 input target did not receive focus")
+        invoked = run(["xdotool", "key", "ctrl+shift+c"], env=environment)
+        quick_paste = wait_for_window("CopyPaste Quick Paste", environment)
+        if quick_paste == target_window:
+            raise RuntimeError("global shortcut did not open a separate Quick Paste window")
+        emit_result("quick_paste_hotkey", invoked)
+        # The search field has autofocus, and Enter activates the first item.
+        run(["xdotool", "key", "--window", quick_paste, "Return"], env=environment)
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            if result_file.is_file() and result_file.read_text(encoding="utf-8") == marker:
+                break
+            time.sleep(0.05)
+        else:
+            raise RuntimeError("Quick Paste did not restore focus and insert the selected item")
+        restored = run(["xdotool", "getwindowfocus"], env=environment)
+        if restored.stdout.decode("utf-8").strip() != target_window:
+            raise RuntimeError("Quick Paste did not restore focus to the invoking window")
+        emit_result("quick_paste_focus_restore", restored)
+        emit_result("native_x11_keyboard_input", restored)
+
+
+def require_modules(socket_path, artifacts, architecture):
+    """Inspect the live inventory and require an exact native module package.
+
+    An inventory is not module lifecycle evidence. The modules assertion is
+    emitted only after a signed, target-matched staged package has completed
+    install, invocation, disable, removal, and restart checks.
+    """
+    response = ipc(socket_path, "modules", {"operation": "list"})
+    modules = response.get("data", {}).get("modules")
+    if not isinstance(modules, dict) or not isinstance(modules.get("json"), str):
+        raise RuntimeError("GUI-owned daemon did not return its typed module inventory")
+    try:
+        inventory = json.loads(modules["json"])
+    except json.JSONDecodeError as error:
+        raise RuntimeError("module inventory is not JSON") from error
+    if not isinstance(inventory, list):
+        raise RuntimeError("module inventory is not a list")
+    packages = [
+        path for path in artifacts.glob(f"CopyPasteModule-*-linux-{architecture}.cpmodule")
+        if path.is_file() and not path.is_symlink()
+    ]
+    if not packages:
+        raise RuntimeError(
+            "modules require an exact staged signed Linux module package; "
+            "inventory alone is not lifecycle qualification"
+        )
+    raise RuntimeError(
+        "staged module lifecycle qualification requires the package-specific "
+        "native invocation contract"
+    )
+
+
+def require_pairing_sync(prefix, cli, environment, workspace, primary_socket):
+    """Pair two exact bundled daemons and verify one real history transfer."""
+    peer_socket = workspace / "peer.sock"
+    peer_data = workspace / "peer-data"
+    peer_environment = {**environment, "COPYPASTE_SOCKET": str(peer_socket)}
+    peer = subprocess.Popen(
+        [str(prefix / "copypaste-daemon"), "--foreground", "--data-dir", str(peer_data), "--port", "0"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=peer_environment,
+    )
+    try:
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            try:
+                status(cli, peer_environment)
+                break
+            except (subprocess.CalledProcessError, json.JSONDecodeError, RuntimeError):
+                time.sleep(0.1)
+        else:
+            raise RuntimeError("paired exact daemon did not become ready")
+        invite = ipc(primary_socket, "pair_create_invite", {}).get("data", {}).get("pairing_invite")
+        if not isinstance(invite, dict) or not isinstance(invite.get("code"), str) or not isinstance(invite.get("listen_addr"), str):
+            raise RuntimeError("GUI-owned daemon did not create a typed pairing invitation")
+        joined = ipc(peer_socket, "pair_join", {"code": invite["code"], "addr": invite["listen_addr"]})
+        if not isinstance(joined.get("data", {}).get("pairing_progress"), dict):
+            raise RuntimeError("paired exact daemon did not report pairing progress")
+        for socket_path in (primary_socket, peer_socket):
+            response = ipc(socket_path, "pair_confirm", {"accept": True})
+            if not isinstance(response.get("data", {}).get("pairing_progress"), dict):
+                raise RuntimeError("pairing confirmation did not return typed progress")
+        marker = "copypaste-pairing-sync-fixture"
+        primary_environment = {**environment, "COPYPASTE_SOCKET": str(primary_socket)}
+        run([str(cli), "add", marker], env=primary_environment)
+        synced = run([str(cli), "--json", "sync"], env=peer_environment, timeout=30)
+        sync_data = response_variant(json.loads(synced.stdout), "sync")
+        if not isinstance(sync_data, list) or not sync_data:
+            raise RuntimeError("paired exact daemon reported no sync result")
+        peer_items = list_items(cli, peer_environment)
+        if not any(item.get("content") == marker for item in peer_items):
+            raise RuntimeError("paired exact daemon did not receive the synced item")
+        emit_result("pairing_sync", synced)
+    finally:
+        peer.terminate()
+        try:
+            peer.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            peer.kill()
+            peer.wait(timeout=5)
+
+
 def require_not_captured(cli, environment, workspace, evidence_dir, label, payloads, assertion=None, protected_mime=None):
     before = cli_item_count(status(cli, environment))
     with clipboard_provider(workspace, evidence_dir, label, payloads, environment) as activity:
@@ -308,45 +512,41 @@ def main():
             prefix = appimage_prefix(artifact.resolve(), workspace)
         finally:
             os.chdir(previous)
-        data = workspace / "data"
-        socket = workspace / "copypaste.sock"
+        runtime_dir = workspace / "runtime"
+        runtime_dir.mkdir(mode=0o700)
         environment = {
             **os.environ,
-            "COPYPASTE_SOCKET": str(socket),
             "COPYPASTE_QUALIFICATION": "1",
             "XDG_DATA_HOME": str(data_home),
+            "TMPDIR": str(runtime_dir),
         }
-        daemon = subprocess.Popen([str(prefix / "copypaste-daemon"), "--foreground", "--data-dir", str(data), "--port", "0"],
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=environment)
+        app, runtime_socket = start_gui_runtime(prefix / "copypaste", environment, runtime_dir, set())
         try:
+            cli_environment = {**environment, "COPYPASTE_SOCKET": str(runtime_socket)}
+            cli = prefix / "copypaste-cli"
             deadline = time.monotonic() + 8
             observed_status = None
-            while daemon.poll() is None and time.monotonic() < deadline:
+            while time.monotonic() < deadline:
                 try:
-                    observed_status = status(prefix / "copypaste-cli", environment)
+                    observed_status = status(cli, cli_environment)
                     break
                 except (subprocess.CalledProcessError, json.JSONDecodeError, RuntimeError):
                     time.sleep(0.15)
-            if daemon.poll() is not None or observed_status is None:
-                raise RuntimeError("daemon did not become ready")
+            if observed_status is None:
+                raise RuntimeError("GUI-owned daemon did not become ready")
             if observed_status.get("capture_running") is not True:
-                raise RuntimeError("daemon did not report an active native clipboard backend")
+                raise RuntimeError("GUI-owned daemon did not report an active native clipboard backend")
             backend = observed_status.get("clipboard_backend")
             if not isinstance(backend, str) or not backend.startswith("linux-"):
-                raise RuntimeError("daemon did not report a Linux system clipboard backend")
-            app = subprocess.Popen([str(prefix / "copypaste")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=environment)
+                raise RuntimeError("GUI-owned daemon did not report a Linux system clipboard backend")
+            gui_status = run([str(cli), "--json", "status"], env=cli_environment)
             try:
-                time.sleep(1)
-                if app.poll() is not None:
-                    raise RuntimeError("packaged GUI exited before it could show a window")
-                cli = prefix / "copypaste-cli"
-                gui_status = run([str(cli), "--json", "status"], env=environment)
                 if not isinstance(response_variant(json.loads(gui_status.stdout), "status"), dict):
                     raise RuntimeError("packaged daemon status has an invalid shape")
                 emit_result("daemon_cli_gui", gui_status)
-                require_capture(cli, environment, workspace, args.evidence_dir, args.session, "text/plain;charset=utf-8", b"copypaste-native-text-fixture", "text", "clipboard_text")
-                require_capture(cli, environment, workspace, args.evidence_dir, args.session, "text/html", b"<b>copypaste-native-html-fixture</b>", "text/html", "clipboard_html")
-                require_capture(cli, environment, workspace, args.evidence_dir, args.session, "text/rtf", b"{\\rtf1 copypaste native rtf fixture}", "text/rtf", "clipboard_rtf")
+                require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "text/plain;charset=utf-8", b"copypaste-native-text-fixture", "text", "clipboard_text")
+                require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "text/html", b"<b>copypaste-native-html-fixture</b>", "text/html", "clipboard_html")
+                require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "text/rtf", b"{\\rtf1 copypaste native rtf fixture}", "text/rtf", "clipboard_rtf")
                 # These are valid, minimal image payloads. The copy-back probe
                 # verifies the exact bytes after daemon storage, not merely a
                 # row count or image label.
@@ -361,14 +561,14 @@ def main():
                     "010000001701040001000000040000001c0103000100000001000000520103000100"
                     "000002000000000000000800080008000800123456ff"
                 )
-                require_capture(cli, environment, workspace, args.evidence_dir, args.session, "image/png", png, "image/png", "clipboard_png")
-                require_capture(cli, environment, workspace, args.evidence_dir, args.session, "image/tiff", tiff, "image/tiff", "clipboard_tiff")
-                require_file_capture(cli, environment, workspace, args.evidence_dir, args.session)
+                require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "image/png", png, "image/png", "clipboard_png")
+                require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "image/tiff", tiff, "image/tiff", "clipboard_tiff")
+                require_file_capture(cli, cli_environment, workspace, args.evidence_dir, args.session)
 
                 confidential = b"copypaste-confidential-fixture"
                 require_not_captured(
                     cli,
-                    environment,
+                    cli_environment,
                     workspace,
                     args.evidence_dir,
                     "privacy-confidential",
@@ -380,50 +580,54 @@ def main():
                     protected_mime="text/plain;charset=utf-8",
                 )
 
-                response = ipc(socket, "set_private_mode", {"enabled": True})
+                response = ipc(runtime_socket, "set_private_mode", {"enabled": True})
                 if response.get("data", {}).get("private_mode", {}).get("private_mode") is not True:
                     raise RuntimeError("daemon did not acknowledge private mode enabled")
                 private_marker = b"copypaste-private-cursor-fixture"
-                require_not_captured(cli, environment, workspace, args.evidence_dir, "privacy-private", {"text/plain;charset=utf-8": private_marker})
-                response = ipc(socket, "set_private_mode", {"enabled": False})
+                require_not_captured(cli, cli_environment, workspace, args.evidence_dir, "privacy-private", {"text/plain;charset=utf-8": private_marker})
+                response = ipc(runtime_socket, "set_private_mode", {"enabled": False})
                 if response.get("data", {}).get("private_mode", {}).get("private_mode") is not False:
                     raise RuntimeError("daemon did not acknowledge private mode disabled")
                 # A new post-private value must be captured, while the old
                 # value remains absent. This proves the skip advanced the
                 # source cursor rather than deferring plaintext capture.
-                require_capture(cli, environment, workspace, args.evidence_dir, args.session, "text/plain;charset=utf-8", b"copypaste-after-private-fixture", "text", "privacy_private_mode")
-                if any(private_marker.decode("utf-8") in item.get("content", "") for item in list_items(cli, environment)):
+                require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "text/plain;charset=utf-8", b"copypaste-after-private-fixture", "text", "privacy_private_mode")
+                if any(private_marker.decode("utf-8") in item.get("content", "") for item in list_items(cli, cli_environment)):
                     raise RuntimeError("private-mode clipboard content was replayed after private mode ended")
 
-                configured = response_variant(cli_json(cli, environment, "config", "set", "--excluded-apps", SOURCE_APPLICATION_ID), "config")
+                configured = response_variant(cli_json(cli, cli_environment, "config", "set", "--excluded-apps", SOURCE_APPLICATION_ID), "config")
                 if not isinstance(configured, dict):
                     raise RuntimeError("daemon did not acknowledge the source exclusion")
                 try:
-                    require_not_captured(cli, environment, workspace, args.evidence_dir, "privacy-excluded-source", {"text/plain;charset=utf-8": b"copypaste-excluded-source-fixture"}, "privacy_excluded_app")
+                    require_not_captured(cli, cli_environment, workspace, args.evidence_dir, "privacy-excluded-source", {"text/plain;charset=utf-8": b"copypaste-excluded-source-fixture"}, "privacy_excluded_app")
                 finally:
-                    response_variant(cli_json(cli, environment, "config", "set", "--excluded-apps", ""), "config")
+                    response_variant(cli_json(cli, cli_environment, "config", "set", "--excluded-apps", ""), "config")
 
                 # A restart must retain a non-sensitive persisted history entry.
                 persisted = "copypaste-restart-fixture"
-                run([str(cli), "add", persisted], env=environment)
-                daemon.terminate()
-                daemon.wait(timeout=5)
-                daemon = subprocess.Popen([str(prefix / "copypaste-daemon"), "--foreground", "--data-dir", str(data), "--port", "0"],
-                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=environment)
-                time.sleep(1)
-                restart_items = run([str(cli), "--json", "list", "--limit", "100"], env=environment)
+                run([str(cli), "add", persisted], env=cli_environment)
+                prior_sockets = set(runtime_dir.glob("cp-*.sock"))
+                app.terminate()
+                app.wait(timeout=5)
+                app, runtime_socket = start_gui_runtime(
+                    prefix / "copypaste", environment, runtime_dir, prior_sockets,
+                )
+                cli_environment = {**environment, "COPYPASTE_SOCKET": str(runtime_socket)}
+                restart_items = run([str(cli), "--json", "list", "--limit", "100"], env=cli_environment)
                 restart_page = response_variant(json.loads(restart_items.stdout), "page")
                 if not isinstance(restart_page, dict) or not any(persisted in item.get("content", "") for item in restart_page.get("items", [])):
                     raise RuntimeError("encrypted history did not survive daemon restart")
                 emit_result("encrypted_restart_persistence", restart_items)
+                require_modules(runtime_socket, args.artifacts, args.architecture)
+                require_pairing_sync(prefix, cli, environment, workspace, runtime_socket)
 
                 # The remaining assertions deliberately execute their public probes and fail if the exact product
                 # does not expose an observable successful result. They are never converted into fixture booleans.
-                if args.session == "wayland":
+                if args.session == "x11":
+                    require_x11_quick_paste(cli, cli_environment, workspace)
+                else:
                     run(["gdbus", "introspect", "--session", "--dest", "app.copypaste.CopyPaste", "--object-path", "/app/copypaste/WaylandIntegration"])
                     raise RuntimeError("Wayland companion authentication and portal keyboard grant require an enabled companion transaction")
-                run(["xdotool", "search", "--name", "CopyPaste"])
-                raise RuntimeError("X11 Quick Paste hotkey/focus, tray/notification, pairing/sync, modules, confidential and excluded-app scenarios require their shipped observable contract")
             finally:
                 app.terminate()
                 try:
@@ -432,8 +636,7 @@ def main():
                     app.kill()
                     app.wait(timeout=5)
         finally:
-            daemon.terminate()
-            daemon.wait(timeout=5)
+            pass
 
 
 if __name__ == "__main__":

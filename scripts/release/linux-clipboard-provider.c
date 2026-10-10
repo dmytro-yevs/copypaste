@@ -132,6 +132,11 @@ int main(int argc, char **argv) {
   }
   if (!valid_application_id(application_id) || ready_path == NULL || provider.activity_path == NULL || hold_seconds == 0 || provider.count == 0) return 2;
 
+  // GTK 3 Wayland derives the xdg app ID from g_get_prgname() during display
+  // initialization. Set it before gtk_init so source attribution observes the
+  // manifest's application ID instead of this helper's executable filename.
+  g_set_prgname(application_id);
+  // Keep the explicit X11 WM class used by the X11 attribution path.
   gdk_set_program_class(application_id);
   gtk_init(&argc, &argv);
   GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
