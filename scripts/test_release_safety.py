@@ -281,6 +281,19 @@ class ReleaseSafetyTest(unittest.TestCase):
             )
         ]}
         verify(run, jobs, artifacts, "owner/repo", "commit")
+        ci_run = {**run, "path": ".github/workflows/ci.yml", "event": "pull_request", "pull_requests": [{"number": 7}]}
+        ci_jobs = {"total_count": 5, "jobs": [
+            {"name": "Compositor runtime metadata", "status": "completed", "conclusion": "success"},
+            *[{"name": f"Compositor runtime producer / {row['name']}", "status": "completed", "conclusion": "success"} for row in jobs["jobs"]],
+        ]}
+        verify(ci_run, ci_jobs, artifacts, "owner/repo", "commit")
+        ci_run["head_sha"] = "merge-commit"
+        with self.assertRaisesRegex(ValueError, "trusted dispatch"):
+            verify(ci_run, ci_jobs, artifacts, "owner/repo", "commit")
+        ci_run["head_sha"] = "commit"
+        ci_run["head_repository"] = {"full_name": "fork/repo"}
+        with self.assertRaisesRegex(ValueError, "trusted dispatch"):
+            verify(ci_run, ci_jobs, artifacts, "owner/repo", "commit")
         artifacts["artifacts"].pop()
         with self.assertRaisesRegex(ValueError, "artifact inventory"):
             verify(run, jobs, artifacts, "owner/repo", "commit")
