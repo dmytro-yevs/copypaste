@@ -110,6 +110,8 @@ def validate_receipt(receipt: dict[str, Any]) -> None:
     source = receipt.get("source")
     if not isinstance(source, dict) or not isinstance(source.get("revision"), str) or not re.fullmatch(r"[A-Za-z0-9._/+:-]{1,128}", source["revision"]) or not SHA256.fullmatch(source.get("patch_sha256", "")):
         raise ContractError("source revision and bridge patch digest are required")
+    if receipt.get("desktop") == "GNOME" and receipt.get("launch", {}).get("kind") == "private" and not re.fullmatch(r"[0-9a-f]{40}", source.get("shell_revision", "")):
+        raise ContractError("private GNOME Shell revision is required")
     license_info = receipt.get("upstream_license")
     if not isinstance(license_info, dict) or license_info.get("spdx") != "GPL-2.0-or-later" or not isinstance(license_info.get("name"), str) or not SHA256.fullmatch(license_info.get("sha256", "")):
         raise ContractError("upstream GPL license receipt is required")
@@ -260,7 +262,7 @@ def launcher_text(receipt: dict[str, Any], runtime_prefix: str) -> str:
         "unset LD_PRELOAD LD_AUDIT LD_DEBUG LD_LIBRARY_PATH QT_PLUGIN_PATH QML2_IMPORT_PATH GIO_EXTRA_MODULES",
         f"runtime_root={shell_quote(root)}",
         'if [ ! -d "$runtime_root" ]; then', '  echo "CopyPaste compositor runtime is missing" >&2', "  exit 66", "fi",
-        'library_path="$runtime_root/lib:$runtime_root/lib64"', 'export LD_LIBRARY_PATH="$library_path"',
+        'library_path="$runtime_root/lib:$runtime_root/lib64:$runtime_root/usr/lib:$runtime_root/usr/lib/x86_64-linux-gnu:$runtime_root/usr/lib/aarch64-linux-gnu"', 'export LD_LIBRARY_PATH="$library_path"',
         'export XDG_DATA_DIRS="$runtime_root/share:/usr/local/share:/usr/share"',
         'export XDG_CONFIG_DIRS="$runtime_root/etc/xdg:/etc/xdg"',
     ]
