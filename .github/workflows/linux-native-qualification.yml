@@ -251,7 +251,8 @@ jobs:
             --architecture "${{ matrix.architecture }}" --desktop "${{ matrix.desktop }}" --session "${{ matrix.session }}"
             --commit "${{ needs.source.outputs.commit }}" --source-run-id "$GITHUB_RUN_ID" --artifact-run-id "${{ inputs.artifact_run_id }}"
             --driver scripts/release/run-linux-native-scenarios.sh --output evidence
-            --module-artifacts module-artifacts --module-fixtures module-fixtures)
+            --module-artifacts module-artifacts --module-fixtures module-fixtures
+            --compositor-runtime-binding compositor-runtime/binding.json)
           if [[ "${{ needs.source.outputs.upgrade_mode }}" == prior_release ]]; then
             producer+=(--previous-artifacts previous --previous-version "${{ needs.source.outputs.previous_version }}")
           fi
@@ -261,7 +262,8 @@ jobs:
               --architecture "${{ matrix.architecture }}" --desktop KDE --session "${{ matrix.session }}"
               --commit "${{ needs.source.outputs.commit }}" --source-run-id "$GITHUB_RUN_ID" --artifact-run-id "${{ inputs.artifact_run_id }}"
               --driver /work/scripts/release/run-linux-native-scenarios.sh --output /evidence
-              --module-artifacts /module-artifacts --module-fixtures /module-fixtures)
+              --module-artifacts /module-artifacts --module-fixtures /module-fixtures
+              --compositor-runtime-binding /compositor-runtime/binding.json)
             fedora_args=(--session "${{ matrix.session }}" --architecture "${{ matrix.architecture }}" --artifacts current --evidence evidence --companion-source "$companion_source" --module-artifacts module-artifacts --module-fixtures module-fixtures --compositor-runtime compositor-runtime --compositor-runtime-binding compositor-runtime/binding.json)
             if [[ "${{ needs.source.outputs.upgrade_mode }}" == prior_release ]]; then
               fedora_args+=(--previous-artifacts previous)
