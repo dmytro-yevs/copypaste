@@ -213,12 +213,60 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
     def test_private_shell_entrypoints_find_their_private_shell_library_on_both_supported_architectures(self):
         script = (ROOT / "packaging/linux/desktop-integrations/gnome-shell-extension/mutter/build-private-shell.sh").read_text(encoding="utf-8")
         private_library_path = (
-            'private_library_path="$root/lib:$root/lib64:$root/usr/lib:'
-            '$root/usr/lib/x86_64-linux-gnu:$root/usr/lib/x86_64-linux-gnu/mutter-14:$root/usr/lib/x86_64-linux-gnu/gnome-shell:'
-            '$root/usr/lib/aarch64-linux-gnu:$root/usr/lib/aarch64-linux-gnu/mutter-14:$root/usr/lib/aarch64-linux-gnu/gnome-shell"'
+            'private_library_path="$root/lib:$root/lib64:$root/lib/x86_64-linux-gnu:'
+            '$root/lib/x86_64-linux-gnu/mutter-14:$root/lib/x86_64-linux-gnu/gnome-shell:'
+            '$root/lib/aarch64-linux-gnu:$root/lib/aarch64-linux-gnu/mutter-14:$root/lib/aarch64-linux-gnu/gnome-shell"'
         )
         self.assertEqual(script.count(private_library_path), 2)
         self.assertEqual(script.count('export LD_LIBRARY_PATH="$private_library_path"'), 2)
+        self.assertEqual(script.count('export GI_TYPELIB_PATH="$private_typelib_path:$system_typelib_path${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"'), 2)
+
+    def test_private_shell_headless_entrypoint_uses_the_staged_prefix_for_loader_and_typelibs(self):
+        builder = (ROOT / "packaging/linux/desktop-integrations/gnome-shell-extension/mutter/build-private-shell.sh").read_text(encoding="utf-8")
+        template = builder.split("cat > \"$qualification_entrypoint\" <<'EOF'\n", 1)[1].split("\nEOF\n", 1)[0]
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime = Path(temporary) / "runtime"
+            entrypoint = runtime / "usr/libexec/copypaste-gnome-shell-headless"
+            shell = runtime / "usr/bin/gnome-shell"
+            entrypoint.parent.mkdir(parents=True)
+            shell.parent.mkdir(parents=True)
+            entrypoint.write_text(template + "\n", encoding="utf-8")
+            entrypoint.chmod(0o755)
+            shell.write_text(
+                "#!/bin/sh\nprintf '%s\\n%s\\n' \"$LD_LIBRARY_PATH\" \"$GI_TYPELIB_PATH\" > \"$CAPTURE\"\n",
+                encoding="utf-8",
+            )
+            shell.chmod(0o755)
+            capture = runtime / "capture"
+            completed = subprocess.run(
+                [str(entrypoint)],
+                env={**os.environ, "CAPTURE": str(capture), "LD_LIBRARY_PATH": "/host/lib", "GI_TYPELIB_PATH": "/host/typelib"},
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            library_path, typelib_path = capture.read_text(encoding="utf-8").splitlines()
+            root = runtime / "usr"
+            self.assertEqual(
+                library_path,
+                ":".join((
+                    f"{root}/lib", f"{root}/lib64", f"{root}/lib/x86_64-linux-gnu",
+                    f"{root}/lib/x86_64-linux-gnu/mutter-14", f"{root}/lib/x86_64-linux-gnu/gnome-shell",
+                    f"{root}/lib/aarch64-linux-gnu", f"{root}/lib/aarch64-linux-gnu/mutter-14",
+                    f"{root}/lib/aarch64-linux-gnu/gnome-shell",
+                )),
+            )
+            self.assertEqual(
+                typelib_path,
+                ":".join((
+                    f"{root}/lib/x86_64-linux-gnu/mutter-14", f"{root}/lib/x86_64-linux-gnu/gnome-shell",
+                    f"{root}/lib/aarch64-linux-gnu/mutter-14", f"{root}/lib/aarch64-linux-gnu/gnome-shell",
+                    "/usr/lib/x86_64-linux-gnu/girepository-1.0", "/usr/lib/aarch64-linux-gnu/girepository-1.0",
+                    "/host/typelib",
+                )),
+            )
 
     def test_gnome_fixture_scopes_private_libraries_to_the_compositor_and_waits_for_extensions_api(self):
         script = (ROOT / "scripts/release/run-linux-native-desktop-session.sh").read_text(encoding="utf-8")
