@@ -68,6 +68,8 @@ class LinuxQualificationBootstrapTest(unittest.TestCase):
         self.assertNotIn("pkg-config --exists x11 xres", wrapper)
         observer = (ROOT / "scripts/release/linux-x11-clipboard-observer.c").read_text(encoding="utf-8")
         self.assertIn("XRES_CLIENT_ID_XID_MASK", observer)
+        self.assertIn("values[i].value[0]", observer)
+        self.assertNotIn("XResGetClientXid", observer)
         self.assertIn("canonical_client_window_class_matches_fixture", observer)
         self.assertIn("cached_desktop_entry_available", observer)
 

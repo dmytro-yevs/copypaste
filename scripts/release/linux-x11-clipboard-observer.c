@@ -1,13 +1,14 @@
+#define _POSIX_C_SOURCE 200809L
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/extensions/XRes.h>
 #include <stdint.h>
-#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 /* Fixture-only inspector: it never requests selection data or window titles. */
 static unsigned long property_pid(Display *display, Window window, Atom pid_atom) {
@@ -41,7 +42,7 @@ static int client_ids(Display *display, Window window, XID *client_xid, pid_t *p
     return 0;
   for (long i = 0; i < count; i++) {
     if (values[i].spec.mask == XRES_CLIENT_ID_XID_MASK) {
-      *client_xid = XResGetClientXid(&values[i]);
+      *client_xid = values[i].length == 1 ? values[i].value[0] : None;
       found_xid = *client_xid != None;
     } else if (values[i].spec.mask == XRES_CLIENT_ID_PID_MASK) {
       *pid = XResGetClientPid(&values[i]);
@@ -54,7 +55,7 @@ static int client_ids(Display *display, Window window, XID *client_xid, pid_t *p
 
 static int cached_desktop_entry(void) {
   const char *data_home = getenv("XDG_DATA_HOME");
-  char path[PATH_MAX]; struct stat details;
+  char path[4096]; struct stat details;
   if (!data_home || snprintf(path, sizeof(path), "%s/applications/org.copypaste.QualificationSource.desktop", data_home) >= (int)sizeof(path))
     return 0;
   return lstat(path, &details) == 0 && S_ISREG(details.st_mode) && !S_ISLNK(details.st_mode);
