@@ -907,6 +907,7 @@ mod tests {
     }
 
     struct FixtureOwner {
+        owner: u32,
         stop: Arc<AtomicBool>,
         requests: Arc<AtomicUsize>,
         worker: Option<JoinHandle<()>>,
@@ -921,12 +922,16 @@ mod tests {
             let (ready, started) = mpsc::sync_channel(1);
             let worker = thread::spawn(move || {
                 let (connection, screen) = x11rb::connect(None).expect("fixture X server");
-                let window = connection.generate_id().expect("fixture window id");
+                let owner = connection.generate_id().expect("fixture owner window id");
+                let frame = connection.generate_id().expect("fixture frame window id");
+                let metadata = connection
+                    .generate_id()
+                    .expect("fixture metadata window id");
                 let root = connection.setup().roots[screen].root;
                 connection
                     .create_window(
                         0,
-                        window,
+                        owner,
                         root,
                         0,
                         0,
@@ -937,7 +942,37 @@ mod tests {
                         0,
                         &CreateWindowAux::new(),
                     )
-                    .expect("create fixture window");
+                    .expect("create fixture owner window");
+                connection
+                    .create_window(
+                        0,
+                        frame,
+                        root,
+                        0,
+                        0,
+                        1,
+                        1,
+                        0,
+                        WindowClass::INPUT_OUTPUT,
+                        0,
+                        &CreateWindowAux::new(),
+                    )
+                    .expect("create fixture frame window");
+                connection
+                    .create_window(
+                        0,
+                        metadata,
+                        frame,
+                        0,
+                        0,
+                        1,
+                        1,
+                        0,
+                        WindowClass::INPUT_OUTPUT,
+                        0,
+                        &CreateWindowAux::new(),
+                    )
+                    .expect("create reparented fixture metadata window");
                 let atoms = Atoms::intern(&connection).expect("fixture atoms");
                 let pid = connection
                     .intern_atom(false, b"_NET_WM_PID")
@@ -948,7 +983,7 @@ mod tests {
                 connection
                     .change_property32(
                         PropMode::REPLACE,
-                        window,
+                        metadata,
                         pid,
                         AtomEnum::CARDINAL,
                         &[std::process::id()],
@@ -957,17 +992,17 @@ mod tests {
                 connection
                     .change_property8(
                         PropMode::REPLACE,
-                        window,
+                        metadata,
                         AtomEnum::WM_CLASS,
                         AtomEnum::STRING,
                         b"fixture\0org.example.Fixture\0",
                     )
                     .expect("fixture class");
                 connection
-                    .set_selection_owner(window, atoms.clipboard, x11rb::CURRENT_TIME)
+                    .set_selection_owner(owner, atoms.clipboard, x11rb::CURRENT_TIME)
                     .expect("fixture owner");
                 connection.flush().expect("flush fixture owner");
-                let _ = ready.send(());
+                let _ = ready.send(owner);
                 while !worker_stop.load(Ordering::Acquire) {
                     while let Some(event) = connection.poll_for_event().expect("fixture event") {
                         let Event::SelectionRequest(request) = event else {
@@ -982,10 +1017,11 @@ mod tests {
                     thread::sleep(Duration::from_millis(1));
                 }
             });
-            started
+            let owner = started
                 .recv_timeout(Duration::from_secs(2))
                 .expect("fixture owner startup");
             Self {
+                owner,
                 stop,
                 requests,
                 worker: Some(worker),
@@ -994,6 +1030,10 @@ mod tests {
 
         fn request_count(&self) -> usize {
             self.requests.load(AtomicOrdering::Relaxed)
+        }
+
+        fn owner(&self) -> u32 {
+            self.owner
         }
     }
 
@@ -1201,6 +1241,23 @@ mod tests {
         let settings = copypaste_ipc::ConfigData::default();
 
         let text = FixtureOwner::start(FixturePayload::Text(b"fixture text".to_vec()));
+        let (connection, _) = x11rb::connect(None).expect("fixture attribution verifier");
+        let pid = connection
+            .intern_atom(false, b"_NET_WM_PID")
+            .expect("fixture pid atom")
+            .reply()
+            .expect("fixture pid atom reply")
+            .atom;
+        assert!(
+            connection
+                .get_property(false, text.owner(), pid, AtomEnum::CARDINAL, 0, 1)
+                .expect("read hidden owner pid")
+                .reply()
+                .expect("read hidden owner pid reply")
+                .value32()
+                .is_none_or(|mut values| values.next().is_none()),
+            "fixture selection owner unexpectedly has direct metadata"
+        );
         let mut clipboard = X11Clipboard::new(directory.path()).expect("X11 clipboard");
         let capture = wait_for_capture(&mut clipboard, &settings).expect("capture fixture text");
         assert_eq!(capture.content, "fixture text");
@@ -1318,6 +1375,121 @@ mod tests {
             drop(clipboard);
             drop(owner);
         }
+    }
+
+    #[test]
+    fn live_x11_fixture_rejects_metadata_from_a_different_x_client() {
+        if std::env::var_os("COPYPASTE_X11_FIXTURE") != Some("1".into()) {
+            return;
+        }
+        use x11rb::protocol::res::{ClientIdMask, ClientIdSpec, ConnectionExt as _};
+
+        let data_home = std::path::PathBuf::from(
+            std::env::var_os("XDG_DATA_HOME").expect("fixture XDG_DATA_HOME"),
+        );
+        std::fs::create_dir_all(data_home.join("applications")).expect("fixture desktop dir");
+        std::fs::write(
+            data_home.join("applications/org.example.Fixture.desktop"),
+            "[Desktop Entry]\nName=Fixture Writer\nStartupWMClass=org.example.Fixture\n",
+        )
+        .expect("fixture desktop entry");
+
+        let (owner_connection, screen) = x11rb::connect(None).expect("fixture owner X server");
+        let owner = owner_connection
+            .generate_id()
+            .expect("fixture owner window id");
+        let root = owner_connection.setup().roots[screen].root;
+        owner_connection
+            .create_window(
+                0,
+                owner,
+                root,
+                0,
+                0,
+                1,
+                1,
+                0,
+                WindowClass::INPUT_OUTPUT,
+                0,
+                &CreateWindowAux::new(),
+            )
+            .expect("create fixture owner window");
+        owner_connection.flush().expect("flush fixture owner");
+
+        let (spoof_connection, spoof_screen) =
+            x11rb::connect(None).expect("fixture spoof X server");
+        let spoof = spoof_connection
+            .generate_id()
+            .expect("fixture spoof window id");
+        let spoof_root = spoof_connection.setup().roots[spoof_screen].root;
+        assert_eq!(root, spoof_root, "fixture clients use different roots");
+        spoof_connection
+            .create_window(
+                0,
+                spoof,
+                spoof_root,
+                0,
+                0,
+                1,
+                1,
+                0,
+                WindowClass::INPUT_OUTPUT,
+                0,
+                &CreateWindowAux::new(),
+            )
+            .expect("create fixture spoof window");
+        let pid = spoof_connection
+            .intern_atom(false, b"_NET_WM_PID")
+            .expect("fixture pid atom")
+            .reply()
+            .expect("fixture pid atom reply")
+            .atom;
+        spoof_connection
+            .change_property32(
+                PropMode::REPLACE,
+                spoof,
+                pid,
+                AtomEnum::CARDINAL,
+                &[std::process::id()],
+            )
+            .expect("fixture spoof pid");
+        spoof_connection
+            .change_property8(
+                PropMode::REPLACE,
+                spoof,
+                AtomEnum::WM_CLASS,
+                AtomEnum::STRING,
+                b"spoof\0org.example.Fixture\0",
+            )
+            .expect("fixture spoof class");
+        spoof_connection.flush().expect("flush fixture spoof");
+
+        let (resolver, _) = x11rb::connect(None).expect("fixture resolver X server");
+        let xres_client = |window| {
+            resolver
+                .res_query_client_ids(&[ClientIdSpec {
+                    client: window,
+                    mask: ClientIdMask::CLIENT_XID,
+                }])
+                .expect("XRes client request")
+                .reply()
+                .expect("XRes client reply")
+                .ids
+                .into_iter()
+                .find(|identity| identity.spec.mask == ClientIdMask::CLIENT_XID)
+                .map(|identity| identity.spec.client)
+                .expect("XRes client XID")
+        };
+        assert_ne!(
+            xres_client(owner),
+            xres_client(spoof),
+            "fixture windows unexpectedly share an X client"
+        );
+        assert_eq!(
+            super::super::linux_attribution::resolve_owner(&resolver, owner),
+            None,
+            "same-PID metadata from another X client must not be attributed"
+        );
     }
 
     #[test]

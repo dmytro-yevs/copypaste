@@ -90,7 +90,9 @@ security-framework.workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 # XFixes is the X11 selection-change signal. It lets the clipboard worker wait
 # for a real owner transition instead of polling or reading clipboard data.
-x11rb = { version = "0.13.2", features = ["xfixes"] }
+# XRes binds GTK's hidden selection owner to a metadata-bearing window from the
+# same X client without consulting the foreground application.
+x11rb = { version = "0.13.2", features = ["res", "xfixes"] }
 zbus = { version = "5.19", default-features = false, features = ["blocking-api", "tokio"] }
 # A persistent data-control client is the only supported Wayland clipboard
 # transport.  `ext-data-control` is preferred; `wlr-data-control` is kept for
