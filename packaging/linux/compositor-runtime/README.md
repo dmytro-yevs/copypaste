@@ -14,13 +14,11 @@ the glibc floor, and defines one of two launch modes:
 
 * **KWin** has a private, receipt-listed entrypoint. The session launcher can
   execute only that entrypoint from `/usr/lib/copypaste/compositor-runtime`.
-* **GNOME** currently has a maintained Mutter library output, not a private
-  GNOME Shell. Its receipt therefore pins the matching system `gnome-session`
-  and `gnome-shell` binaries by digest. The launcher verifies those exact
-  binaries, gives that trusted matching system session only the private Mutter
-  library/search paths, and refuses a mismatched distribution release. A
-  compiler may switch to a private Shell only by producing a `private` receipt
-  with every Shell byte listed.
+* **GNOME** includes matching private Mutter libraries and GNOME Shell. Its
+  `private` receipt lists every Shell byte and binds both upstream revisions
+  and patch digests. The launcher uses private library and introspection paths;
+  Shell resolves its compiled introspection directories relative to its actual
+  executable prefix. Private ELF files have no host build RPATH or RUNPATH.
 
 When the output contains ELF files, staging also checks their machine type and
 rejects any GLIBC symbol requirement above the declared floor. This prevents a
@@ -98,8 +96,8 @@ floor to the release evidence. Source-only bridge bundles do not qualify a
 release.
 
 Current production baselines are GNOME 46 on Ubuntu 24.04 and KWin 6.0 on
-Fedora 40, each on x86_64 and aarch64. A current GNOME compiler output contains
-private Mutter libraries but no private Shell; it must not produce a companion
-receipt until a reviewed session route proves the matching Shell loads those
-private libraries. GNOME 47 and KWin 6.3 builds are ABI gates only until they
-have matching session runtimes and native evidence.
+Fedora 40, each on x86_64 and aarch64. GNOME 46 compiler outputs contain private
+Mutter and Shell runtimes. Publication still requires same-commit installed
+product evidence for every supported desktop, session, and architecture.
+GNOME 47 and KWin 6.3 builds are ABI gates only until they have matching session
+runtimes and native evidence.
