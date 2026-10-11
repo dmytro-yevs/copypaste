@@ -33,6 +33,11 @@ on:
         required: false
         type: boolean
         default: false
+      linux_gnome_bridge_diagnostic:
+        description: Run only the GNOME and KWin compositor clipboard D-Bus fixture
+        required: false
+        type: boolean
+        default: false
       supabase_module_run_id:
         description: Completed exact-source unpublished Supabase module run
         required: false
@@ -79,6 +84,7 @@ jobs:
       linux_artifact_run_id: ${{ steps.version.outputs.linux_artifact_run_id }}
       compositor_runtime_required: ${{ steps.version.outputs.compositor_runtime_required }}
       linux_qualification_only: ${{ steps.version.outputs.linux_qualification_only }}
+      linux_gnome_bridge_diagnostic: ${{ steps.version.outputs.linux_gnome_bridge_diagnostic }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -90,10 +96,12 @@ jobs:
           LINUX_ARTIFACT_RUN_ID: ${{ inputs.linux_artifact_run_id }}
           COMPOSITOR_RUNTIME_RUN_ID: ${{ inputs.compositor_runtime_run_id }}
           LINUX_QUALIFICATION_ONLY: ${{ inputs.linux_qualification_only }}
+          LINUX_GNOME_BRIDGE_DIAGNOSTIC: ${{ inputs.linux_gnome_bridge_diagnostic }}
           SUPABASE_MODULE_RUN_ID: ${{ inputs.supabase_module_run_id }}
           SEMANTIC_SEARCH_MODULE_RUN_ID: ${{ inputs.semantic_search_module_run_id }}
           OCR_MODULE_RUN_ID: ${{ inputs.ocr_module_run_id }}
           LINUX_EVIDENCE_RUN_ID: ${{ inputs.linux_evidence_run_id }}
+          PREVIOUS_LINUX_ARTIFACT_RUN_ID: ${{ inputs.previous_linux_artifact_run_id }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -114,6 +122,13 @@ jobs:
           linux_artifact_run_id="$GITHUB_RUN_ID"
           compositor_runtime_required=false
           linux_qualification_only=false
+          linux_gnome_bridge_diagnostic=false
+          if [[ "${LINUX_GNOME_BRIDGE_DIAGNOSTIC:-false}" == true ]]; then
+            [[ "${REQUESTED_PUBLISH:-false}" == false ]]
+            [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && -z "${QUALIFIED_RUN_ID:-}" && -z "${LINUX_EVIDENCE_RUN_ID:-}" && -z "${LINUX_ARTIFACT_RUN_ID:-}" && -z "${COMPOSITOR_RUNTIME_RUN_ID:-}" && -z "${SUPABASE_MODULE_RUN_ID:-}" && -z "${SEMANTIC_SEARCH_MODULE_RUN_ID:-}" && -z "${OCR_MODULE_RUN_ID:-}" && -z "${PREVIOUS_LINUX_ARTIFACT_RUN_ID:-}" ]]
+            linux_gnome_bridge_diagnostic=true
+            reuse_qualified=true
+          fi
           if [[ "${LINUX_QUALIFICATION_ONLY:-false}" == true ]]; then
             [[ "${REQUESTED_PUBLISH:-false}" == false ]]
             [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && -z "${QUALIFIED_RUN_ID:-}" && -z "${LINUX_EVIDENCE_RUN_ID:-}" ]]
@@ -218,6 +233,7 @@ jobs:
             echo "linux_artifact_run_id=$linux_artifact_run_id"
             echo "compositor_runtime_required=$compositor_runtime_required"
             echo "linux_qualification_only=$linux_qualification_only"
+            echo "linux_gnome_bridge_diagnostic=$linux_gnome_bridge_diagnostic"
           } >> "$GITHUB_OUTPUT"
 
   linux-native-bootstrap:
@@ -232,6 +248,12 @@ jobs:
       semantic_search_module_run_id: ${{ inputs.semantic_search_module_run_id }}
       ocr_module_run_id: ${{ inputs.ocr_module_run_id }}
       compositor_runtime_run_id: ${{ inputs.compositor_runtime_run_id }}
+
+  linux-gnome-bridge-diagnostic:
+    name: Run GNOME and KWin compositor clipboard diagnostic
+    needs: preflight
+    if: needs.preflight.outputs.linux_gnome_bridge_diagnostic == 'true'
+    uses: ./.github/workflows/linux-gnome-bridge-diagnostic.yml
 
   macos:
     needs: preflight
@@ -727,7 +749,7 @@ jobs:
 
   qualify:
     needs: [preflight, macos, android, windows, linux, compositor-runtime-public, linux-full-parity-evidence]
-    if: ${{ always() && needs.preflight.result == 'success' && (needs.preflight.outputs.reuse_qualified == 'true' || (needs.macos.result == 'success' && needs.android.result == 'success' && needs.windows.result == 'success' && (needs.preflight.outputs.linux_required != 'true' || ((needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && needs.linux-full-parity-evidence.result == 'success' && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success'))))) }}
+    if: ${{ always() && needs.preflight.result == 'success' && needs.preflight.outputs.linux_gnome_bridge_diagnostic != 'true' && (needs.preflight.outputs.reuse_qualified == 'true' || (needs.macos.result == 'success' && needs.android.result == 'success' && needs.windows.result == 'success' && (needs.preflight.outputs.linux_required != 'true' || ((needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && needs.linux-full-parity-evidence.result == 'success' && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success'))))) }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
