@@ -36,8 +36,50 @@ def daemon_flags(gui_pid, helper_environment):
 
 def capture_state(cli, environment, socket_path):
     status = fixture.status(cli, environment)
+    config = fixture.response_variant(fixture.cli_json(cli, environment, "config", "show"), "config")
     private = fixture.ipc(socket_path, "get_private_mode", {}).get("data", {}).get("private_mode", {})
-    return {"capture_running": status.get("capture_running") is True, "clipboard_backend": status.get("clipboard_backend") if isinstance(status.get("clipboard_backend"), str) else "invalid", "private_mode": private.get("private_mode") is True, "item_count": fixture.cli_item_count(status)}
+    exclusions = config.get("excluded_app_bundle_ids") if isinstance(config, dict) else None
+    source_allowed = isinstance(exclusions, list) and all(isinstance(value, str) and value != fixture.SOURCE_APPLICATION_ID for value in exclusions)
+    configured_private_mode = config.get("private_mode") if isinstance(config, dict) else None
+    return {
+        "capture_running": status.get("capture_running") is True,
+        "clipboard_backend": status.get("clipboard_backend") if isinstance(status.get("clipboard_backend"), str) else "invalid",
+        "private_mode": private.get("private_mode") is True,
+        "settings_capture_enabled": configured_private_mode is False and source_allowed,
+        "source_allowed_by_exclusion_settings": source_allowed,
+        "item_count": fixture.cli_item_count(status),
+    }
+
+
+def x11_state(helper, environment):
+    result = subprocess.run([str(helper)], capture_output=True, text=True, check=False, env=environment)
+    if result.returncode != 0:
+        return {"available": False}
+    try:
+        state = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {"available": False}
+    return state if isinstance(state, dict) else {"available": False}
+
+
+def start_observer(environment, runtime):
+    observer_path = os.environ.get("COPYPASTE_DIAGNOSTIC_KWIN_OBSERVER")
+    if not observer_path:
+        return None
+    ready = runtime / "kwin-observer.ready"
+    output = Path(os.environ["COPYPASTE_DIAGNOSTIC_KWIN_OUTPUT"])
+    sink = output.open("wb")
+    observer = subprocess.Popen(
+        [sys.executable, observer_path, "--seconds", "30", "--ready-file", str(ready)],
+        stdout=sink, stderr=subprocess.DEVNULL, env=environment,
+    )
+    deadline = time.monotonic() + 5
+    while not ready.is_file() and observer.poll() is None and time.monotonic() < deadline:
+        time.sleep(.05)
+    if observer.poll() is not None or not ready.is_file():
+        sink.close()
+        raise RuntimeError("KWin observer did not become ready")
+    return observer, sink
 
 
 def start_gui_diagnostic(executable, environment, runtime_dir, output):
@@ -71,9 +113,12 @@ def main():
     data_home.mkdir(mode=0o700); runtime.mkdir(mode=0o700)
     fixture.write_source_desktop_entry(data_home)
     environment = {**os.environ, "COPYPASTE_QUALIFICATION": "1", "XDG_DATA_HOME": str(data_home), "TMPDIR": str(runtime)}
-    app, socket_path, gui_startup = start_gui_diagnostic(args.gui_launcher, environment, runtime, args.output)
-    record = {"kind": "first_clipboard_capture", "captured": False, "gui_startup": gui_startup, "daemon_environment": daemon_flags(app.pid, environment), "before_provider": capture_state(cli, cli_environment, socket_path)}
+    observer = None
+    app = None
+    record = {"kind": "first_clipboard_capture", "captured": False}
     try:
+        observer = start_observer(environment, runtime)
+        app, socket_path, gui_startup = start_gui_diagnostic(args.gui_launcher, environment, runtime, args.output)
         cli_environment = {**environment, "COPYPASTE_SOCKET": str(socket_path)}
         cli = prefix / "copypaste-cli"; deadline = time.monotonic() + 8; before = None
         while time.monotonic() < deadline:
@@ -82,31 +127,42 @@ def main():
             except Exception:
                 time.sleep(.15)
         if before is None: raise RuntimeError("GUI-owned daemon did not become ready")
-        observer = None
-        observer_path = os.environ.get("COPYPASTE_DIAGNOSTIC_KWIN_OBSERVER")
-        if observer_path:
-            observer_ready = runtime / "kwin-observer.ready"
-            observer = subprocess.Popen([sys.executable, observer_path, "--seconds", "30", "--x11-helper", os.environ["COPYPASTE_DIAGNOSTIC_X11_HELPER"], "--ready-file", str(observer_ready)], stdout=open(os.environ["COPYPASTE_DIAGNOSTIC_KWIN_OUTPUT"], "wb"), stderr=subprocess.DEVNULL, env=environment)
-            deadline = time.monotonic() + 5
-            while not observer_ready.is_file() and observer.poll() is None and time.monotonic() < deadline: time.sleep(.05)
-            if observer.poll() is not None or not observer_ready.is_file(): raise RuntimeError("KWin observer did not become ready")
+        before_items = {item.get("id") for item in fixture.list_items(cli, cli_environment) if isinstance(item.get("id"), str)}
+        record.update({"gui_startup": gui_startup, "daemon_environment": daemon_flags(app.pid, environment), "before_provider": capture_state(cli, cli_environment, socket_path)})
         with fixture.clipboard_provider(workspace, workspace, "first-capture", {"text/plain;charset=utf-8": b"copypaste-diagnostic"}, environment):
             record["during_provider"] = capture_state(cli, cli_environment, socket_path)
+            helper = os.environ.get("COPYPASTE_DIAGNOSTIC_X11_HELPER")
+            if helper:
+                record["x11_owner_during_provider"] = x11_state(helper, environment)
             fixture.wait_for_count(cli, cli_environment, before + 1)
             after = fixture.cli_item_count(fixture.status(cli, cli_environment))
-            record.update({"before_item_count": before, "after_item_count": after, "captured": after > before, "daemon_environment": daemon_flags(app.pid, environment), "after_provider": capture_state(cli, cli_environment, socket_path)})
+            captured = after > before
+            source_fixture_match = False
+            if captured:
+                items = fixture.list_items(cli, cli_environment)
+                item = next((item for item in items if item.get("id") not in before_items and item.get("content_type") == "text"), None)
+                source_fixture_match = bool(item and item.get("source_app_bundle_id") == fixture.SOURCE_APPLICATION_ID and item.get("source_app_name") == fixture.SOURCE_APPLICATION_NAME)
+            record.update({"before_item_count": before, "after_item_count": after, "captured": captured, "source_fixture_match": source_fixture_match, "daemon_environment": daemon_flags(app.pid, environment), "after_provider": capture_state(cli, cli_environment, socket_path)})
         if observer:
-            observer.wait(timeout=35)
+            observer[0].wait(timeout=35)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
         print("COPYPASTE_FIRST_CLIPBOARD_DIAGNOSTIC " + json.dumps(record, sort_keys=True, separators=(",", ":")))
     except Exception as error:
-        record["failed_before_capture"] = True
+        record["failed_before_capture"] = not record["captured"]
+        if app is not None and "cli" in locals() and "cli_environment" in locals():
+            try:
+                record["after_failure"] = capture_state(cli, cli_environment, socket_path)
+            except Exception:
+                record["after_failure"] = {"available": False}
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
         raise
     finally:
-        app.terminate(); app.wait(timeout=5)
+        if observer is not None:
+            observer[1].close()
+        if app is not None:
+            app.terminate(); app.wait(timeout=5)
         shutil.rmtree(workspace, ignore_errors=True)
 
 
