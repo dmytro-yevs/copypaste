@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use tracing::debug;
 use zbus::blocking::{connection::Builder, Connection, Proxy};
 
 use super::super::{Capture, CapturePolicy, ClipboardSource, SourcePolicyEvidence};
@@ -174,7 +175,14 @@ impl GnomeClipboard {
             secret,
             transient: false,
         };
-        if !privacy.allows(settings) || !current_epoch(&self.state, epoch, sequence) {
+        if !privacy.allows(settings) {
+            return None;
+        }
+        if !current_epoch(&self.state, epoch, sequence) {
+            debug!(
+                outcome = "read_epoch_changed",
+                "compositor clipboard read was dropped"
+            );
             return None;
         }
         let (mime, content_type, binary) = representation(&mimes)?;
@@ -186,6 +194,10 @@ impl GnomeClipboard {
             return None;
         }
         if !current_epoch(&self.state, epoch, sequence) {
+            debug!(
+                outcome = "read_epoch_changed",
+                "compositor clipboard read was dropped"
+            );
             return None;
         }
         if content_type == copypaste_ipc::content_type::FILE {
@@ -352,22 +364,30 @@ fn worker(commands: mpsc::Receiver<Command>, state: Arc<Mutex<State>>, bridge: B
                 limit,
                 reply,
             } => {
-                let bytes = proxy
-                    .as_ref()
-                    .and_then(|proxy| proxy.call("Read", &(sequence, mime.as_str(), limit)).ok())
-                    .filter(|_| {
-                        owner.as_deref().is_some_and(|owner| {
-                            owner_is_current(&connection, bridge, owner)
-                                && state.lock().is_ok_and(|state| {
-                                    state.active && state.owner.as_deref() == Some(owner)
-                                })
+                let read = proxy.as_ref().map(|proxy| {
+                    proxy.call::<_, _, Vec<u8>>("Read", &(sequence, mime.as_str(), limit))
+                });
+                let live = owner.as_deref().is_some_and(|owner| {
+                    owner_is_current(&connection, bridge, owner)
+                        && state.lock().is_ok_and(|state| {
+                            state.active && state.owner.as_deref() == Some(owner)
                         })
-                    });
-                if bytes.is_none() {
+                });
+                let transaction_error = read
+                    .as_ref()
+                    .and_then(|read| read.as_ref().err())
+                    .is_some_and(compositor_transaction_error);
+                if !live || (!transaction_error && !matches!(&read, Some(Ok(_)))) {
                     if let Some(owner) = owner.as_deref() {
                         invalidate_owner(&state, Some(owner));
                     }
+                } else if transaction_error {
+                    debug!(
+                        outcome = "read_rpc_transaction_rejected",
+                        "compositor clipboard read was dropped"
+                    );
                 }
+                let bytes = live.then(|| read?.ok()).flatten();
                 let _ = reply.send(bytes);
             }
             Command::Write { values, reply } => {
@@ -392,6 +412,20 @@ fn worker(commands: mpsc::Receiver<Command>, state: Arc<Mutex<State>>, bridge: B
             Command::Stop => unreachable!("Stop returned before proxy dispatch"),
         }
     }
+}
+
+fn compositor_transaction_error(error: &zbus::Error) -> bool {
+    matches!(
+        error,
+        zbus::Error::MethodError(name, ..)
+            if matches!(
+                name.as_str(),
+                "app.copypaste.Clipboard.Error.StaleSelection"
+                    | "app.copypaste.Clipboard.Error.Unavailable"
+                    | "app.copypaste.Clipboard.Error.TooLarge"
+                    | "app.copypaste.Clipboard.Error.UnsupportedMime"
+            )
+    )
 }
 
 fn activate(connection: &Connection, state: &Arc<Mutex<State>>, bridge: Bridge) {
@@ -749,11 +783,19 @@ mod tests {
         values: HashMap<String, Vec<u8>>,
         writes: Vec<HashMap<String, Vec<u8>>>,
         reads: usize,
+        next_read_error: Option<FixtureReadError>,
         stall_reads: bool,
         snapshots: usize,
         completed_snapshots: usize,
         snapshot_started: Option<mpsc::Sender<()>>,
         snapshot_release: Option<mpsc::Receiver<()>>,
+    }
+
+    #[derive(Clone, Debug, zbus::DBusError)]
+    #[zbus(prefix = "app.copypaste.Clipboard.Error")]
+    enum FixtureReadError {
+        StaleSelection,
+        AccessDenied,
     }
 
     struct FixtureBridge(Arc<Mutex<BridgeState>>);
@@ -784,17 +826,20 @@ mod tests {
             snapshot
         }
 
-        fn read(&self, sequence: u64, mime: &str, limit: u32) -> Vec<u8> {
+        fn read(&self, sequence: u64, mime: &str, limit: u32) -> Result<Vec<u8>, FixtureReadError> {
             let mut state = self.0.lock().expect("fixture bridge state");
             state.reads += 1;
+            if let Some(error) = state.next_read_error.take() {
+                return Err(error);
+            }
             if state.stall_reads {
                 drop(state);
                 thread::sleep(RPC_TIMEOUT + Duration::from_secs(1));
-                return Vec::new();
+                return Ok(Vec::new());
             }
             assert_eq!(sequence, state.sequence, "bridge read sequence");
             let value = state.values.get(mime).cloned().unwrap_or_default();
-            value[..value.len().min(limit as usize)].to_vec()
+            Ok(value[..value.len().min(limit as usize)].to_vec())
         }
 
         fn write(&self, values: HashMap<String, Vec<u8>>) -> u64 {
@@ -884,6 +929,13 @@ mod tests {
                 .insert(mime.into(), value.into());
         }
 
+        fn next_read_error(&self, error: FixtureReadError) {
+            self.state
+                .lock()
+                .expect("fixture bridge state")
+                .next_read_error = Some(error);
+        }
+
         fn stall_next_snapshot(&self) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
             let (started, started_receiver) = mpsc::channel();
             let (release_sender, release) = mpsc::channel();
@@ -952,6 +1004,21 @@ mod tests {
         panic!("fixture OwnerChanged did not advance to sequence {sequence}");
     }
 
+    fn wait_for_inactive(clipboard: &GnomeClipboard) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if clipboard
+                .state
+                .lock()
+                .is_ok_and(|state| !state.active && !state.watching)
+            {
+                return;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        panic!("rejected compositor RPC did not invalidate the bridge");
+    }
+
     #[test]
     fn live_gnome_dbus_fixture_reads_writes_and_bounds_stalled_calls() {
         if std::env::var_os("COPYPASTE_GNOME_FIXTURE") != Some("1".into()) {
@@ -959,9 +1026,57 @@ mod tests {
         }
         for bridge in [GNOME, KWIN] {
             live_bridge_fixture(bridge);
+            stale_read_keeps_live_owner_fixture(bridge);
+            access_denied_read_invalidates_fixture(bridge);
             owner_changed_during_stalled_snapshot_fixture(bridge);
             owner_switch_during_stalled_snapshot_fixture(bridge);
         }
+    }
+
+    fn stale_read_keeps_live_owner_fixture(bridge: Bridge) {
+        let fixture = BridgeFixture::start(bridge);
+        let directory = tempfile::tempdir().expect("fixture data dir");
+        let mut clipboard =
+            GnomeClipboard::with_bridge(directory.path(), bridge).expect("compositor clipboard");
+        wait_for_active(&clipboard);
+
+        fixture.update_owner(2, vec!["text/plain;charset=utf-8".into()]);
+        wait_for_change(&mut clipboard);
+        assert_eq!(
+            zbus::DBusError::name(&FixtureReadError::StaleSelection).as_str(),
+            "app.copypaste.Clipboard.Error.StaleSelection"
+        );
+        fixture.next_read_error(FixtureReadError::StaleSelection);
+        assert!(
+            clipboard.poll().is_none(),
+            "stale Read unexpectedly captured"
+        );
+        wait_for_active(&clipboard);
+
+        fixture.update_value("text/plain;charset=utf-8", b"recovered bridge text");
+        fixture.update_owner(3, vec!["text/plain;charset=utf-8".into()]);
+        wait_for_change(&mut clipboard);
+        let capture = clipboard
+            .poll()
+            .expect("live owner did not recover after rejected Read");
+        assert_eq!(capture.content, "recovered bridge text");
+    }
+
+    fn access_denied_read_invalidates_fixture(bridge: Bridge) {
+        let fixture = BridgeFixture::start(bridge);
+        let directory = tempfile::tempdir().expect("fixture data dir");
+        let mut clipboard =
+            GnomeClipboard::with_bridge(directory.path(), bridge).expect("compositor clipboard");
+        wait_for_active(&clipboard);
+
+        fixture.update_owner(2, vec!["text/plain;charset=utf-8".into()]);
+        wait_for_change(&mut clipboard);
+        fixture.next_read_error(FixtureReadError::AccessDenied);
+        assert!(
+            clipboard.poll().is_none(),
+            "denied Read unexpectedly captured"
+        );
+        wait_for_inactive(&clipboard);
     }
 
     fn live_bridge_fixture(bridge: Bridge) {
