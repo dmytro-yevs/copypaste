@@ -97,10 +97,19 @@ jobs:
           set -euo pipefail
           [[ "$PRODUCT_COMMIT" =~ ^[0-9a-f]{40}$ && "$COMPOSITOR_RUNTIME_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           python3 scripts/release/compositor-runtime-archive.py extract --archive compositor-runtime/runtime.tar --output compositor-runtime/runtime
-          python3 scripts/release/verify-linux-compositor-runtime.py artifact \
-            --root compositor-runtime --desktop GNOME --architecture x86_64 \
-            --commit "$PRODUCT_COMMIT" --producer-run-id "$COMPOSITOR_RUNTIME_RUN_ID" \
-            --output compositor-runtime/binding.json
+          jq -e --arg commit "$PRODUCT_COMMIT" --arg run "$COMPOSITOR_RUNTIME_RUN_ID" '
+            .commit == $commit and (.producer_run_id | tostring) == $run and
+            .desktop == "GNOME" and .architecture == "x86_64" and
+            .runtime_id == "gnome-46-private-shell" and
+            (.source | keys | sort) == ["patch_sha256", "revision", "shell_revision"]
+          ' compositor-runtime/compositor-runtime-producer-receipt.json
+          jq -e '
+            .runtime_id == "gnome-46-private-shell" and
+            (.source | keys | sort) == ["patch_sha256", "revision", "shell_revision"]
+          ' compositor-runtime/runtime-receipt.json
+          receipt_sha256="$(sha256sum compositor-runtime/runtime-receipt.json | awk '{print $1}')"
+          [[ "$receipt_sha256" == "$(jq -er '.runtime_receipt.sha256' compositor-runtime/compositor-runtime-producer-receipt.json)" ]]
+          jq -n --arg runtime_id "$(jq -er '.runtime_id' compositor-runtime/runtime-receipt.json)" '{runtime_id: $runtime_id}' > compositor-runtime/binding.json
       - name: Capture private GNOME loader maps and decisions
         env:
           PRODUCT_VERSION: ${{ needs.source.outputs.version }}
