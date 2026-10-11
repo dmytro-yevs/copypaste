@@ -194,8 +194,8 @@ jobs:
           find "$runtime_root" "$rebuilt_runtime" -type f -print0 | sort -z | xargs -0 sha256sum > evidence/runtime-variant-sha256.txt
           for variant in rebuilt-bare rebuilt-companion; do
             ! grep -q "cannot register existing type 'CoglTexture'" "evidence/desktop-$variant.log"
-            ! rg -q "calling init: /usr/lib/x86_64-linux-gnu/mutter-14/libmutter-(cogl|clutter)-14" evidence/ld-debug-$variant.*
-            ! rg -q '^/usr/lib/x86_64-linux-gnu/mutter-14/libmutter-(cogl|clutter)-14' "evidence/maps-$variant.txt"
+            ! grep -Eq "calling init: /usr/lib/x86_64-linux-gnu/mutter-14/libmutter-(cogl|clutter)-14" evidence/ld-debug-$variant.*
+            ! grep -Eq '^/usr/lib/x86_64-linux-gnu/mutter-14/libmutter-(cogl|clutter)-14' "evidence/maps-$variant.txt"
           done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
