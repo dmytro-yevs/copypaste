@@ -9,23 +9,20 @@
 #include <QEventLoop>
 #include <QMap>
 #include <QTimer>
+#include <QXmlStreamReader>
 
 #include <optional>
 
-struct WriterIdentity {
-    QString status;
-    quint32 pid = 0;
-    quint32 uid = 0;
-    QString appId;
-};
-Q_DECLARE_METATYPE(WriterIdentity)
+#include "../src/copypasteclipboardbridge.h"
 
 bool mayReplyForOwnerEpoch(qulonglong capturedEpoch, qulonglong currentEpoch, bool cancelled)
 {
     return !cancelled && capturedEpoch == currentEpoch;
 }
 
-QDBusArgument &operator<<(QDBusArgument &argument, const WriterIdentity &identity)
+namespace KWin
+{
+QDBusArgument &operator<<(QDBusArgument &argument, const CopyPasteWriterIdentity &identity)
 {
     argument.beginStructure();
     argument << identity.status << identity.pid << identity.uid << identity.appId;
@@ -33,14 +30,66 @@ QDBusArgument &operator<<(QDBusArgument &argument, const WriterIdentity &identit
     return argument;
 }
 
-const QDBusArgument &operator>>(const QDBusArgument &argument, WriterIdentity &identity)
+const QDBusArgument &operator>>(const QDBusArgument &argument, CopyPasteWriterIdentity &identity)
 {
     argument.beginStructure();
     argument >> identity.status >> identity.pid >> identity.uid >> identity.appId;
     argument.endStructure();
     return argument;
 }
+} // namespace KWin
 
+bool hasSnapshotOutSignature(const QString &xml)
+{
+    QXmlStreamReader reader(xml);
+    bool inSnapshot = false;
+    QStringList outputTypes;
+
+    while (!reader.atEnd()) {
+        reader.readNext();
+        if (reader.isStartElement() && reader.name() == QLatin1String("method")) {
+            inSnapshot = reader.attributes().value(QLatin1String("name")) == QLatin1String("Snapshot");
+        } else if (inSnapshot && reader.isStartElement() && reader.name() == QLatin1String("arg") &&
+                   reader.attributes().value(QLatin1String("direction")) == QLatin1String("out")) {
+            outputTypes.append(reader.attributes().value(QLatin1String("type")).toString());
+        } else if (inSnapshot && reader.isEndElement() && reader.name() == QLatin1String("method")) {
+            return outputTypes == QStringList{QStringLiteral("t"), QStringLiteral("as"), QStringLiteral("(suus)")};
+        }
+    }
+
+    return false;
+}
+
+QDBusMessage snapshotReply(const QDBusConnection &client)
+{
+    const auto pending = client.asyncCall(QDBusMessage::createMethodCall(QString(),
+                                                                           QStringLiteral("/app/copypaste/Clipboard"),
+                                                                           QStringLiteral("app.copypaste.Clipboard"),
+                                                                           QStringLiteral("Snapshot")),
+                                          1'000);
+    QDBusPendingCallWatcher watcher(pending);
+    QEventLoop replyLoop;
+    QObject::connect(&watcher, &QDBusPendingCallWatcher::finished, &replyLoop, &QEventLoop::quit);
+    QTimer::singleShot(1'000, &replyLoop, &QEventLoop::quit);
+    replyLoop.exec();
+    return watcher.reply();
+}
+
+bool hasSnapshotValues(const QDBusMessage &reply, qulonglong generation, const QStringList &mimeTypes,
+                       const KWin::CopyPasteWriterIdentity &expectedIdentity)
+{
+    const auto arguments = reply.arguments();
+    if (reply.type() == QDBusMessage::ErrorMessage || reply.signature() != QLatin1String("tas(suus)") || arguments.size() != 3 ||
+        arguments.at(0).toULongLong() != generation || arguments.at(1).toStringList() != mimeTypes) {
+        return false;
+    }
+    const auto identity = qdbus_cast<KWin::CopyPasteWriterIdentity>(arguments.at(2));
+    return identity.status == expectedIdentity.status && identity.pid == expectedIdentity.pid && identity.uid == expectedIdentity.uid &&
+           identity.appId == expectedIdentity.appId;
+}
+
+namespace KWin
+{
 class ClipboardFixture final : public QObject
 {
     Q_OBJECT
@@ -52,8 +101,18 @@ public Q_SLOTS:
         version = 2;
     }
 
-    Q_SCRIPTABLE void Snapshot(qulonglong &generation, QStringList &mimeTypes, WriterIdentity &identity)
+#if defined(COPYPASTE_TEST_UNQUALIFIED_SNAPSHOT)
+    Q_SCRIPTABLE void Snapshot(qulonglong &generation, QStringList &mimeTypes, CopyPasteWriterIdentity &identity)
+#else
+    Q_SCRIPTABLE void Snapshot(qulonglong &generation, QStringList &mimeTypes, KWin::CopyPasteWriterIdentity &identity)
+#endif
     {
+        if (!m_hasSelection) {
+            generation = 0;
+            mimeTypes.clear();
+            identity = {};
+            return;
+        }
         generation = 7;
         mimeTypes = {QStringLiteral("text/plain")};
         identity = {QStringLiteral("verified"), 101, 1000, QStringLiteral("org.example.Writer")};
@@ -70,15 +129,26 @@ public Q_SLOTS:
     }
 
 Q_SIGNALS:
-    Q_SCRIPTABLE void OwnerChanged(qulonglong generation, const QStringList &mimeTypes, const WriterIdentity &identity);
+    Q_SCRIPTABLE void OwnerChanged(qulonglong generation, const QStringList &mimeTypes,
+                                   const KWin::CopyPasteWriterIdentity &identity);
+
+public:
+    void setHasSelection(bool hasSelection)
+    {
+        m_hasSelection = hasSelection;
+    }
+
+private:
+    bool m_hasSelection = false;
 };
+} // namespace KWin
 
 int main(int argc, char **argv)
 {
     QCoreApplication application(argc, argv);
-    qDBusRegisterMetaType<WriterIdentity>();
+    qDBusRegisterMetaType<KWin::CopyPasteWriterIdentity>();
     qDBusRegisterMetaType<QMap<QString, QByteArray>>();
-    ClipboardFixture fixture;
+    KWin::ClipboardFixture fixture;
     QDBusServer server(QStringLiteral("unix:tmpdir=%1").arg(QDir::tempPath()));
     if (!server.isConnected()) {
         return 1;
@@ -121,25 +191,12 @@ int main(int argc, char **argv)
         return 4;
     }
 
-    const auto pending = client.asyncCall(QDBusMessage::createMethodCall(QString(),
-                                                                           QStringLiteral("/app/copypaste/Clipboard"),
-                                                                           QStringLiteral("app.copypaste.Clipboard"),
-                                                                           QStringLiteral("Snapshot")),
-                                          1'000);
-    QDBusPendingCallWatcher watcher(pending);
-    QEventLoop replyLoop;
-    QObject::connect(&watcher, &QDBusPendingCallWatcher::finished, &replyLoop, &QEventLoop::quit);
-    QTimer::singleShot(1'000, &replyLoop, &QEventLoop::quit);
-    replyLoop.exec();
-    const auto reply = watcher.reply();
-    const auto arguments = reply.arguments();
-    if (reply.type() == QDBusMessage::ErrorMessage || reply.signature() != QLatin1String("tas(suus)") || arguments.size() != 3 ||
-        arguments.at(0).toULongLong() != 7 || arguments.at(1).toStringList() != QStringList{QStringLiteral("text/plain")}) {
+    if (!hasSnapshotValues(snapshotReply(client), 0, {}, {})) {
         return 5;
     }
-    const auto identity = qdbus_cast<WriterIdentity>(arguments.at(2));
-    if (identity.status != QLatin1String("verified") || identity.pid != 101 || identity.uid != 1000 ||
-        identity.appId != QLatin1String("org.example.Writer")) {
+    fixture.setHasSelection(true);
+    const KWin::CopyPasteWriterIdentity expectedIdentity{QStringLiteral("verified"), 101, 1000, QStringLiteral("org.example.Writer")};
+    if (!hasSnapshotValues(snapshotReply(client), 7, {QStringLiteral("text/plain")}, expectedIdentity)) {
         return 6;
     }
     if (mayReplyForOwnerEpoch(7, 8, false) || mayReplyForOwnerEpoch(7, 7, true) || !mayReplyForOwnerEpoch(7, 7, false)) {
@@ -160,10 +217,13 @@ int main(int argc, char **argv)
         return 8;
     }
     const auto xml = introspectionReply.arguments().constFirst().toString();
+    if (!hasSnapshotOutSignature(xml)) {
+        return 9;
+    }
     for (const auto &member : {QStringLiteral("Version"), QStringLiteral("Snapshot"), QStringLiteral("Read"),
                                QStringLiteral("Write"), QStringLiteral("OwnerChanged")}) {
         if (!xml.contains(QStringLiteral("\"") + member + QStringLiteral("\""))) {
-            return 9;
+            return 10;
         }
     }
     QDBusConnection::disconnectFromPeer(connectionName);
