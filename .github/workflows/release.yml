@@ -118,6 +118,12 @@ jobs:
             [[ "${REQUESTED_PUBLISH:-false}" == false ]]
             [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && -z "${QUALIFIED_RUN_ID:-}" && -z "${LINUX_EVIDENCE_RUN_ID:-}" ]]
             for value in "$LINUX_ARTIFACT_RUN_ID" "$COMPOSITOR_RUNTIME_RUN_ID" "$SUPABASE_MODULE_RUN_ID" "$SEMANTIC_SEARCH_MODULE_RUN_ID" "$OCR_MODULE_RUN_ID"; do [[ "$value" =~ ^[1-9][0-9]*$ ]]; done
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$LINUX_ARTIFACT_RUN_ID" > "$RUNNER_TEMP/diagnostic-artifact-run.json"
+            release_commit="$(jq -er '.head_sha | select(test("^[0-9a-f]{40}$"))' "$RUNNER_TEMP/diagnostic-artifact-run.json")"
+            git cat-file -e "$release_commit^{commit}"
+            artifact_version="$(git show "$release_commit:apps/copypaste_flutter/pubspec.yaml" | awk '/^version:[[:space:]]*/ {print $2; exit}')"
+            artifact_version="${artifact_version%%+*}"
+            [[ "$artifact_version" == "$version" ]]
             linux_qualification_only=true
           fi
           if [[ -n "${QUALIFIED_RUN_ID:-}" ]]; then
@@ -224,7 +230,7 @@ jobs:
     name: Run exact staged Linux native qualification
     needs: preflight
     if: needs.preflight.outputs.linux_qualification_only == 'true'
-    uses: ./.github/workflows/linux-native-qualification.yml
+    uses: ./.github/workflows/gnome-runtime-loader-diagnostic.yml
     with:
       artifact_run_id: ${{ inputs.linux_artifact_run_id }}
       previous_artifact_run_id: ${{ inputs.previous_linux_artifact_run_id }}

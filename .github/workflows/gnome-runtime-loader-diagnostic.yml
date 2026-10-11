@@ -1,0 +1,194 @@
+name: GNOME runtime loader diagnostic
+
+on:
+  workflow_call:
+    inputs:
+      artifact_run_id:
+        required: true
+        type: string
+      compositor_runtime_run_id:
+        required: true
+        type: string
+      previous_artifact_run_id:
+        required: false
+        type: string
+        default: ""
+      supabase_module_run_id:
+        required: true
+        type: string
+      semantic_search_module_run_id:
+        required: true
+        type: string
+      ocr_module_run_id:
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  source:
+    name: Bind exact diagnostic inputs
+    runs-on: ubuntu-24.04
+    outputs:
+      product_commit: ${{ steps.source.outputs.product_commit }}
+      version: ${{ steps.source.outputs.version }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - id: source
+        env:
+          ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID" > "$RUNNER_TEMP/product-run.json"
+          product_commit="$(jq -er '.head_sha | select(test("^[0-9a-f]{40}$"))' "$RUNNER_TEMP/product-run.json")"
+          git cat-file -e "$product_commit^{commit}"
+          version="$(git show "$product_commit:apps/copypaste_flutter/pubspec.yaml" | awk '/^version:[[:space:]]*/ {print $2; exit}')"
+          version="${version%%+*}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          printf 'product_commit=%s\nversion=%s\n' "$product_commit" "$version" >> "$GITHUB_OUTPUT"
+
+  gnome-wayland-loader:
+    name: x86_64 GNOME Wayland loader
+    needs: source
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Install disposable GNOME loader dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends dbus-user-session gnome-shell gnome-session gsettings-desktop-schemas patchelf
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64
+          path: compositor-runtime
+          run-id: ${{ inputs.compositor_runtime_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: production-linux-x86_64
+          path: current
+          run-id: ${{ inputs.artifact_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify and stage the exact private runtime
+        env:
+          PRODUCT_COMMIT: ${{ needs.source.outputs.product_commit }}
+          COMPOSITOR_RUNTIME_RUN_ID: ${{ inputs.compositor_runtime_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$PRODUCT_COMMIT" =~ ^[0-9a-f]{40}$ && "$COMPOSITOR_RUNTIME_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          python3 scripts/release/compositor-runtime-archive.py extract --archive compositor-runtime/runtime.tar --output compositor-runtime/runtime
+          python3 scripts/release/verify-linux-compositor-runtime.py artifact \
+            --root compositor-runtime --desktop GNOME --architecture x86_64 \
+            --commit "$PRODUCT_COMMIT" --producer-run-id "$COMPOSITOR_RUNTIME_RUN_ID" \
+            --output compositor-runtime/binding.json
+          package="$(jq -er '.package.name' compositor-runtime/binding.json)"
+          sudo apt-get install --yes "$(realpath "compositor-runtime/$package")"
+      - name: Capture private GNOME loader maps and decisions
+        env:
+          PRODUCT_VERSION: ${{ needs.source.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir evidence
+          runtime_id="$(jq -er '.runtime_id' compositor-runtime/binding.json)"
+          runtime_root="/usr/lib/copypaste/compositor-runtime/$runtime_id"
+          entrypoint="$runtime_root/usr/libexec/copypaste-gnome-shell-headless"
+          [[ -x "$entrypoint" ]]
+          private_library_path="$runtime_root/lib:$runtime_root/lib64:$runtime_root/usr/lib:$runtime_root/usr/lib/x86_64-linux-gnu:$runtime_root/usr/lib/x86_64-linux-gnu/mutter-14:$runtime_root/usr/lib/x86_64-linux-gnu/gnome-shell"
+          private_typelib_path="$runtime_root/usr/lib/x86_64-linux-gnu/mutter-14:$runtime_root/usr/lib/x86_64-linux-gnu/gnome-shell"
+          appimage="current/CopyPaste-v$PRODUCT_VERSION-linux-x86_64.AppImage"
+          [[ -f "$appimage" && ! -L "$appimage" ]]
+          chmod u+x "$appimage"
+          mkdir companion
+          (cd companion && APPIMAGE_EXTRACT_AND_RUN=1 "../$appimage" --appimage-extract >/dev/null)
+          companion_source="$PWD/companion/squashfs-root/usr/share/copypaste/desktop-integrations"
+          [[ -d "$companion_source/gnome-shell-extension" ]]
+          diagnostic_runtime="$RUNNER_TEMP/copypaste-gnome-runtime-without-rpath"
+          cp -a "$runtime_root" "$diagnostic_runtime"
+          find "$diagnostic_runtime" -type f -print0 | while IFS= read -r -d '' elf; do
+            file --brief "$elf" | grep -q '^ELF ' || continue
+            patchelf --remove-rpath "$elf"
+          done
+          run_variant() {
+            local variant="$1"
+            local enable_companion="$2"
+            local variant_runtime_root="$3"
+            local runtime_dir shell_pid dbus_pid native_typelib_path variant_entrypoint variant_library_path variant_typelib_path
+            variant_entrypoint="$variant_runtime_root/usr/libexec/copypaste-gnome-shell-headless"
+            variant_library_path="$variant_runtime_root/lib:$variant_runtime_root/lib64:$variant_runtime_root/usr/lib:$variant_runtime_root/usr/lib/x86_64-linux-gnu:$variant_runtime_root/usr/lib/x86_64-linux-gnu/mutter-14:$variant_runtime_root/usr/lib/x86_64-linux-gnu/gnome-shell"
+            variant_typelib_path="$variant_runtime_root/usr/lib/x86_64-linux-gnu/mutter-14:$variant_runtime_root/usr/lib/x86_64-linux-gnu/gnome-shell"
+            [[ -x "$variant_entrypoint" ]]
+            {
+              printf 'entrypoint=%s\n' "$variant_entrypoint"
+              for elf in "$variant_runtime_root/usr/bin/gnome-shell" "$variant_runtime_root/usr/lib/x86_64-linux-gnu/libmutter-14.so.0" "$variant_runtime_root/usr/lib/x86_64-linux-gnu/mutter-14/libmutter-cogl-14.so.0"; do
+                printf '%s\n' "$elf"
+                objdump -p "$elf" | grep -E 'RPATH|RUNPATH|NEEDED|SONAME' || true
+              done
+            } > "evidence/dynamic-$variant.txt"
+            runtime_dir="$(mktemp -d)"
+            chmod 700 "$runtime_dir"
+            (
+              export XDG_RUNTIME_DIR="$runtime_dir"
+              export XDG_DATA_HOME="$runtime_dir/data"
+              export XDG_CONFIG_HOME="$runtime_dir/config"
+              export XDG_CACHE_HOME="$runtime_dir/cache"
+              export XDG_CURRENT_DESKTOP=GNOME
+              export XDG_SESSION_DESKTOP=GNOME
+              export XDG_SESSION_TYPE=wayland
+              mkdir -p "$XDG_DATA_HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
+              mapfile -t bus < <(dbus-daemon --session --fork --print-address=1 --print-pid=1)
+              export DBUS_SESSION_BUS_ADDRESS="${bus[0]}"
+              dbus_pid="${bus[1]}"
+              native_typelib_path=""
+              if [[ "$enable_companion" == true ]]; then
+                extension="$companion_source/gnome-shell-extension"
+                extension_id="$(jq -er '.uuid' "$extension/metadata.json")"
+                install -d "$XDG_DATA_HOME/gnome-shell/extensions"
+                cp -a "$extension" "$XDG_DATA_HOME/gnome-shell/extensions/$extension_id"
+                native_typelib_path="$XDG_DATA_HOME/gnome-shell/extensions/$extension_id/native/typelib"
+                [[ -d "$native_typelib_path" ]]
+                gsettings set org.gnome.shell enabled-extensions "['$extension_id']"
+              fi
+              LD_DEBUG=libs LD_DEBUG_OUTPUT="$PWD/evidence/ld-debug-$variant" \
+                GI_TYPELIB_PATH="$variant_typelib_path${native_typelib_path:+:$native_typelib_path}" \
+                LD_LIBRARY_PATH="$variant_library_path" \
+                "$variant_entrypoint" >"$PWD/evidence/desktop-$variant.log" 2>&1 &
+              shell_pid=$!
+              for _ in $(seq 1 40); do
+                kill -0 "$shell_pid" 2>/dev/null || break
+                sleep 0.25
+              done
+              [[ -r "/proc/$shell_pid/maps" ]] && awk '/libmutter|lib.*cogl|lib.*clutter|libst|libshell/ {print}' "/proc/$shell_pid/maps" > "evidence/maps-$variant.txt" || true
+              kill "$shell_pid" 2>/dev/null || true
+              wait "$shell_pid" 2>/dev/null || true
+              kill "$dbus_pid" 2>/dev/null || true
+            )
+            rm -rf "$runtime_dir"
+          }
+          run_variant original-bare false "$runtime_root"
+          run_variant original-companion true "$runtime_root"
+          run_variant transformed-bare false "$diagnostic_runtime"
+          run_variant transformed-companion true "$diagnostic_runtime"
+          cp "$entrypoint" evidence/entrypoint.sh
+          sha256sum compositor-runtime/runtime.tar compositor-runtime/runtime-receipt.json "$entrypoint" > evidence/input-sha256.txt
+          find "$runtime_root" "$diagnostic_runtime" -type f -print0 | sort -z | xargs -0 sha256sum > evidence/runtime-variant-sha256.txt
+          for variant in original-bare original-companion transformed-bare transformed-companion; do
+            if grep -q "cannot register existing type 'CoglTexture'" "evidence/desktop-$variant.log"; then
+              printf '%s=CoglTextureDuplicate\n' "$variant"
+            else
+              printf '%s=NoCoglTextureDuplicate\n' "$variant"
+            fi
+          done > evidence/results.txt
+          echo "ERROR: diagnostic complete; inspect the uploaded loader evidence before changing the runtime" >&2
+          exit 1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: gnome-runtime-loader-diagnostic
+          path: evidence
