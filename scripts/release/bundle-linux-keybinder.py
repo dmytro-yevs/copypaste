@@ -29,6 +29,9 @@ ARCHITECTURES = {
 SONAME = re.compile(r"\(SONAME\).*\[(?P<soname>[^]]+)\]")
 NEEDED = re.compile(r"\(NEEDED\).*\[(?P<soname>[^]]+)\]")
 MACHINE = re.compile(r"Machine:\s*(?P<machine>.+)")
+COMMON_LICENSE = re.compile(r"/usr/share/common-licenses/(?P<name>[A-Za-z0-9][A-Za-z0-9.+-]*)\b")
+SAFE_COMMON_LICENSE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.+-]*$")
+COMMON_LICENSE_ROOT = Path("/usr/share/common-licenses")
 
 
 class BundleError(RuntimeError):
@@ -131,6 +134,45 @@ def package_license() -> Path:
     return regular(source)
 
 
+def referenced_common_licenses(copyright: Path) -> list[str]:
+    try:
+        content = copyright.read_text(encoding="utf-8")
+    except OSError as error:
+        raise BundleError("Keybinder license bytes are unavailable") from error
+    names = sorted(set(COMMON_LICENSE.findall(content)))
+    if not all(SAFE_COMMON_LICENSE.fullmatch(name) for name in names):
+        raise BundleError("Keybinder copyright references an unsafe common license")
+    return names
+
+
+def common_license_source(name: str) -> Path:
+    if not SAFE_COMMON_LICENSE.fullmatch(name):
+        raise BundleError("Keybinder copyright references an unsafe common license")
+    try:
+        root = COMMON_LICENSE_ROOT.resolve(strict=True)
+        source = (root / name).resolve(strict=True)
+        source.relative_to(root)
+    except (OSError, ValueError) as error:
+        raise BundleError("referenced common license bytes are unavailable") from error
+    if source.name != name:
+        raise BundleError("referenced common license path is invalid")
+    return regular(source)
+
+
+def copy_common_licenses(copyright: Path, destination: Path) -> list[dict[str, str]]:
+    names = referenced_common_licenses(copyright)
+    if not names:
+        return []
+    destination.mkdir(parents=True, exist_ok=False)
+    records = []
+    for name in names:
+        source = common_license_source(name)
+        target = destination / name
+        shutil.copyfile(source, target, follow_symlinks=False)
+        records.append({"path": str(target.name), "sha256": sha256(target)})
+    return records
+
+
 def copy_library(source: Path, destination: Path) -> Path:
     destination.mkdir(parents=True, exist_ok=True)
     target = destination / source.name
@@ -173,6 +215,7 @@ def bundle(*, appdir: Path, architecture: str, manifest: Path) -> None:
     licenses.mkdir(parents=True)
     license_target = licenses / f"{PACKAGE}.copyright"
     shutil.copyfile(license_source, license_target, follow_symlinks=False)
+    common_licenses = copy_common_licenses(license_source, licenses / "common")
     baseline = appdir / "usr/share/copypaste/keybinder-runtime-glibc.json"
     baseline.parent.mkdir(parents=True, exist_ok=True)
     validate_glibc(copied, architecture=architecture, output=baseline)
@@ -191,6 +234,7 @@ def bundle(*, appdir: Path, architecture: str, manifest: Path) -> None:
         "license": {
             "path": str(license_target.relative_to(appdir)),
             "sha256": sha256(license_target),
+            "common_licenses": common_licenses,
         },
         "glibc_baseline": str(baseline.relative_to(appdir)),
     }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
