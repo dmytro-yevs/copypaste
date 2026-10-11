@@ -72,6 +72,8 @@ class LinuxQualificationBootstrapTest(unittest.TestCase):
         self.assertNotIn("values[i].value[0]", observer)
         self.assertNotIn("XResGetClientXid", observer)
         self.assertIn("canonical_client_window_class_matches_fixture", observer)
+        self.assertIn("canonical_client_window_class_casefold_matches_fixture", observer)
+        self.assertIn("owner_instance_matches_fixture", observer)
         self.assertIn("cached_desktop_entry_available", observer)
         workflow = (ROOT / ".github/workflows/linux-clipboard-diagnostic.yml").read_text(encoding="utf-8")
         self.assertIn("libxres-dev", workflow)
