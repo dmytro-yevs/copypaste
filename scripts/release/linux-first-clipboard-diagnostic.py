@@ -61,6 +61,18 @@ def x11_state(helper, environment):
         return {"available": False}
     return state if isinstance(state, dict) else {"available": False}
 
+def provider_read_state(activity):
+    try:
+        requests = [json.loads(line).get("mime") for line in activity.read_text(encoding="utf-8").splitlines()]
+    except (AttributeError, OSError, ValueError, json.JSONDecodeError):
+        return {"available": False}
+    return {
+        "available": True,
+        "request_count": len(requests),
+        "targets_requested": "TARGETS" in requests,
+        "text_requested": any(mime in {"text/plain;charset=utf-8", "UTF8_STRING", "TEXT", "STRING"} for mime in requests),
+    }
+
 
 def start_observer(environment, runtime):
     observer_path = os.environ.get("COPYPASTE_DIAGNOSTIC_KWIN_OBSERVER")
@@ -129,12 +141,17 @@ def main():
         if before is None: raise RuntimeError("GUI-owned daemon did not become ready")
         before_items = {item.get("id") for item in fixture.list_items(cli, cli_environment) if isinstance(item.get("id"), str)}
         record.update({"gui_startup": gui_startup, "daemon_environment": daemon_flags(app.pid, environment), "before_provider": capture_state(cli, cli_environment, socket_path)})
-        with fixture.clipboard_provider(workspace, workspace, "first-capture", {"text/plain;charset=utf-8": b"copypaste-diagnostic"}, environment):
+        with fixture.clipboard_provider(workspace, workspace, "first-capture", {"text/plain;charset=utf-8": b"copypaste-diagnostic"}, environment) as provider_activity:
             record["during_provider"] = capture_state(cli, cli_environment, socket_path)
             helper = os.environ.get("COPYPASTE_DIAGNOSTIC_X11_HELPER")
             if helper:
                 record["x11_owner_during_provider"] = x11_state(helper, environment)
-            fixture.wait_for_count(cli, cli_environment, before + 1)
+            try:
+                fixture.wait_for_count(cli, cli_environment, before + 1)
+            except Exception:
+                record["provider_read_state"] = provider_read_state(provider_activity)
+                raise
+            record["provider_read_state"] = provider_read_state(provider_activity)
             after = fixture.cli_item_count(fixture.status(cli, cli_environment))
             captured = after > before
             source_fixture_match = False

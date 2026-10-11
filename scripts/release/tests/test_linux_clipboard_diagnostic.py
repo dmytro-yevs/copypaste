@@ -155,6 +155,15 @@ class LinuxClipboardDiagnosticTest(unittest.TestCase):
         self.assertTrue(state["settings_capture_enabled"])
         self.assertTrue(state["source_allowed_by_exclusion_settings"])
 
+    def test_provider_read_state_never_records_clipboard_content(self):
+        with tempfile.TemporaryDirectory() as directory:
+            activity = Path(directory) / "activity.jsonl"
+            activity.write_text('{"mime":"TARGETS"}\n{"mime":"text/plain;charset=utf-8"}\n', encoding="utf-8")
+            state = diagnostic.provider_read_state(activity)
+        self.assertEqual(state, {
+            "available": True, "request_count": 2, "targets_requested": True, "text_requested": True,
+        })
+
     def test_first_capture_records_metadata_after_cli_is_assigned(self):
         class App:
             pid = 41
@@ -175,8 +184,10 @@ class LinuxClipboardDiagnosticTest(unittest.TestCase):
             }
 
         @contextmanager
-        def provider(*_args):
-            yield
+        def provider(workspace, *_args):
+            activity = workspace / "activity.jsonl"
+            activity.write_text("", encoding="utf-8")
+            yield activity
 
         def wait_for_count(*_args):
             phase["captured"] = True

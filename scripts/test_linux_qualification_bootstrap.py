@@ -66,6 +66,10 @@ class LinuxQualificationBootstrapTest(unittest.TestCase):
         self.assertIn("pkg-config --exists x11", wrapper)
         self.assertIn("$(pkg-config --cflags --libs x11) -lXRes", wrapper)
         self.assertNotIn("pkg-config --exists x11 xres", wrapper)
+        observer = (ROOT / "scripts/release/linux-x11-clipboard-observer.c").read_text(encoding="utf-8")
+        self.assertIn("XRES_CLIENT_ID_XID_MASK", observer)
+        self.assertIn("canonical_client_window_class_matches_fixture", observer)
+        self.assertIn("cached_desktop_entry_available", observer)
 
     def test_native_workflow_is_callable_and_downloads_public_runtime_for_final_verification(self):
         workflow = (ROOT / ".github/workflows/linux-native-qualification.yml").read_text(encoding="utf-8")

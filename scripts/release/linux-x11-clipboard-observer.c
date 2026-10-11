@@ -3,9 +3,11 @@
 #include <X11/Xutil.h>
 #include <X11/extensions/XRes.h>
 #include <stdint.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 /* Fixture-only inspector: it never requests selection data or window titles. */
 static unsigned long property_pid(Display *display, Window window, Atom pid_atom) {
@@ -15,6 +17,47 @@ static unsigned long property_pid(Display *display, Window window, Atom pid_atom
     return 0;
   unsigned long value = count == 1 && format == 32 ? *(unsigned long *)data : 0;
   XFree(data); return value;
+}
+
+static int fixture_class(Display *display, Window window) {
+  XClassHint hint = {0};
+  int matches = XGetClassHint(display, window, &hint)
+      && hint.res_name && hint.res_class
+      && !strcmp(hint.res_name, "org.copypaste.QualificationSource")
+      && !strcmp(hint.res_class, "org.copypaste.QualificationSource");
+  if (hint.res_name) XFree(hint.res_name);
+  if (hint.res_class) XFree(hint.res_class);
+  return matches;
+}
+
+static int client_ids(Display *display, Window window, XID *client_xid, pid_t *pid) {
+  XResClientIdSpec specs[] = {
+    {.client = window, .mask = XRES_CLIENT_ID_XID_MASK},
+    {.client = window, .mask = XRES_CLIENT_ID_PID_MASK},
+  };
+  XResClientIdValue *values = NULL; long count = 0;
+  int found_xid = 0, found_pid = 0;
+  if (XResQueryClientIds(display, 2, specs, &count, &values) != Success || !values)
+    return 0;
+  for (long i = 0; i < count; i++) {
+    if (values[i].spec.mask == XRES_CLIENT_ID_XID_MASK) {
+      *client_xid = XResGetClientXid(&values[i]);
+      found_xid = *client_xid != None;
+    } else if (values[i].spec.mask == XRES_CLIENT_ID_PID_MASK) {
+      *pid = XResGetClientPid(&values[i]);
+      found_pid = *pid > 0;
+    }
+  }
+  XResClientIdsDestroy(count, values);
+  return found_xid && found_pid;
+}
+
+static int cached_desktop_entry(void) {
+  const char *data_home = getenv("XDG_DATA_HOME");
+  char path[PATH_MAX]; struct stat details;
+  if (!data_home || snprintf(path, sizeof(path), "%s/applications/org.copypaste.QualificationSource.desktop", data_home) >= (int)sizeof(path))
+    return 0;
+  return lstat(path, &details) == 0 && S_ISREG(details.st_mode) && !S_ISLNK(details.st_mode);
 }
 
 int main(void) {
@@ -27,37 +70,35 @@ int main(void) {
   Window owner = XGetSelectionOwner(display, clipboard);
   Atom type; int format; unsigned long count = 0, after; unsigned char *data = NULL;
   unsigned long ewmh_count = 0, same_client_windows = 0, owner_pid = 0;
+  XID owner_client_xid = None;
   pid_t xres_pid = 0;
-  XResClientIdSpec spec = {.client = owner, .mask = XRES_CLIENT_ID_PID_MASK};
-  XResClientIdValue *values = NULL; long values_count = 0;
-  int xres_pid_present = owner != None
-      && XResQueryClientIds(display, 1, &spec, &values_count, &values) == Success
-      && values_count == 1 && values != NULL;
-  if (xres_pid_present) {
-    xres_pid = XResGetClientPid(values);
-    xres_pid_present = xres_pid > 0;
-  }
+  int xres_pid_present = owner != None && client_ids(display, owner, &owner_client_xid, &xres_pid);
+  int canonical_client_window_present = 0, canonical_client_pid_matches_owner = 0;
+  int canonical_client_window_class_matches_fixture = 0;
   if (owner != None) owner_pid = property_pid(display, owner, net_pid);
   if (XGetWindowProperty(display, root, net_clients, 0, 4096, False, XA_WINDOW,
                          &type, &format, &count, &after, &data) == Success && data) {
     ewmh_count = count;
     Window *windows = (Window *)data;
-    for (unsigned long i = 0; i < count; i++)
+    for (unsigned long i = 0; i < count; i++) {
       if (xres_pid_present && property_pid(display, windows[i], net_pid) == (unsigned long)xres_pid) same_client_windows++;
+      XID candidate_client_xid = None; pid_t candidate_pid = 0;
+      if (xres_pid_present && windows[i] != owner && client_ids(display, windows[i], &candidate_client_xid, &candidate_pid)
+          && candidate_client_xid == owner_client_xid) {
+        canonical_client_window_present = 1;
+        canonical_client_pid_matches_owner |= candidate_pid == xres_pid && property_pid(display, windows[i], net_pid) == (unsigned long)xres_pid;
+        canonical_client_window_class_matches_fixture |= fixture_class(display, windows[i]);
+      }
+    }
     XFree(data);
   }
   Window root_return, parent_return, *children = NULL; unsigned int child_count = 0;
   unsigned int tree_children = XQueryTree(display, root, &root_return, &parent_return, &children, &child_count) ? child_count : 0;
   if (children) XFree(children);
-  XClassHint hint = {0}; int class_matches = 0;
-  if (owner != None && XGetClassHint(display, owner, &hint)) {
-    class_matches = hint.res_name && hint.res_class && !strcmp(hint.res_name, "org.copypaste.QualificationSource") && !strcmp(hint.res_class, "org.copypaste.QualificationSource");
-    if (hint.res_name) XFree(hint.res_name);
-    if (hint.res_class) XFree(hint.res_class);
-  }
-  printf("{\"selection_owner_present\":%s,\"selection_owner_pid_present\":%s,\"xres_client_pid_present\":%s,\"owner_pid_matches_xres\":%s,\"owner_class_matches_fixture\":%s,\"ewmh_client_count\":%lu,\"root_child_count\":%u,\"same_xres_pid_window_count\":%lu}\n",
+  int class_matches = owner != None && fixture_class(display, owner);
+  printf("{\"selection_owner_present\":%s,\"selection_owner_pid_present\":%s,\"xres_client_pid_present\":%s,\"canonical_client_xid_present\":%s,\"owner_pid_matches_xres\":%s,\"owner_class_matches_fixture\":%s,\"canonical_client_window_present\":%s,\"canonical_client_pid_matches_owner\":%s,\"canonical_client_window_class_matches_fixture\":%s,\"cached_desktop_entry_available\":%s,\"ewmh_client_count\":%lu,\"root_child_count\":%u,\"same_xres_pid_window_count\":%lu}\n",
          owner == None ? "false" : "true", owner_pid ? "true" : "false", xres_pid_present ? "true" : "false",
-         owner_pid && xres_pid_present && owner_pid == (unsigned long)xres_pid ? "true" : "false", class_matches ? "true" : "false", ewmh_count, tree_children, same_client_windows);
-  if (values) XResClientIdsDestroy(values_count, values);
+         xres_pid_present ? "true" : "false", owner_pid && xres_pid_present && owner_pid == (unsigned long)xres_pid ? "true" : "false", class_matches ? "true" : "false",
+         canonical_client_window_present ? "true" : "false", canonical_client_pid_matches_owner ? "true" : "false", canonical_client_window_class_matches_fixture ? "true" : "false", cached_desktop_entry() ? "true" : "false", ewmh_count, tree_children, same_client_windows);
   XCloseDisplay(display); return 0;
 }
