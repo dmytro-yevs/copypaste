@@ -96,6 +96,7 @@ and completes the Ninja build without installing a compositor on the host.
 session route for making the bridge usable.
 
 `test-wire.sh` is a Qt 6-only private peer-to-peer D-Bus serialization fixture.
-Set `COPYPASTE_QT_PREFIX` to the Qt 6 SDK prefix; it asserts that `Snapshot`
-replies with the exact shared `tas(suus)` signature and three top-level values,
-rather than one enclosing struct.
+Set `COPYPASTE_QT_PREFIX` to the Qt 6 SDK prefix; it imports the production
+`KWin::CopyPasteWriterIdentity` declaration and asserts that both an initial
+empty and a populated `Snapshot` reply have the exact shared `tas(suus)`
+signature and three top-level values, rather than one enclosing struct.
