@@ -6,16 +6,40 @@ records only bridge outcome metadata, so generated CI artifacts cannot contain
 clipboard content, error text, source application IDs, titles, or paths.
 """
 import argparse, json, time
+from xml.etree import ElementTree
 from pathlib import Path
 import gi
 gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib
 
 BUS = "org.kde.KWin"; PATH = "/app/copypaste/Clipboard"; IFACE = "app.copypaste.Clipboard"
-ERRORS = {"AccessDenied", "StaleSelection", "UnsupportedMime", "TooLarge", "Unavailable"}
+ERRORS = {
+    "app.copypaste.Clipboard.Error.AccessDenied", "app.copypaste.Clipboard.Error.StaleSelection",
+    "app.copypaste.Clipboard.Error.UnsupportedMime", "app.copypaste.Clipboard.Error.TooLarge",
+    "app.copypaste.Clipboard.Error.Unavailable", "org.freedesktop.DBus.Error.Failed",
+    "org.freedesktop.DBus.Error.NoReply", "org.freedesktop.DBus.Error.InvalidArgs",
+    "org.freedesktop.DBus.Error.UnknownMethod", "org.freedesktop.DBus.Error.NotSupported",
+    "org.freedesktop.DBus.Error.AccessDenied", "org.freedesktop.DBus.Error.Disconnected",
+    "org.freedesktop.DBus.Error.Timeout", "org.freedesktop.DBus.Error.TimedOut",
+}
 
 def emit(kind, **fields):
     print("COPYPASTE_KWIN_DIAGNOSTIC " + json.dumps({"kind": kind, **fields}, sort_keys=True, separators=(",", ":")), flush=True)
+
+def interface_metadata(bus, owner):
+    try:
+        xml = bus.call_sync(owner, PATH, "org.freedesktop.DBus.Introspectable", "Introspect", GLib.Variant("()", ()), GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE, 2000, None).unpack()[0]
+        root = ElementTree.fromstring(xml)
+        interface = next(item for item in root.findall("interface") if item.get("name") == IFACE)
+        snapshot = next(item for item in interface.findall("method") if item.get("name") == "Snapshot")
+        out_types = [item.get("type") for item in snapshot.findall("arg") if item.get("direction") == "out"]
+        emit("interface", snapshot_exported=True, snapshot_out_signature="".join(out_types), snapshot_out_count=len(out_types))
+    except (ElementTree.ParseError, StopIteration, TypeError, ValueError):
+        emit("interface", snapshot_exported=False)
+
+def reported_error_name(message):
+    name = message.get_error_name() or ""
+    return name if name in ERRORS else "other"
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -25,6 +49,7 @@ def main():
     if not 1 <= args.seconds <= 30: raise SystemExit(2)
     bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
     owner = bus.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetNameOwner", GLib.Variant("(s)", (BUS,)), GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE, 2000, None).unpack()[0]
+    interface_metadata(bus, owner)
     destinations = {BUS, owner}
     bus.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.Monitoring", "BecomeMonitor",
                   GLib.Variant("(asu)", ([
@@ -45,8 +70,7 @@ def main():
             emit(f"{member.lower()}_call", serial=message.get_serial(), signature=message.get_signature() or "")
         elif message_type in (Gio.DBusMessageType.METHOD_RETURN, Gio.DBusMessageType.ERROR) and message.get_sender() == owner and key in calls:
             kind, started = calls.pop(key)
-            name = (message.get_error_name() or "").rsplit(".", 1)[-1]
-            fields = {"reply_serial": message.get_reply_serial(), "outcome": "ok" if message_type == Gio.DBusMessageType.METHOD_RETURN else "error", "error_name": name if name in ERRORS else "other", "signature": message.get_signature() or "", "duration_ms": round((time.monotonic()-started)*1000)}
+            fields = {"reply_serial": message.get_reply_serial(), "outcome": "ok" if message_type == Gio.DBusMessageType.METHOD_RETURN else "error", "error_name": reported_error_name(message), "signature": message.get_signature() or "", "duration_ms": round((time.monotonic()-started)*1000)}
             if kind == "read": fields["byte_count"] = len(message.to_blob(Gio.DBusCapabilityFlags.NONE))
             emit(f"{kind}_reply", **fields)
         elif message_type == Gio.DBusMessageType.SIGNAL and message.get_sender() == owner and member == "OwnerChanged":

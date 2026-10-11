@@ -26,14 +26,18 @@ class LinuxClipboardDiagnosticTest(unittest.TestCase):
         filters = []
 
         class Reply:
-            @staticmethod
-            def unpack():
-                return (":1.77",)
+            def __init__(self, value):
+                self.value = value
+
+            def unpack(self):
+                return self.value
 
         class Connection:
             def call_sync(self, *args):
                 if args[3] == "GetNameOwner":
-                    return Reply()
+                    return Reply((":1.77",))
+                if args[3] == "Introspect":
+                    return Reply(("<node><interface name='app.copypaste.Clipboard'><method name='Snapshot'><arg type='t' direction='out'/><arg type='as' direction='out'/><arg type='(suus)' direction='out'/></method></interface></node>",))
                 self.rules = args[4][1][0]
                 return None
 
@@ -112,6 +116,11 @@ class LinuxClipboardDiagnosticTest(unittest.TestCase):
         )
         self.assertIsNone(filters[0](None, message, True))
         self.assertIs(filters[0](None, message, False), message)
+
+        known_error = types.SimpleNamespace(get_error_name=lambda: "org.freedesktop.DBus.Error.UnknownMethod")
+        unknown_error = types.SimpleNamespace(get_error_name=lambda: "org.example.Private")
+        self.assertEqual(observer.reported_error_name(known_error), "org.freedesktop.DBus.Error.UnknownMethod")
+        self.assertEqual(observer.reported_error_name(unknown_error), "other")
 
     def test_capture_state_records_only_capture_gate_booleans(self):
         with mock.patch.object(diagnostic.fixture, "status", return_value={
