@@ -66,6 +66,22 @@ cleanup() {
   [[ -n "${shell_pid:-}" ]] && kill "$shell_pid" 2>/dev/null || true
   [[ -n "${desktop_pid:-}" ]] && kill "$desktop_pid" 2>/dev/null || true
   [[ -n "${display_pid:-}" ]] && kill "$display_pid" 2>/dev/null || true
+  if mountpoint -q "$RUNTIME/doc"; then
+    document_mount="$(awk -v target="$RUNTIME/doc" '
+      $5 == target {
+        split($0, fields, " - ")
+        split(fields[2], filesystem, " ")
+        print $5 " " filesystem[1]
+        exit
+      }
+    ' /proc/self/mountinfo)"
+    [[ "$document_mount" == "$RUNTIME/doc fuse.portal" ]] || {
+      printf 'ERROR: unexpected fixture runtime document mount: %s\n' "$document_mount" >&2
+      return 1
+    }
+    fusermount3 -u "$RUNTIME/doc"
+    ! mountpoint -q "$RUNTIME/doc"
+  fi
   [[ -n "${dbus_pid:-}" ]] && kill "$dbus_pid" 2>/dev/null || true
   rm -rf "$RUNTIME"
 }
@@ -187,9 +203,105 @@ unset keyring_password
 
 if [[ "$DESKTOP" == GNOME ]]; then
   session_phase=enable_appindicator
-  appindicator="$(gnome-extensions list 2>/dev/null | awk '/appindicator|ubuntu-appindicators/ {print; exit}')"
-  [[ -n "$appindicator" ]] || { echo "ERROR: GNOME AppIndicator extension is unavailable" >&2; exit 1; }
-  gnome-extensions enable "$appindicator"
+  if [[ "${COPYPASTE_GNOME_EXTENSION_DIAGNOSTIC:-}" == 1 ]]; then
+    diagnostic_output="${COPYPASTE_GNOME_EXTENSION_DIAGNOSTIC_OUTPUT:-}"
+    [[ "$diagnostic_output" == /* ]] || { echo "ERROR: GNOME diagnostic output must be an absolute path" >&2; exit 2; }
+    diagnostic_dir="$RUNTIME/extension-diagnostic"
+    mkdir -p "$diagnostic_dir"
+
+    capture_diagnostic_command() {
+      local name="$1"
+      shift
+      set +e
+      "$@" >"$diagnostic_dir/$name.stdout" 2>"$diagnostic_dir/$name.stderr"
+      local status=$?
+      set -e
+      printf '%s\n' "$status" >"$diagnostic_dir/$name.status"
+    }
+
+    capture_diagnostic_command cli_service_list \
+      gdbus call --session --dest org.gnome.Shell.Extensions --object-path /org/gnome/Shell/Extensions \
+      --method org.gnome.Shell.Extensions.ListExtensions
+    capture_diagnostic_command list gnome-extensions list
+    appindicator="$(awk '/appindicator|ubuntu-appindicators/ {print; exit}' "$diagnostic_dir/list.stdout")"
+    capture_diagnostic_command list_details gnome-extensions list --details
+    capture_diagnostic_command enabled_before gsettings get org.gnome.shell enabled-extensions
+    capture_diagnostic_command disabled_before gsettings get org.gnome.shell disabled-extensions
+    if [[ -n "$appindicator" ]]; then
+      capture_diagnostic_command info_before gnome-extensions info "$appindicator"
+      capture_diagnostic_command extension_info_before \
+        gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell \
+        --method org.gnome.Shell.Extensions.GetExtensionInfo "$appindicator"
+      capture_diagnostic_command extension_errors_before \
+        gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell \
+        --method org.gnome.Shell.Extensions.GetExtensionErrors "$appindicator"
+      capture_diagnostic_command enable gnome-extensions enable "$appindicator"
+      capture_diagnostic_command enabled_after gsettings get org.gnome.shell enabled-extensions
+      capture_diagnostic_command disabled_after gsettings get org.gnome.shell disabled-extensions
+      capture_diagnostic_command info_after gnome-extensions info "$appindicator"
+      capture_diagnostic_command extension_info_after \
+        gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell \
+        --method org.gnome.Shell.Extensions.GetExtensionInfo "$appindicator"
+      capture_diagnostic_command extension_errors_after \
+        gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell \
+        --method org.gnome.Shell.Extensions.GetExtensionErrors "$appindicator"
+      capture_diagnostic_command extensions_after \
+        gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell \
+        --method org.gnome.Shell.Extensions.ListExtensions
+    fi
+    APPINDICATOR="$appindicator" DIAGNOSTIC_DIR="$diagnostic_dir" DIAGNOSTIC_OUTPUT="$diagnostic_output" \
+      python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+directory = Path(os.environ["DIAGNOSTIC_DIR"])
+output = Path(os.environ["DIAGNOSTIC_OUTPUT"])
+
+def read(name: str) -> str:
+    path = directory / name
+    if not path.is_file():
+        return ""
+    return path.read_text(encoding="utf-8", errors="replace")[:65536]
+
+commands = {}
+for status_path in sorted(directory.glob("*.status")):
+    name = status_path.stem
+    commands[name] = {
+        "status": int(read(status_path.name).strip()),
+        "stdout": read(f"{name}.stdout"),
+        "stderr": read(f"{name}.stderr"),
+    }
+
+environment = {
+    name: os.environ.get(name, "")
+    for name in (
+        "DBUS_SESSION_BUS_ADDRESS", "DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR",
+        "XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CURRENT_DESKTOP", "XDG_SESSION_DESKTOP",
+        "XDG_SESSION_TYPE",
+    )
+}
+output.parent.mkdir(parents=True, exist_ok=True)
+output.write_text(json.dumps({
+    "schema": 1,
+    "appindicator_uuid": os.environ["APPINDICATOR"],
+    "activation_order": [
+        "XDG variables exported before dbus-daemon",
+        "initial gsettings write before dbus-update-activation-environment",
+        "dbus-update-activation-environment before extension probe",
+    ],
+    "environment": environment,
+    "commands": commands,
+}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+PY
+    [[ -n "$appindicator" ]] || { echo "ERROR: GNOME AppIndicator extension is unavailable" >&2; exit 1; }
+    enable_status="$(<"$diagnostic_dir/enable.status")"
+    [[ "$enable_status" == 0 ]] || exit "$enable_status"
+  else
+    appindicator="$(gnome-extensions list 2>/dev/null | awk '/appindicator|ubuntu-appindicators/ {print; exit}')"
+    [[ -n "$appindicator" ]] || { echo "ERROR: GNOME AppIndicator extension is unavailable" >&2; exit 1; }
+    gnome-extensions enable "$appindicator"
+  fi
 fi
 
 session_phase=run_product_scenarios

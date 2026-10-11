@@ -33,6 +33,11 @@ on:
         required: false
         type: boolean
         default: false
+      gnome_x11_extension_diagnostic:
+        description: Run only the bounded GNOME X11 extension-state diagnostic against the fixed e19 staging inputs
+        required: false
+        type: boolean
+        default: false
       supabase_module_run_id:
         description: Completed exact-source unpublished Supabase module run
         required: false
@@ -79,6 +84,7 @@ jobs:
       linux_artifact_run_id: ${{ steps.version.outputs.linux_artifact_run_id }}
       compositor_runtime_required: ${{ steps.version.outputs.compositor_runtime_required }}
       linux_qualification_only: ${{ steps.version.outputs.linux_qualification_only }}
+      gnome_x11_extension_diagnostic: ${{ steps.version.outputs.gnome_x11_extension_diagnostic }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -90,6 +96,7 @@ jobs:
           LINUX_ARTIFACT_RUN_ID: ${{ inputs.linux_artifact_run_id }}
           COMPOSITOR_RUNTIME_RUN_ID: ${{ inputs.compositor_runtime_run_id }}
           LINUX_QUALIFICATION_ONLY: ${{ inputs.linux_qualification_only }}
+          GNOME_X11_EXTENSION_DIAGNOSTIC: ${{ inputs.gnome_x11_extension_diagnostic }}
           SUPABASE_MODULE_RUN_ID: ${{ inputs.supabase_module_run_id }}
           SEMANTIC_SEARCH_MODULE_RUN_ID: ${{ inputs.semantic_search_module_run_id }}
           OCR_MODULE_RUN_ID: ${{ inputs.ocr_module_run_id }}
@@ -114,6 +121,14 @@ jobs:
           linux_artifact_run_id="$GITHUB_RUN_ID"
           compositor_runtime_required=false
           linux_qualification_only=false
+          gnome_x11_extension_diagnostic=false
+          if [[ "${GNOME_X11_EXTENSION_DIAGNOSTIC:-false}" == true ]]; then
+            [[ "${REQUESTED_PUBLISH:-false}" == false && "$GITHUB_EVENT_NAME" == workflow_dispatch ]]
+            [[ "${LINUX_QUALIFICATION_ONLY:-false}" == true ]]
+            [[ "$LINUX_ARTIFACT_RUN_ID" == 38134248784 && "$COMPOSITOR_RUNTIME_RUN_ID" == 38134225268 ]]
+            [[ "$SUPABASE_MODULE_RUN_ID" == 38134249699 && "$SEMANTIC_SEARCH_MODULE_RUN_ID" == 38134250731 && "$OCR_MODULE_RUN_ID" == 38134252001 ]]
+            gnome_x11_extension_diagnostic=true
+          fi
           if [[ "${LINUX_QUALIFICATION_ONLY:-false}" == true ]]; then
             [[ "${REQUESTED_PUBLISH:-false}" == false ]]
             [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && -z "${QUALIFIED_RUN_ID:-}" && -z "${LINUX_EVIDENCE_RUN_ID:-}" ]]
@@ -191,7 +206,7 @@ jobs:
               exit 1
             }
           fi
-          if [[ -n "${LINUX_ARTIFACT_RUN_ID:-}" ]]; then
+          if [[ -n "${LINUX_ARTIFACT_RUN_ID:-}" && "$gnome_x11_extension_diagnostic" != true ]]; then
             [[ "$LINUX_ARTIFACT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
             [[ "$linux_required" == true ]]
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$LINUX_ARTIFACT_RUN_ID" > "$RUNNER_TEMP/linux-source-run.json"
@@ -218,12 +233,13 @@ jobs:
             echo "linux_artifact_run_id=$linux_artifact_run_id"
             echo "compositor_runtime_required=$compositor_runtime_required"
             echo "linux_qualification_only=$linux_qualification_only"
+            echo "gnome_x11_extension_diagnostic=$gnome_x11_extension_diagnostic"
           } >> "$GITHUB_OUTPUT"
 
   linux-native-bootstrap:
     name: Run exact staged Linux native qualification
     needs: preflight
-    if: needs.preflight.outputs.linux_qualification_only == 'true'
+    if: needs.preflight.outputs.linux_qualification_only == 'true' && needs.preflight.outputs.gnome_x11_extension_diagnostic != 'true'
     uses: ./.github/workflows/linux-native-qualification.yml
     with:
       artifact_run_id: ${{ inputs.linux_artifact_run_id }}
@@ -232,6 +248,99 @@ jobs:
       semantic_search_module_run_id: ${{ inputs.semantic_search_module_run_id }}
       ocr_module_run_id: ${{ inputs.ocr_module_run_id }}
       compositor_runtime_run_id: ${{ inputs.compositor_runtime_run_id }}
+
+  gnome-x11-extension-diagnostic:
+    name: GNOME X11 extension diagnostic (${{ matrix.architecture }})
+    needs: preflight
+    if: needs.preflight.outputs.gnome_x11_extension_diagnostic == 'true'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x86_64
+            runner: ubuntu-24.04
+          - architecture: aarch64
+            runner: ubuntu-24.04-arm
+    env:
+      EXACT_COMMIT: e19a5fdd75f203949da0d335afa6a00d30df3026
+      ARTIFACT_RUN_ID: "38134248784"
+      RUNTIME_RUN_ID: "38134225268"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Verify fixed diagnostic inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$EXACT_COMMIT"
+          git diff --quiet "$EXACT_COMMIT" -- apps/copypaste_flutter/pubspec.yaml Cargo.toml packaging/linux scripts/release/verify-linux-compositor-runtime.py scripts/release/compositor-runtime-archive.py
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID" > "$RUNNER_TEMP/artifact-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUNTIME_RUN_ID" > "$RUNNER_TEMP/runtime-run.json"
+          jq -e --arg commit "$EXACT_COMMIT" '.head_sha == $commit and .conclusion == "cancelled"' "$RUNNER_TEMP/artifact-run.json" >/dev/null
+          jq -e --arg commit "$EXACT_COMMIT" '.head_sha == $commit and .conclusion == "success"' "$RUNNER_TEMP/runtime-run.json" >/dev/null
+      - name: Install GNOME X11 fixture dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            dbus-user-session gnome-shell gnome-session gnome-keyring gnome-shell-extension-appindicator \
+            libsecret-tools x11-utils xvfb xclip jq openssl at-spi2-core gjs strace
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: production-linux-${{ matrix.architecture }}
+          path: current
+          run-id: ${{ env.ARTIFACT_RUN_ID }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: copypaste-compositor-runtime-gnome-46-ubuntu24.04-${{ matrix.architecture }}
+          path: compositor-runtime
+          run-id: ${{ env.RUNTIME_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Bind the exact GNOME runtime
+        run: |
+          set -euo pipefail
+          python3 scripts/release/compositor-runtime-archive.py extract \
+            --archive compositor-runtime/runtime.tar --output compositor-runtime/runtime
+          python3 scripts/release/verify-linux-compositor-runtime.py artifact \
+            --root compositor-runtime --desktop GNOME --architecture "${{ matrix.architecture }}" \
+            --commit "$EXACT_COMMIT" --producer-run-id "$RUNTIME_RUN_ID" \
+            --output compositor-runtime/binding.json
+      - name: Probe GNOME X11 extension activation
+        run: |
+          set -euo pipefail
+          version="$(awk '/^version:[[:space:]]*/ {print $2; exit}' apps/copypaste_flutter/pubspec.yaml)"
+          version="${version%%+*}"
+          appimage="current/CopyPaste-v${version}-linux-${{ matrix.architecture }}.AppImage"
+          [[ -f "$appimage" && ! -L "$appimage" ]]
+          chmod u+x "$appimage"
+          mkdir companion
+          (cd companion && APPIMAGE_EXTRACT_AND_RUN=1 "../$appimage" --appimage-extract >/dev/null)
+          companion_source="$PWD/companion/squashfs-root/usr/share/copypaste/desktop-integrations"
+          test -d "$companion_source"
+          mkdir teardown-trace
+          set +e
+          COPYPASTE_GNOME_EXTENSION_DIAGNOSTIC=1 \
+          COPYPASTE_GNOME_EXTENSION_DIAGNOSTIC_OUTPUT="$PWD/gnome-x11-extension-diagnostic.json" \
+          sudo strace -ff -qq -o teardown-trace/trace -e trace=unlink,unlinkat,rmdir,mount,umount2 \
+          scripts/release/run-linux-native-desktop-session.sh \
+            --desktop GNOME --session x11 --companion-source "$companion_source" \
+            --compositor-runtime compositor-runtime --compositor-runtime-binding compositor-runtime/binding.json -- \
+            bash -c true
+          probe_status=$?
+          set -e
+          sudo chown -R "$USER" teardown-trace
+          printf '%s\n' "$probe_status" > teardown-trace/exit-status
+          exit "$probe_status"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: gnome-x11-extension-diagnostic-${{ matrix.architecture }}
+          if-no-files-found: warn
+          path: |
+            gnome-x11-extension-diagnostic.json
+            teardown-trace
 
   macos:
     needs: preflight
