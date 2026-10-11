@@ -28,8 +28,11 @@ cat > "$entrypoint" <<'EOF'
 #!/bin/sh
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-private_library_path="$root/lib:$root/lib64:$root/usr/lib:$root/usr/lib/x86_64-linux-gnu:$root/usr/lib/x86_64-linux-gnu/mutter-14:$root/usr/lib/x86_64-linux-gnu/gnome-shell:$root/usr/lib/aarch64-linux-gnu:$root/usr/lib/aarch64-linux-gnu/mutter-14:$root/usr/lib/aarch64-linux-gnu/gnome-shell"
+private_library_path="$root/lib:$root/lib64:$root/lib/x86_64-linux-gnu:$root/lib/x86_64-linux-gnu/mutter-14:$root/lib/x86_64-linux-gnu/gnome-shell:$root/lib/aarch64-linux-gnu:$root/lib/aarch64-linux-gnu/mutter-14:$root/lib/aarch64-linux-gnu/gnome-shell"
+private_typelib_path="$root/lib/x86_64-linux-gnu/mutter-14:$root/lib/x86_64-linux-gnu/gnome-shell:$root/lib/aarch64-linux-gnu/mutter-14:$root/lib/aarch64-linux-gnu/gnome-shell"
+system_typelib_path="/usr/lib/x86_64-linux-gnu/girepository-1.0:/usr/lib/aarch64-linux-gnu/girepository-1.0"
 export LD_LIBRARY_PATH="$private_library_path"
+export GI_TYPELIB_PATH="$private_typelib_path:$system_typelib_path${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"
 exec "$root/bin/gnome-shell" --wayland
 EOF
 chmod 755 "$entrypoint"
@@ -39,8 +42,11 @@ cat > "$qualification_entrypoint" <<'EOF'
 set -eu
 [ "$#" -eq 0 ] || { echo "CopyPaste GNOME qualification session does not accept arguments" >&2; exit 64; }
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-private_library_path="$root/lib:$root/lib64:$root/usr/lib:$root/usr/lib/x86_64-linux-gnu:$root/usr/lib/x86_64-linux-gnu/mutter-14:$root/usr/lib/x86_64-linux-gnu/gnome-shell:$root/usr/lib/aarch64-linux-gnu:$root/usr/lib/aarch64-linux-gnu/mutter-14:$root/usr/lib/aarch64-linux-gnu/gnome-shell"
+private_library_path="$root/lib:$root/lib64:$root/lib/x86_64-linux-gnu:$root/lib/x86_64-linux-gnu/mutter-14:$root/lib/x86_64-linux-gnu/gnome-shell:$root/lib/aarch64-linux-gnu:$root/lib/aarch64-linux-gnu/mutter-14:$root/lib/aarch64-linux-gnu/gnome-shell"
+private_typelib_path="$root/lib/x86_64-linux-gnu/mutter-14:$root/lib/x86_64-linux-gnu/gnome-shell:$root/lib/aarch64-linux-gnu/mutter-14:$root/lib/aarch64-linux-gnu/gnome-shell"
+system_typelib_path="/usr/lib/x86_64-linux-gnu/girepository-1.0:/usr/lib/aarch64-linux-gnu/girepository-1.0"
 export LD_LIBRARY_PATH="$private_library_path"
+export GI_TYPELIB_PATH="$private_typelib_path:$system_typelib_path${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"
 exec "$root/bin/gnome-shell" --headless --virtual-monitor 1280x800
 EOF
 chmod 755 "$qualification_entrypoint"
