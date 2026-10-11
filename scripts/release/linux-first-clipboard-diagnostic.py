@@ -129,7 +129,7 @@ def main():
     app = None
     record = {"kind": "first_clipboard_capture", "captured": False}
     try:
-        observer = start_observer(environment, runtime)
+        observer = start_observer(environment, runtime) if args.session == "wayland" else None
         app, socket_path, gui_startup = start_gui_diagnostic(args.gui_launcher, environment, runtime, args.output)
         cli_environment = {**environment, "COPYPASTE_SOCKET": str(socket_path)}
         cli = prefix / "copypaste-cli"; deadline = time.monotonic() + 8; before = None

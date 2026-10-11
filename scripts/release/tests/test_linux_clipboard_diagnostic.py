@@ -233,6 +233,7 @@ class LinuxClipboardDiagnosticTest(unittest.TestCase):
             helper.index("observer = start_observer(environment, runtime)"),
             helper.index("app, socket_path, gui_startup = start_gui_diagnostic"),
         )
+        self.assertIn('if args.session == "wayland" else None', helper)
         self.assertIn('record["x11_owner_during_provider"] = x11_state', helper)
 
 
