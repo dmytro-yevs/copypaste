@@ -54,6 +54,7 @@ class LinuxQualificationBootstrapTest(unittest.TestCase):
         self.assertIn("needs.preflight.outputs.linux_qualification_only != 'true'", workflow)
         self.assertIn("GITHUB_EVENT_NAME\" == workflow_dispatch", workflow)
         self.assertIn("linux_evidence_run_id", workflow)
+        self.assertIn('[[ -n "${LINUX_ARTIFACT_RUN_ID:-}" && "$linux_diagnostic_only" != true ]]', workflow)
         helper = (ROOT / "scripts/release/verify-linux-qualification-evidence-source.py").read_text(encoding="utf-8")
         self.assertIn("Run exact staged Linux native qualification /", helper)
         gate = workflow.split("  linux-full-parity-evidence:\n", 1)[1].split("  qualify:\n", 1)[0]

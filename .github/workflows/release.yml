@@ -204,7 +204,7 @@ jobs:
               exit 1
             }
           fi
-          if [[ -n "${LINUX_ARTIFACT_RUN_ID:-}" ]]; then
+          if [[ -n "${LINUX_ARTIFACT_RUN_ID:-}" && "$linux_diagnostic_only" != true ]]; then
             [[ "$LINUX_ARTIFACT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
             [[ "$linux_required" == true ]]
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$LINUX_ARTIFACT_RUN_ID" > "$RUNNER_TEMP/linux-source-run.json"
