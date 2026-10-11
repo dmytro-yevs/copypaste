@@ -536,6 +536,8 @@ class ReleaseSafetyTest(unittest.TestCase):
         self.assertIn("rm -rf \"$STAGE/DEBIAN\"", packages)
         self.assertIn("rpmbuild -bb", packages)
         self.assertIn("APPIMAGETOOL", packages)
+        self.assertIn("bundle-linux-keybinder.py", packages)
+        self.assertIn("keybinder-runtime.json", packages)
         self.assertIn("package-metadata.json", packages)
         self.assertIn("copypaste-cli", packages)
         self.assertNotIn("/etc/xdg/autostart", packages)
