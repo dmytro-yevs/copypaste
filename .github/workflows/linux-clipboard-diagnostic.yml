@@ -42,7 +42,8 @@ jobs:
       - run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends cpio
+          sudo apt-get install --yes --no-install-recommends cpio libx11-dev libxres-dev pkg-config
+          cc -std=c11 -O2 -Wall -Wextra -Werror scripts/release/linux-x11-clipboard-observer.c -o "$RUNNER_TEMP/linux-x11-clipboard-observer" $(pkg-config --cflags --libs x11) -lXRes
           python3 scripts/release/compositor-runtime-archive.py extract --archive compositor-runtime/runtime.tar --output compositor-runtime/runtime
           python3 scripts/release/verify-linux-compositor-runtime.py artifact --root compositor-runtime --desktop KDE --architecture "${{ matrix.architecture }}" --commit e19a5fdd75f203949da0d335afa6a00d30df3026 --producer-run-id "${{ inputs.compositor_runtime_run_id }}" --output compositor-runtime/binding.json
           appimage="$(find current -maxdepth 1 -name '*.AppImage' -type f -print -quit)"; chmod u+x "$appimage"; mkdir companion

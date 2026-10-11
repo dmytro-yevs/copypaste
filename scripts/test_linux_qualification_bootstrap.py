@@ -68,10 +68,14 @@ class LinuxQualificationBootstrapTest(unittest.TestCase):
         self.assertNotIn("pkg-config --exists x11 xres", wrapper)
         observer = (ROOT / "scripts/release/linux-x11-clipboard-observer.c").read_text(encoding="utf-8")
         self.assertIn("XRES_CLIENT_ID_XID_MASK", observer)
-        self.assertIn("values[i].value[0]", observer)
+        self.assertIn("*client_xid = values[i].spec.client", observer)
+        self.assertNotIn("values[i].value[0]", observer)
         self.assertNotIn("XResGetClientXid", observer)
         self.assertIn("canonical_client_window_class_matches_fixture", observer)
         self.assertIn("cached_desktop_entry_available", observer)
+        workflow = (ROOT / ".github/workflows/linux-clipboard-diagnostic.yml").read_text(encoding="utf-8")
+        self.assertIn("libxres-dev", workflow)
+        self.assertIn('cc -std=c11 -O2 -Wall -Wextra -Werror scripts/release/linux-x11-clipboard-observer.c', workflow)
 
     def test_native_workflow_is_callable_and_downloads_public_runtime_for_final_verification(self):
         workflow = (ROOT / ".github/workflows/linux-native-qualification.yml").read_text(encoding="utf-8")

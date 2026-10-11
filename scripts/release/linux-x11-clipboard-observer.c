@@ -42,7 +42,7 @@ static int client_ids(Display *display, Window window, XID *client_xid, pid_t *p
     return 0;
   for (long i = 0; i < count; i++) {
     if (values[i].spec.mask == XRES_CLIENT_ID_XID_MASK) {
-      *client_xid = values[i].length == 1 ? values[i].value[0] : None;
+      *client_xid = values[i].spec.client;
       found_xid = *client_xid != None;
     } else if (values[i].spec.mask == XRES_CLIENT_ID_PID_MASK) {
       *pid = XResGetClientPid(&values[i]);
