@@ -233,7 +233,9 @@ rg -F 'setSelection(source);' "$root/src/copypasteclipboardbridge.cpp" >/dev/nul
 rg -F 'setSelection(source, waylandServer()->display()->nextSerial());' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
 rg -F '++m_daemonOwnerEpoch;' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
 rg -F 'bridge->m_daemonOwnerEpoch != daemonOwnerEpoch' "$root/src/copypasteclipboardbridge.cpp" >/dev/null
-for export in 'Q_SCRIPTABLE void Version(uint &version);' 'Q_SCRIPTABLE void Snapshot(' 'Q_SCRIPTABLE QByteArray Read(' \
+for export in 'Q_SCRIPTABLE void Version(uint &version);' \
+    'Q_SCRIPTABLE void Snapshot(qulonglong &generation, QStringList &mimeTypes, KWin::CopyPasteWriterIdentity &identity);' \
+    'Q_SCRIPTABLE QByteArray Read(' \
     'Q_SCRIPTABLE qulonglong Write(' 'Q_SCRIPTABLE void OwnerChanged('; do
   rg -F "$export" "$root/src/copypasteclipboardbridge.h" >/dev/null
 done
