@@ -106,9 +106,7 @@ class LinuxClipboardDiagnosticTest(unittest.TestCase):
             "data": {"config": {"private_mode": False, "excluded_app_bundle_ids": []}},
         }), mock.patch.object(diagnostic.fixture, "response_variant", return_value={
             "private_mode": False, "excluded_app_bundle_ids": [],
-        }), mock.patch.object(diagnostic.fixture, "ipc", return_value={
-            "data": {"private_mode": {"private_mode": False}},
-        }):
+        }), mock.patch.object(diagnostic.fixture, "ipc") as ipc:
             state = diagnostic.capture_state(Path("cli"), {}, Path("socket"))
 
         self.assertEqual(state, {
@@ -120,6 +118,7 @@ class LinuxClipboardDiagnosticTest(unittest.TestCase):
             "item_count": 4,
         })
         self.assertNotIn(diagnostic.fixture.SOURCE_APPLICATION_ID, json.dumps(state))
+        ipc.assert_not_called()
 
     def test_first_capture_records_metadata_after_cli_is_assigned(self):
         class App:
@@ -163,7 +162,6 @@ class LinuxClipboardDiagnosticTest(unittest.TestCase):
                  mock.patch.object(diagnostic.fixture, "status", side_effect=status), \
                  mock.patch.object(diagnostic.fixture, "cli_json", return_value={"data": {"config": {"private_mode": False, "excluded_app_bundle_ids": []}}}), \
                  mock.patch.object(diagnostic.fixture, "response_variant", return_value={"private_mode": False, "excluded_app_bundle_ids": []}), \
-                 mock.patch.object(diagnostic.fixture, "ipc", return_value={"data": {"private_mode": {"private_mode": False}}}), \
                  mock.patch.object(diagnostic.fixture, "list_items", side_effect=[[], [{"id": "new", "content_type": "text", "source_app_bundle_id": diagnostic.fixture.SOURCE_APPLICATION_ID, "source_app_name": diagnostic.fixture.SOURCE_APPLICATION_NAME}]]), \
                  mock.patch.object(diagnostic.fixture, "clipboard_provider", side_effect=provider), \
                  mock.patch.object(diagnostic.fixture, "wait_for_count", side_effect=wait_for_count), \

@@ -37,14 +37,13 @@ def daemon_flags(gui_pid, helper_environment):
 def capture_state(cli, environment, socket_path):
     status = fixture.status(cli, environment)
     config = fixture.response_variant(fixture.cli_json(cli, environment, "config", "show"), "config")
-    private = fixture.ipc(socket_path, "get_private_mode", {}).get("data", {}).get("private_mode", {})
     exclusions = config.get("excluded_app_bundle_ids") if isinstance(config, dict) else None
     source_allowed = isinstance(exclusions, list) and all(isinstance(value, str) and value != fixture.SOURCE_APPLICATION_ID for value in exclusions)
     configured_private_mode = config.get("private_mode") if isinstance(config, dict) else None
     return {
         "capture_running": status.get("capture_running") is True,
         "clipboard_backend": status.get("clipboard_backend") if isinstance(status.get("clipboard_backend"), str) else "invalid",
-        "private_mode": private.get("private_mode") is True,
+        "private_mode": configured_private_mode is True,
         "settings_capture_enabled": configured_private_mode is False and source_allowed,
         "source_allowed_by_exclusion_settings": source_allowed,
         "item_count": fixture.cli_item_count(status),
