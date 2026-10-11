@@ -119,6 +119,13 @@ jobs:
           runtime_id="$(jq -er '.runtime_id' compositor-runtime/binding.json)"
           runtime_root="$PWD/compositor-runtime/runtime"
           [[ -d "$runtime_root/usr" && ! -L "$runtime_root" ]]
+          mapfile -t host_requirements < <(jq -r '.host_requirements[].name' compositor-runtime/runtime-receipt.json)
+          for package in "${host_requirements[@]}"; do
+            dpkg-query --show "$package" >/dev/null
+          done
+          input_library_path="$runtime_root/usr/lib:$runtime_root/usr/lib/x86_64-linux-gnu:$runtime_root/usr/lib/x86_64-linux-gnu/mutter-14:$runtime_root/usr/lib/x86_64-linux-gnu/gnome-shell"
+          LD_LIBRARY_PATH="$input_library_path" ldd "$runtime_root/usr/bin/gnome-shell" > evidence/input-shell-ldd.txt
+          ! grep -q '=> not found' evidence/input-shell-ldd.txt
           rebuilt_runtime="$RUNNER_TEMP/copypaste-gnome-runtime-rebuilt"
           cp -a "$runtime_root" "$rebuilt_runtime"
           bash packaging/linux/desktop-integrations/gnome-shell-extension/mutter/build-private-shell.sh "$rebuilt_runtime"
@@ -181,7 +188,12 @@ jobs:
                 sleep 0.25
               done
               [[ -r "/proc/$shell_pid/maps" ]] && awk '/libmutter|lib.*cogl|lib.*clutter|libst|libshell/ {print}' "/proc/$shell_pid/maps" > "evidence/maps-$variant.txt" || true
-              kill "$shell_pid" 2>/dev/null || true
+              kill -TERM "$shell_pid" 2>/dev/null || true
+              for _ in $(seq 1 20); do
+                kill -0 "$shell_pid" 2>/dev/null || break
+                sleep 0.1
+              done
+              kill -KILL "$shell_pid" 2>/dev/null || true
               wait "$shell_pid" 2>/dev/null || true
               kill "$dbus_pid" 2>/dev/null || true
             )
