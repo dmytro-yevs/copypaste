@@ -52,6 +52,31 @@ class BundleLinuxKeybinderTest(unittest.TestCase):
             with self.assertRaisesRegex(bundler.BundleError, "expected Debian package"):
                 bundler.package_owner(Path("/usr/lib/libkeybinder-3.0.so.0.0.0"))
 
+    def test_referenced_common_license_is_copied_with_a_hash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            copyright = root / "copyright"
+            copyright.write_text("See /usr/share/common-licenses/LGPL-2.1.\n", encoding="utf-8")
+            common = root / "common-licenses"
+            common.mkdir()
+            source = common / "LGPL-2.1"
+            source.write_text("full LGPL terms", encoding="utf-8")
+            destination = root / "destination"
+            with mock.patch.object(bundler, "COMMON_LICENSE_ROOT", common):
+                records = bundler.copy_common_licenses(copyright, destination)
+            self.assertEqual(records, [{"path": "LGPL-2.1", "sha256": bundler.sha256(destination / "LGPL-2.1")}])
+
+    def test_missing_referenced_common_license_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            copyright = root / "copyright"
+            copyright.write_text("See /usr/share/common-licenses/LGPL-2.1.\n", encoding="utf-8")
+            common = root / "common-licenses"
+            common.mkdir()
+            with mock.patch.object(bundler, "COMMON_LICENSE_ROOT", common):
+                with self.assertRaisesRegex(bundler.BundleError, "common license bytes"):
+                    bundler.copy_common_licenses(copyright, root / "destination")
+
     def test_bundle_records_hashed_library_license_and_abi_provenance(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -60,13 +85,17 @@ class BundleLinuxKeybinderTest(unittest.TestCase):
             source = root / "libkeybinder-3.0.so.0.0.0"
             source.write_bytes(b"keybinder")
             license_source = root / "copyright"
-            license_source.write_text("license", encoding="utf-8")
+            license_source.write_text("license; see /usr/share/common-licenses/LGPL-2.1\n", encoding="utf-8")
+            common = root / "common-licenses"
+            common.mkdir()
+            common.joinpath("LGPL-2.1").write_text("full LGPL terms", encoding="utf-8")
             manifest = appdir / "usr/share/copypaste/keybinder-runtime.json"
             with mock.patch.object(bundler, "library_from_cache", return_value=source), \
                  mock.patch.object(bundler, "verify_architecture"), \
                  mock.patch.object(bundler, "verify_soname", return_value=["libgtk-3.so.0", "libX11.so.6"]), \
                  mock.patch.object(bundler, "package_owner", return_value="0.3.2-1"), \
                  mock.patch.object(bundler, "package_license", return_value=license_source), \
+                 mock.patch.object(bundler, "COMMON_LICENSE_ROOT", common), \
                  mock.patch.object(bundler, "validate_glibc") as validate_glibc:
                 bundler.bundle(appdir=appdir, architecture="x86_64", manifest=manifest)
             document = json.loads(manifest.read_text(encoding="utf-8"))
@@ -76,6 +105,8 @@ class BundleLinuxKeybinderTest(unittest.TestCase):
             self.assertEqual(document["library"]["host_abi_sonames"], ["libgtk-3.so.0", "libX11.so.6"])
             self.assertEqual(document["library"]["sha256"], bundler.sha256(appdir / document["library"]["path"]))
             self.assertEqual(document["license"]["sha256"], bundler.sha256(appdir / document["license"]["path"]))
+            common_record = document["license"]["common_licenses"]
+            self.assertEqual(common_record, [{"path": "LGPL-2.1", "sha256": bundler.sha256(appdir / "usr/share/licenses/copypaste-keybinder/common/LGPL-2.1")}])
             validate_glibc.assert_called_once()
 
     def test_manifest_cannot_escape_the_appimage(self):
