@@ -80,10 +80,14 @@ class CompositorRuntimeSourceTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
 
     def test_requires_checked_out_baseline_revision_and_patch_bytes(self):
-        revision, shell_revision, patch = self.module.BASELINES["GNOME"]
-        source = {"revision": revision, "shell_revision": shell_revision, "patch_sha256": self.module.sha256(ROOT / patch)}
+        revision, shell_revision, patch, shell_patch = self.module.BASELINES["GNOME"]
+        source = {"revision": revision, "shell_revision": shell_revision, "patch_sha256": self.module.sha256(ROOT / patch), "shell_patch_sha256": self.module.sha256(ROOT / shell_patch)}
         self.module.verify_baseline_source("GNOME", source)
         source["patch_sha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "baseline"):
+            self.module.verify_baseline_source("GNOME", source)
+        source["patch_sha256"] = self.module.sha256(ROOT / patch)
+        source["shell_patch_sha256"] = "0" * 64
         with self.assertRaisesRegex(ValueError, "baseline"):
             self.module.verify_baseline_source("GNOME", source)
 
@@ -203,8 +207,13 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
 
     def test_private_shell_export_builds_all_install_targets_before_no_rebuild_install(self):
         script = (ROOT / "packaging/linux/desktop-integrations/gnome-shell-extension/mutter/build-private-shell.sh").read_text(encoding="utf-8")
+        source_patch = ROOT / "packaging/linux/desktop-integrations/gnome-shell-extension/mutter/gnome-shell-46-relocatable-runtime.patch"
         self.assertIn('meson compile -C "$shell_build"\n', script)
         self.assertNotIn('meson compile -C "$shell_build" gnome-shell', script)
+        self.assertIn('git -C "$shell_source" apply --check "$shell_patch"', script)
+        self.assertIn('patchelf --remove-rpath "$elf"', script)
+        self.assertIn('g_file_read_link ("/proc/self/exe"', source_patch.read_text(encoding="utf-8"))
+        self.assertIn('g_irepository_prepend_library_path (mutter_typelib_dir)', source_patch.read_text(encoding="utf-8"))
         self.assertLess(
             script.index('meson compile -C "$shell_build"\n'),
             script.index('DESTDIR="$mutter_runtime" meson install -C "$shell_build" --no-rebuild'),
@@ -302,9 +311,13 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
     def test_private_shell_revision_marker_is_not_receipt_listed_payload(self):
         script = (ROOT / "packaging/linux/desktop-integrations/gnome-shell-extension/mutter/verify-patch.sh").read_text(encoding="utf-8")
         marker = '"$runtime_output/.copypaste-gnome-shell-revision"'
+        patch_marker = '"$runtime_output/.copypaste-gnome-shell-patch-sha256"'
         self.assertIn('shell_revision="$(cat ' + marker + ')"', script)
+        self.assertIn('shell_patch_sha256="$(cat ' + patch_marker + ')"', script)
         self.assertIn('rm -f ' + marker, script)
+        self.assertIn('rm -f ' + patch_marker, script)
         self.assertIn('--shell-revision "$shell_revision"', script)
+        self.assertIn('--shell-patch "$PWD/gnome-shell-46-relocatable-runtime.patch"', script)
         self.assertLess(script.index('rm -f ' + marker), script.index('emit_runtime_receipt.py'))
 
     def test_uses_authenticated_runtime_artifacts_and_generated_launchers(self):
