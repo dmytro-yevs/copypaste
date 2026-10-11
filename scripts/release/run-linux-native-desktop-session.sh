@@ -66,6 +66,22 @@ cleanup() {
   [[ -n "${shell_pid:-}" ]] && kill "$shell_pid" 2>/dev/null || true
   [[ -n "${desktop_pid:-}" ]] && kill "$desktop_pid" 2>/dev/null || true
   [[ -n "${display_pid:-}" ]] && kill "$display_pid" 2>/dev/null || true
+  if mountpoint -q "$RUNTIME/doc"; then
+    document_mount="$(awk -v target="$RUNTIME/doc" '
+      $5 == target {
+        split($0, fields, " - ")
+        split(fields[2], filesystem, " ")
+        print $5 " " filesystem[1]
+        exit
+      }
+    ' /proc/self/mountinfo)"
+    [[ "$document_mount" == "$RUNTIME/doc fuse.portal" ]] || {
+      printf 'ERROR: unexpected fixture runtime document mount: %s\n' "$document_mount" >&2
+      return 1
+    }
+    fusermount3 -u "$RUNTIME/doc"
+    ! mountpoint -q "$RUNTIME/doc"
+  fi
   [[ -n "${dbus_pid:-}" ]] && kill "$dbus_pid" 2>/dev/null || true
   rm -rf "$RUNTIME"
 }
