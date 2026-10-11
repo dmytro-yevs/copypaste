@@ -8,7 +8,7 @@ RUN dnf --assumeyes --setopt=install_weak_deps=False install \
     gtk3 gtk3-devel gcc pkgconf-pkg-config libsecret python3-gobject python3-pyatspi \
     kf6-kconfig kf6-kpackage kwin kwin-wayland kwin-x11 plasma-workspace-x11 \
     xdg-desktop-portal xdg-desktop-portal-kde \
-    xclip wl-clipboard wtype xdotool xprop xdpyinfo xorg-x11-server-Xvfb xorg-x11-xauth \
+    xclip wl-clipboard wtype xdotool xprop xdpyinfo xorg-x11-server-Xvfb xorg-x11-xauth libXres-devel \
     dpkg rpm sudo ffmpeg-free qrencode v4l-utils \
  && python3 -c 'import pyatspi' \
  && for tool in jq xdpyinfo dbus-daemon dbus-update-activation-environment gdbus busctl \

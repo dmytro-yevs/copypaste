@@ -1,0 +1,58 @@
+name: Linux clipboard diagnostic
+on:
+  workflow_call:
+    inputs:
+      artifact_run_id: {required: false, type: string, default: "38134248784"}
+      compositor_runtime_run_id: {required: false, type: string, default: "38134225268"}
+  workflow_dispatch:
+    inputs:
+      artifact_run_id: {required: true, type: string, default: "38134248784"}
+      compositor_runtime_run_id: {required: true, type: string, default: "38134225268"}
+permissions: {actions: read, contents: read}
+jobs:
+  probe:
+    name: ${{ matrix.architecture }} KDE ${{ matrix.session }} diagnostic
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {architecture: x86_64, runner: ubuntu-24.04, session: wayland, runtime: copypaste-compositor-runtime-kwin-6.0-fedora40-x86_64}
+          - {architecture: aarch64, runner: ubuntu-24.04-arm, session: x11, runtime: copypaste-compositor-runtime-kwin-6.0-fedora40-aarch64}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID" --jq .head_sha | grep -Fx e19a5fdd75f203949da0d335afa6a00d30df3026
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: production-linux-${{ matrix.architecture }}
+          path: current
+          run-id: ${{ inputs.artifact_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ matrix.runtime }}
+          path: compositor-runtime
+          run-id: ${{ inputs.compositor_runtime_run_id }}
+          github-token: ${{ github.token }}
+      - run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends cpio
+          python3 scripts/release/compositor-runtime-archive.py extract --archive compositor-runtime/runtime.tar --output compositor-runtime/runtime
+          python3 scripts/release/verify-linux-compositor-runtime.py artifact --root compositor-runtime --desktop KDE --architecture "${{ matrix.architecture }}" --commit e19a5fdd75f203949da0d335afa6a00d30df3026 --producer-run-id "${{ inputs.compositor_runtime_run_id }}" --output compositor-runtime/binding.json
+          appimage="$(find current -maxdepth 1 -name '*.AppImage' -type f -print -quit)"; chmod u+x "$appimage"; mkdir companion
+          (cd companion && APPIMAGE_EXTRACT_AND_RUN=1 "../$appimage" --appimage-extract >/dev/null)
+          mkdir evidence
+          chmod +x scripts/release/run-*-diagnostic.sh scripts/release/run-fedora-plasma6-session.sh
+          scripts/release/run-fedora-plasma6-diagnostic.sh --session "${{ matrix.session }}" --architecture "${{ matrix.architecture }}" --artifacts current --evidence evidence --companion-source companion/squashfs-root/usr/share/copypaste/desktop-integrations --compositor-runtime compositor-runtime --compositor-runtime-binding compositor-runtime/binding.json -- /work/scripts/release/run-linux-first-clipboard-diagnostic.sh --artifacts /artifacts --session "${{ matrix.session }}" --output "/evidence/${{ matrix.architecture }}-${{ matrix.session }}.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: linux-clipboard-diagnostic-${{ matrix.architecture }}-${{ matrix.session }}
+          path: evidence
+          if-no-files-found: warn

@@ -22,6 +22,7 @@ done
 [[ -d "$COMPANION_SOURCE" ]] || { echo "ERROR: exact packaged companion source is required" >&2; exit 2; }
 [[ -d "$COMPOSITOR_RUNTIME" && -f "$COMPOSITOR_RUNTIME_BINDING" && ! -L "$COMPOSITOR_RUNTIME" && ! -L "$COMPOSITOR_RUNTIME_BINDING" ]] || { echo "ERROR: authenticated compositor runtime input is required" >&2; exit 2; }
 runtime_package="$(jq -er '.package.name | select(type == "string" and test("^[A-Za-z0-9._+-]+\\.rpm$"))' "$COMPOSITOR_RUNTIME_BINDING")"
+if [[ "${COPYPASTE_DIAGNOSTIC_INSTALL_KEYBINDER3:-}" == 1 ]]; then dnf --assumeyes install keybinder3; fi
 runtime_id="$(jq -er '.runtime_id | select(type == "string" and test("^[a-z0-9.-]+$"))' "$COMPOSITOR_RUNTIME_BINDING")"
 dnf --assumeyes install "$COMPOSITOR_RUNTIME/$runtime_package"
 rpm -q "copypaste-compositor-runtime-$runtime_id" >/dev/null
@@ -34,6 +35,12 @@ COMPOSITOR_QUALIFICATION_ENTRYPOINT="$runtime_root/$qualification_entrypoint"
 
 runtime="$(mktemp -d)"
 cleanup() {
+  if [[ -n "${COPYPASTE_DIAGNOSTIC_EVIDENCE:-}" && -d "$COPYPASTE_DIAGNOSTIC_EVIDENCE" ]]; then
+    for log in "$runtime/kwin.log" "$runtime/plasmashell.log"; do
+      [[ -f "$log" ]] || continue
+      tail -c 1048576 -- "$log" > "$COPYPASTE_DIAGNOSTIC_EVIDENCE/$(basename "$log").startup"
+    done
+  fi
   [[ -n "${geometry_broker_pid:-}" ]] && kill "$geometry_broker_pid" 2>/dev/null || true
   [[ -n "${shell_pid:-}" ]] && kill "$shell_pid" 2>/dev/null || true
   [[ -n "${kwin_pid:-}" ]] && kill "$kwin_pid" 2>/dev/null || true

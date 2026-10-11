@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+session=""; architecture=""; artifacts=""; evidence=""; companion=""; runtime=""; binding=""
+while [[ "$#" -gt 0 ]]; do case "$1" in --session) session="$2"; shift 2;; --architecture) architecture="$2"; shift 2;; --artifacts) artifacts="$2"; shift 2;; --evidence) evidence="$2"; shift 2;; --companion-source) companion="$2"; shift 2;; --compositor-runtime) runtime="$2"; shift 2;; --compositor-runtime-binding) binding="$2"; shift 2;; --) shift; break;; *) exit 2;; esac; done
+[[ "$session" == x11 || "$session" == wayland ]] && [[ "$architecture" == x86_64 || "$architecture" == aarch64 ]] && [[ -d "$artifacts" && -d "$evidence" && -d "$companion" && -d "$runtime" && -f "$binding" && "$#" -gt 0 ]] || exit 2
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; platform=linux/amd64; [[ "$architecture" == aarch64 ]] && platform=linux/arm64
+image="copypaste-linux-native-qualification:fedora40-$architecture"; docker build --platform "$platform" -f "$root/packaging/linux/Dockerfile.fedora-native-qualification" -t "$image" "$root"
+docker run --rm --platform "$platform" --cap-add SYS_NICE --env COPYPASTE_DIAGNOSTIC_EVIDENCE=/evidence --env COPYPASTE_DIAGNOSTIC_INSTALL_KEYBINDER3=1 -v "$root:/work:ro" -v "$(cd "$artifacts" && pwd):/artifacts:ro" -v "$(cd "$evidence" && pwd):/evidence" -v "$(cd "$companion" && pwd):/companion:ro" -v "$(cd "$runtime" && pwd):/compositor-runtime:ro" -w /work "$image" /work/scripts/release/run-fedora-plasma6-session.sh --session "$session" --companion-source /companion --compositor-runtime /compositor-runtime --compositor-runtime-binding "/compositor-runtime/$(basename "$binding")" -- "$@"

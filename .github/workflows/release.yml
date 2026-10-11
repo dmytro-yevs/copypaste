@@ -33,6 +33,11 @@ on:
         required: false
         type: boolean
         default: false
+      linux_diagnostic_only:
+        description: Run the redacted first-capture KDE diagnostic against signed staging artifacts
+        required: false
+        type: boolean
+        default: false
       supabase_module_run_id:
         description: Completed exact-source unpublished Supabase module run
         required: false
@@ -79,6 +84,7 @@ jobs:
       linux_artifact_run_id: ${{ steps.version.outputs.linux_artifact_run_id }}
       compositor_runtime_required: ${{ steps.version.outputs.compositor_runtime_required }}
       linux_qualification_only: ${{ steps.version.outputs.linux_qualification_only }}
+      linux_diagnostic_only: ${{ steps.version.outputs.linux_diagnostic_only }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -90,6 +96,7 @@ jobs:
           LINUX_ARTIFACT_RUN_ID: ${{ inputs.linux_artifact_run_id }}
           COMPOSITOR_RUNTIME_RUN_ID: ${{ inputs.compositor_runtime_run_id }}
           LINUX_QUALIFICATION_ONLY: ${{ inputs.linux_qualification_only }}
+          LINUX_DIAGNOSTIC_ONLY: ${{ inputs.linux_diagnostic_only }}
           SUPABASE_MODULE_RUN_ID: ${{ inputs.supabase_module_run_id }}
           SEMANTIC_SEARCH_MODULE_RUN_ID: ${{ inputs.semantic_search_module_run_id }}
           OCR_MODULE_RUN_ID: ${{ inputs.ocr_module_run_id }}
@@ -114,6 +121,12 @@ jobs:
           linux_artifact_run_id="$GITHUB_RUN_ID"
           compositor_runtime_required=false
           linux_qualification_only=false
+          linux_diagnostic_only=false
+          if [[ "${LINUX_DIAGNOSTIC_ONLY:-false}" == true ]]; then
+            [[ "${REQUESTED_PUBLISH:-false}" == false && "$GITHUB_EVENT_NAME" == workflow_dispatch ]] || exit 1
+            linux_diagnostic_only=true
+            linux_qualification_only=true
+          fi
           if [[ "${LINUX_QUALIFICATION_ONLY:-false}" == true ]]; then
             [[ "${REQUESTED_PUBLISH:-false}" == false ]]
             [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && -z "${QUALIFIED_RUN_ID:-}" && -z "${LINUX_EVIDENCE_RUN_ID:-}" ]]
@@ -218,12 +231,13 @@ jobs:
             echo "linux_artifact_run_id=$linux_artifact_run_id"
             echo "compositor_runtime_required=$compositor_runtime_required"
             echo "linux_qualification_only=$linux_qualification_only"
+            echo "linux_diagnostic_only=$linux_diagnostic_only"
           } >> "$GITHUB_OUTPUT"
 
   linux-native-bootstrap:
     name: Run exact staged Linux native qualification
     needs: preflight
-    if: needs.preflight.outputs.linux_qualification_only == 'true'
+    if: needs.preflight.outputs.linux_qualification_only == 'true' && needs.preflight.outputs.linux_diagnostic_only != 'true'
     uses: ./.github/workflows/linux-native-qualification.yml
     with:
       artifact_run_id: ${{ inputs.linux_artifact_run_id }}
@@ -232,6 +246,12 @@ jobs:
       semantic_search_module_run_id: ${{ inputs.semantic_search_module_run_id }}
       ocr_module_run_id: ${{ inputs.ocr_module_run_id }}
       compositor_runtime_run_id: ${{ inputs.compositor_runtime_run_id }}
+
+  linux-clipboard-diagnostic:
+    name: Run redacted Linux clipboard diagnostic
+    needs: preflight
+    if: needs.preflight.outputs.linux_diagnostic_only == 'true'
+    uses: ./.github/workflows/linux-clipboard-diagnostic.yml
 
   macos:
     needs: preflight
