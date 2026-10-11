@@ -114,8 +114,8 @@ def validate_receipt(receipt: dict[str, Any]) -> None:
     source = receipt.get("source")
     if not isinstance(source, dict) or not isinstance(source.get("revision"), str) or not re.fullmatch(r"[A-Za-z0-9._/+:-]{1,128}", source["revision"]) or not SHA256.fullmatch(source.get("patch_sha256", "")):
         raise ContractError("source revision and bridge patch digest are required")
-    if receipt.get("desktop") == "GNOME" and receipt.get("launch", {}).get("kind") == "private" and not re.fullmatch(r"[0-9a-f]{40}", source.get("shell_revision", "")):
-        raise ContractError("private GNOME Shell revision is required")
+    if receipt.get("desktop") == "GNOME" and receipt.get("launch", {}).get("kind") == "private" and (not re.fullmatch(r"[0-9a-f]{40}", source.get("shell_revision", "")) or not SHA256.fullmatch(source.get("shell_patch_sha256", ""))):
+        raise ContractError("private GNOME Shell revision and patch digest are required")
     licenses = receipt.get("upstream_licenses")
     if not isinstance(licenses, list) or not licenses:
         raise ContractError("upstream GPL license receipt is required")

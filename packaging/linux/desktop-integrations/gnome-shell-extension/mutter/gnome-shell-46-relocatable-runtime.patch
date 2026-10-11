@@ -1,0 +1,57 @@
+diff --git a/src/main.c b/src/main.c
+index bbb67e482..cb8fe9291 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -216,20 +216,48 @@ maybe_add_rpath_introspection_paths (void)
+ }
+ #endif /* HAVE_EXE_INTROSPECTION */
+ 
++static void
++shell_runtime_introspection_dir (const char *configured_dir,
++                                 char      **runtime_dir)
++{
++  g_autoptr (GError) error = NULL;
++  g_autofree char *exe_path = NULL;
++  g_autofree char *bindir = NULL;
++  g_autofree char *prefix = NULL;
++
++  exe_path = g_file_read_link ("/proc/self/exe", &error);
++  if (!exe_path || !g_str_has_prefix (configured_dir, "/usr/"))
++    {
++      *runtime_dir = g_strdup (configured_dir);
++      return;
++    }
++
++  bindir = g_path_get_dirname (exe_path);
++  prefix = g_path_get_dirname (bindir);
++  *runtime_dir = g_build_filename (prefix,
++                                  configured_dir + strlen ("/usr/"),
++                                  NULL);
++}
++
+ static void
+ shell_introspection_init (void)
+ {
++  g_autofree char *mutter_typelib_dir = NULL;
++  g_autofree char *gnome_shell_pkglibdir = NULL;
++
++  shell_runtime_introspection_dir (MUTTER_TYPELIB_DIR, &mutter_typelib_dir);
++  shell_runtime_introspection_dir (GNOME_SHELL_PKGLIBDIR, &gnome_shell_pkglibdir);
+ 
+-  g_irepository_prepend_search_path (MUTTER_TYPELIB_DIR);
+-  g_irepository_prepend_search_path (GNOME_SHELL_PKGLIBDIR);
++  g_irepository_prepend_search_path (mutter_typelib_dir);
++  g_irepository_prepend_search_path (gnome_shell_pkglibdir);
+ 
+   /* We need to explicitly add the directories where the private libraries are
+    * installed to the GIR's library path, so that they can be found at runtime
+    * when linking using DT_RUNPATH (instead of DT_RPATH), which is the default
+    * for some linkers (e.g. gold) and in some distros (e.g. Debian).
+    */
+-  g_irepository_prepend_library_path (MUTTER_TYPELIB_DIR);
+-  g_irepository_prepend_library_path (GNOME_SHELL_PKGLIBDIR);
++  g_irepository_prepend_library_path (mutter_typelib_dir);
++  g_irepository_prepend_library_path (gnome_shell_pkglibdir);
+ 
+ #ifdef HAVE_EXE_INTROSPECTION
+   maybe_add_rpath_introspection_paths ();

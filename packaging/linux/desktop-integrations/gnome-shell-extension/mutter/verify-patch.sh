@@ -34,9 +34,13 @@ if [[ -n "$runtime_output" ]]; then
   DESTDIR="$runtime_output" meson install -C "$build_dir" --no-rebuild
   bash "$PWD/build-private-shell.sh" "$runtime_output"
   shell_revision="$(cat "$runtime_output/.copypaste-gnome-shell-revision")"
+  shell_patch_sha256="$(cat "$runtime_output/.copypaste-gnome-shell-patch-sha256")"
   [[ "$shell_revision" =~ ^[0-9a-f]{40}$ ]] || { echo "ERROR: private GNOME Shell revision is invalid" >&2; exit 1; }
+  [[ "$shell_patch_sha256" =~ ^[0-9a-f]{64}$ ]] || { echo "ERROR: private GNOME Shell patch digest is invalid" >&2; exit 1; }
   rm -f "$runtime_output/.copypaste-gnome-shell-revision"
+  rm -f "$runtime_output/.copypaste-gnome-shell-patch-sha256"
   [[ ! -e "$runtime_output/.copypaste-gnome-shell-revision" ]] || { echo "ERROR: transient private Shell metadata remains in runtime payload" >&2; exit 1; }
+  [[ ! -e "$runtime_output/.copypaste-gnome-shell-patch-sha256" ]] || { echo "ERROR: transient private Shell metadata remains in runtime payload" >&2; exit 1; }
   runtime_id="gnome-${version}-private-shell"
   python3 "$PWD/../../../compositor-runtime/emit_runtime_receipt.py" \
     --runtime-dir "$runtime_output" --output "$runtime_output/runtime-receipt.json" \
@@ -44,7 +48,7 @@ if [[ -n "$runtime_output" ]]; then
     --patch "$patch" --glibc-floor 2.39 --dependency gnome-shell --dependency gnome-session --dependency libdisplay-info1 \
     --private-entrypoint usr/libexec/copypaste-gnome-shell \
     --qualification-entrypoint usr/libexec/copypaste-gnome-shell-headless \
-    --shell-revision "$shell_revision" --license-file "$source_dir/COPYING"
+    --shell-revision "$shell_revision" --shell-patch "$PWD/gnome-shell-46-relocatable-runtime.patch" --license-file "$source_dir/COPYING"
 else
   meson compile -C "$build_dir" "$target"
 fi
