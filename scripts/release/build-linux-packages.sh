@@ -205,6 +205,9 @@ cp -a "$STAGE/usr/share/kwin/scripts/copypaste-quick-paste" \
 python3 "$ROOT/scripts/release/bundle-linux-gstreamer-camera.py" \
   --appdir "$APPDIR" --architecture "$ARCHITECTURE" --maximum-glibc 2.39 \
   --manifest "$APPDIR/usr/share/copypaste/gstreamer-camera-runtime.json"
+python3 "$ROOT/scripts/release/bundle-linux-keybinder.py" \
+  --appdir "$APPDIR" --architecture "$ARCHITECTURE" \
+  --manifest "$APPDIR/usr/share/copypaste/keybinder-runtime.json"
 sed 's#^Exec=.*#Exec=AppRun %U#' "$DESKTOP_TEMPLATE" > "$APPDIR/com.copypaste.CopyPaste.desktop"
 cp "$ICON" "$APPDIR/com.copypaste.CopyPaste.png"
 cat > "$APPDIR/AppRun" <<'EOF'
