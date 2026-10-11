@@ -218,17 +218,19 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
             '$root/usr/lib/aarch64-linux-gnu:$root/usr/lib/aarch64-linux-gnu/mutter-14:$root/usr/lib/aarch64-linux-gnu/gnome-shell"'
         )
         self.assertEqual(script.count(private_library_path), 2)
-        self.assertEqual(script.count('export LD_LIBRARY_PATH="$private_library_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"'), 2)
+        self.assertEqual(script.count('export LD_LIBRARY_PATH="$private_library_path"'), 2)
 
     def test_gnome_fixture_scopes_private_libraries_to_the_compositor_and_waits_for_extensions_api(self):
         script = (ROOT / "scripts/release/run-linux-native-desktop-session.sh").read_text(encoding="utf-8")
         self.assertNotIn('export LD_LIBRARY_PATH="$native/lib', script)
-        self.assertIn('export GI_TYPELIB_PATH="$private_typelib_path:$native/typelib${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"', script)
-        self.assertIn('LD_LIBRARY_PATH="$compositor_library_path" gnome-shell --x11 --replace', script)
-        self.assertIn('LD_LIBRARY_PATH="$compositor_library_path" "$COMPOSITOR_QUALIFICATION_ENTRYPOINT"', script)
+        self.assertIn('native_typelib_path="$native/typelib${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"', script)
+        self.assertIn('GI_TYPELIB_PATH="$native_typelib_path" LD_LIBRARY_PATH="$compositor_library_path"', script)
+        self.assertIn('gnome-shell --x11 --replace', script)
+        self.assertIn('GI_TYPELIB_PATH="$private_typelib_path:$native_typelib_path"', script)
+        self.assertIn('LD_LIBRARY_PATH="$private_library_path" "$COMPOSITOR_QUALIFICATION_ENTRYPOINT"', script)
         self.assertIn(
-            'wait_for \'gdbus call --session --dest org.gnome.Shell.Extensions '
-            '--object-path /org/gnome/Shell/Extensions --method '
+            'wait_for \'gdbus call --session --dest org.gnome.Shell '
+            '--object-path /org/gnome/Shell --method '
             'org.gnome.Shell.Extensions.ListExtensions >/dev/null 2>&1\'',
             script,
         )
