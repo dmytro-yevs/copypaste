@@ -2,6 +2,9 @@
 
 #include <fcntl.h>
 #include <gtk/gtk.h>
+#ifdef GDK_WINDOWING_WAYLAND
+#include <gdk/gdkwayland.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,9 +22,16 @@ typedef struct {
 
 typedef struct {
   const gchar *activity_path;
+  const gchar *ready_path;
   Offer offers[MAX_OFFERS];
   guint count;
+  guint hold_seconds;
+  gboolean selection_scheduled;
+  gboolean ready;
+  gboolean failed;
 } Provider;
+
+static gboolean write_ready(const gchar *path);
 
 static gboolean valid_application_id(const gchar *value) {
   if (value == NULL || *value == '\0' || strlen(value) > 255) return FALSE;
@@ -91,6 +101,51 @@ static gboolean stop(gpointer unused) {
   return G_SOURCE_REMOVE;
 }
 
+static gboolean establish_clipboard(Provider *provider, GdkDisplay *display) {
+  GtkTargetEntry targets[MAX_OFFERS];
+  for (guint index = 0; index < provider->count; index++) {
+    targets[index] = (GtkTargetEntry){.target = provider->offers[index].mime, .flags = 0, .info = index};
+  }
+  GtkClipboard *clipboard = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
+  if (!gtk_clipboard_set_with_data(clipboard, targets, provider->count, provide, clear, provider)) {
+    provider->failed = TRUE;
+    return FALSE;
+  }
+
+  // GTK3 passes the latest Wayland input serial to set_selection.  This idle
+  // task runs after focus delivery has recorded that serial for the mapped
+  // source window.
+  gdk_display_flush(display);
+  gdk_display_sync(display);
+  if (!write_ready(provider->ready_path)) {
+    provider->failed = TRUE;
+    return FALSE;
+  }
+  provider->ready = TRUE;
+  g_timeout_add_seconds(provider->hold_seconds, stop, NULL);
+  return TRUE;
+}
+
+#ifdef GDK_WINDOWING_WAYLAND
+static gboolean set_clipboard_after_focus(gpointer user_data) {
+  Provider *provider = user_data;
+  if (provider->ready || provider->failed) return G_SOURCE_REMOVE;
+  if (!establish_clipboard(provider, gdk_display_get_default())) gtk_main_quit();
+  return G_SOURCE_REMOVE;
+}
+
+static gboolean schedule_clipboard_after_focus(GtkWidget *widget, GdkEventFocus *event, gpointer user_data) {
+  (void)widget;
+  (void)event;
+  Provider *provider = user_data;
+  if (!provider->ready && !provider->failed && !provider->selection_scheduled) {
+    provider->selection_scheduled = TRUE;
+    g_idle_add(set_clipboard_after_focus, provider);
+  }
+  return FALSE;
+}
+#endif
+
 static gboolean write_ready(const gchar *path) {
   int descriptor = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
   if (descriptor < 0) return FALSE;
@@ -139,22 +194,28 @@ int main(int argc, char **argv) {
   // Keep the explicit X11 WM class used by the X11 attribution path.
   gdk_set_program_class(application_id);
   gtk_init(&argc, &argv);
+  provider.ready_path = ready_path;
+  provider.hold_seconds = hold_seconds;
   GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
   gtk_window_set_title(GTK_WINDOW(window), "CopyPaste qualification source");
   gtk_window_set_default_size(GTK_WINDOW(window), 240, 80);
-  gtk_widget_show_all(window);
-
-  GtkTargetEntry targets[MAX_OFFERS];
-  for (guint index = 0; index < provider.count; index++) {
-    targets[index] = (GtkTargetEntry){.target = provider.offers[index].mime, .flags = 0, .info = index};
+#ifdef GDK_WINDOWING_WAYLAND
+  if (GDK_IS_WAYLAND_DISPLAY(gdk_display_get_default())) {
+    GtkWidget *focus_target = gtk_entry_new();
+    gtk_container_add(GTK_CONTAINER(window), focus_target);
+    g_signal_connect(focus_target, "focus-in-event", G_CALLBACK(schedule_clipboard_after_focus), &provider);
+    gtk_widget_show_all(window);
+    gtk_widget_grab_focus(focus_target);
+  } else
+#endif
+  {
+    gtk_widget_show_all(window);
+    if (!establish_clipboard(&provider, gdk_display_get_default())) return 1;
   }
-  GtkClipboard *clipboard = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
-  if (!gtk_clipboard_set_with_data(clipboard, targets, provider.count, provide, clear, &provider) || !write_ready(ready_path)) return 1;
-  g_timeout_add_seconds(hold_seconds, stop, NULL);
   gtk_main();
   for (guint index = 0; index < provider.count; index++) {
     g_free(provider.offers[index].mime);
     g_free(provider.offers[index].bytes);
   }
-  return 0;
+  return provider.failed ? 1 : 0;
 }
