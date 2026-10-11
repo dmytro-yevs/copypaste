@@ -62,8 +62,21 @@ jobs:
       - name: Install disposable GNOME loader dependencies
         run: |
           set -euo pipefail
+          sudo python3 - <<'PY'
+          import re
+          from pathlib import Path
+          source = Path('/etc/apt/sources.list.d/ubuntu.sources').read_text(encoding='utf-8')
+          source, count = re.subn(r'^Types: deb$', 'Types: deb-src', source, flags=re.MULTILINE)
+          if not count:
+              raise ValueError('Ubuntu source repository configuration is unavailable')
+          Path('/etc/apt/sources.list.d/copypaste-compositor.sources').write_text(source, encoding='utf-8')
+          PY
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends dbus-user-session gnome-shell gnome-session gsettings-desktop-schemas patchelf
+          sudo apt-get build-dep --yes --no-install-recommends gnome-shell
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential dpkg-dev git meson ninja-build patchelf pkg-config \
+            dbus-user-session gnome-shell gnome-session gsettings-desktop-schemas \
+            libmutter-14-dev gobject-introspection libgirepository1.0-dev
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64
@@ -88,8 +101,6 @@ jobs:
             --root compositor-runtime --desktop GNOME --architecture x86_64 \
             --commit "$PRODUCT_COMMIT" --producer-run-id "$COMPOSITOR_RUNTIME_RUN_ID" \
             --output compositor-runtime/binding.json
-          package="$(jq -er '.package.name' compositor-runtime/binding.json)"
-          sudo apt-get install --yes "$(realpath "compositor-runtime/$package")"
       - name: Capture private GNOME loader maps and decisions
         env:
           PRODUCT_VERSION: ${{ needs.source.outputs.version }}
@@ -97,11 +108,13 @@ jobs:
           set -euo pipefail
           mkdir evidence
           runtime_id="$(jq -er '.runtime_id' compositor-runtime/binding.json)"
-          runtime_root="/usr/lib/copypaste/compositor-runtime/$runtime_id"
-          entrypoint="$runtime_root/usr/libexec/copypaste-gnome-shell-headless"
+          runtime_root="$PWD/compositor-runtime/runtime"
+          [[ -d "$runtime_root/usr" && ! -L "$runtime_root" ]]
+          rebuilt_runtime="$RUNNER_TEMP/copypaste-gnome-runtime-rebuilt"
+          cp -a "$runtime_root" "$rebuilt_runtime"
+          bash packaging/linux/desktop-integrations/gnome-shell-extension/mutter/build-private-shell.sh "$rebuilt_runtime"
+          entrypoint="$rebuilt_runtime/usr/libexec/copypaste-gnome-shell-headless"
           [[ -x "$entrypoint" ]]
-          private_library_path="$runtime_root/lib:$runtime_root/lib64:$runtime_root/usr/lib:$runtime_root/usr/lib/x86_64-linux-gnu:$runtime_root/usr/lib/x86_64-linux-gnu/mutter-14:$runtime_root/usr/lib/x86_64-linux-gnu/gnome-shell"
-          private_typelib_path="$runtime_root/usr/lib/x86_64-linux-gnu/mutter-14:$runtime_root/usr/lib/x86_64-linux-gnu/gnome-shell"
           appimage="current/CopyPaste-v$PRODUCT_VERSION-linux-x86_64.AppImage"
           [[ -f "$appimage" && ! -L "$appimage" ]]
           chmod u+x "$appimage"
@@ -109,12 +122,6 @@ jobs:
           (cd companion && APPIMAGE_EXTRACT_AND_RUN=1 "../$appimage" --appimage-extract >/dev/null)
           companion_source="$PWD/companion/squashfs-root/usr/share/copypaste/desktop-integrations"
           [[ -d "$companion_source/gnome-shell-extension" ]]
-          diagnostic_runtime="$RUNNER_TEMP/copypaste-gnome-runtime-without-rpath"
-          cp -a "$runtime_root" "$diagnostic_runtime"
-          find "$diagnostic_runtime" -type f -print0 | while IFS= read -r -d '' elf; do
-            file --brief "$elf" | grep -q '^ELF ' || continue
-            patchelf --remove-rpath "$elf"
-          done
           run_variant() {
             local variant="$1"
             local enable_companion="$2"
@@ -171,22 +178,16 @@ jobs:
             )
             rm -rf "$runtime_dir"
           }
-          run_variant original-bare false "$runtime_root"
-          run_variant original-companion true "$runtime_root"
-          run_variant transformed-bare false "$diagnostic_runtime"
-          run_variant transformed-companion true "$diagnostic_runtime"
+          run_variant rebuilt-bare false "$rebuilt_runtime"
+          run_variant rebuilt-companion true "$rebuilt_runtime"
           cp "$entrypoint" evidence/entrypoint.sh
           sha256sum compositor-runtime/runtime.tar compositor-runtime/runtime-receipt.json "$entrypoint" > evidence/input-sha256.txt
-          find "$runtime_root" "$diagnostic_runtime" -type f -print0 | sort -z | xargs -0 sha256sum > evidence/runtime-variant-sha256.txt
-          for variant in original-bare original-companion transformed-bare transformed-companion; do
-            if grep -q "cannot register existing type 'CoglTexture'" "evidence/desktop-$variant.log"; then
-              printf '%s=CoglTextureDuplicate\n' "$variant"
-            else
-              printf '%s=NoCoglTextureDuplicate\n' "$variant"
-            fi
-          done > evidence/results.txt
-          echo "ERROR: diagnostic complete; inspect the uploaded loader evidence before changing the runtime" >&2
-          exit 1
+          find "$runtime_root" "$rebuilt_runtime" -type f -print0 | sort -z | xargs -0 sha256sum > evidence/runtime-variant-sha256.txt
+          for variant in rebuilt-bare rebuilt-companion; do
+            ! grep -q "cannot register existing type 'CoglTexture'" "evidence/desktop-$variant.log"
+            ! rg -q "calling init: /usr/lib/x86_64-linux-gnu/mutter-14/libmutter-(cogl|clutter)-14" evidence/ld-debug-$variant.*
+            ! rg -q '^/usr/lib/x86_64-linux-gnu/mutter-14/libmutter-(cogl|clutter)-14' "evidence/maps-$variant.txt"
+          done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

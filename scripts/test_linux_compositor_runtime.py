@@ -91,6 +91,13 @@ class CompositorRuntimeSourceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "baseline"):
             self.module.verify_baseline_source("GNOME", source)
 
+    def test_accepts_the_checked_out_kde_baseline_patch_bytes(self):
+        revision, patch = self.module.BASELINES["KDE"]
+        self.module.verify_baseline_source(
+            "KDE",
+            {"revision": revision, "patch_sha256": self.module.sha256(ROOT / patch)},
+        )
+
     def test_binding_accepts_the_producer_workflows_exact_family_version(self):
         for desktop in ("GNOME", "KDE"):
             with self.subTest(desktop=desktop), tempfile.TemporaryDirectory() as directory:
