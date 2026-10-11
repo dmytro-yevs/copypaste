@@ -33,6 +33,11 @@ on:
         required: false
         type: boolean
         default: false
+      kwin_snapshot_wire_diagnostic:
+        description: Run only the isolated KWin Snapshot QtDBus wire diagnostic
+        required: false
+        type: boolean
+        default: false
       supabase_module_run_id:
         description: Completed exact-source unpublished Supabase module run
         required: false
@@ -65,7 +70,38 @@ permissions:
   actions: read
 
 jobs:
+  kwin-snapshot-wire-diagnostic:
+    name: KWin Snapshot QtDBus wire diagnostic
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.kwin_snapshot_wire_diagnostic == true }}
+    runs-on: ubuntu-24.04
+    container:
+      image: fedora:40@sha256:3c86d25fef9d2001712bc3d9b091fc40cf04be4767e48f1aa3b785bf58d300ed
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Install Qt 6 wire-test dependencies
+        run: dnf --assumeyes install qt6-qtbase-devel cmake gcc-c++
+      - name: Verify qualified KWin Snapshot export
+        env:
+          COPYPASTE_QT_PREFIX: /usr
+        run: packaging/linux/desktop-integrations/kde-native-clipboard/test-wire.sh
+      - name: Verify legacy unqualified Snapshot export fails
+        run: |
+          set -euo pipefail
+          build="$RUNNER_TEMP/kwin-snapshot-wire-legacy"
+          cmake -S packaging/linux/desktop-integrations/kde-native-clipboard/test-wire -B "$build" \
+            -DCMAKE_PREFIX_PATH=/usr -DCOPYPASTE_TEST_UNQUALIFIED_SNAPSHOT=ON
+          cmake --build "$build"
+          set +e
+          "$build/copypaste-kwin-clipboard-wire-fixture"
+          status=$?
+          set -e
+          [[ "$status" == 5 ]] || {
+            echo "ERROR: legacy Snapshot fixture unexpectedly returned $status" >&2
+            exit 1
+          }
+
   preflight:
+    if: inputs.kwin_snapshot_wire_diagnostic != true
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
