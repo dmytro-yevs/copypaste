@@ -109,7 +109,7 @@ jobs:
           sudo apt-get update
           sudo apt-get build-dep --yes --no-install-recommends mutter gnome-shell
           sudo apt-get install --yes --no-install-recommends \
-            build-essential dpkg-dev git meson ninja-build pkg-config python3 rpm \
+            build-essential dpkg-dev git meson ninja-build patchelf pkg-config python3 rpm \
             libmutter-14-dev gobject-introspection libgirepository1.0-dev
       - name: Build receipt-listed private compositor runtime
         run: |
