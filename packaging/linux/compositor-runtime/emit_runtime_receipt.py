@@ -102,6 +102,7 @@ def main() -> int:
     p.add_argument("--private-entrypoint"); p.add_argument("--gnome-major", type=int)
     p.add_argument("--qualification-entrypoint")
     p.add_argument("--shell-revision")
+    p.add_argument("--shell-patch", type=Path)
     p.add_argument("--license-file", required=True, type=Path); p.add_argument("--license-spdx", default="GPL-2.0-or-later")
     a = p.parse_args()
     try:
@@ -137,6 +138,10 @@ def main() -> int:
         if a.shell_revision:
             if not re.fullmatch(r"[0-9a-f]{40}", a.shell_revision): raise ValueError("private Shell revision must be a full SHA")
             source["shell_revision"]=a.shell_revision
+            if a.shell_patch is None or not a.shell_patch.is_file() or a.shell_patch.is_symlink(): raise ValueError("private Shell patch is required")
+            source["shell_patch_sha256"]=digest(a.shell_patch)
+        elif a.shell_patch is not None:
+            raise ValueError("private Shell patch requires a private Shell revision")
         receipt={"schema":1,"runtime_id":a.runtime_id,"desktop":a.desktop,"architecture":architecture(),"distribution":os_release(),"glibc_floor":a.glibc_floor,"source":source,"payload":payload(root),"launch":launch,"qualification":{"kind":"headless","entrypoint":a.qualification_entrypoint},"runtime_env":{},"host_requirements":deps,"package_dependencies":[],"upstream_licenses":licenses}
         if receipt["architecture"] not in {"x86_64","aarch64"}: raise ValueError("unsupported build architecture")
         a.output.parent.mkdir(parents=True, exist_ok=True); a.output.write_text(json.dumps(receipt,indent=2)+"\n",encoding="utf-8")
