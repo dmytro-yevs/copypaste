@@ -58,7 +58,7 @@ def artifact_name(desktop: str, architecture: str) -> str:
 
 def verify_baseline_source(desktop: str, source: dict) -> None:
     baseline = BASELINES[desktop]
-    revision, patch = baseline[0], baseline[2]
+    revision, patch = baseline[0], baseline[2] if desktop == "GNOME" else baseline[1]
     if source.get("revision") != revision or source.get("patch_sha256") != sha256(ROOT / patch):
         raise ValueError("producer source revision or patch bytes differ from the checked-out baseline")
     if desktop == "GNOME" and (source.get("shell_revision") != baseline[1] or source.get("shell_patch_sha256") != sha256(ROOT / baseline[3])):
