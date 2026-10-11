@@ -64,7 +64,7 @@ class LinuxQualificationBootstrapTest(unittest.TestCase):
     def test_x11_diagnostic_links_xres_without_requiring_a_pkg_config_manifest(self):
         wrapper = (ROOT / "scripts/release/run-linux-clipboard-diagnostic.sh").read_text(encoding="utf-8")
         self.assertIn("pkg-config --exists x11", wrapper)
-        self.assertIn("$(pkg-config --cflags --libs x11) -lXres", wrapper)
+        self.assertIn("$(pkg-config --cflags --libs x11) -lXRes", wrapper)
         self.assertNotIn("pkg-config --exists x11 xres", wrapper)
 
     def test_native_workflow_is_callable_and_downloads_public_runtime_for_final_verification(self):

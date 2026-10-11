@@ -99,6 +99,20 @@ class LinuxClipboardDiagnosticTest(unittest.TestCase):
         self.assertTrue(any("destination='org.kde.KWin'" in rule for rule in connection.rules))
         self.assertTrue(any("destination=':1.77'" in rule for rule in connection.rules))
 
+        message = types.SimpleNamespace(
+            get_member=lambda: "Version",
+            get_message_type=lambda: Gio.DBusMessageType.METHOD_CALL,
+            get_destination=lambda: ":1.77",
+            get_reply_serial=lambda: 0,
+            get_path=lambda: "/app/copypaste/Clipboard",
+            get_interface=lambda: "app.copypaste.Clipboard",
+            get_sender=lambda: ":1.4",
+            get_serial=lambda: 7,
+            get_signature=lambda: "",
+        )
+        self.assertIsNone(filters[0](None, message, True))
+        self.assertIs(filters[0](None, message, False), message)
+
     def test_capture_state_records_only_capture_gate_booleans(self):
         with mock.patch.object(diagnostic.fixture, "status", return_value={
             "capture_running": True, "clipboard_backend": "linux-kde", "item_count": 4,

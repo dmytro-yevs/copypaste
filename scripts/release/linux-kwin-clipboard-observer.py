@@ -53,7 +53,9 @@ def main():
             body = message.get_body(); generation, _mimes, identity = body.unpack()
             status, pid, uid, _app_id = identity
             emit("owner_changed", generation=int(generation), status=status if status in {"verified","no-client","no-app-id","ambiguous"} else "other", pid=int(pid), uid=int(uid))
-        return message
+        # A monitor observes incoming traffic; forwarding it would make GDBus
+        # dispatch a second, invalid reply to the peer's method call.
+        return None if _incoming else message
     bus.add_filter(observe)
     loop = GLib.MainLoop(); GLib.timeout_add_seconds(args.seconds, loop.quit); loop.run()
     emit("complete", unresolved_calls=len(calls))

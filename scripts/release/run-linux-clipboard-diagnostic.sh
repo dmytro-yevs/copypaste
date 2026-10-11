@@ -18,7 +18,7 @@ mkdir -p "$(dirname "$OUTPUT")"
 helper="$(mktemp)"
 trap 'rm -f "$helper"' EXIT
 pkg-config --exists x11
-cc -std=c11 -O2 -Wall -Wextra -Werror "$ROOT/scripts/release/linux-x11-clipboard-observer.c" -o "$helper" $(pkg-config --cflags --libs x11) -lXres
+cc -std=c11 -O2 -Wall -Wextra -Werror "$ROOT/scripts/release/linux-x11-clipboard-observer.c" -o "$helper" $(pkg-config --cflags --libs x11) -lXRes
 export COPYPASTE_DIAGNOSTIC_X11_HELPER="$helper"
 export COPYPASTE_DIAGNOSTIC_KWIN_OBSERVER="$ROOT/scripts/release/linux-kwin-clipboard-observer.py"
 export COPYPASTE_DIAGNOSTIC_KWIN_OUTPUT="$OUTPUT"
