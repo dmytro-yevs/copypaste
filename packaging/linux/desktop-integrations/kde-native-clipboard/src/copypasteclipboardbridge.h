@@ -41,7 +41,7 @@ public:
 
 public Q_SLOTS:
     Q_SCRIPTABLE void Version(uint &version);
-    Q_SCRIPTABLE void Snapshot(qulonglong &generation, QStringList &mimeTypes, CopyPasteWriterIdentity &identity);
+    Q_SCRIPTABLE void Snapshot(qulonglong &generation, QStringList &mimeTypes, KWin::CopyPasteWriterIdentity &identity);
     Q_SCRIPTABLE QByteArray Read(qulonglong generation, const QString &mimeType, uint maxBytes);
     Q_SCRIPTABLE qulonglong Write(const QMap<QString, QByteArray> &payloads);
 
