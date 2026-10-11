@@ -105,7 +105,7 @@ class LinuxClipboardDiagnosticTest(unittest.TestCase):
         }), mock.patch.object(diagnostic.fixture, "cli_json", return_value={
             "data": {"config": {"private_mode": False, "excluded_app_bundle_ids": []}},
         }), mock.patch.object(diagnostic.fixture, "response_variant", return_value={
-            "private_mode": False, "excluded_app_bundle_ids": [],
+            "config": {"private_mode": False, "excluded_app_bundle_ids": []},
         }), mock.patch.object(diagnostic.fixture, "ipc") as ipc:
             state = diagnostic.capture_state(Path("cli"), {}, Path("socket"))
 
@@ -119,6 +119,18 @@ class LinuxClipboardDiagnosticTest(unittest.TestCase):
         })
         self.assertNotIn(diagnostic.fixture.SOURCE_APPLICATION_ID, json.dumps(state))
         ipc.assert_not_called()
+
+    def test_capture_state_reads_the_effective_config_from_config_applied(self):
+        with mock.patch.object(diagnostic.fixture, "status", return_value={
+            "capture_running": True, "clipboard_backend": "linux-x11", "item_count": 0,
+        }), mock.patch.object(diagnostic.fixture, "cli_json", return_value={}), \
+             mock.patch.object(diagnostic.fixture, "response_variant", return_value={
+                 "config": {"private_mode": False, "excluded_app_bundle_ids": []}, "restart_required": [],
+             }):
+            state = diagnostic.capture_state(Path("cli"), {}, Path("socket"))
+
+        self.assertTrue(state["settings_capture_enabled"])
+        self.assertTrue(state["source_allowed_by_exclusion_settings"])
 
     def test_first_capture_records_metadata_after_cli_is_assigned(self):
         class App:
@@ -161,7 +173,7 @@ class LinuxClipboardDiagnosticTest(unittest.TestCase):
                  mock.patch.object(diagnostic, "start_observer", return_value=None), \
                  mock.patch.object(diagnostic.fixture, "status", side_effect=status), \
                  mock.patch.object(diagnostic.fixture, "cli_json", return_value={"data": {"config": {"private_mode": False, "excluded_app_bundle_ids": []}}}), \
-                 mock.patch.object(diagnostic.fixture, "response_variant", return_value={"private_mode": False, "excluded_app_bundle_ids": []}), \
+                 mock.patch.object(diagnostic.fixture, "response_variant", return_value={"config": {"private_mode": False, "excluded_app_bundle_ids": []}}), \
                  mock.patch.object(diagnostic.fixture, "list_items", side_effect=[[], [{"id": "new", "content_type": "text", "source_app_bundle_id": diagnostic.fixture.SOURCE_APPLICATION_ID, "source_app_name": diagnostic.fixture.SOURCE_APPLICATION_NAME}]]), \
                  mock.patch.object(diagnostic.fixture, "clipboard_provider", side_effect=provider), \
                  mock.patch.object(diagnostic.fixture, "wait_for_count", side_effect=wait_for_count), \

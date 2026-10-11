@@ -36,7 +36,8 @@ def daemon_flags(gui_pid, helper_environment):
 
 def capture_state(cli, environment, socket_path):
     status = fixture.status(cli, environment)
-    config = fixture.response_variant(fixture.cli_json(cli, environment, "config", "show"), "config")
+    applied = fixture.response_variant(fixture.cli_json(cli, environment, "config", "show"), "config")
+    config = applied.get("config") if isinstance(applied, dict) else None
     exclusions = config.get("excluded_app_bundle_ids") if isinstance(config, dict) else None
     source_allowed = isinstance(exclusions, list) and all(isinstance(value, str) and value != fixture.SOURCE_APPLICATION_ID for value in exclusions)
     configured_private_mode = config.get("private_mode") if isinstance(config, dict) else None
