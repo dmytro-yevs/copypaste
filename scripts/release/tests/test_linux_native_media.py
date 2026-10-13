@@ -83,25 +83,28 @@ class LinuxNativeMediaTest(unittest.TestCase):
                 return self.accepted
 
         class Node:
-            childCount = 0
-
-            def __init__(self, name):
+            def __init__(self, name, action=None, children=()):
                 self.name = name
+                self.action = action
+                self.children = list(children)
+                self.childCount = len(self.children)
 
             def getChildAtIndex(self, index):
-                raise IndexError(index)
+                return self.children[index]
 
             def queryAction(self):
+                if self.action is None:
+                    raise RuntimeError("not actionable")
                 return self.action
 
-        application = Node("application")
         expected = Node("Pair a device")
         for action_name in ("click", "Tap"):
             with self.subTest(action_name=action_name):
                 target = Node("Scan QR")
                 target.action = Action(action_name)
+                application = Node("application", children=(target,))
                 with mock.patch.object(media, "atspi_application", return_value=application), \
-                     mock.patch.object(media, "matching_accessible", side_effect=[target, expected]):
+                     mock.patch.object(media, "matching_accessible", return_value=expected):
                     record = media.click_accessible(mock.Mock(), pid=123, target="Scan QR", expected="Pair a device", timeout_seconds=1)
                 self.assertEqual(target.action.invoked, [0])
                 self.assertEqual(record["kind"], "atspi_click")
@@ -110,8 +113,13 @@ class LinuxNativeMediaTest(unittest.TestCase):
                 self.assertNotIn("Pair a device", str(record))
 
     def test_click_rejects_missing_actionable_control(self):
-        with mock.patch.object(media, "atspi_application", return_value=mock.Mock()), \
-             mock.patch.object(media, "matching_accessible", return_value=None):
+        class Application:
+            childCount = 0
+
+            def getChildAtIndex(self, index):
+                raise IndexError(index)
+
+        with mock.patch.object(media, "atspi_application", return_value=Application()):
             with self.assertRaisesRegex(media.MediaQualificationError, "control is absent"):
                 media.click_accessible(mock.Mock(), pid=1, target="Scan QR", expected="Pair a device", timeout_seconds=1)
 
@@ -130,26 +138,94 @@ class LinuxNativeMediaTest(unittest.TestCase):
                 return self.accepted
 
         class Node:
-            childCount = 0
-            name = "Continue"
-
-            def __init__(self, action):
+            def __init__(self, name, action=None, children=()):
+                self.name = name
                 self.action = action
+                self.children = list(children)
+                self.childCount = len(self.children)
 
             def getChildAtIndex(self, index):
-                raise IndexError(index)
+                return self.children[index]
 
             def queryAction(self):
+                if self.action is None:
+                    raise RuntimeError("not actionable")
                 return self.action
 
-        application = mock.Mock()
-        with mock.patch.object(media, "atspi_application", return_value=application), \
-             mock.patch.object(media, "matching_accessible", return_value=Node(Action("Focus"))):
+        application = Node("application", children=(Node("Continue", Action("Focus")),))
+        with mock.patch.object(media, "atspi_application", return_value=application):
             with self.assertRaisesRegex(media.MediaQualificationError, "not actionable"):
                 media.invoke_accessible(mock.Mock(), pid=1, target="Continue")
-        with mock.patch.object(media, "atspi_application", return_value=application), \
-             mock.patch.object(media, "matching_accessible", return_value=Node(Action("Tap", accepted=False))):
+        application = Node("application", children=(Node("Continue", Action("Tap", accepted=False)),))
+        with mock.patch.object(media, "atspi_application", return_value=application):
             with self.assertRaisesRegex(media.MediaQualificationError, "not accepted"):
+                media.invoke_accessible(mock.Mock(), pid=1, target="Continue")
+
+    def test_click_ignores_a_same_name_non_actionable_heading_before_the_button(self):
+        class Action:
+            nActions = 1
+
+            def __init__(self):
+                self.invoked = []
+
+            def getName(self, _index):
+                return "Tap"
+
+            def doAction(self, index):
+                self.invoked.append(index)
+                return True
+
+        class Node:
+            def __init__(self, name, action=None, children=()):
+                self.name = name
+                self.action = action
+                self.children = list(children)
+                self.childCount = len(self.children)
+
+            def getChildAtIndex(self, index):
+                return self.children[index]
+
+            def queryAction(self):
+                if self.action is None:
+                    raise RuntimeError("not actionable")
+                return self.action
+
+        action = Action()
+        heading = Node("Continue")
+        button = Node("Continue", action)
+        application = Node("application", children=(heading, button))
+        with mock.patch.object(media, "atspi_application", return_value=application):
+            media.invoke_accessible(mock.Mock(), pid=1, target="Continue")
+        self.assertEqual(action.invoked, [0])
+
+    def test_click_rejects_two_same_name_actionable_controls(self):
+        class Action:
+            nActions = 1
+
+            def getName(self, _index):
+                return "click"
+
+            def doAction(self, _index):
+                return True
+
+        class Node:
+            def __init__(self, name, action=None, children=()):
+                self.name = name
+                self.action = action
+                self.children = list(children)
+                self.childCount = len(self.children)
+
+            def getChildAtIndex(self, index):
+                return self.children[index]
+
+            def queryAction(self):
+                if self.action is None:
+                    raise RuntimeError("not actionable")
+                return self.action
+
+        application = Node("application", children=(Node("Continue", Action()), Node("Continue", Action())))
+        with mock.patch.object(media, "atspi_application", return_value=application):
+            with self.assertRaisesRegex(media.MediaQualificationError, "ambiguous"):
                 media.invoke_accessible(mock.Mock(), pid=1, target="Continue")
 
     def test_quick_paste_readiness_requires_visible_marker_and_one_focused_editable_text(self):
