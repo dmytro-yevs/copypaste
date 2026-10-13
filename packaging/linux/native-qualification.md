@@ -64,6 +64,13 @@ output, stores a raw driver log and trace, and computes the receipt hashes.
   encrypted persistence, pairing and a sync transfer, and every declared
   native module.
 
+Confidential-read evidence is bound to the GUI-owned daemon: X11 uses XRes
+requestor PIDs, and GNOME Wayland observes authenticated Clipboard v2 `Read`
+calls. The daemon must inspect the confidential hint without requesting the
+protected payload. Unknown readers fail qualification; independent desktop
+clipboard-manager requests remain visible in the audit. History must remain
+unchanged throughout the existing privacy observation window.
+
 The raw trace lists the actual command argv, exit code, and assertions covered
 by each command. The final verifier reads the trace and requires successful
 coverage of every assertion, in addition to checking the raw attachment bytes.
