@@ -42,10 +42,11 @@ class LinuxClipboardProviderTest(unittest.TestCase):
             audit = root / "audit.jsonl"
             with mock.patch.object(provider.os, "execv", side_effect=RuntimeError("exec")) as execute:
                 with self.assertRaisesRegex(RuntimeError, "exec"):
-                    provider.run(helper, manifest, ready, activity, 20, audit)
+                    provider.run(helper, manifest, ready, activity, 20, audit, require_focus=True)
             arguments = execute.call_args.args[1]
             self.assertIn("--request-audit-file", arguments)
             self.assertEqual(arguments[arguments.index("--request-audit-file") + 1], str(audit))
+            self.assertIn("--require-focus", arguments)
             self.assertFalse(audit.exists())
 
     def test_request_audit_requires_a_new_path(self):
@@ -71,6 +72,7 @@ class LinuxClipboardProviderTest(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "exec"):
                     provider.run(helper, manifest, root / "ready", root / "activity", 20)
             self.assertNotIn("--request-audit-file", execute.call_args.args[1])
+            self.assertNotIn("--require-focus", execute.call_args.args[1])
 
 
 if __name__ == "__main__":
