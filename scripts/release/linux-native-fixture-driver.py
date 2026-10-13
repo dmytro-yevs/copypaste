@@ -269,6 +269,33 @@ def atspi_present(actor, gui_pid, target, environment):
     return record["present"]
 
 
+def require_quick_paste_ready(actor, quick_paste_pid, marker, timeout_seconds, environment):
+    result = run(
+        [
+            sys.executable, str(actor), "quick-paste-ready", "--pid", str(quick_paste_pid),
+            "--marker", marker, "--timeout-seconds", str(timeout_seconds),
+        ],
+        env=environment,
+    )
+    prefix = "COPYPASTE_QUALIFICATION_MEDIA "
+    lines = result.stdout.decode("utf-8").splitlines()
+    if len(lines) != 1 or not lines[0].startswith(prefix):
+        raise RuntimeError("Quick Paste AT-SPI readiness helper emitted invalid output")
+    record = json.loads(lines[0].removeprefix(prefix))
+    if (not isinstance(record, dict) or record.get("kind") != "atspi_quick_paste_ready"
+            or record.get("gui_pid") != quick_paste_pid
+            or record.get("marker_sha256") != hashlib.sha256(marker.encode("utf-8")).hexdigest()):
+        raise RuntimeError("Quick Paste AT-SPI readiness evidence is invalid")
+
+
+def x11_window_pid(window, environment):
+    result = run(["xdotool", "getwindowpid", window], env=environment)
+    value = result.stdout.decode("ascii").strip()
+    if not re.fullmatch(r"[1-9][0-9]*", value):
+        raise RuntimeError("Quick Paste window owner is invalid")
+    return int(value)
+
+
 def require_linux_onboarding(args, *, gui_pid, environment):
     """Complete the installed Linux onboarding before feature qualification."""
     actor = require_helper(args.wayland_actor, "Linux onboarding AT-SPI actor")
@@ -863,8 +890,8 @@ def require_external_file_drag(cli, environment, workspace, gui_pid, session):
     emit_result("external_file_drag", result)
 
 
-def wait_for_window(name, environment):
-    deadline = time.monotonic() + 8
+def wait_for_window(name, environment, deadline=None):
+    deadline = time.monotonic() + 8 if deadline is None else deadline
     while time.monotonic() < deadline:
         result = subprocess.run(["xdotool", "search", "--name", name], stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL, env=environment)
@@ -887,12 +914,21 @@ def require_x11_quick_paste(cli, environment, workspace):
         if before_focus.stdout.decode("utf-8").strip() != target_window:
             raise RuntimeError("X11 input target did not receive focus")
         invoked = run(["xdotool", "key", "ctrl+shift+c"], env=environment)
-        quick_paste = wait_for_window("CopyPaste Quick Paste", environment)
+        readiness_deadline = time.monotonic() + CAPTURE_TIMEOUT_SECONDS
+        quick_paste = wait_for_window("CopyPaste Quick Paste", environment, deadline=readiness_deadline)
         if quick_paste == target_window:
             raise RuntimeError("global shortcut did not open a separate Quick Paste window")
+        quick_paste_pid = x11_window_pid(quick_paste, environment)
+        remaining = int(readiness_deadline - time.monotonic())
+        if remaining < 1:
+            raise RuntimeError("Quick Paste did not become ready before the X11 readiness deadline")
+        actor = require_helper(NATIVE_MEDIA, "Quick Paste AT-SPI actor")
+        require_quick_paste_ready(actor, quick_paste_pid, marker, remaining, environment)
+        quick_paste_focus = run(["xdotool", "getwindowfocus"], env=environment)
+        if quick_paste_focus.stdout.decode("utf-8").strip() != quick_paste:
+            raise RuntimeError("Quick Paste window did not receive X11 input focus")
         emit_result("quick_paste_hotkey", invoked)
-        # The search field has autofocus, and Enter activates the first item.
-        run(["xdotool", "key", "--window", quick_paste, "Return"], env=environment)
+        run(["xdotool", "key", "Return"], env=environment)
         deadline = time.monotonic() + 8
         while time.monotonic() < deadline:
             if result_file.is_file() and result_file.read_text(encoding="utf-8") == marker:
