@@ -64,7 +64,7 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
                 "[Desktop Entry]\n"
                 "Type=Application\n"
                 f"Name={driver.SOURCE_APPLICATION_NAME}\n"
-                f"StartupWMClass={driver.SOURCE_APPLICATION_ID[:1].upper()}{driver.SOURCE_APPLICATION_ID[1:]}\n"
+                "StartupWMClass=Org.copypaste.QualificationSource\n"
                 "Exec=true\n",
             )
 
