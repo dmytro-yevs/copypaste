@@ -33,7 +33,7 @@ class LinuxOnboardingController extends ChangeNotifier {
     final status = _status;
     if (status == null) return false;
     return switch (status.session) {
-      LinuxDesktopSession.x11 => status.quickPaste,
+      LinuxDesktopSession.x11 => status.clipboard && status.quickPaste,
       LinuxDesktopSession.wayland => status.clipboard && status.quickPaste,
       LinuxDesktopSession.unsupported => false,
     };
@@ -154,6 +154,8 @@ class LinuxOnboardingController extends ChangeNotifier {
   }
 
   String _integrationRequirement() => switch (_status?.session) {
+    LinuxDesktopSession.x11 when _status?.clipboard != true =>
+      'Clipboard access is unavailable in this X11 session.',
     LinuxDesktopSession.x11 =>
       'Quick Paste input is unavailable in this X11 session.',
     LinuxDesktopSession.wayland =>

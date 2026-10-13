@@ -253,6 +253,10 @@ impl AppState {
         self.capture_running.load(Ordering::Acquire)
     }
 
+    pub fn clipboard_available(&self) -> bool {
+        self.clipboard().is_available()
+    }
+
     pub fn set_capture_running(&self, running: bool) {
         self.capture_running.store(running, Ordering::Release);
     }

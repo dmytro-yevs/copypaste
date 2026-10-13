@@ -123,6 +123,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             device_details: None,
             item_count: 1,
             capture_running: true,
+            clipboard_available: true,
             clipboard_backend: "fake".into(),
             private_mode: false,
             private_mode_epoch: 0,
@@ -261,6 +262,7 @@ fn status_without_a_device_id_remains_compatible_with_older_backends() {
     .expect("older status payload deserialises");
 
     assert_eq!(status.device_id, None);
+    assert!(!status.clipboard_available);
 }
 
 #[test]

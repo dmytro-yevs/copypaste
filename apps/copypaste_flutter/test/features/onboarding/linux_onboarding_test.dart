@@ -53,6 +53,89 @@ void main() {
     },
   );
 
+  test(
+    'X11 setup requires clipboard availability before Quick Paste',
+    () async {
+      final integration = _Integration(
+        const LinuxIntegrationStatus(
+          session: LinuxDesktopSession.x11,
+          globalShortcuts: true,
+          remoteDesktop: LinuxRemoteDesktopState.unsupported,
+          companion: LinuxCompanionState.unavailable,
+          clipboard: false,
+          quickPaste: true,
+          screenshotProtection: false,
+        ),
+      );
+      final controller = LinuxOnboardingController(
+        store: MemoryLinuxOnboardingStore(),
+        integration: integration,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+      controller.showIntegration();
+      await controller.continueFromIntegration();
+
+      expect(controller.step, LinuxOnboardingStep.integration);
+      expect(
+        controller.errorMessage,
+        contains('Clipboard access is unavailable'),
+      );
+
+      integration.statusValue = const LinuxIntegrationStatus(
+        session: LinuxDesktopSession.x11,
+        globalShortcuts: true,
+        remoteDesktop: LinuxRemoteDesktopState.unsupported,
+        companion: LinuxCompanionState.unavailable,
+        clipboard: true,
+        quickPaste: true,
+        screenshotProtection: false,
+      );
+      await controller.continueFromIntegration();
+
+      expect(controller.step, LinuxOnboardingStep.sync);
+    },
+  );
+
+  test(
+    'Wayland setup keeps clipboard and Quick Paste readiness separate',
+    () async {
+      final integration = _Integration(
+        const LinuxIntegrationStatus(
+          session: LinuxDesktopSession.wayland,
+          globalShortcuts: true,
+          remoteDesktop: LinuxRemoteDesktopState.active,
+          companion: LinuxCompanionState.active,
+          clipboard: true,
+          quickPaste: false,
+          screenshotProtection: false,
+        ),
+      );
+      final controller = LinuxOnboardingController(
+        store: MemoryLinuxOnboardingStore(),
+        integration: integration,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+      expect(controller.integrationReady, isFalse);
+
+      integration.statusValue = const LinuxIntegrationStatus(
+        session: LinuxDesktopSession.wayland,
+        globalShortcuts: true,
+        remoteDesktop: LinuxRemoteDesktopState.active,
+        companion: LinuxCompanionState.active,
+        clipboard: false,
+        quickPaste: true,
+        screenshotProtection: false,
+      );
+      await controller.refreshIntegration();
+
+      expect(controller.integrationReady, isFalse);
+    },
+  );
+
   testWidgets('Linux setup states the screenshot protection exception', (
     tester,
   ) async {

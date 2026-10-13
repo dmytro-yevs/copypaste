@@ -278,6 +278,12 @@ impl ClipboardSource for GnomeClipboard {
             .map(|state| state.active && state.dirty)
             .unwrap_or(false)
     }
+    fn is_available(&self) -> bool {
+        self.state
+            .lock()
+            .map(|state| state.active && state.watching)
+            .unwrap_or(false)
+    }
     fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
         self.write(HashMap::from([(
             "text/plain;charset=utf-8".into(),
