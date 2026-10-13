@@ -66,15 +66,20 @@ class LinuxNativeMediaTest(unittest.TestCase):
             with self.assertRaisesRegex(media.MediaQualificationError, "invalid"):
                 media.stop_qr_feed(state)
 
-    def test_click_uses_named_atspi_action_and_records_only_hashes(self):
+    def test_click_uses_the_supported_gtk_or_flutter_atspi_action_and_records_only_hashes(self):
         class Action:
-            nActions = 1
+            def __init__(self, name, accepted=True):
+                self.name = name
+                self.accepted = accepted
+                self.invoked = []
+                self.nActions = 1
 
             def getName(self, index):
-                return "click"
+                return self.name
 
             def doAction(self, index):
-                return True
+                self.invoked.append(index)
+                return self.accepted
 
         class Node:
             childCount = 0
@@ -86,24 +91,65 @@ class LinuxNativeMediaTest(unittest.TestCase):
                 raise IndexError(index)
 
             def queryAction(self):
-                return Action()
+                return self.action
 
         application = Node("application")
-        target = Node("Scan QR")
         expected = Node("Pair a device")
-        with mock.patch.object(media, "atspi_application", return_value=application), \
-             mock.patch.object(media, "matching_accessible", side_effect=[target, expected]):
-            record = media.click_accessible(mock.Mock(), pid=123, target="Scan QR", expected="Pair a device", timeout_seconds=1)
-        self.assertEqual(record["kind"], "atspi_click")
-        self.assertEqual(record["gui_pid"], 123)
-        self.assertNotIn("Scan QR", str(record))
-        self.assertNotIn("Pair a device", str(record))
+        for action_name in ("click", "Tap"):
+            with self.subTest(action_name=action_name):
+                target = Node("Scan QR")
+                target.action = Action(action_name)
+                with mock.patch.object(media, "atspi_application", return_value=application), \
+                     mock.patch.object(media, "matching_accessible", side_effect=[target, expected]):
+                    record = media.click_accessible(mock.Mock(), pid=123, target="Scan QR", expected="Pair a device", timeout_seconds=1)
+                self.assertEqual(target.action.invoked, [0])
+                self.assertEqual(record["kind"], "atspi_click")
+                self.assertEqual(record["gui_pid"], 123)
+                self.assertNotIn("Scan QR", str(record))
+                self.assertNotIn("Pair a device", str(record))
 
     def test_click_rejects_missing_actionable_control(self):
         with mock.patch.object(media, "atspi_application", return_value=mock.Mock()), \
              mock.patch.object(media, "matching_accessible", return_value=None):
             with self.assertRaisesRegex(media.MediaQualificationError, "control is absent"):
                 media.click_accessible(mock.Mock(), pid=1, target="Scan QR", expected="Pair a device", timeout_seconds=1)
+
+    def test_click_rejects_unsupported_or_rejected_atspi_actions(self):
+        class Action:
+            nActions = 1
+
+            def __init__(self, name, accepted=True):
+                self.name = name
+                self.accepted = accepted
+
+            def getName(self, _index):
+                return self.name
+
+            def doAction(self, _index):
+                return self.accepted
+
+        class Node:
+            childCount = 0
+            name = "Continue"
+
+            def __init__(self, action):
+                self.action = action
+
+            def getChildAtIndex(self, index):
+                raise IndexError(index)
+
+            def queryAction(self):
+                return self.action
+
+        application = mock.Mock()
+        with mock.patch.object(media, "atspi_application", return_value=application), \
+             mock.patch.object(media, "matching_accessible", return_value=Node(Action("Focus"))):
+            with self.assertRaisesRegex(media.MediaQualificationError, "not actionable"):
+                media.invoke_accessible(mock.Mock(), pid=1, target="Continue")
+        with mock.patch.object(media, "atspi_application", return_value=application), \
+             mock.patch.object(media, "matching_accessible", return_value=Node(Action("Tap", accepted=False))):
+            with self.assertRaisesRegex(media.MediaQualificationError, "not accepted"):
+                media.invoke_accessible(mock.Mock(), pid=1, target="Continue")
 
     def test_camera_observation_binds_the_gui_pairing_state_and_gstreamer_mapping(self):
         application = mock.Mock()
