@@ -258,13 +258,36 @@ class LinuxNativeMediaTest(unittest.TestCase):
         atspi = SimpleNamespace(
             STATE_SHOWING="showing", STATE_VISIBLE="visible", STATE_FOCUSED="focused", STATE_EDITABLE="editable",
         )
-        marker = Node("requested clip", State("showing", "visible"))
+        marker = Node("requested clip\nCtrl\n1", State("showing", "visible"))
         input_node = Node("search", State("showing", "visible", "focused", "editable"), text=True)
         application = Node("application", State(), children=(marker, input_node))
         with mock.patch.object(media, "atspi_application", return_value=application):
             record = media.quick_paste_ready(mock.Mock(), atspi, pid=123, marker="requested clip", timeout_seconds=1)
         self.assertEqual(record["kind"], "atspi_quick_paste_ready")
         self.assertEqual(record["gui_pid"], 123)
+
+    def test_quick_paste_marker_matches_only_the_exact_first_content_line(self):
+        class Node:
+            def __init__(self, name, children=()):
+                self.name = name
+                self.children = list(children)
+                self.childCount = len(self.children)
+
+            def getChildAtIndex(self, index):
+                return self.children[index]
+
+        marker = "copypaste-x11-quick-paste-fixture"
+        bare = Node(marker)
+        aggregated = Node(f"{marker}\nCtrl\n1")
+        self.assertIs(media.quick_paste_marker_accessible(Node("application", (bare,)), marker), bare)
+        self.assertIs(media.quick_paste_marker_accessible(Node("application", (aggregated,)), marker), aggregated)
+        for name in (
+            f"prefix {marker}",
+            f"{marker} suffix",
+            f"Ctrl\n{marker}",
+        ):
+            with self.subTest(name=name):
+                self.assertIsNone(media.quick_paste_marker_accessible(Node("application", (Node(name),)), marker))
 
     def test_quick_paste_readiness_waits_for_its_accessibility_application(self):
         class State:
