@@ -329,7 +329,7 @@ class QuickPasteSettingsController extends ChangeNotifier
     _linuxIntegration = await integration.status();
     _nativeQuickPasteSupported = await _windowHost.isSupported();
     final supported = _quickPasteSupported;
-    if (!_initialized || wasSupported == supported) {
+    if (wasSupported == supported || (!_initialized && supported)) {
       _supported = supported;
       return;
     }
