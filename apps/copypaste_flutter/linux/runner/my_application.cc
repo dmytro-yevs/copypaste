@@ -2,8 +2,16 @@
 
 #include <flutter_linux/flutter_linux.h>
 
+#if defined(GDK_WINDOWING_X11)
+#include <gdk/gdkx.h>
+#endif
+
+#include <cerrno>
+#include <cstdint>
 #include <cstring>
+#include <cstdlib>
 #include <limits.h>
+#include <limits>
 
 #include "flutter/generated_plugin_registrant.h"
 #include "linux_host_channels.h"
@@ -16,6 +24,8 @@ struct _MyApplication {
   GtkWindow* root_window;
   GQueue* pending_pairing_uris;
   gboolean flutter_ready;
+  guint32 x11_activation_time;
+  gboolean x11_activation_time_invalid;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
@@ -37,6 +47,22 @@ bool is_pairing_uri(const gchar* argument) {
   }
   return g_str_has_prefix(argument, "copypaste://pair/v1?") ||
          g_str_has_prefix(argument, "copypaste://pair/v2?");
+}
+
+bool parse_x11_activation_time(const gchar* value, guint32* activation_time) {
+  if (value == nullptr || *value == '\0' || activation_time == nullptr) return false;
+  for (const gchar* character = value; *character != '\0'; ++character) {
+    if (!g_ascii_isdigit(*character)) return false;
+  }
+  errno = 0;
+  char* end = nullptr;
+  const unsigned long parsed = std::strtoul(value, &end, 10);
+  if (errno != 0 || end == value || *end != '\0' || parsed == GDK_CURRENT_TIME ||
+      parsed > std::numeric_limits<guint32>::max()) {
+    return false;
+  }
+  *activation_time = static_cast<guint32>(parsed);
+  return true;
 }
 
 void dispatch_pending_pairing_uris(MyApplication* self) {
@@ -71,6 +97,17 @@ void set_quick_paste_context(MyApplication* self, const gchar* argument) {
     g_object_set_data_full(G_OBJECT(self), "copypaste-x11-window",
                            g_strdup(argument + strlen("--copypaste-x11-window=")),
                            g_free);
+  } else if (g_str_has_prefix(argument, "--copypaste-x11-activation-time=")) {
+    guint32 activation_time = GDK_CURRENT_TIME;
+    const gchar* value = argument + strlen("--copypaste-x11-activation-time=");
+    if (self->x11_activation_time != GDK_CURRENT_TIME ||
+        self->x11_activation_time_invalid ||
+        !parse_x11_activation_time(value, &activation_time)) {
+      self->x11_activation_time = GDK_CURRENT_TIME;
+      self->x11_activation_time_invalid = TRUE;
+    } else {
+      self->x11_activation_time = activation_time;
+    }
   } else if (g_str_has_prefix(argument, "--copypaste-runtime-endpoint=")) {
     const gchar* endpoint = argument + strlen("--copypaste-runtime-endpoint=");
     if (!is_runtime_endpoint(endpoint) ||
@@ -91,6 +128,13 @@ void first_frame_cb(MyApplication* self, FlView* view) {
     // Preserve the compositor's initial monitor/position. Clamp only the size
     // after the surface exists; inspector changes can clamp its current frame.
     resize_linux_quick_paste_window(GTK_WINDOW(window), false, false);
+#if defined(GDK_WINDOWING_X11)
+    if (!self->x11_activation_time_invalid &&
+        self->x11_activation_time != GDK_CURRENT_TIME &&
+        GDK_IS_X11_DISPLAY(gtk_widget_get_display(window))) {
+      gtk_window_present_with_time(GTK_WINDOW(window), self->x11_activation_time);
+    }
+#endif
   }
   self->flutter_ready = TRUE;
   dispatch_pending_pairing_uris(self);
