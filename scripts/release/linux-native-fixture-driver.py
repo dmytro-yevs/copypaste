@@ -751,6 +751,24 @@ def require_capture(cli, environment, workspace, evidence_dir, session, mime, pa
         wait_for_count(cli, environment, before + 1)
         item = newest_item(list_items(cli, environment), before_ids, content_type)
         require_source_identity(item)
+    overwrite_marker = f"copypaste-native-overwrite-{assertion}".encode("utf-8")
+    overwrite_before = cli_item_count(status(cli, environment))
+    overwrite_ids = {item.get("id") for item in list_items(cli, environment)}
+    with clipboard_provider(
+        workspace,
+        evidence_dir,
+        f"{assertion}-overwrite",
+        {"text/plain;charset=utf-8": overwrite_marker},
+        environment,
+    ):
+        wait_for_count(cli, environment, overwrite_before + 1)
+        overwrite_item = newest_item(list_items(cli, environment), overwrite_ids, "text")
+        require_source_identity(overwrite_item)
+        if overwrite_item.get("content") != overwrite_marker.decode("utf-8"):
+            raise RuntimeError("native overwrite marker was not retained in clipboard history")
+        overwritten = external_clipboard_bytes(session, "text/plain;charset=utf-8", environment)
+        if overwritten.stdout != overwrite_marker:
+            raise RuntimeError("native overwrite marker did not become the active clipboard value")
         run([str(cli), "--json", "copy", item["id"]], env=environment)
         copied = external_clipboard_bytes(session, mime, environment)
         if copied.stdout != payload:
