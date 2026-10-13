@@ -169,15 +169,32 @@ def click_action_index(node: Any) -> int | None:
     return None
 
 
+def actionable_accessible(application: Any, name: str) -> tuple[Any, int]:
+    named = []
+    actionable = []
+    for node in accessible_descendants(application):
+        try:
+            if node.name != name:
+                continue
+        except Exception:
+            continue
+        named.append(node)
+        index = click_action_index(node)
+        if index is not None:
+            actionable.append((node, index))
+    if not named:
+        raise MediaQualificationError("required installed UI control is absent")
+    if not actionable:
+        raise MediaQualificationError("required installed UI control is not actionable")
+    if len(actionable) != 1:
+        raise MediaQualificationError("required installed UI control is ambiguous")
+    return actionable[0]
+
+
 def invoke_accessible(registry: Any, *, pid: int, target: str) -> dict[str, Any]:
     """Invoke one installed control and report the action acknowledgement."""
     application = atspi_application(registry, pid)
-    button = matching_accessible(application, target)
-    if button is None:
-        raise MediaQualificationError("required installed UI control is absent")
-    index = click_action_index(button)
-    if index is None:
-        raise MediaQualificationError("required installed UI control is not actionable")
+    button, index = actionable_accessible(application, target)
     try:
         performed = button.queryAction().doAction(index)
     except Exception as error:
