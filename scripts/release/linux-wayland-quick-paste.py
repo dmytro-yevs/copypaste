@@ -210,9 +210,11 @@ class PortalKeyboard:
         self.session_digest = ""
         self.calls: list[str] = []
 
-    def _call(self, interface: str, method: str, parameters: Any, reply_type: str | None = None) -> Any:
+    def _call(
+        self, interface: str, method: str, parameters: Any, reply_type: str | None = None, *, path: str = PORTAL_PATH,
+    ) -> Any:
         reply = self.connection.call_sync(
-            PORTAL_NAME, PORTAL_PATH, interface, method, parameters,
+            PORTAL_NAME, path, interface, method, parameters,
             self.glib.VariantType.new(reply_type) if reply_type else None,
             self.gio.DBusCallFlags.NONE, 8000, None,
         )
@@ -372,9 +374,16 @@ class PortalKeyboard:
 
     def _request(self, method: str, signature: str, values: tuple[Any, ...], on_requested=None) -> dict[str, Any]:
         options = next((value for value in values if isinstance(value, dict) and "handle_token" in value), None)
-        if not isinstance(options, dict) or not isinstance(options.get("handle_token"), str):
+        handle_token = options.get("handle_token") if isinstance(options, dict) else None
+        try:
+            if handle_token.get_type_string() != "s":
+                raise ValueError
+            handle_token = handle_token.unpack()
+        except Exception:
+            raise QuickPasteQualificationError("portal request has no safe handle token") from None
+        if not isinstance(handle_token, str):
             raise QuickPasteQualificationError("portal request has no safe handle token")
-        predicted = portal_request_path(self.connection.get_unique_name(), options["handle_token"])
+        predicted = portal_request_path(self.connection.get_unique_name(), handle_token)
         watch = self._watch_response(predicted)
         try:
             reply = self._call(REMOTE_DESKTOP, method, self.glib.Variant(signature, values), "(o)")
@@ -388,15 +397,21 @@ class PortalKeyboard:
             self._unsubscribe_response(watch)
 
     def grant(self, on_start_requested) -> None:
-        created = self._request("CreateSession", "(a{sv})", ({"handle_token": token("create"), "session_handle_token": token("session")},))
+        created = self._request("CreateSession", "(a{sv})", ({
+            "handle_token": self.glib.Variant("s", token("create")),
+            "session_handle_token": self.glib.Variant("s", token("session")),
+        },))
         session = created.get("session_handle")
         if not isinstance(session, str) or not session.startswith("/"):
             raise QuickPasteQualificationError("desktop portal did not create a keyboard session")
         self.session = session
         self.session_digest = sha256(session)
-        self._request("SelectDevices", "(oa{sv})", (session, {"handle_token": token("devices"), "types": KEYBOARD_DEVICE}))
+        self._request("SelectDevices", "(oa{sv})", (session, {
+            "handle_token": self.glib.Variant("s", token("devices")),
+            "types": self.glib.Variant("u", KEYBOARD_DEVICE),
+        }))
         started = self._request(
-            "Start", "(osa{sv})", (session, "", {"handle_token": token("start")}), on_start_requested,
+            "Start", "(osa{sv})", (session, "", {"handle_token": self.glib.Variant("s", token("start"))}), on_start_requested,
         )
         if type(started.get("devices")) is not int or not (started["devices"] & KEYBOARD_DEVICE):
             raise QuickPasteQualificationError("desktop portal did not grant keyboard input")
@@ -415,7 +430,7 @@ class PortalKeyboard:
     def close(self) -> None:
         if self.session:
             try:
-                self._call(SESSION_INTERFACE, "Close", self.glib.Variant("(o)", (self.session,)))
+                self._call(SESSION_INTERFACE, "Close", None, path=self.session)
             finally:
                 self.session = ""
 
@@ -473,7 +488,7 @@ def portal_control(application: Any, atspi: Any, name: str, actions: set[str]) -
     for node in accessible_descendants(application):
         try:
             state = node.getState()
-            if node.name == name and all(state.contains(value) for value in (atspi.STATE_SHOWING, atspi.STATE_VISIBLE, atspi.STATE_ENABLED)):
+            if node.name == name and all(state.contains(value) for value in (atspi.STATE_SHOWING, atspi.STATE_VISIBLE, atspi.STATE_SENSITIVE)):
                 index = action_index(node, actions)
                 if index is not None:
                     candidates.append((node, index))
