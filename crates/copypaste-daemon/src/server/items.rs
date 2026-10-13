@@ -72,6 +72,7 @@ pub(super) fn status(state: &AppState, id: u64) -> Response {
             listen_addr,
             item_count,
             capture_running: state.capture_running(),
+            clipboard_available: state.clipboard_available(),
             clipboard_backend: state.backend_name().to_string(),
             private_mode: settings.private_mode,
             private_mode_epoch: settings.private_mode_epoch(),
@@ -434,10 +435,58 @@ pub(super) fn reorder_pinned(state: &AppState, id: u64, ids: &[String]) -> Respo
 mod tests {
     use super::*;
     use crate::server::dispatch::dispatch_store;
-    use crate::testutil::test_state;
+    use crate::testutil::{test_state, test_state_with_clipboard};
     use base64::engine::general_purpose::STANDARD;
     use copypaste_ipc::limits::LIST_PREVIEW_BYTES;
     use copypaste_ipc::{content_type::TEXT, Method};
+
+    struct UnavailableClipboard;
+
+    impl crate::clipboard::ClipboardSource for UnavailableClipboard {
+        fn poll(&mut self) -> Option<crate::clipboard::Capture> {
+            None
+        }
+
+        fn poll_with_policy(
+            &mut self,
+            _: crate::clipboard::CapturePolicy<'_>,
+        ) -> Option<crate::clipboard::Capture> {
+            None
+        }
+
+        fn is_available(&self) -> bool {
+            false
+        }
+
+        fn set_contents(&mut self, _: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn backend_name(&self) -> &'static str {
+            "unavailable-test"
+        }
+    }
+
+    #[test]
+    fn status_reports_clipboard_transport_availability() {
+        let (available, _dir) = test_state("status-clipboard-available");
+        let (unavailable, _dir) = test_state_with_clipboard(
+            "status-clipboard-unavailable",
+            Box::new(UnavailableClipboard),
+        );
+
+        let response_available = status(&available, 1);
+        let response_unavailable = status(&unavailable, 2);
+        let Some(ResponseData::Status(available)) = response_available.data else {
+            panic!("status response expected");
+        };
+        let Some(ResponseData::Status(unavailable)) = response_unavailable.data else {
+            panic!("status response expected");
+        };
+
+        assert!(available.clipboard_available);
+        assert!(!unavailable.clipboard_available);
+    }
 
     #[test]
     fn explicit_file_import_keeps_each_named_record_and_original_bytes() {

@@ -429,6 +429,7 @@ mod tests {
         let status: StatusData = serde_json::from_str(minimal).unwrap();
         assert!(status.device_name.is_empty());
         assert!(status.listen_addr.is_none());
+        assert!(!status.clipboard_available);
         assert!(!status.private_mode);
         assert_eq!(status.private_mode_epoch, 0);
         assert_eq!(status.counters, DiagnosticCounters::default());
