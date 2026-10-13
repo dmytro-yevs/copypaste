@@ -5,6 +5,11 @@
 #ifdef GDK_WINDOWING_WAYLAND
 #include <gdk/gdkwayland.h>
 #endif
+#ifdef GDK_WINDOWING_X11
+#include <gdk/gdkx.h>
+#include <X11/Xlib.h>
+#include <X11/extensions/XRes.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,6 +28,8 @@ typedef struct {
 typedef struct {
   const gchar *activity_path;
   const gchar *ready_path;
+  const gchar *request_audit_path;
+  int request_audit_descriptor;
   Offer offers[MAX_OFFERS];
   guint count;
   guint hold_seconds;
@@ -32,6 +39,16 @@ typedef struct {
 } Provider;
 
 static gboolean write_ready(const gchar *path);
+
+static gboolean write_all(int descriptor, const gchar *bytes, gsize length) {
+  gsize offset = 0;
+  while (offset < length) {
+    ssize_t written = write(descriptor, bytes + offset, length - offset);
+    if (written <= 0) return FALSE;
+    offset += (gsize)written;
+  }
+  return TRUE;
+}
 
 static gboolean valid_application_id(const gchar *value) {
   if (value == NULL || *value == '\0' || strlen(value) > 255) return FALSE;
@@ -80,6 +97,110 @@ static void record_request(const gchar *path, const gchar *mime) {
   fsync(descriptor);
   close(descriptor);
 }
+
+static gboolean prepare_request_audit(Provider *provider) {
+  int descriptor = open(provider->request_audit_path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+  if (descriptor < 0) return FALSE;
+  struct stat details;
+  if (fstat(descriptor, &details) != 0 || !S_ISREG(details.st_mode) || (details.st_mode & 0077) != 0) {
+    close(descriptor);
+    return FALSE;
+  }
+  provider->request_audit_descriptor = descriptor;
+  return TRUE;
+}
+
+#ifdef GDK_WINDOWING_X11
+typedef struct {
+  Display *display;
+  gboolean saw_error;
+  int (*previous_handler)(Display *, XErrorEvent *);
+} XErrorScope;
+
+static XErrorScope *x_error_scope;
+
+static int record_x_error(Display *display, XErrorEvent *event) {
+  if (x_error_scope != NULL && x_error_scope->display == display) {
+    x_error_scope->saw_error = TRUE;
+    return 0;
+  }
+  if (x_error_scope != NULL && x_error_scope->previous_handler != NULL) {
+    return x_error_scope->previous_handler(display, event);
+  }
+  return 0;
+}
+
+static pid_t requestor_pid(Display *display, Window requestor, const gchar **error) {
+  XResClientIdSpec specification = {.client = requestor, .mask = XRES_CLIENT_ID_PID_MASK};
+  XResClientIdValue *identities = NULL;
+  long count = 0;
+  XErrorScope scope = {.display = display, .saw_error = FALSE, .previous_handler = NULL};
+  x_error_scope = &scope;
+  scope.previous_handler = XSetErrorHandler(record_x_error);
+  Status status = XResQueryClientIds(display, 1, &specification, &count, &identities);
+  XSync(display, False);
+  XSetErrorHandler(scope.previous_handler);
+  x_error_scope = NULL;
+  if (scope.saw_error || status != Success) {
+    if (identities != NULL) XResClientIdsDestroy(count, identities);
+    *error = "xres_query_failed";
+    return -1;
+  }
+  for (long index = 0; index < count; index++) {
+    if (XResGetClientIdType(&identities[index]) == XRES_CLIENT_ID_PID) {
+      pid_t pid = XResGetClientPid(&identities[index]);
+      XResClientIdsDestroy(count, identities);
+      if (pid > 0) return pid;
+      *error = "xres_pid_unavailable";
+      return -1;
+    }
+  }
+  if (identities != NULL) XResClientIdsDestroy(count, identities);
+  *error = "xres_pid_unavailable";
+  return -1;
+}
+
+static void append_json_string(GString *record, const gchar *value) {
+  g_string_append_c(record, '"');
+  for (const guchar *cursor = (const guchar *)value; *cursor; cursor++) {
+    if (*cursor == '"' || *cursor == '\\') {
+      g_string_append_c(record, '\\');
+      g_string_append_c(record, (gchar)*cursor);
+    } else if (*cursor >= 0x20 && *cursor <= 0x7e) {
+      g_string_append_c(record, (gchar)*cursor);
+    } else {
+      g_string_append_printf(record, "\\u%04x", (unsigned int)*cursor);
+    }
+  }
+  g_string_append_c(record, '"');
+}
+
+static GdkFilterReturn audit_selection_request(GdkXEvent *native_event, GdkEvent *event, gpointer user_data) {
+  (void)event;
+  Provider *provider = user_data;
+  XEvent *xevent = native_event;
+  if (xevent->type != SelectionRequest || provider->request_audit_descriptor < 0) return GDK_FILTER_CONTINUE;
+  XSelectionRequestEvent *request = &xevent->xselectionrequest;
+  gchar *target = XGetAtomName(request->display, request->target);
+  const gchar *error = NULL;
+  pid_t pid = requestor_pid(request->display, request->requestor, &error);
+  GString *record = g_string_new("{\"target\":");
+  append_json_string(record, target == NULL ? "" : target);
+  if (pid > 0) {
+    g_string_append_printf(record, ",\"requestor_pid\":%ld,\"error\":null}\n", (long)pid);
+  } else {
+    g_string_append(record, ",\"requestor_pid\":null,\"error\":");
+    append_json_string(record, error == NULL ? "xres_pid_unavailable" : error);
+    g_string_append(record, "}\n");
+  }
+  if (!write_all(provider->request_audit_descriptor, record->str, record->len) || fsync(provider->request_audit_descriptor) != 0) {
+    provider->failed = TRUE;
+  }
+  g_string_free(record, TRUE);
+  if (target != NULL) XFree(target);
+  return GDK_FILTER_CONTINUE;
+}
+#endif
 
 static void provide(GtkClipboard *clipboard, GtkSelectionData *selection, guint info, gpointer user_data) {
   (void)clipboard;
@@ -155,7 +276,7 @@ static gboolean write_ready(const gchar *path) {
 }
 
 int main(int argc, char **argv) {
-  Provider provider = {0};
+  Provider provider = {.request_audit_descriptor = -1};
   const gchar *application_id = NULL;
   const gchar *ready_path = NULL;
   guint hold_seconds = 0;
@@ -168,6 +289,9 @@ int main(int argc, char **argv) {
       index += 2;
     } else if (index + 1 < argc && strcmp(argv[index], "--activity-log") == 0) {
       provider.activity_path = argv[index + 1];
+      index += 2;
+    } else if (index + 1 < argc && strcmp(argv[index], "--request-audit-file") == 0) {
+      provider.request_audit_path = argv[index + 1];
       index += 2;
     } else if (index + 1 < argc && strcmp(argv[index], "--hold-seconds") == 0) {
       gchar *end = NULL;
@@ -196,6 +320,12 @@ int main(int argc, char **argv) {
   gtk_init(&argc, &argv);
   provider.ready_path = ready_path;
   provider.hold_seconds = hold_seconds;
+#ifdef GDK_WINDOWING_X11
+  if (provider.request_audit_path != NULL && GDK_IS_X11_DISPLAY(gdk_display_get_default())) {
+    if (!prepare_request_audit(&provider)) return 1;
+    gdk_window_add_filter(NULL, audit_selection_request, &provider);
+  }
+#endif
   GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
   gtk_window_set_title(GTK_WINDOW(window), "CopyPaste qualification source");
   gtk_window_set_default_size(GTK_WINDOW(window), 240, 80);
@@ -217,5 +347,6 @@ int main(int argc, char **argv) {
     g_free(provider.offers[index].mime);
     g_free(provider.offers[index].bytes);
   }
+  if (provider.request_audit_descriptor >= 0) close(provider.request_audit_descriptor);
   return provider.failed ? 1 : 0;
 }
