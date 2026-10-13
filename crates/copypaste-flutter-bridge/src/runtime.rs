@@ -457,15 +457,25 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
-    async fn attached_status_server() -> (tempfile::TempDir, PathBuf, tokio::task::JoinHandle<()>) {
+    #[derive(Clone, Copy)]
+    enum AttachmentReply {
+        Status { protocol_version: u32 },
+        Empty,
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn attached_status_server(
+        reply: AttachmentReply,
+        mode: u32,
+    ) -> (tempfile::TempDir, PathBuf, tokio::task::JoinHandle<()>) {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
         let directory = tempfile::tempdir().expect("endpoint directory");
         let endpoint = directory.path().join("runtime.sock");
         let listener = tokio::net::UnixListener::bind(&endpoint).expect("endpoint listener");
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&endpoint, std::fs::Permissions::from_mode(0o600))
-            .expect("private endpoint");
+        std::fs::set_permissions(&endpoint, std::fs::Permissions::from_mode(mode))
+            .expect("endpoint permissions");
         let server = tokio::spawn(async move {
             loop {
                 let Ok((stream, _)) = listener.accept().await else {
@@ -486,26 +496,29 @@ mod tests {
                 let Ok(request) = serde_json::from_str::<copypaste_ipc::Request>(&line) else {
                     continue;
                 };
-                let response = copypaste_ipc::Response::ok(
-                    request.id,
-                    copypaste_ipc::ResponseData::Status(copypaste_ipc::StatusData {
-                        sync_status: Default::default(),
-                        device_name: "Attached runtime".into(),
-                        device_id: None,
-                        version: "test".into(),
-                        protocol_version: copypaste_ipc::PROTOCOL_VERSION,
-                        listen_addr: None,
-                        device_details: None,
-                        item_count: 0,
-                        capture_running: true,
-                        clipboard_available: true,
-                        clipboard_backend: "test".into(),
-                        private_mode: false,
-                        private_mode_epoch: 0,
-                        counters: Default::default(),
-                        settings_health: None,
-                    }),
-                );
+                let data = match reply {
+                    AttachmentReply::Status { protocol_version } => {
+                        copypaste_ipc::ResponseData::Status(copypaste_ipc::StatusData {
+                            sync_status: Default::default(),
+                            device_name: "Attached runtime".into(),
+                            device_id: None,
+                            version: "test".into(),
+                            protocol_version,
+                            listen_addr: None,
+                            device_details: None,
+                            item_count: 0,
+                            capture_running: true,
+                            clipboard_available: true,
+                            clipboard_backend: "test".into(),
+                            private_mode: false,
+                            private_mode_epoch: 0,
+                            counters: Default::default(),
+                            settings_health: None,
+                        })
+                    }
+                    AttachmentReply::Empty => copypaste_ipc::ResponseData::Empty {},
+                };
+                let response = copypaste_ipc::Response::ok(request.id, data);
                 let Ok(line) = serde_json::to_string(&response) else {
                     continue;
                 };
@@ -614,6 +627,18 @@ mod tests {
                 .to_string_lossy()
                 .as_ref()
         );
+        #[cfg(target_os = "linux")]
+        {
+            let conflict = attach(
+                socket_path()
+                    .expect("owned socket")
+                    .to_string_lossy()
+                    .into_owned(),
+            )
+            .await
+            .expect_err("attachment must not replace an owned runtime");
+            assert_eq!(conflict.code, "runtime_conflict");
+        }
         stop();
     }
 
@@ -622,7 +647,13 @@ mod tests {
     async fn attaching_an_explicit_endpoint_serves_queries_and_detaches_without_stopping_owner() {
         let _guard = runtime_test_guard().await;
         stop();
-        let (_directory, endpoint, server) = attached_status_server().await;
+        let (_directory, endpoint, server) = attached_status_server(
+            AttachmentReply::Status {
+                protocol_version: copypaste_ipc::PROTOCOL_VERSION,
+            },
+            0o600,
+        )
+        .await;
         attach(endpoint.to_string_lossy().into_owned())
             .await
             .expect("attach explicit endpoint");
@@ -655,14 +686,108 @@ mod tests {
         let _guard = runtime_test_guard().await;
         stop();
         let directory = tempfile::tempdir().expect("endpoint directory");
+        let relative = attach("runtime.sock".into())
+            .await
+            .expect_err("relative endpoint must be rejected");
+        assert_eq!(relative.code, "runtime_endpoint_invalid");
+        assert!(socket_path().is_err(), "relative rejection must not attach");
+        let missing = attach(
+            directory
+                .path()
+                .join("missing.sock")
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .await
+        .expect_err("missing endpoint must be rejected");
+        assert_eq!(missing.code, "runtime_endpoint_invalid");
+        assert!(socket_path().is_err(), "missing rejection must not attach");
         let regular = directory.path().join("not-a-socket");
         std::fs::write(&regular, "not a socket").expect("regular endpoint fixture");
         let invalid = attach(regular.to_string_lossy().into_owned())
             .await
             .expect_err("regular path must be rejected");
         assert_eq!(invalid.code, "runtime_endpoint_invalid");
+        assert!(
+            socket_path().is_err(),
+            "regular-file rejection must not attach"
+        );
 
-        let (_owner_directory, endpoint, server) = attached_status_server().await;
+        let (private_directory, private_endpoint, private_server) = attached_status_server(
+            AttachmentReply::Status {
+                protocol_version: copypaste_ipc::PROTOCOL_VERSION,
+            },
+            0o600,
+        )
+        .await;
+        let symlink = directory.path().join("endpoint-link");
+        std::os::unix::fs::symlink(&private_endpoint, &symlink).expect("endpoint symlink");
+        let linked = attach(symlink.to_string_lossy().into_owned())
+            .await
+            .expect_err("symlink endpoint must be rejected");
+        assert_eq!(linked.code, "runtime_endpoint_invalid");
+        assert!(socket_path().is_err(), "symlink rejection must not attach");
+        private_server.abort();
+        drop(private_directory);
+
+        let (_public_directory, public_endpoint, public_server) = attached_status_server(
+            AttachmentReply::Status {
+                protocol_version: copypaste_ipc::PROTOCOL_VERSION,
+            },
+            0o644,
+        )
+        .await;
+        let public = attach(public_endpoint.to_string_lossy().into_owned())
+            .await
+            .expect_err("nonprivate endpoint must be rejected");
+        assert_eq!(public.code, "runtime_endpoint_invalid");
+        assert!(socket_path().is_err(), "mode rejection must not attach");
+        public_server.abort();
+
+        let (_wrong_version_directory, wrong_version_endpoint, wrong_version_server) =
+            attached_status_server(
+                AttachmentReply::Status {
+                    protocol_version: copypaste_ipc::PROTOCOL_VERSION + 1,
+                },
+                0o600,
+            )
+            .await;
+        let wrong_version = attach(wrong_version_endpoint.to_string_lossy().into_owned())
+            .await
+            .expect_err("wrong protocol endpoint must be rejected");
+        assert_eq!(wrong_version.code, "runtime_internal");
+        assert!(socket_path().is_err(), "protocol rejection must not attach");
+        wrong_version_server.abort();
+
+        let (_wrong_shape_directory, wrong_shape_endpoint, wrong_shape_server) =
+            attached_status_server(AttachmentReply::Empty, 0o600).await;
+        let wrong_shape = attach(wrong_shape_endpoint.to_string_lossy().into_owned())
+            .await
+            .expect_err("wrong response endpoint must be rejected");
+        assert_eq!(wrong_shape.code, "runtime_internal");
+        assert!(socket_path().is_err(), "response rejection must not attach");
+        wrong_shape_server.abort();
+
+        let closed_endpoint = directory.path().join("closed.sock");
+        let closed_listener =
+            tokio::net::UnixListener::bind(&closed_endpoint).expect("closed socket");
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&closed_endpoint, std::fs::Permissions::from_mode(0o600))
+            .expect("closed socket permissions");
+        drop(closed_listener);
+        let closed = attach(closed_endpoint.to_string_lossy().into_owned())
+            .await
+            .expect_err("closed endpoint must be unreachable");
+        assert_eq!(closed.code, "daemon_unreachable");
+        assert!(socket_path().is_err(), "closed endpoint must not attach");
+
+        let (_owner_directory, endpoint, server) = attached_status_server(
+            AttachmentReply::Status {
+                protocol_version: copypaste_ipc::PROTOCOL_VERSION,
+            },
+            0o600,
+        )
+        .await;
         attach(endpoint.to_string_lossy().into_owned())
             .await
             .expect("first attachment");
