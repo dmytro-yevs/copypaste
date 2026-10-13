@@ -1,5 +1,7 @@
 import 'package:flutter/services.dart';
 
+import '../../generated/api.dart' as api;
+
 enum LinuxDesktopSession { x11, wayland, unsupported }
 
 enum LinuxRemoteDesktopState { unsupported, consentRequired, active }
@@ -74,11 +76,16 @@ abstract interface class LinuxIntegrationPort {
 }
 
 class MethodChannelLinuxIntegrationPort implements LinuxIntegrationPort {
-  MethodChannelLinuxIntegrationPort({MethodChannel? channel})
-    : _channel =
-          channel ?? const MethodChannel('com.copypaste.app/linux_integration');
+  MethodChannelLinuxIntegrationPort({
+    MethodChannel? channel,
+    Future<bool> Function()? clipboardAvailable,
+  }) : _channel =
+           channel ??
+           const MethodChannel('com.copypaste.app/linux_integration'),
+       _clipboardAvailable = clipboardAvailable ?? api.clipboardAvailable;
 
   final MethodChannel _channel;
+  final Future<bool> Function() _clipboardAvailable;
 
   @override
   Future<LinuxIntegrationStatus> status() async {
@@ -86,7 +93,28 @@ class MethodChannelLinuxIntegrationPort implements LinuxIntegrationPort {
     if (result == null) {
       throw const FormatException('Invalid Linux status.');
     }
-    return LinuxIntegrationStatus.fromMap(result);
+    final nativeStatus = LinuxIntegrationStatus.fromMap(result);
+    final daemonClipboardAvailable = await _daemonClipboardAvailable();
+    final clipboard = nativeStatus.clipboard && daemonClipboardAvailable;
+    return LinuxIntegrationStatus(
+      session: nativeStatus.session,
+      globalShortcuts: nativeStatus.globalShortcuts,
+      remoteDesktop: nativeStatus.remoteDesktop,
+      companion: nativeStatus.companion,
+      clipboard: clipboard,
+      quickPaste: nativeStatus.quickPaste && clipboard,
+      screenshotProtection: nativeStatus.screenshotProtection,
+      startAtLogin: nativeStatus.startAtLogin,
+      uriRegistered: nativeStatus.uriRegistered,
+    );
+  }
+
+  Future<bool> _daemonClipboardAvailable() async {
+    try {
+      return await _clipboardAvailable();
+    } catch (_) {
+      return false;
+    }
   }
 
   @override

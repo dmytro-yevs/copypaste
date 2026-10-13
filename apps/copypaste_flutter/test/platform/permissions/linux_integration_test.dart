@@ -7,10 +7,15 @@ void main() {
   const channel = MethodChannel('test/linux_integration');
   final messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  late Future<bool> Function() clipboardAvailable;
   late MethodChannelLinuxIntegrationPort port;
 
   setUp(() {
-    port = MethodChannelLinuxIntegrationPort(channel: channel);
+    clipboardAvailable = () async => true;
+    port = MethodChannelLinuxIntegrationPort(
+      channel: channel,
+      clipboardAvailable: () => clipboardAvailable(),
+    );
     messenger.setMockMethodCallHandler(channel, (call) async {
       return switch (call.method) {
         'status' => {
@@ -67,4 +72,41 @@ void main() {
 
     await expectLater(port.status(), throwsFormatException);
   });
+
+  test('fails closed when the daemon clipboard is unavailable', () async {
+    clipboardAvailable = () async => false;
+
+    final status = await port.status();
+
+    expect(status.session, LinuxDesktopSession.wayland);
+    expect(status.globalShortcuts, isTrue);
+    expect(status.remoteDesktop, LinuxRemoteDesktopState.active);
+    expect(status.companion, LinuxCompanionState.active);
+    expect(status.clipboard, isFalse);
+    expect(status.quickPaste, isFalse);
+  });
+
+  test('fails closed when the daemon clipboard check throws', () async {
+    clipboardAvailable = () async => throw StateError('daemon unavailable');
+
+    final status = await port.status();
+
+    expect(status.clipboard, isFalse);
+    expect(status.quickPaste, isFalse);
+  });
+
+  test(
+    'restores readiness when the daemon clipboard becomes available',
+    () async {
+      var available = false;
+      clipboardAvailable = () async => available;
+
+      expect((await port.status()).clipboard, isFalse);
+      available = true;
+
+      final status = await port.status();
+      expect(status.clipboard, isTrue);
+      expect(status.quickPaste, isTrue);
+    },
+  );
 }
