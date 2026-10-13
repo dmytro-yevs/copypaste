@@ -24,6 +24,12 @@ the previous application's focus. The user must install and enable the matching
 companion and approve Remote Desktop keyboard access. Packages must not enable
 extensions or acquire that permission silently.
 
+Linux Quick Paste runs in a separate UI process and attaches to the exact
+private runtime endpoint supplied by the main application. Only the main
+application owns the daemon's lifetime. Closing Quick Paste detaches its local
+client without stopping the daemon, and a missing or invalid endpoint must not
+start another daemon or fall back to the standalone CLI runtime.
+
 Clipboard integration must cover X11 and native Wayland on GNOME and KDE.
 Changing a Wayland session to XWayland is not evidence of native Wayland support.
 Unavailable protocols, locked keyrings, rejected permissions, and unsuccessful
