@@ -1,6 +1,8 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import Clutter from 'gi://Clutter';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 const BUS_NAME = 'app.copypaste.QualificationGeometry';
 const PATH = '/app/copypaste/QualificationGeometry';
@@ -20,9 +22,26 @@ function rectValues(rect) {
 
 export default class QualificationWindowGeometryExtension extends Extension {
     enable() {
+        // The private headless Mutter seat has no libinput keyboard; keep one
+        // virtual keyboard alive so GTK Wayland clients receive seat keyboard
+        // capability during the qualified desktop session.
+        const seat = Clutter.get_default_backend().get_default_seat();
+        this._virtualKeyboard = seat.create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+        this._desktopReady = false;
+        this._startupCompleteId = 0;
+        this._overviewHiddenId = 0;
+        if (Main.layoutManager._startingUp) {
+            this._startupCompleteId = Main.layoutManager.connect('startup-complete', () => this._prepareDesktop());
+        } else {
+            this._prepareDesktop();
+        }
         this._connection = Gio.bus_get_sync(Gio.BusType.SESSION, null);
         this._impl = Gio.DBusExportedObject.wrapJSObject(XML, {
-            VersionAsync: (_params, invocation) => invocation.return_value(new GLib.Variant('(u)', [1])),
+            VersionAsync: (_params, invocation) => {
+                if (!this._desktopReady)
+                    return invocation.return_dbus_error(`${INTERFACE}.Error.NotReady`, 'GNOME desktop is not ready');
+                invocation.return_value(new GLib.Variant('(u)', [1]));
+            },
             LookupAsync: (params, invocation) => this._lookup(params, invocation),
             PointBelongsToAsync: (params, invocation) => this._pointBelongsTo(params, invocation),
         });
@@ -31,12 +50,39 @@ export default class QualificationWindowGeometryExtension extends Extension {
     }
 
     disable() {
+        if (this._startupCompleteId)
+            Main.layoutManager.disconnect(this._startupCompleteId);
+        this._startupCompleteId = 0;
+        if (this._overviewHiddenId)
+            Main.overview.disconnect(this._overviewHiddenId);
+        this._overviewHiddenId = 0;
+        this._desktopReady = false;
+        this._virtualKeyboard?.run_dispose();
+        this._virtualKeyboard = null;
         if (this._owner)
             Gio.bus_unown_name(this._owner);
         this._owner = 0;
         this._impl?.unexport();
         this._impl = null;
         this._connection = null;
+    }
+
+    _prepareDesktop() {
+        if (this._startupCompleteId)
+            Main.layoutManager.disconnect(this._startupCompleteId);
+        this._startupCompleteId = 0;
+        if (this._desktopReady || this._overviewHiddenId)
+            return;
+        if (Main.overview.visible || Main.overview.visibleTarget) {
+            this._overviewHiddenId = Main.overview.connect('hidden', () => {
+                Main.overview.disconnect(this._overviewHiddenId);
+                this._overviewHiddenId = 0;
+                this._desktopReady = true;
+            });
+            Main.overview.hide();
+        } else {
+            this._desktopReady = true;
+        }
     }
 
     _lookup(params, invocation) {
