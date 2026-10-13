@@ -56,10 +56,11 @@ class LinuxOnboardingController extends ChangeNotifier {
     }
   }
 
-  void showIntegration() {
+  Future<void> showIntegration() async {
     if (_busy || _step != LinuxOnboardingStep.welcome) return;
     _step = LinuxOnboardingStep.integration;
     _notify();
+    await _run(_refresh);
   }
 
   void showPreviousStep() {
