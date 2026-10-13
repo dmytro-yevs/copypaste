@@ -297,45 +297,52 @@ class _AppMobileNavigationState extends State<AppMobileNavigation>
                   context,
                   weight: weights[index],
                   directlyManipulated: dragging || pageGesture,
-                  builder: (context, factor, _) => NavigationItem(
-                    key: ValueKey(appNavigationDestinations[index].destination),
-                    onChanged: (value) {
-                      if (!value) {
-                        _activate(appNavigationDestinations[index].destination);
-                      }
-                    },
-                    alignment: Alignment.center,
-                    style: AppTheme.mobileNavigationButtonStyle(
-                      selected: false,
-                      selectionFactor: factor,
-                      horizontalPadding: layout.horizontalPadding,
-                    ),
-                    selectedStyle: AppTheme.mobileNavigationButtonStyle(
-                      selected: true,
-                      selectionFactor: factor,
-                      horizontalPadding: layout.horizontalPadding,
-                    ),
-                    spacing: AppSpacing.navigationIconLabelGap,
-                    overflow: NavigationOverflow.ellipsis,
-                    label: Text(
-                      appNavigationDestinations[index].label,
-                      style: AppTheme.mobileNavigationTextStyle(
-                        fontSize: layout.fontSize,
-                        selected: weights[index] >= 0.5,
+                  builder: (context, factor, _) {
+                    final destination = appNavigationDestinations[index];
+                    return NavigationItem(
+                      key: ValueKey(destination.destination),
+                      onChanged: (value) {
+                        if (!value) _activate(destination.destination);
+                      },
+                      alignment: Alignment.center,
+                      style: AppTheme.mobileNavigationButtonStyle(
+                        selected: false,
+                        selectionFactor: factor,
+                        horizontalPadding: layout.horizontalPadding,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                    ),
-                    child: AppMotion.navigationIconResponse(
-                      context,
-                      selected: weights[index] >= 0.5,
-                      child: Icon(
-                        appNavigationDestinations[index].icon,
-                        size: AppIconSize.lg,
+                      selectedStyle: AppTheme.mobileNavigationButtonStyle(
+                        selected: true,
+                        selectionFactor: factor,
+                        horizontalPadding: layout.horizontalPadding,
                       ),
-                    ),
-                  ),
+                      spacing: AppSpacing.navigationIconLabelGap,
+                      overflow: NavigationOverflow.ellipsis,
+                      label: ExcludeSemantics(
+                        child: Text(
+                          destination.label,
+                          style: AppTheme.mobileNavigationTextStyle(
+                            fontSize: layout.fontSize,
+                            selected: weights[index] >= 0.5,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                      child: Semantics(
+                        label: destination.label,
+                        button: true,
+                        selected: selected == destination.destination,
+                        child: ExcludeSemantics(
+                          child: AppMotion.navigationIconResponse(
+                            context,
+                            selected: weights[index] >= 0.5,
+                            child: Icon(destination.icon, size: AppIconSize.lg),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ),
           ],
