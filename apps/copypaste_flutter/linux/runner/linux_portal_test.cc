@@ -675,6 +675,55 @@ void test_shutdown_drops_queued_session_closed() {
   g_assert_cmpuint(closed, ==, 0);
 }
 
+#if defined(GDK_WINDOWING_WAYLAND)
+void test_wayland_export_release_waits_for_terminal_response() {
+  guint unexports = 0;
+  bool window_finalized = false;
+  GObject* object = G_OBJECT(g_object_new(G_TYPE_OBJECT, nullptr));
+  g_object_weak_ref(
+      object,
+      [](gpointer data, GObject*) { *static_cast<bool*>(data) = true; },
+      &window_finalized);
+
+  auto lease = std::make_shared<LinuxPortal::Impl::ParentIdentifierLease>(
+      reinterpret_cast<GdkWindow*>(object), "wayland:fixture",
+      [&unexports](GdkWindow*) { ++unexports; },
+      [](GdkWindow*) { return false; });
+  std::function<void()> final_response = [lease] {};
+  g_object_unref(object);
+  lease.reset();
+
+  g_assert_cmpuint(unexports, ==, 0);
+  g_assert_false(window_finalized);
+  final_response();
+  g_assert_cmpuint(unexports, ==, 0);
+  final_response = nullptr;
+  g_assert_true(wait_until([&] { return unexports == 1; }));
+  g_assert_cmpuint(unexports, ==, 1);
+  g_assert_true(window_finalized);
+}
+
+void test_wayland_export_release_skips_destroyed_window() {
+  guint unexports = 0;
+  bool window_finalized = false;
+  GObject* object = G_OBJECT(g_object_new(G_TYPE_OBJECT, nullptr));
+  g_object_weak_ref(
+      object,
+      [](gpointer data, GObject*) { *static_cast<bool*>(data) = true; },
+      &window_finalized);
+
+  auto lease = std::make_shared<LinuxPortal::Impl::ParentIdentifierLease>(
+      reinterpret_cast<GdkWindow*>(object), "wayland:fixture",
+      [&unexports](GdkWindow*) { ++unexports; },
+      [](GdkWindow*) { return true; });
+  g_object_unref(object);
+  lease.reset();
+
+  g_assert_true(wait_until([&] { return window_finalized; }));
+  g_assert_cmpuint(unexports, ==, 0);
+}
+#endif
+
 void test_remote_desktop_object_path_session_grants_keyboard() {
   PortalFixture fixture;
   LinuxPortal client(nullptr);
@@ -780,6 +829,12 @@ int main(int argc, char** argv) {
                   test_session_closed_unsubscribes_and_completes);
   g_test_add_func("/linux_portal/shutdown_drops_queued_session_closed",
                   test_shutdown_drops_queued_session_closed);
+#if defined(GDK_WINDOWING_WAYLAND)
+  g_test_add_func("/linux_portal/wayland_export_release_waits_for_terminal_response",
+                  test_wayland_export_release_waits_for_terminal_response);
+  g_test_add_func("/linux_portal/wayland_export_release_skips_destroyed_window",
+                  test_wayland_export_release_skips_destroyed_window);
+#endif
   g_test_add_func("/linux_portal/remote_desktop_object_path_session_grants_keyboard",
                   test_remote_desktop_object_path_session_grants_keyboard);
   g_test_add_func("/linux_portal/remote_desktop_denied_keyboard_never_activates",
