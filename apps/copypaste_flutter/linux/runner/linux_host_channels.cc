@@ -358,7 +358,18 @@ void quit_context_when_idle() {
       application, nullptr);
 }
 
-bool spawn_quick_paste(const std::string& x11_window = {}) {
+guint32 x11_user_time() {
+#if defined(GDK_WINDOWING_X11)
+  GdkDisplay* display = gdk_display_get_default();
+  if (display != nullptr && GDK_IS_X11_DISPLAY(display)) {
+    return gdk_x11_display_get_user_time(display);
+  }
+#endif
+  return GDK_CURRENT_TIME;
+}
+
+bool spawn_quick_paste(const std::string& x11_window, guint32 activation_time) {
+  if (activation_time == GDK_CURRENT_TIME) return false;
   g_autofree gchar* endpoint_arg = runtime_endpoint_argument();
   if (endpoint_arg == nullptr) return false;
   if (bridge_child_pid != 0) {
@@ -381,8 +392,13 @@ bool spawn_quick_paste(const std::string& x11_window = {}) {
     g_snprintf(x11_arg, sizeof(x11_arg), "--copypaste-x11-window=%s",
                x11_window.c_str());
   }
+  gchar activation_arg[80] = {};
+  g_snprintf(activation_arg, sizeof(activation_arg),
+             "--copypaste-x11-activation-time=%" G_GUINT32_FORMAT,
+             activation_time);
   gchar* arguments[] = {executable, quick, presentation_arg, endpoint_arg,
-                        x11_window.empty() ? nullptr : x11_arg, nullptr};
+                        x11_window.empty() ? nullptr : x11_arg, activation_arg,
+                        nullptr};
   if (!g_spawn_async(nullptr, arguments, nullptr, static_cast<GSpawnFlags>(
                      G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD),
                      nullptr, nullptr, &bridge_child_pid, nullptr)) {
@@ -936,8 +952,13 @@ void quick_paste_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
     success(call, fl_value_new_bool(x11 || (portal != nullptr &&
                                             portal->remote_desktop_active())));
   } else if (is_method(call, "open")) {
+    const guint32 shortcut_time = x11 ? x11_quick_paste->take_activation_time()
+                                      : GDK_CURRENT_TIME;
+    const guint32 activation_time = shortcut_time == GDK_CURRENT_TIME
+                                        ? x11_user_time()
+                                        : shortcut_time;
     success(call, fl_value_new_bool(x11 && spawn_quick_paste(
-        x11_quick_paste->focused_window())));
+        x11_quick_paste->focused_window(), activation_time)));
   } else if (is_method(call, "dispose")) {
     success(call, fl_value_new_bool(true));
   } else {
