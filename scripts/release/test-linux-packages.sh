@@ -31,7 +31,7 @@ run_architecture() {
       apt-get install --yes --no-install-recommends \
         binutils build-essential ca-certificates cpio curl dpkg-dev file rpm xz-utils \
         gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
-        libgstreamer1.0-dev patchelf pkg-config
+        libgstreamer1.0-dev libkeybinder-3.0-0 patchelf pkg-config
       cp -a /source /work
       cd /work
       mkdir -p dist/linux-"$ARCHITECTURE"/bundle
@@ -93,6 +93,69 @@ run_architecture() {
       grep -F "GST_PLUGIN_SYSTEM_PATH" /tmp/appimage/squashfs-root/AppRun
       grep -F "LD_LIBRARY_PATH=\"\$HERE/usr/lib/gstreamer-runtime:\$HERE/usr/lib/copypaste/lib\"" /tmp/appimage/squashfs-root/AppRun
       app_root=/tmp/appimage/squashfs-root
+      python3 - "$app_root" "$ARCHITECTURE" <<'PY'
+import hashlib
+import json
+import stat
+import sys
+from pathlib import Path
+
+appdir = Path(sys.argv[1]).resolve(strict=True)
+architecture = sys.argv[2]
+manifest_path = appdir / "usr/share/copypaste/keybinder-runtime.json"
+try:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+except (OSError, UnicodeError, json.JSONDecodeError) as error:
+    raise SystemExit(f"ERROR: Keybinder AppImage manifest is unavailable: {error}") from error
+
+def require(condition, message):
+    if not condition:
+        raise SystemExit(f"ERROR: {message}")
+
+def bundled_file(relative, label):
+    require(isinstance(relative, str), f"Keybinder {label} path is invalid")
+    candidate = appdir / relative
+    try:
+        mode = candidate.lstat().st_mode
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(appdir)
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"ERROR: Keybinder {label} escapes the AppImage") from error
+    require(stat.S_ISREG(mode), f"Keybinder {label} is not a regular file")
+    return candidate
+
+def digest(path):
+    value = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            value.update(block)
+    return value.hexdigest()
+
+require(isinstance(manifest, dict) and manifest.get("schema") == 1, "Keybinder manifest schema is invalid")
+require(manifest.get("architecture") == architecture, "Keybinder manifest architecture does not match the package")
+library = manifest.get("library")
+license_record = manifest.get("license")
+require(isinstance(library, dict), "Keybinder manifest library record is invalid")
+require(isinstance(license_record, dict), "Keybinder manifest license record is invalid")
+require(library.get("soname") == "libkeybinder-3.0.so.0", "Keybinder manifest SONAME is invalid")
+require(library.get("source_package") == "libkeybinder-3.0-0", "Keybinder manifest source package is invalid")
+library_path = bundled_file(library.get("path"), "library")
+require(library.get("sha256") == digest(library_path), "Keybinder manifest does not bind bundled library bytes")
+soname = appdir / "usr/lib/copypaste/lib/libkeybinder-3.0.so.0"
+require(soname.is_symlink(), "Keybinder SONAME entry is missing")
+require(soname.resolve(strict=True) == library_path.resolve(strict=True), "Keybinder SONAME does not resolve to the manifest library")
+license_path = bundled_file(license_record.get("path"), "license")
+require(license_path == appdir / "usr/share/licenses/copypaste-keybinder/libkeybinder-3.0-0.copyright", "Keybinder license path is invalid")
+require(license_record.get("sha256") == digest(license_path), "Keybinder manifest does not bind bundled license bytes")
+common_licenses = license_record.get("common_licenses")
+require(isinstance(common_licenses, list), "Keybinder common license records are invalid")
+for common in common_licenses:
+    require(isinstance(common, dict), "Keybinder common license record is invalid")
+    common_path = common.get("path")
+    require(isinstance(common_path, str) and common_path not in (".", "..") and Path(common_path).name == common_path, "Keybinder common license path is invalid")
+    bundled_common = bundled_file(f"usr/share/licenses/copypaste-keybinder/common/{common_path}", "common license")
+    require(common.get("sha256") == digest(bundled_common), "Keybinder manifest does not bind bundled common license bytes")
+PY
       camera_plugin="$app_root/usr/lib/copypaste/lib/libcamera_desktop_plugin.so"
       env -i PATH="$PATH" LD_LIBRARY_PATH="$app_root/usr/lib/gstreamer-runtime:$app_root/usr/lib/copypaste/lib" \
         LD_PRELOAD= LD_AUDIT= ldd "$camera_plugin" | grep -F "$app_root/usr/lib/gstreamer-runtime/libgstreamer-1.0.so"
