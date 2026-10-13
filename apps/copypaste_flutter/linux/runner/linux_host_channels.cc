@@ -911,11 +911,10 @@ void quick_paste_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
   const bool portal_shortcuts = portal != nullptr && portal->is_available();
   const bool gnome_shortcuts_available = gdk_is_wayland() && !portal_shortcuts &&
       gnome_shortcuts != nullptr && gnome_shortcuts->is_available();
-  const bool wayland_ready = gdk_is_wayland() && bridge_companion_active() &&
-      ((portal_shortcuts && portal->shortcut_registered()) ||
-       (gnome_shortcuts_available && gnome_shortcuts->shortcut_registered()));
+  const bool wayland_supported = gdk_is_wayland() &&
+      (portal_shortcuts || gnome_shortcuts_available);
   if (is_method(call, "isSupported") || is_method(call, "prepare")) {
-    success(call, fl_value_new_bool(x11 || wayland_ready));
+    success(call, fl_value_new_bool(x11 || wayland_supported));
   } else if (is_method(call, "accessibilityGranted") ||
              is_method(call, "requestAccessibility")) {
     success(call, fl_value_new_bool(x11 || (portal != nullptr &&

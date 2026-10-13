@@ -109,46 +109,71 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  test('registers once after Linux integration becomes active', () async {
-    final integration = _LinuxIntegration(
-      const LinuxIntegrationStatus(
+  test(
+    'registers the first Linux shortcut before execution is ready',
+    () async {
+      final integration = _LinuxIntegration(
+        const LinuxIntegrationStatus(
+          session: LinuxDesktopSession.wayland,
+          globalShortcuts: true,
+          remoteDesktop: LinuxRemoteDesktopState.consentRequired,
+          companion: LinuxCompanionState.active,
+          clipboard: true,
+          quickPaste: false,
+          screenshotProtection: false,
+        ),
+      );
+      final registrar = _Registrar();
+      final controller = QuickPasteSettingsController(
+        store: MemoryQuickPastePreferencesStore(),
+        registrar: registrar,
+        windowHost: _WindowHost(),
+        linuxIntegration: integration,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+      expect(controller.supported, isTrue);
+      expect(controller.linuxIntegration?.quickPaste, isFalse);
+      expect(registrar.registered, controller.shortcut);
+      expect(registrar.registerCalls, 1);
+      expect(integration.statusReads, 2);
+
+      await controller.refreshLinuxIntegration();
+      expect(registrar.registerCalls, 1);
+
+      integration.value = const LinuxIntegrationStatus(
         session: LinuxDesktopSession.wayland,
-        globalShortcuts: true,
+        globalShortcuts: false,
         remoteDesktop: LinuxRemoteDesktopState.consentRequired,
         companion: LinuxCompanionState.active,
-        clipboard: false,
+        clipboard: true,
         quickPaste: false,
         screenshotProtection: false,
-      ),
-    );
-    final registrar = _Registrar();
-    final controller = QuickPasteSettingsController(
-      store: MemoryQuickPastePreferencesStore(),
-      registrar: registrar,
-      windowHost: _WindowHost(),
-      linuxIntegration: integration,
-    );
-    addTearDown(controller.dispose);
+      );
+      await controller.refreshLinuxIntegration();
 
-    await controller.initialize();
-    expect(controller.supported, isFalse);
-    expect(registrar.registered, isNull);
+      expect(controller.supported, isFalse);
+      expect(registrar.registered, isNull);
+      expect(registrar.unregisterCalls, 1);
 
-    integration.value = const LinuxIntegrationStatus(
-      session: LinuxDesktopSession.wayland,
-      globalShortcuts: true,
-      remoteDesktop: LinuxRemoteDesktopState.active,
-      companion: LinuxCompanionState.active,
-      clipboard: true,
-      quickPaste: true,
-      screenshotProtection: false,
-    );
-    await controller.refreshLinuxIntegration();
+      integration.value = const LinuxIntegrationStatus(
+        session: LinuxDesktopSession.wayland,
+        globalShortcuts: true,
+        remoteDesktop: LinuxRemoteDesktopState.active,
+        companion: LinuxCompanionState.active,
+        clipboard: true,
+        quickPaste: true,
+        screenshotProtection: false,
+      );
+      await controller.refreshLinuxIntegration();
 
-    expect(controller.supported, isTrue);
-    expect(registrar.registered, controller.shortcut);
-    expect(registrar.registerCalls, 1);
-  });
+      expect(controller.supported, isTrue);
+      expect(controller.linuxIntegration?.quickPaste, isTrue);
+      expect(registrar.registered, controller.shortcut);
+      expect(registrar.registerCalls, 2);
+    },
+  );
 
   test('Linux setup actions refresh confirmed integration state', () async {
     final integration =
@@ -188,6 +213,7 @@ void main() {
 class _Registrar implements DesktopShortcutRegistrar {
   DesktopShortcut? registered;
   int registerCalls = 0;
+  int unregisterCalls = 0;
 
   @override
   Future<void> register(
@@ -200,6 +226,7 @@ class _Registrar implements DesktopShortcutRegistrar {
 
   @override
   Future<void> unregister() async {
+    unregisterCalls += 1;
     registered = null;
   }
 }
@@ -245,6 +272,7 @@ class _LinuxIntegration implements LinuxIntegrationPort {
   bool companionSetupResult = false;
   int remoteDesktopRequests = 0;
   int companionSetupRequests = 0;
+  int statusReads = 0;
 
   @override
   Future<bool> openCompanionSetup() async {
@@ -265,5 +293,8 @@ class _LinuxIntegration implements LinuxIntegrationPort {
   Future<bool> setStartAtLogin(bool enabled) async => true;
 
   @override
-  Future<LinuxIntegrationStatus> status() async => value;
+  Future<LinuxIntegrationStatus> status() async {
+    statusReads += 1;
+    return value;
+  }
 }

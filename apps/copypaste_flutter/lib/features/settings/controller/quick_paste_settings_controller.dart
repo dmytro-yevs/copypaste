@@ -68,6 +68,9 @@ class QuickPasteSettingsController extends ChangeNotifier
       _supported = _quickPasteSupported;
       if (_supported) {
         if (!await _changeRegistration(_preferences.shortcut)) return;
+        if (_linuxIntegrationPort != null) {
+          await _refreshLinuxIntegration();
+        }
         _accessibilityGranted = await _windowHost.accessibilityGranted();
         if (_disposed) return;
       }
@@ -310,7 +313,8 @@ class QuickPasteSettingsController extends ChangeNotifier
 
   bool get _quickPasteSupported =>
       _nativeQuickPasteSupported &&
-      (_linuxIntegrationPort == null || _linuxIntegration?.quickPaste == true);
+      (_linuxIntegrationPort == null ||
+          _linuxIntegration?.globalShortcuts == true);
 
   void _startObservingLifecycle() {
     if (_observingLifecycle) return;
