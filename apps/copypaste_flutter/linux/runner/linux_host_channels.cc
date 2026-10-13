@@ -397,7 +397,7 @@ bool spawn_quick_paste(const std::string& x11_window, guint32 activation_time) {
              "--copypaste-x11-activation-time=%" G_GUINT32_FORMAT,
              activation_time);
   gchar* arguments[] = {executable, quick, presentation_arg, endpoint_arg,
-                        x11_window.empty() ? nullptr : x11_arg, activation_arg,
+                        activation_arg, x11_window.empty() ? nullptr : x11_arg,
                         nullptr};
   if (!g_spawn_async(nullptr, arguments, nullptr, static_cast<GSpawnFlags>(
                      G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD),
