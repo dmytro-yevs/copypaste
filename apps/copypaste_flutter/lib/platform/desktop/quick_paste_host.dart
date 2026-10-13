@@ -133,6 +133,17 @@ class MethodChannelQuickPasteContextHost implements QuickPasteContextHost {
   QuickPasteOpenedHandler? _opened;
   Future<void> Function()? _shutdown;
 
+  Future<String> runtimeEndpoint() async {
+    final endpoint = await _channel.invokeMethod<Object?>('runtimeEndpoint');
+    if (endpoint is! String ||
+        endpoint.isEmpty ||
+        !endpoint.startsWith('/') ||
+        endpoint.contains('\u0000')) {
+      throw PlatformException(code: 'runtime_endpoint_unavailable');
+    }
+    return endpoint;
+  }
+
   @override
   Future<void> signalReady() async {
     if (await _channel.invokeMethod<bool>('ready') != true) {
