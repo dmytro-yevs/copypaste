@@ -330,7 +330,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     });
     try {
       await _startRuntimeProcess();
-      if (Platform.isLinux) {
+      if (Platform.isLinux && mounted) {
         final endpoint = await runtime.desktopRuntimeEndpoint();
         await MethodChannelLinuxIntegrationPort().publishRuntimeEndpoint(
           endpoint,
@@ -399,6 +399,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       unawaited(_activatePendingPairingLink());
     } catch (error) {
       if (!mounted) {
+        if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
+          await runtime.stopDesktopRuntime();
+        }
         return;
       }
       setState(() {
