@@ -220,6 +220,65 @@ struct LinuxPortal::Impl : public std::enable_shared_from_this<LinuxPortal::Impl
     std::function<void(GVariant*, GError*)> complete;
   };
 
+  struct ParentIdentifierLease {
+    explicit ParentIdentifierLease(std::string value)
+        : identifier(std::move(value)) {}
+
+#if defined(GDK_WINDOWING_WAYLAND)
+    ParentIdentifierLease(
+        GdkWindow* window, std::string value,
+        std::function<void(GdkWindow*)> release = [](GdkWindow* target) {
+          gdk_wayland_window_unexport_handle(target);
+        },
+        std::function<bool(GdkWindow*)> window_destroyed = [](GdkWindow* target) {
+          return gdk_window_is_destroyed(target);
+        })
+        : identifier(std::move(value)), exported_window(window),
+          release_export(std::move(release)),
+          window_destroyed(std::move(window_destroyed)) {
+      g_object_ref(exported_window);
+    }
+#endif
+
+    ~ParentIdentifierLease() {
+#if defined(GDK_WINDOWING_WAYLAND)
+      if (exported_window == nullptr) return;
+      auto* deferred = new DeferredRelease{exported_window, std::move(release_export),
+                                           std::move(window_destroyed)};
+      exported_window = nullptr;
+      g_idle_add_full(
+          G_PRIORITY_DEFAULT_IDLE,
+          [](gpointer data) {
+            auto* release = static_cast<DeferredRelease*>(data);
+            if (!release->window_destroyed(release->window)) {
+              release->unexport(release->window);
+            }
+            return G_SOURCE_REMOVE;
+          },
+          deferred, [](gpointer data) {
+            auto* release = static_cast<DeferredRelease*>(data);
+            g_object_unref(release->window);
+            delete release;
+          });
+#endif
+    }
+
+    std::string identifier;
+
+   private:
+#if defined(GDK_WINDOWING_WAYLAND)
+    struct DeferredRelease {
+      GdkWindow* window;
+      std::function<void(GdkWindow*)> unexport;
+      std::function<bool(GdkWindow*)> window_destroyed;
+    };
+
+    GdkWindow* exported_window = nullptr;
+    std::function<void(GdkWindow*)> release_export;
+    std::function<bool(GdkWindow*)> window_destroyed;
+#endif
+  };
+
   explicit Impl(GtkWindow* initial_parent, LinuxPortalCallbacks initial_callbacks)
       : parent(initial_parent == nullptr
                    ? nullptr
@@ -402,7 +461,8 @@ struct LinuxPortal::Impl : public std::enable_shared_from_this<LinuxPortal::Impl
     pending_responses.push_back(pending);
   }
 
-  void with_parent_identifier(std::function<void(std::string)> complete) {
+  void with_parent_identifier(
+      std::function<void(std::shared_ptr<ParentIdentifierLease>)> complete) {
     if (parent == nullptr) {
       complete({});
       return;
@@ -414,7 +474,8 @@ struct LinuxPortal::Impl : public std::enable_shared_from_this<LinuxPortal::Impl
     }
 #if defined(GDK_WINDOWING_X11)
     if (GDK_IS_X11_DISPLAY(gdk_window_get_display(window))) {
-      complete("x11:" + std::to_string(GDK_WINDOW_XID(window)));
+      complete(std::make_shared<ParentIdentifierLease>(
+          "x11:" + std::to_string(GDK_WINDOW_XID(window))));
       return;
     }
 #endif
@@ -422,7 +483,7 @@ struct LinuxPortal::Impl : public std::enable_shared_from_this<LinuxPortal::Impl
     if (GDK_IS_WAYLAND_DISPLAY(gdk_window_get_display(window))) {
       struct Export {
         std::shared_ptr<Impl> owner;
-        std::function<void(std::string)> complete;
+        std::function<void(std::shared_ptr<ParentIdentifierLease>)> complete;
       };
       // Keep the local completion callable for synchronous export failure;
       // Export receives its own copy and owns the eventual callback path.
@@ -430,15 +491,19 @@ struct LinuxPortal::Impl : public std::enable_shared_from_this<LinuxPortal::Impl
       if (!gdk_wayland_window_export_handle(
               window,
               [](GdkWindow* exported_window, const char* handle, gpointer data) {
-                std::unique_ptr<Export> request(static_cast<Export*>(data));
-                if (request->owner->cancelled || handle == nullptr) {
-                  request->complete({});
+                auto* request = static_cast<Export*>(data);
+                if (handle == nullptr) {
+                  request->complete(nullptr);
                   return;
                 }
-                request->complete("wayland:" + std::string(handle));
-                gdk_wayland_window_unexport_handle(exported_window);
+                auto lease = std::make_shared<ParentIdentifierLease>(
+                    exported_window, "wayland:" + std::string(handle));
+                request->complete(request->owner->cancelled ? nullptr
+                                                             : std::move(lease));
               },
-              export_request, nullptr)) {
+              export_request, [](gpointer data) {
+                delete static_cast<Export*>(data);
+              })) {
         delete export_request;
         complete({});
       }
@@ -545,8 +610,8 @@ void LinuxPortal::request_remote_desktop(std::function<void(bool)> done) {
   }
   portal->remote_request_in_flight = true;
   portal->with_parent_identifier(
-      [portal, done = std::move(done)](std::string parent_identifier) mutable {
-        if (parent_identifier.empty() && portal->parent != nullptr) {
+      [portal, done = std::move(done)](auto parent_identifier) mutable {
+        if (parent_identifier == nullptr && portal->parent != nullptr) {
           portal->remote_request_in_flight = false;
           done(false);
           return;
@@ -600,10 +665,14 @@ void LinuxPortal::request_remote_desktop(std::function<void(bool)> done) {
             option_string(&options, "handle_token", token("remote_start"));
             portal->request(kRemoteDesktop, "Start",
                             g_variant_new("(os@a{sv})", session.c_str(),
-                                          parent_identifier.c_str(),
+                                          parent_identifier == nullptr
+                                              ? ""
+                                              : parent_identifier->identifier.c_str(),
                                           g_variant_builder_end(&options)),
-                            [portal, done = std::move(done)](guint start_response,
-                                                              GVariant* start_results) mutable {
+                            [portal, parent_identifier,
+                             done = std::move(done)](
+                                guint start_response, GVariant* start_results) mutable {
+              (void)parent_identifier;
               portal->remote_request_in_flight = false;
               const bool keyboard_granted =
                   start_response == 0 &&
@@ -644,8 +713,8 @@ void LinuxPortal::register_shortcut(const ShortcutRequest& request,
   portal->shortcut_bound = false;
   portal->shortcut_id.clear();
   portal->with_parent_identifier(
-      [portal, request, done = std::move(done)](std::string parent_identifier) mutable {
-        if (parent_identifier.empty() && portal->parent != nullptr) {
+      [portal, request, done = std::move(done)](auto parent_identifier) mutable {
+        if (parent_identifier == nullptr && portal->parent != nullptr) {
           done({false, {}, "The application window is not ready for portal consent."});
           return;
         }
@@ -682,10 +751,14 @@ void LinuxPortal::register_shortcut(const ShortcutRequest& request,
           portal->request(kGlobalShortcuts, "BindShortcuts",
                           g_variant_new("(o@a(sa{sv})s@a{sv})", session.c_str(),
                                         g_variant_builder_end(&shortcuts),
-                                        parent_identifier.c_str(),
+                                        parent_identifier == nullptr
+                                            ? ""
+                                            : parent_identifier->identifier.c_str(),
                                         g_variant_builder_end(&options)),
-                          [portal, session, request, done = std::move(done)](
+                          [portal, session, request, parent_identifier,
+                           done = std::move(done)](
                               guint bind_response, GVariant* bind_results) mutable {
+            (void)parent_identifier;
             std::string trigger_description;
             if (bind_response == 0 && bind_results != nullptr) {
               g_autoptr(GVariant) shortcuts = g_variant_lookup_value(
