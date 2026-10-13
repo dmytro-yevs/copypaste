@@ -1035,9 +1035,10 @@ void main() {
               isTrue,
             );
             expect(
-              node.getSemanticsData().flagsCollection.isSelected ==
-                  Tristate.isTrue,
-              destination.destination == AppDestination.history,
+              node.getSemanticsData().flagsCollection.isSelected,
+              destination.destination == AppDestination.history
+                  ? Tristate.isTrue
+                  : Tristate.isFalse,
             );
           }
           if (width >= 800) {
@@ -1064,31 +1065,27 @@ void main() {
           expect(controller.selectedDestination, AppDestination.devices);
           expect(
             devices
-                    .evaluate()
-                    .single
-                    .getSemanticsData()
-                    .flagsCollection
-                    .isSelected ==
-                Tristate.isTrue,
-            isTrue,
+                .evaluate()
+                .single
+                .getSemanticsData()
+                .flagsCollection
+                .isSelected,
+            Tristate.isTrue,
           );
           expect(
             find.semantics
-                    .byPredicate(
-                      (node) =>
-                          node.label == 'History' &&
-                          node.getSemanticsData().flagsCollection.isButton &&
-                          node.getSemanticsData().hasAction(
-                            SemanticsAction.tap,
-                          ),
-                    )
-                    .evaluate()
-                    .single
-                    .getSemanticsData()
-                    .flagsCollection
-                    .isSelected ==
-                Tristate.isFalse,
-            isTrue,
+                .byPredicate(
+                  (node) =>
+                      node.label == 'History' &&
+                      node.getSemanticsData().flagsCollection.isButton &&
+                      node.getSemanticsData().hasAction(SemanticsAction.tap),
+                )
+                .evaluate()
+                .single
+                .getSemanticsData()
+                .flagsCollection
+                .isSelected,
+            Tristate.isFalse,
           );
           if (width >= 800) {
             expect(
