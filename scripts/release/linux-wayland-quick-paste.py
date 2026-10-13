@@ -39,6 +39,7 @@ EVDEV_RETURN = 28
 TARGET_TITLE = "CopyPaste Qualification Wayland Input Target"
 TARGET_SOURCE = Path(__file__).with_name("linux-wayland-input-target.c")
 MEDIA_ACTOR = Path(__file__).with_name("linux-native-media.py")
+PROC_ROOT = Path("/proc")
 UNIQUE_NAME = re.compile(r"^:[0-9]+\.[0-9]+$")
 PORTAL_IMPLEMENTATION_PREFIX = "org.freedesktop.impl.portal.desktop."
 APP_PERMISSION_GRANTED = "Keyboard control is allowed for Quick Paste."
@@ -88,14 +89,16 @@ def portal_request_path(unique_owner: str, handle_token: str) -> str:
 
 
 def receipt(
-    *, gui_pid: int, portal_dialog_pid: int, input_target_pid: int, marker: str,
-    portal_input_calls: int, portal_session_digest: str, portal_click_digest: str,
+    *, gui_pid: int, portal_dialog_pid: int, quick_paste_pid: int, input_target_pid: int, marker: str,
+    portal_input_calls: int, portal_session_digest: str, portal_click_digest: str, quick_paste_ready_digest: str,
 ) -> dict[str, Any]:
     """Return a redacted receipt bound to every UI actor process."""
-    pids = (gui_pid, portal_dialog_pid, input_target_pid)
-    digests = (portal_session_digest, portal_click_digest)
+    pids = (gui_pid, portal_dialog_pid, quick_paste_pid, input_target_pid)
+    digests = (portal_session_digest, portal_click_digest, quick_paste_ready_digest)
     if any(type(pid) is not int or pid <= 0 for pid in pids):
         raise QuickPasteQualificationError("Wayland receipt actor identity is invalid")
+    if quick_paste_pid in {gui_pid, portal_dialog_pid, input_target_pid}:
+        raise QuickPasteQualificationError("Wayland Quick Paste actor is not separate")
     if type(portal_input_calls) is not int or portal_input_calls < 8 or any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in digests):
         raise QuickPasteQualificationError("Wayland receipt proof is invalid")
     return {
@@ -104,12 +107,14 @@ def receipt(
         "actors": {
             "gui_pid": gui_pid,
             "portal_dialog_pid": portal_dialog_pid,
+            "quick_paste_pid": quick_paste_pid,
             "input_target_pid": input_target_pid,
         },
         "target": {"pid": input_target_pid, "title_sha256": sha256(TARGET_TITLE), "marker_sha256": sha256(marker)},
         "portal": {"input_calls": portal_input_calls, "session_sha256": portal_session_digest},
         "atspi": {
             "portal_click_sha256": portal_click_digest,
+            "quick_paste_ready_sha256": quick_paste_ready_digest,
         },
     }
 
@@ -568,6 +573,116 @@ def actor_command(actor: Path, command: str, pid: int, target: str, environment:
     raise QuickPasteQualificationError(f"AT-SPI {command} action failed")
 
 
+def process_status(pid: int) -> dict[str, str] | None:
+    try:
+        lines = (PROC_ROOT / str(pid) / "status").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    values = {}
+    for line in lines:
+        name, separator, value = line.partition(":")
+        if separator:
+            values[name] = value.strip()
+    return values
+
+
+def status_number(status: dict[str, str], name: str) -> int | None:
+    values = status.get(name, "").split(maxsplit=1)
+    if not values:
+        return None
+    value = values[0]
+    return int(value) if re.fullmatch(r"[0-9]+", value) else None
+
+
+def quick_paste_child(gui_pid: int) -> int | None:
+    """Return the unique Quick Paste child owned by the GUI process."""
+    gui_status = process_status(gui_pid)
+    if gui_status is None:
+        return None
+    gui_uid = status_number(gui_status, "Uid")
+    if gui_uid != os.getuid():
+        return None
+    try:
+        gui_executable = (PROC_ROOT / str(gui_pid) / "exe").resolve(strict=True)
+    except OSError:
+        return None
+    candidates = []
+    try:
+        children = tuple(PROC_ROOT.iterdir())
+    except OSError:
+        return None
+    for child in children:
+        if not re.fullmatch(r"[1-9][0-9]*", child.name):
+            continue
+        pid = int(child.name)
+        status = process_status(pid)
+        if status is None or status_number(status, "PPid") != gui_pid or status_number(status, "Uid") != gui_uid:
+            continue
+        try:
+            executable = (child / "exe").resolve(strict=True)
+            arguments = (child / "cmdline").read_bytes().split(b"\0")
+        except OSError:
+            continue
+        if executable == gui_executable and b"--copypaste-quick-paste" in arguments:
+            candidates.append(pid)
+    if len(candidates) > 1:
+        raise QuickPasteQualificationError("Quick Paste child process is ambiguous")
+    return candidates[0] if candidates else None
+
+
+def quick_paste_ready_record(output: str, *, pid: int, marker: str) -> str:
+    prefix = "COPYPASTE_QUALIFICATION_MEDIA "
+    lines = output.splitlines()
+    if len(lines) != 1 or not lines[0].startswith(prefix):
+        raise QuickPasteQualificationError("Quick Paste readiness helper emitted invalid output")
+    try:
+        record = json.loads(lines[0].removeprefix(prefix))
+    except json.JSONDecodeError as error:
+        raise QuickPasteQualificationError("Quick Paste readiness helper emitted invalid JSON") from error
+    if (
+        not isinstance(record, dict) or set(record) != {"schema", "kind", "gui_pid", "marker_sha256"}
+        or type(record.get("schema")) is not int or record["schema"] != 1
+        or record.get("kind") != "atspi_quick_paste_ready" or type(record.get("gui_pid")) is not int or record["gui_pid"] != pid
+        or type(record.get("marker_sha256")) is not str or record["marker_sha256"] != sha256(marker)
+    ):
+        raise QuickPasteQualificationError("Quick Paste readiness evidence is invalid")
+    return sha256(output)
+
+
+def wait_for_quick_paste_ready(actor: Path, gui_pid: int, marker: str, environment: dict[str, str]) -> tuple[int, str]:
+    """Bind Return input to one discovered Quick Paste process and its AT-SPI state."""
+    require_regular(actor, "Quick Paste AT-SPI actor")
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        pid = quick_paste_child(gui_pid)
+        if pid is None:
+            time.sleep(0.1)
+            continue
+        remaining = int(deadline - time.monotonic())
+        if remaining < 1:
+            break
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable, str(actor), "quick-paste-ready", "--pid", str(pid),
+                    "--marker", marker, "--timeout-seconds", str(remaining),
+                ],
+                env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False, timeout=remaining,
+            )
+        except subprocess.TimeoutExpired as error:
+            details = " ".join(
+                value.decode("utf-8", "replace") if isinstance(value, bytes) else value
+                for value in (error.stdout, error.stderr) if value
+            )
+            message = "Quick Paste readiness helper exceeded its deadline"
+            raise QuickPasteQualificationError(f"{message}: {details}" if details else message) from error
+        if result.returncode:
+            message = f"Quick Paste readiness helper failed with exit {result.returncode}"
+            raise QuickPasteQualificationError(f"{message}: {result.stderr.strip()}" if result.stderr.strip() else message)
+        return pid, quick_paste_ready_record(result.stdout, pid=pid, marker=marker)
+    raise QuickPasteQualificationError("Quick Paste did not become ready before the readiness deadline")
+
+
 def grant_product_permission(args: argparse.Namespace) -> dict[str, Any]:
     """Grant the installed application's own portal request from onboarding."""
     if args.gui_pid <= 0:
@@ -623,6 +738,9 @@ def qualify(args: argparse.Namespace) -> dict[str, Any]:
             if portal.require_gui_owner(args.gui_pid) != gui_owner:
                 raise QuickPasteQualificationError("CopyPaste GUI D-Bus owner changed before global shortcut input")
             portal.chord(EVDEV_CONTROL, EVDEV_SHIFT, EVDEV_C)
+            quick_paste_pid, quick_paste_ready = wait_for_quick_paste_ready(
+                args.actor, args.gui_pid, args.marker, environment,
+            )
             # A real target result after Return requires the product's actual
             # shortcut activation and focus restoration; no qualification D-Bus
             # transaction is used as a substitute for that proof.
@@ -637,9 +755,10 @@ def qualify(args: argparse.Namespace) -> dict[str, Any]:
         finally:
             target.close()
         return receipt(
-            gui_pid=args.gui_pid, portal_dialog_pid=portal_dialog_pid, input_target_pid=target.pid, marker=args.marker,
+            gui_pid=args.gui_pid, portal_dialog_pid=portal_dialog_pid, quick_paste_pid=quick_paste_pid,
+            input_target_pid=target.pid, marker=args.marker,
             portal_input_calls=portal.calls.count("NotifyKeyboardKeycode"), portal_session_digest=portal.session_digest,
-            portal_click_digest=consent_click,
+            portal_click_digest=consent_click, quick_paste_ready_digest=quick_paste_ready,
         )
     finally:
         portal.close()
