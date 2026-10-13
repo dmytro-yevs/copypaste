@@ -504,7 +504,7 @@ def write_source_desktop_entry(data_home):
         "[Desktop Entry]\n"
         "Type=Application\n"
         f"Name={SOURCE_APPLICATION_NAME}\n"
-        f"StartupWMClass={SOURCE_APPLICATION_ID}\n"
+        f"StartupWMClass={SOURCE_APPLICATION_ID[:1].upper()}{SOURCE_APPLICATION_ID[1:]}\n"
         "Exec=true\n",
         encoding="utf-8",
     )

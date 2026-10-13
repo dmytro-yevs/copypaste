@@ -53,6 +53,21 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
     def test_native_clipboard_transport_rejects_capture_task_without_available_transport(self):
         self.assertFalse(driver.native_clipboard_transport_is_ready(self.native_status(clipboard_available=False)))
 
+    def test_source_desktop_entry_maps_gtk_wm_class_to_the_lowercase_source_id(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data_home = Path(directory)
+            driver.write_source_desktop_entry(data_home)
+
+            entry = data_home / "applications" / f"{driver.SOURCE_APPLICATION_ID}.desktop"
+            self.assertEqual(
+                entry.read_text(encoding="utf-8"),
+                "[Desktop Entry]\n"
+                "Type=Application\n"
+                f"Name={driver.SOURCE_APPLICATION_NAME}\n"
+                f"StartupWMClass={driver.SOURCE_APPLICATION_ID[:1].upper()}{driver.SOURCE_APPLICATION_ID[1:]}\n"
+                "Exec=true\n",
+            )
+
     def test_startup_waits_for_delayed_native_clipboard_transport(self):
         inactive = self.native_status(clipboard_available=False)
         ready = self.native_status()
