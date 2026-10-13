@@ -8,7 +8,6 @@ import re
 import shlex
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 
 MAX_MANIFEST_BYTES = 64 * 1024
@@ -80,7 +79,7 @@ def build(output: Path) -> None:
     os.replace(temporary, output)
 
 
-def run(helper: Path, manifest: Path, ready: Path, activity: Path, hold_seconds: int, request_audit: Optional[Path]) -> None:
+def run(helper: Path, manifest: Path, ready: Path, activity: Path, hold_seconds: int, request_audit: Path | None = None) -> None:
     if not helper.is_file() or helper.is_symlink() or not os.access(helper, os.X_OK):
         raise ValueError("GTK clipboard provider helper is unavailable")
     application_id, offers = load_manifest(manifest)
