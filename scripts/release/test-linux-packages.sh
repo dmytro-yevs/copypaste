@@ -93,7 +93,7 @@ run_architecture() {
       grep -F "GST_PLUGIN_SYSTEM_PATH" /tmp/appimage/squashfs-root/AppRun
       grep -F "LD_LIBRARY_PATH=\"\$HERE/usr/lib/gstreamer-runtime:\$HERE/usr/lib/copypaste/lib\"" /tmp/appimage/squashfs-root/AppRun
       app_root=/tmp/appimage/squashfs-root
-      python3 - "$app_root" "$ARCHITECTURE" <<'PY'
+      python3 - "$app_root" "$ARCHITECTURE" <<"PY"
 import hashlib
 import json
 import stat
