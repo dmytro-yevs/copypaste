@@ -585,12 +585,20 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             data_home = root / "data-home"
             data = data_home / "copypaste" / "runtime"
             data.mkdir(parents=True)
-            children = proc / app_pid / "task" / app_pid / "children"
-            children.parent.mkdir(parents=True)
-            children.write_text(daemon_pid, encoding="ascii")
+            gui = proc / app_pid
+            gui.mkdir(parents=True)
+            gui.joinpath("status").write_text(f"Uid:\t{os.geteuid()}\t0\t0\t0\n", encoding="utf-8")
+            main_children = gui / "task" / app_pid / "children"
+            main_children.parent.mkdir(parents=True)
+            main_children.write_text("", encoding="ascii")
+            worker_children = gui / "task" / "102" / "children"
+            worker_children.parent.mkdir(parents=True)
+            worker_children.write_text(daemon_pid, encoding="ascii")
             daemon = proc / daemon_pid
             daemon.mkdir()
-            daemon.joinpath("status").write_text(f"Name:\tcopypaste-daemon\nUid:\t{os.geteuid()}\t0\t0\t0\n", encoding="utf-8")
+            daemon.joinpath("status").write_text(
+                f"Name:\tcopypaste-daemon\nPPid:\t{app_pid}\nUid:\t{os.geteuid()}\t0\t0\t0\n", encoding="utf-8",
+            )
             daemon.joinpath("cmdline").write_bytes(
                 b"/bundle/copypaste-daemon\0--data-dir\0" + str(data).encode() + b"\0",
             )
@@ -612,12 +620,15 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             data_home.mkdir()
             external = root / "external"
             external.mkdir()
-            children = proc / "100" / "task" / "100" / "children"
+            gui = proc / "100"
+            gui.mkdir(parents=True)
+            gui.joinpath("status").write_text(f"Uid:\t{os.geteuid()}\t0\t0\t0\n", encoding="utf-8")
+            children = gui / "task" / "100" / "children"
             children.parent.mkdir(parents=True)
             children.write_text("101", encoding="ascii")
             daemon = proc / "101"
             daemon.mkdir()
-            daemon.joinpath("status").write_text(f"Uid:\t{os.geteuid()}\t0\t0\t0\n", encoding="utf-8")
+            daemon.joinpath("status").write_text(f"PPid:\t100\nUid:\t{os.geteuid()}\t0\t0\t0\n", encoding="utf-8")
             daemon.joinpath("cmdline").write_bytes(
                 b"/bundle/copypaste-daemon\0--data-dir\0" + str(external).encode() + b"\0",
             )
@@ -625,6 +636,43 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             driver.PROC_ROOT = proc
             try:
                 with self.assertRaisesRegex(RuntimeError, "escapes isolated XDG data"):
+                    driver.gui_daemon_data_dir(SimpleNamespace(pid=100), data_home)
+            finally:
+                driver.PROC_ROOT = original
+
+    def test_rejects_adopted_foreign_uid_and_ambiguous_gui_daemons(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            proc = root / "proc"
+            data_home = root / "data-home"
+            data = data_home / "copypaste"
+            data.mkdir(parents=True)
+            gui = proc / "100"
+            gui.mkdir(parents=True)
+            gui.joinpath("status").write_text(f"Uid:\t{os.geteuid()}\t0\t0\t0\n", encoding="utf-8")
+            children = gui / "task" / "101" / "children"
+            children.parent.mkdir(parents=True)
+
+            def daemon(pid, *, ppid, uid):
+                process = proc / str(pid)
+                process.mkdir()
+                process.joinpath("status").write_text(f"PPid:\t{ppid}\nUid:\t{uid}\t0\t0\t0\n", encoding="utf-8")
+                process.joinpath("cmdline").write_bytes(
+                    b"/bundle/copypaste-daemon\0--data-dir\0" + str(data).encode() + b"\0",
+                )
+
+            daemon(102, ppid=999, uid=os.geteuid())
+            daemon(103, ppid=100, uid=os.geteuid() + 1)
+            children.write_text("102 103", encoding="ascii")
+            original = driver.PROC_ROOT
+            driver.PROC_ROOT = proc
+            try:
+                with self.assertRaisesRegex(RuntimeError, "exactly one daemon"):
+                    driver.gui_daemon_data_dir(SimpleNamespace(pid=100), data_home)
+                daemon(104, ppid=100, uid=os.geteuid())
+                daemon(105, ppid=100, uid=os.geteuid())
+                children.write_text("104 105", encoding="ascii")
+                with self.assertRaisesRegex(RuntimeError, "exactly one daemon"):
                     driver.gui_daemon_data_dir(SimpleNamespace(pid=100), data_home)
             finally:
                 driver.PROC_ROOT = original
