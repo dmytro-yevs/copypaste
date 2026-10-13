@@ -390,6 +390,7 @@ def require_wayland_qualification(args, *, gui_pid, cli, environment, workspace,
     emit_result("tray_window_notification", tray_result)
 
     marker = "copypaste-wayland-quick-paste-fixture"
+    run([str(cli), "add", marker], env={**environment, "COPYPASTE_SOCKET": str(socket_path)})
     quick_paste_result = run(
         [
             sys.executable, str(quick_paste_helper), "--gui-pid", str(gui_pid),
