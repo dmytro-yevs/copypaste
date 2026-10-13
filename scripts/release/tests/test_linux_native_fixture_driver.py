@@ -170,6 +170,87 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
                         Path("copypaste-cli"), {}, workspace, "wayland", workspace / "gui.sock",
                     )
 
+    def test_capture_requires_cli_copy_to_restore_the_original_after_a_real_overwrite(self):
+        original = b"original HTML"
+        marker = b"copypaste-native-overwrite-clipboard_html"
+        captured = {
+            "id": "original", "content_type": "text",
+            "source_app_bundle_id": driver.SOURCE_APPLICATION_ID,
+            "source_app_name": driver.SOURCE_APPLICATION_NAME,
+        }
+        overwritten = {
+            "id": "marker", "content_type": "text", "content": marker.decode("utf-8"),
+            "source_app_bundle_id": driver.SOURCE_APPLICATION_ID,
+            "source_app_name": driver.SOURCE_APPLICATION_NAME,
+        }
+        labels = []
+        @driver.contextmanager
+        def provider(_workspace, _evidence, label, payloads, _environment):
+            labels.append((label, payloads))
+            yield None
+        copied = False
+        def run(argv, **_kwargs):
+            nonlocal copied
+            if argv[0] == "copypaste-cli":
+                copied = True
+                return subprocess.CompletedProcess(argv, 0)
+            if argv[-1] == "text/plain;charset=utf-8":
+                return subprocess.CompletedProcess(argv, 0, stdout=marker)
+            self.assertEqual(argv[-1], "text/html")
+            return subprocess.CompletedProcess(argv, 0, stdout=original if copied else marker)
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            with mock.patch.object(driver, "clipboard_provider", provider), \
+                 mock.patch.object(driver, "status", side_effect=[
+                     {"item_count": 0}, {"item_count": 1}, {"item_count": 1}, {"item_count": 2},
+                 ]), \
+                 mock.patch.object(driver, "list_items", side_effect=[[], [captured], [captured], [overwritten, captured]]), \
+                 mock.patch.object(driver, "run", side_effect=run):
+                driver.require_capture(
+                    Path("copypaste-cli"), {}, workspace, workspace / "evidence", "wayland",
+                    "text/html", original, "text", "clipboard_html",
+                )
+        self.assertEqual(
+            labels,
+            [
+                ("clipboard_html", {"text/html": original}),
+                ("clipboard_html-overwrite", {"text/plain;charset=utf-8": marker}),
+            ],
+        )
+
+    def test_capture_rejects_a_no_op_copy_that_leaves_the_overwrite_marker_active(self):
+        marker = b"copypaste-native-overwrite-clipboard_png"
+        captured = {
+            "id": "original", "content_type": "image/png",
+            "source_app_bundle_id": driver.SOURCE_APPLICATION_ID,
+            "source_app_name": driver.SOURCE_APPLICATION_NAME,
+        }
+        overwritten = {
+            "id": "marker", "content_type": "text", "content": marker.decode("utf-8"),
+            "source_app_bundle_id": driver.SOURCE_APPLICATION_ID,
+            "source_app_name": driver.SOURCE_APPLICATION_NAME,
+        }
+        @driver.contextmanager
+        def provider(*_args, **_kwargs):
+            yield None
+        def run(argv, **_kwargs):
+            if argv[0] == "copypaste-cli":
+                return subprocess.CompletedProcess(argv, 0)
+            return subprocess.CompletedProcess(argv, 0, stdout=marker)
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            with mock.patch.object(driver, "clipboard_provider", provider), \
+                 mock.patch.object(driver, "status", side_effect=[
+                     {"item_count": 0}, {"item_count": 1}, {"item_count": 1}, {"item_count": 2},
+                 ]), \
+                 mock.patch.object(driver, "list_items", side_effect=[[], [captured], [captured], [overwritten, captured]]), \
+                 mock.patch.object(driver, "run", side_effect=run):
+                with self.assertRaisesRegex(RuntimeError, "did not preserve image/png bytes"):
+                    driver.require_capture(
+                        Path("copypaste-cli"), {}, workspace, workspace / "evidence", "wayland",
+                        "image/png", b"expected PNG bytes", "image/png", "clipboard_png",
+                    )
+
     def wayland_inputs(self, **overrides):
         values = {
             "wayland_app_permission_target": "Allow keyboard control",
