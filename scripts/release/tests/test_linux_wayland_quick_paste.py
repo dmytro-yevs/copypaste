@@ -108,18 +108,20 @@ class LinuxWaylandQuickPasteTest(unittest.TestCase):
 
             def doAction(self, index):
                 self.node.clicked.append(self.names[index])
+                self.node.events.append(f'{self.node.name}:{self.names[index]}')
                 if self.node.name == 'Allow Remote Interaction':
                     self.node._state.values.add('checked')
                 return True
 
         class Node:
-            def __init__(self, name='', *states, children=(), actions=('click',)):
+            def __init__(self, name='', *states, children=(), actions=('click',), events=None):
                 self.name = name
                 self._state = State(*states)
                 self._children = list(children)
                 self.childCount = len(self._children)
                 self.actions = actions
                 self.clicked = []
+                self.events = events if events is not None else []
 
             def getState(self):
                 return self._state
@@ -132,16 +134,56 @@ class LinuxWaylandQuickPasteTest(unittest.TestCase):
                 action.node = self
                 return action
 
-        atspi = SimpleNamespace(STATE_CHECKABLE='checkable', STATE_CHECKED='checked', STATE_SHOWING='showing', STATE_VISIBLE='visible', STATE_ENABLED='enabled')
-        interaction = Node('Allow Remote Interaction', 'checkable', 'showing', 'visible', 'enabled', actions=('toggle',))
-        share = Node('Share', 'showing', 'visible')
+        atspi = SimpleNamespace(STATE_CHECKABLE='checkable', STATE_CHECKED='checked', STATE_SHOWING='showing', STATE_VISIBLE='visible', STATE_SENSITIVE='sensitive')
+        events = []
+        interaction = Node('Allow Remote Interaction', 'checkable', 'showing', 'visible', 'sensitive', actions=('toggle',), events=events)
+        share = Node('Share', 'showing', 'visible', 'sensitive', events=events)
         application = Node(children=(interaction, share))
-        self.assertFalse(module.gnome_portal_consent(application, atspi))
-        self.assertEqual(interaction.clicked, ['toggle'])
-        share._state.values.add('enabled')
         self.assertTrue(module.gnome_portal_consent(application, atspi))
         self.assertEqual(interaction.clicked, ['toggle'])
         self.assertEqual(share.clicked, ['click'])
+        self.assertEqual(events, ['Allow Remote Interaction:toggle', 'Share:click'])
+
+    def test_portal_control_rejects_insensitive_ambiguous_or_wrong_action_controls(self):
+        class State:
+            def __init__(self, *values):
+                self.values = set(values)
+
+            def contains(self, value):
+                return value in self.values
+
+        class Action:
+            def __init__(self, names):
+                self.names = names
+                self.nActions = len(names)
+
+            def getName(self, index):
+                return self.names[index]
+
+        class Node:
+            def __init__(self, name='', *states, children=(), actions=('click',)):
+                self.name = name
+                self.state = State(*states)
+                self.children = list(children)
+                self.childCount = len(self.children)
+                self.actions = actions
+
+            def getState(self):
+                return self.state
+
+            def getChildAtIndex(self, index):
+                return self.children[index]
+
+            def queryAction(self):
+                return Action(self.actions)
+
+        atspi = SimpleNamespace(STATE_SHOWING='showing', STATE_VISIBLE='visible', STATE_SENSITIVE='sensitive')
+        insensitive = Node('Share', 'showing', 'visible', 'enabled')
+        self.assertIsNone(module.portal_control(insensitive, atspi, 'Share', {'click'}))
+        first = Node('Share', 'showing', 'visible', 'sensitive')
+        second = Node('Share', 'showing', 'visible', 'sensitive')
+        self.assertIsNone(module.portal_control(Node(children=(first, second)), atspi, 'Share', {'click'}))
+        self.assertIsNone(module.portal_control(Node('Share', 'showing', 'visible', 'sensitive', actions=('toggle',)), atspi, 'Share', {'click'}))
 
     def test_kde_portal_consent_uses_the_localized_allow_button(self):
         class State:
@@ -167,7 +209,7 @@ class LinuxWaylandQuickPasteTest(unittest.TestCase):
             def queryAction(self):
                 return Action()
 
-        self.assertTrue(module.kde_portal_consent(Node(), SimpleNamespace(STATE_SHOWING='showing', STATE_VISIBLE='visible', STATE_ENABLED='enabled')))
+        self.assertTrue(module.kde_portal_consent(Node(), SimpleNamespace(STATE_SHOWING='showing', STATE_VISIBLE='visible', STATE_SENSITIVE='sensitive')))
 
     def test_portal_response_received_during_call_is_not_lost(self):
         class Reply:
@@ -186,8 +228,15 @@ class LinuxWaylandQuickPasteTest(unittest.TestCase):
 
         class Glib:
             class Variant:
-                def __init__(self, _signature, value):
+                def __init__(self, signature, value):
+                    self.signature = signature
                     self.value = value
+
+                def get_type_string(self):
+                    return self.signature
+
+                def unpack(self):
+                    return self.value
 
             class VariantType:
                 @staticmethod
@@ -237,15 +286,22 @@ class LinuxWaylandQuickPasteTest(unittest.TestCase):
         portal.connection = Connection()
         portal.owner = ':1.9'
         portal.calls = []
-        outcome = portal._request('CreateSession', '(a{sv})', ({'handle_token': 'copypaste_create_7'},))
+        outcome = portal._request('CreateSession', '(a{sv})', ({'handle_token': Glib.Variant('s', 'copypaste_create_7')},))
         self.assertEqual(outcome, {'session_handle': '/session'})
         self.assertEqual(portal.connection.unsubscribed, [12])
 
     def test_portal_call_error_unsubscribes_the_preinstalled_watch(self):
         class Glib:
             class Variant:
-                def __init__(self, _signature, _value):
-                    pass
+                def __init__(self, signature, value):
+                    self.signature = signature
+                    self.value = value
+
+                def get_type_string(self):
+                    return self.signature
+
+                def unpack(self):
+                    return self.value
 
             class VariantType:
                 @staticmethod
@@ -281,7 +337,7 @@ class LinuxWaylandQuickPasteTest(unittest.TestCase):
         portal.owner = ':1.9'
         portal.calls = []
         with self.assertRaisesRegex(RuntimeError, 'D-Bus call failed'):
-            portal._request('CreateSession', '(a{sv})', ({'handle_token': 'copypaste_create_7'},))
+            portal._request('CreateSession', '(a{sv})', ({'handle_token': Glib.Variant('s', 'copypaste_create_7')},))
         self.assertEqual(portal.connection.unsubscribed, [25])
 
     def test_malformed_portal_reply_unsubscribes_the_preinstalled_watch(self):
@@ -291,8 +347,15 @@ class LinuxWaylandQuickPasteTest(unittest.TestCase):
 
         class Glib:
             class Variant:
-                def __init__(self, _signature, _value):
-                    pass
+                def __init__(self, signature, value):
+                    self.signature = signature
+                    self.value = value
+
+                def get_type_string(self):
+                    return self.signature
+
+                def unpack(self):
+                    return self.value
 
             class VariantType:
                 @staticmethod
@@ -329,8 +392,106 @@ class LinuxWaylandQuickPasteTest(unittest.TestCase):
         portal.owner = ':1.9'
         portal.calls = []
         with self.assertRaises(ValueError):
-            portal._request('CreateSession', '(a{sv})', ({'handle_token': 'copypaste_create_7'},))
+            portal._request('CreateSession', '(a{sv})', ({'handle_token': Glib.Variant('s', 'copypaste_create_7')},))
         self.assertEqual(portal.connection.unsubscribed, [26])
+
+    def test_portal_request_rejects_an_untyped_handle_token_before_subscribing(self):
+        class Glib:
+            class Variant:
+                def __init__(self, signature, value):
+                    self.signature = signature
+                    self.value = value
+
+                def get_type_string(self):
+                    return self.signature
+
+                def unpack(self):
+                    return self.value
+
+        class Connection:
+            def signal_subscribe(self, *_args):
+                raise AssertionError('untyped handle token must not install a response watch')
+
+        portal = object.__new__(module.PortalKeyboard)
+        portal.glib = Glib()
+        portal.connection = Connection()
+        with self.assertRaisesRegex(module.QuickPasteQualificationError, 'safe handle token'):
+            portal._request('CreateSession', '(a{sv})', ({'handle_token': 'copypaste_create_7'},))
+
+    def test_grant_uses_typed_variants_for_all_portal_options(self):
+        class Variant:
+            def __init__(self, signature, value):
+                self.signature = signature
+                self.value = value
+
+            def get_type_string(self):
+                return self.signature
+
+            def unpack(self):
+                return self.value
+
+        portal = object.__new__(module.PortalKeyboard)
+        portal.glib = SimpleNamespace(Variant=Variant)
+        portal.session = ''
+        portal.session_digest = ''
+        calls = []
+
+        def request(method, signature, values, on_requested=None):
+            calls.append((method, signature, values, on_requested))
+            if method == 'CreateSession':
+                return {'session_handle': '/org/freedesktop/portal/desktop/session/test'}
+            if method == 'SelectDevices':
+                return {}
+            self.assertEqual(method, 'Start')
+            return {'devices': module.KEYBOARD_DEVICE}
+
+        portal._request = request
+        callback = lambda: None
+        portal.grant(callback)
+
+        self.assertEqual([call[0] for call in calls], ['CreateSession', 'SelectDevices', 'Start'])
+        create_options = calls[0][2][0]
+        select_options = calls[1][2][1]
+        start_options = calls[2][2][2]
+        self.assertEqual(create_options['handle_token'].get_type_string(), 's')
+        self.assertEqual(create_options['session_handle_token'].get_type_string(), 's')
+        self.assertEqual(select_options['handle_token'].get_type_string(), 's')
+        self.assertEqual(select_options['types'].get_type_string(), 'u')
+        self.assertEqual(select_options['types'].unpack(), module.KEYBOARD_DEVICE)
+        self.assertEqual(start_options['handle_token'].get_type_string(), 's')
+        self.assertIs(calls[2][3], callback)
+
+    def test_close_targets_the_session_object_without_a_body_and_clears_it(self):
+        class Glib:
+            class VariantType:
+                @staticmethod
+                def new(value):
+                    return value
+
+        class Gio:
+            class DBusCallFlags:
+                NONE = 0
+
+        class Connection:
+            def __init__(self):
+                self.calls = []
+
+            def call_sync(self, *args):
+                self.calls.append(args)
+                return object()
+
+        portal = object.__new__(module.PortalKeyboard)
+        portal.glib = Glib()
+        portal.gio = Gio
+        portal.connection = Connection()
+        portal.calls = []
+        portal.session = '/org/freedesktop/portal/desktop/session/test'
+        portal.close()
+
+        self.assertEqual(portal.connection.calls[0][0:5], (
+            module.PORTAL_NAME, '/org/freedesktop/portal/desktop/session/test', module.SESSION_INTERFACE, 'Close', None,
+        ))
+        self.assertEqual(portal.session, '')
 
 
 if __name__ == "__main__":
