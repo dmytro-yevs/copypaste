@@ -605,6 +605,15 @@ pub async fn runtime_status() -> Result<ThisDevice, RuntimeError> {
     }
 }
 
+/// Returns whether the daemon's clipboard transport is currently available.
+pub async fn clipboard_available() -> Result<bool, RuntimeError> {
+    let response = client::request(Method::Status).await?;
+    match response.data {
+        Some(ResponseData::Status(status)) => Ok(status.clipboard_available),
+        _ => Err(RuntimeError::internal()),
+    }
+}
+
 pub async fn capture_state() -> Result<CaptureState, RuntimeError> {
     let response = client::request(Method::Status).await?;
     match response.data {
@@ -1388,6 +1397,7 @@ mod tests {
             device_details: None,
             item_count: 0,
             capture_running: false,
+            clipboard_available: true,
             clipboard_backend: "fake".into(),
             private_mode: false,
             private_mode_epoch: 0,

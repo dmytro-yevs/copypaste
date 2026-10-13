@@ -266,6 +266,7 @@ impl Runtime {
                         listen_addr: self.node.listen_addr(),
                         item_count: self.store.count().unwrap_or(0),
                         capture_running: self.capture_running.load(Ordering::Acquire),
+                        clipboard_available: true,
                         clipboard_backend: "android".to_owned(),
                         private_mode: settings.config.private_mode,
                         private_mode_epoch: settings.private_mode_epoch,
@@ -1824,6 +1825,7 @@ mod tests {
                     status.device_id.as_deref(),
                     Some(runtime.device_id.as_str())
                 );
+                assert!(status.clipboard_available);
             }
             other => panic!("expected status response, got {other:?}"),
         }
