@@ -186,13 +186,15 @@ def wayland_quick_paste_receipt(value, *, gui_pid, inputs, marker):
     atspi = value["atspi"]
     if type(gui_pid) is not int or gui_pid <= 0:
         raise RuntimeError("Wayland Quick Paste GUI actor is invalid")
-    if not isinstance(actors, dict) or set(actors) != {"gui_pid", "portal_dialog_pid", "input_target_pid"}:
+    if not isinstance(actors, dict) or set(actors) != {"gui_pid", "portal_dialog_pid", "quick_paste_pid", "input_target_pid"}:
         raise RuntimeError("Wayland Quick Paste receipt actor identity is invalid")
     if actors.get("gui_pid") != gui_pid or any(type(actors.get(name)) is not int or actors[name] <= 0 for name in (
-        "portal_dialog_pid", "input_target_pid",
+        "portal_dialog_pid", "quick_paste_pid", "input_target_pid",
     )):
         raise RuntimeError("Wayland Quick Paste receipt actor identity does not match the discovered actors")
-    if actors["input_target_pid"] in {gui_pid, actors["portal_dialog_pid"]}:
+    if actors["input_target_pid"] in {gui_pid, actors["portal_dialog_pid"]} or actors["quick_paste_pid"] in {
+        gui_pid, actors["portal_dialog_pid"], actors["input_target_pid"],
+    }:
         raise RuntimeError("Wayland Quick Paste target actor is not separate")
     if (not isinstance(target, dict) or set(target) != {"pid", "title_sha256", "marker_sha256"}
             or target["pid"] != actors["input_target_pid"]):
@@ -206,7 +208,7 @@ def wayland_quick_paste_receipt(value, *, gui_pid, inputs, marker):
             or type(portal["input_calls"]) is not int or portal["input_calls"] < 8):
         raise RuntimeError("Wayland Quick Paste portal evidence is invalid")
     require_sha256(portal["session_sha256"], "Wayland Quick Paste portal session digest")
-    if not isinstance(atspi, dict) or set(atspi) != {"portal_click_sha256"}:
+    if not isinstance(atspi, dict) or set(atspi) != {"portal_click_sha256", "quick_paste_ready_sha256"}:
         raise RuntimeError("Wayland Quick Paste media evidence is invalid")
     for name, digest in atspi.items():
         require_sha256(digest, f"Wayland Quick Paste {name}")
