@@ -194,13 +194,17 @@ class _AppShellState extends State<AppShell> {
                     data: media.copyWith(
                       padding: media.padding.copyWith(bottom: bottom),
                     ),
-                    child: AppNavigationHost(
-                      key: _navigationHostKey,
-                      controller: widget.controller,
-                      child: AppDestinationViewport(
+                    child: Semantics(
+                      container: true,
+                      explicitChildNodes: true,
+                      child: AppNavigationHost(
+                        key: _navigationHostKey,
                         controller: widget.controller,
-                        swipeEnabled: mode == _ShellNavigationMode.bottom,
-                        children: _destinationChildren,
+                        child: AppDestinationViewport(
+                          controller: widget.controller,
+                          swipeEnabled: mode == _ShellNavigationMode.bottom,
+                          children: _destinationChildren,
+                        ),
                       ),
                     ),
                   );
@@ -288,19 +292,30 @@ class _AppShellState extends State<AppShell> {
               selected: true,
             ),
             alignment: expanded ? Alignment.centerLeft : Alignment.center,
-            label: Text(
-              destination.label,
-              style: theme.typography.large
-                  .merge(theme.typography.medium)
-                  .copyWith(height: 1),
-            ),
-            child: SizedBox.square(
-              key: ValueKey<String>(
-                'navigation-icon-${destination.destination.name}',
+            label: ExcludeSemantics(
+              child: Text(
+                destination.label,
+                style: theme.typography.large
+                    .merge(theme.typography.medium)
+                    .copyWith(height: 1),
               ),
-              dimension: AppIconSize.xl,
-              child: Center(
-                child: Icon(destination.icon, size: AppIconSize.md),
+            ),
+            child: Semantics(
+              label: destination.label,
+              button: true,
+              selected:
+                  widget.controller.selectedDestination ==
+                  destination.destination,
+              child: ExcludeSemantics(
+                child: SizedBox.square(
+                  key: ValueKey<String>(
+                    'navigation-icon-${destination.destination.name}',
+                  ),
+                  dimension: AppIconSize.xl,
+                  child: Center(
+                    child: Icon(destination.icon, size: AppIconSize.md),
+                  ),
+                ),
               ),
             ),
           );
