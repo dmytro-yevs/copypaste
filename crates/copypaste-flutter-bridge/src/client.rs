@@ -42,8 +42,30 @@ pub(crate) async fn request(method: Method) -> Result<Response, RuntimeError> {
 }
 
 #[cfg(not(target_os = "android"))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) async fn request_at(
+    path: &std::path::Path,
+    method: Method,
+) -> Result<Response, RuntimeError> {
+    let timeout_budget = if method.is_long_running() {
+        TRANSFER_TIMEOUT
+    } else {
+        REQUEST_TIMEOUT
+    };
+    timeout(timeout_budget, request_once_at(path, method))
+        .await
+        .map_err(|_| RuntimeError::timeout())?
+}
+
+#[cfg(not(target_os = "android"))]
 async fn request_once(method: Method) -> Result<Response, RuntimeError> {
-    let stream = transport::connect(&crate::runtime::socket_path()?)
+    let path = crate::runtime::socket_path()?;
+    request_once_at(&path, method).await
+}
+
+#[cfg(not(target_os = "android"))]
+async fn request_once_at(path: &std::path::Path, method: Method) -> Result<Response, RuntimeError> {
+    let stream = transport::connect(path)
         .await
         .map_err(|_| RuntimeError::daemon_unreachable())?;
     let mut framed = Framed::new(stream, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
