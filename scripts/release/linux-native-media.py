@@ -160,13 +160,22 @@ def action_index(node: Any, action_name: str) -> int | None:
     return None
 
 
+def click_action_index(node: Any) -> int | None:
+    """Resolve the semantic click action exposed by GTK or Flutter AT-SPI."""
+    for action_name in ("click", "Tap"):
+        index = action_index(node, action_name)
+        if index is not None:
+            return index
+    return None
+
+
 def invoke_accessible(registry: Any, *, pid: int, target: str) -> dict[str, Any]:
     """Invoke one installed control and report the action acknowledgement."""
     application = atspi_application(registry, pid)
     button = matching_accessible(application, target)
     if button is None:
         raise MediaQualificationError("required installed UI control is absent")
-    index = action_index(button, "click")
+    index = click_action_index(button)
     if index is None:
         raise MediaQualificationError("required installed UI control is not actionable")
     try:
