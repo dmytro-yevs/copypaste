@@ -908,6 +908,7 @@ def require_x11_quick_paste(cli, environment, workspace):
     """Drive the packaged global shortcut through an external GTK input field."""
     marker = "copypaste-x11-quick-paste-fixture"
     run([str(cli), "add", marker], env=environment)
+    run(["xdotool", "mousemove", "--sync", "16", "16"], env=environment)
     with x11_input_target(workspace, environment) as (target_window, result_file):
         # The target owns focus before the real global shortcut is sent.
         before_focus = run(["xdotool", "getwindowfocus"], env=environment)

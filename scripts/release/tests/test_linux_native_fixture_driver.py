@@ -201,8 +201,10 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
                 driver.x11_window_pid("42", {})
 
     def test_x11_quick_paste_uses_observed_focus_for_a_normal_return_key(self):
+        events = []
         @driver.contextmanager
         def input_target(_workspace, _environment):
+            events.append("target_focus")
             with tempfile.TemporaryDirectory() as directory:
                 result = Path(directory) / "result"
                 result.write_text("copypaste-x11-quick-paste-fixture", encoding="utf-8")
@@ -211,6 +213,10 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
         calls = []
         def run(argv, **_kwargs):
             calls.append(argv)
+            if argv == ["xdotool", "mousemove", "--sync", "16", "16"]:
+                events.append("pointer_park")
+            if argv == ["xdotool", "key", "ctrl+shift+c"]:
+                events.append("hotkey")
             if argv == ["xdotool", "getwindowfocus"]:
                 value = b"100\n" if calls.count(argv) != 2 else b"200\n"
                 return subprocess.CompletedProcess(argv, 0, stdout=value)
@@ -228,6 +234,9 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
         ready.assert_called_once()
         self.assertIn(["xdotool", "key", "Return"], calls)
         self.assertFalse(any(command[:3] == ["xdotool", "key", "--window"] for command in calls))
+        self.assertLess(events.index("pointer_park"), events.index("target_focus"))
+        self.assertLess(events.index("target_focus"), events.index("hotkey"))
+        self.assertNotIn("pointer_park", events[events.index("hotkey") + 1:])
 
     def test_capture_requires_cli_copy_to_restore_the_original_after_a_real_overwrite(self):
         original = b"original HTML"
