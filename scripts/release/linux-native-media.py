@@ -342,9 +342,15 @@ def quick_paste_ready(registry: Any, atspi: Any, *, pid: int, marker: str, timeo
     """Require the requested clip and a focused editable input in one Quick Paste process."""
     if pid <= 0 or not marker:
         raise MediaQualificationError("Quick Paste readiness arguments are invalid")
-    application = atspi_application(registry, pid)
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
+        try:
+            application = atspi_application(registry, pid)
+        except MediaQualificationError as error:
+            if str(error) != "installed GUI is absent from the AT-SPI desktop":
+                raise
+            time.sleep(0.1)
+            continue
         marker_node = matching_accessible(application, marker)
         try:
             marker_visible = marker_node is not None and all(
