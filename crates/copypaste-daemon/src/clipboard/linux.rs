@@ -472,8 +472,10 @@ fn worker(
             PollFd::from_borrowed_fd(xfd, PollFlags::IN),
             PollFd::new(&wake, PollFlags::IN),
         ];
-        if poll(&mut fds, None).is_err() {
-            return;
+        match poll(&mut fds, None) {
+            Err(rustix::io::Errno::INTR) => continue,
+            Err(_) => return,
+            Ok(_) => {}
         }
         if fds[0]
             .revents()
@@ -906,9 +908,15 @@ impl Transfer<'_> {
                 PollFd::from_borrowed_fd(xfd, PollFlags::IN),
                 PollFd::new(&*self.wake, PollFlags::IN),
             ];
-            if poll(&mut fds, Some(&timeout)).is_err() {
-                self.stopped = true;
-                return None;
+            match poll(&mut fds, Some(&timeout)) {
+                // Signals do not invalidate the connection. The next iteration
+                // recomputes the remaining time from the original deadline.
+                Err(rustix::io::Errno::INTR) => continue,
+                Err(_) => {
+                    self.stopped = true;
+                    return None;
+                }
+                Ok(_) => {}
             }
             if fds[0]
                 .revents()
@@ -1419,11 +1427,11 @@ mod tests {
         );
         let (result, clipboard) = transfer.join().expect("transfer must not panic");
         assert!(result.is_none());
+        drop(clipboard);
         assert!(
             !availability.load(Ordering::Acquire),
             "X11 adapter remained available after server disconnect during a transfer"
         );
-        drop(clipboard);
         drop(owner);
         assert!(
             start.elapsed() < Duration::from_secs(1),
