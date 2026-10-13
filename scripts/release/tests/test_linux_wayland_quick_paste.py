@@ -3,10 +3,13 @@
 
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+from unittest import mock
 from pathlib import Path
 
 
@@ -74,21 +77,128 @@ class LinuxWaylandQuickPasteTest(unittest.TestCase):
     def test_receipt_binds_every_actor_pid_and_rejects_weak_input_proof(self):
         digest = 'a' * 64
         record = module.receipt(
-            gui_pid=11, portal_dialog_pid=13, input_target_pid=14,
+            gui_pid=11, portal_dialog_pid=13, quick_paste_pid=14, input_target_pid=15,
             marker='fixture', portal_input_calls=8, portal_session_digest=digest,
-            portal_click_digest=digest,
+            portal_click_digest=digest, quick_paste_ready_digest=digest,
         )
         self.assertEqual(record['actors'], {
             'gui_pid': 11,
             'portal_dialog_pid': 13,
-            'input_target_pid': 14,
+            'quick_paste_pid': 14,
+            'input_target_pid': 15,
         })
         with self.assertRaisesRegex(module.QuickPasteQualificationError, 'proof'):
             module.receipt(
-                gui_pid=11, portal_dialog_pid=13, input_target_pid=14,
+                gui_pid=11, portal_dialog_pid=13, quick_paste_pid=14, input_target_pid=15,
                 marker='fixture', portal_input_calls=7, portal_session_digest=digest,
-                portal_click_digest=digest,
+                portal_click_digest=digest, quick_paste_ready_digest=digest,
             )
+
+    def test_quick_paste_child_excludes_foreign_children_and_rejects_ambiguity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            proc = root / 'proc'
+            proc.mkdir()
+            executable = root / 'copypaste'
+            executable.write_text('binary', encoding='utf-8')
+            foreign_executable = root / 'foreign'
+            foreign_executable.write_text('binary', encoding='utf-8')
+
+            def process(pid, *, ppid, executable_path, arguments):
+                node = proc / str(pid)
+                node.mkdir()
+                node.joinpath('status').write_text(
+                    f'PPid:\t{ppid}\nUid:\t{os.getuid()}\t0\t0\t0\n', encoding='utf-8',
+                )
+                node.joinpath('exe').symlink_to(executable_path)
+                node.joinpath('cmdline').write_bytes(b'\0'.join(arguments) + b'\0')
+                return node
+
+            gui = process(100, ppid=1, executable_path=executable, arguments=(b'/app/copypaste',))
+            process(101, ppid=100, executable_path=executable, arguments=(b'/app/copypaste', b'--copypaste-quick-paste'))
+            process(102, ppid=999, executable_path=executable, arguments=(b'/app/copypaste', b'--copypaste-quick-paste'))
+            process(103, ppid=100, executable_path=foreign_executable, arguments=(b'/app/copypaste', b'--copypaste-quick-paste'))
+            process(104, ppid=100, executable_path=executable, arguments=(b'/app/copypaste', b'--copypaste-quick-pastes'))
+            original = module.PROC_ROOT
+            module.PROC_ROOT = proc
+            try:
+                self.assertEqual(module.status_number({'Uid': '0 0 0 0'}, 'Uid'), 0)
+                self.assertIsNone(module.status_number({}, 'Uid'))
+                self.assertEqual(module.quick_paste_child(100), 101)
+                process(105, ppid=100, executable_path=executable, arguments=(b'/app/copypaste', b'--copypaste-quick-paste'))
+                with self.assertRaisesRegex(module.QuickPasteQualificationError, 'ambiguous'):
+                    module.quick_paste_child(100)
+            finally:
+                module.PROC_ROOT = original
+
+    def test_malformed_quick_paste_readiness_evidence_blocks_completion(self):
+        malformed = subprocess.CompletedProcess(['python3', 'actor'], 0, stdout='unexpected\n', stderr='')
+        with mock.patch.object(module, 'quick_paste_child', return_value=101), \
+             mock.patch.object(module.subprocess, 'run', return_value=malformed) as run:
+            with self.assertRaisesRegex(module.QuickPasteQualificationError, 'invalid output'):
+                module.wait_for_quick_paste_ready(module.MEDIA_ACTOR, 100, 'fixture', {})
+        self.assertEqual(run.call_args.args[0][2], 'quick-paste-ready')
+
+    def test_quick_paste_readiness_rejects_boolean_schema_and_keeps_actor_failure_details(self):
+        marker = 'fixture'
+        output = 'COPYPASTE_QUALIFICATION_MEDIA ' + json.dumps({
+            'schema': True,
+            'kind': 'atspi_quick_paste_ready',
+            'gui_pid': 101,
+            'marker_sha256': module.sha256(marker),
+        }) + '\n'
+        with self.assertRaisesRegex(module.QuickPasteQualificationError, 'evidence'):
+            module.quick_paste_ready_record(output, pid=101, marker=marker)
+        failed = subprocess.CompletedProcess(['python3', 'actor'], 7, stdout='', stderr='causal actor failure')
+        with mock.patch.object(module, 'quick_paste_child', return_value=101), \
+             mock.patch.object(module.subprocess, 'run', return_value=failed):
+            with self.assertRaisesRegex(module.QuickPasteQualificationError, 'exit 7: causal actor failure'):
+                module.wait_for_quick_paste_ready(module.MEDIA_ACTOR, 100, marker, {})
+
+    def test_quick_paste_readiness_rejects_an_exhausted_deadline(self):
+        with mock.patch.object(module, 'quick_paste_child', return_value=None), \
+             mock.patch.object(module.time, 'monotonic', side_effect=[0, 8]):
+            with self.assertRaisesRegex(module.QuickPasteQualificationError, 'deadline'):
+                module.wait_for_quick_paste_ready(module.MEDIA_ACTOR, 100, 'fixture', {})
+
+    def test_readiness_failure_prevents_return_input(self):
+        class Portal:
+            def __init__(self, *_args):
+                self.calls = []
+                self.session_digest = 'a' * 64
+                self.chords = []
+
+            def require_gui_owner(self, _pid):
+                return ':1.2'
+
+            def grant(self, callback):
+                callback()
+
+            def chord(self, *keycodes):
+                self.chords.append(keycodes)
+
+            def close(self):
+                pass
+
+        portal = Portal()
+        target = SimpleNamespace(pid=103, close=mock.Mock())
+        repository = ModuleType('gi.repository')
+        repository.Gio = object()
+        repository.GLib = object()
+        gi = ModuleType('gi')
+        gi.repository = repository
+        args = SimpleNamespace(gui_pid=100, workspace=Path('/workspace'), marker='fixture', actor=module.MEDIA_ACTOR)
+        with mock.patch.dict(sys.modules, {'gi': gi, 'gi.repository': repository}), \
+             mock.patch.dict(os.environ, {'WAYLAND_DISPLAY': 'wayland-0'}), \
+             mock.patch.object(module, 'build_target', return_value=Path('/target')), \
+             mock.patch.object(module, 'PortalKeyboard', return_value=portal), \
+             mock.patch.object(module, 'start_target', return_value=target), \
+             mock.patch.object(module, 'click_owned_portal_consent', return_value=(101, 'b' * 64)), \
+             mock.patch.object(module, 'wait_for_quick_paste_ready', side_effect=module.QuickPasteQualificationError('malformed readiness')):
+            with self.assertRaisesRegex(module.QuickPasteQualificationError, 'malformed readiness'):
+                module.qualify(args)
+        self.assertEqual(portal.chords, [(module.EVDEV_CONTROL, module.EVDEV_SHIFT, module.EVDEV_C)])
+        target.close.assert_called_once()
 
     def test_gnome_portal_consent_checks_remote_interaction_before_sharing(self):
         class State:
