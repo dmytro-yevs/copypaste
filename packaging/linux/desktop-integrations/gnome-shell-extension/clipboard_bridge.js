@@ -39,7 +39,7 @@ export class ClipboardBridge {
         this._identity = null;
         this._identity = this._writerIdentity(this._currentOwner());
         this._ownerChangedId = this._selection.connect('owner-changed', (_selection, selectionType, source) => {
-            if (selectionType !== Meta.SelectionType.CLIPBOARD)
+            if (selectionType !== Meta.SelectionType.SELECTION_CLIPBOARD)
                 return;
             this._sequence += 1;
             this._identity = this._writerIdentity(source);
@@ -92,7 +92,7 @@ export class ClipboardBridge {
         const cancellable = new Gio.Cancellable();
         this._reads.add(cancellable);
         const output = Gio.MemoryOutputStream.new_resizable();
-        this._selection.transfer_async(Meta.SelectionType.CLIPBOARD, mime, maxBytes + 1, output, cancellable, (selection, result) => {
+        this._selection.transfer_async(Meta.SelectionType.SELECTION_CLIPBOARD, mime, maxBytes + 1, output, cancellable, (selection, result) => {
             this._reads.delete(cancellable);
             try {
                 selection.transfer_finish(result);
@@ -133,7 +133,7 @@ export class ClipboardBridge {
         } catch (_error) {
             return this._error(invocation, 'Unavailable');
         }
-        this._selection.set_owner(Meta.SelectionType.CLIPBOARD, this._source);
+        this._selection.set_owner(Meta.SelectionType.SELECTION_CLIPBOARD, this._source);
         this._reply(invocation, new GLib.Variant('(t)', [BigInt(this._sequence)]));
     }
 
@@ -167,7 +167,7 @@ export class ClipboardBridge {
     }
 
     _inventory() {
-        const values = this._selection.get_mimetypes(Meta.SelectionType.CLIPBOARD) ?? [];
+        const values = this._selection.get_mimetypes(Meta.SelectionType.SELECTION_CLIPBOARD) ?? [];
         if (values.length > MAX_MIMES || values.some(mime => !this._validMime(mime)))
             return null;
         return [...values];
