@@ -190,6 +190,43 @@ class LinuxNativeMediaTest(unittest.TestCase):
         self.assertEqual(record["kind"], "atspi_quick_paste_ready")
         self.assertEqual(record["gui_pid"], 123)
 
+    def test_quick_paste_readiness_waits_for_its_accessibility_application(self):
+        class State:
+            def contains(self, _value):
+                return True
+
+        class Node:
+            def __init__(self, name, *, text=False, children=()):
+                self.name = name
+                self.text = text
+                self.children = list(children)
+                self.childCount = len(self.children)
+
+            def getChildAtIndex(self, index):
+                return self.children[index]
+
+            def getState(self):
+                return State()
+
+            def queryText(self):
+                if not self.text:
+                    raise RuntimeError("not text")
+                return object()
+
+        atspi = SimpleNamespace(
+            STATE_SHOWING="showing", STATE_VISIBLE="visible", STATE_FOCUSED="focused", STATE_EDITABLE="editable",
+        )
+        application = Node("application", children=(Node("marker"), Node("search", text=True)))
+        with mock.patch.object(
+            media,
+            "atspi_application",
+            side_effect=[
+                media.MediaQualificationError("installed GUI is absent from the AT-SPI desktop"), application,
+            ],
+        ) as observed, mock.patch.object(media.time, "sleep"):
+            media.quick_paste_ready(mock.Mock(), atspi, pid=123, marker="marker", timeout_seconds=1)
+        self.assertEqual(observed.call_count, 2)
+
     def test_quick_paste_readiness_rejects_missing_marker_focus_or_pid(self):
         class State:
             def __init__(self, *values):
@@ -236,6 +273,18 @@ class LinuxNativeMediaTest(unittest.TestCase):
              mock.patch.object(media.time, "sleep"):
             with self.assertRaisesRegex(media.MediaQualificationError, "focused editable"):
                 media.quick_paste_ready(mock.Mock(), atspi, pid=123, marker="marker", timeout_seconds=1)
+
+    def test_quick_paste_readiness_rejects_a_pid_absent_for_the_entire_deadline(self):
+        atspi = SimpleNamespace(
+            STATE_SHOWING="showing", STATE_VISIBLE="visible", STATE_FOCUSED="focused", STATE_EDITABLE="editable",
+        )
+        absent = media.MediaQualificationError("installed GUI is absent from the AT-SPI desktop")
+        with mock.patch.object(media, "atspi_application", side_effect=absent), \
+             mock.patch.object(media.time, "monotonic", side_effect=[0, 0, 2]), \
+             mock.patch.object(media.time, "sleep"):
+            with self.assertRaisesRegex(media.MediaQualificationError, "requested clip"):
+                media.quick_paste_ready(mock.Mock(), atspi, pid=123, marker="marker", timeout_seconds=1)
+
     def test_camera_observation_binds_the_gui_pairing_state_and_gstreamer_mapping(self):
         application = mock.Mock()
         with mock.patch.object(media, "atspi_application", return_value=application), \
