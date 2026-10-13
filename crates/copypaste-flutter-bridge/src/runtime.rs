@@ -23,11 +23,19 @@ struct RunningRuntime {
     child: Child,
 }
 
-static RUNTIME: OnceLock<Mutex<Option<RunningRuntime>>> = OnceLock::new();
+enum RuntimeSlot {
+    Owned(RunningRuntime),
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    Attached {
+        socket_path: PathBuf,
+    },
+}
+
+static RUNTIME: OnceLock<Mutex<Option<RuntimeSlot>>> = OnceLock::new();
 static WATCHES: OnceLock<Mutex<HashMap<u64, tokio::sync::watch::Sender<bool>>>> = OnceLock::new();
 static NEXT_WATCH_ID: AtomicU64 = AtomicU64::new(1);
 
-fn slot() -> &'static Mutex<Option<RunningRuntime>> {
+fn slot() -> &'static Mutex<Option<RuntimeSlot>> {
     RUNTIME.get_or_init(|| Mutex::new(None))
 }
 
@@ -79,11 +87,83 @@ pub(crate) fn socket_path() -> Result<PathBuf, RuntimeError> {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .as_ref()
-        .map(|runtime| runtime.socket_path.clone())
+        .map(|runtime| match runtime {
+            RuntimeSlot::Owned(runtime) => runtime.socket_path.clone(),
+            RuntimeSlot::Attached { socket_path } => socket_path.clone(),
+        })
         .ok_or_else(RuntimeError::not_initialized)
 }
 
+pub(crate) fn desktop_endpoint() -> Result<String, RuntimeError> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut guard = slot()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(RuntimeSlot::Owned(runtime)) = guard.as_mut() else {
+            return Err(RuntimeError::runtime_conflict());
+        };
+        if !matches!(runtime.child.try_wait(), Ok(None)) {
+            return Err(RuntimeError::daemon_unreachable());
+        }
+        return runtime
+            .socket_path
+            .to_str()
+            .map(str::to_owned)
+            .ok_or_else(RuntimeError::runtime_endpoint_invalid);
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err(RuntimeError::runtime_attachment_unsupported())
+    }
+}
+
+pub(crate) async fn attach(endpoint: String) -> Result<(), RuntimeError> {
+    #[cfg(target_os = "linux")]
+    {
+        let socket_path = validate_attachment_endpoint(&endpoint)?;
+        if slot()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_some()
+        {
+            return Err(RuntimeError::runtime_conflict());
+        }
+        let response =
+            crate::client::request_at(&socket_path, copypaste_ipc::Method::Status).await?;
+        if !matches!(
+            response.data,
+            Some(copypaste_ipc::ResponseData::Status(status))
+                if status.protocol_version == copypaste_ipc::PROTOCOL_VERSION
+        ) {
+            return Err(RuntimeError::internal());
+        }
+        let mut guard = slot()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if guard.is_some() {
+            return Err(RuntimeError::runtime_conflict());
+        }
+        *guard = Some(RuntimeSlot::Attached { socket_path });
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = endpoint;
+        Err(RuntimeError::runtime_attachment_unsupported())
+    }
+}
+
 pub(crate) async fn start(daemon_executable: String, data_dir: String) -> Result<(), RuntimeError> {
+    if matches!(
+        slot()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref(),
+        Some(RuntimeSlot::Attached { .. })
+    ) {
+        return Err(RuntimeError::runtime_conflict());
+    }
     let data_dir = validate_data_dir(&data_dir)?;
     let socket_path = isolated_socket_path(&data_dir)?;
     let startup_log = open_startup_log(&data_dir)?;
@@ -94,9 +174,15 @@ pub(crate) async fn start(daemon_executable: String, data_dir: String) -> Result
         let mut guard = slot()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        match guard.as_mut().map(|runtime| runtime.child.try_wait()) {
-            Some(Ok(None)) => return Ok(()),
-            Some(Ok(Some(_)) | Err(_)) => guard.take().map(|runtime| runtime.child),
+        match guard.as_mut() {
+            Some(RuntimeSlot::Owned(runtime)) => match runtime.child.try_wait() {
+                Ok(None) => return Ok(()),
+                Ok(Some(_)) | Err(_) => guard.take().and_then(|runtime| match runtime {
+                    RuntimeSlot::Owned(runtime) => Some(runtime.child),
+                    RuntimeSlot::Attached { .. } => None,
+                }),
+            },
+            Some(RuntimeSlot::Attached { .. }) => return Err(RuntimeError::runtime_conflict()),
             None => None,
         }
     };
@@ -107,6 +193,9 @@ pub(crate) async fn start(daemon_executable: String, data_dir: String) -> Result
         let mut guard = slot()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if guard.is_some() {
+            return Err(RuntimeError::runtime_conflict());
+        }
 
         let child = Command::new(daemon_executable)
             .args([
@@ -133,10 +222,10 @@ pub(crate) async fn start(daemon_executable: String, data_dir: String) -> Result
                 let _ = writeln!(startup_diagnostic, "spawn failed: {error}");
                 RuntimeError::daemon_spawn_failed()
             })?;
-        *guard = Some(RunningRuntime {
+        *guard = Some(RuntimeSlot::Owned(RunningRuntime {
             socket_path: socket_path.clone(),
             child,
-        });
+        }));
     }
 
     // Keychain access on macOS is user-mediated and may legitimately take much
@@ -192,7 +281,7 @@ fn owned_child_state() -> OwnedChildState {
     let mut guard = slot()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let Some(runtime) = guard.as_mut() else {
+    let Some(RuntimeSlot::Owned(runtime)) = guard.as_mut() else {
         return OwnedChildState::Stopped;
     };
     match runtime.child.try_wait() {
@@ -237,11 +326,14 @@ pub(crate) fn stop() {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .take()
-        .map(|mut runtime| {
-            // Closing this pipe is the daemon's app-parent shutdown signal.
-            // Take it before the child moves to the reaper so EOF is prompt.
-            let _ = runtime.child.stdin.take();
-            runtime.child
+        .and_then(|runtime| match runtime {
+            RuntimeSlot::Owned(mut runtime) => Some({
+                // Closing this pipe is the daemon's app-parent shutdown signal.
+                // Take it before the child moves to the reaper so EOF is prompt.
+                let _ = runtime.child.stdin.take();
+                runtime.child
+            }),
+            RuntimeSlot::Attached { .. } => None,
         });
     if let Some(child) = child {
         reap(child);
@@ -267,6 +359,28 @@ fn reap(mut child: Child) {
 
 fn validate_data_dir(value: &str) -> Result<PathBuf, RuntimeError> {
     validate_data_dir_against(value, &copypaste_ipc::data_dir())
+}
+
+#[cfg(target_os = "linux")]
+fn validate_attachment_endpoint(value: &str) -> Result<PathBuf, RuntimeError> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
+
+    let path = PathBuf::from(value);
+    if value.trim().is_empty() || !path.is_absolute() {
+        return Err(RuntimeError::runtime_endpoint_invalid());
+    }
+    let metadata =
+        std::fs::symlink_metadata(&path).map_err(|_| RuntimeError::runtime_endpoint_invalid())?;
+    let mode = metadata.permissions().mode() & 0o777;
+    let owner = std::fs::metadata("/proc/self")
+        .map_err(|_| RuntimeError::runtime_endpoint_invalid())?
+        .uid();
+    (metadata.file_type().is_socket()
+        && !metadata.file_type().is_symlink()
+        && mode == 0o600
+        && metadata.uid() == owner)
+        .then_some(path)
+        .ok_or_else(RuntimeError::runtime_endpoint_invalid)
 }
 
 fn validate_data_dir_against(value: &str, production: &Path) -> Result<PathBuf, RuntimeError> {
@@ -333,6 +447,74 @@ fn is_isolated_from(candidate: &Path, production: &Path) -> bool {
 mod tests {
     use super::*;
 
+    static TEST_RUNTIME_SERIAL: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
+    async fn runtime_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
+        TEST_RUNTIME_SERIAL
+            .get_or_init(|| tokio::sync::Mutex::new(()))
+            .lock()
+            .await
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn attached_status_server() -> (tempfile::TempDir, PathBuf, tokio::task::JoinHandle<()>) {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        let directory = tempfile::tempdir().expect("endpoint directory");
+        let endpoint = directory.path().join("runtime.sock");
+        let listener = tokio::net::UnixListener::bind(&endpoint).expect("endpoint listener");
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&endpoint, std::fs::Permissions::from_mode(0o600))
+            .expect("private endpoint");
+        let server = tokio::spawn(async move {
+            loop {
+                let Ok((stream, _)) = listener.accept().await else {
+                    return;
+                };
+                let (reader, mut writer) = stream.into_split();
+                let mut reader = BufReader::new(reader);
+                let mut line = String::new();
+                if reader
+                    .read_line(&mut line)
+                    .await
+                    .ok()
+                    .filter(|read| *read > 0)
+                    .is_none()
+                {
+                    continue;
+                }
+                let Ok(request) = serde_json::from_str::<copypaste_ipc::Request>(&line) else {
+                    continue;
+                };
+                let response = copypaste_ipc::Response::ok(
+                    request.id,
+                    copypaste_ipc::ResponseData::Status(copypaste_ipc::StatusData {
+                        sync_status: Default::default(),
+                        device_name: "Attached runtime".into(),
+                        device_id: None,
+                        version: "test".into(),
+                        protocol_version: copypaste_ipc::PROTOCOL_VERSION,
+                        listen_addr: None,
+                        device_details: None,
+                        item_count: 0,
+                        capture_running: true,
+                        clipboard_available: true,
+                        clipboard_backend: "test".into(),
+                        private_mode: false,
+                        private_mode_epoch: 0,
+                        counters: Default::default(),
+                        settings_health: None,
+                    }),
+                );
+                let Ok(line) = serde_json::to_string(&response) else {
+                    continue;
+                };
+                let _ = writer.write_all(format!("{line}\n").as_bytes()).await;
+            }
+        });
+        (directory, endpoint, server)
+    }
+
     #[test]
     fn production_data_directory_is_rejected() {
         let production = copypaste_ipc::data_dir();
@@ -378,6 +560,7 @@ mod tests {
 
     #[tokio::test]
     async fn cancelling_one_quiet_watch_keeps_another_active() {
+        let _guard = runtime_test_guard().await;
         let first = allocate_watch();
         let second = allocate_watch();
         let mut first_cancelled = watch_stop_rx(first).unwrap();
@@ -405,6 +588,7 @@ mod tests {
 
     #[tokio::test]
     async fn isolated_test_child_uses_the_explicit_fake_clipboard_build() {
+        let _guard = runtime_test_guard().await;
         let Ok(daemon) = std::env::var("COPYPASTE_TEST_DAEMON_BIN") else {
             return;
         };
@@ -422,11 +606,84 @@ mod tests {
             status.clipboard_backend.starts_with("fake"),
             "the test daemon must use its explicit fake-clipboard feature"
         );
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            desktop_endpoint().expect("owned endpoint"),
+            socket_path()
+                .expect("owned socket")
+                .to_string_lossy()
+                .as_ref()
+        );
         stop();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn attaching_an_explicit_endpoint_serves_queries_and_detaches_without_stopping_owner() {
+        let _guard = runtime_test_guard().await;
+        stop();
+        let (_directory, endpoint, server) = attached_status_server().await;
+        attach(endpoint.to_string_lossy().into_owned())
+            .await
+            .expect("attach explicit endpoint");
+        let response = crate::client::request(copypaste_ipc::Method::Status)
+            .await
+            .expect("attached status query");
+        assert!(matches!(
+            response.data,
+            Some(copypaste_ipc::ResponseData::Status(_))
+        ));
+        assert!(
+            desktop_endpoint().is_err(),
+            "attached endpoint is not owned"
+        );
+
+        stop();
+        let response = crate::client::request_at(&endpoint, copypaste_ipc::Method::Status)
+            .await
+            .expect("owner remains reachable after detach");
+        assert!(matches!(
+            response.data,
+            Some(copypaste_ipc::ResponseData::Status(_))
+        ));
+        server.abort();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn attachment_rejects_invalid_and_conflicting_endpoints() {
+        let _guard = runtime_test_guard().await;
+        stop();
+        let directory = tempfile::tempdir().expect("endpoint directory");
+        let regular = directory.path().join("not-a-socket");
+        std::fs::write(&regular, "not a socket").expect("regular endpoint fixture");
+        let invalid = attach(regular.to_string_lossy().into_owned())
+            .await
+            .expect_err("regular path must be rejected");
+        assert_eq!(invalid.code, "runtime_endpoint_invalid");
+
+        let (_owner_directory, endpoint, server) = attached_status_server().await;
+        attach(endpoint.to_string_lossy().into_owned())
+            .await
+            .expect("first attachment");
+        let conflict = attach(endpoint.to_string_lossy().into_owned())
+            .await
+            .expect_err("second attachment must conflict");
+        assert_eq!(conflict.code, "runtime_conflict");
+        let start_conflict = start(
+            "unused".into(),
+            directory.path().to_string_lossy().into_owned(),
+        )
+        .await
+        .expect_err("owned start must not replace attachment");
+        assert_eq!(start_conflict.code, "runtime_conflict");
+        stop();
+        server.abort();
     }
 
     #[tokio::test]
     async fn stopping_and_restarting_releases_the_owned_test_daemon() {
+        let _guard = runtime_test_guard().await;
         let Ok(daemon) = std::env::var("COPYPASTE_TEST_DAEMON_BIN") else {
             return;
         };
