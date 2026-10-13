@@ -5,7 +5,7 @@ index bbb67e482..a6802fa16 100644
 @@ -216,20 +216,42 @@ maybe_add_rpath_introspection_paths (void)
  }
  #endif /* HAVE_EXE_INTROSPECTION */
- 
+
 +static char *
 +shell_runtime_introspection_dir (const char *configured_dir)
 +{
@@ -31,12 +31,12 @@ index bbb67e482..a6802fa16 100644
 +
 +  mutter_typelib_dir = shell_runtime_introspection_dir (MUTTER_TYPELIB_DIR);
 +  gnome_shell_pkglibdir = shell_runtime_introspection_dir (GNOME_SHELL_PKGLIBDIR);
- 
+
 -  g_irepository_prepend_search_path (MUTTER_TYPELIB_DIR);
 -  g_irepository_prepend_search_path (GNOME_SHELL_PKGLIBDIR);
 +  g_irepository_prepend_search_path (mutter_typelib_dir);
 +  g_irepository_prepend_search_path (gnome_shell_pkglibdir);
- 
+
    /* We need to explicitly add the directories where the private libraries are
     * installed to the GIR's library path, so that they can be found at runtime
     * when linking using DT_RUNPATH (instead of DT_RPATH), which is the default
@@ -46,6 +46,6 @@ index bbb67e482..a6802fa16 100644
 -  g_irepository_prepend_library_path (GNOME_SHELL_PKGLIBDIR);
 +  g_irepository_prepend_library_path (mutter_typelib_dir);
 +  g_irepository_prepend_library_path (gnome_shell_pkglibdir);
- 
+
  #ifdef HAVE_EXE_INTROSPECTION
    maybe_add_rpath_introspection_paths ();
