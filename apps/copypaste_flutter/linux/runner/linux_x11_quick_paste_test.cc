@@ -9,10 +9,12 @@
 #include <gtk/gtk.h>
 
 #include <X11/Xatom.h>
+#include <X11/XKBlib.h>
 #include <X11/keysym.h>
 #include <X11/extensions/XTest.h>
 #include <linux/input-event-codes.h>
 
+#include <array>
 #include <functional>
 #include <string>
 #include <utility>
@@ -112,6 +114,64 @@ Window focused_xid(Display* display) {
   return focused;
 }
 
+unsigned int modifier_mask_for(Display* display, KeySym keysym) {
+  XModifierKeymap* map = XGetModifierMapping(display);
+  g_assert_nonnull(map);
+  unsigned int mask = 0;
+  for (int modifier = 0; modifier < 8; ++modifier) {
+    for (int index = 0; index < map->max_keypermod; ++index) {
+      const KeyCode keycode = map->modifiermap[modifier * map->max_keypermod + index];
+      if (keycode != 0 && XkbKeycodeToKeysym(display, keycode, 0, 0) == keysym) {
+        mask |= 1U << modifier;
+      }
+    }
+  }
+  XFreeModifiermap(map);
+  return mask;
+}
+
+unsigned int current_modifiers(Display* display) {
+  Window root = 0;
+  Window child = 0;
+  int root_x = 0;
+  int root_y = 0;
+  int window_x = 0;
+  int window_y = 0;
+  unsigned int modifiers = 0;
+  g_assert_true(XQueryPointer(display, DefaultRootWindow(display), &root, &child,
+                              &root_x, &root_y, &window_x, &window_y,
+                              &modifiers));
+  return modifiers;
+}
+
+void set_lock(Display* display, KeySym keysym, unsigned int mask, bool enabled) {
+  const bool current = (current_modifiers(display) & mask) != 0;
+  if (current == enabled) return;
+  const KeyCode keycode = XKeysymToKeycode(display, keysym);
+  g_assert_cmpuint(keycode, !=, 0);
+  g_assert_true(XTestFakeKeyEvent(display, keycode, True, CurrentTime));
+  g_assert_true(XTestFakeKeyEvent(display, keycode, False, CurrentTime));
+  XSync(display, False);
+  g_assert_cmpint((current_modifiers(display) & mask) != 0, ==, enabled);
+}
+
+void drain_events(Display* display) {
+  while (XPending(display) > 0) {
+    XEvent event {};
+    XNextEvent(display, &event);
+  }
+}
+
+bool received_keypress(Display* display, KeyCode keycode) {
+  bool received = false;
+  while (XPending(display) > 0) {
+    XEvent event {};
+    XNextEvent(display, &event);
+    received |= event.type == KeyPress && event.xkey.keycode == keycode;
+  }
+  return received;
+}
+
 void test_x11_quick_paste() {
   int argc = 0;
   char** argv = nullptr;
@@ -173,9 +233,84 @@ void test_x11_quick_paste() {
   drain_main_context();
 }
 
+void test_x11_shortcut_grabs_all_lock_subsets() {
+  int argc = 0;
+  char** argv = nullptr;
+  g_assert_true(gtk_init_check(&argc, &argv));
+
+  GdkDisplay* gdk_display = gdk_display_get_default();
+  g_assert_true(GDK_IS_X11_DISPLAY(gdk_display));
+  Display* display = GDK_DISPLAY_XDISPLAY(gdk_display);
+  Display* foreign_display = XOpenDisplay(nullptr);
+  g_assert_nonnull(foreign_display);
+  const Window foreign_window = XCreateSimpleWindow(
+      foreign_display, DefaultRootWindow(foreign_display), 0, 0, 1, 1, 0, 0, 0);
+  XSelectInput(foreign_display, foreign_window, KeyPressMask);
+  XMapRaised(foreign_display, foreign_window);
+  XSetInputFocus(foreign_display, foreign_window, RevertToPointerRoot, CurrentTime);
+  XSync(foreign_display, False);
+
+  const unsigned int caps_mask = modifier_mask_for(display, XK_Caps_Lock);
+  const unsigned int num_mask = modifier_mask_for(display, XK_Num_Lock);
+  g_assert_cmpuint(caps_mask, !=, 0);
+  g_assert_cmpuint(num_mask, !=, 0);
+  const bool caps_initial = (current_modifiers(display) & caps_mask) != 0;
+  const bool num_initial = (current_modifiers(display) & num_mask) != 0;
+
+  LinuxX11QuickPaste quick_paste;
+  bool completed = false;
+  ShortcutResult result;
+  int activations = 0;
+  const ShortcutRequest request{
+      "x11-lock-subsets", "X11 lock subsets",
+      std::to_string(kHidKeyboardPage | 0x06), {"control", "shift"},
+      "Ctrl+Shift+C"};
+  quick_paste.register_shortcut(
+      request,
+      [&completed, &result](ShortcutResult registration) {
+        completed = true;
+        result = std::move(registration);
+      },
+      [&activations, &quick_paste] {
+        g_assert_cmpuint(quick_paste.take_activation_time(), !=, GDK_CURRENT_TIME);
+        ++activations;
+      });
+  g_assert_true(completed);
+  g_assert_true(result.registered);
+
+  const KeyCode shortcut_key = XKeysymToKeycode(display, XK_C);
+  g_assert_cmpuint(shortcut_key, !=, 0);
+  const std::array<std::pair<bool, bool>, 4> lock_states = {
+      {{false, false}, {true, false}, {false, true}, {true, true}}};
+  for (const auto& [caps, num] : lock_states) {
+    set_lock(display, XK_Caps_Lock, caps_mask, caps);
+    set_lock(display, XK_Num_Lock, num_mask, num);
+    XSetInputFocus(foreign_display, foreign_window, RevertToPointerRoot, CurrentTime);
+    XSync(foreign_display, False);
+    drain_events(foreign_display);
+    send_shortcut(display, shortcut_key);
+    const int expected_activations = activations + 1;
+    g_assert_true(wait_until([&activations, expected_activations] {
+      return activations == expected_activations;
+    }));
+    g_assert_false(received_keypress(foreign_display, shortcut_key));
+  }
+
+  bool removed = false;
+  quick_paste.unregister_shortcut(request.id, [&removed](bool registered) {
+    removed = registered;
+  });
+  g_assert_true(removed);
+  set_lock(display, XK_Caps_Lock, caps_mask, caps_initial);
+  set_lock(display, XK_Num_Lock, num_mask, num_initial);
+  XDestroyWindow(foreign_display, foreign_window);
+  XCloseDisplay(foreign_display);
+}
+
 }  // namespace
 
 int main() {
   test_x11_quick_paste();
+  test_x11_shortcut_grabs_all_lock_subsets();
   return 0;
 }
