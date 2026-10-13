@@ -62,6 +62,10 @@ Future<void> stopDesktopRuntime() =>
 Future<ThisDevice> runtimeStatus() =>
     RustLib.instance.api.crateApiRuntimeStatus();
 
+/// Returns whether the daemon's clipboard transport is currently available.
+Future<bool> clipboardAvailable() =>
+    RustLib.instance.api.crateApiClipboardAvailable();
+
 Future<CaptureState> captureState() =>
     RustLib.instance.api.crateApiCaptureState();
 

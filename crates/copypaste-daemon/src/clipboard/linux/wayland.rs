@@ -252,6 +252,9 @@ impl ClipboardSource for WaylandClipboard {
             .lock()
             .is_ok_and(|state| state.active && state.dirty)
     }
+    fn is_available(&self) -> bool {
+        self.active()
+    }
 
     fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
         self.write(HashMap::from([(
