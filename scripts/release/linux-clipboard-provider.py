@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Validate one private clipboard manifest and execute the GTK3 provider."""
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
