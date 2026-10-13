@@ -19,7 +19,9 @@ import stat
 import hashlib
 import importlib.util
 import re
+import signal
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlencode, urlparse
 
@@ -39,6 +41,13 @@ PROC_ROOT = Path("/proc")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 WAYLAND_INPUT_TARGET_TITLE = "CopyPaste Qualification Wayland Input Target"
 MEDIA_PREFIX = "COPYPASTE_QUALIFICATION_MEDIA "
+GNOME_CLIPBOARD_READ_OBSERVER = Path(__file__).with_name("linux-gnome-clipboard-read-observer.py")
+
+
+@dataclass(frozen=True)
+class OwnedDaemon:
+    pid: int
+    data_dir: Path
 
 
 def module_qualification_helper():
@@ -626,7 +635,7 @@ def start_gui_runtime(executable, environment, runtime_dir, previous_sockets):
 
 
 @contextmanager
-def clipboard_provider(workspace, evidence_dir, label, payloads, environment):
+def clipboard_provider(workspace, evidence_dir, label, payloads, environment, request_audit_file=None):
     """Offer real MIME data from a visible GTK client until the assertion ends."""
     if not PROVIDER.is_file() or PROVIDER.is_symlink():
         raise RuntimeError("native clipboard provider is unavailable")
@@ -647,11 +656,16 @@ def clipboard_provider(workspace, evidence_dir, label, payloads, environment):
     os.chmod(manifest, 0o600)
     ready = directory / "ready.json"
     activity = directory / "activity.jsonl"
+    command = [
+        sys.executable, str(PROVIDER), "--helper", str(helper), "--manifest", str(manifest), "--ready-file", str(ready),
+        "--activity-log", str(activity), "--hold-seconds", "20",
+    ]
+    if request_audit_file is not None:
+        command.extend(["--request-audit-file", str(request_audit_file)])
     provider = subprocess.Popen(
-        [sys.executable, str(PROVIDER), "--helper", str(helper), "--manifest", str(manifest), "--ready-file", str(ready),
-         "--activity-log", str(activity), "--hold-seconds", "20"],
+        command,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
         env=environment,
     )
     try:
@@ -664,12 +678,19 @@ def clipboard_provider(workspace, evidence_dir, label, payloads, environment):
             raise RuntimeError("GTK clipboard provider readiness is invalid")
         yield activity
     finally:
-        provider.terminate()
+        was_alive = provider.poll() is None
+        if was_alive:
+            provider.terminate()
         try:
-            provider.wait(timeout=5)
+            exit_code = provider.wait(timeout=5)
         except subprocess.TimeoutExpired:
             provider.kill()
             provider.wait(timeout=5)
+            raise RuntimeError("GTK clipboard provider did not exit") from None
+        stderr = provider.stderr.read().decode("utf-8", "replace") if provider.stderr is not None else ""
+        if request_audit_file is not None and (not was_alive or exit_code != -signal.SIGTERM):
+            message = "GTK clipboard provider failed during the privacy assertion"
+            raise RuntimeError(f"{message}: {stderr.strip()}" if stderr.strip() else message)
         requests = []
         if activity.exists():
             for line in activity.read_text(encoding="utf-8").splitlines():
@@ -957,8 +978,8 @@ def require_modules(socket_path, artifacts, fixtures, application_data, architec
     )
 
 
-def gui_daemon_data_dir(gui, data_home):
-    """Read the controlled GUI child's explicit daemon data directory."""
+def gui_owned_daemon(gui, data_home):
+    """Return the one direct GUI-owned daemon and its explicit data directory."""
     try:
         gui_status = (PROC_ROOT / str(gui.pid) / "status").read_text(encoding="utf-8")
         task_directory = PROC_ROOT / str(gui.pid) / "task"
@@ -977,7 +998,7 @@ def gui_daemon_data_dir(gui, data_home):
                         if re.fullmatch(r"[1-9][0-9]*", pid))
         except OSError:
             continue
-    candidates = []
+    candidates: list[OwnedDaemon] = []
     for pid in pids:
         process = PROC_ROOT / pid
         try:
@@ -1005,7 +1026,7 @@ def gui_daemon_data_dir(gui, data_home):
             raise RuntimeError("GUI-owned daemon data directory escapes isolated XDG data") from error
         if path.is_symlink() or not resolved.is_dir():
             raise RuntimeError("GUI-owned daemon data directory is unsafe")
-        candidates.append(resolved)
+        candidates.append(OwnedDaemon(pid=int(pid), data_dir=resolved))
     if len(candidates) != 1:
         raise RuntimeError("packaged GUI did not own exactly one daemon with an explicit data directory")
     return candidates[0]
@@ -1174,24 +1195,142 @@ def require_camera_qr_scan(prefix, cli, environment, workspace, gui_pid, runtime
                 peer.wait(timeout=5)
 
 
-def require_not_captured(cli, environment, workspace, evidence_dir, label, payloads, assertion=None, protected_mime=None):
+def read_request_audit(path):
+    records = []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        raise RuntimeError("clipboard reader audit is unavailable") from error
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise RuntimeError("clipboard reader audit is invalid") from error
+        if (
+            not isinstance(record, dict) or set(record) != {"target", "requestor_pid", "error"}
+            or not isinstance(record.get("target"), str)
+            or record.get("requestor_pid") is not None and (type(record["requestor_pid"]) is not int or record["requestor_pid"] <= 0)
+            or record.get("error") is not None and not isinstance(record["error"], str)
+        ):
+            raise RuntimeError("clipboard reader audit is invalid")
+        records.append(record)
+    return records
+
+
+def require_confidential_reader_audit(records, *, daemon_pid, protected_mime):
+    hint = "x-kde-passwordManagerHint"
+    if any(record["error"] is not None or type(record["requestor_pid"]) is not int or record["requestor_pid"] <= 0 for record in records):
+        raise RuntimeError("clipboard reader audit has an unknown reader")
+    if not any(record["target"] == hint and record["requestor_pid"] == daemon_pid and record["error"] is None for record in records):
+        raise RuntimeError("GUI-owned daemon did not inspect the confidential clipboard hint")
+    for record in records:
+        if record["target"] not in {protected_mime, "MULTIPLE"}:
+            continue
+        if record["error"] is not None or record["requestor_pid"] is None:
+            raise RuntimeError("clipboard reader for protected content is unknown")
+        if record["requestor_pid"] == daemon_pid:
+            raise RuntimeError("GUI-owned daemon read protected clipboard content")
+
+
+def write_reader_audit(evidence_dir, label, records, *, daemon_pid, protocol):
+    (evidence_dir / f"linux-clipboard-reader-{label}.json").write_text(
+        json.dumps({"expected_daemon_pid": daemon_pid, "protocol": protocol, "records": records}, separators=(",", ":")) + "\n", encoding="utf-8",
+    )
+
+
+@contextmanager
+def gnome_clipboard_read_observer(workspace, daemon_pid, environment):
+    if not GNOME_CLIPBOARD_READ_OBSERVER.is_file() or GNOME_CLIPBOARD_READ_OBSERVER.is_symlink():
+        raise RuntimeError("GNOME clipboard read observer is unavailable")
+    directory = workspace / f"gnome-clipboard-reader-{time.monotonic_ns()}"
+    directory.mkdir(mode=0o700)
+    ready = directory / "ready.json"
+    audit = directory / "audit.jsonl"
+    observer = subprocess.Popen(
+        [
+            sys.executable, str(GNOME_CLIPBOARD_READ_OBSERVER), "--daemon-pid", str(daemon_pid),
+            "--ready-file", str(ready), "--audit-file", str(audit),
+        ],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=environment,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not ready.is_file() and observer.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if observer.poll() is not None or not ready.is_file():
+            raise RuntimeError("GNOME clipboard read observer did not become ready")
+        try:
+            record = json.loads(ready.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise RuntimeError("GNOME clipboard read observer readiness is invalid") from error
+        if (
+            not isinstance(record, dict) or set(record) != {"schema", "daemon_pid", "bus_owner"}
+            or type(record.get("schema")) is not int or record["schema"] != 1
+            or type(record.get("daemon_pid")) is not int or record["daemon_pid"] != daemon_pid
+            or not isinstance(record.get("bus_owner"), str) or not re.fullmatch(r":[0-9]+\.[0-9]+", record["bus_owner"])
+        ):
+            raise RuntimeError("GNOME clipboard read observer readiness is invalid")
+        yield audit
+        if observer.poll() is not None:
+            raise RuntimeError("GNOME clipboard read observer exited during the privacy assertion")
+    finally:
+        if observer.poll() is None:
+            observer.terminate()
+        try:
+            exit_code = observer.wait(timeout=5)
+        except subprocess.TimeoutExpired as error:
+            observer.kill()
+            observer.wait(timeout=5)
+            raise RuntimeError("GNOME clipboard read observer did not exit") from error
+        if exit_code != 0:
+            stderr = observer.stderr.read().decode("utf-8", "replace") if observer.stderr is not None else ""
+            message = "GNOME clipboard read observer failed"
+            raise RuntimeError(f"{message}: {stderr.strip()}" if stderr.strip() else message)
+
+
+def require_not_captured(cli, environment, workspace, evidence_dir, label, payloads, assertion=None, protected_mime=None,
+                         session=None, desktop=None, owned_daemon=None):
     before = cli_item_count(status(cli, environment))
-    with clipboard_provider(workspace, evidence_dir, label, payloads, environment) as activity:
+
+    def privacy_window():
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
             if cli_item_count(status(cli, environment)) != before:
                 raise RuntimeError("privacy-protected clipboard content was captured")
             time.sleep(0.15)
-        if protected_mime is not None:
-            requests = [] if not activity.exists() else [
-                json.loads(line).get("mime") for line in activity.read_text(encoding="utf-8").splitlines()
-            ]
-            if "x-kde-passwordManagerHint" not in requests:
-                raise RuntimeError("native backend did not inspect the confidential clipboard hint")
-            assert_secret_payload_was_not_requested(activity, protected_mime)
-        final_status = run([str(cli), "--json", "status"], env=environment)
-        if cli_item_count(response_variant(json.loads(final_status.stdout), "status")) != before:
-            raise RuntimeError("privacy-protected clipboard content was captured")
+        return run([str(cli), "--json", "status"], env=environment)
+
+    reader_audit = None
+    if protected_mime is not None and session == "x11":
+        reader_audit = workspace / f"clipboard-reader-{label}.jsonl"
+        with clipboard_provider(workspace, evidence_dir, label, payloads, environment, request_audit_file=reader_audit):
+            final_status = privacy_window()
+    elif protected_mime is not None and session == "wayland" and desktop == "GNOME":
+        if not isinstance(owned_daemon, OwnedDaemon):
+            raise RuntimeError("GUI-owned daemon identity is unavailable for the privacy assertion")
+        with gnome_clipboard_read_observer(workspace, owned_daemon.pid, environment) as reader_audit:
+            with clipboard_provider(workspace, evidence_dir, label, payloads, environment):
+                final_status = privacy_window()
+    else:
+        with clipboard_provider(workspace, evidence_dir, label, payloads, environment) as activity:
+            final_status = privacy_window()
+            if protected_mime is not None:
+                requests = [] if not activity.exists() else [
+                    json.loads(line).get("mime") for line in activity.read_text(encoding="utf-8").splitlines()
+                ]
+                if "x-kde-passwordManagerHint" not in requests:
+                    raise RuntimeError("native backend did not inspect the confidential clipboard hint")
+                assert_secret_payload_was_not_requested(activity, protected_mime)
+    if reader_audit is not None:
+        records = read_request_audit(reader_audit)
+        daemon_pid = owned_daemon.pid if isinstance(owned_daemon, OwnedDaemon) else None
+        if daemon_pid is None:
+            raise RuntimeError("GUI-owned daemon identity is unavailable for the privacy assertion")
+        protocol = "x11-xres" if session == "x11" else "gnome-wayland-dbus"
+        write_reader_audit(evidence_dir, label, records, daemon_pid=daemon_pid, protocol=protocol)
+        require_confidential_reader_audit(records, daemon_pid=daemon_pid, protected_mime=protected_mime)
+    if cli_item_count(response_variant(json.loads(final_status.stdout), "status")) != before:
+        raise RuntimeError("privacy-protected clipboard content was captured")
     if assertion is not None:
         emit_result(assertion, final_status)
 
@@ -1281,6 +1420,7 @@ def main():
                 require_file_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, runtime_socket)
 
                 confidential = b"copypaste-confidential-fixture"
+                owned_daemon = gui_owned_daemon(app, data_home)
                 require_not_captured(
                     cli,
                     cli_environment,
@@ -1293,6 +1433,9 @@ def main():
                     },
                     "privacy_confidential",
                     protected_mime="text/plain;charset=utf-8",
+                    session=args.session,
+                    desktop=args.desktop,
+                    owned_daemon=owned_daemon,
                 )
 
                 response = ipc(runtime_socket, "set_private_mode", {"enabled": True})
@@ -1333,10 +1476,14 @@ def main():
                 if not isinstance(restart_page, dict) or not any(persisted in item.get("content", "") for item in restart_page.get("items", [])):
                     raise RuntimeError("encrypted history did not survive daemon restart")
                 emit_result("encrypted_restart_persistence", restart_items)
+                restarted_daemon = gui_owned_daemon(app, data_home)
+                if restarted_daemon.data_dir != owned_daemon.data_dir:
+                    raise RuntimeError("GUI-owned daemon changed its data directory during restart")
+                owned_daemon = restarted_daemon
                 if upgrading:
                     verify_upgrade_canary(cli, cli_environment, workspace, prefix / "copypaste")
                     emit_result("package_upgrade", restart_items)
-                daemon_data = gui_daemon_data_dir(app, data_home)
+                daemon_data = owned_daemon.data_dir
                 def restart_gui_for_modules():
                     nonlocal app, runtime_socket, cli_environment, daemon_data
                     prior_sockets = set(runtime_dir.glob("cp-*.sock"))
@@ -1348,7 +1495,7 @@ def main():
                     cli_environment = {**environment, "COPYPASTE_SOCKET": str(runtime_socket)}
                     if not isinstance(status(cli, cli_environment), dict):
                         raise RuntimeError("GUI-owned daemon did not become ready after module lifecycle restart")
-                    restarted_data = gui_daemon_data_dir(app, data_home)
+                    restarted_data = gui_owned_daemon(app, data_home).data_dir
                     if restarted_data != daemon_data:
                         raise RuntimeError("GUI-owned daemon changed its data directory during module qualification")
                     return runtime_socket
