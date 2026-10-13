@@ -186,13 +186,15 @@ def wayland_quick_paste_receipt(value, *, gui_pid, inputs, marker):
     atspi = value["atspi"]
     if type(gui_pid) is not int or gui_pid <= 0:
         raise RuntimeError("Wayland Quick Paste GUI actor is invalid")
-    if not isinstance(actors, dict) or set(actors) != {"gui_pid", "portal_dialog_pid", "input_target_pid"}:
+    if not isinstance(actors, dict) or set(actors) != {"gui_pid", "portal_dialog_pid", "quick_paste_pid", "input_target_pid"}:
         raise RuntimeError("Wayland Quick Paste receipt actor identity is invalid")
     if actors.get("gui_pid") != gui_pid or any(type(actors.get(name)) is not int or actors[name] <= 0 for name in (
-        "portal_dialog_pid", "input_target_pid",
+        "portal_dialog_pid", "quick_paste_pid", "input_target_pid",
     )):
         raise RuntimeError("Wayland Quick Paste receipt actor identity does not match the discovered actors")
-    if actors["input_target_pid"] in {gui_pid, actors["portal_dialog_pid"]}:
+    if actors["input_target_pid"] in {gui_pid, actors["portal_dialog_pid"]} or actors["quick_paste_pid"] in {
+        gui_pid, actors["portal_dialog_pid"], actors["input_target_pid"],
+    }:
         raise RuntimeError("Wayland Quick Paste target actor is not separate")
     if (not isinstance(target, dict) or set(target) != {"pid", "title_sha256", "marker_sha256"}
             or target["pid"] != actors["input_target_pid"]):
@@ -206,7 +208,7 @@ def wayland_quick_paste_receipt(value, *, gui_pid, inputs, marker):
             or type(portal["input_calls"]) is not int or portal["input_calls"] < 8):
         raise RuntimeError("Wayland Quick Paste portal evidence is invalid")
     require_sha256(portal["session_sha256"], "Wayland Quick Paste portal session digest")
-    if not isinstance(atspi, dict) or set(atspi) != {"portal_click_sha256"}:
+    if not isinstance(atspi, dict) or set(atspi) != {"portal_click_sha256", "quick_paste_ready_sha256"}:
         raise RuntimeError("Wayland Quick Paste media evidence is invalid")
     for name, digest in atspi.items():
         require_sha256(digest, f"Wayland Quick Paste {name}")
@@ -957,11 +959,24 @@ def require_modules(socket_path, artifacts, fixtures, application_data, architec
 
 def gui_daemon_data_dir(gui, data_home):
     """Read the controlled GUI child's explicit daemon data directory."""
-    children = PROC_ROOT / str(gui.pid) / "task" / str(gui.pid) / "children"
     try:
-        pids = children.read_text(encoding="ascii").split()
+        gui_status = (PROC_ROOT / str(gui.pid) / "status").read_text(encoding="utf-8")
+        task_directory = PROC_ROOT / str(gui.pid) / "task"
+        tasks = tuple(task_directory.iterdir())
     except OSError as error:
         raise RuntimeError("packaged GUI child process inventory is unavailable") from error
+    gui_uid = next((line.split()[1] for line in gui_status.splitlines() if line.startswith("Uid:") and len(line.split()) >= 2), None)
+    if gui_uid != str(os.geteuid()):
+        raise RuntimeError("packaged GUI process identity is invalid")
+    pids = set()
+    for task in tasks:
+        if not re.fullmatch(r"[1-9][0-9]*", task.name):
+            continue
+        try:
+            pids.update(pid for pid in task.joinpath("children").read_text(encoding="ascii").split()
+                        if re.fullmatch(r"[1-9][0-9]*", pid))
+        except OSError:
+            continue
     candidates = []
     for pid in pids:
         process = PROC_ROOT / pid
@@ -971,7 +986,8 @@ def gui_daemon_data_dir(gui, data_home):
         except OSError:
             continue
         uid = next((line.split()[1] for line in status.splitlines() if line.startswith("Uid:") and len(line.split()) >= 2), None)
-        if uid != str(os.geteuid()):
+        ppid = next((line.split()[1] for line in status.splitlines() if line.startswith("PPid:") and len(line.split()) >= 2), None)
+        if uid != gui_uid or ppid != str(gui.pid):
             continue
         argv = [value.decode("utf-8") for value in cmdline if value]
         if not argv or Path(argv[0]).name != "copypaste-daemon":
