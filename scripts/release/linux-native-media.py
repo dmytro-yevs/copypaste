@@ -322,6 +322,47 @@ def observe_accessible(registry: Any, *, pid: int, target: str, timeout_seconds:
     raise MediaQualificationError("installed UI did not reach the required state")
 
 
+def focused_editable_text(application: Any, atspi: Any) -> bool:
+    focused = []
+    for node in accessible_descendants(application):
+        try:
+            state = node.getState()
+            if not all(state.contains(value) for value in (
+                atspi.STATE_SHOWING, atspi.STATE_VISIBLE, atspi.STATE_FOCUSED, atspi.STATE_EDITABLE,
+            )):
+                continue
+            node.queryText()
+            focused.append(node)
+        except Exception:
+            continue
+    return len(focused) == 1
+
+
+def quick_paste_ready(registry: Any, atspi: Any, *, pid: int, marker: str, timeout_seconds: int) -> dict[str, Any]:
+    """Require the requested clip and a focused editable input in one Quick Paste process."""
+    if pid <= 0 or not marker:
+        raise MediaQualificationError("Quick Paste readiness arguments are invalid")
+    application = atspi_application(registry, pid)
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        marker_node = matching_accessible(application, marker)
+        try:
+            marker_visible = marker_node is not None and all(
+                marker_node.getState().contains(value)
+                for value in (atspi.STATE_SHOWING, atspi.STATE_VISIBLE)
+            )
+        except Exception:
+            marker_visible = False
+        if marker_visible and focused_editable_text(application, atspi):
+            return redacted_record(
+                "atspi_quick_paste_ready",
+                gui_pid=pid,
+                marker_sha256=hashlib.sha256(marker.encode("utf-8")).hexdigest(),
+            )
+        time.sleep(0.1)
+    raise MediaQualificationError("Quick Paste did not expose the requested clip and focused editable input")
+
+
 def probe_accessible(registry: Any, *, pid: int, target: str) -> dict[str, Any]:
     application = atspi_application(registry, pid)
     return redacted_record(
@@ -479,6 +520,10 @@ def main(argv: list[str] | None = None) -> int:
     observe.add_argument("--pid", required=True, type=int)
     observe.add_argument("--target", required=True)
     observe.add_argument("--timeout-seconds", type=int, default=8)
+    ready = commands.add_parser("quick-paste-ready", help="require one ready Quick Paste input state")
+    ready.add_argument("--pid", required=True, type=int)
+    ready.add_argument("--marker", required=True)
+    ready.add_argument("--timeout-seconds", type=int, default=8)
     probe = commands.add_parser("probe", help="report whether one named installed AT-SPI state is present")
     probe.add_argument("--pid", required=True, type=int)
     probe.add_argument("--target", required=True)
@@ -511,6 +556,17 @@ def main(argv: list[str] | None = None) -> int:
             except ImportError as error:
                 raise MediaQualificationError("python3-pyatspi is required for native UI qualification") from error
             emit(observe_accessible(pyatspi.Registry, pid=args.pid, target=args.target, timeout_seconds=args.timeout_seconds))
+            return 0
+        if args.command == "quick-paste-ready":
+            if args.pid <= 0 or not args.marker or not 1 <= args.timeout_seconds <= MAX_TIMEOUT_SECONDS:
+                raise MediaQualificationError("Quick Paste readiness arguments are invalid")
+            try:
+                import pyatspi  # type: ignore[import-not-found]
+            except ImportError as error:
+                raise MediaQualificationError("python3-pyatspi is required for native UI qualification") from error
+            emit(quick_paste_ready(
+                pyatspi.Registry, pyatspi, pid=args.pid, marker=args.marker, timeout_seconds=args.timeout_seconds,
+            ))
             return 0
         if args.command == "probe":
             if args.pid <= 0:

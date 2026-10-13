@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import stat
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -151,6 +152,90 @@ class LinuxNativeMediaTest(unittest.TestCase):
             with self.assertRaisesRegex(media.MediaQualificationError, "not accepted"):
                 media.invoke_accessible(mock.Mock(), pid=1, target="Continue")
 
+    def test_quick_paste_readiness_requires_visible_marker_and_one_focused_editable_text(self):
+        class State:
+            def __init__(self, *values):
+                self.values = set(values)
+
+            def contains(self, value):
+                return value in self.values
+
+        class Node:
+            def __init__(self, name, state, *, text=False, children=()):
+                self.name = name
+                self._state = state
+                self._text = text
+                self._children = list(children)
+                self.childCount = len(self._children)
+
+            def getChildAtIndex(self, index):
+                return self._children[index]
+
+            def getState(self):
+                return self._state
+
+            def queryText(self):
+                if not self._text:
+                    raise RuntimeError("not text")
+                return object()
+
+        atspi = SimpleNamespace(
+            STATE_SHOWING="showing", STATE_VISIBLE="visible", STATE_FOCUSED="focused", STATE_EDITABLE="editable",
+        )
+        marker = Node("requested clip", State("showing", "visible"))
+        input_node = Node("search", State("showing", "visible", "focused", "editable"), text=True)
+        application = Node("application", State(), children=(marker, input_node))
+        with mock.patch.object(media, "atspi_application", return_value=application):
+            record = media.quick_paste_ready(mock.Mock(), atspi, pid=123, marker="requested clip", timeout_seconds=1)
+        self.assertEqual(record["kind"], "atspi_quick_paste_ready")
+        self.assertEqual(record["gui_pid"], 123)
+
+    def test_quick_paste_readiness_rejects_missing_marker_focus_or_pid(self):
+        class State:
+            def __init__(self, *values):
+                self.values = set(values)
+
+            def contains(self, value):
+                return value in self.values
+
+        class Node:
+            childCount = 0
+
+            def __init__(self, name, state, text=False):
+                self.name = name
+                self.state = state
+                self.text = text
+
+            def getChildAtIndex(self, index):
+                raise IndexError(index)
+
+            def getState(self):
+                return self.state
+
+            def queryText(self):
+                if not self.text:
+                    raise RuntimeError("not text")
+                return object()
+
+        atspi = SimpleNamespace(
+            STATE_SHOWING="showing", STATE_VISIBLE="visible", STATE_FOCUSED="focused", STATE_EDITABLE="editable",
+        )
+        application = Node("application", State())
+        with mock.patch.object(media, "atspi_application", return_value=application), \
+             mock.patch.object(media.time, "monotonic", side_effect=[0, 0, 2]), \
+             mock.patch.object(media.time, "sleep"):
+            with self.assertRaisesRegex(media.MediaQualificationError, "requested clip"):
+                media.quick_paste_ready(mock.Mock(), atspi, pid=123, marker="missing", timeout_seconds=1)
+        with self.assertRaisesRegex(media.MediaQualificationError, "arguments"):
+            media.quick_paste_ready(mock.Mock(), atspi, pid=0, marker="marker", timeout_seconds=1)
+        marker = Node("marker", State("showing", "visible"))
+        with mock.patch.object(media, "atspi_application", return_value=application), \
+             mock.patch.object(media, "matching_accessible", return_value=marker), \
+             mock.patch.object(media, "focused_editable_text", return_value=False), \
+             mock.patch.object(media.time, "monotonic", side_effect=[0, 0, 2]), \
+             mock.patch.object(media.time, "sleep"):
+            with self.assertRaisesRegex(media.MediaQualificationError, "focused editable"):
+                media.quick_paste_ready(mock.Mock(), atspi, pid=123, marker="marker", timeout_seconds=1)
     def test_camera_observation_binds_the_gui_pairing_state_and_gstreamer_mapping(self):
         application = mock.Mock()
         with mock.patch.object(media, "atspi_application", return_value=application), \
