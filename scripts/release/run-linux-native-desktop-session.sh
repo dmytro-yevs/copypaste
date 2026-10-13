@@ -202,9 +202,15 @@ secret-tool lookup copypaste-qualification default >/dev/null
 unset keyring_password
 
 if [[ "$DESKTOP" == GNOME ]]; then
-  session_phase=enable_appindicator
-  appindicator="$(gnome-extensions list 2>/dev/null | awk '/appindicator|ubuntu-appindicators/ {print; exit}')"
+  session_phase=inventory_appindicator
+  set +e
+  appindicator_inventory="$(gnome-extensions list)"
+  appindicator_inventory_status=$?
+  set -e
+  [[ "$appindicator_inventory_status" == 0 ]] || exit "$appindicator_inventory_status"
+  appindicator="$(printf '%s\n' "$appindicator_inventory" | awk '/appindicator|ubuntu-appindicators/ {print; exit}')"
   [[ -n "$appindicator" ]] || { echo "ERROR: GNOME AppIndicator extension is unavailable" >&2; exit 1; }
+  session_phase=enable_appindicator
   gnome-extensions enable "$appindicator"
 fi
 
