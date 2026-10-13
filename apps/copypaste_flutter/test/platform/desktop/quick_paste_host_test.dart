@@ -175,6 +175,26 @@ void main() {
       );
     });
 
+    test('reads only a valid child runtime endpoint', () async {
+      response = '/tmp/copypaste.sock';
+      expect(await context.runtimeEndpoint(), '/tmp/copypaste.sock');
+      expect(calls.last.method, 'runtimeEndpoint');
+
+      for (final value in [null, '', 'relative.sock', 1]) {
+        response = value;
+        await expectLater(
+          context.runtimeEndpoint(),
+          throwsA(
+            isA<PlatformException>().having(
+              (error) => error.code,
+              'code',
+              'runtime_endpoint_unavailable',
+            ),
+          ),
+        );
+      }
+    });
+
     test('shutdown acknowledges only after its cleanup completes', () async {
       final cleanup = Completer<void>();
       context.setShutdownHandler(() => cleanup.future);

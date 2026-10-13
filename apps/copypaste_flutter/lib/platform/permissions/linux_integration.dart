@@ -87,6 +87,18 @@ class MethodChannelLinuxIntegrationPort implements LinuxIntegrationPort {
   final MethodChannel _channel;
   final Future<bool> Function() _clipboardAvailable;
 
+  Future<void> publishRuntimeEndpoint(String endpoint) async {
+    if (!_isRuntimeEndpoint(endpoint)) {
+      throw ArgumentError('Runtime endpoint must be an absolute path.');
+    }
+    if (await _channel.invokeMethod<bool>('publishRuntimeEndpoint', {
+          'endpoint': endpoint,
+        }) !=
+        true) {
+      throw PlatformException(code: 'runtime_endpoint_unavailable');
+    }
+  }
+
   @override
   Future<LinuxIntegrationStatus> status() async {
     final result = await _channel.invokeMapMethod<String, Object?>('status');
@@ -116,6 +128,9 @@ class MethodChannelLinuxIntegrationPort implements LinuxIntegrationPort {
       return false;
     }
   }
+
+  static bool _isRuntimeEndpoint(String value) =>
+      value.isNotEmpty && value.startsWith('/') && !value.contains('\u0000');
 
   @override
   Future<bool> requestRemoteDesktop() async =>

@@ -67,10 +67,22 @@ std::string bridge_waiter_owner;
 std::string qualification_transaction;
 std::string qualification_action;
 bool qualification_unmapped = false;
+std::string quick_paste_runtime_endpoint;
 
 constexpr char kBridgeName[] = "app.copypaste.CopyPaste";
 constexpr char kBridgePath[] = "/app/copypaste/WaylandIntegration";
 constexpr char kBridgeInterface[] = "app.copypaste.WaylandIntegration";
+
+bool valid_runtime_endpoint(const std::string& endpoint) {
+  return !endpoint.empty() && endpoint.size() < PATH_MAX &&
+      g_path_is_absolute(endpoint.c_str());
+}
+
+gchar* runtime_endpoint_argument() {
+  if (!valid_runtime_endpoint(quick_paste_runtime_endpoint)) return nullptr;
+  return g_strdup_printf("--copypaste-runtime-endpoint=%s",
+                         quick_paste_runtime_endpoint.c_str());
+}
 
 void bridge_child_exited(GPid pid, gint, gpointer) {
   if (bridge_child_pid == pid) bridge_child_pid = 0;
@@ -117,6 +129,8 @@ void cancel_bridge(bool notify_companion = true, bool terminate_child = true) {
 gboolean bridge_expired(gpointer) { cancel_bridge(); return G_SOURCE_REMOVE; }
 
 bool launch_quick_paste(const std::string& transaction) {
+  g_autofree gchar* endpoint_arg = runtime_endpoint_argument();
+  if (endpoint_arg == nullptr) return false;
   gchar executable[PATH_MAX] = {};
   const ssize_t size = readlink("/proc/self/exe", executable, sizeof(executable) - 1);
   if (size <= 0 || size >= static_cast<ssize_t>(sizeof(executable) - 1)) return false;
@@ -131,7 +145,7 @@ bool launch_quick_paste(const std::string& transaction) {
   gchar presentation_arg[80] = {};
   g_snprintf(presentation_arg, sizeof(presentation_arg),
              "--copypaste-presentation-id=%" G_GUINT64_FORMAT, presentation);
-  gchar* argv[] = {executable, quick, transaction_arg, presentation_arg, nullptr};
+  gchar* argv[] = {executable, quick, transaction_arg, presentation_arg, endpoint_arg, nullptr};
   if (!g_spawn_async(nullptr, argv, nullptr, static_cast<GSpawnFlags>(
                      G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD), nullptr,
                      nullptr, &bridge_child_pid, nullptr)) {
@@ -345,6 +359,8 @@ void quit_context_when_idle() {
 }
 
 bool spawn_quick_paste(const std::string& x11_window = {}) {
+  g_autofree gchar* endpoint_arg = runtime_endpoint_argument();
+  if (endpoint_arg == nullptr) return false;
   if (bridge_child_pid != 0) {
     if (kill(bridge_child_pid, 0) == 0) return true;
     bridge_child_pid = 0;
@@ -365,7 +381,7 @@ bool spawn_quick_paste(const std::string& x11_window = {}) {
     g_snprintf(x11_arg, sizeof(x11_arg), "--copypaste-x11-window=%s",
                x11_window.c_str());
   }
-  gchar* arguments[] = {executable, quick, presentation_arg,
+  gchar* arguments[] = {executable, quick, presentation_arg, endpoint_arg,
                         x11_window.empty() ? nullptr : x11_arg, nullptr};
   if (!g_spawn_async(nullptr, arguments, nullptr, static_cast<GSpawnFlags>(
                      G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD),
@@ -930,7 +946,17 @@ void quick_paste_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
 }
 
 void quick_paste_context_call(FlMethodChannel* channel, FlMethodCall* call, gpointer) {
-  if (is_method(call, "paste")) {
+  if (is_method(call, "runtimeEndpoint")) {
+    const gchar* endpoint = static_cast<const gchar*>(g_object_get_data(
+        G_OBJECT(state->application), "copypaste-runtime-endpoint"));
+    const bool invalid = g_object_get_data(
+        G_OBJECT(state->application), "copypaste-runtime-endpoint-invalid") != nullptr;
+    if (invalid || endpoint == nullptr || !valid_runtime_endpoint(endpoint)) {
+      failure(call, "runtime_endpoint_unavailable", "Quick Paste runtime is unavailable.");
+      return;
+    }
+    success(call, fl_value_new_string(endpoint));
+  } else if (is_method(call, "paste")) {
     if (!presentation_matches(call)) {
       success(call, fl_value_new_bool(false));
       return;
@@ -1168,6 +1194,17 @@ void integration_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
     fl_value_set_string_take(status, "uriRegistered",
                              fl_value_new_bool(startup_status.uri_registered));
     success(call, status);
+  } else if (is_method(call, "publishRuntimeEndpoint")) {
+    FlValue* args = fl_method_call_get_args(call);
+    FlValue* endpoint = args != nullptr && fl_value_get_type(args) == FL_VALUE_TYPE_MAP
+        ? fl_value_lookup_string(args, "endpoint") : nullptr;
+    if (endpoint == nullptr || fl_value_get_type(endpoint) != FL_VALUE_TYPE_STRING ||
+        !valid_runtime_endpoint(fl_value_get_string(endpoint))) {
+      failure(call, "invalid_arguments", "Runtime endpoint must be an absolute path.");
+      return;
+    }
+    quick_paste_runtime_endpoint = fl_value_get_string(endpoint);
+    success(call, fl_value_new_bool(true));
   } else if (is_method(call, "setStartAtLogin")) {
     FlValue* args = fl_method_call_get_args(call);
     FlValue* enabled = args != nullptr && fl_value_get_type(args) == FL_VALUE_TYPE_MAP
