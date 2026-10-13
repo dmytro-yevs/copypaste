@@ -1,5 +1,8 @@
+import 'dart:ui' show Tristate;
+
 import 'package:copypaste_flutter/app/navigation/navigation.dart';
 import 'package:copypaste_flutter/app/shell/shell.dart';
+import 'package:copypaste_flutter/app/theme/app_overlays.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/features/devices/device_presentation.dart';
@@ -163,11 +166,12 @@ void main() {
       ),
     );
     expect(items, hasLength(3));
-    expect(items.map((item) => (item.label! as Text).data), [
-      'History',
-      'Devices',
-      'Settings',
-    ]);
+    expect(
+      items.map(
+        (item) => ((item.label! as ExcludeSemantics).child as Text).data,
+      ),
+      ['History', 'Devices', 'Settings'],
+    );
     expect(
       tester
           .widgetList<Icon>(
@@ -853,15 +857,17 @@ void main() {
       );
 
       expect(
-        (tester
-                    .widgetList<NavigationItem>(
-                      find.descendant(
-                        of: find.byType(NavigationBar),
-                        matching: find.byType(NavigationItem),
-                      ),
-                    )
-                    .last
-                    .label!
+        ((tester
+                            .widgetList<NavigationItem>(
+                              find.descendant(
+                                of: find.byType(NavigationBar),
+                                matching: find.byType(NavigationItem),
+                              ),
+                            )
+                            .last
+                            .label!
+                        as ExcludeSemantics)
+                    .child
                 as Text)
             .data,
         'Settings',
@@ -995,6 +1001,159 @@ void main() {
     await tester.pump();
     expect(find.text('Save'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  for (final width in [800.0, 1024.0, 480.0]) {
+    testWidgets(
+      'navigation exposes stable semantics and semantic tap at $width pixels',
+      (tester) async {
+        await tester.binding.setSurfaceSize(Size(width, 720));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final semantics = tester.ensureSemantics();
+        final controller = AppNavigationController();
+        addTearDown(controller.dispose);
+
+        try {
+          await tester.pumpWidget(_shell(controller: controller));
+          await tester.pump(const Duration(seconds: 1));
+          for (final destination in appNavigationDestinations) {
+            final finder = find.semantics.byPredicate(
+              (node) =>
+                  node.label == destination.label &&
+                  node.getSemanticsData().flagsCollection.isButton &&
+                  node.getSemanticsData().hasAction(SemanticsAction.tap),
+            );
+            expect(finder, findsOneWidget);
+            final node = finder.evaluate().single;
+            expect(node.getSemanticsData().flagsCollection.isButton, isTrue);
+            expect(
+              node.getSemanticsData().hasAction(SemanticsAction.tap),
+              isTrue,
+            );
+            expect(
+              node.getSemanticsData().hasAction(SemanticsAction.focus),
+              isTrue,
+            );
+            expect(
+              node.getSemanticsData().flagsCollection.isSelected ==
+                  Tristate.isTrue,
+              destination.destination == AppDestination.history,
+            );
+          }
+          if (width >= 800) {
+            expect(
+              find.semantics.byPredicate(
+                (node) =>
+                    node.label.split('\n').contains('History') &&
+                    !node.getSemanticsData().flagsCollection.isButton,
+              ),
+              findsOneWidget,
+            );
+            expect(find.semantics.byLabel('History body'), findsOneWidget);
+          }
+
+          final devices = find.semantics.byPredicate(
+            (node) =>
+                node.label == 'Devices' &&
+                node.getSemanticsData().flagsCollection.isButton &&
+                node.getSemanticsData().hasAction(SemanticsAction.tap),
+          );
+          tester.semantics.tap(devices);
+          await tester.pump(const Duration(seconds: 1));
+
+          expect(controller.selectedDestination, AppDestination.devices);
+          expect(
+            devices
+                    .evaluate()
+                    .single
+                    .getSemanticsData()
+                    .flagsCollection
+                    .isSelected ==
+                Tristate.isTrue,
+            isTrue,
+          );
+          expect(
+            find.semantics
+                    .byPredicate(
+                      (node) =>
+                          node.label == 'History' &&
+                          node.getSemanticsData().flagsCollection.isButton &&
+                          node.getSemanticsData().hasAction(
+                            SemanticsAction.tap,
+                          ),
+                    )
+                    .evaluate()
+                    .single
+                    .getSemanticsData()
+                    .flagsCollection
+                    .isSelected ==
+                Tristate.isFalse,
+            isTrue,
+          );
+          if (width >= 800) {
+            expect(
+              find.semantics.byPredicate(
+                (node) =>
+                    node.label.split('\n').contains('Devices') &&
+                    !node.getSemanticsData().flagsCollection.isButton,
+              ),
+              findsOneWidget,
+            );
+            expect(find.semantics.byLabel('Devices body'), findsOneWidget);
+          }
+        } finally {
+          semantics.dispose();
+        }
+      },
+    );
+  }
+
+  testWidgets('root dialogs block background navigation semantics', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(800, 720));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final semantics = tester.ensureSemantics();
+    final controller = AppNavigationController();
+    addTearDown(controller.dispose);
+
+    try {
+      await tester.pumpWidget(_shell(controller: controller));
+      await tester.pump(const Duration(seconds: 1));
+      final historyNavigation = find.semantics.byPredicate(
+        (node) =>
+            node.label == 'History' &&
+            node.getSemanticsData().flagsCollection.isButton &&
+            node.getSemanticsData().hasAction(SemanticsAction.tap),
+      );
+      expect(historyNavigation, findsOneWidget);
+
+      final dialog = AppOverlays.showDialog<void>(
+        tester.element(find.byType(AppShell)),
+        builder: (context) => AppOverlays.alertDialog(
+          icon: LucideIcons.info,
+          title: const Text('Modal navigation test'),
+          actions: [
+            Button.primary(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close modal'),
+            ),
+          ],
+        ),
+      );
+      await tester.pump(const Duration(seconds: 1));
+
+      expect(find.text('Modal navigation test'), findsOneWidget);
+      expect(historyNavigation, findsNothing);
+
+      await tester.tap(find.text('Close modal'));
+      await tester.pump(const Duration(seconds: 1));
+      await dialog;
+
+      expect(historyNavigation, findsOneWidget);
+    } finally {
+      semantics.dispose();
+    }
   });
 }
 
