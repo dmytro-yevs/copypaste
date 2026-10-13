@@ -59,6 +59,7 @@ void register_and_activate(LinuxX11QuickPaste* quick_paste, Display* display,
   bool completed = false;
   ShortcutResult result;
   int activations = 0;
+  guint32 activation_time = GDK_CURRENT_TIME;
   const ShortcutRequest request{
       "x11-quick-paste-test", "X11 Quick Paste test",
       std::to_string(kHidKeyboardPage | usage), {"control", "shift"},
@@ -69,7 +70,10 @@ void register_and_activate(LinuxX11QuickPaste* quick_paste, Display* display,
         completed = true;
         result = std::move(registration);
       },
-      [&activations] { ++activations; });
+      [&activations, &activation_time, quick_paste] {
+        activation_time = quick_paste->take_activation_time();
+        ++activations;
+      });
 
   g_assert_true(completed);
   g_assert_true(result.registered);
@@ -78,6 +82,8 @@ void register_and_activate(LinuxX11QuickPaste* quick_paste, Display* display,
   send_shortcut(display, static_cast<KeyCode>(evdev_key + 8));
   g_assert_true(wait_until([&activations] { return activations == 1; }));
   g_assert_cmpint(activations, ==, 1);
+  g_assert_cmpuint(activation_time, !=, GDK_CURRENT_TIME);
+  g_assert_cmpuint(quick_paste->take_activation_time(), ==, GDK_CURRENT_TIME);
   bool removed = false;
   quick_paste->unregister_shortcut(request.id, [&removed](bool result) {
     removed = result;

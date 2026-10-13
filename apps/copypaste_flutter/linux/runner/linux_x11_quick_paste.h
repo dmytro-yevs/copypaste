@@ -3,6 +3,7 @@
 
 #include "linux_portal.h"
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -20,6 +21,10 @@ class LinuxX11QuickPaste {
 
   bool available() const;
   bool input_available() const;
+
+  // Returns and clears the timestamp from the matching raw X11 shortcut.
+  // Zero means no usable user-activation time is pending.
+  std::uint32_t take_activation_time();
 
   void register_shortcut(const ShortcutRequest& request,
                          std::function<void(ShortcutResult)> done,
