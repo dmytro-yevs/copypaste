@@ -454,6 +454,39 @@ def status(cli, environment):
     return value
 
 
+def native_clipboard_transport_is_ready(value):
+    """Return whether status proves the live Linux capture transport is usable."""
+    return (
+        value.get("capture_running") is True
+        and value.get("clipboard_available") is True
+        and isinstance(value.get("clipboard_backend"), str)
+        and value["clipboard_backend"].startswith("linux-")
+    )
+
+
+def wait_for_startup_status(cli, environment, *, require_native_clipboard):
+    """Wait within the startup deadline for IPC, and for native transport when required."""
+    deadline = time.monotonic() + CAPTURE_TIMEOUT_SECONDS
+    observed = None
+    while time.monotonic() < deadline:
+        try:
+            observed = status(cli, environment)
+        except (subprocess.CalledProcessError, json.JSONDecodeError, RuntimeError):
+            time.sleep(0.15)
+            continue
+        if not require_native_clipboard or native_clipboard_transport_is_ready(observed):
+            return observed
+        time.sleep(0.15)
+    if observed is None:
+        raise RuntimeError("GUI-owned daemon IPC status did not become ready before the startup deadline")
+    raise RuntimeError(
+        "GUI-owned daemon native clipboard transport remained inactive before the startup deadline "
+        f"(capture_running={observed.get('capture_running')!r}, "
+        f"clipboard_available={observed.get('clipboard_available')!r}, "
+        f"clipboard_backend={observed.get('clipboard_backend')!r})"
+    )
+
+
 def list_items(cli, environment):
     page = response_variant(cli_json(cli, environment, "list", "--limit", "100"), "page")
     if not isinstance(page, dict) or not isinstance(page.get("items"), list):
@@ -1095,25 +1128,13 @@ def main():
         try:
             cli_environment = {**environment, "COPYPASTE_SOCKET": str(runtime_socket)}
             cli = prefix / "copypaste-cli"
-            deadline = time.monotonic() + 8
-            observed_status = None
-            while time.monotonic() < deadline:
-                try:
-                    observed_status = status(cli, cli_environment)
-                    break
-                except (subprocess.CalledProcessError, json.JSONDecodeError, RuntimeError):
-                    time.sleep(0.15)
-            if observed_status is None:
-                raise RuntimeError("GUI-owned daemon did not become ready")
+            wait_for_startup_status(
+                cli, cli_environment, require_native_clipboard=not args.seed_upgrade_canary,
+            )
             if args.seed_upgrade_canary:
                 seed_upgrade_canary(cli, cli_environment, workspace, prefix / "copypaste")
                 return
             upgrading = verify_upgrade_canary(cli, cli_environment, workspace, prefix / "copypaste") if args.qualification_root else False
-            if observed_status.get("capture_running") is not True:
-                raise RuntimeError("GUI-owned daemon did not report an active native clipboard backend")
-            backend = observed_status.get("clipboard_backend")
-            if not isinstance(backend, str) or not backend.startswith("linux-"):
-                raise RuntimeError("GUI-owned daemon did not report a Linux system clipboard backend")
             gui_status = run([str(cli), "--json", "status"], env=cli_environment)
             try:
                 if not isinstance(response_variant(json.loads(gui_status.stdout), "status"), dict):
