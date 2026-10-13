@@ -264,6 +264,7 @@ mod tests {
             device_details: None,
             item_count: 42,
             capture_running: true,
+            clipboard_available: true,
             clipboard_backend: backend.into(),
             private_mode: false,
             private_mode_epoch: 0,
