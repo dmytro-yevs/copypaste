@@ -374,7 +374,7 @@ def desktop_acceptance_capture_command(workspace, environment):
     return [
         sys.executable, str(PROVIDER), "--helper", str(helper), "--manifest", str(manifest),
         "--ready-file", str(directory / "ready"), "--activity-log", str(directory / "activity.jsonl"),
-        "--hold-seconds", "8",
+        "--hold-seconds", "8", "--require-focus",
     ]
 
 
@@ -658,7 +658,7 @@ def clipboard_provider(workspace, evidence_dir, label, payloads, environment, re
     activity = directory / "activity.jsonl"
     command = [
         sys.executable, str(PROVIDER), "--helper", str(helper), "--manifest", str(manifest), "--ready-file", str(ready),
-        "--activity-log", str(activity), "--hold-seconds", "20",
+        "--activity-log", str(activity), "--hold-seconds", "20", "--require-focus",
     ]
     if request_audit_file is not None:
         command.extend(["--request-audit-file", str(request_audit_file)])
