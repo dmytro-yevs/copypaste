@@ -110,19 +110,40 @@ void main() {
   });
 
   test(
-    'registers the first Linux shortcut before execution is ready',
+    'clears the shortcut when Linux capability is lost during initialization',
     () async {
-      final integration = _LinuxIntegration(
-        const LinuxIntegrationStatus(
-          session: LinuxDesktopSession.wayland,
-          globalShortcuts: true,
-          remoteDesktop: LinuxRemoteDesktopState.consentRequired,
-          companion: LinuxCompanionState.active,
-          clipboard: true,
-          quickPaste: false,
-          screenshotProtection: false,
-        ),
-      );
+      final integration =
+          _LinuxIntegration(
+              const LinuxIntegrationStatus(
+                session: LinuxDesktopSession.wayland,
+                globalShortcuts: true,
+                remoteDesktop: LinuxRemoteDesktopState.consentRequired,
+                companion: LinuxCompanionState.active,
+                clipboard: true,
+                quickPaste: false,
+                screenshotProtection: false,
+              ),
+            )
+            ..statusSequence.addAll(<LinuxIntegrationStatus>[
+              const LinuxIntegrationStatus(
+                session: LinuxDesktopSession.wayland,
+                globalShortcuts: true,
+                remoteDesktop: LinuxRemoteDesktopState.consentRequired,
+                companion: LinuxCompanionState.active,
+                clipboard: true,
+                quickPaste: false,
+                screenshotProtection: false,
+              ),
+              const LinuxIntegrationStatus(
+                session: LinuxDesktopSession.wayland,
+                globalShortcuts: false,
+                remoteDesktop: LinuxRemoteDesktopState.consentRequired,
+                companion: LinuxCompanionState.active,
+                clipboard: true,
+                quickPaste: false,
+                screenshotProtection: false,
+              ),
+            ]);
       final registrar = _Registrar();
       final controller = QuickPasteSettingsController(
         store: MemoryQuickPastePreferencesStore(),
@@ -133,27 +154,15 @@ void main() {
       addTearDown(controller.dispose);
 
       await controller.initialize();
-      expect(controller.supported, isTrue);
+      expect(controller.supported, isFalse);
       expect(controller.linuxIntegration?.quickPaste, isFalse);
-      expect(registrar.registered, controller.shortcut);
+      expect(registrar.registered, isNull);
       expect(registrar.registerCalls, 1);
+      expect(registrar.unregisterCalls, 1);
       expect(integration.statusReads, 2);
 
       await controller.refreshLinuxIntegration();
       expect(registrar.registerCalls, 1);
-
-      integration.value = const LinuxIntegrationStatus(
-        session: LinuxDesktopSession.wayland,
-        globalShortcuts: false,
-        remoteDesktop: LinuxRemoteDesktopState.consentRequired,
-        companion: LinuxCompanionState.active,
-        clipboard: true,
-        quickPaste: false,
-        screenshotProtection: false,
-      );
-      await controller.refreshLinuxIntegration();
-
-      expect(controller.supported, isFalse);
       expect(registrar.registered, isNull);
       expect(registrar.unregisterCalls, 1);
 
@@ -172,6 +181,74 @@ void main() {
       expect(controller.linuxIntegration?.quickPaste, isTrue);
       expect(registrar.registered, controller.shortcut);
       expect(registrar.registerCalls, 2);
+    },
+  );
+
+  test('registers once while Linux execution readiness is pending', () async {
+    final integration = _LinuxIntegration(
+      const LinuxIntegrationStatus(
+        session: LinuxDesktopSession.wayland,
+        globalShortcuts: true,
+        remoteDesktop: LinuxRemoteDesktopState.consentRequired,
+        companion: LinuxCompanionState.active,
+        clipboard: true,
+        quickPaste: false,
+        screenshotProtection: false,
+      ),
+    );
+    final registrar = _Registrar();
+    final controller = QuickPasteSettingsController(
+      store: MemoryQuickPastePreferencesStore(),
+      registrar: registrar,
+      windowHost: _WindowHost(),
+      linuxIntegration: integration,
+    );
+    addTearDown(controller.dispose);
+
+    await controller.initialize();
+
+    expect(controller.supported, isTrue);
+    expect(controller.linuxIntegration?.quickPaste, isFalse);
+    expect(registrar.registered, controller.shortcut);
+    expect(registrar.registerCalls, 1);
+    expect(integration.statusReads, 2);
+
+    await controller.refreshLinuxIntegration();
+
+    expect(controller.supported, isTrue);
+    expect(registrar.registered, controller.shortcut);
+    expect(registrar.registerCalls, 1);
+  });
+
+  test(
+    'does not unregister before Linux shortcut capability is available',
+    () async {
+      final integration = _LinuxIntegration(
+        const LinuxIntegrationStatus(
+          session: LinuxDesktopSession.wayland,
+          globalShortcuts: false,
+          remoteDesktop: LinuxRemoteDesktopState.consentRequired,
+          companion: LinuxCompanionState.active,
+          clipboard: true,
+          quickPaste: false,
+          screenshotProtection: false,
+        ),
+      );
+      final registrar = _Registrar();
+      final controller = QuickPasteSettingsController(
+        store: MemoryQuickPastePreferencesStore(),
+        registrar: registrar,
+        windowHost: _WindowHost(),
+        linuxIntegration: integration,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+      await controller.refreshLinuxIntegration();
+
+      expect(controller.supported, isFalse);
+      expect(registrar.registerCalls, 0);
+      expect(registrar.unregisterCalls, 0);
     },
   );
 
@@ -273,6 +350,8 @@ class _LinuxIntegration implements LinuxIntegrationPort {
   int remoteDesktopRequests = 0;
   int companionSetupRequests = 0;
   int statusReads = 0;
+  final List<LinuxIntegrationStatus> statusSequence =
+      <LinuxIntegrationStatus>[];
 
   @override
   Future<bool> openCompanionSetup() async {
@@ -295,6 +374,9 @@ class _LinuxIntegration implements LinuxIntegrationPort {
   @override
   Future<LinuxIntegrationStatus> status() async {
     statusReads += 1;
+    if (statusSequence.isNotEmpty) {
+      value = statusSequence.removeAt(0);
+    }
     return value;
   }
 }
