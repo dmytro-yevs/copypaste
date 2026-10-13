@@ -758,7 +758,12 @@ def require_capture(cli, environment, workspace, evidence_dir, session, mime, pa
     emit_result(assertion, copied)
 
 
-def require_file_capture(cli, environment, workspace, evidence_dir, session):
+def require_empty_ipc_response(response, operation):
+    if not isinstance(response, dict) or response.get("data") != {"empty": {}}:
+        raise RuntimeError(f"daemon returned an invalid {operation} response")
+
+
+def require_locator_file_capture(cli, environment, workspace, evidence_dir, session, socket_path):
     original = workspace / "fixture.txt"
     payload = b"CopyPaste qualification file payload\n"
     original.write_bytes(payload)
@@ -768,12 +773,54 @@ def require_file_capture(cli, environment, workspace, evidence_dir, session):
         wait_for_count(cli, environment, before + 1)
         item = newest_item(list_items(cli, environment), before_ids, "file")
         require_source_identity(item)
+        saved = workspace / "captured-file-roundtrip.txt"
+        require_empty_ipc_response(
+            ipc(socket_path, "save_file", {"id": item["id"], "dest_path": str(saved)}),
+            "save_file",
+        )
+        if saved.read_bytes() != payload:
+            raise RuntimeError("captured file bytes did not survive the product save_file path")
         run([str(cli), "--json", "copy", item["id"]], env=environment)
-        returned_uri = external_clipboard_bytes(session, "text/uri-list", environment)
-        parsed = urlparse(returned_uri.stdout.decode("utf-8").strip())
-        returned_file = Path(unquote(parsed.path))
-        if parsed.scheme != "file" or returned_file.read_bytes() != payload:
-            raise RuntimeError("native backend did not preserve file payload bytes on paste")
+        locator = external_clipboard_bytes(session, "text/plain;charset=utf-8", environment)
+        if locator.stdout != str(original).encode("utf-8"):
+            raise RuntimeError("native backend did not preserve the file locator on copy")
+    return locator
+
+
+def require_reference_free_file_copy(cli, environment, workspace, session, socket_path):
+    original = workspace / "reference-free-file.txt"
+    payload = b"CopyPaste qualification reference-free file payload\n"
+    original.write_bytes(payload)
+    before_ids = {item.get("id") for item in list_items(cli, environment)}
+    require_empty_ipc_response(
+        ipc(
+            socket_path,
+            "import_file",
+            {
+                "path": str(original),
+                "filename": original.name,
+                "mime_type": "text/plain",
+                "source_reference": None,
+            },
+        ),
+        "import_file",
+    )
+    item = newest_item(list_items(cli, environment), before_ids, "file")
+    details = item.get("file_details")
+    if not isinstance(details, dict) or details.get("filename") != original.name or details.get("size_bytes") != len(payload):
+        raise RuntimeError("reference-free file import did not retain the expected History attachment")
+    run([str(cli), "--json", "copy", item["id"]], env=environment)
+    returned_uri = external_clipboard_bytes(session, "text/uri-list", environment)
+    parsed = urlparse(returned_uri.stdout.decode("utf-8").strip())
+    returned_file = Path(unquote(parsed.path))
+    if parsed.scheme != "file" or returned_file.read_bytes() != payload:
+        raise RuntimeError("native backend did not preserve reference-free file bytes on paste")
+    return returned_uri
+
+
+def require_file_capture(cli, environment, workspace, evidence_dir, session, socket_path):
+    require_locator_file_capture(cli, environment, workspace, evidence_dir, session, socket_path)
+    returned_uri = require_reference_free_file_copy(cli, environment, workspace, session, socket_path)
     emit_result("clipboard_file", returned_uri)
 
 
@@ -1159,7 +1206,7 @@ def main():
                 )
                 require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "image/png", png, "image/png", "clipboard_png")
                 require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "image/tiff", tiff, "image/tiff", "clipboard_tiff")
-                require_file_capture(cli, cli_environment, workspace, args.evidence_dir, args.session)
+                require_file_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, runtime_socket)
 
                 confidential = b"copypaste-confidential-fixture"
                 require_not_captured(
