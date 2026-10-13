@@ -119,7 +119,7 @@ export default class CopyPasteQuickPasteExtension extends Extension {
         try {
             GIRepository.Repository.prepend_search_path(`${this.path}/native/typelib`);
             GIRepository.Repository.prepend_library_path(`${this.path}/native/lib`);
-            const factory = await import('gi://CopyPasteClipboard?version=1.0');
+            const {default: factory} = await import('gi://CopyPasteClipboard?version=1.0');
             if (this._enabled) {
                 this._clipboardBridge = new ClipboardBridge(this._bus, factory);
                 this._shortcutBridge = new ShortcutBridge(this._bus);
