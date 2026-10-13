@@ -107,6 +107,29 @@ impl RuntimeError {
         }
     }
 
+    pub(crate) fn runtime_conflict() -> Self {
+        Self {
+            code: "runtime_conflict".into(),
+            message: "CopyPaste runtime ownership is already configured.".into(),
+        }
+    }
+
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub(crate) fn runtime_endpoint_invalid() -> Self {
+        Self {
+            code: "runtime_endpoint_invalid".into(),
+            message: "CopyPaste runtime endpoint is invalid.".into(),
+        }
+    }
+
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
+    pub(crate) fn runtime_attachment_unsupported() -> Self {
+        Self {
+            code: "runtime_attachment_unsupported".into(),
+            message: "CopyPaste runtime attachment is unavailable on this platform.".into(),
+        }
+    }
+
     pub(crate) fn unsafe_data_directory() -> Self {
         Self {
             code: "unsafe_data_directory".into(),
@@ -588,6 +611,16 @@ pub async fn start_desktop_runtime(
     data_dir: String,
 ) -> Result<(), RuntimeError> {
     crate::runtime::start(daemon_executable, data_dir).await
+}
+
+/// Returns the explicit endpoint of this bridge's owned Linux desktop runtime.
+pub fn desktop_runtime_endpoint() -> Result<String, RuntimeError> {
+    crate::runtime::desktop_endpoint()
+}
+
+/// Attaches this bridge to an explicitly supplied Linux desktop runtime endpoint.
+pub async fn attach_desktop_runtime(endpoint: String) -> Result<(), RuntimeError> {
+    crate::runtime::attach(endpoint).await
 }
 
 /// Releases the private app-parent pipe and lets the desktop daemon shut down.
