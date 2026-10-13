@@ -71,7 +71,7 @@ No clipboard payload, pairing secret, database, credential, or screenshot is
 uploaded. A screenshot is not a release requirement; command traces and
 non-sensitive state evidence are the authoritative record.
 
-## Hosted desktop execution and current blocker
+## Hosted desktop execution and evidence
 
 The workflow uses GitHub-hosted x86_64 and ARM64 runners. It creates a fresh
 D-Bus runtime, software-rendered virtual X11 display or native Wayland socket,
@@ -80,12 +80,13 @@ AppImage daemon, CLI, and GUI plus a separate GTK source window, writes real
 clipboard MIME targets, and observes the product through the CLI. It does not
 depend on a self-hosted runner label.
 
-The current driver deliberately fails after the scenarios it can observe until
-the product exposes executable contracts for confidential/private capture,
-Quick Paste portal and focus restoration, tray/notifications, restart,
-pairing/sync, and declared modules. It never emits those assertions from a
-fixture or an input. This is an executable release gate, not a promise that
-the current native implementation is already qualified.
+The driver executes confidential/private capture, Quick Paste portal and focus
+restoration, tray/notifications, restart, pairing/sync, native modules,
+onboarding, camera pairing, and external file drag against the installed
+application. Each assertion requires the corresponding observed product
+behavior; a fixture or input cannot supply a successful result. A failing
+scenario leaves the matrix unqualified. The existence of these executable
+checks does not establish that the current implementation has passed them.
 
 Ubuntu 24.04 carries Plasma 5 and cannot qualify the Plasma 6 KWin companion.
 RPM install/upgrade also needs a Fedora runtime, not extraction on Ubuntu.
