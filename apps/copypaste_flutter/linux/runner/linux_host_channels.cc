@@ -835,13 +835,10 @@ FlValue* integration_status() {
   const bool x11 = gdk_is_x11() && x11_quick_paste != nullptr &&
       x11_quick_paste->available();
   const bool wayland = gdk_is_wayland();
-  // The Clipboard v2 payload contract admits only the private daemon owner.
-  // The GUI must not probe Version or Snapshot as a readiness shortcut: that
-  // would either fail closed or require widening a payload-bearing interface.
-  // Wayland remains unavailable until the daemon supplies authenticated public
-  // readiness metadata through its typed runtime status.
+  // Version is a no-payload liveness check explicitly available to the GUI.
+  // Snapshot remains private to the daemon, so readiness must not use it.
   const bool clipboard = x11 || (wayland && clipboard_version_active());
-  const bool companion = wayland && clipboard;
+  const bool companion = wayland && bridge_companion_active();
   const bool portal_shortcuts = portal != nullptr && portal->is_available();
   const bool gnome_shortcuts_available = wayland && !portal_shortcuts &&
       gnome_shortcuts != nullptr && gnome_shortcuts->is_available();
@@ -866,7 +863,7 @@ FlValue* integration_status() {
       clipboard));
   fl_value_set_string_take(response, "quickPaste", fl_value_new_bool(
       x11 ? x11_quick_paste->input_available()
-          : wayland && companion && shortcut_active && remote_active));
+          : wayland && companion && clipboard && shortcut_active && remote_active));
   // Wayland and X11 do not provide a GTK client API for compositor-wide
   // screenshot exclusion. The UI must keep this unsupported rather than fake
   // a protected pairing context.
