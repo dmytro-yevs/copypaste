@@ -1,10 +1,12 @@
 import importlib.util
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import stat
 import subprocess
+import signal
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -21,6 +23,59 @@ SPEC.loader.exec_module(driver)
 
 
 class LinuxNativeFixtureDriverTest(unittest.TestCase):
+    def test_audited_clipboard_provider_requires_its_expected_sigterm_exit(self):
+        class Provider:
+            def __init__(self, command, **_kwargs):
+                ready = Path(command[command.index("--ready-file") + 1])
+                ready.write_text("ready\n", encoding="utf-8")
+                self.stderr = io.BytesIO()
+                self.terminated = False
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                self.terminated = True
+
+            def wait(self, timeout):
+                assert timeout == 5
+                return -signal.SIGTERM
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            evidence = root / "evidence"
+            evidence.mkdir()
+            audit = root / "audit.jsonl"
+            with mock.patch.object(driver, "gtk_provider_helper", return_value=root / "helper"), \
+                 mock.patch.object(driver.subprocess, "Popen", side_effect=Provider):
+                with driver.clipboard_provider(root, evidence, "privacy", {"text/plain": b"fixture"}, {}, request_audit_file=audit):
+                    pass
+
+    def test_audited_clipboard_provider_rejects_an_early_writer_failure(self):
+        class Provider:
+            stderr = io.BytesIO(b"audit fsync failed")
+
+            def poll(self):
+                return 1
+
+            def terminate(self):
+                raise AssertionError("an exited provider must not be terminated")
+
+            def wait(self, timeout):
+                assert timeout == 5
+                return 1
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            evidence = root / "evidence"
+            evidence.mkdir()
+            with mock.patch.object(driver, "gtk_provider_helper", return_value=root / "helper"), \
+                 mock.patch.object(driver.subprocess, "Popen", return_value=Provider()):
+                with self.assertRaisesRegex(RuntimeError, "audit fsync failed"):
+                    with driver.clipboard_provider(
+                        root, evidence, "privacy", {"text/plain": b"fixture"}, {}, request_audit_file=root / "audit.jsonl",
+                    ):
+                        pass
     def test_seed_and_current_runtime_evidence_namespaces_do_not_collide(self):
         self.assertEqual(
             driver.runtime_evidence_namespace("AppImage", seed_upgrade_canary=True),
@@ -605,10 +660,9 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             original = driver.PROC_ROOT
             driver.PROC_ROOT = proc
             try:
-                self.assertEqual(
-                    driver.gui_daemon_data_dir(SimpleNamespace(pid=int(app_pid)), data_home),
-                    data.resolve(),
-                )
+                daemon = driver.gui_owned_daemon(SimpleNamespace(pid=int(app_pid)), data_home)
+                self.assertEqual(daemon.pid, int(daemon_pid))
+                self.assertEqual(daemon.data_dir, data.resolve())
             finally:
                 driver.PROC_ROOT = original
 
@@ -636,7 +690,7 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             driver.PROC_ROOT = proc
             try:
                 with self.assertRaisesRegex(RuntimeError, "escapes isolated XDG data"):
-                    driver.gui_daemon_data_dir(SimpleNamespace(pid=100), data_home)
+                    driver.gui_owned_daemon(SimpleNamespace(pid=100), data_home)
             finally:
                 driver.PROC_ROOT = original
 
@@ -668,14 +722,53 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             driver.PROC_ROOT = proc
             try:
                 with self.assertRaisesRegex(RuntimeError, "exactly one daemon"):
-                    driver.gui_daemon_data_dir(SimpleNamespace(pid=100), data_home)
+                    driver.gui_owned_daemon(SimpleNamespace(pid=100), data_home)
                 daemon(104, ppid=100, uid=os.geteuid())
                 daemon(105, ppid=100, uid=os.geteuid())
                 children.write_text("104 105", encoding="ascii")
                 with self.assertRaisesRegex(RuntimeError, "exactly one daemon"):
-                    driver.gui_daemon_data_dir(SimpleNamespace(pid=100), data_home)
+                    driver.gui_owned_daemon(SimpleNamespace(pid=100), data_home)
             finally:
                 driver.PROC_ROOT = original
+
+    def test_confidential_reader_audit_binds_the_hint_to_the_owned_daemon_only(self):
+        daemon_pid = 4321
+        records = [
+            {"target": "x-kde-passwordManagerHint", "requestor_pid": daemon_pid, "error": None},
+            {"target": "text/plain;charset=utf-8", "requestor_pid": 9876, "error": None},
+            {"target": "TARGETS", "requestor_pid": 9876, "error": None},
+        ]
+        driver.require_confidential_reader_audit(
+            records, daemon_pid=daemon_pid, protected_mime="text/plain;charset=utf-8",
+        )
+        with self.assertRaisesRegex(RuntimeError, "did not inspect"):
+            driver.require_confidential_reader_audit(
+                records[1:], daemon_pid=daemon_pid, protected_mime="text/plain;charset=utf-8",
+            )
+
+    def test_confidential_reader_audit_rejects_daemon_plaintext_unknown_and_multiple(self):
+        daemon_pid = 4321
+        hint = {"target": "x-kde-passwordManagerHint", "requestor_pid": daemon_pid, "error": None}
+        for record, message in (
+            ({"target": "text/plain;charset=utf-8", "requestor_pid": daemon_pid, "error": None}, "read protected"),
+            ({"target": "MULTIPLE", "requestor_pid": daemon_pid, "error": None}, "read protected"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, message):
+                driver.require_confidential_reader_audit(
+                    [hint, record], daemon_pid=daemon_pid, protected_mime="text/plain;charset=utf-8",
+                )
+        with tempfile.TemporaryDirectory() as directory:
+            audit = Path(directory) / "audit.jsonl"
+            audit.write_text(json.dumps({"target": "unknown", "requestor_pid": None, "error": "x_target_query_failed"}) + "\n", encoding="utf-8")
+            records = driver.read_request_audit(audit)
+            driver.write_reader_audit(Path(directory), "privacy", records, daemon_pid=daemon_pid, protocol="x11-xres")
+            written = json.loads((Path(directory) / "linux-clipboard-reader-privacy.json").read_text(encoding="utf-8"))
+            self.assertEqual(written["expected_daemon_pid"], daemon_pid)
+            self.assertEqual(written["protocol"], "x11-xres")
+            with self.assertRaisesRegex(RuntimeError, "unknown reader"):
+                driver.require_confidential_reader_audit(
+                    records, daemon_pid=daemon_pid, protected_mime="text/plain;charset=utf-8",
+                )
 
     def test_pairing_uri_uses_the_live_peer_invitation_without_retaining_it(self):
         uri = driver.pairing_uri_from_invite({
