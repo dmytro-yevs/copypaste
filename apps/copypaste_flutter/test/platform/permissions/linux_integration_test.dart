@@ -7,16 +7,19 @@ void main() {
   const channel = MethodChannel('test/linux_integration');
   final messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  final calls = <MethodCall>[];
   late Future<bool> Function() clipboardAvailable;
   late MethodChannelLinuxIntegrationPort port;
 
   setUp(() {
+    calls.clear();
     clipboardAvailable = () async => true;
     port = MethodChannelLinuxIntegrationPort(
       channel: channel,
       clipboardAvailable: () => clipboardAvailable(),
     );
     messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
       return switch (call.method) {
         'status' => {
           'session': 'wayland',
@@ -31,6 +34,7 @@ void main() {
         },
         'requestRemoteDesktop' => true,
         'openCompanionSetup' => true,
+        'publishRuntimeEndpoint' => true,
         'setStartAtLogin' => true,
         'registerCopypasteUri' => true,
         _ => null,
@@ -63,6 +67,17 @@ void main() {
       expect(await port.registerCopypasteUri(), isTrue);
     },
   );
+
+  test('publishes only an absolute runtime endpoint', () async {
+    await port.publishRuntimeEndpoint('/tmp/copypaste.sock');
+    expect(calls.last.method, 'publishRuntimeEndpoint');
+    expect(calls.last.arguments, {'endpoint': '/tmp/copypaste.sock'});
+
+    await expectLater(
+      port.publishRuntimeEndpoint('relative.sock'),
+      throwsArgumentError,
+    );
+  });
 
   test('rejects partial or invalid native state', () async {
     messenger.setMockMethodCallHandler(

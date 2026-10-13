@@ -3,6 +3,7 @@
 #include <flutter_linux/flutter_linux.h>
 
 #include <cstring>
+#include <limits.h>
 
 #include "flutter/generated_plugin_registrant.h"
 #include "linux_host_channels.h"
@@ -23,6 +24,11 @@ namespace {
 
 constexpr gsize kMaxPairingUriBytes = 8192;
 constexpr guint kMaxPendingPairingUris = 8;
+
+bool is_runtime_endpoint(const gchar* endpoint) {
+  return endpoint != nullptr && *endpoint != '\0' &&
+         strnlen(endpoint, PATH_MAX) < PATH_MAX && g_path_is_absolute(endpoint);
+}
 
 bool is_pairing_uri(const gchar* argument) {
   if (argument == nullptr ||
@@ -65,6 +71,16 @@ void set_quick_paste_context(MyApplication* self, const gchar* argument) {
     g_object_set_data_full(G_OBJECT(self), "copypaste-x11-window",
                            g_strdup(argument + strlen("--copypaste-x11-window=")),
                            g_free);
+  } else if (g_str_has_prefix(argument, "--copypaste-runtime-endpoint=")) {
+    const gchar* endpoint = argument + strlen("--copypaste-runtime-endpoint=");
+    if (!is_runtime_endpoint(endpoint) ||
+        g_object_get_data(G_OBJECT(self), "copypaste-runtime-endpoint") != nullptr) {
+      g_object_set_data(G_OBJECT(self), "copypaste-runtime-endpoint-invalid",
+                        GINT_TO_POINTER(1));
+    } else {
+      g_object_set_data_full(G_OBJECT(self), "copypaste-runtime-endpoint",
+                             g_strdup(endpoint), g_free);
+    }
   }
 }
 
