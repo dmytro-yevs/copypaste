@@ -355,6 +355,17 @@ def focused_editable_text(application: Any, atspi: Any) -> bool:
     return len(focused) == 1
 
 
+def quick_paste_marker_accessible(application: Any, marker: str) -> Any | None:
+    for node in accessible_descendants(application):
+        try:
+            name = node.name
+            if isinstance(name, str) and name.split("\n", 1)[0] == marker:
+                return node
+        except Exception:
+            continue
+    return None
+
+
 def quick_paste_ready(registry: Any, atspi: Any, *, pid: int, marker: str, timeout_seconds: int) -> dict[str, Any]:
     """Require the requested clip and a focused editable input in one Quick Paste process."""
     if pid <= 0 or not marker:
@@ -368,7 +379,7 @@ def quick_paste_ready(registry: Any, atspi: Any, *, pid: int, marker: str, timeo
                 raise
             time.sleep(0.1)
             continue
-        marker_node = matching_accessible(application, marker)
+        marker_node = quick_paste_marker_accessible(application, marker)
         try:
             marker_visible = marker_node is not None and all(
                 marker_node.getState().contains(value)
