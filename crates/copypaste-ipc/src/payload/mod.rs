@@ -419,6 +419,10 @@ pub struct StatusData {
     pub device_details: Option<DeviceDetails>,
     pub item_count: u64,
     pub capture_running: bool,
+    /// Whether the clipboard transport is currently ready to receive and
+    /// publish system clipboard data.
+    #[serde(default)]
+    pub clipboard_available: bool,
     /// Which clipboard backend is live — the real pasteboard or the fake used
     /// on non-macOS hosts and in tests. Surfaced so a demo cannot be mistaken
     /// for the real thing.

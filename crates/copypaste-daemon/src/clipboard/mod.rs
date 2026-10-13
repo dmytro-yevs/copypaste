@@ -247,6 +247,15 @@ pub trait ClipboardSource: Send {
         true
     }
 
+    /// Whether the system clipboard transport is currently usable.
+    ///
+    /// Backends without a cheap, authoritative readiness observation retain
+    /// the established available-by-default contract. Linux transports
+    /// override this with their live connection state.
+    fn is_available(&self) -> bool {
+        true
+    }
+
     /// Write text to the clipboard. Must suppress the resulting self-write so
     /// the next poll does not re-capture our own content.
     fn set_contents(&mut self, text: &str) -> anyhow::Result<()>;

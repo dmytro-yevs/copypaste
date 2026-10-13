@@ -102,9 +102,30 @@ impl Sender {
 pub(super) struct X11Clipboard {
     sender: Arc<Sender>,
     changed: Arc<AtomicBool>,
+    available: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
     staging: super::file_materialize::StagingArea,
 }
+
+struct WorkerAvailability(Arc<AtomicBool>);
+
+impl WorkerAvailability {
+    fn new(available: Arc<AtomicBool>) -> Self {
+        available.store(false, Ordering::Release);
+        Self(available)
+    }
+
+    fn mark_ready(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+
+impl Drop for WorkerAvailability {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
 impl X11Clipboard {
     pub(super) fn new(data_dir: &Path) -> std::io::Result<Self> {
         // Create the cleanup owner before exposing a worker which can accept a
@@ -116,15 +137,18 @@ impl X11Clipboard {
         write.set_nonblocking(true)?;
         let changed = Arc::new(AtomicBool::new(true));
         let thread_changed = Arc::clone(&changed);
+        let available = Arc::new(AtomicBool::new(false));
+        let thread_available = Arc::clone(&available);
         let worker = thread::Builder::new()
             .name("copypaste-x11-clipboard".into())
-            .spawn(move || worker(rx, read, thread_changed))?;
+            .spawn(move || worker(rx, read, thread_changed, thread_available))?;
         Ok(Self {
             sender: Arc::new(Sender {
                 commands: tx,
                 wake: Mutex::new(write),
             }),
             changed,
+            available,
             worker: Some(worker),
             staging,
         })
@@ -237,6 +261,9 @@ impl ClipboardSource for X11Clipboard {
     fn changed(&mut self) -> bool {
         self.changed.load(Ordering::Acquire)
     }
+    fn is_available(&self) -> bool {
+        self.available.load(Ordering::Acquire)
+    }
     fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
         self.write(OwnedSelection {
             target: 0,
@@ -304,6 +331,14 @@ impl ClipboardSource for LinuxClipboard {
             Self::Wayland(source) => source.changed(),
         }
     }
+    fn is_available(&self) -> bool {
+        match self {
+            Self::X11(source) => source.is_available(),
+            Self::Gnome(source) => source.is_available(),
+            Self::Kwin(source) => source.is_available(),
+            Self::Wayland(source) => source.is_available(),
+        }
+    }
     fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
         match self {
             Self::X11(source) => source.set_contents(text),
@@ -342,7 +377,13 @@ impl ClipboardSource for LinuxClipboard {
     }
 }
 
-fn worker(commands: mpsc::Receiver<Command>, mut wake: UnixStream, changed: Arc<AtomicBool>) {
+fn worker(
+    commands: mpsc::Receiver<Command>,
+    mut wake: UnixStream,
+    changed: Arc<AtomicBool>,
+    available: Arc<AtomicBool>,
+) {
+    let availability = WorkerAvailability::new(available);
     let Ok((connection, screen)) = x11rb::connect(None) else {
         return;
     };
@@ -384,6 +425,7 @@ fn worker(commands: mpsc::Receiver<Command>, mut wake: UnixStream, changed: Arc<
     {
         return;
     }
+    availability.mark_ready();
     let mut owned = None;
     loop {
         while let Ok(request) = commands.try_recv() {
@@ -894,6 +936,38 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use std::time::Duration;
+
+    #[test]
+    fn x11_worker_availability_tracks_setup_and_unwind() {
+        let available = Arc::new(AtomicBool::new(false));
+        let failed_setup = Arc::clone(&available);
+        let failed_worker = thread::spawn(move || {
+            let _availability = WorkerAvailability::new(failed_setup);
+        });
+        failed_worker.join().expect("setup worker exits normally");
+        assert!(
+            !available.load(Ordering::Acquire),
+            "a worker that returns before setup must remain unavailable"
+        );
+
+        let worker_available = Arc::clone(&available);
+        let (ready, started) = mpsc::sync_channel(1);
+        let (release, continue_worker) = mpsc::sync_channel(1);
+        let worker = thread::spawn(move || {
+            let availability = WorkerAvailability::new(worker_available);
+            assert!(!availability.0.load(Ordering::Acquire));
+            availability.mark_ready();
+            ready.send(()).expect("report worker readiness");
+            continue_worker.recv().expect("wait for release");
+            panic!("fixture worker exit");
+        });
+
+        started.recv().expect("worker reached ready state");
+        assert!(available.load(Ordering::Acquire));
+        release.send(()).expect("release worker");
+        assert!(worker.join().is_err());
+        assert!(!available.load(Ordering::Acquire));
+    }
 
     #[derive(Clone)]
     enum FixturePayload {
