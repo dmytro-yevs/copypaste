@@ -11,10 +11,12 @@
 #include <linux/input-event-codes.h>
 
 #include <cerrno>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -77,6 +79,18 @@ unsigned int ignored_lock_mask(Display* display) {
   return mask;
 }
 
+std::vector<unsigned int> lock_subsets(unsigned int mask) {
+  std::vector<unsigned int> subsets = {0};
+  for (unsigned int bit = 1; bit != 0; bit <<= 1) {
+    if ((mask & bit) == 0) continue;
+    const std::size_t count = subsets.size();
+    for (std::size_t index = 0; index < count; ++index) {
+      subsets.push_back(subsets[index] | bit);
+    }
+  }
+  return subsets;
+}
+
 bool parse_xid(const std::string& value, Window* window) {
   if (value.empty() || window == nullptr) return false;
   errno = 0;
@@ -101,6 +115,7 @@ struct LinuxX11QuickPaste::Impl {
   KeyCode keycode = 0;
   unsigned int modifiers = 0;
   std::uint32_t activation_time = 0;
+  std::vector<unsigned int> registered_masks;
   std::string id;
   std::function<void()> activated;
 
@@ -141,14 +156,13 @@ struct LinuxX11QuickPaste::Impl {
   }
 
   void clear() {
-    if (display != nullptr && registered) {
-      const unsigned int locks = ignored_lock_mask(display);
-      const unsigned int ignored[] = {0, locks};
-      for (unsigned int lock : ignored) {
+    if (display != nullptr) {
+      for (unsigned int lock : registered_masks) {
         XUngrabKey(display, keycode, modifiers | lock, root);
       }
-      XSync(display, False);
+      if (!registered_masks.empty()) XSync(display, False);
     }
+    registered_masks.clear();
     registered = false;
     keycode = 0;
     modifiers = 0;
@@ -199,26 +213,24 @@ void LinuxX11QuickPaste::register_shortcut(
     done({false, {}, "The selected shortcut is invalid on X11."});
     return;
   }
-  const unsigned int locks = ignored_lock_mask(impl_->display);
-  const unsigned int ignored[] = {0, locks};
+  impl_->keycode = keycode;
+  impl_->modifiers = modifiers;
+  const std::vector<unsigned int> masks = lock_subsets(ignored_lock_mask(impl_->display));
   grab_error = 0;
   XErrorHandler previous = XSetErrorHandler(record_grab_error);
-  for (unsigned int lock : ignored) {
+  for (unsigned int lock : masks) {
     XGrabKey(impl_->display, keycode, modifiers | lock, impl_->root, True,
              GrabModeAsync, GrabModeAsync);
+    XSync(impl_->display, False);
+    if (grab_error != 0) break;
+    impl_->registered_masks.push_back(lock);
   }
-  XSync(impl_->display, False);
   XSetErrorHandler(previous);
   if (grab_error != 0) {
-    for (unsigned int lock : ignored) {
-      XUngrabKey(impl_->display, keycode, modifiers | lock, impl_->root);
-    }
-    XSync(impl_->display, False);
+    impl_->clear();
     done({false, {}, "That X11 shortcut is already in use."});
     return;
   }
-  impl_->keycode = keycode;
-  impl_->modifiers = modifiers;
   impl_->id = request.id;
   impl_->activated = std::move(activated);
   impl_->registered = true;
