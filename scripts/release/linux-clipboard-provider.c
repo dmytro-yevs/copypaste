@@ -34,6 +34,7 @@ typedef struct {
   Offer offers[MAX_OFFERS];
   guint count;
   guint hold_seconds;
+  gboolean require_focus;
   gboolean selection_scheduled;
   gboolean ready;
   gboolean failed;
@@ -271,7 +272,6 @@ static gboolean establish_clipboard(Provider *provider, GdkDisplay *display) {
   return TRUE;
 }
 
-#ifdef GDK_WINDOWING_WAYLAND
 static gboolean set_clipboard_after_focus(gpointer user_data) {
   Provider *provider = user_data;
   if (provider->ready || provider->failed) return G_SOURCE_REMOVE;
@@ -289,7 +289,6 @@ static gboolean schedule_clipboard_after_focus(GtkWidget *widget, GdkEventFocus 
   }
   return FALSE;
 }
-#endif
 
 static gboolean write_ready(const gchar *path) {
   int descriptor = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
@@ -317,6 +316,9 @@ int main(int argc, char **argv) {
     } else if (index + 1 < argc && strcmp(argv[index], "--request-audit-file") == 0) {
       provider.request_audit_path = argv[index + 1];
       index += 2;
+    } else if (strcmp(argv[index], "--require-focus") == 0) {
+      provider.require_focus = TRUE;
+      index++;
     } else if (index + 1 < argc && strcmp(argv[index], "--hold-seconds") == 0) {
       gchar *end = NULL;
       unsigned long parsed = strtoul(argv[index + 1], &end, 10);
@@ -344,6 +346,10 @@ int main(int argc, char **argv) {
   gtk_init(&argc, &argv);
   provider.ready_path = ready_path;
   provider.hold_seconds = hold_seconds;
+  gboolean needs_focus = provider.require_focus;
+#ifdef GDK_WINDOWING_WAYLAND
+  needs_focus = needs_focus || GDK_IS_WAYLAND_DISPLAY(gdk_display_get_default());
+#endif
 #ifdef GDK_WINDOWING_X11
   if (provider.request_audit_path != NULL && GDK_IS_X11_DISPLAY(gdk_display_get_default())) {
     if (!prepare_request_audit(&provider)) return 1;
@@ -354,16 +360,13 @@ int main(int argc, char **argv) {
   GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
   gtk_window_set_title(GTK_WINDOW(window), "CopyPaste qualification source");
   gtk_window_set_default_size(GTK_WINDOW(window), 240, 80);
-#ifdef GDK_WINDOWING_WAYLAND
-  if (GDK_IS_WAYLAND_DISPLAY(gdk_display_get_default())) {
+  if (needs_focus) {
     GtkWidget *focus_target = gtk_entry_new();
     gtk_container_add(GTK_CONTAINER(window), focus_target);
     g_signal_connect(focus_target, "focus-in-event", G_CALLBACK(schedule_clipboard_after_focus), &provider);
     gtk_widget_show_all(window);
     gtk_widget_grab_focus(focus_target);
-  } else
-#endif
-  {
+  } else {
     gtk_widget_show_all(window);
     if (!establish_clipboard(&provider, gdk_display_get_default())) return 1;
   }

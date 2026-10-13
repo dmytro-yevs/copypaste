@@ -81,7 +81,7 @@ def build(output: Path) -> None:
     os.replace(temporary, output)
 
 
-def run(helper: Path, manifest: Path, ready: Path, activity: Path, hold_seconds: int, request_audit: Path | None = None) -> None:
+def run(helper: Path, manifest: Path, ready: Path, activity: Path, hold_seconds: int, request_audit: Path | None = None, require_focus: bool = False) -> None:
     if not helper.is_file() or helper.is_symlink() or not os.access(helper, os.X_OK):
         raise ValueError("GTK clipboard provider helper is unavailable")
     application_id, offers = load_manifest(manifest)
@@ -96,6 +96,8 @@ def run(helper: Path, manifest: Path, ready: Path, activity: Path, hold_seconds:
     ]
     if request_audit is not None:
         arguments.extend(("--request-audit-file", str(request_audit)))
+    if require_focus:
+        arguments.append("--require-focus")
     for mime, payload in offers:
         arguments.extend(("--offer", mime, str(payload)))
     os.execv(str(helper), arguments)
@@ -109,10 +111,11 @@ def main() -> int:
     parser.add_argument("--ready-file", type=Path)
     parser.add_argument("--activity-log", type=Path)
     parser.add_argument("--request-audit-file", type=Path)
+    parser.add_argument("--require-focus", action="store_true")
     parser.add_argument("--hold-seconds", type=int, default=20)
     args = parser.parse_args()
     if args.build_helper is not None:
-        if any(value is not None for value in (args.helper, args.manifest, args.ready_file, args.activity_log, args.request_audit_file)):
+        if args.require_focus or any(value is not None for value in (args.helper, args.manifest, args.ready_file, args.activity_log, args.request_audit_file)):
             raise ValueError("GTK clipboard provider build mode has no runtime arguments")
         build(args.build_helper)
         return 0
@@ -120,7 +123,7 @@ def main() -> int:
         raise ValueError("GTK clipboard provider runtime arguments are incomplete")
     if not 1 <= args.hold_seconds <= 60:
         raise ValueError("clipboard provider hold duration is invalid")
-    run(args.helper, args.manifest, args.ready_file, args.activity_log, args.hold_seconds, args.request_audit_file)
+    run(args.helper, args.manifest, args.ready_file, args.activity_log, args.hold_seconds, args.request_audit_file, args.require_focus)
     raise AssertionError("execv returned")
 
 
