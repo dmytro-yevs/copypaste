@@ -959,11 +959,24 @@ def require_modules(socket_path, artifacts, fixtures, application_data, architec
 
 def gui_daemon_data_dir(gui, data_home):
     """Read the controlled GUI child's explicit daemon data directory."""
-    children = PROC_ROOT / str(gui.pid) / "task" / str(gui.pid) / "children"
     try:
-        pids = children.read_text(encoding="ascii").split()
+        gui_status = (PROC_ROOT / str(gui.pid) / "status").read_text(encoding="utf-8")
+        task_directory = PROC_ROOT / str(gui.pid) / "task"
+        tasks = tuple(task_directory.iterdir())
     except OSError as error:
         raise RuntimeError("packaged GUI child process inventory is unavailable") from error
+    gui_uid = next((line.split()[1] for line in gui_status.splitlines() if line.startswith("Uid:") and len(line.split()) >= 2), None)
+    if gui_uid != str(os.geteuid()):
+        raise RuntimeError("packaged GUI process identity is invalid")
+    pids = set()
+    for task in tasks:
+        if not re.fullmatch(r"[1-9][0-9]*", task.name):
+            continue
+        try:
+            pids.update(pid for pid in task.joinpath("children").read_text(encoding="ascii").split()
+                        if re.fullmatch(r"[1-9][0-9]*", pid))
+        except OSError:
+            continue
     candidates = []
     for pid in pids:
         process = PROC_ROOT / pid
@@ -973,7 +986,8 @@ def gui_daemon_data_dir(gui, data_home):
         except OSError:
             continue
         uid = next((line.split()[1] for line in status.splitlines() if line.startswith("Uid:") and len(line.split()) >= 2), None)
-        if uid != str(os.geteuid()):
+        ppid = next((line.split()[1] for line in status.splitlines() if line.startswith("PPid:") and len(line.split()) >= 2), None)
+        if uid != gui_uid or ppid != str(gui.pid):
             continue
         argv = [value.decode("utf-8") for value in cmdline if value]
         if not argv or Path(argv[0]).name != "copypaste-daemon":
