@@ -3,9 +3,13 @@ import fs from 'node:fs';
 
 const root = new URL('.', import.meta.url);
 
-function loadGnome({focusWindow = null} = {}) {
+function loadGnome({focusWindow = null, clipboardFactoryModule = {default: {}}} = {}) {
     const source = fs.readFileSync(new URL('gnome-shell-extension/extension.js', root), 'utf8')
         .replace(/^import .*;\n/gm, '')
+        .replace(
+            "const {default: factory} = await import('gi://CopyPasteClipboard?version=1.0');",
+            'const {default: factory} = await importClipboardFactory();'
+        )
         .replace('export default class ', 'class ');
     const callbacks = {};
     const calls = [];
@@ -81,19 +85,31 @@ function loadGnome({focusWindow = null} = {}) {
         },
         Source: {remove() {}},
     };
+    const GIRepository = {Repository: {
+        prepend_search_path() {},
+        prepend_library_path() {},
+    }};
     const Extension = class {};
     const shell = {display: {focus_window: focusWindow, connect: () => 4, disconnect() {}}, get_current_time: () => 1};
-    const ClipboardBridge = class { destroy() {} };
+    let clipboardFactory;
+    const ClipboardBridge = class {
+        constructor(_bus, factory) {
+            clipboardFactory = factory;
+        }
+        destroy() {}
+    };
     const ShortcutBridge = class { destroy() {} };
-    const ExtensionClass = new Function('Gio', 'GLib', 'Extension', 'ClipboardBridge', 'ShortcutBridge', 'global', `${source}; return CopyPasteQuickPasteExtension;`)(
+    const ExtensionClass = new Function('Gio', 'GIRepository', 'GLib', 'Extension', 'ClipboardBridge', 'ShortcutBridge', 'importClipboardFactory', 'global', `${source}; return CopyPasteQuickPasteExtension;`)(
         Gio,
+        GIRepository,
         GLib,
         Extension,
         ClipboardBridge,
         ShortcutBridge,
+        async () => clipboardFactoryModule,
         shell
     );
-    return {callbacks, calls, timers, shell, extension: new ExtensionClass()};
+    return {bus, callbacks, calls, timers, shell, get clipboardFactory() { return clipboardFactory; }, extension: new ExtensionClass()};
 }
 
 function completeGnome(bus, call, value) {
@@ -273,6 +289,15 @@ async function invokeShortcut(runtime, method, params, sender = ':1.host') {
     };
     await runtime.state.handlers[method](params, invocation);
     return reply;
+}
+
+{
+    const factory = {clipboard_source_is_available() { return true; }};
+    const runtime = loadGnome({clipboardFactoryModule: {default: factory}});
+    runtime.extension._enabled = true;
+    runtime.extension._bus = runtime.bus;
+    await runtime.extension._loadClipboardBridge();
+    assert.equal(runtime.clipboardFactory, factory, 'GNOME bridge unwraps the dynamic GI module default export');
 }
 
 {
