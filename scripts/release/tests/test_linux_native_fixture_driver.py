@@ -170,6 +170,65 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
                         Path("copypaste-cli"), {}, workspace, "wayland", workspace / "gui.sock",
                     )
 
+    def test_quick_paste_readiness_requires_a_matching_child_pid_and_marker_digest(self):
+        marker = "copypaste-x11-quick-paste-fixture"
+        record = {
+            "schema": 1,
+            "kind": "atspi_quick_paste_ready",
+            "gui_pid": 4321,
+            "marker_sha256": hashlib.sha256(marker.encode("utf-8")).hexdigest(),
+        }
+        result = subprocess.CompletedProcess(
+            ["python3", "actor.py"], 0,
+            stdout=("COPYPASTE_QUALIFICATION_MEDIA " + json.dumps(record) + "\n").encode("utf-8"),
+        )
+        with mock.patch.object(driver, "run", return_value=result):
+            driver.require_quick_paste_ready(Path("actor.py"), 4321, marker, 3, {})
+        record["gui_pid"] = 4322
+        result = subprocess.CompletedProcess(
+            ["python3", "actor.py"], 0,
+            stdout=("COPYPASTE_QUALIFICATION_MEDIA " + json.dumps(record) + "\n").encode("utf-8"),
+        )
+        with mock.patch.object(driver, "run", return_value=result):
+            with self.assertRaisesRegex(RuntimeError, "readiness evidence"):
+                driver.require_quick_paste_ready(Path("actor.py"), 4321, marker, 3, {})
+
+    def test_x11_quick_paste_window_pid_rejects_an_invalid_owner(self):
+        with mock.patch.object(
+            driver, "run", return_value=subprocess.CompletedProcess(["xdotool"], 0, stdout=b"not-a-pid\n"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "window owner is invalid"):
+                driver.x11_window_pid("42", {})
+
+    def test_x11_quick_paste_uses_observed_focus_for_a_normal_return_key(self):
+        @driver.contextmanager
+        def input_target(_workspace, _environment):
+            with tempfile.TemporaryDirectory() as directory:
+                result = Path(directory) / "result"
+                result.write_text("copypaste-x11-quick-paste-fixture", encoding="utf-8")
+                yield "100", result
+
+        calls = []
+        def run(argv, **_kwargs):
+            calls.append(argv)
+            if argv == ["xdotool", "getwindowfocus"]:
+                value = b"100\n" if calls.count(argv) != 2 else b"200\n"
+                return subprocess.CompletedProcess(argv, 0, stdout=value)
+            return subprocess.CompletedProcess(argv, 0)
+
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            with mock.patch.object(driver, "x11_input_target", input_target), \
+                 mock.patch.object(driver, "wait_for_window", return_value="200"), \
+                 mock.patch.object(driver, "x11_window_pid", return_value=4321), \
+                 mock.patch.object(driver, "require_helper", return_value=Path("actor.py")), \
+                 mock.patch.object(driver, "require_quick_paste_ready") as ready, \
+                 mock.patch.object(driver, "run", side_effect=run):
+                driver.require_x11_quick_paste(Path("copypaste-cli"), {}, workspace)
+        ready.assert_called_once()
+        self.assertIn(["xdotool", "key", "Return"], calls)
+        self.assertFalse(any(command[:3] == ["xdotool", "key", "--window"] for command in calls))
+
     def test_capture_requires_cli_copy_to_restore_the_original_after_a_real_overwrite(self):
         original = b"original HTML"
         marker = b"copypaste-native-overwrite-clipboard_html"
