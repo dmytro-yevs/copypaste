@@ -90,6 +90,10 @@ Future<void> quickPasteMain() async {
   WidgetsFlutterBinding.ensureInitialized();
   AppMotion.configureLibrary();
   await RustLib.init();
+  final host = MethodChannelQuickPasteContextHost();
+  if (Platform.isLinux) {
+    await runtime.attachDesktopRuntime(endpoint: await host.runtimeEndpoint());
+  }
   final repository = RuntimeHistoryRepository();
   runApp(
     QuickPasteApp(
@@ -97,7 +101,7 @@ Future<void> quickPasteMain() async {
         repository: repository,
         disposeRepository: repository.dispose,
         preferencesStore: SharedPreferencesQuickPastePreferencesStore(),
-        host: MethodChannelQuickPasteContextHost(),
+        host: host,
       ),
     ),
   );
@@ -326,6 +330,12 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     });
     try {
       await _startRuntimeProcess();
+      if (Platform.isLinux) {
+        final endpoint = await runtime.desktopRuntimeEndpoint();
+        await MethodChannelLinuxIntegrationPort().publishRuntimeEndpoint(
+          endpoint,
+        );
+      }
       if (!mounted) {
         if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
           await runtime.stopDesktopRuntime();
