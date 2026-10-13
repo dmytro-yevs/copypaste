@@ -30,6 +30,7 @@ typedef struct {
   const gchar *ready_path;
   const gchar *request_audit_path;
   int request_audit_descriptor;
+  gboolean request_audit_filter_installed;
   Offer offers[MAX_OFFERS];
   guint count;
   guint hold_seconds;
@@ -130,18 +131,40 @@ static int record_x_error(Display *display, XErrorEvent *event) {
   return 0;
 }
 
+static void begin_x_error_scope(XErrorScope *scope, Display *display) {
+  scope->display = display;
+  scope->saw_error = FALSE;
+  x_error_scope = scope;
+  scope->previous_handler = XSetErrorHandler(record_x_error);
+}
+
+static gboolean finish_x_error_scope(XErrorScope *scope) {
+  XSync(scope->display, False);
+  XSetErrorHandler(scope->previous_handler);
+  x_error_scope = NULL;
+  return scope->saw_error;
+}
+
+static gchar *selection_target(Display *display, Atom target, const gchar **error) {
+  XErrorScope scope = {.display = NULL, .saw_error = FALSE, .previous_handler = NULL};
+  begin_x_error_scope(&scope, display);
+  gchar *name = XGetAtomName(display, target);
+  if (finish_x_error_scope(&scope) || name == NULL) {
+    if (name != NULL) XFree(name);
+    *error = "x_target_query_failed";
+    return NULL;
+  }
+  return name;
+}
+
 static pid_t requestor_pid(Display *display, Window requestor, const gchar **error) {
   XResClientIdSpec specification = {.client = requestor, .mask = XRES_CLIENT_ID_PID_MASK};
   XResClientIdValue *identities = NULL;
   long count = 0;
-  XErrorScope scope = {.display = display, .saw_error = FALSE, .previous_handler = NULL};
-  x_error_scope = &scope;
-  scope.previous_handler = XSetErrorHandler(record_x_error);
+  XErrorScope scope = {.display = NULL, .saw_error = FALSE, .previous_handler = NULL};
+  begin_x_error_scope(&scope, display);
   Status status = XResQueryClientIds(display, 1, &specification, &count, &identities);
-  XSync(display, False);
-  XSetErrorHandler(scope.previous_handler);
-  x_error_scope = NULL;
-  if (scope.saw_error || status != Success) {
+  if (finish_x_error_scope(&scope) || status != Success) {
     if (identities != NULL) XResClientIdsDestroy(count, identities);
     *error = "xres_query_failed";
     return -1;
@@ -181,11 +204,11 @@ static GdkFilterReturn audit_selection_request(GdkXEvent *native_event, GdkEvent
   XEvent *xevent = native_event;
   if (xevent->type != SelectionRequest || provider->request_audit_descriptor < 0) return GDK_FILTER_CONTINUE;
   XSelectionRequestEvent *request = &xevent->xselectionrequest;
-  gchar *target = XGetAtomName(request->display, request->target);
   const gchar *error = NULL;
-  pid_t pid = requestor_pid(request->display, request->requestor, &error);
+  gchar *target = selection_target(request->display, request->target, &error);
+  pid_t pid = error == NULL ? requestor_pid(request->display, request->requestor, &error) : -1;
   GString *record = g_string_new("{\"target\":");
-  append_json_string(record, target == NULL ? "" : target);
+  append_json_string(record, target == NULL ? "unknown" : target);
   if (pid > 0) {
     g_string_append_printf(record, ",\"requestor_pid\":%ld,\"error\":null}\n", (long)pid);
   } else {
@@ -195,6 +218,7 @@ static GdkFilterReturn audit_selection_request(GdkXEvent *native_event, GdkEvent
   }
   if (!write_all(provider->request_audit_descriptor, record->str, record->len) || fsync(provider->request_audit_descriptor) != 0) {
     provider->failed = TRUE;
+    gtk_main_quit();
   }
   g_string_free(record, TRUE);
   if (target != NULL) XFree(target);
@@ -324,6 +348,7 @@ int main(int argc, char **argv) {
   if (provider.request_audit_path != NULL && GDK_IS_X11_DISPLAY(gdk_display_get_default())) {
     if (!prepare_request_audit(&provider)) return 1;
     gdk_window_add_filter(NULL, audit_selection_request, &provider);
+    provider.request_audit_filter_installed = TRUE;
   }
 #endif
   GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -343,6 +368,11 @@ int main(int argc, char **argv) {
     if (!establish_clipboard(&provider, gdk_display_get_default())) return 1;
   }
   gtk_main();
+#ifdef GDK_WINDOWING_X11
+  if (provider.request_audit_filter_installed) {
+    gdk_window_remove_filter(NULL, audit_selection_request, &provider);
+  }
+#endif
   for (guint index = 0; index < provider.count; index++) {
     g_free(provider.offers[index].mime);
     g_free(provider.offers[index].bytes);
