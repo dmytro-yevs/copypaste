@@ -849,21 +849,28 @@ impl Transfer<'_> {
     }
     fn next_event(&mut self, deadline: Instant) -> Option<Event> {
         loop {
-            while let Ok(Some(event)) = self.c.poll_for_event() {
-                match event {
-                    Event::SelectionRequest(request)
-                        if request.selection == self.atoms.clipboard =>
-                    {
-                        serve(self.c, self.atoms, self.owned.as_ref(), request);
-                    }
-                    Event::XfixesSelectionNotify(event)
-                        if event.selection == self.atoms.clipboard =>
-                    {
-                        if event.owner != self.window {
-                            self.changed.store(true, Ordering::Release);
+            loop {
+                match self.c.poll_for_event() {
+                    Ok(Some(event)) => match event {
+                        Event::SelectionRequest(request)
+                            if request.selection == self.atoms.clipboard =>
+                        {
+                            serve(self.c, self.atoms, self.owned.as_ref(), request);
                         }
+                        Event::XfixesSelectionNotify(event)
+                            if event.selection == self.atoms.clipboard =>
+                        {
+                            if event.owner != self.window {
+                                self.changed.store(true, Ordering::Release);
+                            }
+                        }
+                        event => return Some(event),
+                    },
+                    Ok(None) => break,
+                    Err(_) => {
+                        self.stopped = true;
+                        return None;
                     }
-                    event => return Some(event),
                 }
             }
             while let Ok(command) = self.commands.try_recv() {
@@ -899,7 +906,17 @@ impl Transfer<'_> {
                 PollFd::from_borrowed_fd(xfd, PollFlags::IN),
                 PollFd::new(&*self.wake, PollFlags::IN),
             ];
-            poll(&mut fds, Some(&timeout)).ok()?;
+            if poll(&mut fds, Some(&timeout)).is_err() {
+                self.stopped = true;
+                return None;
+            }
+            if fds[0]
+                .revents()
+                .intersects(PollFlags::ERR | PollFlags::HUP | PollFlags::NVAL)
+            {
+                self.stopped = true;
+                return None;
+            }
             if fds[1].revents().contains(PollFlags::IN) {
                 let mut buffer = [0; 256];
                 while self.wake.read(&mut buffer).is_ok() {}
@@ -1100,15 +1117,18 @@ mod tests {
                 connection.flush().expect("flush fixture owner");
                 let _ = ready.send(owner);
                 while !worker_stop.load(Ordering::Acquire) {
-                    while let Some(event) = connection.poll_for_event().expect("fixture event") {
-                        let Event::SelectionRequest(request) = event else {
-                            continue;
-                        };
-                        if request.selection != atoms.clipboard {
-                            continue;
+                    loop {
+                        match connection.poll_for_event() {
+                            Ok(Some(Event::SelectionRequest(request)))
+                                if request.selection == atoms.clipboard =>
+                            {
+                                worker_requests.fetch_add(1, AtomicOrdering::Relaxed);
+                                serve_fixture(&connection, &atoms, &payload, request);
+                            }
+                            Ok(Some(_)) => {}
+                            Ok(None) => break,
+                            Err(_) => return,
                         }
-                        worker_requests.fetch_add(1, AtomicOrdering::Relaxed);
-                        serve_fixture(&connection, &atoms, &payload, request);
                     }
                     thread::sleep(Duration::from_millis(1));
                 }
@@ -1296,15 +1316,16 @@ mod tests {
                 .stderr(Stdio::null())
                 .spawn()
                 .expect("start GTK provider");
+            let provider = Self {
+                child,
+                _directory: directory,
+            };
             let deadline = Instant::now() + Duration::from_secs(2);
             while !ready.is_file() && Instant::now() < deadline {
                 thread::sleep(Duration::from_millis(5));
             }
             assert!(ready.is_file(), "GTK provider did not become ready");
-            Self {
-                child,
-                _directory: directory,
-            }
+            provider
         }
     }
 
@@ -1369,10 +1390,25 @@ mod tests {
             return;
         }
         let directory = tempfile::tempdir().expect("fixture data dir");
-        let clipboard = X11Clipboard::new(directory.path()).expect("X11 clipboard");
+        let owner = FixtureOwner::start(FixturePayload::Stalled);
+        let mut clipboard = X11Clipboard::new(directory.path()).expect("X11 clipboard");
         wait_for_available(&clipboard);
+        let availability = Arc::clone(&clipboard.available);
+        let transfer = thread::spawn(move || {
+            let result = clipboard.read(&copypaste_ipc::ConfigData::default());
+            (result, clipboard)
+        });
+        let request_deadline = Instant::now() + Duration::from_secs(2);
+        while owner.request_count() == 0 && Instant::now() < request_deadline {
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(
+            owner.request_count() > 0,
+            "stalled transfer did not request the selection owner"
+        );
         let server =
             std::env::var("COPYPASTE_X11_FIXTURE_XVFB_PID").expect("fixture Xvfb process id");
+        let start = Instant::now();
         assert!(
             ProcessCommand::new("kill")
                 .args(["-TERM", server.as_str()])
@@ -1381,13 +1417,17 @@ mod tests {
                 .success(),
             "fixture Xvfb did not accept SIGTERM"
         );
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while clipboard.is_available() && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(5));
-        }
+        let (result, clipboard) = transfer.join().expect("transfer must not panic");
+        assert!(result.is_none());
         assert!(
-            !clipboard.is_available(),
-            "X11 adapter remained available after server disconnect"
+            !availability.load(Ordering::Acquire),
+            "X11 adapter remained available after server disconnect during a transfer"
+        );
+        drop(clipboard);
+        drop(owner);
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "server disconnect waited for the selection transfer deadline"
         );
     }
 
