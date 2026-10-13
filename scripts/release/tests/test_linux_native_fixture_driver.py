@@ -31,6 +31,60 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             "appimage",
         )
 
+    def native_status(self, **overrides):
+        value = {
+            "capture_running": True,
+            "clipboard_available": True,
+            "clipboard_backend": "linux-wayland",
+        }
+        value.update(overrides)
+        return value
+
+    def test_native_clipboard_transport_requires_exact_status_booleans(self):
+        for availability in (None, False, 1, "true"):
+            status = self.native_status()
+            if availability is None:
+                status.pop("clipboard_available")
+            else:
+                status["clipboard_available"] = availability
+            self.assertFalse(driver.native_clipboard_transport_is_ready(status))
+        self.assertFalse(driver.native_clipboard_transport_is_ready(self.native_status(capture_running=1)))
+
+    def test_native_clipboard_transport_rejects_capture_task_without_available_transport(self):
+        self.assertFalse(driver.native_clipboard_transport_is_ready(self.native_status(clipboard_available=False)))
+
+    def test_startup_waits_for_delayed_native_clipboard_transport(self):
+        inactive = self.native_status(clipboard_available=False)
+        ready = self.native_status()
+        with mock.patch.object(driver, "status", side_effect=[inactive, ready]) as status, \
+             mock.patch.object(driver.time, "sleep"):
+            self.assertEqual(
+                driver.wait_for_startup_status("cli", {}, require_native_clipboard=True),
+                ready,
+            )
+        self.assertEqual(status.call_count, 2)
+
+    def test_startup_timeout_distinguishes_missing_ipc_from_inactive_transport(self):
+        with mock.patch.object(driver.time, "monotonic", side_effect=[0, 0, 9]), \
+             mock.patch.object(driver, "status", side_effect=RuntimeError("socket unavailable")), \
+             mock.patch.object(driver.time, "sleep"):
+            with self.assertRaisesRegex(RuntimeError, "IPC status did not become ready"):
+                driver.wait_for_startup_status("cli", {}, require_native_clipboard=True)
+        with mock.patch.object(driver.time, "monotonic", side_effect=[0, 0, 9]), \
+             mock.patch.object(driver, "status", return_value=self.native_status(clipboard_available=False)), \
+             mock.patch.object(driver.time, "sleep"):
+            with self.assertRaisesRegex(RuntimeError, "native clipboard transport remained inactive"):
+                driver.wait_for_startup_status("cli", {}, require_native_clipboard=True)
+
+    def test_prior_seed_startup_does_not_require_new_clipboard_availability_field(self):
+        prior_status = {"capture_running": False, "clipboard_backend": "linux-x11"}
+        with mock.patch.object(driver, "status", return_value=prior_status) as status:
+            self.assertEqual(
+                driver.wait_for_startup_status("cli", {}, require_native_clipboard=False),
+                prior_status,
+            )
+        status.assert_called_once_with("cli", {})
+
     def wayland_inputs(self, **overrides):
         values = {
             "wayland_app_permission_target": "Allow keyboard control",
