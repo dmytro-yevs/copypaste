@@ -29,7 +29,7 @@ void main() {
       addTearDown(controller.dispose);
 
       await controller.initialize();
-      controller.showIntegration();
+      await controller.showIntegration();
       await controller.continueFromIntegration();
       expect(controller.step, LinuxOnboardingStep.integration);
       expect(
@@ -74,7 +74,7 @@ void main() {
       addTearDown(controller.dispose);
 
       await controller.initialize();
-      controller.showIntegration();
+      await controller.showIntegration();
       await controller.continueFromIntegration();
 
       expect(controller.step, LinuxOnboardingStep.integration);
@@ -136,6 +136,42 @@ void main() {
     },
   );
 
+  test('refreshes Linux readiness when integration setup opens', () async {
+    final integration = _Integration(
+      const LinuxIntegrationStatus(
+        session: LinuxDesktopSession.wayland,
+        globalShortcuts: true,
+        remoteDesktop: LinuxRemoteDesktopState.consentRequired,
+        companion: LinuxCompanionState.active,
+        clipboard: false,
+        quickPaste: false,
+        screenshotProtection: false,
+      ),
+    );
+    final controller = LinuxOnboardingController(
+      store: MemoryLinuxOnboardingStore(),
+      integration: integration,
+    );
+    addTearDown(controller.dispose);
+
+    await controller.initialize();
+    expect(controller.integrationReady, isFalse);
+
+    integration.statusValue = const LinuxIntegrationStatus(
+      session: LinuxDesktopSession.wayland,
+      globalShortcuts: true,
+      remoteDesktop: LinuxRemoteDesktopState.active,
+      companion: LinuxCompanionState.active,
+      clipboard: true,
+      quickPaste: true,
+      screenshotProtection: false,
+    );
+    await controller.showIntegration();
+
+    expect(controller.step, LinuxOnboardingStep.integration);
+    expect(controller.integrationReady, isTrue);
+  });
+
   testWidgets('Linux setup states the screenshot protection exception', (
     tester,
   ) async {
@@ -157,7 +193,7 @@ void main() {
     );
     addTearDown(controller.dispose);
     await controller.initialize();
-    controller.showIntegration();
+    await controller.showIntegration();
 
     await tester.pumpWidget(
       ShadcnApp(
