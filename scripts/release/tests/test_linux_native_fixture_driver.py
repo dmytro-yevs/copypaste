@@ -430,17 +430,52 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
                 ["python3", str(quick_paste)], 0,
                 stdout=("COPYPASTE_QUALIFICATION_WAYLAND " + json.dumps(self.wayland_receipt()) + "\n").encode("utf-8"),
             )
+            socket = root / "socket"
+            seed_result = subprocess.CompletedProcess([str(root / "copypaste-cli"), "add", "copypaste-wayland-quick-paste-fixture"], 0)
             with mock.patch.object(driver, "desktop_acceptance_capture_command", return_value=["python3", "provider"]), \
-                 mock.patch.object(driver, "run", side_effect=[tray_result, quick_result]) as run:
+                 mock.patch.object(driver, "run", side_effect=[tray_result, seed_result, quick_result]) as run:
                 driver.require_wayland_qualification(
-                    args, gui_pid=4321, cli=root / "copypaste-cli", environment={}, workspace=root, socket_path=root / "socket",
+                    args, gui_pid=4321, cli=root / "copypaste-cli", environment={"INHERITED": "value"}, workspace=root, socket_path=socket,
                 )
-            command = run.call_args_list[1].args[0]
+            seed = run.call_args_list[1]
+            self.assertEqual(seed.args[0], [str(root / "copypaste-cli"), "add", "copypaste-wayland-quick-paste-fixture"])
+            self.assertEqual(seed.kwargs["env"], {"INHERITED": "value", "COPYPASTE_SOCKET": str(socket)})
+            command = run.call_args_list[2].args[0]
             self.assertEqual(command[command.index("--app-permission-target") + 1], "Allow keyboard control")
             self.assertFalse(any(argument.startswith("--portal-dialog") or argument.startswith("--app-portal-dialog") for argument in command))
             written = json.loads((evidence / "wayland-quick-paste.json").read_text(encoding="utf-8"))
             self.assertEqual(written["actors"]["input_target_pid"], 4324)
             self.assertEqual(set(written["atspi"]), {"portal_click_sha256"})
+
+    def test_wayland_seed_failure_prevents_the_quick_paste_helper_and_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            evidence = root / "evidence"
+            evidence.mkdir()
+            (evidence / "linux-desktop-acceptance.json").write_text(json.dumps(self.desktop_receipt()), encoding="utf-8")
+            tray = root / "tray.py"
+            quick_paste = root / "quick-paste.py"
+            actor = root / "actor.py"
+            for helper in (tray, quick_paste, actor):
+                helper.write_text("# helper\n", encoding="utf-8")
+            args = self.wayland_inputs()
+            args.desktop = "GNOME"
+            args.evidence_dir = evidence
+            args.wayland_desktop_acceptance_helper = tray
+            args.wayland_quick_paste_helper = quick_paste
+            args.wayland_actor = actor
+            cli = root / "copypaste-cli"
+            tray_result = subprocess.CompletedProcess(["python3", str(tray)], 0, stdout=b"")
+            seed_failure = subprocess.CalledProcessError(1, [str(cli), "add", "copypaste-wayland-quick-paste-fixture"])
+            with mock.patch.object(driver, "desktop_acceptance_capture_command", return_value=["python3", "provider"]), \
+                 mock.patch.object(driver, "run", side_effect=[tray_result, seed_failure]) as run, \
+                 mock.patch.object(driver, "wayland_quick_paste_receipt") as receipt:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    driver.require_wayland_qualification(
+                        args, gui_pid=4321, cli=cli, environment={}, workspace=root, socket_path=root / "socket",
+                    )
+            self.assertEqual(run.call_count, 2)
+            receipt.assert_not_called()
 
     def test_linux_onboarding_drives_the_installed_x11_flow_without_seeding_preferences(self):
         with tempfile.TemporaryDirectory() as directory:
