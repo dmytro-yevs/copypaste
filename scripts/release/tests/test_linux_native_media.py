@@ -366,12 +366,13 @@ class LinuxNativeMediaTest(unittest.TestCase):
             media.quick_paste_ready(mock.Mock(), atspi, pid=0, marker="marker", timeout_seconds=1)
         marker = Node("marker", State("showing", "visible"))
         with mock.patch.object(media, "atspi_application", return_value=application), \
-             mock.patch.object(media, "matching_accessible", return_value=marker), \
-             mock.patch.object(media, "focused_editable_text", return_value=False), \
+             mock.patch.object(media, "quick_paste_marker_accessible", return_value=marker), \
+             mock.patch.object(media, "focused_editable_text", return_value=False) as focused, \
              mock.patch.object(media.time, "monotonic", side_effect=[0, 0, 2]), \
              mock.patch.object(media.time, "sleep"):
             with self.assertRaisesRegex(media.MediaQualificationError, "focused editable"):
                 media.quick_paste_ready(mock.Mock(), atspi, pid=123, marker="marker", timeout_seconds=1)
+            focused.assert_called_once_with(application, atspi)
 
     def test_quick_paste_readiness_rejects_a_pid_absent_for_the_entire_deadline(self):
         atspi = SimpleNamespace(
