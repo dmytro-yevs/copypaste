@@ -85,6 +85,76 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             )
         status.assert_called_once_with("cli", {})
 
+    def test_locator_file_capture_saves_bytes_and_copies_the_original_locator_as_text(self):
+        captured = {
+            "id": "captured", "content_type": "file",
+            "source_app_bundle_id": driver.SOURCE_APPLICATION_ID,
+            "source_app_name": driver.SOURCE_APPLICATION_NAME,
+        }
+        @driver.contextmanager
+        def provider(*_args, **_kwargs):
+            yield None
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            saved = workspace / "captured-file-roundtrip.txt"
+            copied = str(workspace / "fixture.txt").encode("utf-8")
+            def ipc(socket_path, method, params):
+                self.assertEqual(socket_path, workspace / "gui.sock")
+                self.assertEqual(method, "save_file")
+                self.assertEqual(params["id"], "captured")
+                self.assertEqual(params["dest_path"], str(saved))
+                saved.write_bytes(b"CopyPaste qualification file payload\n")
+                return {"data": {"empty": {}}}
+            with mock.patch.object(driver, "clipboard_provider", provider), \
+                 mock.patch.object(driver, "status", side_effect=[{"item_count": 0}, {"item_count": 1}]), \
+                 mock.patch.object(driver, "list_items", side_effect=[[], [captured]]), \
+                 mock.patch.object(driver, "ipc", side_effect=ipc), \
+                 mock.patch.object(driver, "run", side_effect=[
+                     subprocess.CompletedProcess(["copypaste-cli", "copy"], 0),
+                     subprocess.CompletedProcess(["wl-paste"], 0, stdout=copied),
+                 ]):
+                driver.require_locator_file_capture(
+                    Path("copypaste-cli"), {}, workspace, workspace / "evidence", "wayland", workspace / "gui.sock",
+                )
+
+    def test_reference_free_import_copies_a_materialized_uri_with_original_bytes(self):
+        imported = {
+            "id": "imported", "content_type": "file",
+            "file_details": {
+                "filename": "reference-free-file.txt",
+                "size_bytes": len(b"CopyPaste qualification reference-free file payload\n"),
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            materialized = workspace / "materialized.txt"
+            materialized.write_bytes(b"CopyPaste qualification reference-free file payload\n")
+            def ipc(socket_path, method, params):
+                self.assertEqual(socket_path, workspace / "gui.sock")
+                self.assertEqual(method, "import_file")
+                self.assertEqual(params["source_reference"], None)
+                self.assertEqual(params["path"], str(workspace / "reference-free-file.txt"))
+                return {"data": {"empty": {}}}
+            with mock.patch.object(driver, "list_items", side_effect=[[{"id": "old"}], [imported]]), \
+                 mock.patch.object(driver, "ipc", side_effect=ipc), \
+                 mock.patch.object(driver, "run", side_effect=[
+                     subprocess.CompletedProcess(["copypaste-cli", "copy"], 0),
+                     subprocess.CompletedProcess(["wl-paste"], 0, stdout=materialized.as_uri().encode("utf-8")),
+                 ]):
+                driver.require_reference_free_file_copy(
+                    Path("copypaste-cli"), {}, workspace, "wayland", workspace / "gui.sock",
+                )
+
+    def test_reference_free_file_qualification_propagates_a_product_ipc_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            with mock.patch.object(driver, "list_items", return_value=[]), \
+                 mock.patch.object(driver, "ipc", side_effect=RuntimeError("daemon rejected import_file")):
+                with self.assertRaisesRegex(RuntimeError, "daemon rejected import_file"):
+                    driver.require_reference_free_file_copy(
+                        Path("copypaste-cli"), {}, workspace, "wayland", workspace / "gui.sock",
+                    )
+
     def wayland_inputs(self, **overrides):
         values = {
             "wayland_app_permission_target": "Allow keyboard control",
