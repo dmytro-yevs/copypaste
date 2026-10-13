@@ -29,6 +29,7 @@ const KDE_PASSWORD_MANAGER_HINT: &str = "x-kde-passwordManagerHint";
 const MAX_TARGETS: usize = 1024;
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(2);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
+const XFIXES_SELECTION_VERSION: (u32, u32) = (2, 0);
 
 #[derive(Clone)]
 struct Atoms {
@@ -391,38 +392,48 @@ fn worker(
         return;
     };
     let root = connection.setup().roots[screen].root;
-    if connection
-        .create_window(
-            0,
-            window,
-            root,
-            0,
-            0,
-            1,
-            1,
-            0,
-            WindowClass::INPUT_OUTPUT,
-            0,
-            &CreateWindowAux::new().event_mask(EventMask::PROPERTY_CHANGE),
-        )
-        .is_err()
-    {
+    let Ok(create) = connection.create_window(
+        0,
+        window,
+        root,
+        0,
+        0,
+        1,
+        1,
+        0,
+        WindowClass::INPUT_OUTPUT,
+        0,
+        &CreateWindowAux::new().event_mask(EventMask::PROPERTY_CHANGE),
+    ) else {
+        return;
+    };
+    if create.check().is_err() {
         return;
     }
     let Ok(atoms) = Atoms::intern(&connection) else {
         return;
     };
-    if connection
-        .xfixes_select_selection_input(
-            window,
-            atoms.clipboard,
-            SelectionEventMask::SET_SELECTION_OWNER
-                | SelectionEventMask::SELECTION_WINDOW_DESTROY
-                | SelectionEventMask::SELECTION_CLIENT_CLOSE,
-        )
-        .and_then(|_| connection.flush())
-        .is_err()
-    {
+    let Ok(version) =
+        connection.xfixes_query_version(XFIXES_SELECTION_VERSION.0, XFIXES_SELECTION_VERSION.1)
+    else {
+        return;
+    };
+    let Ok(version) = version.reply() else {
+        return;
+    };
+    if (version.major_version, version.minor_version) < XFIXES_SELECTION_VERSION {
+        return;
+    }
+    let Ok(subscription) = connection.xfixes_select_selection_input(
+        window,
+        atoms.clipboard,
+        SelectionEventMask::SET_SELECTION_OWNER
+            | SelectionEventMask::SELECTION_WINDOW_DESTROY
+            | SelectionEventMask::SELECTION_CLIENT_CLOSE,
+    ) else {
+        return;
+    };
+    if subscription.check().is_err() {
         return;
     }
     availability.mark_ready();
@@ -442,15 +453,19 @@ fn worker(
                 return;
             }
         }
-        while let Ok(Some(next_event)) = connection.poll_for_event() {
-            event(
-                &connection,
-                window,
-                &atoms,
-                &mut owned,
-                next_event,
-                &changed,
-            );
+        loop {
+            match connection.poll_for_event() {
+                Ok(Some(next_event)) => event(
+                    &connection,
+                    window,
+                    &atoms,
+                    &mut owned,
+                    next_event,
+                    &changed,
+                ),
+                Ok(None) => break,
+                Err(_) => return,
+            }
         }
         let xfd = unsafe { BorrowedFd::borrow_raw(connection.stream().as_raw_fd()) };
         let mut fds = [
@@ -458,6 +473,12 @@ fn worker(
             PollFd::new(&wake, PollFlags::IN),
         ];
         if poll(&mut fds, None).is_err() {
+            return;
+        }
+        if fds[0]
+            .revents()
+            .intersects(PollFlags::ERR | PollFlags::HUP | PollFlags::NVAL)
+        {
             return;
         }
         if fds[1].revents().contains(PollFlags::IN) {
@@ -934,6 +955,7 @@ pub(super) fn file_capture(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::{Command as ProcessCommand, Stdio};
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use std::time::Duration;
 
@@ -1243,6 +1265,130 @@ mod tests {
             thread::sleep(Duration::from_millis(5));
         }
         None
+    }
+
+    struct GtkProvider {
+        child: std::process::Child,
+        _directory: tempfile::TempDir,
+    }
+
+    impl GtkProvider {
+        fn start() -> Self {
+            let directory = tempfile::tempdir().expect("provider directory");
+            let payload = directory.path().join("payload");
+            let ready = directory.path().join("ready");
+            let activity = directory.path().join("activity");
+            std::fs::write(&payload, b"fixture text").expect("provider payload");
+            let helper =
+                std::env::var("COPYPASTE_GTK_CLIPBOARD_PROVIDER").expect("GTK provider helper");
+            let child = ProcessCommand::new(helper)
+                .args([
+                    "--application-id",
+                    "org.copypaste.QualificationSource",
+                    "--ready-file",
+                ])
+                .arg(&ready)
+                .args(["--activity-log"])
+                .arg(&activity)
+                .args(["--hold-seconds", "5", "--offer", "text/plain;charset=utf-8"])
+                .arg(&payload)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("start GTK provider");
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !ready.is_file() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(5));
+            }
+            assert!(ready.is_file(), "GTK provider did not become ready");
+            Self {
+                child,
+                _directory: directory,
+            }
+        }
+    }
+
+    impl Drop for GtkProvider {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    fn wait_for_available(clipboard: &X11Clipboard) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !clipboard.is_available() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            clipboard.is_available(),
+            "X11 adapter did not become available"
+        );
+    }
+
+    #[test]
+    fn live_x11_fixture_captures_gtk_owner_after_initial_empty_poll() {
+        if std::env::var_os("COPYPASTE_X11_FIXTURE") != Some("1".into()) {
+            return;
+        }
+        let data_home = std::path::PathBuf::from(
+            std::env::var_os("XDG_DATA_HOME").expect("fixture XDG_DATA_HOME"),
+        );
+        std::fs::create_dir_all(data_home.join("applications")).expect("fixture desktop dir");
+        std::fs::write(
+            data_home.join("applications/org.copypaste.QualificationSource.desktop"),
+            "[Desktop Entry]\nType=Application\nName=CopyPaste Qualification Source\nStartupWMClass=Org.copypaste.QualificationSource\nExec=true\n",
+        )
+        .expect("fixture desktop entry");
+
+        let directory = tempfile::tempdir().expect("fixture data dir");
+        let settings = copypaste_ipc::ConfigData::default();
+        let mut clipboard = X11Clipboard::new(directory.path()).expect("X11 clipboard");
+        wait_for_available(&clipboard);
+        assert!(clipboard
+            .poll_with_policy(CapturePolicy::new(&settings))
+            .is_none());
+        assert!(!clipboard.changed(), "initial empty poll was not drained");
+
+        let _provider = GtkProvider::start();
+        let capture = wait_for_capture(&mut clipboard, &settings).expect("capture later GTK owner");
+        assert_eq!(capture.content, "fixture text");
+        assert_eq!(
+            capture.app_bundle_id.as_deref(),
+            Some("org.copypaste.QualificationSource")
+        );
+        assert_eq!(
+            capture.app_name.as_deref(),
+            Some("CopyPaste Qualification Source")
+        );
+    }
+
+    #[test]
+    fn x11_worker_clears_availability_after_x_server_disconnect() {
+        if std::env::var_os("COPYPASTE_X11_FIXTURE") != Some("1".into()) {
+            return;
+        }
+        let directory = tempfile::tempdir().expect("fixture data dir");
+        let clipboard = X11Clipboard::new(directory.path()).expect("X11 clipboard");
+        wait_for_available(&clipboard);
+        let server =
+            std::env::var("COPYPASTE_X11_FIXTURE_XVFB_PID").expect("fixture Xvfb process id");
+        assert!(
+            ProcessCommand::new("kill")
+                .args(["-TERM", server.as_str()])
+                .status()
+                .expect("signal fixture Xvfb")
+                .success(),
+            "fixture Xvfb did not accept SIGTERM"
+        );
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while clipboard.is_available() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            !clipboard.is_available(),
+            "X11 adapter remained available after server disconnect"
+        );
     }
 
     fn read_owned_target(target: Atom) -> Vec<u8> {

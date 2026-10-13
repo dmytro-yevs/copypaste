@@ -27,5 +27,25 @@ xdpyinfo -display "$display_number" >/dev/null
 export DISPLAY="$display_number"
 export XDG_DATA_HOME="$fixture_root"
 export COPYPASTE_X11_FIXTURE=1
+python3 scripts/release/linux-clipboard-provider.py --build-helper "$fixture_root/linux-clipboard-provider"
+export COPYPASTE_GTK_CLIPBOARD_PROVIDER="$fixture_root/linux-clipboard-provider"
 cargo test --locked -p copypaste-daemon live_x11_fixture -- --test-threads=1 --nocapture | tee "$fixture_root/test.log"
-grep -q 'test result: ok. 4 passed' "$fixture_root/test.log"
+grep -q 'test result: ok. 5 passed' "$fixture_root/test.log"
+
+kill "$xvfb_pid" 2>/dev/null || true
+wait "$xvfb_pid" 2>/dev/null || true
+xvfb_pid=''
+disconnect_display=:98
+Xvfb "$disconnect_display" -screen 0 1280x800x24 -nolisten tcp >/tmp/copypaste-x11-disconnect-fixture.log 2>&1 &
+xvfb_pid=$!
+for _ in $(seq 1 100); do
+  if xdpyinfo -display "$disconnect_display" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.02
+done
+xdpyinfo -display "$disconnect_display" >/dev/null
+export DISPLAY="$disconnect_display"
+export COPYPASTE_X11_FIXTURE_XVFB_PID="$xvfb_pid"
+cargo test --locked -p copypaste-daemon clipboard::linux::tests::x11_worker_clears_availability_after_x_server_disconnect -- --exact --test-threads=1 --nocapture | tee "$fixture_root/disconnect.log"
+grep -q 'test result: ok. 1 passed' "$fixture_root/disconnect.log"
