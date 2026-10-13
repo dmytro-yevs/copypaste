@@ -100,6 +100,7 @@ struct LinuxX11QuickPaste::Impl {
   bool registered = false;
   KeyCode keycode = 0;
   unsigned int modifiers = 0;
+  std::uint32_t activation_time = 0;
   std::string id;
   std::function<void()> activated;
 
@@ -132,7 +133,10 @@ struct LinuxX11QuickPaste::Impl {
     if ((event->xkey.state & ~ignored) != self->modifiers) {
       return GDK_FILTER_CONTINUE;
     }
-    if (self->activated != nullptr) self->activated();
+    self->activation_time = event->xkey.time;
+    if (self->activation_time != CurrentTime && self->activated != nullptr) {
+      self->activated();
+    }
     return GDK_FILTER_REMOVE;
   }
 
@@ -148,6 +152,7 @@ struct LinuxX11QuickPaste::Impl {
     registered = false;
     keycode = 0;
     modifiers = 0;
+    activation_time = 0;
     id.clear();
     activated = nullptr;
   }
@@ -161,6 +166,12 @@ bool LinuxX11QuickPaste::available() const { return impl_->display != nullptr; }
 
 bool LinuxX11QuickPaste::input_available() const {
   return impl_->display != nullptr && impl_->xtest_available;
+}
+
+std::uint32_t LinuxX11QuickPaste::take_activation_time() {
+  const std::uint32_t time = impl_->activation_time;
+  impl_->activation_time = 0;
+  return time;
 }
 
 void LinuxX11QuickPaste::register_shortcut(
