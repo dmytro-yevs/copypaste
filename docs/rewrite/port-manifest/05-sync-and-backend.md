@@ -102,6 +102,21 @@ sorting so normalization cannot reorder a page after cursor decisions.
 An over-limit live value is withheld and reported, never deleted locally. The
 content-type owner selects the text or binary upload bound.
 
+P2P validates each outgoing version before batching. An unavailable or invalid
+version is withheld and counted without interrupting unrelated transfers in
+either direction. Missing requested versions remain behind the receive cursor
+and are offered again in later sessions. A completed round reports these
+pending items separately from a channel or session failure.
+
+All transports validate payload metadata through `copypaste-payload`. Captured
+confidential and transient values retain their privacy flags when synchronized;
+capture exclusion preferences do not suppress versions already in history.
+The shared store export hydrates source icons and serializes one canonical
+envelope for P2P and cloud. Unrecognized legacy text metadata is exported with
+the same conservative confidential classification used by the local reader,
+without rewriting the stored original. Required file attributes are never
+invented or discarded to make an invalid file transferable.
+
 ## 4. Cloud row contract
 
 ### 4.1 Table and trust boundaries
@@ -138,8 +153,9 @@ ciphertext, nonce-dependent content or source/payload metadata. `deleted` is
 always sent explicitly on upsert; omission must not let a column default
 resurrect a tombstone.
 
-File rows require validated bounded `FileMetadata`. Non-file rows reject file
-metadata. No transport converts an invalid file row to text.
+File rows require validated bounded `FileMetadata`. Imported images may carry
+the same bounded file metadata; other non-file rows reject it. No transport
+converts an invalid file row to text.
 
 ### 4.3 Retention
 

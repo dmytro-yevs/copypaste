@@ -4,6 +4,8 @@ import 'app_motion.dart';
 import 'app_overlays.dart';
 import 'app_tokens.dart';
 
+enum AppSelectVariant { field, toolbar, compactToolbar, primaryAction }
+
 abstract final class AppTheme {
   static const mode = ThemeMode.system;
 
@@ -397,16 +399,74 @@ abstract final class AppTheme {
     );
   }
 
-  static SelectTheme primarySelectTheme(BuildContext context) {
-    final style = actionButtonStyle(const ButtonStyle.primaryIcon());
+  static const selectChipStyle = ButtonStyle.secondary();
+
+  /// Defines field and action variants without changing popup row styling.
+  static SelectTheme selectTheme(
+    BuildContext context, {
+    AppSelectVariant variant = AppSelectVariant.field,
+    Iterable<String> labels = const [],
+  }) {
+    final toolbar =
+        variant == AppSelectVariant.toolbar ||
+        variant == AppSelectVariant.compactToolbar;
+    final compact = variant == AppSelectVariant.compactToolbar;
+    final action = variant == AppSelectVariant.primaryAction;
+    double? popupWidth;
+    if (toolbar) {
+      final theme = Theme.of(context);
+      final textStyle = DefaultTextStyle.of(context).style
+          .merge(theme.typography.sans)
+          .merge(theme.typography.small)
+          .merge(theme.typography.normal);
+      var widestLabel = 0.0;
+      for (final label in labels) {
+        final painter = TextPainter(
+          text: TextSpan(text: label, style: textStyle),
+          maxLines: 1,
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout();
+        if (painter.width > widestLabel) widestLabel = painter.width;
+        painter.dispose();
+      }
+      // Reserve space for a leading icon, selection mark and menu padding.
+      popupWidth =
+          widestLabel.ceilToDouble() +
+          AppSpacing.xxxl +
+          AppSpacing.massive * theme.scaling;
+    }
+    final actionStyle = actionButtonStyle(const ButtonStyle.primaryIcon());
     return SelectTheme(
       adaptiveOverlay: false,
+      borderRadius: const BorderRadius.all(Radius.circular(AppRadius.md)),
+      popupConstraints: BoxConstraints(
+        minWidth: popupWidth ?? 0,
+        maxWidth: popupWidth ?? double.infinity,
+        maxHeight: AppOverlaySize.selectMaxHeight,
+      ),
       overlayConfiguration: AppOverlays.selectPopoverConfiguration(
         context,
-        widthConstraint: PopoverConstraint.intrinsic,
+        widthConstraint: action
+            ? PopoverConstraint.intrinsic
+            : toolbar
+            ? PopoverConstraint.anchorMinSize
+            : PopoverConstraint.anchorFixedSize,
       ),
-      padding: style.padding(context, const {}),
-      decoration: (context, states, value) => style.decoration(context, states),
+      padding: action
+          ? actionStyle.padding(context, const {})
+          : controlFieldPadding(
+              context,
+              horizontal: compact
+                  ? AppSpacing.xs
+                  : toolbar
+                  ? AppSpacing.sm
+                  : AppSpacing.md,
+              minimum: toolbar ? AppControlSize.large : AppControlSize.regular,
+            ),
+      decoration: action
+          ? (context, states, value) => actionStyle.decoration(context, states)
+          : softSelectDecoration,
     );
   }
 
@@ -759,29 +819,21 @@ abstract final class AppTheme {
             borderRadius: const BorderRadius.all(Radius.circular(AppRadius.md)),
             padding: controlFieldPadding(context),
           ),
-          child: ComponentTheme<SelectTheme>(
-            data: SelectTheme(
-              adaptiveOverlay: false,
-              overlayConfiguration: AppOverlays.selectPopoverConfiguration(
-                context,
-              ),
-              borderRadius: const BorderRadius.all(
-                Radius.circular(AppRadius.md),
-              ),
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.md,
-                vertical: AppSpacing.sm,
-              ),
-              decoration: softSelectDecoration,
+          child: ComponentTheme<ChipTheme>(
+            data: const ChipTheme(
+              padding: EdgeInsets.symmetric(horizontal: AppSpacing.xs),
             ),
-            child: ComponentTheme<InputOTPTheme>(
-              data: const InputOTPTheme(
-                spacing: AppSpacing.sm,
-                height: AppControlSize.regular,
-              ),
-              child: ComponentTheme<TabsTheme>(
-                data: tabsTheme,
-                child: buttonThemedChild,
+            child: ComponentTheme<SelectTheme>(
+              data: selectTheme(context),
+              child: ComponentTheme<InputOTPTheme>(
+                data: const InputOTPTheme(
+                  spacing: AppSpacing.sm,
+                  height: AppControlSize.regular,
+                ),
+                child: ComponentTheme<TabsTheme>(
+                  data: tabsTheme,
+                  child: buttonThemedChild,
+                ),
               ),
             ),
           ),
@@ -826,8 +878,10 @@ abstract final class AppTheme {
   }
 
   /// Adds the shared border only to an explicitly marked action button.
-  static AbstractButtonStyle actionButtonStyle(ButtonStyle style) =>
-      controlButtonStyle(style).copyWith(decoration: actionButtonDecoration);
+  static AbstractButtonStyle actionButtonStyle(AbstractButtonStyle style) =>
+      (style is ButtonStyle ? controlButtonStyle(style) : style).copyWith(
+        decoration: actionButtonDecoration,
+      );
 
   static Decoration actionButtonDecoration(
     BuildContext context,

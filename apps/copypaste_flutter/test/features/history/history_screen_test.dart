@@ -2110,47 +2110,88 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('all history filters use soft borderless select triggers', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(1200, 800));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    final controller = HistoryController(_ScreenRepository());
-    addTearDown(controller.dispose);
-    await tester.pumpWidget(
-      ShadcnApp(
-        home: Scaffold(child: HistoryScreen(controller: controller)),
-      ),
-    );
-    await tester.pumpAndSettle();
+  testWidgets(
+    'all history filters use soft borderless select triggers',
+    (tester) async {
+      const surfaceSize = Size(1200, 800);
+      await tester.binding.setSurfaceSize(surfaceSize);
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final controller = HistoryController(_ScreenRepository());
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: Scaffold(child: HistoryScreen(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    final selectFinder = find.byWidgetPredicate(
-      (widget) => widget is Select<dynamic>,
-    );
-    expect(selectFinder, findsNWidgets(4));
-    expect(find.bySemanticsLabel('All pins'), findsNothing);
-    expect(find.bySemanticsLabel('Pinned only'), findsNothing);
-    for (final select in tester.widgetList<Select<dynamic>>(selectFinder)) {
-      expect(select.filled, isTrue);
-      final selectContext = tester.element(find.byWidget(select));
-      for (final states in <Set<WidgetState>>[
-        const {},
-        const {WidgetState.hovered},
-        const {WidgetState.focused},
-        const {WidgetState.pressed},
-      ]) {
-        final selectTheme = ComponentTheme.maybeOf<SelectTheme>(selectContext)!;
-        final decoration =
-            selectTheme.decoration!(
-                  selectContext,
-                  states,
-                  const BoxDecoration(),
+      final selectFinder = find.byWidgetPredicate(
+        (widget) => widget is Select<dynamic>,
+      );
+      expect(selectFinder, findsNWidgets(4));
+      expect(find.bySemanticsLabel('All pins'), findsNothing);
+      expect(find.bySemanticsLabel('Pinned only'), findsNothing);
+      for (final select in tester.widgetList<Select<dynamic>>(selectFinder)) {
+        expect(select.filled, isTrue);
+        final selectContext = tester.element(find.byWidget(select));
+        for (final states in <Set<WidgetState>>[
+          const {},
+          const {WidgetState.hovered},
+          const {WidgetState.focused},
+          const {WidgetState.pressed},
+        ]) {
+          final selectTheme = ComponentTheme.maybeOf<SelectTheme>(
+            selectContext,
+          )!;
+          final decoration =
+              selectTheme.decoration!(
+                    selectContext,
+                    states,
+                    const BoxDecoration(),
+                  )
+                  as BoxDecoration;
+          expect(decoration.border?.top.style, BorderStyle.none);
+        }
+        await tester.tap(find.byWidget(select));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        final popup = find.byWidgetPredicate((widget) => widget is SelectPopup);
+        expect(popup, findsOneWidget);
+        final popupRect = tester.getRect(popup);
+        expect(popupRect.left, greaterThanOrEqualTo(0));
+        expect(popupRect.right, lessThanOrEqualTo(surfaceSize.width));
+        expect(popupRect.bottom, lessThanOrEqualTo(surfaceSize.height));
+        for (final item in tester.widgetList<SelectItemButton>(
+          find.byWidgetPredicate((widget) => widget is SelectItemButton),
+        )) {
+          final clickable = tester.widget<Clickable>(
+            find
+                .descendant(
+                  of: find.byWidget(item),
+                  matching: find.byType(Clickable),
                 )
-                as BoxDecoration;
-        expect(decoration.border?.top.style, BorderStyle.none);
+                .first,
+          );
+          final decoration =
+              clickable.decoration!.resolve(const {}) as BoxDecoration;
+          expect(
+            decoration.border?.top.style ?? BorderStyle.none,
+            BorderStyle.none,
+          );
+        }
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        expect(popup, findsNothing);
       }
-    }
-  });
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+      TargetPlatform.android,
+    }),
+  );
 
   for (final (platform, size) in [
     (TargetPlatform.macOS, const Size(1400, 900)),

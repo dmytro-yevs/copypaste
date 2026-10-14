@@ -155,6 +155,7 @@ class CopyPasteApp extends StatelessWidget {
                     : SettingsScreen(
                         controller: settingsController!,
                         quickPaste: quickPasteSettings,
+                        desktopVisibility: desktopWindow?.visibility,
                         appUpdate: appUpdateController,
                         modules: modulesController,
                         onOpenAndroidCaptureSetup: onOpenAndroidCaptureSetup,
