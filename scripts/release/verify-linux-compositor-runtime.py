@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 import re
+import runpy
 import sys
 from pathlib import Path
 
@@ -79,7 +80,8 @@ def verify_source(run: dict, artifacts: dict, repository: str, commit: str) -> N
     entries = artifacts.get("artifacts", [])
     if artifacts.get("total_count") != len(entries):
         raise ValueError("compositor runtime artifact inventory is incomplete")
-    expected = {artifact_name(desktop, architecture) for desktop, architecture in RUNTIMES}
+    release = runpy.run_path(str(Path(__file__).with_name("linux_release_contract.py")))
+    expected = {baseline["artifact"] for baseline in release["BASELINES"]}
     for name in expected:
         matches = [entry for entry in entries if entry.get("name") == name]
         if len(matches) != 1:

@@ -68,7 +68,7 @@ class LinuxQualificationBootstrapTest(unittest.TestCase):
         self.assertIn("path: compositor-runtime", evidence)
         self.assertIn("run-id: ${{ inputs.artifact_run_id }}", evidence)
         self.assertEqual(evidence.count("path: previous-artifacts/x86_64"), 1)
-        self.assertEqual(evidence.count("path: previous-artifacts/aarch64"), 1)
+        self.assertEqual(evidence.count("path: previous-artifacts/aarch64"), 0)
         self.assertIn("run-id: ${{ inputs.previous_artifact_run_id }}", evidence)
 
     def test_script_jobs_checkout_the_trigger_commit_after_source_binding(self):

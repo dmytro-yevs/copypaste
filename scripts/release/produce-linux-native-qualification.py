@@ -12,15 +12,17 @@ import hashlib
 import json
 import os
 import re
+import runpy
 import subprocess
 from pathlib import Path, PurePosixPath
 from typing import Optional
 
 
-ARCHITECTURES = ("x86_64", "aarch64")
-DESKTOPS = ("GNOME", "KDE")
-SESSIONS = ("x11", "wayland")
-FORMATS = ("AppImage", "deb", "rpm")
+RELEASE = runpy.run_path(str(Path(__file__).with_name("linux_release_contract.py")))
+ARCHITECTURES = RELEASE["ARCHITECTURES"]
+DESKTOPS = RELEASE["DESKTOPS"]
+SESSIONS = RELEASE["SESSIONS"]
+FORMATS = RELEASE["FORMATS"]
 ASSERTIONS = {
     "package_install", "package_upgrade", "desktop_uri_icon", "daemon_cli_gui",
     "clipboard_text", "clipboard_html", "clipboard_rtf", "clipboard_png",
@@ -466,7 +468,7 @@ def compositor_session_record(binding_path: Path, binding: dict, session: str, o
 
 
 def produce(args: argparse.Namespace) -> Path:
-    if args.architecture not in ARCHITECTURES or args.desktop not in DESKTOPS or args.session not in SESSIONS:
+    if args.architecture not in ("x86_64", "aarch64") or args.desktop not in ("GNOME", "KDE") or args.session not in ("x11", "wayland"):
         raise ValueError("unsupported Linux qualification matrix coordinate")
     if not re.fullmatch(r"[0-9a-f]{40}", args.commit):
         raise ValueError("commit must be a full lowercase Git SHA")

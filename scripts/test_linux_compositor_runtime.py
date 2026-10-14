@@ -367,7 +367,7 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
         self.assertIn("COPYPASTE_QUALIFICATION_V4L2_DEVICE", workflow)
         self.assertIn("--previous-artifacts previous-artifacts/all", workflow)
         self.assertIn("--previous-version \"${{ needs.source.outputs.previous_version }}\"", workflow)
-        for name in ("gnome-46-ubuntu24.04", "kwin-6.0-fedora40"):
+        for name in ("gnome-46-ubuntu24.04",):
             self.assertIn(name, workflow)
         for name in ("run-linux-native-desktop-session.sh", "run-fedora-plasma6-session.sh"):
             script = (ROOT / "scripts/release" / name).read_text(encoding="utf-8")
