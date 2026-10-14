@@ -435,7 +435,10 @@ class PortalKeyboard:
         if not self.session or not self.granted_devices & POINTER_DEVICE:
             raise QuickPasteQualificationError("desktop portal has no granted pointer session")
         self._call(REMOTE_DESKTOP, "NotifyPointerMotion", self.glib.Variant(
-            "(oa{sv}dd)", (self.session, {}, -10000.0, -10000.0),
+            "(oa{sv}dd)", (self.session, {}, -10000.0, 10000.0),
+        ))
+        self._call(REMOTE_DESKTOP, "NotifyPointerMotion", self.glib.Variant(
+            "(oa{sv}dd)", (self.session, {}, 16.0, -16.0),
         ))
 
     def key(self, keycode: int, state: int) -> None:

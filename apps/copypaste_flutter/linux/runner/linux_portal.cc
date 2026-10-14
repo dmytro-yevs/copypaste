@@ -24,6 +24,8 @@ namespace {
 
 constexpr char kPortalName[] = "org.freedesktop.portal.Desktop";
 constexpr char kPortalPath[] = "/org/freedesktop/portal/desktop";
+constexpr char kRegistry[] = "org.freedesktop.host.portal.Registry";
+constexpr char kApplicationId[] = "com.copypaste.CopyPaste";
 constexpr char kProperties[] = "org.freedesktop.DBus.Properties";
 constexpr char kRequest[] = "org.freedesktop.portal.Request";
 constexpr char kSession[] = "org.freedesktop.portal.Session";
@@ -334,10 +336,11 @@ struct LinuxPortal::Impl : public std::enable_shared_from_this<LinuxPortal::Impl
       subscription = 0;
     }
     if (connection != nullptr && !session.empty()) {
-      g_dbus_connection_call(connection, kPortalName, session.c_str(), kSession,
-                             "Close", nullptr, nullptr,
-                             G_DBUS_CALL_FLAGS_NONE, -1, nullptr, nullptr,
-                             nullptr);
+      // Confirm release before replacing a binding or exiting the GTK loop.
+      // An unflushed asynchronous Close can leave the old accelerator reserved.
+      g_autoptr(GVariant) closed = g_dbus_connection_call_sync(
+          connection, kPortalName, session.c_str(), kSession, "Close", nullptr,
+          nullptr, G_DBUS_CALL_FLAGS_NONE, 2000, nullptr, nullptr);
     }
     session.clear();
   }
@@ -597,6 +600,19 @@ struct LinuxPortal::Impl : public std::enable_shared_from_this<LinuxPortal::Impl
   std::function<void(ParentIdentifierCompletion)> parent_identifier_override_for_test;
 #endif
 };
+
+GDBusConnection* LinuxPortal::register_application() {
+  GDBusConnection* connection = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, nullptr);
+  if (connection == nullptr) return nullptr;
+  GVariantBuilder options;
+  g_variant_builder_init(&options, G_VARIANT_TYPE_VARDICT);
+  // Older frontends and sandboxed applications retain their automatic identity.
+  g_autoptr(GVariant) registered = g_dbus_connection_call_sync(
+      connection, kPortalName, kPortalPath, kRegistry, "Register",
+      g_variant_new("(s@a{sv})", kApplicationId, g_variant_builder_end(&options)),
+      G_VARIANT_TYPE("()"), G_DBUS_CALL_FLAGS_NONE, 2000, nullptr, nullptr);
+  return connection;
+}
 
 LinuxPortal::LinuxPortal(GtkWindow* parent, LinuxPortalCallbacks callbacks)
     : impl_(std::make_shared<Impl>(parent, std::move(callbacks))) {}
