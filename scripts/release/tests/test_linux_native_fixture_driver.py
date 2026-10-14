@@ -72,12 +72,43 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
                 pass
 
             def makefile(self, _mode):
-                return io.BytesIO(b'{"ok":false,"error":{"code":"invalid_request","message":"malformed request"}}\n')
+                return io.BytesIO(b'{"ok":false,"error":"malformed request","error_code":"invalid_request"}\n')
 
         with mock.patch.object(driver.socket, "socket", return_value=Channel()):
             with self.assertRaisesRegex(RuntimeError, "invalid_request") as error:
                 driver.ipc(Path("daemon.sock"), "pair_create_invite")
         self.assertNotIn("malformed request", str(error.exception))
+
+    def test_ipc_redacts_malicious_or_unbounded_top_level_error_codes(self):
+        class Channel:
+            def __init__(self, response):
+                self.response = response
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                pass
+
+            def settimeout(self, _timeout):
+                pass
+
+            def connect(self, _path):
+                pass
+
+            def sendall(self, _value):
+                pass
+
+            def makefile(self, _mode):
+                return io.BytesIO(self.response)
+
+        for code in ("UPPER", "a" * 65):
+            response = json.dumps({"ok": False, "error": "sensitive server detail", "error_code": code}).encode() + b"\n"
+            with mock.patch.object(driver.socket, "socket", return_value=Channel(response)):
+                with self.assertRaisesRegex(RuntimeError, "daemon rejected pair_create_invite") as error:
+                    driver.ipc(Path("daemon.sock"), "pair_create_invite")
+            self.assertNotIn(code, str(error.exception))
+            self.assertNotIn("sensitive server detail", str(error.exception))
 
     def test_audited_clipboard_provider_requires_its_expected_sigterm_exit(self):
         class Provider:
