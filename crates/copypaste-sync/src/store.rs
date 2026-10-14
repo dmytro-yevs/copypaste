@@ -357,7 +357,7 @@ impl StoreView {
             item_id: row.id.clone(),
             content,
             content_type: row.content_type.clone(),
-            payload_metadata: row.payload_metadata.clone(),
+            payload_metadata: self.shared.store().payload_metadata_for_sync(row).ok()?,
             created_at: row.created_at,
             deleted: row.deleted,
             source_app_bundle_id: row.app_bundle_id.clone(),

@@ -72,24 +72,35 @@ impl Store {
         &self,
         item: &StoredItem,
     ) -> Result<Option<String>, StoreError> {
-        let Some(icon_id) = item.source_icon_id.as_deref() else {
-            return Ok(item.payload_metadata.clone());
-        };
-        let Some(icon) = self.source_app_icon_by_id(icon_id)? else {
-            return Ok(item.payload_metadata.clone());
-        };
-        let privacy = item.clipboard_privacy();
-        let file = item
-            .payload_metadata
-            .as_deref()
-            .and_then(|json| PayloadMetadata::from_json(json, &item.content_type))
-            .and_then(|metadata| metadata.file);
-        Ok(PayloadMetadata {
-            privacy,
-            file,
-            source_app_icon: Some(icon),
+        if item.deleted {
+            return Ok(None);
         }
-        .to_json(&item.content_type))
+        let mut metadata = match item.payload_metadata.as_deref() {
+            Some(json) => match PayloadMetadata::from_json(json, &item.content_type) {
+                Some(metadata) => metadata,
+                // The local reader already classifies unrecognized text
+                // metadata as confidential. Preserve that classification in
+                // the current envelope without rewriting the stored original.
+                None if copypaste_ipc::content_type::is_text(&item.content_type) => {
+                    PayloadMetadata {
+                        privacy: item.clipboard_privacy(),
+                        ..Default::default()
+                    }
+                }
+                // File and image attributes cannot be inferred from text.
+                None => return Ok(item.payload_metadata.clone()),
+            },
+            None => PayloadMetadata::default(),
+        };
+        if let Some(icon_id) = item.source_icon_id.as_deref() {
+            if let Some(icon) = self.source_app_icon_by_id(icon_id)? {
+                // Optional artwork must not discard the privacy envelope.
+                if icon.png().is_some() {
+                    metadata.source_app_icon = Some(icon);
+                }
+            }
+        }
+        Ok(metadata.to_json(&item.content_type))
     }
 
     /// Resolve the asset independently of any individual clipboard row.

@@ -211,13 +211,24 @@ impl SyncItem {
         check_id("item_id", &item.item_id)?;
         check_id("origin_device_id", &item.origin_device_id)?;
         check_len("content_type", &item.content_type, MAX_CONTENT_TYPE_BYTES)?;
+        if !item.deleted
+            && item.content_type == copypaste_ipc::content_type::FILE
+            && item.payload_metadata.is_none()
+        {
+            return Err(ProtocolError::Decode(
+                "file item has no payload metadata".into(),
+            ));
+        }
         if let Some(metadata) = &item.payload_metadata {
             check_len(
                 "payload_metadata",
                 metadata,
                 copypaste_ipc::MAX_SYNC_METADATA_BYTES,
             )?;
-            if item.deleted || !valid_payload_metadata(metadata, &item.content_type) {
+            if item.deleted
+                || copypaste_payload::PayloadMetadata::from_json(metadata, &item.content_type)
+                    .is_none()
+            {
                 return Err(ProtocolError::Decode(
                     "item carries invalid payload metadata".into(),
                 ));
@@ -251,73 +262,6 @@ fn check_protocol_version(protocol_version: u32) -> Result<(), ProtocolError> {
         });
     }
     Ok(())
-}
-
-/// The protocol crate cannot depend on core (core owns the sync source), so it
-/// checks the strict JSON envelope shape here. Core then decodes the PNG under
-/// allocation limits before any row is stored.
-fn valid_payload_metadata(value: &str, content_type: &str) -> bool {
-    use serde_json::Value;
-
-    let Ok(Value::Object(metadata)) = serde_json::from_str(value) else {
-        return false;
-    };
-    let is_file = content_type == copypaste_ipc::content_type::FILE;
-    let carries_file = is_file
-        || copypaste_ipc::content_type::classify(content_type)
-            == copypaste_ipc::ContentClass::Image;
-    let valid_file = |value: &Value| match value {
-        Value::Object(file) => {
-            (file.len() == 2 || file.len() == 3)
-                && file.contains_key("filename")
-                && file.contains_key("mime_type")
-                && file.keys().all(|key| {
-                    matches!(key.as_str(), "filename" | "mime_type" | "source_reference")
-                })
-                && file.get("filename").is_some_and(Value::is_string)
-                && file.get("mime_type").is_some_and(Value::is_string)
-                && file.get("source_reference").is_none_or(Value::is_string)
-        }
-        _ => false,
-    };
-    let valid_icon = |value: &Value| match value {
-        Value::Object(icon) => {
-            icon.len() == 3
-                && icon.contains_key("png_base64")
-                && icon.contains_key("width")
-                && icon.contains_key("height")
-                && icon.get("png_base64").is_some_and(Value::is_string)
-                && icon.get("width").is_some_and(Value::is_u64)
-                && icon.get("height").is_some_and(Value::is_u64)
-        }
-        _ => false,
-    };
-
-    if metadata.contains_key("filename") || metadata.contains_key("mime_type") {
-        return is_file && valid_file(&Value::Object(metadata));
-    }
-
-    if metadata.len() > 3
-        || metadata
-            .keys()
-            .any(|key| key != "file" && key != "source_app_icon" && key != "privacy")
-    {
-        return false;
-    }
-    let file = metadata.get("file");
-    let icon = metadata.get("source_app_icon");
-    let privacy = match metadata.get("privacy") {
-        Some(value) => {
-            match serde_json::from_value::<copypaste_ipc::ClipboardPrivacy>(value.clone()) {
-                Ok(privacy) => privacy,
-                Err(_) => return false,
-            }
-        }
-        None => Default::default(),
-    };
-    (file.is_some() || icon.is_some() || !privacy.is_empty())
-        && file.is_none_or(|value| carries_file && valid_file(value))
-        && icon.is_none_or(valid_icon)
 }
 
 pub(crate) fn validate_device_profile(profile: &DeviceProfile) -> Result<(), ProtocolError> {
@@ -386,7 +330,8 @@ mod tests {
     };
     use crate::DeviceProfile;
 
-    use super::{valid_payload_metadata, ProtocolError};
+    use super::ProtocolError;
+    use copypaste_payload::PayloadMetadata;
 
     fn summary(id: &str) -> ItemSummary {
         ItemSummary {
@@ -439,9 +384,7 @@ mod tests {
                 item_id: "binary".into(),
                 content: String::new(),
                 binary_content: bytes.clone(),
-                payload_metadata: Some(
-                    r#"{"source_app_icon":{"png_base64":"AAAA","width":64,"height":64}}"#.into(),
-                ),
+                payload_metadata: Some(crate::sync::testutil::source_icon_metadata()),
                 source_app_bundle_id: None,
                 source_app_name: None,
                 content_type: "image/png".into(),
@@ -488,19 +431,17 @@ mod tests {
     #[test]
     fn metadata_matches_the_shared_privacy_and_imported_image_contract() {
         let privacy = r#"{"privacy":{"secret":true,"transient":false}}"#;
-        assert!(valid_payload_metadata(privacy, "text"));
-        assert!(!valid_payload_metadata(
-            r#"{"privacy":{"secret":"true"}}"#,
-            "text"
-        ));
-        assert!(!valid_payload_metadata(
+        assert!(PayloadMetadata::from_json(privacy, "text").is_some());
+        assert!(PayloadMetadata::from_json(r#"{"privacy":{"secret":"true"}}"#, "text").is_none());
+        assert!(PayloadMetadata::from_json(
             r#"{"privacy":{"secret":true,"unknown":true}}"#,
             "text"
-        ));
-        assert!(!valid_payload_metadata(r#"{"privacy":{}}"#, "text"));
+        )
+        .is_none());
+        assert!(PayloadMetadata::from_json(r#"{"privacy":{}}"#, "text").is_none());
         let imported_image = r#"{"file":{"filename":"image.png","mime_type":"image/png"}}"#;
-        assert!(valid_payload_metadata(imported_image, "image/png"));
-        assert!(!valid_payload_metadata(imported_image, "text"));
+        assert!(PayloadMetadata::from_json(imported_image, "image/png").is_some());
+        assert!(PayloadMetadata::from_json(imported_image, "text").is_none());
         let mut image = item("imported-image", "");
         image.content_type = "image/png".into();
         image.binary_content = vec![1, 2, 3];
@@ -641,14 +582,15 @@ mod tests {
 
     #[test]
     fn file_metadata_accepts_a_bounded_source_reference_shape() {
-        assert!(valid_payload_metadata(
+        assert!(PayloadMetadata::from_json(
             r#"{"filename":"report.pdf","mime_type":"application/pdf","source_reference":"/Users/person/Documents/report.pdf"}"#,
             copypaste_ipc::content_type::FILE,
-        ));
-        assert!(!valid_payload_metadata(
+        ).is_some());
+        assert!(PayloadMetadata::from_json(
             r#"{"filename":"report.pdf","mime_type":"application/pdf","source_reference":42}"#,
             copypaste_ipc::content_type::FILE,
-        ));
+        )
+        .is_none());
     }
 
     #[test]
