@@ -5,10 +5,12 @@
 ## Decision
 
 Linux is a product target alongside macOS, Android, and Windows, using the same
-Flutter UI and Rust runtime. Support covers x86_64 and ARM64, with AppImage,
-Debian, and RPM packages in each regular stable release.
+Flutter UI and Rust runtime. Stable release support covers x86_64 on GNOME 46 X11 on Ubuntu 24.04, with
+AppImage and Debian packages. ARM64, KDE, Wayland, and RPM implementations
+remain experimental and are outside release qualification until completed.
 
-Functional and UI parity is required on X11 and native Wayland on GNOME and KDE.
+Functional and UI parity is required for the released GNOME X11 target.
+GNOME/KDE native Wayland remains under development.
 Wayland Quick Paste includes user-enabled GNOME Shell/KWin companions to restore
 the previously focused application and user-consented Remote Desktop keyboard
 access. Packages cannot silently enable desktop integrations or approve portals.

@@ -1,9 +1,10 @@
 # Linux platform contract
 
 Linux joins the shared Flutter/Rust application as a production target. The
-implementation and release qualification must cover both x86_64 and ARM64.
-Each stable application release must produce signed AppImage, Debian, and RPM
-packages for both architectures. This document defines the acceptance contract;
+stable release qualification covers x86_64, GNOME 46 X11 on Ubuntu 24.04.
+Each stable application release produces signed AppImage and Debian packages.
+ARM64, KDE, Wayland, and RPM implementations remain available for development
+but are outside this release contract. This document defines the acceptance contract;
 it does not establish that a particular release has passed qualification.
 
 ## Functional contract
@@ -30,7 +31,8 @@ application owns the daemon's lifetime. Closing Quick Paste detaches its local
 client without stopping the daemon, and a missing or invalid endpoint must not
 start another daemon or fall back to the standalone CLI runtime.
 
-Clipboard integration must cover X11 and native Wayland on GNOME and KDE.
+The released clipboard integration must cover GNOME X11. GNOME/KDE native
+Wayland integrations remain available for development.
 Changing a Wayland session to XWayland is not evidence of native Wayland support.
 Unavailable protocols, locked keyrings, rejected permissions, and unsuccessful
 installations must remain explicit errors rather than successful no-ops.
