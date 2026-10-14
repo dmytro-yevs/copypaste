@@ -7,9 +7,9 @@ The shared release contract covers macOS, Android, Windows, and Linux.
   per-machine self-signing helper;
 - universal, arm64, and armv7 Android APKs signed by the durable release keystore;
 - an Authenticode-signed current-user Windows NSIS installer;
-- signed Linux AppImage, Debian, and RPM packages for x86_64 and ARM64.
+- signed Linux AppImage and Debian packages for x86_64.
 
-Linux publication requires the exact-artifact GNOME/KDE X11/native Wayland
+Linux publication requires the exact-artifact GNOME 46 X11 on Ubuntu 24.04
 matrix in [Linux native qualification](../packaging/linux/native-qualification.md).
 Package builds and protocol fixtures alone do not satisfy that contract.
 
@@ -85,3 +85,7 @@ key and increasing version codes. Exercise unknown-source permission, successful
 self-update, cancellation, and returning to CopyPaste after backgrounding it
 while confirmation is pending. JVM session tests and APK builds do not establish
 that physical-device acceptance.
+
+ARM64, KDE, Wayland, and RPM are excluded from stable Linux qualification.
+Their implementation and opt-in checks remain in `linux-experimental.yml`.
+Optional Linux module publication follows the same x86_64 release scope.
