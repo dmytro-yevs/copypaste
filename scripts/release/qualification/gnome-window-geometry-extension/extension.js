@@ -22,11 +22,14 @@ function rectValues(rect) {
 
 export default class QualificationWindowGeometryExtension extends Extension {
     enable() {
-        // The private headless Mutter seat has no libinput keyboard; keep one
+        // The private headless Mutter Wayland seat has no libinput keyboard; keep one
         // virtual keyboard alive so GTK Wayland clients receive seat keyboard
         // capability during the qualified desktop session.
-        const seat = Clutter.get_default_backend().get_default_seat();
-        this._virtualKeyboard = seat.create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+        this._virtualKeyboard = null;
+        if (GLib.getenv('XDG_SESSION_TYPE') === 'wayland') {
+            const seat = Clutter.get_default_backend().get_default_seat();
+            this._virtualKeyboard = seat.create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
+        }
         this._desktopReady = false;
         this._startupCompleteId = 0;
         this._overviewHiddenId = 0;
