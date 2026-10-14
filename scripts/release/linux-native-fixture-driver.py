@@ -473,15 +473,20 @@ def response_variant(response, name):
     return data[name]
 
 
-def ipc(socket_path, method, params):
-    request = {"id": 991, "protocol_version": 5, "method": method, "params": params}
+def ipc(socket_path, method, params=None):
+    request = {"id": 991, "protocol_version": 5, "method": method}
+    if params is not None:
+        request["params"] = params
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as channel:
         channel.settimeout(5)
         channel.connect(str(socket_path))
         channel.sendall(json.dumps(request, separators=(",", ":")).encode() + b"\n")
         response = channel.makefile("rb").readline()
     decoded = json.loads(response)
-    if not decoded.get("ok"):
+    if not isinstance(decoded, dict) or not decoded.get("ok"):
+        code = decoded.get("error", {}).get("code") if isinstance(decoded, dict) and isinstance(decoded.get("error"), dict) else None
+        if isinstance(code, str) and 1 <= len(code) <= 64 and code.isascii() and code.replace("_", "").isalnum():
+            raise RuntimeError(f"daemon rejected {method}: {code}")
         raise RuntimeError(f"daemon rejected {method}")
     return decoded
 
@@ -1053,7 +1058,7 @@ def require_pairing_sync(prefix, cli, environment, workspace, primary_socket):
                 time.sleep(0.1)
         else:
             raise RuntimeError("paired exact daemon did not become ready")
-        invite = ipc(primary_socket, "pair_create_invite", {}).get("data", {}).get("pairing_invite")
+        invite = ipc(primary_socket, "pair_create_invite").get("data", {}).get("pairing_invite")
         if not isinstance(invite, dict) or not isinstance(invite.get("code"), str) or not isinstance(invite.get("listen_addr"), str):
             raise RuntimeError("GUI-owned daemon did not create a typed pairing invitation")
         joined = ipc(peer_socket, "pair_join", {"code": invite["code"], "addr": invite["listen_addr"]})
@@ -1156,7 +1161,7 @@ def require_camera_qr_scan(prefix, cli, environment, workspace, gui_pid, runtime
                 time.sleep(0.1)
         else:
             raise RuntimeError("camera peer daemon did not become ready")
-        response = ipc(peer_socket, "pair_create_invite", {})
+        response = ipc(peer_socket, "pair_create_invite")
         uri = pairing_uri_from_invite(response.get("data", {}).get("pairing_invite"))
         write_private_pairing_uri(uri_file, uri)
         run_media(
