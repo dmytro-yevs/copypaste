@@ -284,6 +284,31 @@ class CompositorRuntimeWorkflowTest(unittest.TestCase):
                 )),
             )
 
+    def test_kwin_headless_entrypoint_uses_the_staged_qt_plugin_path(self):
+        builder = (ROOT / "packaging/linux/desktop-integrations/kde-native-clipboard/verify-build.sh").read_text(encoding="utf-8")
+        template = builder.split("cat > \"$qualification_entrypoint\" <<'EOF'\n", 1)[1].split("\nEOF\n", 1)[0]
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime = Path(temporary) / "runtime"
+            entrypoint = runtime / "usr/libexec/copypaste-kwin-headless"
+            kwin = runtime / "usr/bin/kwin_wayland"
+            entrypoint.parent.mkdir(parents=True)
+            kwin.parent.mkdir(parents=True)
+            entrypoint.write_text(template + "\n", encoding="utf-8")
+            entrypoint.chmod(0o755)
+            kwin.write_text("#!/bin/sh\nprintf '%s\\n' \"$QT_PLUGIN_PATH\" > \"$CAPTURE\"\n", encoding="utf-8")
+            kwin.chmod(0o755)
+            capture = runtime / "capture"
+            completed = subprocess.run(
+                [str(entrypoint)],
+                env={**os.environ, "CAPTURE": str(capture), "QT_PLUGIN_PATH": "/host/plugins"},
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(capture.read_text(encoding="utf-8"), f"{runtime}/usr/lib64/qt6/plugins\n")
+
     def test_gnome_fixture_scopes_private_libraries_to_the_compositor_and_waits_for_extensions_api(self):
         script = (ROOT / "scripts/release/run-linux-native-desktop-session.sh").read_text(encoding="utf-8")
         self.assertNotIn('export LD_LIBRARY_PATH="$native/lib', script)
