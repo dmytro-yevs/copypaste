@@ -260,7 +260,11 @@ class _SyncPeerCard extends StatelessWidget {
           if (peer.error case final error?) ...[
             Alert.destructive(
               leading: const Icon(LucideIcons.circleAlert),
-              title: const Text('Last sync problem'),
+              title: Text(
+                phase == SyncPhase.synced
+                    ? 'Items pending synchronization'
+                    : 'Last sync problem',
+              ),
               content: Text(error),
             ),
             const Gap(AppSpacing.md),

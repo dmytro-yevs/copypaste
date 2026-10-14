@@ -931,6 +931,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn invalid_local_versions_do_not_block_either_direction_or_later_recovery() {
+        for initiates_from_b in [false, true] {
+            let mut broken = item("broken", 200, "preserved locally", "dev-a");
+            broken.payload_metadata = Some(r#"{"unexpected":true}"#.into());
+            let a = TestSource::new(
+                "dev-a",
+                vec![
+                    item("before", 100, "before the refusal", "dev-a"),
+                    broken.clone(),
+                    item("after", 300, "after the refusal", "dev-a"),
+                ],
+            );
+            let b = TestSource::new(
+                "dev-b",
+                vec![item("returning", 400, "opposite direction", "dev-b")],
+            );
+            let (oa, ob) = if initiates_from_b {
+                let (ob, oa) = session(&b, &a).await;
+                (oa, ob)
+            } else {
+                session(&a, &b).await
+            };
+            assert_eq!((oa.stats.sent, oa.stats.received), (2, 1));
+            assert_eq!((ob.stats.sent, ob.stats.received), (1, 2));
+            assert_eq!(oa.stats.skipped_unavailable, 1);
+            assert_eq!(ob.stats.skipped_unavailable, 1);
+            assert_eq!(a.get("broken"), Some(broken.clone()));
+            assert!(b.get("broken").is_none());
+            assert!(b.get("before").is_some());
+            assert!(b.get("after").is_some());
+            assert!(a.get("returning").is_some());
+            assert_eq!(ob.cursor.since_ms, broken.created_at);
+
+            let mut repaired = a.snapshot();
+            repaired
+                .iter_mut()
+                .find(|i| i.item_id == "broken")
+                .unwrap()
+                .payload_metadata = None;
+            let repaired = TestSource::new("dev-a", repaired);
+            let (next_a, next_b) = session_with(&repaired, &b, oa.cursor, ob.cursor).await;
+            assert_eq!(next_a.stats.skipped_unavailable, 0);
+            assert_eq!(next_b.stats.skipped_unavailable, 0);
+            assert_eq!(next_b.stats.received, 1);
+            assert_eq!(repaired.snapshot(), b.snapshot());
+        }
+    }
+
+    #[tokio::test]
     async fn arrival_order_does_not_change_the_outcome() {
         // Three versions of one item, applied in every order, all end the same.
         let versions = [
