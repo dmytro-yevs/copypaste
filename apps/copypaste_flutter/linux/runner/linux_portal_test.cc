@@ -768,6 +768,8 @@ void test_failed_wayland_export_parent_fallback_predicate() {
 void test_empty_parent_lease_starts_remote_desktop() {
   PortalFixture fixture;
   LinuxPortal client(nullptr);
+  client.impl_->parent = reinterpret_cast<GtkWindow*>(
+      g_object_new(G_TYPE_OBJECT, nullptr));
   client.impl_->parent_identifier_override_for_test =
       [](LinuxPortal::Impl::ParentIdentifierCompletion complete) {
         complete(std::make_shared<LinuxPortal::Impl::ParentIdentifierLease>(""));
@@ -794,6 +796,8 @@ void test_empty_parent_lease_starts_remote_desktop() {
 void test_empty_parent_lease_binds_shortcut() {
   PortalFixture fixture;
   LinuxPortal client(nullptr);
+  client.impl_->parent = reinterpret_cast<GtkWindow*>(
+      g_object_new(G_TYPE_OBJECT, nullptr));
   client.impl_->parent_identifier_override_for_test =
       [](LinuxPortal::Impl::ParentIdentifierCompletion complete) {
         complete(std::make_shared<LinuxPortal::Impl::ParentIdentifierLease>(""));
