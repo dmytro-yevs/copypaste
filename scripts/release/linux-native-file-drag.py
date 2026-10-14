@@ -442,17 +442,17 @@ def drag_wayland(source: DragSource, gui_pid: int, environment: dict[str, str]) 
         target_geometry = compositor_geometry(Gio, GLib, gui_pid, TARGET_TITLE)
         source_bounds = absolute_atspi_bounds(source_local, source_geometry, SOURCE_TITLE)
         target_bounds = absolute_atspi_bounds(target_local, target_geometry, TARGET_TITLE)
-        require_single_wayland_layout(display, source_geometry, target_geometry, source_bounds, target_bounds)
+        layout = require_single_wayland_layout(display, source_geometry, target_geometry, source_bounds, target_bounds)
         source_point = owned_point(Gio, GLib, source.process.pid, SOURCE_TITLE, source_bounds)
         target_point = owned_point(Gio, GLib, gui_pid, TARGET_TITLE, target_bounds)
         approach_point = (target_point[0] - 1, target_point[1])
         if not target_bounds.contains(approach_point) or not compositor_owns_point(Gio, GLib, gui_pid, TARGET_TITLE, approach_point):
             raise FileDragQualificationError("file-drag approach is not owned by the installed CopyPaste window")
         # Relative portal motion has no public query for the current pointer.
-        # First clamp it to the desktop origin, then move to the external GTK
-        # source using the source's AT-SPI screen coordinates.
-        pointer.motion(-10000, -10000)
-        pointer.motion(*source_point)
+        # Clamp to the bottom-left, avoiding GNOME's top-left hot corner,
+        # then move to the authenticated external GTK source coordinates.
+        pointer.motion(-10000, 10000)
+        pointer.motion(source_point[0], source_point[1] - (layout.height - 1))
         source.begin()
         pointer.button(1)
         source.started()

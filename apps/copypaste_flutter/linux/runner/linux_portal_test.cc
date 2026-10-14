@@ -238,6 +238,15 @@ class PortalFixture {
             <arg type='v' direction='out'/>
           </method>
         </interface>
+        <interface name='org.freedesktop.portal.Session'>
+          <method name='Close'/>
+        </interface>
+        <interface name='org.freedesktop.host.portal.Registry'>
+          <method name='Register'>
+            <arg type='s' direction='in'/>
+            <arg type='a{sv}' direction='in'/>
+          </method>
+        </interface>
       </node>)xml";
     g_autoptr(GDBusNodeInfo) node = g_dbus_node_info_new_for_xml(kIntrospection, &error);
     if (node == nullptr) return report_start_failure(error);
@@ -259,6 +268,20 @@ class PortalFixture {
       g_dbus_connection_unregister_object(server, remote_registration);
       return report_start_failure(error);
     }
+    const guint remote_session_registration = g_dbus_connection_register_object(
+        server, "/org/freedesktop/portal/desktop/session/test_remote",
+        node->interfaces[3], &kVTable, this, nullptr, &error);
+    g_assert_no_error(error);
+    g_assert_cmpuint(remote_session_registration, !=, 0);
+    const guint shortcut_session_registration = g_dbus_connection_register_object(
+        server, "/org/freedesktop/portal/desktop/session/test_shortcut",
+        node->interfaces[3], &kVTable, this, nullptr, &error);
+    g_assert_no_error(error);
+    g_assert_cmpuint(shortcut_session_registration, !=, 0);
+    const guint registry_registration = g_dbus_connection_register_object(
+        server, kPortalPath, node->interfaces[4], &kVTable, this, nullptr, &error);
+    g_assert_no_error(error);
+    g_assert_cmpuint(registry_registration, !=, 0);
     g_autoptr(GVariant) name_reply = g_dbus_connection_call_sync(
         server, "org.freedesktop.DBus", "/org/freedesktop/DBus",
         "org.freedesktop.DBus", "RequestName",
@@ -281,6 +304,9 @@ class PortalFixture {
     g_main_loop_run(server_loop_);
     g_main_loop_unref(server_loop_);
     server_loop_ = nullptr;
+    g_dbus_connection_unregister_object(server, registry_registration);
+    g_dbus_connection_unregister_object(server, shortcut_session_registration);
+    g_dbus_connection_unregister_object(server, remote_session_registration);
     g_dbus_connection_unregister_object(server, properties_registration);
     g_dbus_connection_unregister_object(server, shortcuts_registration);
     g_dbus_connection_unregister_object(server, remote_registration);
@@ -383,12 +409,31 @@ class PortalFixture {
     keys_ready_.notify_all();
   }
 
-  static void on_method_call(GDBusConnection* server, const gchar*, const gchar*,
+  static void on_method_call(GDBusConnection* server, const gchar*, const gchar* object_path,
                              const gchar* interface_name,
                              const gchar* method_name, GVariant* parameters,
                              GDBusMethodInvocation* invocation,
                              gpointer user_data) {
     auto* fixture = static_cast<PortalFixture*>(user_data);
+    if (g_strcmp0(interface_name, kRegistry) == 0) {
+      g_assert_cmpstr(method_name, ==, "Register");
+      const gchar* application_id = nullptr;
+      GVariant* options = nullptr;
+      g_variant_get(parameters, "(&s@a{sv})", &application_id, &options);
+      g_assert_cmpstr(application_id, ==, "com.copypaste.CopyPaste");
+      g_assert_cmpuint(g_variant_n_children(options), ==, 0);
+      g_variant_unref(options);
+      fixture->record_call(interface_name, method_name);
+      g_dbus_method_invocation_return_value(invocation, nullptr);
+      return;
+    }
+    if (g_strcmp0(interface_name, kSession) == 0) {
+      g_assert_cmpstr(method_name, ==, "Close");
+      g_assert_cmpuint(g_variant_n_children(parameters), ==, 0);
+      fixture->record_call(interface_name, (std::string("Close:") + object_path).c_str());
+      g_dbus_method_invocation_return_value(invocation, nullptr);
+      return;
+    }
     if (g_strcmp0(interface_name, kProperties) == 0) {
       g_assert_cmpstr(method_name, ==, "Get");
       g_dbus_method_invocation_return_value(
@@ -701,6 +746,39 @@ void test_shutdown_drops_queued_session_closed() {
   g_assert_cmpuint(closed, ==, 0);
 }
 
+void test_shutdown_confirms_both_session_releases_before_returning() {
+  PortalFixture fixture;
+  auto client = fixture.new_client();
+  client->observe_session("/org/freedesktop/portal/desktop/session/test_remote", true);
+  client->observe_session("/org/freedesktop/portal/desktop/session/test_shortcut", false);
+  const guint before = fixture.calls();
+  client->shutdown();
+  g_assert_cmpuint(fixture.calls(), ==, before + 2);
+  g_assert_true(fixture.saw_sequence({
+      "org.freedesktop.portal.Session.Close:/org/freedesktop/portal/desktop/session/test_shortcut",
+      "org.freedesktop.portal.Session.Close:/org/freedesktop/portal/desktop/session/test_remote",
+  }));
+  client->shutdown();
+  g_assert_cmpuint(fixture.calls(), ==, before + 2);
+}
+
+void test_host_identity_uses_the_same_connection_before_portal_requests() {
+  PortalFixture fixture;
+  g_autoptr(GDBusConnection) identity = LinuxPortal::register_application();
+  g_assert_nonnull(identity);
+  LinuxPortal client(nullptr);
+  g_assert_true(client.impl_->connection == identity);
+  bool granted = false;
+  client.request_remote_desktop([&granted](bool value) { granted = value; });
+  g_assert_true(wait_until([&] { return granted; }));
+  g_assert_true(fixture.saw_sequence({
+      "org.freedesktop.host.portal.Registry.Register",
+      "org.freedesktop.portal.RemoteDesktop.CreateSession",
+      "org.freedesktop.portal.RemoteDesktop.SelectDevices",
+      "org.freedesktop.portal.RemoteDesktop.Start",
+  }));
+}
+
 #if defined(GDK_WINDOWING_WAYLAND)
 void test_wayland_export_release_waits_for_terminal_response() {
   guint unexports = 0;
@@ -951,6 +1029,10 @@ int main(int argc, char** argv) {
                   test_session_closed_unsubscribes_and_completes);
   g_test_add_func("/linux_portal/shutdown_drops_queued_session_closed",
                   test_shutdown_drops_queued_session_closed);
+  g_test_add_func("/linux_portal/shutdown_confirms_both_session_releases_before_returning",
+                  test_shutdown_confirms_both_session_releases_before_returning);
+  g_test_add_func("/linux_portal/host_identity_uses_the_same_connection_before_portal_requests",
+                  test_host_identity_uses_the_same_connection_before_portal_requests);
 #if defined(GDK_WINDOWING_WAYLAND)
   g_test_add_func("/linux_portal/wayland_export_release_waits_for_terminal_response",
                   test_wayland_export_release_waits_for_terminal_response);

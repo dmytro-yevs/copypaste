@@ -1640,7 +1640,15 @@ void register_linux_host_channels(FlBinaryMessenger* messenger,
   // Main, Quick Paste, and protected presentation engines have independent
   // binary messengers. Keep a channel set alive for each instead of treating
   // the process as a singleton Flutter engine.
-  if (state == nullptr) state = new ChannelState{application, {}};
+  if (state == nullptr) {
+    state = new ChannelState{application, {}};
+    g_signal_connect(application, "shutdown", G_CALLBACK(+[](GApplication*, gpointer) {
+      stop_bridge_child();
+      portal.reset();
+      gnome_shortcuts.reset();
+      x11_quick_paste.reset();
+    }), nullptr);
+  }
   if (portal == nullptr) {
     GList* windows = gtk_application_get_windows(application);
     if (windows != nullptr) {
