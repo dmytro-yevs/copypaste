@@ -363,6 +363,14 @@ pub struct SyncResult {
         deserialize_with = "deserialize_optional_u32"
     )]
     pub skipped_too_large: Option<u32>,
+    /// Requested versions still unavailable after a completed session. Their
+    /// source data is preserved and a later session may transfer them.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_u32"
+    )]
+    pub skipped_unavailable: Option<u32>,
     /// End-to-end duration of this sync session. This is not an ICMP ping.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
