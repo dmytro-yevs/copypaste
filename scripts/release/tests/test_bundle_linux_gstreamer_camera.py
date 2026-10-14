@@ -20,12 +20,15 @@ class BundleLinuxGstreamerCameraTest(unittest.TestCase):
         self.assertEqual(
             bundler.REQUIRED_ELEMENTS,
             {
+                "tee": "libgstreamer1.0-0",
+                "queue": "libgstreamer1.0-0",
                 "videoconvert": "gstreamer1.0-plugins-base",
                 "videoscale": "gstreamer1.0-plugins-base",
                 "videorate": "gstreamer1.0-plugins-base",
                 "appsink": "gstreamer1.0-plugins-base",
                 "v4l2src": "gstreamer1.0-plugins-good",
                 "jpegdec": "gstreamer1.0-plugins-good",
+                "videoflip": "gstreamer1.0-plugins-good",
             },
         )
 
