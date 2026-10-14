@@ -34,6 +34,9 @@ GEOMETRY_OWNER_PID_ENV = "COPYPASTE_QUALIFICATION_GEOMETRY_OWNER_PID"
 MAX_FIXTURE_BYTES = 8 * 1024
 SOURCE_TITLE = "CopyPaste Qualification File Drop Source"
 TARGET_TITLE = "CopyPaste"
+SOURCE_CONTROL_NAME = "Drag qualification file"
+SCREEN_COORDINATES = 0
+WINDOW_COORDINATES = 1
 LEFT_BUTTON = 272
 POINTER_DEVICE = 2
 
@@ -236,10 +239,24 @@ def drag_x11(source: DragSource, gui_pid: int, environment: dict[str, str]) -> N
     source_window = wait_for(lambda: x11_window(SOURCE_TITLE, environment, owner_pid=source.process.pid), "GTK file-drag source window did not appear")
     target_window = wait_for(lambda: x11_window(TARGET_TITLE, environment, owner_pid=gui_pid), "installed CopyPaste window did not appear")
     require_x11_window_pid(target_window, gui_pid, environment)
-    source_point = x11_bounds(source_window, environment).point()
-    target_point = x11_bounds(target_window, environment).point(horizontal=0.72)
+    try:
+        import pyatspi  # type: ignore[import-not-found]
+    except ImportError as error:
+        raise FileDragQualificationError("AT-SPI is required for X11 file-drag qualification") from error
     run(["xdotool", "windowactivate", "--sync", source_window], environment)
     require_x11_focus(source_window, environment)
+    # X11 window geometry can include reparenting/CSD offsets that do not match
+    # GTK's actual input surface. Use the PID-bound control's desktop bounds.
+    source_bounds = wait_for(
+        lambda: _atspi_bounds_or_none(pyatspi.Registry, source.process.pid, SOURCE_CONTROL_NAME, SCREEN_COORDINATES),
+        "GTK file-drag source has no accessible desktop bounds",
+    )
+    target_bounds = wait_for(
+        lambda: _atspi_bounds_or_none(pyatspi.Registry, gui_pid, TARGET_TITLE, SCREEN_COORDINATES),
+        "installed CopyPaste window has no accessible desktop bounds",
+    )
+    source_point = source_bounds.point()
+    target_point = target_bounds.point(horizontal=0.72)
     run(["xdotool", "mousemove", "--sync", str(source_point[0]), str(source_point[1])], environment)
     source.begin()
     run(["xdotool", "mousedown", "1"], environment)
@@ -269,8 +286,8 @@ def load_wayland_portal() -> Any:
     return module
 
 
-def atspi_bounds(registry: Any, pid: int, name: str) -> Bounds:
-    """Return one AT-SPI window-local rectangle for the PID-bound named node."""
+def atspi_bounds(registry: Any, pid: int, name: str, coordinates: int = WINDOW_COORDINATES) -> Bounds:
+    """Return one PID-bound named node in the requested AT-SPI coordinate space."""
     try:
         desktop = registry.getDesktop(0)
         def node_pid(node: Any) -> int | None:
@@ -283,9 +300,9 @@ def atspi_bounds(registry: Any, pid: int, name: str) -> Bounds:
         while nodes:
             node = nodes.pop()
             if node.name == name:
-                # ATK_XY_WINDOW is relative to the client toplevel. GTK3's
-                # Wayland SCREEN coordinates are a per-client fake root.
-                rect = node.queryComponent().getExtents(1)
+                # Wayland uses window-local coordinates plus authenticated
+                # compositor geometry. X11 exposes real desktop coordinates.
+                rect = node.queryComponent().getExtents(coordinates)
                 bounds = Bounds(rect.x, rect.y, rect.width, rect.height)
                 if bounds.width >= 32 and bounds.height >= 32:
                     matches.append(bounds)
@@ -475,9 +492,9 @@ def drag_wayland(source: DragSource, gui_pid: int, environment: dict[str, str]) 
         pointer.close()
 
 
-def _atspi_bounds_or_none(registry: Any, pid: int, name: str) -> Bounds | None:
+def _atspi_bounds_or_none(registry: Any, pid: int, name: str, coordinates: int = WINDOW_COORDINATES) -> Bounds | None:
     try:
-        return atspi_bounds(registry, pid, name)
+        return atspi_bounds(registry, pid, name, coordinates)
     except FileDragQualificationError:
         return None
 
