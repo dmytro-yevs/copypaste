@@ -647,13 +647,13 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
                 }) + "\n").encode(),
             )
             result = subprocess.CompletedProcess(["python3", str(actor)], 0, stdout=b"")
-            with mock.patch.object(driver, "run", side_effect=[probe, *([result] * 7)]) as run:
+            with mock.patch.object(driver, "run", side_effect=[probe, *([result] * 8)]) as run:
                 driver.require_linux_onboarding(args, gui_pid=4321, environment={})
             commands = [call.args[0] for call in run.call_args_list[1:]]
-            self.assertEqual([command[2] for command in commands], ["click", "observe", "observe", "click", "observe", "click", "observe"])
+            self.assertEqual([command[2] for command in commands], ["observe", "click", "observe", "observe", "click", "observe", "click", "observe"])
             self.assertEqual(
                 [command[command.index("--target") + 1] for command in commands],
-                ["Continue", "Set up your Linux desktop", "Quick Paste is ready.", "Continue", "Get started", "Get started", "History"],
+                ["Continue", "Continue", "Set up your Linux desktop", "Quick Paste is ready.", "Continue", "Get started", "Get started", "History"],
             )
 
     def test_workflow_producer_needs_no_external_wayland_consent_metadata(self):
