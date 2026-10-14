@@ -611,15 +611,18 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             )
             socket = root / "socket"
             seed_result = subprocess.CompletedProcess([str(root / "copypaste-cli"), "add", "copypaste-wayland-quick-paste-fixture"], 0)
+            copy_result = subprocess.CompletedProcess([str(root / "copypaste-cli"), "--json", "copy", "marker-id"], 0)
             with mock.patch.object(driver, "desktop_acceptance_capture_command", return_value=["python3", "provider"]), \
-                 mock.patch.object(driver, "run", side_effect=[tray_result, seed_result, quick_result]) as run:
+                 mock.patch.object(driver, "list_items", return_value=[{"id": "marker-id", "content": "copypaste-wayland-quick-paste-fixture"}]), \
+                 mock.patch.object(driver, "run", side_effect=[tray_result, seed_result, copy_result, quick_result]) as run:
                 driver.require_wayland_qualification(
                     args, gui_pid=4321, cli=root / "copypaste-cli", environment={"INHERITED": "value"}, workspace=root, socket_path=socket,
                 )
             seed = run.call_args_list[1]
             self.assertEqual(seed.args[0], [str(root / "copypaste-cli"), "add", "copypaste-wayland-quick-paste-fixture"])
             self.assertEqual(seed.kwargs["env"], {"INHERITED": "value", "COPYPASTE_SOCKET": str(socket)})
-            command = run.call_args_list[2].args[0]
+            self.assertEqual(run.call_args_list[2].args[0], [str(root / "copypaste-cli"), "--json", "copy", "marker-id"])
+            command = run.call_args_list[3].args[0]
             self.assertEqual(command[command.index("--app-permission-target") + 1], "Allow keyboard control")
             self.assertFalse(any(argument.startswith("--portal-dialog") or argument.startswith("--app-portal-dialog") for argument in command))
             written = json.loads((evidence / "wayland-quick-paste.json").read_text(encoding="utf-8"))
