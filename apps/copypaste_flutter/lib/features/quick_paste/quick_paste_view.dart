@@ -555,54 +555,53 @@ class _Footer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final style = AppTheme.clipboardMenuButtonStyle();
-    return ButtonStyleOverride(
-      decoration: AppTheme.actionButtonDecoration,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Button.ghost(
-            style: style,
-            alignment: Alignment.centerLeft,
-            onPressed: () => confirmClear(context, controller),
-            child: const Text('Clear'),
+    final style = AppTheme.actionButtonStyle(
+      AppTheme.clipboardMenuButtonStyle(),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Button.ghost(
+          style: style,
+          alignment: Alignment.centerLeft,
+          onPressed: () => confirmClear(context, controller),
+          child: const Text('Clear'),
+        ),
+        Button.ghost(
+          style: style,
+          alignment: Alignment.centerLeft,
+          onPressed: controller.openSettings,
+          child: Row(
+            children: [
+              const Expanded(child: Text('Preferences…')),
+              MenuShortcut(
+                activator: _desktopShortcut(LogicalKeyboardKey.comma),
+                combiner: const SizedBox.shrink(),
+              ),
+            ],
           ),
-          Button.ghost(
-            style: style,
-            alignment: Alignment.centerLeft,
-            onPressed: controller.openSettings,
-            child: Row(
-              children: [
-                const Expanded(child: Text('Preferences…')),
-                MenuShortcut(
-                  activator: _desktopShortcut(LogicalKeyboardKey.comma),
-                  combiner: const SizedBox.shrink(),
-                ),
-              ],
-            ),
+        ),
+        Button.ghost(
+          style: style,
+          alignment: Alignment.centerLeft,
+          onPressed: () => showAbout(context),
+          child: const Text('About'),
+        ),
+        Button.ghost(
+          style: style,
+          alignment: Alignment.centerLeft,
+          onPressed: controller.quit,
+          child: Row(
+            children: [
+              const Expanded(child: Text('Quit')),
+              MenuShortcut(
+                activator: _desktopShortcut(LogicalKeyboardKey.keyQ),
+                combiner: const SizedBox.shrink(),
+              ),
+            ],
           ),
-          Button.ghost(
-            style: style,
-            alignment: Alignment.centerLeft,
-            onPressed: () => showAbout(context),
-            child: const Text('About'),
-          ),
-          Button.ghost(
-            style: style,
-            alignment: Alignment.centerLeft,
-            onPressed: controller.quit,
-            child: Row(
-              children: [
-                const Expanded(child: Text('Quit')),
-                MenuShortcut(
-                  activator: _desktopShortcut(LogicalKeyboardKey.keyQ),
-                  combiner: const SizedBox.shrink(),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -618,10 +617,12 @@ class _Footer extends StatelessWidget {
         content: const Text('Pinned clips will stay in your history.'),
         actions: [
           Button.secondary(
+            style: AppTheme.actionButtonStyle(const ButtonStyle.secondary()),
             onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           Button.destructive(
+            style: AppTheme.actionButtonStyle(const ButtonStyle.destructive()),
             onPressed: () async {
               final cleared = await controller.clearUnpinned();
               if (cleared && dialogContext.mounted) {
@@ -646,6 +647,7 @@ class _Footer extends StatelessWidget {
         ),
         actions: [
           Button.primary(
+            style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
             onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Done'),
           ),

@@ -391,6 +391,19 @@ class _NoopGeometryStore implements DesktopWindowGeometryStore {
 }
 
 class _FakeDesktopWindowHost implements DesktopWindowHost {
+  bool taskbarVisible = true;
+  bool trayVisible = true;
+
+  @override
+  Future<void> setTaskbarVisible(bool visible) async {
+    taskbarVisible = visible;
+  }
+
+  @override
+  Future<void> setTrayVisible(bool visible) async {
+    trayVisible = visible;
+  }
+
   void Function(bool)? visibilityHandler;
 
   @override
@@ -417,6 +430,7 @@ class _FakeDesktopWindowHost implements DesktopWindowHost {
 
   @override
   Future<void> initializeTray({
+    bool visible = true,
     required Future<void> Function() onOpenRequested,
     required Future<void> Function() onCaptureRequested,
     required Future<void> Function() onSettingsRequested,
@@ -432,7 +446,11 @@ class _FakeDesktopWindowHost implements DesktopWindowHost {
   }) async {}
 
   @override
-  Future<void> initializeWindow(DesktopWindowBounds initialBounds) async {
+  Future<void> initializeWindow(
+    DesktopWindowBounds initialBounds, {
+    bool showInTaskbar = true,
+  }) async {
+    taskbarVisible = showInTaskbar;
     if (windowInitializationFails) {
       throw StateError('Native window setup failed.');
     }

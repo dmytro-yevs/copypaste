@@ -22,6 +22,12 @@ class SettingsNavigationState {
 }
 
 enum SettingsSectionId {
+  general(
+    label: 'General',
+    slug: 'general',
+    description: 'Application visibility.',
+    icon: LucideIcons.settings,
+  ),
   clipboard(
     label: 'Clipboard',
     slug: 'clipboard',
