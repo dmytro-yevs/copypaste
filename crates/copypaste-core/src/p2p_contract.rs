@@ -304,6 +304,9 @@ pub fn sync_result(
             skipped_too_large: Some(
                 u32::try_from(outcome.stats.skipped_too_large).unwrap_or(u32::MAX),
             ),
+            skipped_unavailable: Some(
+                u32::try_from(outcome.stats.skipped_unavailable).unwrap_or(u32::MAX),
+            ),
             duration_ms: Some(duration_ms),
             error: None,
             error_code: None,
@@ -314,6 +317,7 @@ pub fn sync_result(
             sent: 0,
             received: 0,
             skipped_too_large: None,
+            skipped_unavailable: None,
             duration_ms: Some(duration_ms),
             error: Some(error.to_string()),
             error_code: Some(node_error_code(&error)),
@@ -373,6 +377,7 @@ mod tests {
                 received: 2,
                 skipped: 3,
                 skipped_too_large,
+                skipped_unavailable: 0,
             },
             peer_device_id: "device-1".into(),
             peer_device_name: "Phone".into(),

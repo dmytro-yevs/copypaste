@@ -305,40 +305,37 @@ class _DevicesScreenState extends State<DevicesScreen> {
       final drawer = _pairingDrawer = showOverlay<void>(
         context,
         AppOverlays.drawerConfiguration(context),
-        builder: (context) => ButtonStyleOverride(
-          decoration: AppTheme.actionButtonDecoration,
-          child: ConstrainedBox(
-            key: const ValueKey<String>('devices-pairing-drawer'),
-            constraints: AppOverlays.drawerContentConstraints(context),
-            child: Focus(
-              autofocus: true,
-              child: CallbackShortcuts(
-                bindings: <ShortcutActivator, VoidCallback>{
-                  const SingleActivator(LogicalKeyboardKey.escape): () async {
-                    if (widget.controller.canClosePairing) {
-                      await widget.controller.closePairing();
-                    }
-                  },
+        builder: (context) => ConstrainedBox(
+          key: const ValueKey<String>('devices-pairing-drawer'),
+          constraints: AppOverlays.drawerContentConstraints(context),
+          child: Focus(
+            autofocus: true,
+            child: CallbackShortcuts(
+              bindings: <ShortcutActivator, VoidCallback>{
+                const SingleActivator(LogicalKeyboardKey.escape): () async {
+                  if (widget.controller.canClosePairing) {
+                    await widget.controller.closePairing();
+                  }
                 },
-                child: AnimatedBuilder(
-                  animation: widget.controller,
-                  builder: (context, _) {
-                    if (!widget.controller.pairingInspectorOpen) {
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        closeOnce(context);
-                      });
-                      return const SizedBox.shrink();
-                    }
-                    return _PairingInspector(
-                      key: ValueKey<PairingEntryMode?>(
-                        widget.controller.pairingEntryMode,
-                      ),
-                      controller: widget.controller,
-                      inDrawer: true,
-                      onClose: widget.controller.closePairing,
-                    );
-                  },
-                ),
+              },
+              child: AnimatedBuilder(
+                animation: widget.controller,
+                builder: (context, _) {
+                  if (!widget.controller.pairingInspectorOpen) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      closeOnce(context);
+                    });
+                    return const SizedBox.shrink();
+                  }
+                  return _PairingInspector(
+                    key: ValueKey<PairingEntryMode?>(
+                      widget.controller.pairingEntryMode,
+                    ),
+                    controller: widget.controller,
+                    inDrawer: true,
+                    onClose: widget.controller.closePairing,
+                  );
+                },
               ),
             ),
           ),
@@ -378,49 +375,46 @@ class _DevicesScreenState extends State<DevicesScreen> {
       final drawer = _deviceDrawer = showOverlay<void>(
         context,
         AppOverlays.drawerConfiguration(context),
-        builder: (context) => ButtonStyleOverride(
-          decoration: AppTheme.actionButtonDecoration,
-          child: ConstrainedBox(
-            key: const ValueKey<String>('devices-details-drawer'),
-            constraints: AppOverlays.drawerContentConstraints(context),
-            child: Focus(
-              autofocus: true,
-              child: CallbackShortcuts(
-                bindings: <ShortcutActivator, VoidCallback>{
-                  const SingleActivator(LogicalKeyboardKey.escape): () {
-                    widget.controller.closeDeviceDetails();
-                  },
+        builder: (context) => ConstrainedBox(
+          key: const ValueKey<String>('devices-details-drawer'),
+          constraints: AppOverlays.drawerContentConstraints(context),
+          child: Focus(
+            autofocus: true,
+            child: CallbackShortcuts(
+              bindings: <ShortcutActivator, VoidCallback>{
+                const SingleActivator(LogicalKeyboardKey.escape): () {
+                  widget.controller.closeDeviceDetails();
                 },
-                child: AnimatedBuilder(
-                  animation: widget.controller,
-                  builder: (context, _) {
-                    final snapshot = widget.controller.snapshot;
-                    if (snapshot == null ||
-                        widget.controller.deviceDetailsTarget == null) {
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        closeOnce(context);
-                      });
-                      return const SizedBox.shrink();
-                    }
-                    return _DeviceDetailsInspector(
-                      key: ValueKey<DeviceDetailsTarget>(
-                        widget.controller.deviceDetailsTarget!,
-                      ),
-                      controller: widget.controller,
-                      snapshot: snapshot,
-                      inDrawer: true,
-                      onClose: widget.controller.closeDeviceDetails,
-                      onRename: (name) =>
-                          _renameThisDevice(context, widget.controller, name),
-                      onRemove: (peer, revoke) => _confirmPeerRemoval(
-                        context,
-                        widget.controller,
-                        peer,
-                        revoke: revoke,
-                      ),
-                    );
-                  },
-                ),
+              },
+              child: AnimatedBuilder(
+                animation: widget.controller,
+                builder: (context, _) {
+                  final snapshot = widget.controller.snapshot;
+                  if (snapshot == null ||
+                      widget.controller.deviceDetailsTarget == null) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      closeOnce(context);
+                    });
+                    return const SizedBox.shrink();
+                  }
+                  return _DeviceDetailsInspector(
+                    key: ValueKey<DeviceDetailsTarget>(
+                      widget.controller.deviceDetailsTarget!,
+                    ),
+                    controller: widget.controller,
+                    snapshot: snapshot,
+                    inDrawer: true,
+                    onClose: widget.controller.closeDeviceDetails,
+                    onRename: (name) =>
+                        _renameThisDevice(context, widget.controller, name),
+                    onRemove: (peer, revoke) => _confirmPeerRemoval(
+                      context,
+                      widget.controller,
+                      peer,
+                      revoke: revoke,
+                    ),
+                  );
+                },
               ),
             ),
           ),
@@ -602,10 +596,12 @@ class _DevicesScreenState extends State<DevicesScreen> {
         ),
         actions: [
           Button.ghost(
+            style: AppTheme.actionButtonStyle(const ButtonStyle.ghost()),
             onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           Button.primary(
+            style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
             onPressed: () => Navigator.pop(dialogContext, nameController.text),
             child: const Text('Save'),
           ),
@@ -657,12 +653,16 @@ class _DevicesScreenState extends State<DevicesScreen> {
             ),
             actions: [
               Button.ghost(
+                style: AppTheme.actionButtonStyle(const ButtonStyle.ghost()),
                 onPressed: submitting
                     ? null
                     : () => Navigator.pop(dialogContext),
                 child: const Text('Cancel'),
               ),
               Button.destructive(
+                style: AppTheme.actionButtonStyle(
+                  const ButtonStyle.destructive(),
+                ),
                 onPressed: submitting
                     ? null
                     : () async {
@@ -882,49 +882,58 @@ class _DeviceDetailsInspector extends StatelessWidget {
   }
 
   Widget _actions(_DetailsDevice device) {
-    return ButtonStyleOverride(
-      decoration: AppTheme.actionButtonDecoration,
-      child: Wrap(
-        key: const ValueKey<String>('device-details-actions'),
-        alignment: WrapAlignment.center,
-        spacing: AppSpacing.sm,
-        runSpacing: AppSpacing.sm,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: device.isThisDevice
-            ? [
-                Button.secondary(
-                  key: const ValueKey<String>('rename-device'),
-                  onPressed: controller.actionInFlight
-                      ? null
-                      : () => onRename(device.name),
-                  leading: const Icon(LucideIcons.pencil),
-                  child: const Text('Rename device'),
+    return Wrap(
+      key: const ValueKey<String>('device-details-actions'),
+      alignment: WrapAlignment.center,
+      spacing: AppSpacing.sm,
+      runSpacing: AppSpacing.sm,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: device.isThisDevice
+          ? [
+              Button.secondary(
+                style: AppTheme.actionButtonStyle(
+                  const ButtonStyle.secondary(),
                 ),
-              ]
-            : [
-                Button.secondary(
-                  onPressed: controller.actionInFlight
-                      ? null
-                      : () => controller.sync(peerId: device.id),
-                  leading: const Icon(LucideIcons.refreshCw),
-                  child: const Text('Sync now'),
+                key: const ValueKey<String>('rename-device'),
+                onPressed: controller.actionInFlight
+                    ? null
+                    : () => onRename(device.name),
+                leading: const Icon(LucideIcons.pencil),
+                child: const Text('Rename device'),
+              ),
+            ]
+          : [
+              Button.secondary(
+                style: AppTheme.actionButtonStyle(
+                  const ButtonStyle.secondary(),
                 ),
-                Button.secondary(
-                  onPressed: controller.actionInFlight
-                      ? null
-                      : () => onRemove(device.peer!, false),
-                  leading: const Icon(LucideIcons.unlink),
-                  child: const Text('Unpair'),
+                onPressed: controller.actionInFlight
+                    ? null
+                    : () => controller.sync(peerId: device.id),
+                leading: const Icon(LucideIcons.refreshCw),
+                child: const Text('Sync now'),
+              ),
+              Button.secondary(
+                style: AppTheme.actionButtonStyle(
+                  const ButtonStyle.secondary(),
                 ),
-                Button.destructive(
-                  onPressed: controller.actionInFlight
-                      ? null
-                      : () => onRemove(device.peer!, true),
-                  leading: const Icon(LucideIcons.ban),
-                  child: const Text('Revoke pairing'),
+                onPressed: controller.actionInFlight
+                    ? null
+                    : () => onRemove(device.peer!, false),
+                leading: const Icon(LucideIcons.unlink),
+                child: const Text('Unpair'),
+              ),
+              Button.destructive(
+                style: AppTheme.actionButtonStyle(
+                  const ButtonStyle.destructive(),
                 ),
-              ],
-      ),
+                onPressed: controller.actionInFlight
+                    ? null
+                    : () => onRemove(device.peer!, true),
+                leading: const Icon(LucideIcons.ban),
+                child: const Text('Revoke pairing'),
+              ),
+            ],
     );
   }
 
@@ -1430,6 +1439,9 @@ class _PairingInspectorState extends State<_PairingInspector> {
         children: [
           if (awaitingConfirmation)
             Button.destructive(
+              style: AppTheme.actionButtonStyle(
+                const ButtonStyle.destructive(),
+              ),
               onPressed:
                   widget.controller.decisionInFlight ||
                       !widget.controller.canConfirmPairing
@@ -1439,6 +1451,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
             ),
           if (awaitingConfirmation)
             Button.primary(
+              style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
               onPressed:
                   widget.controller.decisionInFlight ||
                       !widget.controller.canConfirmPairing
@@ -1448,6 +1461,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
             ),
           if (terminal)
             Button.primary(
+              style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
               onPressed: widget.onClose,
               child: const Text('Done'),
             ),
@@ -1459,6 +1473,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
         return Align(
           alignment: Alignment.center,
           child: Button.primary(
+            style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
             key: const ValueKey<String>('submit-pairing-code'),
             onPressed: widget.controller.pairingInFlight ? null : _submitCode,
             leading: widget.controller.pairingInFlight
@@ -1475,6 +1490,7 @@ class _PairingInspectorState extends State<_PairingInspector> {
         return Align(
           alignment: Alignment.center,
           child: Button.primary(
+            style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
             key: const ValueKey<String>('start-pairing-scanner'),
             onPressed: _startScanner,
             leading: const Icon(LucideIcons.camera),

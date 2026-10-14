@@ -11,9 +11,10 @@ use std::net::SocketAddr;
 use crate::DeviceProfile;
 
 use super::{
-    SyncMessage, MAX_CONTENT_BYTES, MAX_CONTENT_TYPE_BYTES, MAX_DEVICE_NAME_BYTES, MAX_HASH_BYTES,
-    MAX_ID_BYTES, MAX_ITEMS_PER_MESSAGE, MAX_ITEM_BYTES_PER_MESSAGE, MAX_LISTEN_ADDR_BYTES,
-    MAX_MESSAGE_BYTES, MAX_REQUEST_IDS_PER_MESSAGE, MAX_SUMMARIES_PER_MESSAGE, PROTOCOL_VERSION,
+    SyncItem, SyncMessage, MAX_CONTENT_BYTES, MAX_CONTENT_TYPE_BYTES, MAX_DEVICE_NAME_BYTES,
+    MAX_HASH_BYTES, MAX_ID_BYTES, MAX_ITEMS_PER_MESSAGE, MAX_ITEM_BYTES_PER_MESSAGE,
+    MAX_LISTEN_ADDR_BYTES, MAX_MESSAGE_BYTES, MAX_REQUEST_IDS_PER_MESSAGE,
+    MAX_SUMMARIES_PER_MESSAGE, PROTOCOL_VERSION,
 };
 
 /// Wire-level failures.
@@ -184,37 +185,8 @@ impl SyncMessage {
                 check_count("items", items.len(), MAX_ITEMS_PER_MESSAGE)?;
                 let mut total = 0usize;
                 for item in items {
-                    check_id("item_id", &item.item_id)?;
-                    check_id("origin_device_id", &item.origin_device_id)?;
-                    check_len("content_type", &item.content_type, MAX_CONTENT_TYPE_BYTES)?;
-                    if let Some(metadata) = &item.payload_metadata {
-                        check_len(
-                            "payload_metadata",
-                            metadata,
-                            copypaste_ipc::MAX_SYNC_METADATA_BYTES,
-                        )?;
-                        if item.deleted || !valid_payload_metadata(metadata, &item.content_type) {
-                            return Err(ProtocolError::Decode(
-                                "item carries invalid payload metadata".into(),
-                            ));
-                        }
-                    }
-                    check_len("content_hash", &item.content_hash, MAX_HASH_BYTES)?;
-                    check_timestamp(item.created_at)?;
-                    check_timestamp(item.pin_updated_at)?;
-                    check_pin_state(item.pinned, item.pin_order)?;
-                    if !item.content.is_empty() && !item.binary_content.is_empty() {
-                        return Err(ProtocolError::Decode(
-                            "item has both text and binary content".into(),
-                        ));
-                    }
+                    item.validate()?;
                     let content_len = item.content.len().saturating_add(item.binary_content.len());
-                    if content_len > MAX_CONTENT_BYTES {
-                        return Err(ProtocolError::ContentTooLarge {
-                            bytes: content_len,
-                            max: MAX_CONTENT_BYTES,
-                        });
-                    }
                     total = total
                         .saturating_add(content_len)
                         .saturating_add(item.payload_metadata.as_ref().map_or(0, String::len));
@@ -232,6 +204,56 @@ impl SyncMessage {
     }
 }
 
+impl SyncItem {
+    /// Apply the wire contract before this version enters an outgoing batch.
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        let item = self;
+        check_id("item_id", &item.item_id)?;
+        check_id("origin_device_id", &item.origin_device_id)?;
+        check_len("content_type", &item.content_type, MAX_CONTENT_TYPE_BYTES)?;
+        if !item.deleted
+            && item.content_type == copypaste_ipc::content_type::FILE
+            && item.payload_metadata.is_none()
+        {
+            return Err(ProtocolError::Decode(
+                "file item has no payload metadata".into(),
+            ));
+        }
+        if let Some(metadata) = &item.payload_metadata {
+            check_len(
+                "payload_metadata",
+                metadata,
+                copypaste_ipc::MAX_SYNC_METADATA_BYTES,
+            )?;
+            if item.deleted
+                || copypaste_payload::PayloadMetadata::from_json(metadata, &item.content_type)
+                    .is_none()
+            {
+                return Err(ProtocolError::Decode(
+                    "item carries invalid payload metadata".into(),
+                ));
+            }
+        }
+        check_len("content_hash", &item.content_hash, MAX_HASH_BYTES)?;
+        check_timestamp(item.created_at)?;
+        check_timestamp(item.pin_updated_at)?;
+        check_pin_state(item.pinned, item.pin_order)?;
+        if !item.content.is_empty() && !item.binary_content.is_empty() {
+            return Err(ProtocolError::Decode(
+                "item has both text and binary content".into(),
+            ));
+        }
+        let content_len = item.content.len().saturating_add(item.binary_content.len());
+        if content_len > MAX_CONTENT_BYTES {
+            return Err(ProtocolError::ContentTooLarge {
+                bytes: content_len,
+                max: MAX_CONTENT_BYTES,
+            });
+        }
+        Ok(())
+    }
+}
+
 fn check_protocol_version(protocol_version: u32) -> Result<(), ProtocolError> {
     if protocol_version != PROTOCOL_VERSION {
         return Err(ProtocolError::VersionMismatch {
@@ -240,61 +262,6 @@ fn check_protocol_version(protocol_version: u32) -> Result<(), ProtocolError> {
         });
     }
     Ok(())
-}
-
-/// The protocol crate cannot depend on core (core owns the sync source), so it
-/// checks the strict JSON envelope shape here. Core then decodes the PNG under
-/// allocation limits before any row is stored.
-fn valid_payload_metadata(value: &str, content_type: &str) -> bool {
-    use serde_json::Value;
-
-    let Ok(Value::Object(metadata)) = serde_json::from_str(value) else {
-        return false;
-    };
-    let is_file = content_type == copypaste_ipc::content_type::FILE;
-    let valid_file = |value: &Value| match value {
-        Value::Object(file) => {
-            (file.len() == 2 || file.len() == 3)
-                && file.contains_key("filename")
-                && file.contains_key("mime_type")
-                && file.keys().all(|key| {
-                    matches!(key.as_str(), "filename" | "mime_type" | "source_reference")
-                })
-                && file.get("filename").is_some_and(Value::is_string)
-                && file.get("mime_type").is_some_and(Value::is_string)
-                && file.get("source_reference").is_none_or(Value::is_string)
-        }
-        _ => false,
-    };
-    let valid_icon = |value: &Value| match value {
-        Value::Object(icon) => {
-            icon.len() == 3
-                && icon.contains_key("png_base64")
-                && icon.contains_key("width")
-                && icon.contains_key("height")
-                && icon.get("png_base64").is_some_and(Value::is_string)
-                && icon.get("width").is_some_and(Value::is_u64)
-                && icon.get("height").is_some_and(Value::is_u64)
-        }
-        _ => false,
-    };
-
-    if metadata.contains_key("filename") || metadata.contains_key("mime_type") {
-        return is_file && valid_file(&Value::Object(metadata));
-    }
-
-    if metadata.len() > 2
-        || metadata
-            .keys()
-            .any(|key| key != "file" && key != "source_app_icon")
-    {
-        return false;
-    }
-    let file = metadata.get("file");
-    let icon = metadata.get("source_app_icon");
-    (file.is_some() || icon.is_some())
-        && file.is_none_or(|value| is_file && valid_file(value))
-        && icon.is_none_or(valid_icon)
 }
 
 pub(crate) fn validate_device_profile(profile: &DeviceProfile) -> Result<(), ProtocolError> {
@@ -367,7 +334,8 @@ mod tests {
     };
     use crate::DeviceProfile;
 
-    use super::{valid_payload_metadata, ProtocolError};
+    use super::ProtocolError;
+    use copypaste_payload::PayloadMetadata;
 
     fn summary(id: &str) -> ItemSummary {
         ItemSummary {
@@ -540,9 +508,7 @@ mod tests {
                 item_id: "binary".into(),
                 content: String::new(),
                 binary_content: bytes.clone(),
-                payload_metadata: Some(
-                    r#"{"source_app_icon":{"png_base64":"AAAA","width":64,"height":64}}"#.into(),
-                ),
+                payload_metadata: Some(crate::sync::testutil::source_icon_metadata()),
                 source_app_bundle_id: None,
                 source_app_name: None,
                 content_type: "image/png".into(),
@@ -584,6 +550,31 @@ mod tests {
             .validate(),
             Err(ProtocolError::Decode(_))
         ));
+    }
+
+    #[test]
+    fn metadata_matches_the_shared_privacy_and_imported_image_contract() {
+        let privacy = r#"{"privacy":{"secret":true,"transient":false}}"#;
+        assert!(PayloadMetadata::from_json(privacy, "text").is_some());
+        assert!(PayloadMetadata::from_json(r#"{"privacy":{"secret":"true"}}"#, "text").is_none());
+        assert!(PayloadMetadata::from_json(
+            r#"{"privacy":{"secret":true,"unknown":true}}"#,
+            "text"
+        )
+        .is_none());
+        assert!(PayloadMetadata::from_json(r#"{"privacy":{}}"#, "text").is_none());
+        let imported_image = r#"{"file":{"filename":"image.png","mime_type":"image/png"}}"#;
+        assert!(PayloadMetadata::from_json(imported_image, "image/png").is_some());
+        assert!(PayloadMetadata::from_json(imported_image, "text").is_none());
+        let mut image = item("imported-image", "");
+        image.content_type = "image/png".into();
+        image.binary_content = vec![1, 2, 3];
+        image.payload_metadata = Some(imported_image.into());
+        let message = SyncMessage::Items { items: vec![image] };
+        assert_eq!(
+            SyncMessage::decode(&message.encode().unwrap()).unwrap(),
+            message
+        );
     }
 
     #[test]
@@ -715,14 +706,15 @@ mod tests {
 
     #[test]
     fn file_metadata_accepts_a_bounded_source_reference_shape() {
-        assert!(valid_payload_metadata(
+        assert!(PayloadMetadata::from_json(
             r#"{"filename":"report.pdf","mime_type":"application/pdf","source_reference":"/Users/person/Documents/report.pdf"}"#,
             copypaste_ipc::content_type::FILE,
-        ));
-        assert!(!valid_payload_metadata(
+        ).is_some());
+        assert!(PayloadMetadata::from_json(
             r#"{"filename":"report.pdf","mime_type":"application/pdf","source_reference":42}"#,
             copypaste_ipc::content_type::FILE,
-        ));
+        )
+        .is_none());
     }
 
     #[test]

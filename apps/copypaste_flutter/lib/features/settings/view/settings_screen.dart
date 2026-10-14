@@ -15,6 +15,7 @@ import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_toast.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../platform/desktop/global_shortcut.dart';
+import '../../../platform/desktop/desktop_visibility_controller.dart';
 import '../../../platform/permissions/linux_integration.dart';
 import '../../../shared/adaptive_breakpoints.dart';
 import '../../../shared/state_view.dart';
@@ -30,6 +31,7 @@ class SettingsScreen extends StatefulWidget {
     super.key,
     required this.controller,
     this.quickPaste,
+    this.desktopVisibility,
     this.appUpdate,
     this.modules,
     this.onOpenAndroidCaptureSetup,
@@ -37,6 +39,7 @@ class SettingsScreen extends StatefulWidget {
 
   final SettingsController controller;
   final QuickPasteSettingsController? quickPaste;
+  final DesktopVisibilityController? desktopVisibility;
   final AppUpdateController? appUpdate;
   final ModulesController? modules;
   final Future<void> Function()? onOpenAndroidCaptureSetup;
@@ -59,6 +62,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     50 * 1024 * 1024 * 1024,
   ];
 
+  final _generalSectionKey = GlobalKey();
+  final _taskbarVisibilityKey = GlobalKey();
+  final _trayVisibilityKey = GlobalKey();
   final _clipboardSectionKey = GlobalKey();
   final _modulesSectionKey = GlobalKey();
   final _privacySectionKey = GlobalKey();
@@ -121,7 +127,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: widget.controller,
+      animation: Listenable.merge([
+        widget.controller,
+        widget.desktopVisibility,
+      ]),
       builder: (context, _) => _loadedContent(() => _content(context)),
     );
   }
@@ -274,6 +283,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const Gap(AppSpacing.xxxl),
               ],
               switch (selectedSection) {
+                SettingsSectionId.general => _generalSection(
+                  showHeading: showHeading,
+                ),
                 SettingsSectionId.modules => _SettingsSection(
                   key: _modulesSectionKey,
                   title: 'Modules',
@@ -388,7 +400,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       disableAnimations: MediaQuery.disableAnimationsOf(context),
       settings: RouteSettings(name: 'settings/${target.section.slug}'),
       builder: (context) => AnimatedBuilder(
-        animation: Listenable.merge([widget.controller, _detailRevision]),
+        animation: Listenable.merge([
+          widget.controller,
+          widget.desktopVisibility,
+          _detailRevision,
+        ]),
         builder: (context, _) => Scaffold(
           headers: [
             AppBar(
@@ -443,7 +459,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   SettingsSectionId get _effectiveSelectedSection {
-    if ((_selectedSection == SettingsSectionId.quickPaste &&
+    if ((_selectedSection == SettingsSectionId.general &&
+            widget.desktopVisibility == null) ||
+        (_selectedSection == SettingsSectionId.quickPaste &&
             widget.quickPaste == null) ||
         (_selectedSection == SettingsSectionId.modules &&
             widget.modules == null)) {
@@ -462,7 +480,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   List<_SettingsNavigationTarget> _sectionTargets() {
     return [
       for (final section in SettingsSectionId.values)
-        if ((section != SettingsSectionId.quickPaste ||
+        if ((section != SettingsSectionId.general ||
+                widget.desktopVisibility != null) &&
+            (section != SettingsSectionId.quickPaste ||
                 widget.quickPaste != null) &&
             (section != SettingsSectionId.modules || widget.modules != null))
           _SettingsNavigationTarget(
@@ -477,6 +497,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   List<_SettingsNavigationTarget> _searchTargets() {
     return [
+      if (widget.desktopVisibility != null) ...[
+        _SettingsNavigationTarget(
+          id: 'result-taskbar-visibility',
+          section: SettingsSectionId.general,
+          label: _taskbarVisibilityLabel,
+          description: 'Show the application icon for switching windows.',
+          keywords: 'dock taskbar application icon visibility',
+          targetKey: _taskbarVisibilityKey,
+        ),
+        _SettingsNavigationTarget(
+          id: 'result-tray-visibility',
+          section: SettingsSectionId.general,
+          label: _trayVisibilityLabel,
+          description: 'Show quick access to CopyPaste and capture controls.',
+          keywords: 'tray menu bar menubar status icon visibility',
+          targetKey: _trayVisibilityKey,
+        ),
+      ],
       if (widget.modules != null)
         _SettingsNavigationTarget(
           id: 'result-modules',
@@ -642,6 +680,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   GlobalKey _sectionKey(SettingsSectionId section) => switch (section) {
+    SettingsSectionId.general => _generalSectionKey,
     SettingsSectionId.clipboard => _clipboardSectionKey,
     SettingsSectionId.modules => _modulesSectionKey,
     SettingsSectionId.privacy => _privacySectionKey,
@@ -721,6 +760,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
+  bool get _isMacOS => defaultTargetPlatform == TargetPlatform.macOS;
+  String get _taskbarVisibilityLabel =>
+      _isMacOS ? 'Show in Dock' : 'Show in taskbar';
+  String get _trayVisibilityLabel =>
+      _isMacOS ? 'Show in menu bar' : 'Show in system tray';
+
+  Widget _generalSection({required bool showHeading}) {
+    final controller = widget.desktopVisibility!;
+    final preferences = controller.preferences;
+    return _SettingsSection(
+      key: _generalSectionKey,
+      title: 'General',
+      showHeading: showHeading,
+      description:
+          'Choose where CopyPaste appears. Open CopyPaste again to restore its window when both icons are hidden.',
+      children: [
+        if (controller.error case final message?)
+          Alert.destructive(
+            leading: const Icon(LucideIcons.circleAlert),
+            title: const Text('Visibility could not be changed'),
+            content: Text(message),
+          ),
+        _SettingRow(
+          key: _taskbarVisibilityKey,
+          highlighted: _isHighlighted('result-taskbar-visibility'),
+          title: _taskbarVisibilityLabel,
+          description: 'Show the application icon for switching windows.',
+          trailing: Switch(
+            key: const ValueKey('settings-show-in-taskbar'),
+            value: preferences.showInTaskbar,
+            onChanged: controller.busy
+                ? null
+                : (value) => unawaited(controller.setTaskbarVisible(value)),
+          ),
+        ),
+        _SettingRow(
+          key: _trayVisibilityKey,
+          highlighted: _isHighlighted('result-tray-visibility'),
+          title: _trayVisibilityLabel,
+          description: 'Show quick access to CopyPaste and capture controls.',
+          trailing: Switch(
+            key: const ValueKey('settings-show-in-tray'),
+            value: preferences.showInTray,
+            onChanged: controller.busy
+                ? null
+                : (value) => unawaited(controller.setTrayVisible(value)),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _clipboardSection(
     RuntimeSettings settings, {
     required bool showHeading,
@@ -742,6 +833,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             description:
                 'Choose Full or Limited mode and manage the one-time Shizuku or ADB setup.',
             trailing: Button.secondary(
+              style: AppTheme.actionButtonStyle(const ButtonStyle.secondary()),
               onPressed: widget.controller.busy
                   ? null
                   : widget.onOpenAndroidCaptureSetup,
@@ -771,6 +863,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               description:
                   'Allow access to all photos and notifications to save new screenshots in the background.',
               trailing: Button.secondary(
+                style: AppTheme.actionButtonStyle(
+                  const ButtonStyle.secondary(),
+                ),
                 key: const ValueKey<String>('screenshot-capture-permission'),
                 onPressed: widget.controller.busy
                     ? null
@@ -844,6 +939,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: 'Export text history',
               description: 'Save text clips in a portable file.',
               trailing: Button.secondary(
+                style: AppTheme.actionButtonStyle(
+                  const ButtonStyle.secondary(),
+                ),
                 onPressed: widget.controller.busy
                     ? null
                     : widget.controller.exportTextHistory,
@@ -857,6 +955,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: 'Encrypted backup',
               description: 'Save the complete local history for this device.',
               trailing: Button.secondary(
+                style: AppTheme.actionButtonStyle(
+                  const ButtonStyle.secondary(),
+                ),
                 onPressed: widget.controller.busy
                     ? null
                     : widget.controller.createBackup,
@@ -870,6 +971,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: 'Restore backup',
               description: 'Replace local history with an encrypted backup.',
               trailing: Button.destructive(
+                style: AppTheme.actionButtonStyle(
+                  const ButtonStyle.destructive(),
+                ),
                 onPressed: widget.controller.busy ? null : _confirmRestore,
                 leading: const Icon(LucideIcons.history),
                 child: const Text('Restore'),
@@ -1349,10 +1453,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         actions: [
           Button.ghost(
+            style: AppTheme.actionButtonStyle(const ButtonStyle.ghost()),
             onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           Button.primary(
+            style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
             onPressed: () => Navigator.pop(dialogContext, input.text),
             child: const Text('Exclude'),
           ),
@@ -1374,10 +1480,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         actions: [
           Button.ghost(
+            style: AppTheme.actionButtonStyle(const ButtonStyle.ghost()),
             onPressed: () => Navigator.pop(dialogContext, false),
             child: const Text('Cancel'),
           ),
           Button.destructive(
+            style: AppTheme.actionButtonStyle(const ButtonStyle.destructive()),
             onPressed: () => Navigator.pop(dialogContext, true),
             child: const Text('Choose backup'),
           ),
@@ -1456,10 +1564,6 @@ class _SettingRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final actionControl = ButtonStyleOverride(
-      decoration: AppTheme.actionButtonDecoration,
-      child: trailing,
-    );
     final copy = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1486,7 +1590,7 @@ class _SettingRow extends StatelessWidget {
               children: [
                 copy,
                 const Gap(AppSpacing.md),
-                Align(alignment: Alignment.centerRight, child: actionControl),
+                Align(alignment: Alignment.centerRight, child: trailing),
               ],
             );
           }
@@ -1495,7 +1599,7 @@ class _SettingRow extends StatelessWidget {
             children: [
               Expanded(child: copy),
               const Gap(AppSpacing.lg),
-              actionControl,
+              trailing,
             ],
           );
         },
