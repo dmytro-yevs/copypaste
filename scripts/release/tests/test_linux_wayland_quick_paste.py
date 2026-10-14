@@ -295,31 +295,46 @@ class LinuxWaylandQuickPasteTest(unittest.TestCase):
         self.assertIsNone(module.portal_control(Node(children=(first, second)), atspi, 'Share', {'click'}))
         self.assertIsNone(module.portal_control(Node('Share', 'showing', 'visible', 'sensitive', actions=('toggle',)), atspi, 'Share', {'click'}))
 
-    def test_kde_portal_consent_uses_the_localized_allow_button(self):
+    def test_kde_portal_consent_uses_the_unique_qt_share_press_button(self):
         class State:
             def contains(self, _value):
                 return True
 
         class Action:
-            nActions = 1
+            def __init__(self, node):
+                self.node = node
+                self.nActions = 1
 
             def getName(self, _index):
-                return 'Press'
+                return self.node.action
 
             def doAction(self, _index):
+                self.node.clicked = True
                 return True
 
         class Node:
-            name = 'Allow'
-            childCount = 0
+            def __init__(self, name='', action='Press', children=()):
+                self.name = name
+                self.action = action
+                self.children = list(children)
+                self.childCount = len(self.children)
+                self.clicked = False
 
             def getState(self):
                 return State()
 
-            def queryAction(self):
-                return Action()
+            def getChildAtIndex(self, index):
+                return self.children[index]
 
-        self.assertTrue(module.kde_portal_consent(Node(), SimpleNamespace(STATE_SHOWING='showing', STATE_VISIBLE='visible', STATE_SENSITIVE='sensitive')))
+            def queryAction(self):
+                return Action(self)
+
+        atspi = SimpleNamespace(STATE_SHOWING='showing', STATE_VISIBLE='visible', STATE_SENSITIVE='sensitive')
+        share = Node('Share', 'pReSs')
+        self.assertTrue(module.kde_portal_consent(share, atspi))
+        self.assertTrue(share.clicked)
+        self.assertFalse(module.kde_portal_consent(Node('Allow', 'Press'), atspi))
+        self.assertFalse(module.kde_portal_consent(Node(children=(Node('Share'), Node('Share'))), atspi))
 
     def test_portal_response_received_during_call_is_not_lost(self):
         class Reply:
