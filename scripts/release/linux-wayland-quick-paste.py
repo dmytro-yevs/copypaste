@@ -533,8 +533,8 @@ def gnome_portal_consent(application: Any, atspi: Any) -> bool:
 
 
 def kde_portal_consent(application: Any, atspi: Any) -> bool:
-    accept = portal_control(application, atspi, "Allow", {"press", "click"})
-    return accept is not None and activate(*accept)
+    share = portal_control(application, atspi, "Share", {"press"})
+    return share is not None and activate(*share)
 
 
 def click_owned_portal_consent(portal: PortalKeyboard) -> tuple[int, str]:
