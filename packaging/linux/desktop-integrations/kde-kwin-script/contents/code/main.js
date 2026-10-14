@@ -7,6 +7,7 @@ const QUICK_PASTE_CAPTION = 'CopyPaste Quick Paste';
 let activeTransaction = null;
 let awaitingShortcut = false;
 let awaitGeneration = 0;
+let awaitHostPid = null;
 let restorePending = null;
 let deadlineTimer = null;
 let qualificationTimer = null;
@@ -69,8 +70,11 @@ function awaitQualification() {
 function recoverAwaitForHostWindow(window) {
     if (!isHostWindow(window) || activeTransaction)
         return;
-    awaitGeneration += 1;
-    awaitingShortcut = false;
+    if (awaitHostPid !== window.pid) {
+        awaitHostPid = window.pid;
+        awaitGeneration += 1;
+        awaitingShortcut = false;
+    }
     awaitQuickPaste();
 }
 
@@ -87,7 +91,7 @@ function restoreFocusWithoutPaste(pending) {
     if (!pending.window || pending.window.deleted || !pending.presentationWindow || pending.presentationWindow.deleted)
         return;
     if (workspace.activeWindow === pending.presentationWindow)
-        workspace.activateWindow(pending.window);
+        workspace.activeWindow = pending.window;
 }
 
 function finishTransaction(pending) {
@@ -133,7 +137,7 @@ function restoreThenPaste(pending) {
             return;
         }
         restorePending = pending;
-        workspace.activateWindow(pending.window);
+        workspace.activeWindow = pending.window;
         if (workspace.activeWindow === pending.window)
             pasteIntoRestoredWindow(pending);
     } catch (_error) {
@@ -194,7 +198,7 @@ workspace.windowAdded.connect(window => {
     }
     if (activeTransaction && isQuickPasteWindow(window)) {
         activeTransaction.presentationWindow = window;
-        workspace.activateWindow(window);
+        workspace.activeWindow = window;
     }
     recoverAwaitForHostWindow(window);
 });
@@ -212,7 +216,7 @@ workspace.windowRemoved.connect(window => {
         cancelTransaction(activeTransaction);
 });
 
-awaitQuickPaste();
+workspace.windowList().forEach(recoverAwaitForHostWindow);
 callDBus(HOST_BUS_NAME, HOST_OBJECT_PATH, HOST_INTERFACE,
     'QualificationEnabled', enabled => {
         if (!enabled)
