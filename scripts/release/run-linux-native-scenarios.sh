@@ -214,9 +214,30 @@ init_trace_logs
 
 current_package() { printf '%s/CopyPaste-v%s-linux-%s.%s' "$ARTIFACTS" "$VERSION" "$ARCHITECTURE" "$1"; }
 previous_package() { printf '%s/CopyPaste-v%s-linux-%s.%s' "$PREVIOUS_ARTIFACTS" "$PREVIOUS_VERSION" "$ARCHITECTURE" "$1"; }
-for format in AppImage deb rpm; do [[ -f "$(current_package "$format")" ]] || { echo "ERROR: exact current $format package is required" >&2; exit 1; }; done
+if [[ -f /etc/fedora-release ]]; then
+  native_format=rpm
+else
+  native_format=deb
+fi
+
+require_desktop_packages() {
+  local directory="$1"
+  local version="$2"
+  local transition="$3"
+  local format
+  local artifact
+  for format in AppImage "$native_format"; do
+    artifact="$directory/CopyPaste-v$version-linux-$ARCHITECTURE.$format"
+    [[ -f "$artifact" && ! -L "$artifact" ]] || {
+      echo "ERROR: exact $transition $format package is required" >&2
+      return 1
+    }
+  done
+}
+
+require_desktop_packages "$ARTIFACTS" "$VERSION" current
 if [[ "$FIRST_INSTALL_BASELINE" == false ]]; then
-  for format in AppImage deb rpm; do [[ -f "$(previous_package "$format")" ]] || { echo "ERROR: exact prior $format package is required" >&2; exit 1; }; done
+  require_desktop_packages "$PREVIOUS_ARTIFACTS" "$PREVIOUS_VERSION" prior
 fi
 
 cleanup_packages() {
@@ -231,12 +252,6 @@ trap cleanup_packages EXIT
 # manager with dependency resolution; there is no --nodeps escape hatch.
 work="$(mktemp -d)"
 trap 'rm -rf "$work"; cleanup_packages' EXIT
-if [[ -f /etc/fedora-release ]]; then
-  native_format=rpm
-else
-  native_format=deb
-fi
-
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 args=(--artifacts "$ARTIFACTS" --version "$VERSION" --architecture "$ARCHITECTURE" --desktop "$DESKTOP" --session "$SESSION" --evidence-dir "$EVIDENCE_DIR" --module-artifacts "$MODULE_ARTIFACTS" --module-fixtures "$MODULE_FIXTURES")
 if [[ "$FIRST_INSTALL_BASELINE" == true ]]; then
