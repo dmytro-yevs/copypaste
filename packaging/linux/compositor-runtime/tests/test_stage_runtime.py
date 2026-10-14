@@ -116,9 +116,10 @@ class RuntimeStageTests(unittest.TestCase):
             runtime = root / "input"
             (runtime / "bin").mkdir(parents=True)
             executable = runtime / "bin/start"
-            executable.write_text("#!/bin/sh\nprintf '%s|%s|%s|%s\\n' \"$#\" \"${LD_PRELOAD-unset}\" \"$LD_LIBRARY_PATH\" \"$CAPTURE\" > \"$CAPTURE\"\n", encoding="utf-8")
+            executable.write_text("#!/bin/sh\nprintf '%s|%s|%s|%s|%s\\n' \"$#\" \"${LD_PRELOAD-unset}\" \"$LD_LIBRARY_PATH\" \"$QT_PLUGIN_PATH\" \"$CAPTURE\" > \"$CAPTURE\"\n", encoding="utf-8")
             executable.chmod(0o755)
             receipt = self.make_receipt(runtime, {"kind": "private", "entrypoint": "bin/start"})
+            receipt["runtime_env"] = {"QT_PLUGIN_PATH": "usr/lib64/qt6/plugins"}
             receipt_path = root / "receipt.json"
             receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
             runtime_prefix = root / "private"
@@ -126,11 +127,41 @@ class RuntimeStageTests(unittest.TestCase):
             session_dir = root / "sessions"
             launcher, _ = stage_runtime.stage(receipt_path, runtime, Path("/"), str(runtime_prefix), str(session_dir), str(launcher_dir), str(root / "receipts"))
             capture = root / "capture"
-            completed = subprocess.run([str(launcher)], env={**os.environ, "LD_PRELOAD": "/tmp/injected.so", "CAPTURE": str(capture)}, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            completed = subprocess.run([str(launcher)], env={**os.environ, "LD_PRELOAD": "/tmp/injected.so", "QT_PLUGIN_PATH": "/host/plugins", "CAPTURE": str(capture)}, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             self.assertEqual(completed.returncode, 0, completed.stderr)
-            self.assertEqual(capture.read_text(encoding="utf-8"), f"0|unset|{runtime_prefix}/kwin-6.3-test/lib:{runtime_prefix}/kwin-6.3-test/lib64|{capture}\n")
+            self.assertEqual(capture.read_text(encoding="utf-8"), f"0|unset|{runtime_prefix}/kwin-6.3-test/lib:{runtime_prefix}/kwin-6.3-test/lib64|{runtime_prefix}/kwin-6.3-test/usr/lib64/qt6/plugins|{capture}\n")
             rejected = subprocess.run([str(launcher), "unexpected"], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             self.assertEqual(rejected.returncode, 64)
+
+    def test_kde_receipt_binds_the_private_qt_plugin_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = root / "runtime"
+            entrypoint = runtime / "usr/bin/kwin_wayland"
+            qualification = runtime / "usr/libexec/copypaste-kwin-headless"
+            entrypoint.parent.mkdir(parents=True)
+            qualification.parent.mkdir(parents=True)
+            entrypoint.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            qualification.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            entrypoint.chmod(0o755)
+            qualification.chmod(0o755)
+            patch = root / "kwin.patch"
+            license_file = root / "COPYING"
+            patch.write_text("patch\n", encoding="utf-8")
+            license_file.write_text("GPL-2.0-or-later\n", encoding="utf-8")
+            output = root / "receipt.json"
+            arguments = [
+                "emit_runtime_receipt.py", "--runtime-dir", str(runtime), "--output", str(output),
+                "--runtime-id", "kwin-6.3-test", "--desktop", "KDE", "--source-revision", "v6.3.0",
+                "--patch", str(patch), "--glibc-floor", "2.39", "--private-entrypoint", "usr/bin/kwin_wayland",
+                "--qualification-entrypoint", "usr/libexec/copypaste-kwin-headless", "--license-file", str(license_file),
+            ]
+            with mock.patch.object(sys, "argv", arguments), \
+                    mock.patch.object(emit_runtime_receipt, "architecture", return_value="x86_64"), \
+                    mock.patch.object(emit_runtime_receipt, "os_release", return_value={"id": "fedora", "version": "40"}):
+                self.assertEqual(emit_runtime_receipt.main(), 0)
+            receipt = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(receipt["runtime_env"], {"QT_PLUGIN_PATH": "usr/lib64/qt6/plugins"})
 
     def test_receipt_rejects_an_escape_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
