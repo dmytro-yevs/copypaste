@@ -60,6 +60,18 @@ mapfile -t bundles < <(find build/linux -type d -path '*/release/bundle' -print 
   exit 1
 }
 BUNDLE="${bundles[0]}"
+python3 - "$BUNDLE/data/flutter_assets/version.json" "$VERSION" "$BUILD_NUMBER" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+metadata = json.loads(path.read_text(encoding="utf-8"))
+if metadata.get("version") != sys.argv[2] or metadata.get("build_number") != sys.argv[3]:
+    raise ValueError("Flutter bundle metadata differs from the release version")
+metadata["app_name"] = "CopyPaste"
+path.write_text(json.dumps(metadata, separators=(",", ":")), encoding="utf-8")
+PY
 [[ -x "$BUNDLE/copypaste" ]] || {
   echo "ERROR: Flutter Linux release bundle has no copypaste executable" >&2
   exit 1

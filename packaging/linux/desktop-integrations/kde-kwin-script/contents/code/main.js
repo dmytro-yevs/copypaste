@@ -67,6 +67,19 @@ function awaitQualification() {
         });
 }
 
+function armQualification() {
+    const hostPid = awaitHostPid;
+    callDBus(HOST_BUS_NAME, HOST_OBJECT_PATH, HOST_INTERFACE,
+        'QualificationEnabled', enabled => {
+            if (!enabled || hostPid !== awaitHostPid || qualificationTimer)
+                return;
+            qualificationTimer = new QTimer();
+            qualificationTimer.interval = 250;
+            qualificationTimer.timeout.connect(awaitQualification);
+            qualificationTimer.start();
+        });
+}
+
 function recoverAwaitForHostWindow(window) {
     if (!isHostWindow(window) || activeTransaction)
         return;
@@ -74,6 +87,11 @@ function recoverAwaitForHostWindow(window) {
         awaitHostPid = window.pid;
         awaitGeneration += 1;
         awaitingShortcut = false;
+        if (qualificationTimer)
+            qualificationTimer.stop();
+        qualificationTimer = null;
+        qualificationClose = null;
+        armQualification();
     }
     awaitQuickPaste();
 }
@@ -217,12 +235,3 @@ workspace.windowRemoved.connect(window => {
 });
 
 workspace.windowList().forEach(recoverAwaitForHostWindow);
-callDBus(HOST_BUS_NAME, HOST_OBJECT_PATH, HOST_INTERFACE,
-    'QualificationEnabled', enabled => {
-        if (!enabled)
-            return;
-        qualificationTimer = new QTimer();
-        qualificationTimer.interval = 250;
-        qualificationTimer.timeout.connect(awaitQualification);
-        qualificationTimer.start();
-    });
