@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'desktop_window_controller.dart';
 import 'flutter_desktop_window_host.dart';
+import 'desktop_visibility_preferences.dart';
 
 Future<DesktopWindowController?> initializeDesktopWindow() async {
   if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) {
@@ -16,6 +17,7 @@ Future<DesktopWindowController?> initializeDesktopWindow() async {
   final controller = DesktopWindowController(
     host: FlutterDesktopWindowHost(),
     geometryStore: SharedPreferencesDesktopWindowGeometryStore(),
+    visibilityStore: SharedPreferencesDesktopVisibilityStore(),
   );
   await controller.initialize();
   return controller;

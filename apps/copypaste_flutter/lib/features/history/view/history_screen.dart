@@ -1043,7 +1043,13 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
     required T value,
     required ValueChanged<_HistoryFilterOption<T>> onChanged,
   }) => ComponentTheme<SelectTheme>(
-    data: _selectThemeFor(context, options, compact),
+    data: AppTheme.selectTheme(
+      context,
+      variant: compact
+          ? AppSelectVariant.compactToolbar
+          : AppSelectVariant.toolbar,
+      labels: options.map((option) => option.label),
+    ),
     child: Select<_HistoryFilterOption<T>>(
       filled: true,
       constraints: _selectConstraints(context, compact),
@@ -1116,45 +1122,6 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
       if (facet.id == selectedId) return facet.label;
     }
     return fallback;
-  }
-
-  SelectTheme _selectThemeFor<T>(
-    BuildContext context,
-    List<_HistoryFilterOption<T>> options,
-    bool compact,
-  ) {
-    final theme = Theme.of(context);
-    final style = DefaultTextStyle.of(context).style
-        .merge(theme.typography.sans)
-        .merge(theme.typography.small)
-        .merge(theme.typography.normal);
-    final textScaler = MediaQuery.textScalerOf(context);
-    var widestLabel = 0.0;
-    for (final option in options) {
-      final painter = TextPainter(
-        text: TextSpan(text: option.label, style: style),
-        maxLines: 1,
-        textDirection: Directionality.of(context),
-        textScaler: textScaler,
-      )..layout();
-      if (painter.width > widestLabel) widestLabel = painter.width;
-    }
-    final popupWidth = widestLabel.ceilToDouble() + 32 + (48 * theme.scaling);
-    return SelectTheme(
-      adaptiveOverlay: false,
-      decoration: AppTheme.softSelectDecoration,
-      padding: AppTheme.controlFieldPadding(
-        context,
-        horizontal: compact ? AppSpacing.xs : AppSpacing.sm,
-        minimum: AppControlSize.large,
-      ),
-      popupConstraints: BoxConstraints(
-        minWidth: popupWidth,
-        maxWidth: popupWidth,
-        maxHeight: 240,
-      ),
-      overlayConfiguration: AppOverlays.selectPopoverConfiguration(context),
-    );
   }
 
   _HistoryFilterOption<T> _selectedOption<T>(

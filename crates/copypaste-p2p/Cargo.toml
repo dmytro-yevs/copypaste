@@ -9,6 +9,7 @@ license.workspace = true
 copypaste-clock = { path = "../copypaste-clock" }
 copypaste-fs = { path = "../copypaste-fs" }
 copypaste-ipc = { path = "../copypaste-ipc" }
+copypaste-payload = { path = "../copypaste-payload" }
 chacha20poly1305.workspace = true
 snow.workspace = true
 spake2 = "0.4"
@@ -50,6 +51,7 @@ sysctl = "0.7"
 winreg = "0.55"
 
 [dev-dependencies]
+image.workspace = true
 tempfile.workspace = true
 # The cursor-store warnings are the one place a path could reach a log, so the
 # test asserts on what is emitted rather than on a reading of the source.

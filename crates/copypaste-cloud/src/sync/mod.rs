@@ -161,6 +161,155 @@ mod tests {
         assert_eq!(received.payload_metadata.as_deref(), Some(metadata));
     }
 
+    #[cfg(feature = "storage")]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn confidential_and_legacy_records_keep_metadata_through_cloud_and_relay() {
+        use copypaste_core::{Keyring, PayloadMetadata, SourceAppIconMetadata, Store, StoreSource};
+        use copypaste_ipc::{ClipboardPrivacy, ConfigData};
+        let make = |secret, name: &str| {
+            let keys = Arc::new(Keyring::from_secret(&[secret; 32]));
+            let store = Store::open_in_memory(&keys.db_key()).unwrap();
+            let identity = store.device_identity(name).unwrap();
+            let shared = StoreSource::new(
+                store.clone(),
+                Arc::clone(&keys),
+                identity.device_id.clone(),
+                identity.device_name,
+                ConfigData::default(),
+            );
+            let view = StoreView::new(shared, identity.device_id);
+            (keys, store, view)
+        };
+        let (sender_keys, sender, sender_view) = make(111, "sender");
+        let (receiver_keys, receiver, receiver_view) = make(112, "receiver");
+        let (_, relay, relay_view) = make(113, "relay");
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(1, 1)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        let privacy = ClipboardPrivacy {
+            secret: true,
+            transient: true,
+        };
+        let metadata = PayloadMetadata {
+            privacy,
+            file: None,
+            source_app_icon: SourceAppIconMetadata::new(&png.into_inner(), 1, 1),
+        }
+        .to_json("text")
+        .unwrap();
+        for (id, metadata) in [
+            ("private", metadata),
+            ("legacy", r#"{"legacy_private":true}"#.into()),
+        ] {
+            let text = format!("synthetic {id} cloud record");
+            let (nonce, content_ciphertext) =
+                copypaste_core::encrypt(text.as_bytes(), &sender_keys.item_key(), id).unwrap();
+            sender
+                .insert(copypaste_core::NewItem {
+                    id: id.into(),
+                    nonce,
+                    content_ciphertext,
+                    content_type: "text".into(),
+                    content_hash: copypaste_core::compute_content_hash(text.as_bytes()),
+                    search_text: None,
+                    created_at: 1000,
+                    app_bundle_id: Some(format!("com.example.{id}")),
+                    app_name: Some("Synthetic".into()),
+                    payload_metadata: Some(metadata),
+                })
+                .unwrap();
+        }
+        let backend = Arc::new(FakeRest::default());
+        let device_a = CloudSync::new(
+            SharedRest(Arc::clone(&backend)),
+            FakeAuth::default(),
+            key(),
+            config(),
+            session("token-1"),
+        );
+        let outgoing = sender_view
+            .scan(&sender, 0, None, 0, &UnreadableUploads::default())
+            .unwrap()
+            .items;
+        assert_eq!(outgoing.len(), 2);
+        let a_source = FakeSource::with_outgoing(outgoing);
+        assert_eq!(device_a.push(&a_source).await.unwrap().uploaded, 2);
+        let device_b = CloudSync::new(
+            SharedRest(Arc::clone(&backend)),
+            FakeAuth::default(),
+            key(),
+            config(),
+            session("token-2"),
+        );
+        let b_source = FakeSource::default();
+        let downloaded = device_b.pull(&b_source).await.unwrap();
+        assert_eq!(
+            (
+                downloaded.applied,
+                downloaded.skipped_forged,
+                downloaded.skipped_undecryptable
+            ),
+            (2, 0, 0)
+        );
+        let incoming = ["private", "legacy"]
+            .map(|id| b_source.get(id).unwrap())
+            .to_vec();
+        assert!(receiver_view
+            .apply_page(incoming)
+            .unwrap()
+            .iter()
+            .all(|outcome| matches!(outcome, Applied::Merged)));
+        let forwarded = receiver_view
+            .scan(&receiver, 0, None, 0, &UnreadableUploads::default())
+            .unwrap()
+            .items;
+        assert!(relay_view
+            .apply_page(forwarded)
+            .unwrap()
+            .iter()
+            .all(|outcome| matches!(outcome, Applied::Merged)));
+        for id in ["private", "legacy"] {
+            let row = receiver.get(id).unwrap().unwrap();
+            let clear = copypaste_core::decrypt(
+                &row.content_ciphertext,
+                &row.nonce,
+                &receiver_keys.item_key(),
+                id,
+            )
+            .unwrap();
+            assert_eq!(
+                clear.as_slice(),
+                format!("synthetic {id} cloud record").as_bytes()
+            );
+            for (store, view) in [(&receiver, &receiver_view), (&relay, &relay_view)] {
+                let row = store.get(id).unwrap().unwrap();
+                assert!(row.clipboard_privacy().secret);
+                assert!(store.search("synthetic", 10).unwrap().is_empty());
+                let json = view
+                    .shared()
+                    .store()
+                    .payload_metadata_for_sync(&row)
+                    .unwrap()
+                    .unwrap();
+                let envelope = PayloadMetadata::from_json(&json, "text").unwrap();
+                if id == "private" {
+                    assert_eq!(envelope.privacy, privacy);
+                    assert!(envelope.source_app_icon.is_some());
+                }
+            }
+        }
+        assert_eq!(
+            sender
+                .get("legacy")
+                .unwrap()
+                .unwrap()
+                .payload_metadata
+                .as_deref(),
+            Some(r#"{"legacy_private":true}"#)
+        );
+    }
+
     /// One backend shared by two drivers.
     struct SharedRest(Arc<FakeRest>);
 

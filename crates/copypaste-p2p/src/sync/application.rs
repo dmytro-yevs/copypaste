@@ -24,6 +24,7 @@ pub(super) async fn receive_items<C: SyncChannel, S: SyncSource>(
     // beyond one frame per requested id plus that allowance cannot be useful.
     let mut budget = wanted.len().saturating_add(2);
     let mut applied: HashSet<String> = HashSet::new();
+    let mut received: HashSet<String> = HashSet::new();
     let mut floor: Option<i64> = None;
 
     loop {
@@ -44,6 +45,7 @@ pub(super) async fn receive_items<C: SyncChannel, S: SyncSource>(
                         stats.skipped += 1;
                         continue;
                     };
+                    received.insert(item.item_id.clone());
                     if item.summary() != *promised {
                         tracing::warn!(
                             "peer sent an item that does not match its summary; dropping it"
@@ -97,10 +99,14 @@ pub(super) async fn receive_items<C: SyncChannel, S: SyncSource>(
                 }
             }
             SyncMessage::Done => {
+                // Missing or invalid versions keep the cursor at their stamp,
+                // while valid versions in this round can still converge.
+                stats.skipped_unavailable += wanted.len().saturating_sub(applied.len());
+                stats.skipped += wanted.len().saturating_sub(received.len());
                 return Ok(Applied {
                     attempted: applied,
                     floor,
-                })
+                });
             }
             other => {
                 return Err(SyncError::Unexpected {

@@ -7,6 +7,7 @@
 
 #include "flutter_window.h"
 #include "app_update_helper.h"
+#include "application_instance.h"
 #include "utils.h"
 
 namespace {
@@ -66,6 +67,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   if (pairing_argument != command_line_arguments.end()) {
     pending_pairing_uri = *pairing_argument;
     command_line_arguments.erase(pairing_argument);
+  }
+
+  ApplicationInstance application_instance;
+  if (!application_instance.valid()) return EXIT_FAILURE;
+  if (!application_instance.primary()) {
+    const bool opened = application_instance.OpenExisting(pending_pairing_uri);
+    ::CoUninitialize();
+    return opened ? EXIT_SUCCESS : EXIT_FAILURE;
   }
 
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
