@@ -49,6 +49,9 @@ export NO_AT_BRIDGE=0
 export XDG_CURRENT_DESKTOP=KDE
 export XDG_SESSION_DESKTOP=KDE
 export XDG_SESSION_TYPE="$SESSION"
+export KDE_FULL_SESSION=true
+export KDE_SESSION_VERSION=6
+export KDE_SESSION_UID="$(id -u)"
 export XDG_DATA_HOME="$runtime/data"
 export XDG_CONFIG_HOME="$runtime/config"
 export XDG_CACHE_HOME="$runtime/cache"
@@ -124,7 +127,8 @@ esac
 
 dbus-update-activation-environment \
   DBUS_SESSION_BUS_ADDRESS DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_DATA_HOME \
-  XDG_CONFIG_HOME XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE
+  XDG_CONFIG_HOME XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE \
+  KDE_FULL_SESSION KDE_SESSION_VERSION KDE_SESSION_UID
 gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.a11y.Bus.GetAddress >/dev/null
 busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true
 [[ "$(busctl --user get-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled)" == "b true" ]]
