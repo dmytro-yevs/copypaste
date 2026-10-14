@@ -24,7 +24,9 @@ COORDINATES = (
     ("gnome", "GNOME", "46", "ubuntu24.04", "ubuntu", "24.04", "deb"),
     ("kwin", "KDE", "6.0", "fedora40", "fedora", "40", "rpm"),
 )
-ARCHITECTURES = ("x86_64", "aarch64")
+RELEASE = runpy.run_path(str(Path(__file__).with_name("linux_release_contract.py")))
+ARCHITECTURES = RELEASE["ARCHITECTURES"]
+COORDINATES = tuple(row for row in COORDINATES if row[1] in RELEASE["DESKTOPS"])
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -247,8 +249,8 @@ def verify_public(
     if type(producer_run_id) is not int or producer_run_id <= 0:
         raise ContractError("compositor runtime source manifest has no producer run identity")
     entries = manifest.get("entries")
-    if not isinstance(entries, list) or len(entries) != 4:
-        raise ContractError("compositor runtime source manifest does not contain four companion packages")
+    if not isinstance(entries, list) or len(entries) != len(RELEASE["BASELINES"]):
+        raise ContractError("compositor runtime source manifest does not contain every released companion package")
     expected = {
         (desktop, architecture, distribution_id, distribution_version, package_format)
         for _short, desktop, _family, _distro, distribution_id, distribution_version, package_format in COORDINATES

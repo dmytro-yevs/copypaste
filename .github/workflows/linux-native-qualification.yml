@@ -142,41 +142,6 @@ jobs:
             desktop: GNOME
             session: x11
             compositor_artifact: copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64
-          - architecture: x86_64
-            runner: ubuntu-24.04
-            desktop: GNOME
-            session: wayland
-            compositor_artifact: copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64
-          - architecture: x86_64
-            runner: ubuntu-24.04
-            desktop: KDE
-            session: x11
-            compositor_artifact: copypaste-compositor-runtime-kwin-6.0-fedora40-x86_64
-          - architecture: x86_64
-            runner: ubuntu-24.04
-            desktop: KDE
-            session: wayland
-            compositor_artifact: copypaste-compositor-runtime-kwin-6.0-fedora40-x86_64
-          - architecture: aarch64
-            runner: ubuntu-24.04-arm
-            desktop: GNOME
-            session: x11
-            compositor_artifact: copypaste-compositor-runtime-gnome-46-ubuntu24.04-aarch64
-          - architecture: aarch64
-            runner: ubuntu-24.04-arm
-            desktop: GNOME
-            session: wayland
-            compositor_artifact: copypaste-compositor-runtime-gnome-46-ubuntu24.04-aarch64
-          - architecture: aarch64
-            runner: ubuntu-24.04-arm
-            desktop: KDE
-            session: x11
-            compositor_artifact: copypaste-compositor-runtime-kwin-6.0-fedora40-aarch64
-          - architecture: aarch64
-            runner: ubuntu-24.04-arm
-            desktop: KDE
-            session: wayland
-            compositor_artifact: copypaste-compositor-runtime-kwin-6.0-fedora40-aarch64
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -224,13 +189,6 @@ jobs:
         with:
           name: production-linux-x86_64
           path: previous-artifacts/x86_64
-          run-id: ${{ inputs.previous_artifact_run_id }}
-          github-token: ${{ github.token }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: needs.source.outputs.upgrade_mode == 'prior_release'
-        with:
-          name: production-linux-aarch64
-          path: previous-artifacts/aarch64
           run-id: ${{ inputs.previous_artifact_run_id }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -348,23 +306,10 @@ jobs:
           run-id: ${{ inputs.artifact_run_id }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: production-linux-aarch64
-          path: artifacts/aarch64
-          run-id: ${{ inputs.artifact_run_id }}
-          github-token: ${{ github.token }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         if: needs.source.outputs.upgrade_mode == 'prior_release'
         with:
           name: production-linux-x86_64
           path: previous-artifacts/x86_64
-          run-id: ${{ inputs.previous_artifact_run_id }}
-          github-token: ${{ github.token }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: needs.source.outputs.upgrade_mode == 'prior_release'
-        with:
-          name: production-linux-aarch64
-          path: previous-artifacts/aarch64
           run-id: ${{ inputs.previous_artifact_run_id }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4

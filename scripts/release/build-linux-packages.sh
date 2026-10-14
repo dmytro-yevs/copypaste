@@ -4,6 +4,8 @@ set -euo pipefail
 
 VERSION="${1:-}"
 ARCHITECTURE="${2:-}"
+SCOPE="${3:-}"
+[[ -z "$SCOPE" || "$SCOPE" == --release-scope ]] || { echo "ERROR: invalid packaging scope" >&2; exit 1; }
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
   echo "ERROR: usage: $0 <stable-version> <x86_64|aarch64>" >&2
   exit 1
@@ -12,6 +14,18 @@ case "$ARCHITECTURE" in x86_64|aarch64) ;; *) echo "ERROR: invalid architecture"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CONTRACT="$ROOT/packaging/linux/release-contract.json"
+FORMATS=AppImage,deb,rpm
+if [[ "$SCOPE" == --release-scope ]]; then
+  FORMATS="$(python3 - "$CONTRACT" "$ARCHITECTURE" <<'PYCONTRACT'
+import json
+import sys
+contract = json.load(open(sys.argv[1], encoding="utf-8"))
+if sys.argv[2] not in contract["architectures"]:
+    raise SystemExit("architecture is outside the Linux release contract")
+print(",".join(contract["formats"]))
+PYCONTRACT
+)"
+fi
 BUNDLE="$ROOT/dist/linux-$ARCHITECTURE/bundle"
 DESKTOP_TEMPLATE="$ROOT/packaging/linux/com.copypaste.CopyPaste.desktop"
 ICON="$ROOT/apps/copypaste_flutter/assets/brand/copypaste.png"
@@ -141,6 +155,7 @@ EOF
 dpkg-deb --root-owner-group --build "$STAGE" "$DEB"
 rm -rf "$STAGE/DEBIAN"
 
+if [[ ",$FORMATS," == *,rpm,* ]]; then
 SPEC="$TOPDIR/SPECS/copypaste.spec"
 mkdir -p "$TOPDIR/BUILD" "$TOPDIR/BUILDROOT" "$TOPDIR/RPMS" "$TOPDIR/SOURCES" "$TOPDIR/SPECS" "$TOPDIR/SRPMS"
 cat > "$SPEC" <<EOF
@@ -182,6 +197,8 @@ mv "${rpm_outputs[0]}" "$RPM"
 rpm_requires="$TOPDIR/rpm-requires.txt"
 rpm -qp --requires "$RPM" > "$rpm_requires"
 grep -q '^libc\.so\.6' "$rpm_requires" || { echo "ERROR: RPM automatic ELF dependency analysis is missing" >&2; exit 1; }
+
+fi
 
 APPDIR="$(mktemp -d)"
 trap 'rm -rf "$STAGE" "$TOPDIR" "$APPDIR"' EXIT
@@ -230,7 +247,11 @@ chmod 755 "$APPDIR/AppRun"
 [[ -x "$APPIMAGETOOL" ]] || { echo "ERROR: APPIMAGETOOL is not executable" >&2; exit 1; }
 APPIMAGE="$DIST/CopyPaste-v$VERSION-linux-$ARCHITECTURE.AppImage"
 ARCH="$ARCHITECTURE" "$APPIMAGETOOL" "$APPDIR" "$APPIMAGE"
-[[ -s "$APPIMAGE" && -f "$DEB" && -f "$RPM" ]] || {
+[[ -s "$APPIMAGE" && -f "$DEB" ]] || {
   echo "ERROR: Linux package build did not produce every required format" >&2
   exit 1
 }
+
+if [[ ",$FORMATS," == *,rpm,* ]]; then
+  [[ -s "$RPM" ]] || { echo "ERROR: required RPM package is missing" >&2; exit 1; }
+fi

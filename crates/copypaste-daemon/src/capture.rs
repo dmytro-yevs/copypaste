@@ -1832,13 +1832,15 @@ mod tests {
                 assert!(crate::server::dispatch::dispatch_store(&state, 1, method).ok);
             }
             *TEST_PERSIST_MODE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            let polls_after_transition = polls.load(Ordering::SeqCst);
+            assert_eq!(polls_after_transition, 2);
             assert!(matches!(
                 tick(&state, &mut slot),
                 CaptureOutcome::PolicyCancelled
             ));
             assert!(slot.is_none());
             assert_eq!(state.store.count().unwrap(), 0);
-            assert_eq!(polls.load(Ordering::SeqCst), 1);
+            assert_eq!(polls.load(Ordering::SeqCst), polls_after_transition);
             drop(guard);
         }
     }

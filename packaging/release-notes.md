@@ -1,9 +1,9 @@
 Add Linux release packages and desktop integrations.
 
-- Build AppImage, Debian, and RPM packages for Linux x86_64 and ARM64.
-- Add GNOME/KDE X11 and native Wayland clipboard, source identity, privacy controls, and Quick Paste integration. Wayland requires the matching compositor integration and keyboard permission.
+- Release AppImage and Debian packages for Linux x86_64 on GNOME X11 (Ubuntu 24.04).
+- Qualify GNOME X11 clipboard, source identity, privacy controls, and Quick Paste integration. ARM64, KDE, Wayland, and RPM implementation remains available for development, outside this release.
 - Use the desktop Secret Service for device keys and preserve encrypted history across restarts and updates.
-- Verify portable AppImage updates and use the authenticated system package manager for Debian/RPM updates.
+- Verify portable AppImage updates and use the authenticated system package manager for Debian updates.
 - Add Linux packages for optional OCR, Semantic Search, and Supabase modules. Keep the legacy signed marketplace catalog available for older clients.
 - Report screenshot blocking as unavailable on Linux.
 - Complete the macOS plugin migration to Swift Package Manager.

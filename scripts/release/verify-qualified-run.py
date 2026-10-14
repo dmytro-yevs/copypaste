@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 
+RELEASE = runpy.run_path(str(Path(__file__).with_name("linux_release_contract.py")))
+
+
 def verify(
     run: dict,
     jobs: dict,
@@ -54,7 +57,7 @@ def verify(
         missing = required_linux_jobs - passed_linux_jobs
         if missing:
             raise ValueError(f"required Linux qualification jobs did not pass: {', '.join(sorted(missing))}")
-        builds = {f"Linux build ({architecture})" for architecture in ("x86_64", "aarch64")}
+        builds = {f"Linux build ({architecture})" for architecture in RELEASE["ARCHITECTURES"]}
         if not builds <= passed_linux_jobs:
             skipped_builds = [
                 job for job in entries
