@@ -28,6 +28,7 @@ export default class CopyPasteQuickPasteExtension extends Extension {
         this._awaitSourceId = 0;
         this._awaitRetrySeconds = 1;
         this._activeTransaction = null;
+        this._qualification = null;
         this._calls = new Set();
         this._windowCreatedId = global.display.connect('window-created', (_display, window) => {
             this._watchQuickPasteWindow(window);
@@ -78,6 +79,8 @@ export default class CopyPasteQuickPasteExtension extends Extension {
         this._ownsBusName = false;
         this._hostAvailable = false;
         this._cancelActiveTransaction(false);
+        this._clearWindowWatches(this._qualification);
+        this._qualification = null;
         this._clearRetry();
         this._cancelCalls();
         this._clipboardBridge?.destroy();
@@ -152,6 +155,8 @@ export default class CopyPasteQuickPasteExtension extends Extension {
         this._hostAvailable = false;
         this._awaitingShortcut = false;
         this._clearWindowWatches(this._activeTransaction);
+        this._clearWindowWatches(this._qualification);
+        this._qualification = null;
         this._activeTransaction = null;
         this._clearRetry();
         this._cancelCalls();
@@ -164,6 +169,8 @@ export default class CopyPasteQuickPasteExtension extends Extension {
         this._ownsBusName = false;
         this._awaitingShortcut = false;
         this._clearWindowWatches(this._activeTransaction);
+        this._clearWindowWatches(this._qualification);
+        this._qualification = null;
         this._activeTransaction = null;
         this._clearRetry();
         this._cancelCalls();
@@ -209,7 +216,8 @@ export default class CopyPasteQuickPasteExtension extends Extension {
         if (!window)
             return;
         if (action === 'close-main') {
-            this._qualification = {transactionId, pid};
+            this._clearWindowWatches(this._qualification);
+            this._qualification = {transactionId, pid, watchIds: new Map()};
             const unmanaging = window.connect('unmanaging', () => {
                 this._reportQualification(transactionId, pid, false);
             });
@@ -308,8 +316,27 @@ export default class CopyPasteQuickPasteExtension extends Extension {
     _watchQuickPasteWindow(window) {
         const qualification = this._qualification;
         if (qualification && window?.get_pid?.() === qualification.pid &&
-            window.get_gtk_application_id?.() === QUICK_PASTE_APPLICATION_ID)
-            this._reportQualification(qualification.transactionId, qualification.pid, true);
+            !qualification.watchIds.has(window)) {
+            const report = () => {
+                if (this._qualification !== qualification ||
+                    window.get_gtk_application_id?.() !== QUICK_PASTE_APPLICATION_ID)
+                    return;
+                this._reportQualification(qualification.transactionId, qualification.pid, true);
+                this._clearWindowWatches(qualification);
+                this._qualification = null;
+            };
+            const removed = () => {
+                for (const id of qualification.watchIds.get(window) ?? [])
+                    window.disconnect(id);
+                qualification.watchIds.delete(window);
+            };
+            qualification.watchIds.set(window, [
+                window.connect('notify::gtk-application-id', report),
+                window.connect('notify::title', report),
+                window.connect('unmanaging', removed),
+            ]);
+            report();
+        }
         const pending = this._activeTransaction;
         if (!pending || !window || pending.watchIds.has(window))
             return;

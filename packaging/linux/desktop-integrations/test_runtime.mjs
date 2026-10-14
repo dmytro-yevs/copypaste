@@ -16,7 +16,7 @@ function loadGnome({focusWindow = null, clipboardFactoryModule = {default: {}}} 
     const timers = [];
     const bus = {
         call(...args) {
-            calls.push({method: args[3], timeout: args[7], cancellable: args[8], callback: args[9]});
+            calls.push({method: args[3], parameters: args[4], timeout: args[7], cancellable: args[8], callback: args[9]});
         },
         call_finish(result) {
             if (result.error)
@@ -114,6 +114,30 @@ function loadGnome({focusWindow = null, clipboardFactoryModule = {default: {}}} 
 
 function completeGnome(bus, call, value) {
     call.callback(bus, {value: {deep_unpack: () => value}});
+}
+
+{
+    const runtime = loadGnome();
+    runtime.extension.enable();
+    runtime.extension._qualification = {transactionId: 'close-main', pid: 100, watchIds: new Map()};
+    let appId = '';
+    const signals = new Map();
+    const window = {
+        get_pid: () => 100,
+        get_gtk_application_id: () => appId,
+        connect(name, callback) { const id = signals.size + 1; signals.set(id, {name, callback}); return id; },
+        disconnect(id) { signals.delete(id); },
+    };
+    runtime.extension._watchQuickPasteWindow(window);
+    assert.equal(runtime.calls.some(call => call.method === 'QualificationObserved'), false, 'an unmapped identity cannot qualify the reopened host');
+    const report = [...signals.values()].find(signal => signal.name === 'notify::gtk-application-id').callback;
+    appId = 'com.copypaste.CopyPaste';
+    report();
+    assert.deepEqual(runtime.calls.at(-1).parameters.deep_unpack(), ['close-main', 100, 'com.copypaste.CopyPaste', 'main', true]);
+    assert.equal(signals.size, 0, 'a confirmed remap must release its window watches');
+    report();
+    assert.equal(runtime.calls.filter(call => call.method === 'QualificationObserved').length, 1, 'a stale identity callback cannot repeat the remap observation');
+    runtime.extension.disable();
 }
 
 function failGnome(bus, call, message) {

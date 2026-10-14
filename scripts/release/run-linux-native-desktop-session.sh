@@ -90,6 +90,7 @@ chmod 700 "$RUNTIME"
 export XDG_RUNTIME_DIR="$RUNTIME"
 export LANG=C.UTF-8 LC_ALL=C.UTF-8
 export NO_AT_BRIDGE=0
+export GTK_A11Y=atspi
 export LIBGL_ALWAYS_SOFTWARE=1
 export GALLIUM_DRIVER=llvmpipe
 export XDG_CURRENT_DESKTOP="$DESKTOP"
@@ -130,6 +131,7 @@ PY
     geometry_extension_id="copypaste-qualification-window-geometry@copypaste.app"
     [[ -f "$geometry_extension/metadata.json" && -f "$geometry_extension/extension.js" ]] || { echo "ERROR: qualification GNOME geometry fixture is missing" >&2; exit 1; }
     cp -a "$geometry_extension" "$XDG_DATA_HOME/gnome-shell/extensions/$geometry_extension_id"
+    gsettings set org.gnome.desktop.interface enable-animations false
     gsettings set org.gnome.shell enabled-extensions "['$extension_id', '$geometry_extension_id']"
     ;;
   KDE)
@@ -182,7 +184,7 @@ wait_for 'gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/S
 session_phase=publish_session_environment
 dbus-update-activation-environment \
   DBUS_SESSION_BUS_ADDRESS DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_DATA_HOME \
-  XDG_CONFIG_HOME XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE
+  XDG_CONFIG_HOME XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE GTK_A11Y NO_AT_BRIDGE
 session_phase=initialize_accessibility
 gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus --method org.a11y.Bus.GetAddress >/dev/null
 busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true
