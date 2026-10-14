@@ -274,7 +274,7 @@ class PortalKeyboard:
         return pid, uid
 
     def owned_portal_pids(self) -> set[int]:
-        """Return same-user portal services and this desktop's live presenter."""
+        """Authenticate portal services and return this desktop's consent actors."""
         reply = self.connection.call_sync(
             "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "ListNames",
             None, self.glib.VariantType.new("(as)"), self.gio.DBusCallFlags.NONE, 8000, None,
@@ -294,7 +294,12 @@ class PortalKeyboard:
         if presenters is None:
             raise QuickPasteQualificationError("Wayland portal desktop identity is unsupported")
         portal_names.extend(name for name in presenters if name in names)
-        return {self._owner_credentials(self._bus_owner(name))[0] for name in portal_names}
+        owners = {name: self._owner_credentials(self._bus_owner(name))[0] for name in portal_names}
+        if desktop == "GNOME":
+            if "org.gnome.Shell" not in owners:
+                raise QuickPasteQualificationError("GNOME portal dialog presenter is unavailable")
+            return {owners["org.gnome.Shell"]}
+        return set(owners.values())
 
     def require_gui_owner(self, gui_pid: int) -> str:
         """Bind this run to the exact GUI process before driving any input."""
