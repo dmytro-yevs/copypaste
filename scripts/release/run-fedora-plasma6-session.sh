@@ -137,6 +137,7 @@ unset keyring_password
 plasmashell --replace >"$runtime/plasmashell.log" 2>&1 &
 shell_pid=$!
 wait_for 'kill -0 "$shell_pid" 2>/dev/null'
+wait_for '[[ "$(busctl --user get-property org.kde.StatusNotifierWatcher /StatusNotifierWatcher org.kde.StatusNotifierWatcher IsStatusNotifierHostRegistered)" == "b true" ]]'
 
 kpackagetool6 --version >/dev/null
 printf 'desktop=%s\nsession=%s\ncompositor_launcher=%s\n' "$XDG_CURRENT_DESKTOP" "$XDG_SESSION_TYPE" "$COMPOSITOR_LAUNCHER"
