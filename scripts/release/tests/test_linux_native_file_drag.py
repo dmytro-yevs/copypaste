@@ -25,19 +25,42 @@ DRIVER_SPEC.loader.exec_module(driver)
 
 
 class LinuxNativeFileDragTest(unittest.TestCase):
+    def test_owned_top_level_bounds_ignore_duplicate_titles_inside_flutter(self):
+        rectangle = mock.Mock(x=90, y=32, width=1100, height=768)
+        application = mock.Mock(childCount=1)
+        application.get_process_id.return_value = 42
+        application.get_application.return_value = application
+        frame = mock.Mock(name="frame", childCount=1)
+        frame.name = "CopyPaste"
+        frame.getRoleName.return_value = "frame"
+        frame.queryComponent.return_value.getExtents.return_value = rectangle
+        frame.getChildAtIndex.side_effect = AssertionError("a frame lookup must not traverse Flutter descendants")
+        application.getChildAtIndex.return_value = frame
+        frame.get_application.return_value = application
+        desktop = mock.Mock(childCount=1)
+        desktop.getChildAtIndex.return_value = application
+        registry = mock.Mock()
+        registry.getDesktop.return_value = desktop
+        self.assertEqual(
+            drag.atspi_bounds(registry, 42, "CopyPaste", drag.SCREEN_COORDINATES, top_level=True),
+            drag.Bounds(90, 32, 1100, 768),
+        )
+        frame.queryComponent.return_value.getExtents.assert_called_once_with(drag.SCREEN_COORDINATES)
+
     def test_x11_pointer_uses_owned_accessibility_desktop_bounds_after_focus(self):
         source = mock.Mock(process=mock.Mock(pid=71))
         calls = []
         def command(argv, _environment):
             calls.append(argv)
             return mock.Mock(stdout=b"")
-        def bounds(_registry, pid, name, coordinates):
+        def bounds(_registry, pid, name, coordinates, *, top_level=False):
             self.assertEqual(coordinates, drag.SCREEN_COORDINATES)
             self.assertIn(["xdotool", "windowactivate", "--sync", "11"], calls)
             if pid == 71:
                 self.assertEqual(name, drag.SOURCE_CONTROL_NAME)
                 return drag.Bounds(0, 69, 320, 96)
             self.assertEqual((pid, name), (72, drag.TARGET_TITLE))
+            self.assertTrue(top_level)
             return drag.Bounds(400, 100, 600, 500)
         with mock.patch.dict(sys.modules, {"pyatspi": mock.Mock(Registry=mock.sentinel.registry)}), \
                 mock.patch.object(drag, "x11_window", side_effect=["11", "12"]), \
