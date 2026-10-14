@@ -24,6 +24,25 @@ SPEC.loader.exec_module(module)
 
 
 class LinuxWaylandQuickPasteTest(unittest.TestCase):
+    def test_gnome_consent_targets_only_the_authenticated_shell_presenter(self):
+        portal = object.__new__(module.PortalKeyboard)
+        names = [module.PORTAL_NAME, 'org.freedesktop.impl.portal.desktop.gnome', 'org.gnome.Shell']
+        portal.connection = SimpleNamespace(call_sync=lambda *_args: SimpleNamespace(unpack=lambda: (names,)))
+        portal.glib = SimpleNamespace(VariantType=SimpleNamespace(new=lambda value: value))
+        portal.gio = SimpleNamespace(DBusCallFlags=SimpleNamespace(NONE=0))
+        owners = {module.PORTAL_NAME: 10, names[1]: 20, 'org.gnome.Shell': 30}
+        with mock.patch.dict(os.environ, {'XDG_CURRENT_DESKTOP': 'GNOME'}), \
+                mock.patch.object(portal, '_bus_owner', side_effect=lambda name: name), \
+                mock.patch.object(portal, '_owner_credentials', side_effect=lambda name: (owners[name], os.getuid())) as credentials:
+            self.assertEqual(portal.owned_portal_pids(), {30})
+            self.assertEqual(credentials.call_count, 3)
+        names.remove('org.gnome.Shell')
+        with mock.patch.dict(os.environ, {'XDG_CURRENT_DESKTOP': 'GNOME'}), \
+                mock.patch.object(portal, '_bus_owner', side_effect=lambda name: name), \
+                mock.patch.object(portal, '_owner_credentials', side_effect=lambda name: (owners[name], os.getuid())):
+            with self.assertRaisesRegex(module.QuickPasteQualificationError, 'presenter'):
+                portal.owned_portal_pids()
+
     def test_portal_request_path_is_bound_to_owner_and_token(self):
         self.assertEqual(
             module.portal_request_path(':1.42', 'copypaste_create_7'),
