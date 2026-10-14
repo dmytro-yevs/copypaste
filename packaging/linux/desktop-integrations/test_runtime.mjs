@@ -224,7 +224,8 @@ function loadClipboardBridge({nativeAvailable = true, exposeAvailability = true}
     const selection = {
         connect() { return 1; },
         disconnect() {},
-        get_mimetypes() {
+        get_mimetypes(selectionType) {
+            assert.equal(selectionType, 1, 'clipboard inventory uses the Mutter clipboard selection enum');
             state.inventoryCalls += 1;
             return ['text/plain'];
         },
@@ -259,7 +260,7 @@ function loadClipboardBridge({nativeAvailable = true, exposeAvailability = true}
         },
     };
     const GLib = {Variant, VariantType: class { constructor(type) { this.type = type; } }};
-    const Meta = {SelectionType: {CLIPBOARD: 1}};
+    const Meta = {SelectionType: {SELECTION_CLIPBOARD: 1}};
     const factory = {};
     if (exposeAvailability)
         factory.clipboard_source_is_available = receivedSelection => receivedSelection === selection && nativeAvailable;
@@ -434,6 +435,7 @@ async function invokeShortcut(runtime, method, params, sender = ':1.host') {
     assert.deepEqual((await invokeClipboard(runtime, 'VersionAsync', [], ':1.gui')).value, [2], 'the GUI owner may complete the native v2 handshake');
     assert.equal((await invokeClipboard(runtime, 'VersionAsync', [], ':1.other')).error, 'AccessDenied', 'foreign session peers cannot probe the clipboard bridge');
     assert.equal((await invokeClipboard(runtime, 'SnapshotAsync', [], ':1.gui')).error, 'AccessDenied', 'the GUI owner cannot access clipboard payload metadata');
+    assert.deepEqual((await invokeClipboard(runtime, 'SnapshotAsync')).value[1], ['text/plain'], 'the authenticated daemon can inspect the real clipboard selection');
 }
 
 {

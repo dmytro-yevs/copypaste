@@ -23,6 +23,62 @@ SPEC.loader.exec_module(driver)
 
 
 class LinuxNativeFixtureDriverTest(unittest.TestCase):
+    def test_ipc_omits_params_only_for_the_unit_request(self):
+        class Channel:
+            def __init__(self):
+                self.sent = b""
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                pass
+
+            def settimeout(self, _timeout):
+                pass
+
+            def connect(self, _path):
+                pass
+
+            def sendall(self, value):
+                self.sent = value
+
+            def makefile(self, _mode):
+                return io.BytesIO(b'{"ok":true,"data":{}}\n')
+
+        unit = Channel()
+        nonunit = Channel()
+        with mock.patch.object(driver.socket, "socket", side_effect=[unit, nonunit]):
+            driver.ipc(Path("unit.sock"), "pair_create_invite")
+            driver.ipc(Path("nonunit.sock"), "pair_join", {"code": "fixture"})
+        self.assertNotIn("params", json.loads(unit.sent))
+        self.assertEqual(json.loads(nonunit.sent)["params"], {"code": "fixture"})
+
+    def test_ipc_redacts_error_message_but_preserves_a_safe_error_code(self):
+        class Channel:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                pass
+
+            def settimeout(self, _timeout):
+                pass
+
+            def connect(self, _path):
+                pass
+
+            def sendall(self, _value):
+                pass
+
+            def makefile(self, _mode):
+                return io.BytesIO(b'{"ok":false,"error":{"code":"invalid_request","message":"malformed request"}}\n')
+
+        with mock.patch.object(driver.socket, "socket", return_value=Channel()):
+            with self.assertRaisesRegex(RuntimeError, "invalid_request") as error:
+                driver.ipc(Path("daemon.sock"), "pair_create_invite")
+        self.assertNotIn("malformed request", str(error.exception))
+
     def test_audited_clipboard_provider_requires_its_expected_sigterm_exit(self):
         class Provider:
             def __init__(self, command, **_kwargs):
