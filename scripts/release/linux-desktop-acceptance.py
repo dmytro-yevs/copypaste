@@ -44,7 +44,7 @@ SERIAL = re.compile(r"\bserial=(?P<serial>[0-9]+)\b")
 REPLY_SERIAL = re.compile(r"\breply_serial=(?P<serial>[0-9]+)\b")
 CALL_SENDER = re.compile(r"\bsender=(?P<sender>:[0-9]+\.[0-9]+)\b")
 UINT32 = re.compile(r"^\s*uint32\s+(?P<value>[0-9]+)\s*$")
-QUOTED_STRING = re.compile(r'^s\s+"(?P<value>(?:[^"\\]|\\.)*)"\s*$')
+QUOTED_STRING = re.compile(r'^(?P<signature>[so])\s+"(?P<value>(?:[^"\\]|\\.)*)"\s*$')
 MONITOR_STRING = re.compile(r'^\s*string\s+"(?P<value>(?:[^"\\]|\\.)*)"\s*$')
 UNIQUE_NAME = re.compile(r"^:[0-9]+\.[0-9]+$")
 
@@ -126,10 +126,10 @@ def dbus_property(environment: dict[str, str], service: str, name: str) -> str:
     return result.stdout.strip()
 
 
-def quoted_property(value: str, name: str) -> str:
+def quoted_property(value: str, name: str, signature: str = "s") -> str:
     match = QUOTED_STRING.fullmatch(value)
-    if not match:
-        raise AcceptanceError(f"StatusNotifierItem {name} has an invalid D-Bus string value")
+    if not match or match.group("signature") != signature:
+        raise AcceptanceError(f"StatusNotifierItem {name} has an invalid D-Bus {signature} value")
     return bytes(match.group("value"), "utf-8").decode("unicode_escape")
 
 
@@ -173,7 +173,7 @@ def expect_tray(environment: dict[str, str], gui_pid: int) -> str:
             "CopyPaste StatusNotifierItem does not export a clickable D-Bus menu; "
             "the native tray callback cannot be exercised"
         )
-    if quoted_property(dbus_property(environment, service, "Menu"), "Menu") != MENU_PATH:
+    if quoted_property(dbus_property(environment, service, "Menu"), "Menu", "o") != MENU_PATH:
         raise AcceptanceError("StatusNotifierItem has no exported D-Bus menu path")
     return service
 
@@ -182,7 +182,7 @@ def dbus_menu_layout(environment: dict[str, str], service: str) -> object:
     result = require_ok(
         run(
             [
-                "busctl", "--user", "--json=short", "call", service, MENU_PATH,
+                "busctl", "--user", "--json=short", "--", "call", service, MENU_PATH,
                 MENU_INTERFACE, "GetLayout", "iias", "0", "-1", "0",
             ],
             environment=environment,
@@ -206,6 +206,7 @@ def variant_value(value: object) -> object:
 
 def menu_item_id(layout: object, label: str) -> int:
     """Find a labelled, enabled DbusMenu item in busctl's JSON GetLayout data."""
+    layout = variant_value(layout)
     if isinstance(layout, list):
         if len(layout) == 3 and isinstance(layout[0], int) and isinstance(layout[1], dict):
             properties = layout[1]

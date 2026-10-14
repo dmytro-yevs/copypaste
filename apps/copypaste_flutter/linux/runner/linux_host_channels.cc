@@ -1443,16 +1443,16 @@ void bridge_call(GDBusConnection*, const gchar* sender, const gchar*, const gcha
   }
   if (g_strcmp0(method, "QualificationObserved") == 0) {
     const gchar* transaction = nullptr;
-    guint32 pid = 0;
+    gint32 pid = 0;
     const gchar* app_id = nullptr;
     const gchar* role = nullptr;
     gboolean mapped = FALSE;
-    g_variant_get(parameters, "(&su&s&sb)", &transaction, &pid, &app_id, &role, &mapped);
+    g_variant_get(parameters, "(&si&s&sb)", &transaction, &pid, &app_id, &role, &mapped);
     const bool main_surface = role != nullptr && g_strcmp0(role, "main") == 0 &&
-        pid == static_cast<guint32>(getpid());
+        pid == static_cast<gint32>(getpid());
     const bool quick_paste_surface = role != nullptr &&
         g_strcmp0(role, "quick-paste") == 0 && bridge_child_pid != 0 &&
-        pid == static_cast<guint32>(bridge_child_pid);
+        pid == static_cast<gint32>(bridge_child_pid);
     if (!authorised_companion(sender) || transaction == nullptr ||
         qualification_transaction != transaction || (!main_surface && !quick_paste_surface) ||
         app_id == nullptr || g_strcmp0(app_id, "com.copypaste.CopyPaste") != 0 ||
@@ -1464,7 +1464,7 @@ void bridge_call(GDBusConnection*, const gchar* sender, const gchar*, const gcha
     }
     g_dbus_connection_emit_signal(
         bridge_connection, nullptr, kBridgePath, kBridgeInterface,
-        "QualificationObservation", g_variant_new("(susb)", transaction, pid, role, mapped),
+        "QualificationObservation", g_variant_new("(susb)", transaction, static_cast<guint32>(pid), role, mapped),
         nullptr);
     if (!mapped) {
       qualification_unmapped = true;
@@ -1592,7 +1592,7 @@ void bridge_bus_acquired(GDBusConnection* connection, const gchar*, gpointer) {
       "<method name='StartQualification'><arg type='s' direction='in'/><arg type='s' direction='in'/><arg type='s' direction='out'/></method>"
       "<method name='AwaitQualification'><arg type='s' direction='out'/><arg type='s' direction='out'/><arg type='u' direction='out'/></method>"
       "<method name='QualificationEnabled'><arg type='b' direction='out'/></method>"
-      "<method name='QualificationObserved'><arg type='s' direction='in'/><arg type='u' direction='in'/><arg type='s' direction='in'/><arg type='s' direction='in'/><arg type='b' direction='in'/></method>"
+      "<method name='QualificationObserved'><arg type='s' direction='in'/><arg type='i' direction='in'/><arg type='s' direction='in'/><arg type='s' direction='in'/><arg type='b' direction='in'/></method>"
       "<signal name='QualificationRequested'><arg type='s'/><arg type='u'/><arg type='s'/></signal>"
       "<signal name='QualificationObservation'><arg type='s'/><arg type='u'/><arg type='s'/><arg type='b'/></signal>"
       "<signal name='TransactionCancelled'><arg type='s'/></signal>"

@@ -130,6 +130,13 @@ class FakeGio:
 class LinuxDesktopAcceptanceTest(unittest.TestCase):
     gui_pid = 4321
 
+    def test_status_notifier_properties_require_their_protocol_types(self):
+        self.assertEqual(MODULE.quoted_property('s "CopyPaste"', "Title"), "CopyPaste")
+        self.assertEqual(MODULE.quoted_property('o "/StatusNotifierItem/Menu"', "Menu", "o"), MODULE.MENU_PATH)
+        for value, name, signature in [('s "/StatusNotifierItem/Menu"', "Menu", "o"), ('o "/CopyPaste"', "Title", "s")]:
+            with self.assertRaises(MODULE.AcceptanceError):
+                MODULE.quoted_property(value, name, signature)
+
     def wayland_observer(self):
         connection = FakeConnection(self.gui_pid)
         glib = FakeGLib()
@@ -169,6 +176,25 @@ class LinuxDesktopAcceptanceTest(unittest.TestCase):
         self.assertEqual(MODULE.menu_item_id(layout, "Open"), 17)
         with self.assertRaisesRegex(MODULE.AcceptanceError, "no enabled 'Settings'"):
             MODULE.menu_item_id(layout, "Settings")
+
+    def test_menu_layout_keeps_negative_depth_after_the_option_terminator(self):
+        result = MODULE.CommandResult((), 0, '{"data": [0, [0, {}, []]]}', '')
+        with mock.patch.object(MODULE, "run", return_value=result) as run:
+            MODULE.dbus_menu_layout({}, 'org.kde.StatusNotifierItem-4321-1')
+        arguments = run.call_args.args[0]
+        self.assertLess(arguments.index('--'), arguments.index('-1'))
+        self.assertEqual(arguments[-4:], ['iias', '0', '-1', '0'])
+
+    def test_menu_layout_traverses_typed_variant_children(self):
+        item = {"type": "(ia{sv}av)", "data": [17, {
+            "label": {"type": "s", "data": "Open"},
+            "enabled": {"type": "b", "data": True},
+        }, []]}
+        layout = [2, [0, {}, [item]]]
+        self.assertEqual(MODULE.menu_item_id(layout, "Open"), 17)
+        item["data"][1]["enabled"]["data"] = False
+        with self.assertRaisesRegex(MODULE.AcceptanceError, "disabled"):
+            MODULE.menu_item_id(layout, "Open")
 
     def test_notification_transcript_keeps_only_server_reply_metadata(self):
         transcript = MODULE.NotificationTranscript(server_owner=':1.9')
