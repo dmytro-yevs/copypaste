@@ -53,36 +53,6 @@ jobs:
             package_format: deb
             artifact: copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64
             platform: linux/amd64
-          - desktop: GNOME
-            family: "46"
-            distribution: Ubuntu 24.04
-            distribution_id: ubuntu
-            distribution_version: "24.04"
-            architecture: aarch64
-            runner: ubuntu-24.04-arm
-            package_format: deb
-            artifact: copypaste-compositor-runtime-gnome-46-ubuntu24.04-aarch64
-            platform: linux/arm64
-          - desktop: KDE
-            family: "6.0"
-            distribution: Fedora 40
-            distribution_id: fedora
-            distribution_version: "40"
-            architecture: x86_64
-            runner: ubuntu-24.04
-            package_format: rpm
-            artifact: copypaste-compositor-runtime-kwin-6.0-fedora40-x86_64
-            platform: linux/amd64
-          - desktop: KDE
-            family: "6.0"
-            distribution: Fedora 40
-            distribution_id: fedora
-            distribution_version: "40"
-            architecture: aarch64
-            runner: ubuntu-24.04-arm
-            package_format: rpm
-            artifact: copypaste-compositor-runtime-kwin-6.0-fedora40-aarch64
-            platform: linux/arm64
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:

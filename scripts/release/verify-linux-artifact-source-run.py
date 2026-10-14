@@ -3,7 +3,11 @@
 
 import argparse
 import json
+import runpy
 from pathlib import Path
+
+
+RELEASE = runpy.run_path(str(Path(__file__).with_name("linux_release_contract.py")))
 
 
 def verify(run: dict, jobs: dict, artifacts: dict, repository: str, commit: str) -> None:
@@ -18,7 +22,7 @@ def verify(run: dict, jobs: dict, artifacts: dict, repository: str, commit: str)
     entries = jobs.get("jobs", [])
     if jobs.get("total_count") != len(entries):
         raise ValueError("Linux artifact source job inventory is incomplete")
-    expected = {"preflight", "Linux build (x86_64)", "Linux build (aarch64)"}
+    expected = {"preflight", *(f"Linux build ({architecture})" for architecture in RELEASE["ARCHITECTURES"])}
     passed = {
         job.get("name") for job in entries
         if job.get("status") == "completed" and job.get("conclusion") == "success"
@@ -26,10 +30,10 @@ def verify(run: dict, jobs: dict, artifacts: dict, repository: str, commit: str)
     if not expected <= passed:
         raise ValueError("Linux artifact source did not pass all native build jobs")
     names = {artifact.get("name") for artifact in artifacts.get("artifacts", []) if artifact.get("expired") is False}
-    if not {"production-linux-x86_64", "production-linux-aarch64"} <= names:
-        raise ValueError("Linux artifact source lacks both unexpired architecture artifacts")
+    if not {f"production-linux-{architecture}" for architecture in RELEASE["ARCHITECTURES"]} <= names:
+        raise ValueError("Linux artifact source lacks required unexpired architecture artifacts")
     for artifact in artifacts.get("artifacts", []):
-        if artifact.get("name") in {"production-linux-x86_64", "production-linux-aarch64"}:
+        if artifact.get("name") in {f"production-linux-{architecture}" for architecture in RELEASE["ARCHITECTURES"]}:
             source = artifact.get("workflow_run", {})
             if source.get("id") != run["id"] or source.get("head_sha") != commit:
                 raise ValueError("Linux artifact source artifact provenance differs")

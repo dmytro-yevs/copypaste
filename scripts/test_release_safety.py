@@ -234,17 +234,17 @@ class ReleaseSafetyTest(unittest.TestCase):
         evidence[1]["total_count"] += 1
         verify(*evidence, "owner/repo", "commit", require_linux=True, require_compositor_runtime=True)
 
-    def test_linux_artifact_source_requires_both_exact_native_builds(self):
+    def test_linux_artifact_source_requires_every_released_native_build(self):
         verify = runpy.run_path(str(ROOT / "scripts/release/verify-linux-artifact-source-run.py"))["verify"]
         run = {"id": 123, "head_sha": "commit", "head_repository": {"full_name": "owner/repo"},
                "path": ".github/workflows/release.yml", "event": "workflow_dispatch", "status": "completed"}
-        jobs = {"total_count": 3, "jobs": [
+        jobs = {"total_count": 2, "jobs": [
             {"name": name, "status": "completed", "conclusion": "success"}
-            for name in ("preflight", "Linux build (x86_64)", "Linux build (aarch64)")
+            for name in ("preflight", "Linux build (x86_64)")
         ]}
         artifacts = {"artifacts": [
             {"name": name, "expired": False, "workflow_run": {"id": 123, "head_sha": "commit"}}
-            for name in ("production-linux-x86_64", "production-linux-aarch64")
+            for name in ("production-linux-x86_64",)
         ]}
         verify(run, jobs, artifacts, "owner/repo", "commit")
         jobs["jobs"].pop()
@@ -265,13 +265,10 @@ class ReleaseSafetyTest(unittest.TestCase):
             "status": "completed",
             "conclusion": "success",
         }
-        jobs = {"total_count": 4, "jobs": [
+        jobs = {"total_count": 1, "jobs": [
             {"name": name, "status": "completed", "conclusion": "success"}
             for name in (
                 "GNOME 46 Ubuntu 24.04 (x86_64)",
-                "GNOME 46 Ubuntu 24.04 (aarch64)",
-                "KDE 6.0 Fedora 40 (x86_64)",
-                "KDE 6.0 Fedora 40 (aarch64)",
             )
         ]}
         artifacts = {"artifacts": [
@@ -282,14 +279,11 @@ class ReleaseSafetyTest(unittest.TestCase):
             }
             for name in (
                 "copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64",
-                "copypaste-compositor-runtime-gnome-46-ubuntu24.04-aarch64",
-                "copypaste-compositor-runtime-kwin-6.0-fedora40-x86_64",
-                "copypaste-compositor-runtime-kwin-6.0-fedora40-aarch64",
             )
         ]}
         verify(run, jobs, artifacts, "owner/repo", "commit")
         ci_run = {**run, "path": ".github/workflows/ci.yml", "event": "pull_request", "pull_requests": [{"number": 7}]}
-        ci_jobs = {"total_count": 5, "jobs": [
+        ci_jobs = {"total_count": 2, "jobs": [
             {"name": "Compositor runtime metadata", "status": "completed", "conclusion": "success"},
             *[{"name": f"Compositor runtime producer / {row['name']}", "status": "completed", "conclusion": "success"} for row in jobs["jobs"]],
         ]}
@@ -317,10 +311,9 @@ class ReleaseSafetyTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "artifact inventory"):
             verify(run, jobs, artifacts, "owner/repo", "commit")
 
-    def test_compositor_runtime_uses_kwin_artifact_names_everywhere(self):
+    def test_compositor_runtime_uses_released_artifact_names_everywhere(self):
         expected = {
-            "copypaste-compositor-runtime-kwin-6.0-fedora40-x86_64",
-            "copypaste-compositor-runtime-kwin-6.0-fedora40-aarch64",
+            "copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64",
         }
         contract = json.loads((ROOT / "packaging/linux/compositor-runtime/release-contract.json").read_text(encoding="utf-8"))
         self.assertTrue(expected <= {row["artifact"] for row in contract["baselines"]})
@@ -406,7 +399,7 @@ class ReleaseSafetyTest(unittest.TestCase):
             public = root / "public"
             module["stage"](source, public, release_version, commit, "456")
             packages = sorted(path for path in public.iterdir() if path.suffix in (".deb", ".rpm"))
-            self.assertEqual(len(packages), 4)
+            self.assertEqual(len(packages), 1)
             self.assertTrue(all(f"-v{release_version}-linux-" in path.name for path in packages))
             for package in packages:
                 package.with_name(package.name + ".sig").write_bytes(b"signature")
@@ -421,7 +414,7 @@ class ReleaseSafetyTest(unittest.TestCase):
                 signature_validator=lambda _package, _signature: None,
             )
             self.assertEqual(receipt["producer_run_id"], 456)
-            self.assertEqual(len(receipt["companions"]), 4)
+            self.assertEqual(len(receipt["companions"]), 1)
             (public / "unlisted").write_bytes(b"must not publish")
             with self.assertRaisesRegex(ValueError, "unlisted file"):
                 module["verify_public"](
@@ -527,8 +520,10 @@ class ReleaseSafetyTest(unittest.TestCase):
         smoke = (ROOT / "scripts/release/smoke-linux-production.sh").read_text(encoding="utf-8")
         contract = json.loads((ROOT / "packaging/linux/release-contract.json").read_text(encoding="utf-8"))
         self.assertEqual(contract["maximum_glibc"], "2.39")
-        self.assertEqual(set(contract["architectures"]), {"x86_64", "aarch64"})
-        self.assertEqual(contract["formats"], ["AppImage", "deb", "rpm"])
+        self.assertEqual(set(contract["architectures"]), {"x86_64"})
+        self.assertEqual(contract["desktops"], ["GNOME"])
+        self.assertEqual(contract["sessions"], ["x11"])
+        self.assertEqual(contract["formats"], ["AppImage", "deb"])
         self.assertIn("flutter build linux --release", build)
         self.assertIn("copypaste-daemon", build)
         self.assertIn("copypaste-cli", build)
@@ -564,10 +559,11 @@ class ReleaseSafetyTest(unittest.TestCase):
         self.assertIn("GNOME", qualification)
         self.assertIn("KDE", qualification)
         self.assertIn("Wayland", qualification)
-        self.assertIn("AppImage deb rpm", workflow)
+        self.assertIn("AppImage deb", workflow)
+        self.assertNotIn("AppImage deb rpm", workflow)
         native_workflow = (ROOT / ".github/workflows/linux-native-qualification.yml").read_text(encoding="utf-8")
         self.assertIn("linux-native-qualification", native_workflow)
-        self.assertIn("ubuntu-24.04-arm", native_workflow)
+        self.assertNotIn("ubuntu-24.04-arm", native_workflow)
         self.assertIn("previous_artifact_run_id", native_workflow)
         self.assertNotIn("self-hosted", native_workflow)
         producer = (ROOT / "scripts/release/produce-linux-native-qualification.py").read_text(encoding="utf-8")
@@ -623,17 +619,17 @@ class ReleaseSafetyTest(unittest.TestCase):
                     (artifacts / name).touch()
                 notes = render(version, "dmytro-yevs/copypaste", artifacts)
                 links = re.findall(r"https://github.com/[^\s)]+", notes)
-                self.assertEqual(len(links), 11)
+                self.assertEqual(len(links), 7)
                 self.assertTrue(all(f"/download/v{version}/" in link for link in links))
                 self.assertNotIn("{{", notes)
                 rows = [line for line in notes.splitlines() if line.startswith("|")]
                 self.assertEqual(len(rows), 6)
                 self.assertEqual(rows[0], "| Architecture | macOS | Android | Windows | Linux |")
                 self.assertEqual(rows[2].count("[Download]("), 2)
-                self.assertEqual(rows[2].count("[AppImage](") + rows[2].count("[deb](") + rows[2].count("[rpm]("), 3)
+                self.assertEqual(rows[2].count("[AppImage](") + rows[2].count("[deb](") + rows[2].count("[rpm]("), 0)
                 self.assertEqual(rows[3].count("[Download]("), 1)
                 self.assertEqual(rows[4].count("[Download]("), 1)
-                self.assertEqual(rows[4].count("[AppImage](") + rows[4].count("[deb](") + rows[4].count("[rpm]("), 3)
+                self.assertEqual(rows[4].count("[AppImage](") + rows[4].count("[deb](") + rows[4].count("[rpm]("), 2)
                 self.assertEqual(rows[5].count("[Download]("), 1)
                 self.assertTrue(all(link.endswith((".dmg", ".apk", ".exe", ".AppImage", ".deb", ".rpm")) for link in links))
                 for suffix in ("", "-arm64", "-armv7"):
@@ -740,8 +736,8 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
             command = [sys.executable, str(ROOT / "scripts/release/write-artifact-receipt.py"),
                        "--platform", "linux", "--version", "1.2.3", "--commit", "a" * 40,
                        "--run-id", "123", "--output", str(linux / "production-receipt.json")]
-            for architecture in ("x86_64", "aarch64"):
-                for extension in ("AppImage", "deb", "rpm"):
+            for architecture in ("x86_64",):
+                for extension in ("AppImage", "deb"):
                     package = linux / f"CopyPaste-v1.2.3-linux-{architecture}.{extension}"
                     package.write_bytes(b"qualified package")
                     signature = linux / f"{package.name}.sig"
@@ -820,21 +816,21 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
             previous_artifacts = root / "previous-artifacts"
             artifacts.mkdir()
             previous_artifacts.mkdir()
-            for architecture in ("x86_64", "aarch64"):
-                for extension in ("AppImage", "deb", "rpm"):
+            for architecture in verifier["ARCHITECTURES"]:
+                for extension in verifier["FORMATS"]:
                     (artifacts / f"CopyPaste-v1.2.3-linux-{architecture}.{extension}").write_bytes(b"package")
                     (previous_artifacts / f"CopyPaste-v1.2.2-linux-{architecture}.{extension}").write_bytes(b"prior-package")
             package_rows = lambda architecture: [{
                 "name": f"CopyPaste-v1.2.3-linux-{architecture}.{extension}",
                 "sha256": hashlib.sha256(b"package").hexdigest(), "size_bytes": len(b"package"),
-            } for extension in ("AppImage", "deb", "rpm")]
+            } for extension in verifier["FORMATS"]]
             previous_package_rows = lambda architecture: [{
                 "name": f"CopyPaste-v1.2.2-linux-{architecture}.{extension}",
                 "sha256": hashlib.sha256(b"prior-package").hexdigest(), "size_bytes": len(b"prior-package"),
-            } for extension in ("AppImage", "deb", "rpm")]
-            for architecture in ("x86_64", "aarch64"):
-                for desktop in ("GNOME", "KDE"):
-                    for session in ("x11", "wayland"):
+            } for extension in verifier["FORMATS"]]
+            for architecture in verifier["ARCHITECTURES"]:
+                for desktop in verifier["DESKTOPS"]:
+                    for session in verifier["SESSIONS"]:
                         assertions = verifier["assertion_set"]("prior_release", session)
                         trace_name = f"linux-native-{architecture}-{desktop.lower()}-{session}.trace.json"
                         native_format = "deb" if desktop == "GNOME" else "rpm"
@@ -1069,7 +1065,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                     os.environ["COPYPASTE_COMPOSITOR_SESSION_RECORD"] = previous_session_record
             receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
             self.assertEqual(receipt["artifact_run_id"], "456")
-            self.assertEqual(len(receipt["packages"]), 3)
+            self.assertEqual(len(receipt["packages"]), 2)
             self.assertTrue(all(item["size_bytes"] == len(b"current") for item in receipt["packages"]))
             self.assertEqual(receipt["trace"]["name"], "linux-native-x86_64-gnome-wayland.trace.json")
             placeholder = "COPYPASTE_QUALIFICATION_COMMAND " + json.dumps({

@@ -5,26 +5,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import runpy
 from pathlib import Path
 
 
-EXPECTED = {
-    f"copypaste-compositor-runtime-{desktop}-{family}-{distribution}-{architecture}"
-    for desktop, family, distribution in (
-        ("gnome", "46", "ubuntu24.04"),
-        ("kwin", "6.0", "fedora40"),
-    )
-    for architecture in ("x86_64", "aarch64")
-}
+RELEASE = runpy.run_path(str(Path(__file__).with_name("linux_release_contract.py")))
+EXPECTED = {baseline["artifact"] for baseline in RELEASE["BASELINES"]}
+EXPECTED_JOBS = {baseline["job"] for baseline in RELEASE["BASELINES"]}
 
-EXPECTED_JOBS = {
-    f"{desktop} {family} {distribution} ({architecture})"
-    for desktop, family, distribution in (
-        ("GNOME", "46", "Ubuntu 24.04"),
-        ("KDE", "6.0", "Fedora 40"),
-    )
-    for architecture in ("x86_64", "aarch64")
-}
 CI_CANDIDATES = {
     "linux-pr-release-candidate-x86_64",
     "linux-pr-release-candidate-aarch64",
