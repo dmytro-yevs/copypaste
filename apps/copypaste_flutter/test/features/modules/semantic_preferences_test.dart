@@ -95,12 +95,39 @@ void main() {
         );
         // Assert actual option readiness after the opening animation rather
         // than requiring every popup animation to stop scheduling frames.
+        await tester.pump();
         await tester.pump(const Duration(milliseconds: 300));
         expect(find.byType(SelectItemButton<String>), findsNWidgets(2));
+        final popup = find.byType(SelectPopup<String>);
+        final field = find.byKey(const ValueKey('module-choices-languages'));
+        expect(
+          tester.getSize(popup).width,
+          closeTo(tester.getSize(field).width, 0.01),
+        );
+        for (final item in tester.widgetList<SelectItemButton<String>>(
+          find.byType(SelectItemButton<String>),
+        )) {
+          final clickable = tester.widget<Clickable>(
+            find
+                .descendant(
+                  of: find.byWidget(item),
+                  matching: find.byType(Clickable),
+                )
+                .first,
+          );
+          final decoration =
+              clickable.decoration!.resolve(const {}) as BoxDecoration;
+          expect(
+            decoration.border?.top.style ?? BorderStyle.none,
+            BorderStyle.none,
+          );
+        }
         await tester.tap(find.text('English').last);
+        await tester.pump();
         await tester.pump(const Duration(milliseconds: 300));
         expect(find.text('English model · 22.6 MiB download'), findsOneWidget);
         await tester.tap(find.text('Ukrainian').last);
+        await tester.pump();
         await tester.pump(const Duration(milliseconds: 300));
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await tester.pumpAndSettle();
@@ -108,6 +135,21 @@ void main() {
           find.text('Multilingual model · 129.1 MiB download'),
           findsOneWidget,
         );
+        expect(find.byType(MultiSelectChip), findsNWidgets(2));
+        await tester.tap(find.byType(ChipButton).last);
+        await tester.pumpAndSettle();
+        expect(find.byType(MultiSelectChip), findsOneWidget);
+        expect(find.text('English model · 22.6 MiB download'), findsOneWidget);
+        await tester.tap(
+          find.descendant(of: field, matching: find.byType(SelectExpandIcon)),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(find.text('Ukrainian').last);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Save'));
         await tester.pumpAndSettle();
         expect(repository.lastPreferences?['languages'], ['en', 'uk']);

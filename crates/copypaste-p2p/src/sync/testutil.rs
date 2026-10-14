@@ -16,6 +16,19 @@ use super::{
 };
 use crate::protocol::{content_hash, ItemSummary, SyncItem, SyncMessage};
 
+pub(crate) fn source_icon_metadata() -> String {
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::new_rgba8(1, 1)
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    copypaste_payload::PayloadMetadata {
+        source_app_icon: copypaste_payload::SourceAppIconMetadata::new(&png.into_inner(), 1, 1),
+        ..Default::default()
+    }
+    .to_json("text")
+    .unwrap()
+}
+
 pub(crate) fn summary(id: &str, created_at: i64, hash: &str, deleted: bool) -> ItemSummary {
     ItemSummary {
         item_id: id.into(),

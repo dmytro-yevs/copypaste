@@ -223,7 +223,10 @@ class HistoryInspector extends StatelessWidget {
                               label: 'Copy options',
                               button: true,
                               child: ComponentTheme<SelectTheme>(
-                                data: AppTheme.primarySelectTheme(context),
+                                data: AppTheme.selectTheme(
+                                  context,
+                                  variant: AppSelectVariant.primaryAction,
+                                ),
                                 child: Select<bool>(
                                   key: const ValueKey<String>(
                                     'history-copy-options',

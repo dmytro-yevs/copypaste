@@ -139,6 +139,49 @@ void main() {
   });
 
   testWidgets(
+    'pending items keep the completed phase and show an item warning',
+    (tester) async {
+      final repository = FakeSettingsRepository()
+        ..capture = const CaptureSettingsState(
+          running: true,
+          paused: false,
+          epoch: 0,
+          syncStatus: SyncStatus(
+            revision: 1,
+            phase: SyncPhase.synced,
+            peers: [
+              PeerSyncStatus(
+                id: 'phone',
+                name: 'Android phone',
+                phase: SyncPhase.synced,
+                error: '5 items remain pending synchronization.',
+              ),
+            ],
+          ),
+        );
+      final controller = _controller(repository);
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await tester.pumpWidget(_app(controller));
+      await tester.tap(find.byKey(const ValueKey<String>('sync-header-open')));
+      await tester.pumpAndSettle();
+      expect(controller.syncStatus.phase, SyncPhase.synced);
+      expect(find.text('Items pending synchronization'), findsOneWidget);
+      expect(
+        find.text('5 items remain pending synchronization.'),
+        findsOneWidget,
+      );
+      expect(find.text('Last sync problem'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+      TargetPlatform.android,
+    }),
+  );
+
+  testWidgets(
     'drawer shows active devices, errors, endpoint and measured ping',
     (tester) async {
       final now = DateTime(2026, 10, 7, 20);

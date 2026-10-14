@@ -21,6 +21,9 @@ pub struct SyncStats {
     pub received: usize,
     pub skipped: usize,
     pub skipped_too_large: usize,
+    /// Requested versions withheld by the source or still missing at `Done`.
+    /// They remain behind the cursor so a later session can transfer them.
+    pub skipped_unavailable: usize,
 }
 
 /// The result of one completed session.

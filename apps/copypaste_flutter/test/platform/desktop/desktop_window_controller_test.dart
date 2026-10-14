@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:copypaste_flutter/platform/desktop/desktop_window_controller.dart';
 import 'package:copypaste_flutter/platform/desktop/flutter_desktop_window_host.dart';
+import 'package:copypaste_flutter/platform/desktop/desktop_visibility_preferences.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -117,6 +118,58 @@ void main() {
 
         expect(controller.isUnifiedTitleBarReady.value, isTrue);
         expect(controller.setupIssue.value, isNull);
+      },
+    );
+
+    test('restores hidden icons and still reopens after close', () async {
+      final host = _FakeDesktopWindowHost();
+      final store = MemoryDesktopVisibilityStore(
+        const DesktopVisibilityPreferences(
+          showInTaskbar: false,
+          showInTray: false,
+        ),
+      );
+      final controller = DesktopWindowController(
+        host: host,
+        geometryStore: _FakeGeometryStore(),
+        visibilityStore: store,
+      );
+      await controller.initialize();
+      expect(host.taskbarVisible, isFalse);
+      expect(host.trayVisible, isFalse);
+      expect(controller.setupIssue.value, isNull);
+      await controller.handleCloseRequested();
+      expect(controller.isVisible.value, isFalse);
+      host.taskbarVisible = true;
+      await controller.showFromTrayOrDock();
+      expect(controller.isVisible.value, isTrue);
+      expect(host.taskbarVisible, isFalse);
+      expect(host.trayVisible, isFalse);
+      await controller.visibility.setTrayVisible(true);
+      await host.openHandler!();
+      expect(host.trayVisible, isTrue);
+      expect(controller.isVisible.value, isTrue);
+      await controller.dispose();
+    });
+
+    test(
+      'reopen retains native visibility failures until retry succeeds',
+      () async {
+        final host = _FakeDesktopWindowHost();
+        final controller = DesktopWindowController(
+          host: host,
+          geometryStore: _FakeGeometryStore(),
+        );
+        await controller.initialize();
+        host.failedTaskbarChanges = 1;
+        await controller.showFromTrayOrDock();
+        expect(
+          controller.setupIssue.value,
+          DesktopWindowSetupIssue.windowUnavailable,
+        );
+        await controller.retry();
+        expect(controller.setupIssue.value, isNull);
+        await controller.dispose();
       },
     );
 
@@ -513,6 +566,24 @@ void main() {
 }
 
 class _FakeDesktopWindowHost implements DesktopWindowHost {
+  bool taskbarVisible = true;
+  int failedTaskbarChanges = 0;
+  bool trayVisible = true;
+
+  @override
+  Future<void> setTaskbarVisible(bool visible) async {
+    if (failedTaskbarChanges > 0) {
+      failedTaskbarChanges -= 1;
+      throw StateError('Taskbar change failed.');
+    }
+    taskbarVisible = visible;
+  }
+
+  @override
+  Future<void> setTrayVisible(bool visible) async {
+    trayVisible = visible;
+  }
+
   void Function(bool)? visibilityHandler;
 
   @override
@@ -588,11 +659,13 @@ class _FakeDesktopWindowHost implements DesktopWindowHost {
 
   @override
   Future<void> initializeTray({
+    bool visible = true,
     required Future<void> Function() onOpenRequested,
     required Future<void> Function() onCaptureRequested,
     required Future<void> Function() onSettingsRequested,
     required Future<void> Function() onQuitRequested,
   }) async {
+    trayVisible = visible;
     initializeTrayCalls += 1;
     if (failedTrayInitializations > 0) {
       failedTrayInitializations -= 1;
@@ -616,7 +689,11 @@ class _FakeDesktopWindowHost implements DesktopWindowHost {
   }
 
   @override
-  Future<void> initializeWindow(DesktopWindowBounds initialBounds) async {
+  Future<void> initializeWindow(
+    DesktopWindowBounds initialBounds, {
+    bool showInTaskbar = true,
+  }) async {
+    taskbarVisible = showInTaskbar;
     initializeWindowCalls += 1;
     windowInitializationStarted?.complete();
     await windowInitializationGate?.future;
