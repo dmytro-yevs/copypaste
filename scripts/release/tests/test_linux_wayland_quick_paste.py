@@ -629,7 +629,8 @@ class LinuxWaylandQuickPasteTest(unittest.TestCase):
         portal.park_pointer()
         self.assertEqual(pointer_calls[0][:2], (module.REMOTE_DESKTOP, 'NotifyPointerMotion'))
         self.assertEqual(pointer_calls[0][2].get_type_string(), '(oa{sv}dd)')
-        self.assertEqual(pointer_calls[0][2].unpack(), (portal.session, {}, -10000.0, -10000.0))
+        self.assertEqual(pointer_calls[0][2].unpack(), (portal.session, {}, -10000.0, 10000.0))
+        self.assertEqual(pointer_calls[1][2].unpack(), (portal.session, {}, 16.0, -16.0))
 
     def test_close_targets_the_session_object_without_a_body_and_clears_it(self):
         class Glib:
