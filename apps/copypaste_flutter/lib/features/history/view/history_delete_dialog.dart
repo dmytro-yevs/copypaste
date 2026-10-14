@@ -1,6 +1,7 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_overlays.dart';
+import '../../../app/theme/app_theme.dart';
 import '../controller/history_controller.dart';
 
 Future<void> showHistoryBulkDeleteDialog(
@@ -20,12 +21,14 @@ Future<void> showHistoryBulkDeleteDialog(
           : Text(controller.errorMessage!),
       actions: [
         Button.ghost(
+          style: AppTheme.actionButtonStyle(const ButtonStyle.ghost()),
           onPressed: controller.isBulkMutating
               ? null
               : () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
         Button.destructive(
+          style: AppTheme.actionButtonStyle(const ButtonStyle.destructive()),
           onPressed:
               controller.isBulkMutating || controller.bulkSelectedIds.isEmpty
               ? null
@@ -53,12 +56,14 @@ Future<void> showHistoryDeleteDialog(
       title: const Text('Delete this clip?'),
       actions: [
         Button.ghost(
+          style: AppTheme.actionButtonStyle(const ButtonStyle.ghost()),
           onPressed: controller.isDeletePending(clipId)
               ? null
               : () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
         Button.destructive(
+          style: AppTheme.actionButtonStyle(const ButtonStyle.destructive()),
           onPressed: controller.isDeletePending(clipId)
               ? null
               : () async {

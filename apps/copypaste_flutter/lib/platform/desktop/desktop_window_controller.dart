@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'desktop_window_geometry.dart';
+import 'desktop_visibility_controller.dart';
+import 'desktop_visibility_preferences.dart';
 
 export 'desktop_window_geometry.dart';
 
@@ -23,8 +25,11 @@ extension DesktopWindowSetupIssueMessage on DesktopWindowSetupIssue {
   };
 }
 
-abstract interface class DesktopWindowHost {
-  Future<void> initializeWindow(DesktopWindowBounds initialBounds);
+abstract interface class DesktopWindowHost implements DesktopVisibilityHost {
+  Future<void> initializeWindow(
+    DesktopWindowBounds initialBounds, {
+    bool showInTaskbar = true,
+  });
 
   Future<void> setCloseHandler(Future<void> Function() onCloseRequested);
 
@@ -37,6 +42,7 @@ abstract interface class DesktopWindowHost {
   Future<DesktopWindowBounds> getBounds();
 
   Future<void> initializeTray({
+    bool visible = true,
     required Future<void> Function() onOpenRequested,
     required Future<void> Function() onCaptureRequested,
     required Future<void> Function() onSettingsRequested,
@@ -65,8 +71,16 @@ class DesktopWindowController {
   DesktopWindowController({
     required DesktopWindowHost host,
     required DesktopWindowGeometryStore geometryStore,
+    DesktopVisibilityPreferencesStore? visibilityStore,
   }) : _host = host,
-       _geometryStore = geometryStore;
+       _geometryStore = geometryStore,
+       visibility = DesktopVisibilityController(
+         host: host,
+         store: visibilityStore ?? MemoryDesktopVisibilityStore(),
+       );
+
+  final DesktopVisibilityController visibility;
+  bool _visibilityLoaded = false;
 
   final DesktopWindowHost _host;
   final DesktopWindowGeometryStore _geometryStore;
@@ -93,6 +107,7 @@ class DesktopWindowController {
   bool _capturePaused = true;
   Future<void>? _initialization;
   Future<void>? _disposal;
+  Future<void>? _taskbarRestoration;
   Future<void> _boundsWrite = Future<void>.value();
 
   Future<void> initialize() {
@@ -149,7 +164,14 @@ class DesktopWindowController {
 
     if (!_windowReady) {
       try {
-        await _host.initializeWindow(desktopWindowInitialBounds);
+        if (!_visibilityLoaded) {
+          await visibility.load();
+          _visibilityLoaded = true;
+        }
+        await _host.initializeWindow(
+          desktopWindowInitialBounds,
+          showInTaskbar: visibility.preferences.showInTaskbar,
+        );
         if (_disposed) {
           return;
         }
@@ -173,6 +195,7 @@ class DesktopWindowController {
 
     try {
       await _host.initializeTray(
+        visible: visibility.preferences.showInTray,
         onOpenRequested: showFromTrayOrDock,
         onCaptureRequested: _toggleCaptureFromTray,
         onSettingsRequested: _openSettingsFromTray,
@@ -220,6 +243,7 @@ class DesktopWindowController {
     try {
       _visibilityChanged(true);
       await _host.showAndFocus();
+      await _restoreTaskbarVisibility();
       _clearIssue();
     } catch (_) {
       _setIssue(DesktopWindowSetupIssue.windowUnavailable);
@@ -228,6 +252,31 @@ class DesktopWindowController {
 
   void _visibilityChanged(bool visible) {
     if (!_disposed) _isVisible.value = visible;
+    if (visible && _windowReady && !_disposed) {
+      unawaited(
+        _restoreTaskbarVisibility().catchError((Object _) {
+          _setIssue(DesktopWindowSetupIssue.windowUnavailable);
+        }),
+      );
+    }
+  }
+
+  Future<void> _restoreTaskbarVisibility() {
+    final pending = _taskbarRestoration;
+    if (pending != null) return pending;
+    late final Future<void> operation;
+    operation =
+        (() async {
+          await visibility.settle();
+          if (_disposed) return;
+          await _host.setTaskbarVisible(visibility.preferences.showInTaskbar);
+        })().whenComplete(() {
+          if (identical(_taskbarRestoration, operation)) {
+            _taskbarRestoration = null;
+          }
+        });
+    _taskbarRestoration = operation;
+    return operation;
   }
 
   Future<void> _openSettingsFromTray() async {
@@ -365,8 +414,11 @@ class DesktopWindowController {
     try {
       await _initialization?.catchError((_) {});
       await _boundsWrite.catchError((_) {});
+      await visibility.settle();
+      await _taskbarRestoration?.catchError((_) {});
       await _host.dispose();
     } finally {
+      visibility.dispose();
       setupIssue.dispose();
       _isUnifiedTitleBarReady.dispose();
       _isVisible.dispose();

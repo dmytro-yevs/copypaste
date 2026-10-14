@@ -1,6 +1,7 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_overlays.dart';
+import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../shared/state_view.dart';
 import '../controller/module_form_draft.dart';
@@ -49,8 +50,14 @@ class ModuleFormFields extends StatelessWidget {
                   field.id,
                   (values ?? const <String>[]).toList(),
                 ),
-                itemBuilder: (context, id) => Text(
-                  field.options.firstWhere((option) => option.id == id).title,
+                itemBuilder: (context, id) => MultiSelectChip(
+                  value: id,
+                  style: AppTheme.selectChipStyle,
+                  child: Text(
+                    field.options.firstWhere((option) => option.id == id).title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 popup: SelectPopup<String>(
                   items: SelectItemList(
@@ -66,6 +73,9 @@ class ModuleFormFields extends StatelessWidget {
               )
             else if (field.kind == ModuleFieldKind.file)
               Button.secondary(
+                style: AppTheme.actionButtonStyle(
+                  const ButtonStyle.secondary(),
+                ),
                 onPressed: !enabled || draft.busy
                     ? null
                     : () => draft.chooseFile(field),

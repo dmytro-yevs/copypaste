@@ -366,6 +366,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
         content: SingleChildScrollView(child: SelectableText(result!.text)),
         actions: [
           Button.primary(
+            style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
             onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Done'),
           ),
@@ -385,10 +386,12 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
         ),
         actions: [
           Button.ghost(
+            style: AppTheme.actionButtonStyle(const ButtonStyle.ghost()),
             onPressed: () => Navigator.pop(dialogContext, false),
             child: const Text('Cancel'),
           ),
           Button.destructive(
+            style: AppTheme.actionButtonStyle(const ButtonStyle.destructive()),
             onPressed: () => Navigator.pop(dialogContext, true),
             child: const Text('Remove'),
           ),
@@ -436,10 +439,12 @@ class _ModuleFieldsDialog extends StatelessWidget {
       content: SingleChildScrollView(child: ModuleFormFields(draft: draft)),
       actions: [
         Button.ghost(
+          style: AppTheme.actionButtonStyle(const ButtonStyle.ghost()),
           onPressed: () => Navigator.pop(context, false),
           child: const Text('Cancel'),
         ),
         Button.primary(
+          style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
           onPressed: draft.valid && !draft.busy
               ? () => Navigator.pop(context, true)
               : null,

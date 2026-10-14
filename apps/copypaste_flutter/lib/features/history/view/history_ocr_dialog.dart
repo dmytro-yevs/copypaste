@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../../../app/theme/app_overlays.dart';
+import '../../../app/theme/app_theme.dart';
 import '../../../app/theme/app_toast.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../shared/state_view.dart';
@@ -49,10 +50,12 @@ Future<void> showHistoryOcrDialog(
           ),
           actions: [
             Button.secondary(
+              style: AppTheme.actionButtonStyle(const ButtonStyle.secondary()),
               onPressed: () => Navigator.pop(dialogContext),
               child: const Text('Close'),
             ),
             Button.primary(
+              style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
               key: const ValueKey('history-ocr-copy'),
               onPressed: controller.busy || text == null || text.trim().isEmpty
                   ? null

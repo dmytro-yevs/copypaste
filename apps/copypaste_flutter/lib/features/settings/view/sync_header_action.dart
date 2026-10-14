@@ -79,29 +79,26 @@ class _SyncHeaderActionState extends State<SyncHeaderAction> {
       final drawer = _drawer = showOverlay<void>(
         context,
         AppOverlays.drawerConfiguration(context),
-        builder: (context) => ButtonStyleOverride(
-          decoration: AppTheme.actionButtonDecoration,
-          child: ConstrainedBox(
-            key: const ValueKey<String>('sync-details-drawer'),
-            constraints: AppOverlays.drawerContentConstraints(context),
-            child: CallbackShortcuts(
-              bindings: <ShortcutActivator, VoidCallback>{
-                const SingleActivator(LogicalKeyboardKey.escape): () =>
-                    unawaited(closeDrawer(context)),
-              },
-              child: Focus(
-                focusNode: _drawerFocus,
-                autofocus: true,
-                child: AnimatedBuilder(
-                  animation: Listenable.merge([
-                    widget.controller,
-                    ?widget.devices,
-                  ]),
-                  builder: (context, _) => _SyncDetails(
-                    status: widget.controller.syncStatus,
-                    devices: widget.devices,
-                    onClose: () => unawaited(closeDrawer(context)),
-                  ),
+        builder: (context) => ConstrainedBox(
+          key: const ValueKey<String>('sync-details-drawer'),
+          constraints: AppOverlays.drawerContentConstraints(context),
+          child: CallbackShortcuts(
+            bindings: <ShortcutActivator, VoidCallback>{
+              const SingleActivator(LogicalKeyboardKey.escape): () =>
+                  unawaited(closeDrawer(context)),
+            },
+            child: Focus(
+              focusNode: _drawerFocus,
+              autofocus: true,
+              child: AnimatedBuilder(
+                animation: Listenable.merge([
+                  widget.controller,
+                  ?widget.devices,
+                ]),
+                builder: (context, _) => _SyncDetails(
+                  status: widget.controller.syncStatus,
+                  devices: widget.devices,
+                  onClose: () => unawaited(closeDrawer(context)),
                 ),
               ),
             ),

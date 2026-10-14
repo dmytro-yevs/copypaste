@@ -7,6 +7,7 @@ project(runner LANGUAGES CXX)
 #
 # Any new source files that you add to the application should be added here.
 add_executable(${BINARY_NAME} WIN32
+  "application_instance.cpp"
   "app_update_channel.cpp"
   "app_update_helper.cpp"
   "app_update_verifier.cpp"

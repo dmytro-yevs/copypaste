@@ -427,7 +427,7 @@ void main() {
     expect(selectOverlay?.alignment, Alignment.topLeft);
     expect(selectOverlay?.anchorAlignment, Alignment.bottomLeft);
     expect(selectOverlay?.offset, const Offset(0, AppSpacing.xs));
-    expect(selectOverlay?.widthConstraint, PopoverConstraint.anchorMinSize);
+    expect(selectOverlay?.widthConstraint, PopoverConstraint.anchorFixedSize);
     expect(drawerTheme?.barrierColor, AppOverlays.scrimColor);
     expect(drawerTheme?.surfaceOpacity, 1);
     expect(drawerTheme?.surfaceBlur, 0);
@@ -599,13 +599,13 @@ void main() {
                     onPressed: () {},
                     child: const Icon(LucideIcons.filter),
                   ),
-                  ButtonStyleOverride(
-                    decoration: AppTheme.actionButtonDecoration,
-                    child: Button.secondary(
-                      key: const ValueKey('setting-action'),
-                      onPressed: () {},
-                      child: const Text('Export'),
+                  Button.secondary(
+                    key: const ValueKey('setting-action'),
+                    style: AppTheme.actionButtonStyle(
+                      const ButtonStyle.secondary(),
                     ),
+                    onPressed: () {},
+                    child: const Text('Export'),
                   ),
                   ButtonGroup(
                     children: [
