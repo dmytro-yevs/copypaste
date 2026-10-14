@@ -15,6 +15,7 @@
 #include "copypaste_flutter_protected_pairing.h"
 #include "utils.h"
 #include "screenshot_protection.h"
+#include "application_instance.h"
 
 namespace {
 
@@ -751,6 +752,29 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (message == WM_COPYDATA && !is_protected_pairing_context_ &&
+      !is_quick_paste_context_) {
+    const auto uri = ApplicationInstance::ReadLaunch(
+        reinterpret_cast<const COPYDATASTRUCT*>(lparam));
+    if (!uri) return FALSE;
+    ::ShowWindow(hwnd, ::IsIconic(hwnd) ? SW_RESTORE : SW_SHOW);
+    ::SetForegroundWindow(hwnd);
+    if (!uri->empty()) {
+      pending_pairing_uri_ = *uri;
+      if (pairing_links_channel_) {
+        pairing_links_channel_->InvokeMethod("openPairingUri",
+            std::make_unique<flutter::EncodableValue>(*uri),
+            std::make_unique<flutter::MethodResultFunctions<flutter::EncodableValue>>(
+                [this, launch_uri = *uri](const flutter::EncodableValue* result) {
+                  const auto* accepted = result == nullptr ? nullptr : std::get_if<bool>(result);
+                  if (accepted != nullptr && *accepted && pending_pairing_uri_ == launch_uri) {
+                    pending_pairing_uri_.clear();
+                  }
+                }, nullptr, nullptr));
+      }
+    }
+    return TRUE;
+  }
   if (is_protected_pairing_context_ && message == WM_CLOSE && !pairing_cancellation_approved_) {
     pairing_cancellation_approved_ = CancelProtectedPairingContext();
     if (!pairing_cancellation_approved_) return 0;
