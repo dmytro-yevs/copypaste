@@ -66,6 +66,7 @@ where
 }
 
 fn apply_runtime_effects(state: &AppState, transition: &SettingsTransition) {
+    advance_private_cursor(state, transition);
     let removed = copypaste_core::retention::reconcile_policy(
         &state.store,
         || state.settings.get().clone(),
@@ -88,6 +89,19 @@ fn apply_runtime_effects(state: &AppState, transition: &SettingsTransition) {
     }
 }
 
+fn advance_private_cursor(state: &AppState, transition: &SettingsTransition) {
+    if !transition.resumes_capture() {
+        return;
+    }
+    // Settings retains capture authority throughout this effect.
+    // Advance the native cursor without reading or replacing private content.
+    let mut private_policy = transition.config().clone();
+    private_policy.private_mode = true;
+    state
+        .clipboard()
+        .poll_with_policy(crate::clipboard::CapturePolicy::new(&private_policy));
+}
+
 pub(super) fn private_mode(state: &AppState, id: u64) -> Response {
     let settings = state.settings.get();
     Response::ok(
@@ -100,12 +114,13 @@ pub(super) fn private_mode(state: &AppState, id: u64) -> Response {
 }
 
 pub(super) fn set_private_mode(state: &AppState, id: u64, enabled: bool) -> Response {
-    match state.settings.apply_with_epoch(
+    match state.settings.apply_with_effects(
         &state.meta,
         &ConfigPatch {
             private_mode: Some(enabled),
             ..Default::default()
         },
+        |transition| advance_private_cursor(state, transition),
     ) {
         Ok(config) => Response::ok(
             id,
@@ -125,7 +140,7 @@ pub(super) fn set_private_mode(state: &AppState, id: u64, enabled: bool) -> Resp
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
+    use std::sync::{mpsc, Arc, Mutex};
 
     use super::*;
     use crate::testutil::test_state;
@@ -146,6 +161,110 @@ mod tests {
         match response.data {
             Some(ResponseData::PrivateMode(mode)) => mode,
             other => panic!("{other:?}"),
+        }
+    }
+
+    #[derive(Default)]
+    struct CursorFixture {
+        generation: u64,
+        observed: u64,
+        value: &'static str,
+        payload_reads: usize,
+    }
+
+    struct CursorSource(Arc<Mutex<CursorFixture>>);
+
+    impl crate::clipboard::ClipboardSource for CursorSource {
+        fn poll(&mut self) -> Option<crate::clipboard::Capture> {
+            self.poll_with_policy(crate::clipboard::CapturePolicy::new(&ConfigData::default()))
+        }
+
+        fn poll_with_policy(
+            &mut self,
+            policy: crate::clipboard::CapturePolicy<'_>,
+        ) -> Option<crate::clipboard::Capture> {
+            let mut cursor = self.0.lock().unwrap();
+            if cursor.generation == cursor.observed {
+                return None;
+            }
+            cursor.observed = cursor.generation;
+            if policy.settings.private_mode {
+                return None;
+            }
+            cursor.payload_reads += 1;
+            Some(crate::clipboard::Capture {
+                privacy: Default::default(),
+                content: cursor.value.into(),
+                binary_content: None,
+                file_path: None,
+                file_metadata: None,
+                content_type: copypaste_ipc::content_type::TEXT.into(),
+                app_bundle_id: None,
+                app_name: None,
+                source_policy: crate::clipboard::SourcePolicyEvidence::Legacy,
+            })
+        }
+
+        fn set_contents(&mut self, _: &str) -> anyhow::Result<()> {
+            panic!("private mode must preserve the native clipboard")
+        }
+
+        fn backend_name(&self) -> &'static str {
+            "private-mode-cursor-fixture"
+        }
+    }
+
+    #[test]
+    fn both_private_resume_paths_advance_without_reading_and_keep_the_next_copy() {
+        for via_config in [false, true] {
+            let cursor = Arc::new(Mutex::new(CursorFixture::default()));
+            let (state, _dir) = crate::testutil::test_state_with_clipboard(
+                "private-resume",
+                Box::new(CursorSource(Arc::clone(&cursor))),
+            );
+            assert!(call(&state, Method::SetPrivateMode { enabled: true }).ok);
+            {
+                let mut pending = cursor.lock().unwrap();
+                pending.generation = 1;
+                pending.value = "private fixture";
+            }
+            let resume = || {
+                if via_config {
+                    Method::SetConfig {
+                        patch: ConfigPatch {
+                            private_mode: Some(false),
+                            ..Default::default()
+                        },
+                    }
+                } else {
+                    Method::SetPrivateMode { enabled: false }
+                }
+            };
+            assert!(call(&state, resume()).ok);
+            {
+                let pending = cursor.lock().unwrap();
+                assert_eq!(pending.observed, 1);
+                assert_eq!(pending.payload_reads, 0);
+                assert_eq!(pending.value, "private fixture");
+            }
+            let settings = state.settings.get().clone();
+            assert!(state
+                .clipboard()
+                .poll_with_policy(crate::clipboard::CapturePolicy::new(&settings))
+                .is_none());
+            {
+                let mut pending = cursor.lock().unwrap();
+                pending.generation = 2;
+                pending.value = "first post-resume copy";
+            }
+            // Repeating an already-off request must not discard a fresh copy.
+            assert!(call(&state, resume()).ok);
+            let capture = state
+                .clipboard()
+                .poll_with_policy(crate::clipboard::CapturePolicy::new(&settings))
+                .expect("first post-ack copy");
+            assert_eq!(capture.content, "first post-resume copy");
+            assert_eq!(cursor.lock().unwrap().payload_reads, 1);
         }
     }
 

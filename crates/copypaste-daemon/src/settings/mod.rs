@@ -91,6 +91,10 @@ impl SettingsTransition {
         &self.applied.config
     }
 
+    pub(crate) fn resumes_capture(&self) -> bool {
+        self.before.private_mode && !self.applied.config.private_mode
+    }
+
     pub(crate) fn should_enforce_retention(&self) -> bool {
         copypaste_core::retention::policy_tightened(&self.before, &self.applied.config)
     }
@@ -196,14 +200,6 @@ impl Settings {
     pub fn apply(&self, meta: &Meta, patch: &ConfigPatch) -> Result<ConfigData, SettingsError> {
         self.apply_with_effects(meta, patch, |_| {})
             .map(|applied| applied.config)
-    }
-
-    pub(crate) fn apply_with_epoch(
-        &self,
-        meta: &Meta,
-        patch: &ConfigPatch,
-    ) -> Result<SettingsApplied, SettingsError> {
-        self.apply_with_effects(meta, patch, |_| {})
     }
 
     /// Apply a whole settings transition, including its runtime effects.
@@ -399,12 +395,13 @@ mod tests {
         let (state, _dir) = test_state("settings-persistence-failure");
         let initial = state
             .settings
-            .apply_with_epoch(
+            .apply_with_effects(
                 &state.meta,
                 &ConfigPatch {
                     private_mode: Some(true),
                     ..Default::default()
                 },
+                |_| {},
             )
             .unwrap();
         let conn = open_validated(state.db_path(), &state.keyring.db_key()).unwrap();

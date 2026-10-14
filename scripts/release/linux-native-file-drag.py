@@ -101,8 +101,14 @@ def build_source(workspace: Path, environment: dict[str, str]) -> Path:
     return output
 
 
-def x11_window(title: str, environment: dict[str, str]) -> str | None:
-    result = subprocess.run(["xdotool", "search", "--onlyvisible", "--name", f"^{re.escape(title)}$"], env=environment, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+def x11_window(title: str, environment: dict[str, str], *, owner_pid: int | None = None) -> str | None:
+    command = ["xdotool", "search", "--onlyvisible", "--all"]
+    if owner_pid is not None:
+        if type(owner_pid) is not int or owner_pid <= 0:
+            raise FileDragQualificationError("X11 window owner PID is invalid")
+        command += ["--pid", str(owner_pid)]
+    command += ["--name", f"^{re.escape(title)}$"]
+    result = subprocess.run(command, env=environment, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     windows = result.stdout.decode("ascii", errors="ignore").splitlines()
     if len(windows) > 1:
         raise FileDragQualificationError(f"{title} window is not uniquely discoverable")
@@ -227,8 +233,8 @@ def start_source(workspace: Path, environment: dict[str, str]) -> DragSource:
 def drag_x11(source: DragSource, gui_pid: int, environment: dict[str, str]) -> None:
     if not environment.get("DISPLAY"):
         raise FileDragQualificationError("X11 display is unavailable")
-    source_window = wait_for(lambda: x11_window(SOURCE_TITLE, environment), "GTK file-drag source window did not appear")
-    target_window = wait_for(lambda: x11_window(TARGET_TITLE, environment), "installed CopyPaste window did not appear")
+    source_window = wait_for(lambda: x11_window(SOURCE_TITLE, environment, owner_pid=source.process.pid), "GTK file-drag source window did not appear")
+    target_window = wait_for(lambda: x11_window(TARGET_TITLE, environment, owner_pid=gui_pid), "installed CopyPaste window did not appear")
     require_x11_window_pid(target_window, gui_pid, environment)
     source_point = x11_bounds(source_window, environment).point()
     target_point = x11_bounds(target_window, environment).point(horizontal=0.72)

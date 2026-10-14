@@ -131,7 +131,9 @@ PY
     geometry_extension_id="copypaste-qualification-window-geometry@copypaste.app"
     [[ -f "$geometry_extension/metadata.json" && -f "$geometry_extension/extension.js" ]] || { echo "ERROR: qualification GNOME geometry fixture is missing" >&2; exit 1; }
     cp -a "$geometry_extension" "$XDG_DATA_HOME/gnome-shell/extensions/$geometry_extension_id"
-    gsettings set org.gnome.desktop.interface enable-animations false
+    # Virtual pointer setup must not activate the desktop's hot corner.
+    gsettings set org.gnome.desktop.interface enable-hot-corners false
+    gsettings set org.gnome.desktop.interface enable-animations true
     gsettings set org.gnome.shell enabled-extensions "['$extension_id', '$geometry_extension_id']"
     ;;
   KDE)

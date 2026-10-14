@@ -60,8 +60,20 @@ def module_qualification_helper():
 
 
 def run(argv, *, input_bytes=None, env=None, timeout=15):
-    return subprocess.run(argv, input=input_bytes, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                          check=True, timeout=timeout, env=env)
+    try:
+        return subprocess.run(argv, input=input_bytes, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              check=True, timeout=timeout, env=env)
+    except subprocess.CalledProcessError as error:
+        helpers = {PROVIDER, DESKTOP_ACCEPTANCE, WAYLAND_QUICK_PASTE, NATIVE_MEDIA, EXTERNAL_FILE_DRAG}
+        helper = Path(argv[1]) if len(argv) > 1 else None
+        if helper not in helpers:
+            raise
+        diagnostic = error.stderr or b""
+        capability = (os.environ if env is None else env).get("COPYPASTE_QUALIFICATION_CAPABILITY")
+        if capability:
+            diagnostic = diagnostic.replace(capability.encode("utf-8"), b"[redacted]")
+        message = diagnostic[:8 * 1024].decode("utf-8", "replace").strip()
+        raise RuntimeError(f"{helper.name} exited {error.returncode}: {message}") from error
 
 
 def emit_result(assertion, result):
@@ -406,14 +418,8 @@ def require_wayland_qualification(args, *, gui_pid, cli, environment, workspace,
     emit_result("tray_window_notification", tray_result)
 
     marker = "copypaste-wayland-quick-paste-fixture"
-    run([str(cli), "add", marker], env={**environment, "COPYPASTE_SOCKET": str(socket_path)})
-    # Keep the active native selection consistent with the prepared newest clip:
-    # a compositor can announce that selection again when the target gains focus.
     cli_environment = {**environment, "COPYPASTE_SOCKET": str(socket_path)}
-    prepared = [item for item in list_items(cli, cli_environment) if item.get("content") == marker]
-    if len(prepared) != 1 or not isinstance(prepared[0].get("id"), str) or not prepared[0]["id"]:
-        raise RuntimeError("Wayland Quick Paste marker is not uniquely prepared")
-    run([str(cli), "--json", "copy", prepared[0]["id"]], env=cli_environment)
+    prepare_quick_paste_marker(cli, cli_environment, marker)
     quick_paste_result = run(
         [
             sys.executable, str(quick_paste_helper), "--gui-pid", str(gui_pid),
@@ -552,6 +558,15 @@ def list_items(cli, environment):
     return page["items"]
 
 
+def prepare_quick_paste_marker(cli, environment, marker):
+    """Keep the real native selection consistent with the prepared newest clip."""
+    run([str(cli), "add", marker], env=environment)
+    prepared = [item for item in list_items(cli, environment) if item.get("content") == marker]
+    if len(prepared) != 1 or not isinstance(prepared[0].get("id"), str) or not prepared[0]["id"]:
+        raise RuntimeError("Quick Paste marker is not uniquely prepared")
+    run([str(cli), "--json", "copy", prepared[0]["id"]], env=environment)
+
+
 def write_source_desktop_entry(data_home):
     applications = data_home / "applications"
     applications.mkdir(parents=True, exist_ok=True)
@@ -607,7 +622,7 @@ def x11_input_target(workspace, environment):
             time.sleep(0.05)
         if target.poll() is not None or ready.read_text(encoding="utf-8") != "ready\n":
             raise RuntimeError("X11 input target did not become ready")
-        target_window = wait_for_window("CopyPaste Qualification Input Target", environment)
+        target_window = wait_for_window("CopyPaste Qualification Input Target", environment, owner_pid=target.pid)
         run(["xdotool", "windowactivate", "--sync", target_window], env=environment)
         yield target_window, result
     finally:
@@ -931,10 +946,16 @@ def require_external_file_drag(cli, environment, workspace, gui_pid, session):
     emit_result("external_file_drag", result)
 
 
-def wait_for_window(name, environment, deadline=None):
+def wait_for_window(name, environment, deadline=None, *, owner_pid=None):
     deadline = time.monotonic() + 8 if deadline is None else deadline
+    command = ["xdotool", "search", "--onlyvisible", "--all"]
+    if owner_pid is not None:
+        if type(owner_pid) is not int or owner_pid <= 0:
+            raise RuntimeError("X11 window owner PID is invalid")
+        command += ["--pid", str(owner_pid)]
+    command += ["--name", f"^{re.escape(name)}$"]
     while time.monotonic() < deadline:
-        result = subprocess.run(["xdotool", "search", "--name", name], stdout=subprocess.PIPE,
+        result = subprocess.run(command, stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL, env=environment)
         windows = result.stdout.decode("utf-8").splitlines()
         if len(windows) == 1 and windows[0].isdigit():
@@ -948,7 +969,7 @@ def wait_for_window(name, environment, deadline=None):
 def require_x11_quick_paste(cli, environment, workspace):
     """Drive the packaged global shortcut through an external GTK input field."""
     marker = "copypaste-x11-quick-paste-fixture"
-    run([str(cli), "add", marker], env=environment)
+    prepare_quick_paste_marker(cli, environment, marker)
     run(["xdotool", "mousemove", "--sync", "16", "16"], env=environment)
     with x11_input_target(workspace, environment) as (target_window, result_file):
         # The target owns focus before the real global shortcut is sent.
@@ -1517,8 +1538,7 @@ def main():
                         prefix / "copypaste", environment, runtime_dir, prior_sockets,
                     )
                     cli_environment = {**environment, "COPYPASTE_SOCKET": str(runtime_socket)}
-                    if not isinstance(status(cli, cli_environment), dict):
-                        raise RuntimeError("GUI-owned daemon did not become ready after module lifecycle restart")
+                    wait_for_startup_status(cli, cli_environment, require_native_clipboard=True)
                     restarted_data = gui_owned_daemon(app, data_home).data_dir
                     if restarted_data != daemon_data:
                         raise RuntimeError("GUI-owned daemon changed its data directory during module qualification")
