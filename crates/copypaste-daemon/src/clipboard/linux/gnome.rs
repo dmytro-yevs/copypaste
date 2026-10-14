@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use tracing::debug;
 use zbus::blocking::{connection::Builder, Connection, Proxy};
+use zbus::fdo::RequestNameFlags;
 
 use super::super::{Capture, CapturePolicy, ClipboardSource, SourcePolicyEvidence};
 
@@ -332,7 +333,11 @@ fn worker(commands: mpsc::Receiver<Command>, state: Arc<Mutex<State>>, bridge: B
     else {
         return;
     };
-    if connection.request_name(DAEMON).is_err() {
+    // A second daemon must not replace the authenticated clipboard owner.
+    if connection
+        .request_name_with_flags(DAEMON, RequestNameFlags::DoNotQueue.into())
+        .is_err()
+    {
         return;
     }
     // Subscribe before resolving the first owner.  Otherwise a bridge that
@@ -1032,11 +1037,49 @@ mod tests {
         }
         for bridge in [GNOME, KWIN] {
             live_bridge_fixture(bridge);
+            competing_daemon_keeps_live_owner_fixture(bridge);
             stale_read_keeps_live_owner_fixture(bridge);
             access_denied_read_invalidates_fixture(bridge);
             owner_changed_during_stalled_snapshot_fixture(bridge);
             owner_switch_during_stalled_snapshot_fixture(bridge);
         }
+    }
+
+    fn competing_daemon_keeps_live_owner_fixture(bridge: Bridge) {
+        let fixture = BridgeFixture::start(bridge);
+        let directory = tempfile::tempdir().expect("fixture data dir");
+        let mut clipboard =
+            GnomeClipboard::with_bridge(directory.path(), bridge).expect("compositor clipboard");
+        wait_for_active(&clipboard);
+        let competitor = Connection::session().expect("competing daemon connection");
+        let bus = Proxy::new(
+            &competitor,
+            "org.freedesktop.DBus",
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus",
+        )
+        .expect("fixture D-Bus proxy");
+        let original: String = bus.call("GetNameOwner", &(DAEMON,)).expect("daemon owner");
+        assert!(
+            competitor.request_name(DAEMON).is_err(),
+            "competing daemon replaced the live clipboard owner"
+        );
+        let current: String = bus
+            .call("GetNameOwner", &(DAEMON,))
+            .expect("retained daemon owner");
+        assert_eq!(current, original);
+        drop(bus);
+        competitor
+            .close()
+            .expect("close competing daemon connection");
+
+        fixture.update_owner(2, vec!["text/plain;charset=utf-8".into()]);
+        wait_for_change(&mut clipboard);
+        let capture = clipboard
+            .poll()
+            .expect("capture after competing daemon exit");
+        assert_eq!(capture.content, "bridge text");
+        assert!(clipboard.is_available());
     }
 
     fn stale_read_keeps_live_owner_fixture(bridge: Bridge) {

@@ -191,14 +191,12 @@ class LinuxWaylandQuickPasteTest(unittest.TestCase):
             def require_gui_owner(self, _pid):
                 return ':1.2'
 
-            def grant(self, callback, *, with_pointer=False):
-                if not with_pointer:
-                    raise AssertionError('pointer setup requires its real grant')
+            def grant(self, callback):
                 self.events.append('grant')
                 callback()
 
             def park_pointer(self):
-                self.events.append('park')
+                raise AssertionError('keyboard qualification must not inject pointer motion')
 
             def chord(self, *keycodes):
                 self.events.append('chord')
@@ -225,7 +223,7 @@ class LinuxWaylandQuickPasteTest(unittest.TestCase):
             with self.assertRaisesRegex(module.QuickPasteQualificationError, 'malformed readiness'):
                 module.qualify(args)
         self.assertEqual(portal.chords, [(module.EVDEV_CONTROL, module.EVDEV_SHIFT, module.EVDEV_C)])
-        self.assertEqual(portal.events, ['grant', 'park', 'chord'])
+        self.assertEqual(portal.events, ['grant', 'chord'])
         target.close.assert_called_once()
 
     def test_gnome_portal_consent_checks_remote_interaction_before_sharing(self):
@@ -615,22 +613,9 @@ class LinuxWaylandQuickPasteTest(unittest.TestCase):
         self.assertEqual(start_options['handle_token'].get_type_string(), 's')
         self.assertIs(calls[2][3], callback)
 
-        portal.granted_devices = 0
-        with self.assertRaisesRegex(module.QuickPasteQualificationError, 'pointer session'):
-            portal.park_pointer()
+        granted_devices = 0
         with self.assertRaisesRegex(module.QuickPasteQualificationError, 'requested input devices'):
-            portal.grant(callback, with_pointer=True)
-
-        granted_devices |= module.POINTER_DEVICE
-        portal.grant(callback, with_pointer=True)
-        self.assertEqual(calls[-2][2][1]['types'].unpack(), granted_devices)
-        pointer_calls = []
-        portal._call = lambda *args: pointer_calls.append(args)
-        portal.park_pointer()
-        self.assertEqual(pointer_calls[0][:2], (module.REMOTE_DESKTOP, 'NotifyPointerMotion'))
-        self.assertEqual(pointer_calls[0][2].get_type_string(), '(oa{sv}dd)')
-        self.assertEqual(pointer_calls[0][2].unpack(), (portal.session, {}, -10000.0, 10000.0))
-        self.assertEqual(pointer_calls[1][2].unpack(), (portal.session, {}, 16.0, -16.0))
+            portal.grant(callback)
 
     def test_close_targets_the_session_object_without_a_body_and_clears_it(self):
         class Glib:
