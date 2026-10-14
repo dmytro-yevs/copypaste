@@ -177,3 +177,170 @@ fn icon_normalization_and_sync_hydration_preserve_classification() {
     assert_eq!(hydrated.privacy, metadata.privacy);
     assert!(hydrated.source_app_icon.is_some());
 }
+
+struct SyncDevice {
+    store: Store,
+    keys: std::sync::Arc<Keyring>,
+    source: copypaste_core::StoreSource,
+}
+
+impl SyncDevice {
+    fn new(secret: u8, name: &str) -> Self {
+        let keys = std::sync::Arc::new(Keyring::from_secret(&[secret; 32]));
+        let store = Store::open_in_memory(&keys.db_key()).unwrap();
+        let identity = store.device_identity(name).unwrap();
+        let source = copypaste_core::StoreSource::new(
+            store.clone(),
+            std::sync::Arc::clone(&keys),
+            identity.device_id,
+            identity.device_name,
+            ConfigData::default(),
+        );
+        Self {
+            store,
+            keys,
+            source,
+        }
+    }
+}
+
+async fn peer_round(sender: &SyncDevice, receiver: &SyncDevice) {
+    use copypaste_p2p::node::NoiseChannel;
+    use copypaste_p2p::sync::{run_initiator, run_responder, SyncCursor};
+    use copypaste_p2p::Session;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let psk = [63; 32];
+    let (sent, received) = tokio::join!(
+        async {
+            let session = Session::connect(address, &psk).await.unwrap();
+            let mut channel = NoiseChannel::new(session);
+            let result =
+                run_initiator(&mut channel, &sender.source, None, SyncCursor::default()).await;
+            channel.close().await;
+            result.unwrap()
+        },
+        async {
+            let (stream, _) = listener.accept().await.unwrap();
+            let session = Session::accept(stream, &psk).await.unwrap();
+            let mut channel = NoiseChannel::new(session);
+            let result =
+                run_responder(&mut channel, &receiver.source, None, SyncCursor::default()).await;
+            channel.close().await;
+            result.unwrap()
+        }
+    );
+    assert_eq!(sent.stats.skipped_unavailable, 0);
+    assert_eq!(received.stats.skipped_unavailable, 0);
+    assert_eq!(sent.stats.sent, 5);
+    assert_eq!(received.stats.received, 5);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn confidential_and_legacy_text_sync_through_encrypted_peers_without_refusals() {
+    let sender = SyncDevice::new(101, "sender");
+    let relay = SyncDevice::new(102, "relay");
+    let receiver = SyncDevice::new(103, "receiver");
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::new_rgba8(1, 1)
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    let icon = copypaste_core::SourceAppIconMetadata::new(&png.into_inner(), 1, 1).unwrap();
+    let private = ClipboardPrivacy {
+        secret: true,
+        transient: false,
+    };
+    let both = ClipboardPrivacy {
+        secret: true,
+        transient: true,
+    };
+    let transient = ClipboardPrivacy {
+        secret: false,
+        transient: true,
+    };
+    let encoded = |privacy, source_app_icon| {
+        PayloadMetadata {
+            privacy,
+            source_app_icon,
+            ..Default::default()
+        }
+        .to_json("text")
+        .unwrap()
+    };
+    let cases = [
+        ("private", encoded(private, None), private, false),
+        ("icon", encoded(both, Some(icon)), both, true),
+        ("transient", encoded(transient, None), transient, false),
+        (
+            "legacy",
+            r#"{"legacy_private":true}"#.into(),
+            private,
+            false,
+        ),
+        (
+            "malformed",
+            "unrecognized old metadata".into(),
+            private,
+            false,
+        ),
+    ];
+    let mut originals = Vec::new();
+    for (index, (id, metadata, _, _)) in cases.iter().enumerate() {
+        let text = format!("synthetic {id} record");
+        let (nonce, content_ciphertext) =
+            copypaste_core::encrypt(text.as_bytes(), &sender.keys.item_key(), id).unwrap();
+        sender
+            .store
+            .insert(copypaste_core::NewItem {
+                id: (*id).into(),
+                nonce,
+                content_ciphertext,
+                content_type: "text".into(),
+                content_hash: copypaste_core::compute_content_hash(text.as_bytes()),
+                search_text: None,
+                created_at: 1000 + index as i64,
+                app_bundle_id: Some(format!("com.example.{id}")),
+                app_name: Some("Synthetic".into()),
+                payload_metadata: Some(metadata.clone()),
+            })
+            .unwrap();
+        originals.push(sender.store.get(id).unwrap().unwrap().payload_metadata);
+    }
+    peer_round(&sender, &relay).await;
+    peer_round(&relay, &receiver).await;
+    for (index, (id, _, privacy, has_icon)) in cases.iter().enumerate() {
+        for target in [&relay, &receiver] {
+            let row = target
+                .store
+                .get(id)
+                .unwrap()
+                .expect("the record must synchronize");
+            assert_eq!(row.clipboard_privacy(), *privacy);
+            let clear = copypaste_core::decrypt(
+                &row.content_ciphertext,
+                &row.nonce,
+                &target.keys.item_key(),
+                id,
+            )
+            .unwrap();
+            assert_eq!(
+                clear.as_slice(),
+                format!("synthetic {id} record").as_bytes()
+            );
+            let metadata = target
+                .store
+                .payload_metadata_for_sync(&row)
+                .unwrap()
+                .unwrap();
+            let metadata = PayloadMetadata::from_json(&metadata, "text").unwrap();
+            assert_eq!(metadata.source_app_icon.is_some(), *has_icon);
+            if privacy.secret {
+                assert!(target.store.search(id, 10).unwrap().is_empty());
+            }
+        }
+        assert_eq!(
+            sender.store.get(id).unwrap().unwrap().payload_metadata,
+            originals[index]
+        );
+    }
+}
