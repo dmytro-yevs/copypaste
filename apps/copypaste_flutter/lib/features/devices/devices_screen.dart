@@ -221,7 +221,13 @@ class _DevicesScreenState extends State<DevicesScreen> {
         children: [
           Row(
             children: [
-              Expanded(child: const Text('Nearby devices').large().medium()),
+              Expanded(
+                child: Semantics(
+                  container: true,
+                  header: true,
+                  child: const Text('Nearby devices').large().medium(),
+                ),
+              ),
               const Gap(AppSpacing.md),
               Button.text(
                 key: const ValueKey<String>('rescan-devices'),
