@@ -13,10 +13,7 @@ RELEASE = runpy.run_path(str(Path(__file__).with_name("linux_release_contract.py
 EXPECTED = {baseline["artifact"] for baseline in RELEASE["BASELINES"]}
 EXPECTED_JOBS = {baseline["job"] for baseline in RELEASE["BASELINES"]}
 
-CI_CANDIDATES = {
-    "linux-pr-release-candidate-x86_64",
-    "linux-pr-release-candidate-aarch64",
-}
+CI_CANDIDATES = {f"linux-pr-release-candidate-{architecture}" for architecture in RELEASE["ARCHITECTURES"]}
 
 
 def verify(run: dict, jobs: dict, artifacts: dict, repository: str, commit: str) -> None:
