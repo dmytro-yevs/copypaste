@@ -238,7 +238,14 @@ pub fn sync_table(results: &[SyncResult], empty: &str) -> String {
     let mut table = Table::new();
     table.load_preset(presets::UTF8_HORIZONTAL_ONLY);
     table.set_content_arrangement(ContentArrangement::Disabled);
-    table.set_header(vec!["PEER", "SENT", "RECEIVED", "TOO LARGE", "RESULT"]);
+    table.set_header(vec![
+        "PEER",
+        "SENT",
+        "RECEIVED",
+        "TOO LARGE",
+        "PENDING",
+        "RESULT",
+    ]);
 
     for result in results {
         table.add_row(vec![
@@ -247,6 +254,9 @@ pub fn sync_table(results: &[SyncResult], empty: &str) -> String {
             result.received.to_string(),
             result
                 .skipped_too_large
+                .map_or_else(|| "unknown".to_string(), |count| count.to_string()),
+            result
+                .skipped_unavailable
                 .map_or_else(|| "unknown".to_string(), |count| count.to_string()),
             match &result.error {
                 // Already a fixed sentence from the daemon; scrubbed anyway,
@@ -539,6 +549,7 @@ mod tests {
             sent: 3,
             received: 2,
             skipped_too_large: Some(0),
+            skipped_unavailable: Some(0),
             duration_ms: Some(25),
             error: error.map(str::to_string),
             error_code: None,
@@ -575,6 +586,16 @@ mod tests {
         assert!(table.contains("TOO LARGE"), "{table}");
         assert!(table.contains('2'), "{table}");
         assert!(table.contains("unknown"), "{table}");
+    }
+
+    #[test]
+    fn pending_items_are_visible_without_reporting_a_session_failure() {
+        let mut result = sync_result(None);
+        result.skipped_unavailable = Some(5);
+        let table = sync_table(&[result], "none");
+        assert!(table.contains("PENDING"), "{table}");
+        assert!(table.contains('5'), "{table}");
+        assert!(table.contains("ok"), "{table}");
     }
 
     #[test]

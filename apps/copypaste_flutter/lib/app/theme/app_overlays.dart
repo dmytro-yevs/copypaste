@@ -3,7 +3,6 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../../shared/adaptive_breakpoints.dart';
 
 import 'app_motion.dart';
-import 'app_theme.dart';
 import 'app_tokens.dart';
 
 /// Shared presentation and behavior for application-owned overlays.
@@ -66,7 +65,7 @@ abstract final class AppOverlays {
 
   static PopoverConfiguration selectPopoverConfiguration(
     BuildContext context, {
-    PopoverConstraint widthConstraint = PopoverConstraint.anchorMinSize,
+    PopoverConstraint widthConstraint = PopoverConstraint.anchorFixedSize,
   }) {
     return PopoverConfiguration(
       alignment: Alignment.topLeft,
@@ -127,13 +126,7 @@ abstract final class AppOverlays {
                   alignment: WrapAlignment.end,
                   spacing: AppSpacing.sm,
                   runSpacing: AppSpacing.sm,
-                  children: [
-                    for (final action in actions)
-                      ButtonStyleOverride(
-                        decoration: AppTheme.actionButtonDecoration,
-                        child: action,
-                      ),
-                  ],
+                  children: actions,
                 ),
               ),
             ],
