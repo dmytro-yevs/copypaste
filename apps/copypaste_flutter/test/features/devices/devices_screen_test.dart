@@ -93,7 +93,9 @@ void main() {
           captureProtection: _CaptureProtection(),
         );
         addTearDown(controller.dispose);
-        await _pumpDevices(tester, controller, size: const Size(320, 480));
+        // Keep the body taller than the viewport to exercise footer pinning
+        // with the shared control heights.
+        await _pumpDevices(tester, controller, size: const Size(320, 400));
         if (confirm) {
           await tester.runAsync(
             () => controller.joinPairingUri(
@@ -110,7 +112,7 @@ void main() {
             : find.byKey(const ValueKey('submit-pairing-code'));
         final actionsRect = tester.getRect(actions);
         expect(tester.getRect(body).bottom, lessThan(actionsRect.top));
-        expect(actionsRect.bottom, lessThan(480));
+        expect(actionsRect.bottom, lessThan(400));
         final position = tester
             .state<ScrollableState>(
               find
