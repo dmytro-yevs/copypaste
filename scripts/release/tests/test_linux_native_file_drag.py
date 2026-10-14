@@ -25,6 +25,32 @@ DRIVER_SPEC.loader.exec_module(driver)
 
 
 class LinuxNativeFileDragTest(unittest.TestCase):
+    def test_x11_pointer_uses_owned_accessibility_desktop_bounds_after_focus(self):
+        source = mock.Mock(process=mock.Mock(pid=71))
+        calls = []
+        def command(argv, _environment):
+            calls.append(argv)
+            return mock.Mock(stdout=b"")
+        def bounds(_registry, pid, name, coordinates):
+            self.assertEqual(coordinates, drag.SCREEN_COORDINATES)
+            self.assertIn(["xdotool", "windowactivate", "--sync", "11"], calls)
+            if pid == 71:
+                self.assertEqual(name, drag.SOURCE_CONTROL_NAME)
+                return drag.Bounds(0, 69, 320, 96)
+            self.assertEqual((pid, name), (72, drag.TARGET_TITLE))
+            return drag.Bounds(400, 100, 600, 500)
+        with mock.patch.dict(sys.modules, {"pyatspi": mock.Mock(Registry=mock.sentinel.registry)}), \
+                mock.patch.object(drag, "x11_window", side_effect=["11", "12"]), \
+                mock.patch.object(drag, "require_x11_window_pid"), \
+                mock.patch.object(drag, "require_x11_focus"), \
+                mock.patch.object(drag, "_atspi_bounds_or_none", side_effect=bounds), \
+                mock.patch.object(drag, "x11_bounds", side_effect=AssertionError("raw X11 offsets must not position the pointer")), \
+                mock.patch.object(drag, "run", side_effect=command):
+            drag.drag_x11(source, 72, {"DISPLAY": ":99"})
+        self.assertIn(["xdotool", "mousemove", "--sync", "160", "117"], calls)
+        self.assertIn(["xdotool", "mousemove", "--sync", "832", "350"], calls)
+        self.assertEqual(source.method_calls, [mock.call.begin(), mock.call.started(), mock.call.copied(), mock.call.completed()])
+
     def test_bounds_choose_a_main_content_target_point(self):
         self.assertEqual(drag.Bounds(10, 20, 100, 80).point(horizontal=0.72), (82, 60))
 
