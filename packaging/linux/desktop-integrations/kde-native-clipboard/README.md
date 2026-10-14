@@ -75,7 +75,8 @@ The 6.3 image retains the Fedora updates set that supplies its required
 KDecoration3 and KF6 versions. Both images run `dnf builddep --assumeyes kwin`
 and install `cmake`, `ninja-build`, `git`,
 `dbus-daemon`, `dbus-tools`, `plasma-workspace-x11`, `kwin-wayland`, and
-`wl-clipboard`. It clones the selected ref with `git -c protocol.version=2
+`wl-clipboard`. It clones the selected ref from KDE's official GitHub mirror
+(`https://github.com/KDE/kwin.git`) with `git -c protocol.version=2
 clone --filter=blob:none`, verifies `HEAD` exactly, applies this source bundle,
 then runs `cmake -B build -G Ninja`, `cmake --build build`, and the resulting
 `kwin_wayland --virtual --no-lockscreen` under `dbus-run-session`.
