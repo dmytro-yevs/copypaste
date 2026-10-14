@@ -484,8 +484,8 @@ def ipc(socket_path, method, params=None):
         response = channel.makefile("rb").readline()
     decoded = json.loads(response)
     if not isinstance(decoded, dict) or not decoded.get("ok"):
-        code = decoded.get("error", {}).get("code") if isinstance(decoded, dict) and isinstance(decoded.get("error"), dict) else None
-        if isinstance(code, str) and 1 <= len(code) <= 64 and code.isascii() and code.replace("_", "").isalnum():
+        code = decoded.get("error_code") if isinstance(decoded, dict) else None
+        if isinstance(code, str) and 1 <= len(code) <= 64 and code.isascii() and all(character.islower() or character.isdigit() or character == "_" for character in code):
             raise RuntimeError(f"daemon rejected {method}: {code}")
         raise RuntimeError(f"daemon rejected {method}")
     return decoded
