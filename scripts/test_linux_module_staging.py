@@ -45,7 +45,7 @@ class LinuxModuleSourceRunTest(unittest.TestCase):
     def test_requires_exact_successful_linux_module_source(self):
         self.verify(self.run, self.jobs, self.artifacts, "owner/repo", "a" * 40,
                     ".github/workflows/provider-module.yml", "supabase")
-        self.jobs["jobs"][1]["conclusion"] = "failure"
+        self.jobs["jobs"][0]["conclusion"] = "failure"
         with self.assertRaisesRegex(ValueError, "Linux architecture job"):
             self.verify(self.run, self.jobs, self.artifacts, "owner/repo", "a" * 40,
                         ".github/workflows/provider-module.yml", "supabase")

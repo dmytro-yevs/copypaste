@@ -2,12 +2,17 @@
 """Accept an exact standalone or qualification-only parent evidence run."""
 import argparse
 import json
+import runpy
 from pathlib import Path
 
 
-BASE = ["Verify exact artifact sources", "Assemble verified Linux native qualification",
-        "x86_64 GNOME x11", "x86_64 GNOME wayland", "x86_64 KDE x11", "x86_64 KDE wayland",
-        "aarch64 GNOME x11", "aarch64 GNOME wayland", "aarch64 KDE x11", "aarch64 KDE wayland"]
+RELEASE = runpy.run_path(str(Path(__file__).with_name("linux_release_contract.py")))
+BASE = ["Verify exact artifact sources", "Assemble verified Linux native qualification", *(
+    f"{architecture} {desktop} {session}"
+    for architecture in RELEASE["ARCHITECTURES"]
+    for desktop in RELEASE["DESKTOPS"]
+    for session in RELEASE["SESSIONS"]
+)]
 PREFIX = "Run exact staged Linux native qualification / "
 PARENT_SKIPPED = {"macos", "android", "windows",
                   "Build opt-in compositor runtime companions", "Verify staged compositor runtime companions",

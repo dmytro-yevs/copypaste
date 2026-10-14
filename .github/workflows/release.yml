@@ -471,10 +471,6 @@ jobs:
             runner: ubuntu-24.04
             appimagetool_url: https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
             appimagetool_sha256: 95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6
-          - architecture: aarch64
-            runner: ubuntu-24.04-arm
-            appimagetool_url: https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-aarch64.AppImage
-            appimagetool_sha256: a595ea34cd6136c7f595e9dcbb16f3e9725d7610efb9e43b38c3c6e86cafc270
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - id: flutter
@@ -511,7 +507,7 @@ jobs:
           chmod +x scripts/release/build-linux-flutter.sh scripts/release/build-linux-packages.sh
           scripts/release/build-linux-flutter.sh "${{ needs.preflight.outputs.version }}" "${{ needs.preflight.outputs.build_number }}" "${{ matrix.architecture }}"
           python3 scripts/release/verify-linux-runtime-baseline.py --bundle "dist/linux-${{ matrix.architecture }}/bundle" --architecture "${{ matrix.architecture }}" --maximum 2.39 --output "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.runtime-baseline.json"
-          scripts/release/build-linux-packages.sh "${{ needs.preflight.outputs.version }}" "${{ matrix.architecture }}"
+          scripts/release/build-linux-packages.sh "${{ needs.preflight.outputs.version }}" "${{ matrix.architecture }}" --release-scope
       - name: Sign Linux updater artifacts and write SHA-256 receipts
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -519,7 +515,7 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x scripts/release/sign-update-artifact.sh
-          for extension in AppImage deb rpm; do
+          for extension in AppImage deb; do
             artifact="dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.$extension"
             scripts/release/sign-update-artifact.sh "$artifact"
             (cd apps/copypaste_flutter && dart --disable-dart-dev --packages=.dart_tool/package_config.json tool/verify_update_signature.dart "../../$artifact" "../../$artifact.sig")
@@ -529,7 +525,7 @@ jobs:
         run: |
           set -euo pipefail
           args=(--platform linux --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --output "dist/production-receipt.json" --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.runtime-baseline.json")
-          for extension in AppImage deb rpm; do
+          for extension in AppImage deb; do
             artifact="dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.$extension"
             args+=(--artifact "$artifact" --artifact "$artifact.sig" --artifact "$artifact.sha256")
           done
@@ -545,9 +541,6 @@ jobs:
             dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.deb
             dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.deb.sig
             dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.deb.sha256
-            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.rpm
-            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.rpm.sig
-            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.rpm.sha256
             dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.runtime-baseline.json
             dist/production-receipt.json
 
@@ -615,11 +608,7 @@ jobs:
           RUNTIME_RUN_ID: ${{ inputs.compositor_runtime_run_id }}
         run: |
           set -euo pipefail
-          for artifact in \
-            copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64 \
-            copypaste-compositor-runtime-gnome-46-ubuntu24.04-aarch64 \
-            copypaste-compositor-runtime-kwin-6.0-fedora40-x86_64 \
-            copypaste-compositor-runtime-kwin-6.0-fedora40-aarch64; do
+          for artifact in copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64; do
             gh run download "$RUNTIME_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$artifact" --dir "runtime-source/$artifact"
           done
       - name: Stage exact runtime producer outputs
@@ -645,7 +634,7 @@ jobs:
           chmod +x scripts/release/sign-update-artifact.sh
           shopt -s nullglob
           packages=(runtime-public/*.deb runtime-public/*.rpm)
-          (( ${#packages[@]} == 4 ))
+          (( ${#packages[@]} == 1 ))
           for package in "${packages[@]}"; do
             scripts/release/sign-update-artifact.sh "$package"
             (cd apps/copypaste_flutter && dart --disable-dart-dev --packages=.dart_tool/package_config.json tool/verify_update_signature.dart "../../$package" "../../$package.sig")
@@ -698,12 +687,6 @@ jobs:
         with:
           name: production-linux-x86_64
           path: exact-artifacts/x86_64
-          run-id: ${{ needs.preflight.outputs.linux_artifact_run_id }}
-          github-token: ${{ github.token }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: production-linux-aarch64
-          path: exact-artifacts/aarch64
           run-id: ${{ needs.preflight.outputs.linux_artifact_run_id }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -762,13 +745,6 @@ jobs:
           run-id: ${{ needs.preflight.outputs.linux_artifact_run_id }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_required == 'true'
-        with:
-          name: production-linux-aarch64
-          path: qualified/linux-aarch64
-          run-id: ${{ needs.preflight.outputs.linux_artifact_run_id }}
-          github-token: ${{ github.token }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true'
         with:
           name: production-compositor-runtime
@@ -778,10 +754,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p qualified/linux
-          find qualified/linux-x86_64 qualified/linux-aarch64 -type f ! -name production-receipt.json -exec cp {} qualified/linux/ \;
+          find qualified/linux-x86_64 -type f ! -name production-receipt.json -exec cp {} qualified/linux/ \;
           python3 scripts/release/merge-linux-artifact-receipts.py \
             --receipt qualified/linux-x86_64/production-receipt.json \
-            --receipt qualified/linux-aarch64/production-receipt.json \
             --output qualified/linux/production-receipt.json
       - name: Verify exact qualified artifacts
         run: |
