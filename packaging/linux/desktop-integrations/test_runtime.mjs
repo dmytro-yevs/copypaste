@@ -553,6 +553,22 @@ function loadKde({activateWindow, windows = [{desktopFileName: 'com.copypaste.Co
 }
 
 {
+    const runtime = loadKde({windows: []});
+    assert.equal(runtime.calls.length, 0, 'qualification must wait for a real host');
+    runtime.signals.added({desktopFileName: 'com.copypaste.CopyPaste', pid: 100, deleted: false});
+    const oldCapability = runtime.calls.find(call => call.method === 'QualificationEnabled');
+    oldCapability.callback(true);
+    const timer = runtime.timers.find(candidate => candidate.interval === 250);
+    assert.equal(timer.started, true, 'qualification starts after the host confirms its capability');
+    runtime.signals.added({desktopFileName: 'com.copypaste.CopyPaste', pid: 200, deleted: false});
+    assert.equal(timer.stopped, true, 'host restart stops the old qualification observer');
+    oldCapability.callback(true);
+    assert.equal(runtime.timers.length, 1, 'an old host cannot enable qualification for a new process');
+    runtime.calls.filter(call => call.method === 'QualificationEnabled').at(-1).callback(true);
+    assert.equal(runtime.timers.length, 2, 'the new host must confirm its own qualification capability');
+}
+
+{
     const source = {deleted: false};
     const runtime = loadKde({activateWindow: () => {}});
     runtime.workspace.setFocusedWindow(source);
