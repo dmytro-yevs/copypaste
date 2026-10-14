@@ -378,13 +378,21 @@ class PortalPointer:
         self.session = ""
 
     def grant(self, on_start_requested) -> None:
-        created = self.portal._request("CreateSession", "(a{sv})", ({"handle_token": self.helper.token("create"), "session_handle_token": self.helper.token("session")},))
+        created = self.portal._request("CreateSession", "(a{sv})", ({
+            "handle_token": self.glib.Variant("s", self.helper.token("create")),
+            "session_handle_token": self.glib.Variant("s", self.helper.token("session")),
+        },))
         session = created.get("session_handle")
         if not isinstance(session, str) or not session.startswith("/"):
             raise FileDragQualificationError("desktop portal did not create a pointer session")
         self.session = session
-        self.portal._request("SelectDevices", "(oa{sv})", (session, {"handle_token": self.helper.token("devices"), "types": POINTER_DEVICE}))
-        started = self.portal._request("Start", "(osa{sv})", (session, "", {"handle_token": self.helper.token("start")}), on_start_requested)
+        self.portal._request("SelectDevices", "(oa{sv})", (session, {
+            "handle_token": self.glib.Variant("s", self.helper.token("devices")),
+            "types": self.glib.Variant("u", POINTER_DEVICE),
+        }))
+        started = self.portal._request("Start", "(osa{sv})", (session, "", {
+            "handle_token": self.glib.Variant("s", self.helper.token("start")),
+        }), on_start_requested)
         if type(started.get("devices")) is not int or not (started["devices"] & POINTER_DEVICE):
             raise FileDragQualificationError("desktop portal did not grant pointer input")
 
@@ -397,7 +405,7 @@ class PortalPointer:
     def close(self) -> None:
         if self.session:
             try:
-                self.portal._call("org.freedesktop.portal.Session", "Close", self.glib.Variant("(o)", (self.session,)))
+                self.portal._call("org.freedesktop.portal.Session", "Close", None, path=self.session)
             finally:
                 self.session = ""
 
@@ -437,6 +445,9 @@ def drag_wayland(source: DragSource, gui_pid: int, environment: dict[str, str]) 
         require_single_wayland_layout(display, source_geometry, target_geometry, source_bounds, target_bounds)
         source_point = owned_point(Gio, GLib, source.process.pid, SOURCE_TITLE, source_bounds)
         target_point = owned_point(Gio, GLib, gui_pid, TARGET_TITLE, target_bounds)
+        approach_point = (target_point[0] - 1, target_point[1])
+        if not target_bounds.contains(approach_point) or not compositor_owns_point(Gio, GLib, gui_pid, TARGET_TITLE, approach_point):
+            raise FileDragQualificationError("file-drag approach is not owned by the installed CopyPaste window")
         # Relative portal motion has no public query for the current pointer.
         # First clamp it to the desktop origin, then move to the external GTK
         # source using the source's AT-SPI screen coordinates.
@@ -445,7 +456,10 @@ def drag_wayland(source: DragSource, gui_pid: int, environment: dict[str, str]) 
         source.begin()
         pointer.button(1)
         source.started()
-        pointer.motion(target_point[0] - source_point[0], target_point[1] - source_point[1])
+        pointer.motion(approach_point[0] - source_point[0], approach_point[1] - source_point[1])
+        # Wayland enter announces the offer; subsequent motion lets GTK
+        # negotiate the destination before the real pointer release.
+        pointer.motion(1, 0)
         source.copied()
         pointer.button(0)
         source.completed()
