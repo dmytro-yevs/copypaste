@@ -30,12 +30,15 @@ PLUGIN_DIR_NAME = "gstreamer-1.0"
 RUNTIME_DIR_NAME = "gstreamer-runtime"
 SCANNER_DIR_NAME = "gstreamer-1.0"
 REQUIRED_ELEMENTS = {
+    "tee": "libgstreamer1.0-0",
+    "queue": "libgstreamer1.0-0",
     "videoconvert": "gstreamer1.0-plugins-base",
     "videoscale": "gstreamer1.0-plugins-base",
     "videorate": "gstreamer1.0-plugins-base",
     "appsink": "gstreamer1.0-plugins-base",
     "v4l2src": "gstreamer1.0-plugins-good",
     "jpegdec": "gstreamer1.0-plugins-good",
+    "videoflip": "gstreamer1.0-plugins-good",
 }
 LICENSE_PACKAGES = (
     "libgstreamer1.0-0",
@@ -260,6 +263,10 @@ def verify_elements(inspect: str, *, appdir: Path) -> None:
                 source.relative_to(plugin_root)
             except ValueError as error:
                 raise BundleError(f"{element} resolved outside the staged AppImage plugin directory") from error
+        run([
+            sys.executable, str(Path(__file__).with_name("verify-linux-camera-pipelines.py")),
+            "--runtime", str(appdir / "usr/lib" / RUNTIME_DIR_NAME),
+        ], environment=environment)
 
 
 def validate_glibc(runtime: Path, *, architecture: str, maximum: str, output: Path) -> None:
