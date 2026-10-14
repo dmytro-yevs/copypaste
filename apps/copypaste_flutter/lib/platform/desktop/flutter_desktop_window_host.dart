@@ -38,7 +38,10 @@ class FlutterDesktopWindowHost
   ListenerId? _quitMenuItemListener;
 
   @override
-  Future<void> initializeWindow(DesktopWindowBounds initialBounds) async {
+  Future<void> initializeWindow(
+    DesktopWindowBounds initialBounds, {
+    bool showInTaskbar = true,
+  }) async {
     await windowManager.ensureInitialized();
     _reuseExistingGeometry = await windowManager.isPreventClose();
     if (!_listening) {
@@ -50,6 +53,7 @@ class FlutterDesktopWindowHost
         WindowOptions(
           size: Size(initialBounds.width, initialBounds.height),
           title: 'CopyPaste',
+          skipTaskbar: !showInTaskbar,
         ),
       );
     }
@@ -71,6 +75,7 @@ class FlutterDesktopWindowHost
         rethrow;
       }
     }
+    await setTaskbarVisible(showInTaskbar);
     await windowManager.show();
     await windowManager.focus();
   }
@@ -128,6 +133,7 @@ class FlutterDesktopWindowHost
 
   @override
   Future<void> initializeTray({
+    bool visible = true,
     required Future<void> Function() onOpenRequested,
     required Future<void> Function() onCaptureRequested,
     required Future<void> Function() onSettingsRequested,
@@ -204,7 +210,7 @@ class FlutterDesktopWindowHost
               ? ContextMenuTrigger.clicked
               : ContextMenuTrigger.rightClicked,
         );
-      if (!icon.setVisible(true)) {
+      if (!icon.setVisible(visible)) {
         throw StateError('Unable to show the system tray controls.');
       }
       openListener = open.addListener((event) {
@@ -266,6 +272,22 @@ class FlutterDesktopWindowHost
         quitListener: quitListener,
       );
       rethrow;
+    }
+  }
+
+  @override
+  Future<void> setTaskbarVisible(bool visible) async {
+    await windowManager.setSkipTaskbar(!visible);
+    if (await windowManager.isSkipTaskbar() != !visible) {
+      throw StateError('Unable to change Dock or taskbar visibility.');
+    }
+  }
+
+  @override
+  Future<void> setTrayVisible(bool visible) async {
+    final icon = _trayIcon;
+    if (icon == null || !icon.setVisible(visible)) {
+      throw StateError('Unable to change system tray visibility.');
     }
   }
 
