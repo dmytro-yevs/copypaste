@@ -1,6 +1,8 @@
 #ifndef FLUTTER_LINUX_PORTAL_H_
 #define FLUTTER_LINUX_PORTAL_H_
 
+#include <gio/gio.h>
+
 #include <functional>
 #include <memory>
 #include <string>
@@ -40,6 +42,10 @@ struct LinuxPortalCallbacks {
 // It owns portal sessions but not the GtkWindow passed to it.
 class LinuxPortal {
  public:
+  // Associate the process-wide bus connection with the packaged desktop ID
+  // before GTK makes portal calls. The caller owns the returned connection.
+  static GDBusConnection* register_application();
+
   explicit LinuxPortal(GtkWindow* parent, LinuxPortalCallbacks callbacks = {});
   ~LinuxPortal();
 

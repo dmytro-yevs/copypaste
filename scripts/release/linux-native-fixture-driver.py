@@ -407,6 +407,13 @@ def require_wayland_qualification(args, *, gui_pid, cli, environment, workspace,
 
     marker = "copypaste-wayland-quick-paste-fixture"
     run([str(cli), "add", marker], env={**environment, "COPYPASTE_SOCKET": str(socket_path)})
+    # Keep the active native selection consistent with the prepared newest clip:
+    # a compositor can announce that selection again when the target gains focus.
+    cli_environment = {**environment, "COPYPASTE_SOCKET": str(socket_path)}
+    prepared = [item for item in list_items(cli, cli_environment) if item.get("content") == marker]
+    if len(prepared) != 1 or not isinstance(prepared[0].get("id"), str) or not prepared[0]["id"]:
+        raise RuntimeError("Wayland Quick Paste marker is not uniquely prepared")
+    run([str(cli), "--json", "copy", prepared[0]["id"]], env=cli_environment)
     quick_paste_result = run(
         [
             sys.executable, str(quick_paste_helper), "--gui-pid", str(gui_pid),
