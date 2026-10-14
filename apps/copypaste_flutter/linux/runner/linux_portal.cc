@@ -279,6 +279,14 @@ struct LinuxPortal::Impl : public std::enable_shared_from_this<LinuxPortal::Impl
 #endif
   };
 
+  using ParentIdentifierCompletion =
+      std::function<void(std::shared_ptr<ParentIdentifierLease>)>;
+
+  static bool can_use_empty_parent_after_failed_wayland_export(
+      bool cancelled, bool window_realized, bool window_destroyed) {
+    return !cancelled && window_realized && !window_destroyed;
+  }
+
   explicit Impl(GtkWindow* initial_parent, LinuxPortalCallbacks initial_callbacks)
       : parent(initial_parent == nullptr
                    ? nullptr
@@ -461,14 +469,19 @@ struct LinuxPortal::Impl : public std::enable_shared_from_this<LinuxPortal::Impl
     pending_responses.push_back(pending);
   }
 
-  void with_parent_identifier(
-      std::function<void(std::shared_ptr<ParentIdentifierLease>)> complete) {
+  void with_parent_identifier(ParentIdentifierCompletion complete) {
+#ifdef LINUX_PORTAL_TEST
+    if (parent_identifier_override_for_test) {
+      parent_identifier_override_for_test(std::move(complete));
+      return;
+    }
+#endif
     if (parent == nullptr) {
       complete({});
       return;
     }
     GdkWindow* window = gtk_widget_get_window(GTK_WIDGET(parent));
-    if (window == nullptr) {
+    if (window == nullptr || !gtk_widget_get_realized(GTK_WIDGET(parent))) {
       complete({});
       return;
     }
@@ -505,7 +518,14 @@ struct LinuxPortal::Impl : public std::enable_shared_from_this<LinuxPortal::Impl
                 delete static_cast<Export*>(data);
               })) {
         delete export_request;
-        complete({});
+        if (!can_use_empty_parent_after_failed_wayland_export(
+                cancelled, gtk_widget_get_realized(GTK_WIDGET(parent)),
+                gdk_window_is_destroyed(window))) {
+          complete(nullptr);
+          return;
+        }
+        // Portals accept an empty parent when no suitable handle exists.
+        complete(std::make_shared<ParentIdentifierLease>(""));
       }
       return;
     }
@@ -573,6 +593,9 @@ struct LinuxPortal::Impl : public std::enable_shared_from_this<LinuxPortal::Impl
   guint shortcut_activation_subscription = 0;
   std::vector<PendingResponse*> pending_responses;
   std::vector<std::shared_ptr<ResponseGate>> pending_gates;
+#ifdef LINUX_PORTAL_TEST
+  std::function<void(ParentIdentifierCompletion)> parent_identifier_override_for_test;
+#endif
 };
 
 LinuxPortal::LinuxPortal(GtkWindow* parent, LinuxPortalCallbacks callbacks)
