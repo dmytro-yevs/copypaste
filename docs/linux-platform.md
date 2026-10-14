@@ -78,3 +78,12 @@ Record the actual distribution, desktop and compositor versions, architecture,
 permissions and required desktop integrations alongside results. Publish only
 the support matrix for which those checks pass; successful compilation alone
 does not establish functional parity.
+
+## Deferred validation
+
+The regular CI and release workflows qualify the declared x86_64 GNOME X11
+scope. `.github/workflows/linux-experimental.yml` retains opt-in ARM64,
+KDE/KWin, Mutter 47, and broader Linux package validation. Those scenarios
+remain available for development and do not qualify a stable release.
+Optional module publication uses the same released Linux architecture set;
+its package builders and runtime adapters retain ARM64 support.
