@@ -23,6 +23,43 @@ SPEC.loader.exec_module(driver)
 
 
 class LinuxNativeFixtureDriverTest(unittest.TestCase):
+    def test_native_helper_error_retains_stderr_without_stdout_or_capability(self):
+        capability = "a" * 64
+        command = ["python3", str(driver.DESKTOP_ACCEPTANCE)]
+        error = subprocess.CalledProcessError(
+            1, command, output=b"protected stdout", stderr=f"capture unavailable {capability}".encode(),
+        )
+        with mock.patch.object(driver.subprocess, "run", side_effect=error):
+            with self.assertRaisesRegex(RuntimeError, "capture unavailable") as observed:
+                driver.run(command, env={"COPYPASTE_QUALIFICATION_CAPABILITY": capability})
+        self.assertNotIn(capability, str(observed.exception))
+        self.assertNotIn("protected stdout", str(observed.exception))
+
+    def test_native_helper_error_bounds_stderr_and_preserves_cli_errors(self):
+        command = ["python3", str(driver.EXTERNAL_FILE_DRAG)]
+        error = subprocess.CalledProcessError(1, command, stderr=b"x" * (16 * 1024))
+        with mock.patch.object(driver.subprocess, "run", side_effect=error):
+            with self.assertRaises(RuntimeError) as observed:
+                driver.run(command)
+        self.assertLess(len(str(observed.exception)), 9 * 1024)
+        with mock.patch.object(driver.subprocess, "run", side_effect=error):
+            with self.assertRaises(subprocess.CalledProcessError):
+                driver.run(["copypaste-cli", "status"])
+
+    def test_x11_target_discovery_binds_visible_exact_title_to_owner_pid(self):
+        result = subprocess.CompletedProcess([], 0, stdout=b"42\n")
+        with mock.patch.object(driver.subprocess, "run", return_value=result) as run:
+            self.assertEqual(driver.wait_for_window("Input Target", {}, owner_pid=123), "42")
+        self.assertEqual(run.call_args.args[0], [
+            "xdotool", "search", "--onlyvisible", "--all", "--pid", "123", "--name", "^Input\\ Target$",
+        ])
+
+    def test_x11_target_discovery_still_rejects_ambiguous_owned_windows(self):
+        result = subprocess.CompletedProcess([], 0, stdout=b"42\n43\n")
+        with mock.patch.object(driver.subprocess, "run", return_value=result):
+            with self.assertRaisesRegex(RuntimeError, "not uniquely discoverable"):
+                driver.wait_for_window("Input Target", {}, owner_pid=123)
+
     def test_ipc_omits_params_only_for_the_unit_request(self):
         class Channel:
             def __init__(self):
@@ -370,11 +407,16 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
                  mock.patch.object(driver, "wait_for_window", return_value="200"), \
                  mock.patch.object(driver, "x11_window_pid", return_value=4321), \
                  mock.patch.object(driver, "require_helper", return_value=Path("actor.py")), \
+                 mock.patch.object(driver, "list_items", return_value=[{
+                     "id": "marker-id", "content": "copypaste-x11-quick-paste-fixture",
+                 }]), \
                  mock.patch.object(driver, "require_quick_paste_ready") as ready, \
                  mock.patch.object(driver, "run", side_effect=run):
                 driver.require_x11_quick_paste(Path("copypaste-cli"), {}, workspace)
         ready.assert_called_once()
         self.assertIn(["xdotool", "key", "Return"], calls)
+        self.assertLess(calls.index(["copypaste-cli", "--json", "copy", "marker-id"]),
+                        calls.index(["xdotool", "key", "ctrl+shift+c"]))
         self.assertFalse(any(command[:3] == ["xdotool", "key", "--window"] for command in calls))
         self.assertLess(events.index("pointer_park"), events.index("target_focus"))
         self.assertLess(events.index("target_focus"), events.index("hotkey"))
