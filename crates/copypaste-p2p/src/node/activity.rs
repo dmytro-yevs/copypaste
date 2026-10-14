@@ -118,16 +118,24 @@ impl SessionObservation {
     fn finish_inner(&mut self, stats: Option<&SyncStats>, error: Option<String>) {
         self.activity.update(&self.pairing_id, |observation| {
             observation.active = observation.active.saturating_sub(1);
+            let failed = error.is_some();
             if let Some(stats) = stats {
                 observation.status.last_success_ms = Some(crate::now_ms());
                 observation.status.sent = stats.sent as u64;
                 observation.status.received = stats.received as u64;
                 observation.status.skipped_too_large = stats.skipped_too_large as u64;
             }
-            observation.status.error = error;
+            observation.status.error = error.or_else(|| {
+                stats.filter(|stats| stats.skipped_unavailable > 0).map(|stats| {
+                    format!(
+                        "{} items remain pending synchronization. Other available items were synchronized.",
+                        stats.skipped_unavailable
+                    )
+                })
+            });
             observation.status.phase = if observation.active > 0 {
                 SyncPhase::Syncing
-            } else if observation.status.error.is_some() {
+            } else if failed {
                 SyncPhase::Failed
             } else {
                 SyncPhase::Synced
@@ -181,5 +189,44 @@ mod tests {
         assert_eq!(completed.peers[0].sent, 2);
         assert!(completed.peers[0].last_success_ms.is_some());
         assert_eq!(activity.snapshot(&peers, false).phase, SyncPhase::Disabled);
+    }
+
+    #[test]
+    fn completed_sessions_with_pending_items_keep_success_and_report_the_refusals() {
+        let activity = SyncActivity::new();
+        let peer = Peer {
+            pairing_id: "peer".into(),
+            device_id: None,
+            name: "phone".into(),
+            psk: [7; 32],
+            last_addr: None,
+            last_seen_ms: 0,
+            profile: None,
+            profile_observed_at_ms: 0,
+        };
+        let peers = [peer];
+        activity.begin("peer").finish(
+            Some(&SyncStats {
+                sent: 6,
+                received: 2,
+                skipped_unavailable: 5,
+                ..Default::default()
+            }),
+            None,
+        );
+        let completed = activity.snapshot(&peers, true);
+        assert_eq!(completed.phase, SyncPhase::Synced);
+        let status = &completed.peers[0];
+        assert_eq!((status.sent, status.received), (6, 2));
+        assert!(status.last_success_ms.is_some());
+        assert!(status
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("5 items remain pending"));
+        activity
+            .begin("peer")
+            .finish(Some(&SyncStats::default()), None);
+        assert!(activity.snapshot(&peers, true).peers[0].error.is_none());
     }
 }

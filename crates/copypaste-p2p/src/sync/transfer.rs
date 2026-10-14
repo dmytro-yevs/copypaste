@@ -45,11 +45,12 @@ pub(super) async fn serve_items<C: SyncChannel, S: SyncSource>(
 
     let mut batch: Vec<SyncItem> = Vec::new();
     let mut batch_bytes = 0usize;
+    let mut unavailable: HashSet<&str> = allowed.iter().map(String::as_str).collect();
 
     // Bound each fetch so plaintext for an entire history is never resident.
     for chunk in allowed.chunks(MAX_ITEMS_PER_MESSAGE) {
         for mut item in source.fetch(chunk)? {
-            if !advertised.contains_key(&item.item_id) {
+            if !chunk.contains(&item.item_id) || !unavailable.contains(item.item_id.as_str()) {
                 // The source returned something it was not asked for.
                 tracing::warn!("source returned an item outside the advertised set; dropping it");
                 continue;
@@ -67,8 +68,16 @@ pub(super) async fn serve_items<C: SyncChannel, S: SyncSource>(
                 );
                 stats.skipped += 1;
                 stats.skipped_too_large += 1;
+                unavailable.remove(item.item_id.as_str());
                 continue;
             }
+            if item.validate().is_err() {
+                // Refuse only this version before the channel sees it. An
+                // invalid member must never poison an otherwise valid frame.
+                tracing::warn!("local item violates the sync wire contract; withholding it");
+                continue;
+            }
+            unavailable.remove(item.item_id.as_str());
             let message_bytes =
                 content_bytes.saturating_add(item.payload_metadata.as_ref().map_or(0, String::len));
 
@@ -92,6 +101,12 @@ pub(super) async fn serve_items<C: SyncChannel, S: SyncSource>(
     if !batch.is_empty() {
         stats.sent += batch.len();
         chan.send(SyncMessage::Items { items: batch }).await?;
+    }
+
+    stats.skipped += unavailable.len();
+    stats.skipped_unavailable += unavailable.len();
+    if !unavailable.is_empty() {
+        tracing::warn!("some requested local items were unavailable; other items were served");
     }
 
     chan.send(SyncMessage::Done).await
@@ -120,6 +135,33 @@ mod tests {
 
         assert_eq!(stats.sent, 0);
         assert_eq!(channel.sent, vec![SyncMessage::Done]);
+    }
+
+    #[tokio::test]
+    async fn a_missing_source_version_is_counted_without_blocking_a_valid_neighbor() {
+        let valid = item("valid", 200, "still available", "dev-a");
+        let missing = item("missing", 100, "no longer readable", "dev-a");
+        let advertised = HashMap::from([
+            (valid.item_id.clone(), valid.summary()),
+            (missing.item_id.clone(), missing.summary()),
+        ]);
+        let source = TestSource::new("dev-a", vec![valid]);
+        let mut channel = ScriptChannel::new(vec![]);
+        let mut stats = SyncStats::default();
+        serve_items(
+            &mut channel,
+            &source,
+            &advertised,
+            vec!["missing".into(), "valid".into()],
+            &mut stats,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            (stats.sent, stats.skipped, stats.skipped_unavailable),
+            (1, 1, 1)
+        );
+        assert!(matches!(channel.sent.last(), Some(SyncMessage::Done)));
     }
 
     #[tokio::test]

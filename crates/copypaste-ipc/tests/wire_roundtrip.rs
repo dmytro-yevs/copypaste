@@ -61,6 +61,7 @@ fn sync_result() -> SyncResult {
         sent: 1,
         received: 2,
         skipped_too_large: Some(0),
+        skipped_unavailable: Some(0),
         duration_ms: Some(42),
         error: None,
         error_code: None,
@@ -367,6 +368,7 @@ fn sync_error_code_is_additive_and_omitted_when_absent() {
     let old: SyncResult = serde_json::from_value(old_wire.clone()).unwrap();
     assert_eq!(old.error_code, None);
     assert_eq!(old.skipped_too_large, None);
+    assert_eq!(old.skipped_unavailable, None);
     assert_eq!(serde_json::to_value(old).unwrap(), old_wire);
 
     let current = SyncResult {
@@ -377,6 +379,22 @@ fn sync_error_code_is_additive_and_omitted_when_absent() {
         serde_json::to_value(current).unwrap()["error_code"],
         "peer_unreachable"
     );
+}
+
+#[test]
+fn pending_sync_count_distinguishes_partial_progress_from_a_failed_session() {
+    let current = SyncResult {
+        skipped_unavailable: Some(5),
+        ..sync_result()
+    };
+    let wire = serde_json::to_value(current).unwrap();
+    assert_eq!(wire["skipped_unavailable"], 5);
+    assert!(wire["error"].is_null());
+    for invalid in [json!(-1), json!(1.5), json!(null), json!("5")] {
+        let mut invalid_wire = wire.clone();
+        invalid_wire["skipped_unavailable"] = invalid;
+        assert!(serde_json::from_value::<SyncResult>(invalid_wire).is_err());
+    }
 }
 
 #[test]

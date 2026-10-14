@@ -11,9 +11,10 @@ use std::net::SocketAddr;
 use crate::DeviceProfile;
 
 use super::{
-    SyncMessage, MAX_CONTENT_BYTES, MAX_CONTENT_TYPE_BYTES, MAX_DEVICE_NAME_BYTES, MAX_HASH_BYTES,
-    MAX_ID_BYTES, MAX_ITEMS_PER_MESSAGE, MAX_ITEM_BYTES_PER_MESSAGE, MAX_LISTEN_ADDR_BYTES,
-    MAX_MESSAGE_BYTES, MAX_REQUEST_IDS_PER_MESSAGE, MAX_SUMMARIES_PER_MESSAGE, PROTOCOL_VERSION,
+    SyncItem, SyncMessage, MAX_CONTENT_BYTES, MAX_CONTENT_TYPE_BYTES, MAX_DEVICE_NAME_BYTES,
+    MAX_HASH_BYTES, MAX_ID_BYTES, MAX_ITEMS_PER_MESSAGE, MAX_ITEM_BYTES_PER_MESSAGE,
+    MAX_LISTEN_ADDR_BYTES, MAX_MESSAGE_BYTES, MAX_REQUEST_IDS_PER_MESSAGE,
+    MAX_SUMMARIES_PER_MESSAGE, PROTOCOL_VERSION,
 };
 
 /// Wire-level failures.
@@ -184,37 +185,8 @@ impl SyncMessage {
                 check_count("items", items.len(), MAX_ITEMS_PER_MESSAGE)?;
                 let mut total = 0usize;
                 for item in items {
-                    check_id("item_id", &item.item_id)?;
-                    check_id("origin_device_id", &item.origin_device_id)?;
-                    check_len("content_type", &item.content_type, MAX_CONTENT_TYPE_BYTES)?;
-                    if let Some(metadata) = &item.payload_metadata {
-                        check_len(
-                            "payload_metadata",
-                            metadata,
-                            copypaste_ipc::MAX_SYNC_METADATA_BYTES,
-                        )?;
-                        if item.deleted || !valid_payload_metadata(metadata, &item.content_type) {
-                            return Err(ProtocolError::Decode(
-                                "item carries invalid payload metadata".into(),
-                            ));
-                        }
-                    }
-                    check_len("content_hash", &item.content_hash, MAX_HASH_BYTES)?;
-                    check_timestamp(item.created_at)?;
-                    check_timestamp(item.pin_updated_at)?;
-                    check_pin_state(item.pinned, item.pin_order)?;
-                    if !item.content.is_empty() && !item.binary_content.is_empty() {
-                        return Err(ProtocolError::Decode(
-                            "item has both text and binary content".into(),
-                        ));
-                    }
+                    item.validate()?;
                     let content_len = item.content.len().saturating_add(item.binary_content.len());
-                    if content_len > MAX_CONTENT_BYTES {
-                        return Err(ProtocolError::ContentTooLarge {
-                            bytes: content_len,
-                            max: MAX_CONTENT_BYTES,
-                        });
-                    }
                     total = total
                         .saturating_add(content_len)
                         .saturating_add(item.payload_metadata.as_ref().map_or(0, String::len));
@@ -227,6 +199,45 @@ impl SyncMessage {
                 }
             }
             Self::Done => {}
+        }
+        Ok(())
+    }
+}
+
+impl SyncItem {
+    /// Apply the wire contract before this version enters an outgoing batch.
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        let item = self;
+        check_id("item_id", &item.item_id)?;
+        check_id("origin_device_id", &item.origin_device_id)?;
+        check_len("content_type", &item.content_type, MAX_CONTENT_TYPE_BYTES)?;
+        if let Some(metadata) = &item.payload_metadata {
+            check_len(
+                "payload_metadata",
+                metadata,
+                copypaste_ipc::MAX_SYNC_METADATA_BYTES,
+            )?;
+            if item.deleted || !valid_payload_metadata(metadata, &item.content_type) {
+                return Err(ProtocolError::Decode(
+                    "item carries invalid payload metadata".into(),
+                ));
+            }
+        }
+        check_len("content_hash", &item.content_hash, MAX_HASH_BYTES)?;
+        check_timestamp(item.created_at)?;
+        check_timestamp(item.pin_updated_at)?;
+        check_pin_state(item.pinned, item.pin_order)?;
+        if !item.content.is_empty() && !item.binary_content.is_empty() {
+            return Err(ProtocolError::Decode(
+                "item has both text and binary content".into(),
+            ));
+        }
+        let content_len = item.content.len().saturating_add(item.binary_content.len());
+        if content_len > MAX_CONTENT_BYTES {
+            return Err(ProtocolError::ContentTooLarge {
+                bytes: content_len,
+                max: MAX_CONTENT_BYTES,
+            });
         }
         Ok(())
     }
@@ -252,6 +263,9 @@ fn valid_payload_metadata(value: &str, content_type: &str) -> bool {
         return false;
     };
     let is_file = content_type == copypaste_ipc::content_type::FILE;
+    let carries_file = is_file
+        || copypaste_ipc::content_type::classify(content_type)
+            == copypaste_ipc::ContentClass::Image;
     let valid_file = |value: &Value| match value {
         Value::Object(file) => {
             (file.len() == 2 || file.len() == 3)
@@ -283,17 +297,26 @@ fn valid_payload_metadata(value: &str, content_type: &str) -> bool {
         return is_file && valid_file(&Value::Object(metadata));
     }
 
-    if metadata.len() > 2
+    if metadata.len() > 3
         || metadata
             .keys()
-            .any(|key| key != "file" && key != "source_app_icon")
+            .any(|key| key != "file" && key != "source_app_icon" && key != "privacy")
     {
         return false;
     }
     let file = metadata.get("file");
     let icon = metadata.get("source_app_icon");
-    (file.is_some() || icon.is_some())
-        && file.is_none_or(|value| is_file && valid_file(value))
+    let privacy = match metadata.get("privacy") {
+        Some(value) => {
+            match serde_json::from_value::<copypaste_ipc::ClipboardPrivacy>(value.clone()) {
+                Ok(privacy) => privacy,
+                Err(_) => return false,
+            }
+        }
+        None => Default::default(),
+    };
+    (file.is_some() || icon.is_some() || !privacy.is_empty())
+        && file.is_none_or(|value| carries_file && valid_file(value))
         && icon.is_none_or(valid_icon)
 }
 
@@ -460,6 +483,33 @@ mod tests {
             .validate(),
             Err(ProtocolError::Decode(_))
         ));
+    }
+
+    #[test]
+    fn metadata_matches_the_shared_privacy_and_imported_image_contract() {
+        let privacy = r#"{"privacy":{"secret":true,"transient":false}}"#;
+        assert!(valid_payload_metadata(privacy, "text"));
+        assert!(!valid_payload_metadata(
+            r#"{"privacy":{"secret":"true"}}"#,
+            "text"
+        ));
+        assert!(!valid_payload_metadata(
+            r#"{"privacy":{"secret":true,"unknown":true}}"#,
+            "text"
+        ));
+        assert!(!valid_payload_metadata(r#"{"privacy":{}}"#, "text"));
+        let imported_image = r#"{"file":{"filename":"image.png","mime_type":"image/png"}}"#;
+        assert!(valid_payload_metadata(imported_image, "image/png"));
+        assert!(!valid_payload_metadata(imported_image, "text"));
+        let mut image = item("imported-image", "");
+        image.content_type = "image/png".into();
+        image.binary_content = vec![1, 2, 3];
+        image.payload_metadata = Some(imported_image.into());
+        let message = SyncMessage::Items { items: vec![image] };
+        assert_eq!(
+            SyncMessage::decode(&message.encode().unwrap()).unwrap(),
+            message
+        );
     }
 
     #[test]
