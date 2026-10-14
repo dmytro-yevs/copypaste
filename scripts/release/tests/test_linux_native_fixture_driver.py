@@ -498,12 +498,14 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             "desktop": "GNOME",
             "session": "wayland",
             "gui_pid": 4321,
-            "tray": {"service": "org.kde.StatusNotifierItem-4321-1", "menu_path": [0, 1], "open_item_id": 1},
+            "tray": {"service": "org.kde.StatusNotifierItem-4321-1", "menu_path": "/StatusNotifierItem/Menu", "open_item_id": 1},
             "window": {"observer": "compositor_dbus_signal", "hide_show": "dbusmenu_open"},
             "notification": {"server_reply_id": 1, "capture_command_sha256": "f" * 64},
             "history": {"new_item_count": 2},
             "commands": [
-                {"argv": ["busctl", "call"], "returncode": 0},
+                {"argv": ["busctl", "--user", "call", "org.kde.StatusNotifierItem-4321-1",
+                          "/StatusNotifierItem/Menu", "com.canonical.dbusmenu", "Event", "isvu",
+                          "1", "clicked", "s", "", "0"], "returncode": 0},
                 {"argv_sha256": "0" * 64, "returncode": 0},
             ],
         }
@@ -562,6 +564,27 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             receipt["notification"].pop("capture_command_sha256")
             path.write_text(json.dumps(receipt), encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "capture command digest"):
+                driver.wayland_desktop_receipt(path, desktop="GNOME", gui_pid=4321)
+
+    def test_wayland_desktop_receipt_requires_the_exported_menu_object_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "linux-desktop-acceptance.json"
+            receipt = self.desktop_receipt()
+            for menu_path in ([0, 1], "/", "/OtherMenu"):
+                receipt["tray"]["menu_path"] = menu_path
+                path.write_text(json.dumps(receipt), encoding="utf-8")
+                with self.assertRaisesRegex(RuntimeError, "incomplete"):
+                    driver.wayland_desktop_receipt(path, desktop="GNOME", gui_pid=4321)
+
+    def test_wayland_desktop_receipt_binds_the_real_menu_event_arguments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "linux-desktop-acceptance.json"
+            receipt = self.desktop_receipt()
+            path.write_text(json.dumps(receipt), encoding="utf-8")
+            driver.wayland_desktop_receipt(path, desktop="GNOME", gui_pid=4321)
+            receipt["commands"][0]["argv"][-2] = "unexpected-payload"
+            path.write_text(json.dumps(receipt), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "command evidence"):
                 driver.wayland_desktop_receipt(path, desktop="GNOME", gui_pid=4321)
 
     def test_wayland_wiring_resolves_portal_actors_at_runtime(self):
