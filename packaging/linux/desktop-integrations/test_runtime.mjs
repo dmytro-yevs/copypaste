@@ -479,7 +479,7 @@ async function invokeShortcut(runtime, method, params, sender = ':1.host') {
     assert.equal(runtime.state.ungrabs, 1, 'unregistration attempts Mutter ungrab independently of Shell mode cleanup');
 }
 
-function loadKde({activateWindow} = {}) {
+function loadKde({activateWindow, windows = [{desktopFileName: 'com.copypaste.CopyPaste', pid: 100, deleted: false}]} = {}) {
     const source = fs.readFileSync(new URL('kde-kwin-script/contents/code/main.js', root), 'utf8');
     const calls = [];
     const signals = {};
@@ -489,11 +489,12 @@ function loadKde({activateWindow} = {}) {
         start() { this.started = true; }
         stop() { this.stopped = true; }
     };
+    let focusedWindow = null;
     const workspace = {
-        activeWindow: null,
-        activateWindow(window) {
-            activateWindow?.(window, workspace, signals);
-        },
+        setFocusedWindow(window) { focusedWindow = window; },
+        get activeWindow() { return focusedWindow; },
+        set activeWindow(window) { activateWindow?.(window, workspace, signals); },
+        windowList: () => windows,
         windowAdded: {connect: callback => { signals.added = callback; }},
         windowActivated: {connect: callback => { signals.activated = callback; }},
         windowRemoved: {connect: callback => { signals.removed = callback; }},
@@ -510,14 +511,40 @@ function loadKde({activateWindow} = {}) {
     const runtime = loadKde();
     const failedAwait = runtime.calls.find(call => call.method === 'AwaitQuickPaste');
     assert.equal(failedAwait.method, 'AwaitQuickPaste');
-    runtime.signals.added({desktopFileName: 'com.copypaste.CopyPaste', deleted: false});
+    runtime.signals.added({desktopFileName: 'com.copypaste.CopyPaste', pid: 200, deleted: false});
     assert.notEqual(runtime.calls.at(-1), failedAwait, 'a host window arrival must replace an await whose D-Bus error has no callback');
 }
 
 {
+    const runtime = loadKde({windows: []});
+    assert.equal(runtime.calls.some(call => call.method === 'AwaitQuickPaste'), false, 'KWin must wait for a host window before calling an absent host');
+    const host = {desktopFileName: 'com.copypaste.CopyPaste', pid: 100, deleted: false};
+    runtime.signals.added(host);
+    const awaitCall = runtime.calls.find(call => call.method === 'AwaitQuickPaste');
+    runtime.signals.activated(host);
+    runtime.signals.added(host);
+    assert.equal(runtime.calls.filter(call => call.method === 'AwaitQuickPaste').length, 1, 'window events from the same host must preserve its live await');
+    runtime.workspace.setFocusedWindow({deleted: false});
+    awaitCall.callback(true);
+    assert.equal(runtime.calls.at(-1).method, 'BeginQuickPaste', 'the original portal activation must begin Quick Paste after host window events');
+}
+
+{
+    const runtime = loadKde();
+    const oldAwait = runtime.calls.find(call => call.method === 'AwaitQuickPaste');
+    runtime.signals.added({desktopFileName: 'com.copypaste.CopyPaste', pid: 200, deleted: false});
+    const newAwait = runtime.calls.filter(call => call.method === 'AwaitQuickPaste').at(-1);
+    runtime.workspace.setFocusedWindow({deleted: false});
+    oldAwait.callback(true);
+    assert.equal(runtime.calls.some(call => call.method === 'BeginQuickPaste'), false, 'an old host cannot trigger a transaction after restart');
+    newAwait.callback(true);
+    assert.equal(runtime.calls.at(-1).method, 'BeginQuickPaste', 'a restarted host must accept its own activation');
+}
+
+{
     const source = {deleted: false};
-    const runtime = loadKde({activateWindow: (_window, workspace) => { workspace.activeWindow = {deleted: false}; }});
-    runtime.workspace.activeWindow = source;
+    const runtime = loadKde({activateWindow: (_window, workspace) => { workspace.setFocusedWindow({deleted: false}); }});
+    runtime.workspace.setFocusedWindow(source);
     runtime.calls.filter(call => call.method === 'AwaitQuickPaste').at(-1).callback(true);
     runtime.calls.at(-1).callback(true);
     assert.equal(runtime.calls.some(call => call.method === 'PasteIntoRestoredWindow'), false, 'KWin must not paste without restored focus');
@@ -528,10 +555,10 @@ function loadKde({activateWindow} = {}) {
 {
     const source = {deleted: false};
     const runtime = loadKde({activateWindow: () => {}});
-    runtime.workspace.activeWindow = source;
+    runtime.workspace.setFocusedWindow(source);
     runtime.calls.filter(call => call.method === 'AwaitQuickPaste').at(-1).callback(true);
     runtime.calls.at(-1).callback(true);
-    runtime.workspace.activeWindow = source;
+    runtime.workspace.setFocusedWindow(source);
     runtime.signals.activated(source);
     assert.equal(runtime.calls.some(call => call.method === 'PasteIntoRestoredWindow'), true, 'KWin must paste only after the restore activation event');
 }
@@ -539,7 +566,7 @@ function loadKde({activateWindow} = {}) {
 {
     const source = {deleted: false};
     const runtime = loadKde({activateWindow: () => {}});
-    runtime.workspace.activeWindow = source;
+    runtime.workspace.setFocusedWindow(source);
     runtime.calls.filter(call => call.method === 'AwaitQuickPaste').at(-1).callback(true);
     const deadline = runtime.timers.find(timer => timer.singleShot === true);
     assert.ok(deadline, 'a Begin transaction must have one deadline');
@@ -552,11 +579,11 @@ function loadKde({activateWindow} = {}) {
     const source = {deleted: false};
     let restored = false;
     const runtime = loadKde({activateWindow: window => { if (window === source) restored = true; }});
-    runtime.workspace.activeWindow = source;
+    runtime.workspace.setFocusedWindow(source);
     runtime.calls.filter(call => call.method === 'AwaitQuickPaste').at(-1).callback(true);
     const quickPasteWindow = {desktopFileName: 'com.copypaste.CopyPaste', caption: 'CopyPaste Quick Paste', deleted: false};
     runtime.signals.added(quickPasteWindow);
-    runtime.workspace.activeWindow = quickPasteWindow;
+    runtime.workspace.setFocusedWindow(quickPasteWindow);
     runtime.calls.at(-1).callback(false);
     assert.equal(restored, true, 'a copy-only cancellation restores the captured focus');
     assert.equal(runtime.calls.some(call => call.method === 'PasteIntoRestoredWindow'), false, 'a copy-only cancellation never pastes');

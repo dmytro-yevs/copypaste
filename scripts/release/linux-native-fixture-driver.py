@@ -333,6 +333,7 @@ def require_linux_onboarding(args, *, gui_pid, environment):
         atspi_action(actor, "click", gui_pid, "History", environment)
         atspi_action(actor, "observe", gui_pid, "History", environment)
         return
+    atspi_action(actor, "observe", gui_pid, "Continue", environment)
     atspi_action(actor, "click", gui_pid, "Continue", environment)
     atspi_action(actor, "observe", gui_pid, "Set up your Linux desktop", environment)
     if args.session == "wayland":

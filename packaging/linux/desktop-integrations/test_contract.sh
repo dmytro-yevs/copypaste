@@ -41,7 +41,7 @@ for method in AwaitQuickPaste BeginQuickPaste PasteIntoRestoredWindow CancelQuic
   rg -F "$method" "$gnome/extension.js" "$kde/contents/code/main.js" >/dev/null
 done
 rg -F "app.copypaste.GnomeIntegration" "$gnome/extension.js" >/dev/null
-rg -F "workspace.activateWindow(pending.window)" "$kde/contents/code/main.js" >/dev/null
+rg -F "workspace.activeWindow = pending.window" "$kde/contents/code/main.js" >/dev/null
 rg -F "workspace.activeWindow !== pending.window" "$kde/contents/code/main.js" >/dev/null
 rg -F "window.desktopFileName === HOST_DESKTOP_FILE_NAME" "$kde/contents/code/main.js" >/dev/null
 rg -F "pending.window.activate" "$gnome/extension.js" >/dev/null
@@ -102,7 +102,7 @@ fi
 
 gnome_activate=$(rg -n -F "pending.window.activate" "$gnome/extension.js" | head -n 1 | cut -d: -f1)
 gnome_paste=$(rg -n -F "'PasteIntoRestoredWindow'" "$gnome/extension.js" | cut -d: -f1)
-kde_activate=$(rg -n -F "workspace.activateWindow(pending.window)" "$kde/contents/code/main.js" | head -n 1 | cut -d: -f1)
+kde_activate=$(rg -n -F "workspace.activeWindow = pending.window" "$kde/contents/code/main.js" | head -n 1 | cut -d: -f1)
 
 [ "$gnome_activate" -lt "$gnome_paste" ]
 [ "$kde_activate" -gt 0 ]
