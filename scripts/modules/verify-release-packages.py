@@ -7,14 +7,14 @@ from pathlib import Path
 import re
 import subprocess
 
-from catalog import build_catalog
+from catalog import LINUX_RELEASE, build_catalog
 
 
 LEGACY_PLATFORMS = ["macos", "windows", "android"]
 NATIVE_RECEIPT_TARGETS = {
     "macos": [("macos", "aarch64")],
     "windows": [("windows", "x86_64")],
-    "linux": [("linux", "x86_64"), ("linux", "aarch64")],
+    "linux": [("linux", architecture) for architecture in LINUX_RELEASE["ARCHITECTURES"]],
     "android": [("android", "x86_64")],
 }
 

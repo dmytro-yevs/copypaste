@@ -99,7 +99,7 @@ class CatalogTest(unittest.TestCase):
         )
         self.assertEqual(
             {artifact["architecture"] for artifact in current["artifacts"] if artifact["platform"] == "linux"},
-            {"x86_64", "aarch64"},
+            {"x86_64"},
         )
         with self.assertRaises(ValueError):
             catalog.build_catalog(
