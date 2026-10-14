@@ -230,7 +230,7 @@ export default class CopyPasteQuickPasteExtension extends Extension {
             HOST_OBJECT_PATH,
             HOST_INTERFACE,
             'QualificationObserved',
-            new GLib.Variant('(sussb)', [transactionId, pid, QUICK_PASTE_APPLICATION_ID, 'main', mapped]),
+            new GLib.Variant('(sissb)', [transactionId, pid, QUICK_PASTE_APPLICATION_ID, 'main', mapped]),
             null,
             Gio.DBusCallFlags.NONE,
             2000,

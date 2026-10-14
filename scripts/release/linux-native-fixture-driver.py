@@ -165,7 +165,7 @@ def wayland_desktop_receipt(path, *, desktop, gui_pid):
     commands = value["commands"]
     if (not isinstance(tray, dict) or set(tray) != {"service", "menu_path", "open_item_id"}
             or not isinstance(tray["service"], str) or not tray["service"]
-            or not isinstance(tray["menu_path"], list) or not all(type(item) is int and item >= 0 for item in tray["menu_path"])
+            or tray["menu_path"] != "/StatusNotifierItem/Menu"
             or type(tray["open_item_id"]) is not int or tray["open_item_id"] < 0
             or window != {"observer": "compositor_dbus_signal", "hide_show": "dbusmenu_open"}
             or not isinstance(notification, dict) or type(notification.get("server_reply_id")) is not int or notification["server_reply_id"] <= 0
@@ -174,9 +174,13 @@ def wayland_desktop_receipt(path, *, desktop, gui_pid):
         raise RuntimeError("Wayland desktop acceptance evidence is incomplete")
     require_sha256(notification.get("capture_command_sha256"), "Wayland capture command digest")
     menu_command, capture_command = commands
+    expected_menu_argv = [
+        "busctl", "--user", "call", tray["service"], tray["menu_path"],
+        "com.canonical.dbusmenu", "Event", "isvu", str(tray["open_item_id"]),
+        "clicked", "s", "", "0",
+    ]
     if (not isinstance(menu_command, dict) or set(menu_command) != {"argv", "returncode"}
-            or menu_command.get("returncode") != 0 or not isinstance(menu_command["argv"], list) or not menu_command["argv"]
-            or not all(isinstance(item, str) and item for item in menu_command["argv"])):
+            or menu_command.get("returncode") != 0 or menu_command["argv"] != expected_menu_argv):
         raise RuntimeError("Wayland desktop acceptance command evidence is invalid")
     if (not isinstance(capture_command, dict) or set(capture_command) != {"argv_sha256", "returncode"}
             or capture_command.get("returncode") != 0):
@@ -1383,6 +1387,7 @@ def main():
         environment = {
             **os.environ,
             "COPYPASTE_QUALIFICATION": "1",
+            "COPYPASTE_QUALIFICATION_CAPABILITY": os.urandom(32).hex(),
             "XDG_DATA_HOME": str(data_home),
             "TMPDIR": str(runtime_dir),
         }
@@ -1468,6 +1473,12 @@ def main():
                     response_variant(cli_json(cli, cli_environment, "config", "set", "--excluded-apps", ""), "config")
 
                 # A restart must retain a non-sensitive persisted history entry.
+                # Configure feedback before this restart so the GUI loads the
+                # same notification preferences as the GUI-owned daemon.
+                run([
+                    str(cli), "--json", "config", "set", "--notify-on-copy", "true",
+                    "--notification-preview", "false",
+                ], env=cli_environment)
                 persisted = "copypaste-restart-fixture"
                 run([str(cli), "add", persisted], env=cli_environment)
                 prior_sockets = set(runtime_dir.glob("cp-*.sock"))
