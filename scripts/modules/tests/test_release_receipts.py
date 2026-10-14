@@ -44,9 +44,9 @@ class ReleaseReceiptsTest(unittest.TestCase):
                 module, _ = self.fixtures(root, module_id)
                 receipts.verify_receipts(root, module, "a" * 40, "123")
 
-    def test_linux_receipts_require_both_native_architectures(self):
+    def test_linux_receipts_require_every_released_native_architecture(self):
         platforms = ["macos", "windows", "linux", "android"]
-        for architecture in ["x86_64", "aarch64"]:
+        for architecture in receipts.LINUX_RELEASE["ARCHITECTURES"]:
             with self.subTest(architecture=architecture), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 module, paths = self.fixtures(root, "copypaste.ocr", platforms)

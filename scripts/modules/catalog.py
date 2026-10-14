@@ -5,6 +5,7 @@ import base64
 from functools import lru_cache
 import hashlib
 import json
+import runpy
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
@@ -22,9 +23,10 @@ REPOSITORY = "https://github.com/dmytro-yevs/copypaste/releases/download"
 LEGACY_CATALOG_NAME = "modules.json"
 LINUX_CATALOG_NAME = "modules-v2.json"
 CATALOG_NAMES = {LEGACY_CATALOG_NAME, LINUX_CATALOG_NAME}
+LINUX_RELEASE = runpy.run_path(str(ROOT / "scripts/release/linux_release_contract.py"))
 REQUIRED_TARGETS = {
     ("macos", "aarch64"), ("windows", "x86_64"),
-    ("linux", "x86_64"), ("linux", "aarch64"),
+    *(("linux", architecture) for architecture in LINUX_RELEASE["ARCHITECTURES"]),
     ("android", "aarch64"), ("android", "arm"), ("android", "x86_64"),
 }
 LEGACY_PLATFORMS = {"macos", "windows", "android"}

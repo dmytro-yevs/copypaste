@@ -289,7 +289,7 @@ class ReleaseSafetyTest(unittest.TestCase):
         ]}
         ci_artifacts = {"artifacts": [*artifacts["artifacts"], *[
             {"name": name, "expired": False, "workflow_run": {"id": 987, "head_sha": "commit"}}
-            for name in ("linux-pr-release-candidate-x86_64", "linux-pr-release-candidate-aarch64")
+            for name in ("linux-pr-release-candidate-x86_64",)
         ]]}
         verify(ci_run, ci_jobs, ci_artifacts, "owner/repo", "commit")
         ci_artifacts["artifacts"][-1]["expired"] = True

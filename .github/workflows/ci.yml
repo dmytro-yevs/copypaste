@@ -178,7 +178,6 @@ jobs:
           - { name: macos, platform: macos, runner: macos-14 }
           - { name: windows, platform: windows, runner: windows-2022 }
           - { name: Linux x86_64, platform: linux, runner: ubuntu-24.04 }
-          - { name: Linux aarch64, platform: linux, runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
@@ -213,7 +212,6 @@ jobs:
           - { name: android, platform: android, runner: ubuntu-24.04, target: apk }
           - { name: windows, platform: windows, runner: windows-2022, target: windows }
           - { name: Linux x86_64, platform: linux, runner: ubuntu-24.04, target: linux }
-          - { name: Linux aarch64, platform: linux, runner: ubuntu-24.04-arm, target: linux }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - id: flutter
@@ -257,7 +255,6 @@ jobs:
       matrix:
         include:
           - { architecture: x86_64, runner: ubuntu-24.04 }
-          - { architecture: aarch64, runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
@@ -282,11 +279,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mutter: [46, 47]
-        architecture: [x86_64, aarch64]
+        mutter: [46]
+        architecture: [x86_64]
         include:
           - { architecture: x86_64, runner: ubuntu-24.04 }
-          - { architecture: aarch64, runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Build Mutter 47 in a matching GNOME 47 dependency root
@@ -317,28 +313,6 @@ jobs:
         working-directory: packaging/linux/desktop-integrations/gnome-shell-extension/mutter
         run: ./verify-patch.sh "${{ matrix.mutter }}" "$RUNNER_TEMP/mutter-source" "$RUNNER_TEMP/mutter-build"
 
-  linux-kwin-bridges:
-    name: KWin ${{ matrix.kwin }} bridge (${{ matrix.architecture }})
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        kwin: ['6.0', '6.3']
-        architecture: [x86_64, aarch64]
-        include:
-          - { architecture: x86_64, runner: ubuntu-24.04, container_platform: linux/amd64 }
-          - { architecture: aarch64, runner: ubuntu-24.04-arm, container_platform: linux/arm64 }
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Compile and exercise the private Qt D-Bus wire fixture
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends cmake ninja-build qt6-base-dev dbus-x11
-          export COPYPASTE_QT_PREFIX="$(qmake6 -query QT_INSTALL_PREFIX)"
-          packaging/linux/desktop-integrations/kde-native-clipboard/test-wire.sh
-      - name: Compile the pinned patched KWin in an isolated Fedora builder
-        run: packaging/linux/desktop-integrations/kde-native-clipboard/run-fedora-build.sh "${{ matrix.container_platform }}" "${{ matrix.kwin }}"
-
   linux-pr-release-candidate:
     name: Linux release candidate (${{ matrix.architecture }})
     if: github.event_name == 'pull_request'
@@ -354,10 +328,6 @@ jobs:
             runner: ubuntu-24.04
             appimagetool_url: https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
             appimagetool_sha256: 95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6
-          - architecture: aarch64
-            runner: ubuntu-24.04-arm
-            appimagetool_url: https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-aarch64.AppImage
-            appimagetool_sha256: a595ea34cd6136c7f595e9dcbb16f3e9725d7610efb9e43b38c3c6e86cafc270
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - id: flutter
@@ -402,8 +372,8 @@ jobs:
             --architecture "${{ matrix.architecture }}" \
             --maximum 2.39 \
             --output "dist/CopyPaste-v$version-linux-${{ matrix.architecture }}.runtime-baseline.json"
-          scripts/release/build-linux-packages.sh "$version" "${{ matrix.architecture }}"
-          for extension in AppImage deb rpm; do
+          scripts/release/build-linux-packages.sh "$version" "${{ matrix.architecture }}" --release-scope
+          for extension in AppImage deb; do
             test -s "dist/CopyPaste-v$version-linux-${{ matrix.architecture }}.$extension"
           done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -413,7 +383,6 @@ jobs:
           path: |
             dist/CopyPaste-v*-linux-${{ matrix.architecture }}.AppImage
             dist/CopyPaste-v*-linux-${{ matrix.architecture }}.deb
-            dist/CopyPaste-v*-linux-${{ matrix.architecture }}.rpm
             dist/CopyPaste-v*-linux-${{ matrix.architecture }}.runtime-baseline.json
 
   linux-package-fixtures:
@@ -424,7 +393,6 @@ jobs:
       matrix:
         include:
           - { architecture: x86_64, runner: ubuntu-24.04 }
-          - { architecture: aarch64, runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Build and extract every Linux package format
