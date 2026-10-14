@@ -128,7 +128,13 @@ class DevicesHeaderActions extends StatelessWidget {
     return Tooltip(
       showDuration: AppMotion.resolve(context, AppMotion.standard),
       tooltip: (context) => TooltipContainer(child: Text(label)),
-      child: button,
+      child: Semantics(
+        container: true,
+        label: label,
+        button: true,
+        enabled: onPressed != null,
+        child: button,
+      ),
     );
   }
 }
