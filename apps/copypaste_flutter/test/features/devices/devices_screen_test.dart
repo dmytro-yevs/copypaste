@@ -6,10 +6,130 @@ import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/navigation/navigation.dart';
 import 'package:copypaste_flutter/app/shell/app_shell.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/rendering.dart' show SemanticsAction;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
+  testWidgets('nearby discovery exposes a distinct accessible heading', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final controller = DevicesController(
+      gateway: _ScreenGateway(),
+      captureProtection: _CaptureProtection(),
+    );
+    addTearDown(controller.dispose);
+    try {
+      await _pumpDevices(tester, controller, size: const Size(1100, 760));
+      await tester.pumpAndSettle();
+      final heading = find.semantics.byLabel('Nearby devices');
+      expect(heading, findsOneWidget);
+      final data = heading.evaluate().single.getSemanticsData();
+      expect(data.flagsCollection.isHeader, isTrue);
+      expect(data.hasAction(SemanticsAction.tap), isFalse);
+    } finally {
+      semantics.dispose();
+    }
+  });
+
+  for (final width in [320.0, 1100.0, 1400.0]) {
+    testWidgets(
+      'pairing commands expose named semantic actions at $width',
+      (tester) async {
+        final semantics = tester.ensureSemantics();
+        final controller = DevicesController(
+          gateway: _ScreenGateway(peers: const [], discovered: const []),
+          captureProtection: _CaptureProtection(),
+        );
+        addTearDown(controller.dispose);
+        try {
+          await _pumpDevices(tester, controller, size: Size(width, 760));
+          await tester.pumpAndSettle();
+          for (final label in ['Pair device', 'Scan QR', 'Enter code']) {
+            final command = find.semantics.byPredicate(
+              (node) =>
+                  node.label == label &&
+                  node.getSemanticsData().hasAction(SemanticsAction.tap),
+            );
+            expect(command, findsOneWidget);
+          }
+          tester.semantics.tap(find.semantics.byLabel('Enter code'));
+          await tester.pumpAndSettle();
+          expect(controller.pairingEntryMode, PairingEntryMode.enterCode);
+        } finally {
+          semantics.dispose();
+        }
+      },
+      variant: TargetPlatformVariant({
+        TargetPlatform.android,
+        TargetPlatform.macOS,
+        TargetPlatform.windows,
+        TargetPlatform.linux,
+      }),
+    );
+  }
+
+  testWidgets(
+    'desktop QR scanner exposes its native qualification controls',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final controller = DevicesController(
+        gateway: _ScreenGateway(),
+        captureProtection: _CaptureProtection(),
+      );
+      addTearDown(controller.dispose);
+      try {
+        await _pumpDevices(tester, controller, size: const Size(1100, 760));
+        await tester.pumpAndSettle();
+        tester.semantics.tap(find.semantics.byLabel('Scan QR'));
+        await tester.pumpAndSettle();
+        expect(find.semantics.byLabel('Scan QR code'), findsOneWidget);
+        expect(
+          find.semantics.byPredicate(
+            (node) =>
+                node.label == 'Start scanner' &&
+                node.getSemanticsData().hasAction(SemanticsAction.tap),
+          ),
+          findsOneWidget,
+        );
+      } finally {
+        semantics.dispose();
+      }
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+      TargetPlatform.linux,
+    }),
+  );
+
+  testWidgets('pairing confirmation exposes a distinct accessible state', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final gateway = _ScreenGateway();
+    gateway.session.ceremony = const PairingCeremony(
+      state: PairingState.awaitingConfirmation,
+    );
+    final controller = DevicesController(
+      gateway: gateway,
+      captureProtection: _CaptureProtection(),
+    );
+    addTearDown(controller.dispose);
+    try {
+      await _pumpDevices(tester, controller, size: const Size(1100, 760));
+      await tester.pumpAndSettle();
+      await tester.runAsync(
+        () => controller.joinPairingUri('copypaste://pair/v1?test=invitation'),
+      );
+      await tester.pumpAndSettle();
+      expect(find.semantics.byLabel('Confirm on both devices'), findsOneWidget);
+    } finally {
+      semantics.dispose();
+    }
+  });
+
   for (final (size, scale) in [
     (const Size(320, 640), 1.6),
     (const Size(640, 480), 1.0),
