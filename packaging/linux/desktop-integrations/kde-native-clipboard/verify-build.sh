@@ -64,7 +64,7 @@ set -eu
 [ "$#" -eq 0 ] || { echo "CopyPaste KWin qualification session does not accept arguments" >&2; exit 64; }
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 export QT_PLUGIN_PATH="$root/lib64/qt6/plugins"
-exec "$root/bin/kwin_wayland" --virtual --no-lockscreen
+exec "$root/bin/kwin_wayland" --virtual --width 1280 --height 1024 --no-lockscreen
 EOF
     chmod 755 "$qualification_entrypoint"
     python3 "$root/../../compositor-runtime/emit_runtime_receipt.py" \

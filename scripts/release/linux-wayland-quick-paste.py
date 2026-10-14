@@ -32,6 +32,7 @@ REQUEST_INTERFACE = "org.freedesktop.portal.Request"
 SESSION_INTERFACE = "org.freedesktop.portal.Session"
 REMOTE_DESKTOP = "org.freedesktop.portal.RemoteDesktop"
 KEYBOARD_DEVICE = 1
+POINTER_DEVICE = 2
 EVDEV_CONTROL = 29
 EVDEV_SHIFT = 42
 EVDEV_C = 46
@@ -213,6 +214,7 @@ class PortalKeyboard:
         self.owner = self._owner()
         self.session = ""
         self.session_digest = ""
+        self.granted_devices = 0
         self.calls: list[str] = []
 
     def _call(
@@ -407,7 +409,8 @@ class PortalKeyboard:
         finally:
             self._unsubscribe_response(watch)
 
-    def grant(self, on_start_requested) -> None:
+    def grant(self, on_start_requested, *, with_pointer: bool = False) -> None:
+        devices = KEYBOARD_DEVICE | (POINTER_DEVICE if with_pointer else 0)
         created = self._request("CreateSession", "(a{sv})", ({
             "handle_token": self.glib.Variant("s", token("create")),
             "session_handle_token": self.glib.Variant("s", token("session")),
@@ -419,13 +422,21 @@ class PortalKeyboard:
         self.session_digest = sha256(session)
         self._request("SelectDevices", "(oa{sv})", (session, {
             "handle_token": self.glib.Variant("s", token("devices")),
-            "types": self.glib.Variant("u", KEYBOARD_DEVICE),
+            "types": self.glib.Variant("u", devices),
         }))
         started = self._request(
             "Start", "(osa{sv})", (session, "", {"handle_token": self.glib.Variant("s", token("start"))}), on_start_requested,
         )
-        if type(started.get("devices")) is not int or not (started["devices"] & KEYBOARD_DEVICE):
-            raise QuickPasteQualificationError("desktop portal did not grant keyboard input")
+        if type(started.get("devices")) is not int or started["devices"] & devices != devices:
+            raise QuickPasteQualificationError("desktop portal did not grant the requested input devices")
+        self.granted_devices = started["devices"]
+
+    def park_pointer(self) -> None:
+        if not self.session or not self.granted_devices & POINTER_DEVICE:
+            raise QuickPasteQualificationError("desktop portal has no granted pointer session")
+        self._call(REMOTE_DESKTOP, "NotifyPointerMotion", self.glib.Variant(
+            "(oa{sv}dd)", (self.session, {}, -10000.0, -10000.0),
+        ))
 
     def key(self, keycode: int, state: int) -> None:
         if not self.session:
@@ -444,6 +455,7 @@ class PortalKeyboard:
                 self._call(SESSION_INTERFACE, "Close", None, path=self.session)
             finally:
                 self.session = ""
+                self.granted_devices = 0
 
 
 def accessible_children(node: Any):
@@ -740,9 +752,12 @@ def qualify(args: argparse.Namespace) -> dict[str, Any]:
                 nonlocal consent_click, portal_dialog_pid
                 portal_dialog_pid, consent_click = click_owned_portal_consent(portal)
 
-            portal.grant(accept_helper_consent)
+            portal.grant(accept_helper_consent, with_pointer=True)
             if portal.require_gui_owner(args.gui_pid) != gui_owner:
                 raise QuickPasteQualificationError("CopyPaste GUI D-Bus owner changed before global shortcut input")
+            # Keep pointer hover from selecting a different clip when the
+            # keyboard-invoked popup is mapped, as in the X11 input fixture.
+            portal.park_pointer()
             portal.chord(EVDEV_CONTROL, EVDEV_SHIFT, EVDEV_C)
             quick_paste_pid, quick_paste_ready = wait_for_quick_paste_ready(
                 args.actor, args.gui_pid, args.marker, environment,
