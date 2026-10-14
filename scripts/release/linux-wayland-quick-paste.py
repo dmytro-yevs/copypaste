@@ -44,7 +44,7 @@ UNIQUE_NAME = re.compile(r"^:[0-9]+\.[0-9]+$")
 PORTAL_IMPLEMENTATION_PREFIX = "org.freedesktop.impl.portal.desktop."
 APP_PERMISSION_GRANTED = "Keyboard control is allowed for Quick Paste."
 PORTAL_DIALOG_PRESENTERS = {
-    "GNOME": ("org.gnome.Shell",),
+    "GNOME": ("org.freedesktop.impl.portal.desktop.gnome",),
     "KDE": ("org.kde.plasmashell", "org.kde.KWin"),
 }
 
@@ -293,12 +293,13 @@ class PortalKeyboard:
         presenters = PORTAL_DIALOG_PRESENTERS.get(desktop or "")
         if presenters is None:
             raise QuickPasteQualificationError("Wayland portal desktop identity is unsupported")
-        portal_names.extend(name for name in presenters if name in names)
+        portal_names.extend(name for name in presenters if name in names and name not in portal_names)
         owners = {name: self._owner_credentials(self._bus_owner(name))[0] for name in portal_names}
         if desktop == "GNOME":
-            if "org.gnome.Shell" not in owners:
+            presenter = "org.freedesktop.impl.portal.desktop.gnome"
+            if presenter not in owners:
                 raise QuickPasteQualificationError("GNOME portal dialog presenter is unavailable")
-            return {owners["org.gnome.Shell"]}
+            return {owners[presenter]}
         return set(owners.values())
 
     def require_gui_owner(self, gui_pid: int) -> str:
