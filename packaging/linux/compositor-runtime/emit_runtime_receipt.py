@@ -142,7 +142,8 @@ def main() -> int:
             source["shell_patch_sha256"]=digest(a.shell_patch)
         elif a.shell_patch is not None:
             raise ValueError("private Shell patch requires a private Shell revision")
-        receipt={"schema":1,"runtime_id":a.runtime_id,"desktop":a.desktop,"architecture":architecture(),"distribution":os_release(),"glibc_floor":a.glibc_floor,"source":source,"payload":payload(root),"launch":launch,"qualification":{"kind":"headless","entrypoint":a.qualification_entrypoint},"runtime_env":{},"host_requirements":deps,"package_dependencies":[],"upstream_licenses":licenses}
+        runtime_env = {"QT_PLUGIN_PATH": "usr/lib64/qt6/plugins"} if a.desktop == "KDE" else {}
+        receipt={"schema":1,"runtime_id":a.runtime_id,"desktop":a.desktop,"architecture":architecture(),"distribution":os_release(),"glibc_floor":a.glibc_floor,"source":source,"payload":payload(root),"launch":launch,"qualification":{"kind":"headless","entrypoint":a.qualification_entrypoint},"runtime_env":runtime_env,"host_requirements":deps,"package_dependencies":[],"upstream_licenses":licenses}
         if receipt["architecture"] not in {"x86_64","aarch64"}: raise ValueError("unsupported build architecture")
         a.output.parent.mkdir(parents=True, exist_ok=True); a.output.write_text(json.dumps(receipt,indent=2)+"\n",encoding="utf-8")
     except (OSError, subprocess.CalledProcessError, ValueError) as e:
