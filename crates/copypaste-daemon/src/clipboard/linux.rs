@@ -1300,12 +1300,24 @@ mod tests {
         _directory: tempfile::TempDir,
     }
 
+    fn gtk_provider_diagnostics(path: &std::path::Path) -> String {
+        use std::io::Read;
+        let mut diagnostics = String::new();
+        let result = std::fs::File::open(path)
+            .and_then(|file| file.take(8192).read_to_string(&mut diagnostics));
+        match result {
+            Ok(_) => diagnostics,
+            Err(error) => format!("could not read GTK provider stderr: {error}"),
+        }
+    }
+
     impl GtkProvider {
         fn start() -> Self {
             let directory = tempfile::tempdir().expect("provider directory");
             let payload = directory.path().join("payload");
             let ready = directory.path().join("ready");
             let activity = directory.path().join("activity");
+            let stderr = directory.path().join("stderr");
             std::fs::write(&payload, b"fixture text").expect("provider payload");
             let helper =
                 std::env::var("COPYPASTE_GTK_CLIPBOARD_PROVIDER").expect("GTK provider helper");
@@ -1321,18 +1333,31 @@ mod tests {
                 .args(["--hold-seconds", "5", "--offer", "text/plain;charset=utf-8"])
                 .arg(&payload)
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
+                .stderr(Stdio::from(
+                    std::fs::File::create(&stderr).expect("provider stderr"),
+                ))
                 .spawn()
                 .expect("start GTK provider");
-            let provider = Self {
+            let mut provider = Self {
                 child,
                 _directory: directory,
             };
             let deadline = Instant::now() + Duration::from_secs(2);
             while !ready.is_file() && Instant::now() < deadline {
+                if let Some(status) = provider.child.try_wait().expect("provider exit status") {
+                    panic!(
+                        "GTK provider exited before readiness ({status}): {}",
+                        gtk_provider_diagnostics(&stderr)
+                    );
+                }
                 thread::sleep(Duration::from_millis(5));
             }
-            assert!(ready.is_file(), "GTK provider did not become ready");
+            assert!(
+                ready.is_file(),
+                "GTK provider did not become ready; exit status {:?}; stderr: {}",
+                provider.child.try_wait().expect("provider exit status"),
+                gtk_provider_diagnostics(&stderr)
+            );
             provider
         }
     }
