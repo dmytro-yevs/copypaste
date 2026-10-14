@@ -3,10 +3,12 @@
 
 import argparse
 import json
+import runpy
 from pathlib import Path
 
 
-ARCHITECTURES = ("x86_64", "aarch64")
+RELEASE = runpy.run_path(str(Path(__file__).with_name("linux_release_contract.py")))
+ARCHITECTURES = RELEASE["ARCHITECTURES"]
 
 
 def artifact_name(workflow: str, module: str, architecture: str) -> str:

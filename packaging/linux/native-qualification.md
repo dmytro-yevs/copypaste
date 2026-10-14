@@ -1,3 +1,8 @@
+> Current stable release scope: x86_64, GNOME 46, X11 on Ubuntu 24.04.
+> Every AppImage and Debian artifact must pass the complete installed-product
+> scenario. ARM64, KDE, Wayland, and RPM implementation is retained for
+> development but does not qualify or ship in this release.
+
 # Linux native qualification contract
 
 Linux packages are release inputs only after `.github/workflows/linux-native-qualification.yml`
@@ -12,9 +17,9 @@ release run. Supply the current numeric run ID and, for regular releases, the
 prior numeric run ID:
 
 * `artifact_run_id`: the successful current `Production release` run containing
-  `production-linux-x86_64` and `production-linux-aarch64`.
+  `production-linux-x86_64`.
 * `previous_artifact_run_id`: a successful earlier `Production release` run
-  containing both architectures, required for real upgrade scenarios.
+  containing the released x86_64 packages, required for real upgrade scenarios.
 
 The workflow verifies supplied API run records, complete job inventories, artifact
 origins, repository, workflow path, and commit before downloading anything. It
@@ -23,7 +28,7 @@ partial artifact inventory, expired artifact, or different repository fails.
 
 Each row records the qualification workflow run ID as `source_run_id` and the
 package-producing release run ID as `artifact_run_id`. The receipt binds every
-current AppImage, deb, and rpm filename, byte count, and SHA-256 for its own
+current AppImage and deb filename, byte count, and SHA-256 for its own
 architecture. It also binds a prior package inventory used by upgrade tests.
 The final verifier rejects duplicate formats, cross-architecture packages,
 symlinks, paths outside the evidence root, missing files, byte-size or digest
@@ -37,12 +42,11 @@ the following release, which must use `prior_release` and execute upgrades.
 
 ## Required matrix and scenarios
 
-All eight coordinates are mandatory:
+The released coordinate is mandatory:
 
 | Architecture | Desktop | Sessions | Formats |
 | --- | --- | --- | --- |
-| x86_64 | GNOME, KDE | X11, native Wayland | AppImage, deb, rpm |
-| aarch64 | GNOME, KDE | X11, native Wayland | AppImage, deb, rpm |
+| x86_64 | GNOME 46 (Ubuntu 24.04) | X11 | AppImage, deb |
 
 For each coordinate, the repository-maintained GTK/GIO fixture driver must
 execute and emit a command receipt for every scenario below. A JSON receipt
@@ -57,9 +61,9 @@ output, stores a raw driver log and trace, and computes the receipt hashes.
   file payloads.
 * Exercise confidential hints, excluded-app capture, and private mode without
   retaining or replaying protected content.
-* Enable the matching GNOME extension or KWin script as the desktop user;
-  grant the portal keyboard permission, invoke Quick Paste through the native
-  hotkey, and prove focus restoration and paste in the active session.
+* Invoke Quick Paste through the native X11 hotkey and prove focus restoration
+  and paste in the active GNOME session. KDE and Wayland scenarios remain
+  available for development but are outside this release matrix.
 * Exercise tray/window state, capture notification, daemon restart with
   encrypted persistence, pairing and a sync transfer, and every declared
   native module.
@@ -80,7 +84,7 @@ non-sensitive state evidence are the authoritative record.
 
 ## Hosted desktop execution and evidence
 
-The workflow uses GitHub-hosted x86_64 and ARM64 runners. It creates a fresh
+The release workflow uses a GitHub-hosted x86_64 runner. It creates a fresh
 D-Bus runtime, software-rendered virtual X11 display or native Wayland socket,
 and invokes `linux-native-fixture-driver.py`. The driver launches the exact
 AppImage daemon, CLI, and GUI plus a separate GTK source window, writes real

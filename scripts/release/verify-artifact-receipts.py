@@ -7,6 +7,9 @@ from typing import Optional
 import runpy
 
 
+RELEASE = runpy.run_path(str(Path(__file__).with_name("linux_release_contract.py")))
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -67,18 +70,18 @@ def verify(root: Path, version: str, commit: str, run_id: str, *, require_linux:
         if platform == "linux":
             expected = {
                 f"CopyPaste-v{version}-linux-{architecture}.{extension}"
-                for architecture in ("x86_64", "aarch64")
-                for extension in ("AppImage", "deb", "rpm")
+                for architecture in RELEASE["ARCHITECTURES"]
+                for extension in RELEASE["FORMATS"]
             }
             packages = {name for name in names if name.endswith((".AppImage", ".deb", ".rpm"))}
             if packages != expected:
-                raise ValueError("Linux receipt must cover AppImage, deb, and rpm for x86_64 and aarch64")
+                raise ValueError("Linux receipt must cover every released architecture and package format")
             for package in packages:
                 if f"{package}.sig" not in names or f"{package}.sha256" not in names:
                     raise ValueError("Linux receipt must bind each package signature and SHA-256 receipt")
             baselines = {
                 f"CopyPaste-v{version}-linux-{architecture}.runtime-baseline.json"
-                for architecture in ("x86_64", "aarch64")
+                for architecture in RELEASE["ARCHITECTURES"]
             }
             if not baselines <= set(names):
                 raise ValueError("Linux receipt must bind each architecture runtime baseline")

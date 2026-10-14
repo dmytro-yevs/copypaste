@@ -10,10 +10,11 @@ from pathlib import Path, PurePosixPath
 from typing import Optional
 
 
-ARCHITECTURES = ("x86_64", "aarch64")
-DESKTOPS = ("GNOME", "KDE")
-SESSIONS = ("x11", "wayland")
-FORMATS = ("AppImage", "deb", "rpm")
+RELEASE = runpy.run_path(str(Path(__file__).with_name("linux_release_contract.py")))
+ARCHITECTURES = RELEASE["ARCHITECTURES"]
+DESKTOPS = RELEASE["DESKTOPS"]
+SESSIONS = RELEASE["SESSIONS"]
+FORMATS = RELEASE["FORMATS"]
 ASSERTIONS = {
     "package_install", "package_upgrade", "desktop_uri_icon", "daemon_cli_gui",
     "clipboard_text", "clipboard_html", "clipboard_rtf", "clipboard_png",
@@ -227,7 +228,7 @@ def verify_public_compositor_runtime(root: Path, version: str, commit: str) -> l
     if verified != public_receipt:
         raise ValueError("public compositor runtime receipt differs from verified public assets")
     companions = verified.get("companions")
-    if not isinstance(companions, list) or len(companions) != 4:
+    if not isinstance(companions, list) or len(companions) != len(RELEASE["BASELINES"]):
         raise ValueError("public compositor runtime companion matrix is incomplete")
     return companions
 
@@ -526,8 +527,8 @@ def verify(root: Path, artifacts: Path, version: str, commit: str, source_run_id
                 seen.add(identity)
     if len(seen) != len(ARCHITECTURES) * len(DESKTOPS) * len(SESSIONS):
         raise ValueError("native qualification matrix is incomplete")
-    if any(count < 2 for count in installed_coverage.values()):
-        raise ValueError("native package formats were not installed in two desktop sessions")
+    if any(count < len(SESSIONS) for count in installed_coverage.values()):
+        raise ValueError("native package formats were not installed in every released session")
 
 
 def main() -> int:
