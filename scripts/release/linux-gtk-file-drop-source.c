@@ -86,14 +86,10 @@ static gboolean failed_drag(GtkWidget* widget, GdkDragContext* context, GtkDragR
   return FALSE;
 }
 
-static gboolean drag_status(gpointer data) {
-  State* state = data;
-  if (state->context == NULL) return G_SOURCE_REMOVE;
-  if (gdk_drag_context_get_selected_action(state->context) == GDK_ACTION_COPY) {
-    activity(state, "drag_status_copy", state->context);
-    return G_SOURCE_REMOVE;
-  }
-  return G_SOURCE_CONTINUE;
+static void drag_status(GdkDragContext* context, GdkDragAction action, gpointer data) {
+  // The initial selected action is COPY even before a destination accepts it.
+  // Observe GTK's negotiated action notification instead of polling that value.
+  if (action == GDK_ACTION_COPY) activity(data, "drag_status_copy", context);
 }
 
 static gboolean arm_drag(gpointer data) {
@@ -116,7 +112,7 @@ static gboolean start_drag(GtkWidget* source, GdkEventButton* event, gpointer da
     return TRUE;
   }
   state->context = g_object_ref(context);
-  g_timeout_add(20, drag_status, state);
+  g_signal_connect(context, "action-changed", G_CALLBACK(drag_status), state);
   return TRUE;
 }
 
