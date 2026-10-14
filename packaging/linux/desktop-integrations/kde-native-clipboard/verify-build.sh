@@ -27,7 +27,7 @@ build_one() {
   source="$work/kwin-$family"
   build="$work/build-$family"
   git -c protocol.version=2 clone --filter=blob:none --depth=1 --branch "$tag" \
-    https://invent.kde.org/plasma/kwin.git "$source"
+    https://github.com/KDE/kwin.git "$source"
   actual="$(git -C "$source" rev-parse HEAD)"
   [[ "$actual" == "$expected" ]] || {
     echo "ERROR: $tag resolved to $actual, expected $expected" >&2
