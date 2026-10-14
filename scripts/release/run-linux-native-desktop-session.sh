@@ -126,15 +126,11 @@ PY
     [[ -d "$native/lib" && -d "$native/typelib" ]] || { echo "ERROR: packaged GNOME companion native runtime is incomplete" >&2; exit 1; }
     native_typelib_path="$native/typelib${GI_TYPELIB_PATH:+:$GI_TYPELIB_PATH}"
     compositor_library_path="$native/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    if [[ "$SESSION" == wayland ]]; then
-      geometry_extension="$SCRIPT_DIR/qualification/gnome-window-geometry-extension"
-      geometry_extension_id="copypaste-qualification-window-geometry@copypaste.app"
-      [[ -f "$geometry_extension/metadata.json" && -f "$geometry_extension/extension.js" ]] || { echo "ERROR: qualification GNOME geometry fixture is missing" >&2; exit 1; }
-      cp -a "$geometry_extension" "$XDG_DATA_HOME/gnome-shell/extensions/$geometry_extension_id"
-      gsettings set org.gnome.shell enabled-extensions "['$extension_id', '$geometry_extension_id']"
-    else
-      gsettings set org.gnome.shell enabled-extensions "['$extension_id']"
-    fi
+    geometry_extension="$SCRIPT_DIR/qualification/gnome-window-geometry-extension"
+    geometry_extension_id="copypaste-qualification-window-geometry@copypaste.app"
+    [[ -f "$geometry_extension/metadata.json" && -f "$geometry_extension/extension.js" ]] || { echo "ERROR: qualification GNOME geometry fixture is missing" >&2; exit 1; }
+    cp -a "$geometry_extension" "$XDG_DATA_HOME/gnome-shell/extensions/$geometry_extension_id"
+    gsettings set org.gnome.shell enabled-extensions "['$extension_id', '$geometry_extension_id']"
     ;;
   KDE)
     script="$COMPANION_SOURCE/kde-kwin-script"
@@ -179,8 +175,8 @@ else
   python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/record-linux-compositor-session.py" \
     --binding "$COMPOSITOR_RUNTIME_BINDING" --root / --pid "$desktop_pid" --session wayland \
     --output "$COPYPASTE_COMPOSITOR_SESSION_RECORD"
-  wait_for 'gdbus call --session --dest app.copypaste.QualificationGeometry --object-path /app/copypaste/QualificationGeometry --method app.copypaste.QualificationGeometry.Version >/dev/null 2>&1'
 fi
+wait_for 'gdbus call --session --dest app.copypaste.QualificationGeometry --object-path /app/copypaste/QualificationGeometry --method app.copypaste.QualificationGeometry.Version >/dev/null 2>&1'
 wait_for 'gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell --method org.gnome.Shell.Extensions.ListExtensions >/dev/null 2>&1'
 
 session_phase=publish_session_environment
