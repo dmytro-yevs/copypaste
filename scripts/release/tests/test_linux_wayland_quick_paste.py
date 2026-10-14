@@ -186,14 +186,22 @@ class LinuxWaylandQuickPasteTest(unittest.TestCase):
                 self.calls = []
                 self.session_digest = 'a' * 64
                 self.chords = []
+                self.events = []
 
             def require_gui_owner(self, _pid):
                 return ':1.2'
 
-            def grant(self, callback):
+            def grant(self, callback, *, with_pointer=False):
+                if not with_pointer:
+                    raise AssertionError('pointer setup requires its real grant')
+                self.events.append('grant')
                 callback()
 
+            def park_pointer(self):
+                self.events.append('park')
+
             def chord(self, *keycodes):
+                self.events.append('chord')
                 self.chords.append(keycodes)
 
             def close(self):
@@ -217,6 +225,7 @@ class LinuxWaylandQuickPasteTest(unittest.TestCase):
             with self.assertRaisesRegex(module.QuickPasteQualificationError, 'malformed readiness'):
                 module.qualify(args)
         self.assertEqual(portal.chords, [(module.EVDEV_CONTROL, module.EVDEV_SHIFT, module.EVDEV_C)])
+        self.assertEqual(portal.events, ['grant', 'park', 'chord'])
         target.close.assert_called_once()
 
     def test_gnome_portal_consent_checks_remote_interaction_before_sharing(self):
@@ -579,6 +588,7 @@ class LinuxWaylandQuickPasteTest(unittest.TestCase):
         portal.session = ''
         portal.session_digest = ''
         calls = []
+        granted_devices = module.KEYBOARD_DEVICE
 
         def request(method, signature, values, on_requested=None):
             calls.append((method, signature, values, on_requested))
@@ -587,7 +597,7 @@ class LinuxWaylandQuickPasteTest(unittest.TestCase):
             if method == 'SelectDevices':
                 return {}
             self.assertEqual(method, 'Start')
-            return {'devices': module.KEYBOARD_DEVICE}
+            return {'devices': granted_devices}
 
         portal._request = request
         callback = lambda: None
@@ -604,6 +614,22 @@ class LinuxWaylandQuickPasteTest(unittest.TestCase):
         self.assertEqual(select_options['types'].unpack(), module.KEYBOARD_DEVICE)
         self.assertEqual(start_options['handle_token'].get_type_string(), 's')
         self.assertIs(calls[2][3], callback)
+
+        portal.granted_devices = 0
+        with self.assertRaisesRegex(module.QuickPasteQualificationError, 'pointer session'):
+            portal.park_pointer()
+        with self.assertRaisesRegex(module.QuickPasteQualificationError, 'requested input devices'):
+            portal.grant(callback, with_pointer=True)
+
+        granted_devices |= module.POINTER_DEVICE
+        portal.grant(callback, with_pointer=True)
+        self.assertEqual(calls[-2][2][1]['types'].unpack(), granted_devices)
+        pointer_calls = []
+        portal._call = lambda *args: pointer_calls.append(args)
+        portal.park_pointer()
+        self.assertEqual(pointer_calls[0][:2], (module.REMOTE_DESKTOP, 'NotifyPointerMotion'))
+        self.assertEqual(pointer_calls[0][2].get_type_string(), '(oa{sv}dd)')
+        self.assertEqual(pointer_calls[0][2].unpack(), (portal.session, {}, -10000.0, -10000.0))
 
     def test_close_targets_the_session_object_without_a_body_and_clears_it(self):
         class Glib:

@@ -241,8 +241,8 @@ class LinuxNativeFileDragTest(unittest.TestCase):
                     return {"devices": drag.POINTER_DEVICE}
                 return {}
 
-            def _call(self, interface, method, value):
-                calls.append((interface, method, value))
+            def _call(self, interface, method, value, *, path='/org/freedesktop/portal/desktop'):
+                calls.append((interface, method, value, path))
 
         class GLib:
             @staticmethod
@@ -255,9 +255,13 @@ class LinuxNativeFileDragTest(unittest.TestCase):
         pointer.motion(5, -3)
         pointer.button(1)
         pointer.close()
-        self.assertEqual(calls[1][1][1]["types"], drag.POINTER_DEVICE)
+        self.assertEqual(calls[0][1][0]['handle_token'], ('s', 'create'))
+        self.assertEqual(calls[0][1][0]['session_handle_token'], ('s', 'session'))
+        self.assertEqual(calls[1][1][1]["types"], ('u', drag.POINTER_DEVICE))
+        self.assertEqual(calls[2][1][2]['handle_token'], ('s', 'start'))
         self.assertEqual(accepted, [True])
-        self.assertIn(("org.freedesktop.portal.RemoteDesktop", "NotifyPointerButton", ("(oa{sv}iu)", ("/session", {}, drag.LEFT_BUTTON, 1))), calls)
+        self.assertIn(("org.freedesktop.portal.RemoteDesktop", "NotifyPointerButton", ("(oa{sv}iu)", ("/session", {}, drag.LEFT_BUTTON, 1)), '/org/freedesktop/portal/desktop'), calls)
+        self.assertEqual(calls[-1], ('org.freedesktop.portal.Session', 'Close', None, '/session'))
 
     def test_driver_requires_a_new_cli_observed_external_file_attachment(self):
         with tempfile.TemporaryDirectory() as directory:
