@@ -108,6 +108,15 @@ either direction. Missing requested versions remain behind the receive cursor
 and are offered again in later sessions. A completed round reports these
 pending items separately from a channel or session failure.
 
+All transports validate payload metadata through `copypaste-payload`. Captured
+confidential and transient values retain their privacy flags when synchronized;
+capture exclusion preferences do not suppress versions already in history.
+The shared store export hydrates source icons and serializes one canonical
+envelope for P2P and cloud. Unrecognized legacy text metadata is exported with
+the same conservative confidential classification used by the local reader,
+without rewriting the stored original. Required file attributes are never
+invented or discarded to make an invalid file transferable.
+
 ## 4. Cloud row contract
 
 ### 4.1 Table and trust boundaries

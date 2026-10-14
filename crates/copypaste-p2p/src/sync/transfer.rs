@@ -232,8 +232,7 @@ mod tests {
     async fn metadata_does_not_reduce_the_raw_content_cap() {
         let mut at_content_cap = item("at-content-cap", 100, "", "dev-a");
         at_content_cap.content = "x".repeat(MAX_CONTENT_BYTES);
-        at_content_cap.payload_metadata =
-            Some(r#"{"source_app_icon":{"png_base64":"AAAA","width":64,"height":64}}"#.into());
+        at_content_cap.payload_metadata = Some(crate::sync::testutil::source_icon_metadata());
         let advertised =
             HashMap::from([(at_content_cap.item_id.clone(), at_content_cap.summary())]);
         let source = TestSource::new("dev-a", vec![at_content_cap]);
