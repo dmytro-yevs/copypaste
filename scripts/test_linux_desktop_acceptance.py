@@ -8,6 +8,7 @@ import sys
 import unittest
 from unittest import mock
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -211,6 +212,18 @@ class LinuxDesktopAcceptanceTest(unittest.TestCase):
         self.assertEqual(transcript.notification_id, 24)
         evidence = json.dumps({"server_reply_id": transcript.notification_id})
         self.assertNotIn("sensitive clipboard body", evidence)
+
+    def test_notification_monitor_excludes_proxy_forwarded_calls(self):
+        response = MODULE.CommandResult((), 0, '', '')
+        process = SimpleNamespace(stdout=SimpleNamespace(fileno=lambda: 42))
+        with mock.patch.object(MODULE, 'run', return_value=response), \
+                mock.patch.object(MODULE, 'busctl_value', side_effect=[':1.9', os.getuid()]), \
+                mock.patch.object(MODULE.subprocess, 'Popen', return_value=process) as popen, \
+                mock.patch.object(MODULE.fcntl, 'fcntl', return_value=0):
+            MODULE.notification_monitor({})
+        match = popen.call_args.args[0][2]
+        self.assertIn("destination='org.freedesktop.Notifications'", match)
+        self.assertIn("path='/org/freedesktop/Notifications'", match)
 
     def test_notification_body_uint32_cannot_be_a_server_reply(self):
         transcript = MODULE.NotificationTranscript(server_owner=':1.9')

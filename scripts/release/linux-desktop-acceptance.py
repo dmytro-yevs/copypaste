@@ -328,7 +328,7 @@ def notification_monitor(environment: dict[str, str]) -> tuple[subprocess.Popen[
     monitor = subprocess.Popen(
         [
             "dbus-monitor", "--session",
-            "type='method_call',interface='org.freedesktop.Notifications',member='Notify'",
+            f"type='method_call',destination='{NOTIFICATIONS_NAME}',path='{NOTIFICATIONS_PATH}',interface='org.freedesktop.Notifications',member='Notify'",
             "type='method_return',sender='org.freedesktop.Notifications'",
         ],
         env=environment,
