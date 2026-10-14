@@ -17,6 +17,7 @@
 #define private public
 #include "linux_portal.h"
 #undef private
+#define LINUX_PORTAL_TEST
 #include "linux_portal.cc"
 
 namespace {
@@ -153,6 +154,16 @@ class PortalFixture {
       }
     }
     return expected_index == expected.size();
+  }
+
+  std::string remote_start_parent() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return remote_start_parent_;
+  }
+
+  std::string shortcut_bind_parent() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return shortcut_bind_parent_;
   }
 
   void set_keyboard_granted(bool granted) {
@@ -433,6 +444,16 @@ class PortalFixture {
         g_strcmp0(method_name, "Start") == 0) {
       const std::string path = request_path(invocation, parameters);
       g_assert_false(path.empty());
+      const gchar* session = nullptr;
+      const gchar* parent = nullptr;
+      GVariant* options = nullptr;
+      g_variant_get(parameters, "(&o&s@a{sv})", &session, &parent, &options);
+      g_variant_unref(options);
+      (void)session;
+      {
+        std::lock_guard<std::mutex> lock(fixture->mutex_);
+        fixture->remote_start_parent_ = parent;
+      }
       bool keyboard_granted = false;
       {
         std::lock_guard<std::mutex> lock(fixture->mutex_);
@@ -480,7 +501,10 @@ class PortalFixture {
       g_variant_unref(options);
       g_assert_cmpstr(session, ==,
                       "/org/freedesktop/portal/desktop/session/shortcuts");
-      g_assert_cmpstr(parent, ==, "");
+      {
+        std::lock_guard<std::mutex> lock(fixture->mutex_);
+        fixture->shortcut_bind_parent_ = parent;
+      }
       fixture->emit_response(server, path, 0,
                              shortcut_result(requested_shortcut_id));
       g_dbus_method_invocation_return_value(invocation,
@@ -541,6 +565,8 @@ class PortalFixture {
   std::string server_error_;
   ReplyMode mode_ = ReplyMode::kEarlyResponse;
   bool keyboard_granted_ = true;
+  std::string remote_start_parent_;
+  std::string shortcut_bind_parent_;
   guint calls_ = 0;
   std::vector<std::string> method_calls_;
   std::vector<std::pair<gint, guint>> key_events_;
@@ -724,6 +750,98 @@ void test_wayland_export_release_skips_destroyed_window() {
 }
 #endif
 
+void test_failed_wayland_export_parent_fallback_predicate() {
+  g_assert_true(
+      LinuxPortal::Impl::can_use_empty_parent_after_failed_wayland_export(
+          false, true, false));
+  g_assert_false(
+      LinuxPortal::Impl::can_use_empty_parent_after_failed_wayland_export(
+          true, true, false));
+  g_assert_false(
+      LinuxPortal::Impl::can_use_empty_parent_after_failed_wayland_export(
+          false, false, false));
+  g_assert_false(
+      LinuxPortal::Impl::can_use_empty_parent_after_failed_wayland_export(
+          false, true, true));
+}
+
+void test_empty_parent_lease_starts_remote_desktop() {
+  PortalFixture fixture;
+  LinuxPortal client(nullptr);
+  client.impl_->parent_identifier_override_for_test =
+      [](LinuxPortal::Impl::ParentIdentifierCompletion complete) {
+        complete(std::make_shared<LinuxPortal::Impl::ParentIdentifierLease>(""));
+      };
+  guint completions = 0;
+  bool granted = false;
+
+  client.request_remote_desktop([&completions, &granted](bool received) {
+    ++completions;
+    granted = received;
+  });
+
+  g_assert_true(wait_until([&] { return completions == 1; }));
+  g_assert_true(granted);
+  const std::string parent = fixture.remote_start_parent();
+  g_assert_cmpstr(parent.c_str(), ==, "");
+  g_assert_true(fixture.saw_sequence({
+      "org.freedesktop.portal.RemoteDesktop.CreateSession",
+      "org.freedesktop.portal.RemoteDesktop.SelectDevices",
+      "org.freedesktop.portal.RemoteDesktop.Start",
+  }));
+}
+
+void test_empty_parent_lease_binds_shortcut() {
+  PortalFixture fixture;
+  LinuxPortal client(nullptr);
+  client.impl_->parent_identifier_override_for_test =
+      [](LinuxPortal::Impl::ParentIdentifierCompletion complete) {
+        complete(std::make_shared<LinuxPortal::Impl::ParentIdentifierLease>(""));
+      };
+  ShortcutRequest request;
+  request.id = "quick_paste";
+  request.description = "Quick Paste";
+  request.usage = "V";
+  request.modifiers = {"Control", "Shift"};
+  guint completions = 0;
+  ShortcutResult result;
+
+  client.register_shortcut(request, [&completions, &result](ShortcutResult received) {
+    ++completions;
+    result = std::move(received);
+  });
+
+  g_assert_true(wait_until([&] { return completions == 1; }));
+  g_assert_true(result.registered);
+  const std::string parent = fixture.shortcut_bind_parent();
+  g_assert_cmpstr(parent.c_str(), ==, "");
+  g_assert_true(fixture.saw_sequence({
+      "org.freedesktop.portal.GlobalShortcuts.CreateSession",
+      "org.freedesktop.portal.GlobalShortcuts.BindShortcuts",
+  }));
+}
+
+void test_missing_parent_identifier_with_parent_fails_closed() {
+  PortalFixture fixture;
+  LinuxPortal client(nullptr);
+  client.impl_->parent = reinterpret_cast<GtkWindow*>(
+      g_object_new(G_TYPE_OBJECT, nullptr));
+  client.impl_->parent_identifier_override_for_test =
+      [](LinuxPortal::Impl::ParentIdentifierCompletion complete) {
+        complete(nullptr);
+      };
+  guint remote_completions = 0;
+  bool granted = true;
+  client.request_remote_desktop([&remote_completions, &granted](bool received) {
+    ++remote_completions;
+    granted = received;
+  });
+
+  g_assert_true(wait_until([&] { return remote_completions == 1; }));
+  g_assert_false(granted);
+  g_assert_cmpuint(fixture.calls(), ==, 0);
+}
+
 void test_remote_desktop_object_path_session_grants_keyboard() {
   PortalFixture fixture;
   LinuxPortal client(nullptr);
@@ -835,6 +953,14 @@ int main(int argc, char** argv) {
   g_test_add_func("/linux_portal/wayland_export_release_skips_destroyed_window",
                   test_wayland_export_release_skips_destroyed_window);
 #endif
+  g_test_add_func("/linux_portal/failed_wayland_export_parent_fallback_predicate",
+                  test_failed_wayland_export_parent_fallback_predicate);
+  g_test_add_func("/linux_portal/empty_parent_lease_starts_remote_desktop",
+                  test_empty_parent_lease_starts_remote_desktop);
+  g_test_add_func("/linux_portal/empty_parent_lease_binds_shortcut",
+                  test_empty_parent_lease_binds_shortcut);
+  g_test_add_func("/linux_portal/missing_parent_identifier_with_parent_fails_closed",
+                  test_missing_parent_identifier_with_parent_fails_closed);
   g_test_add_func("/linux_portal/remote_desktop_object_path_session_grants_keyboard",
                   test_remote_desktop_object_path_session_grants_keyboard);
   g_test_add_func("/linux_portal/remote_desktop_denied_keyboard_never_activates",
