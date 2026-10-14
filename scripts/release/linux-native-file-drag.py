@@ -252,7 +252,7 @@ def drag_x11(source: DragSource, gui_pid: int, environment: dict[str, str]) -> N
         "GTK file-drag source has no accessible desktop bounds",
     )
     target_bounds = wait_for(
-        lambda: _atspi_bounds_or_none(pyatspi.Registry, gui_pid, TARGET_TITLE, SCREEN_COORDINATES),
+        lambda: _atspi_bounds_or_none(pyatspi.Registry, gui_pid, TARGET_TITLE, SCREEN_COORDINATES, top_level=True),
         "installed CopyPaste window has no accessible desktop bounds",
     )
     source_point = source_bounds.point()
@@ -286,7 +286,7 @@ def load_wayland_portal() -> Any:
     return module
 
 
-def atspi_bounds(registry: Any, pid: int, name: str, coordinates: int = WINDOW_COORDINATES) -> Bounds:
+def atspi_bounds(registry: Any, pid: int, name: str, coordinates: int = WINDOW_COORDINATES, *, top_level: bool = False) -> Bounds:
     """Return one PID-bound named node in the requested AT-SPI coordinate space."""
     try:
         desktop = registry.getDesktop(0)
@@ -295,18 +295,20 @@ def atspi_bounds(registry: Any, pid: int, name: str, coordinates: int = WINDOW_C
             value = application.get_process_id()
             return value if isinstance(value, int) else None
         application = next(candidate for candidate in (desktop.getChildAtIndex(index) for index in range(desktop.childCount)) if node_pid(candidate) == pid)
-        nodes = [application]
+        nodes = ([application.getChildAtIndex(index) for index in range(application.childCount)]
+                 if top_level else [application])
         matches = []
         while nodes:
             node = nodes.pop()
-            if node.name == name:
+            if node.name == name and (not top_level or node.getRoleName() in {"frame", "window"}):
                 # Wayland uses window-local coordinates plus authenticated
                 # compositor geometry. X11 exposes real desktop coordinates.
                 rect = node.queryComponent().getExtents(coordinates)
                 bounds = Bounds(rect.x, rect.y, rect.width, rect.height)
                 if bounds.width >= 32 and bounds.height >= 32:
                     matches.append(bounds)
-            nodes.extend(node.getChildAtIndex(index) for index in range(node.childCount))
+            if not top_level:
+                nodes.extend(node.getChildAtIndex(index) for index in range(node.childCount))
         if len(matches) == 1:
             return matches[0]
     except Exception:
@@ -492,9 +494,9 @@ def drag_wayland(source: DragSource, gui_pid: int, environment: dict[str, str]) 
         pointer.close()
 
 
-def _atspi_bounds_or_none(registry: Any, pid: int, name: str, coordinates: int = WINDOW_COORDINATES) -> Bounds | None:
+def _atspi_bounds_or_none(registry: Any, pid: int, name: str, coordinates: int = WINDOW_COORDINATES, *, top_level: bool = False) -> Bounds | None:
     try:
-        return atspi_bounds(registry, pid, name, coordinates)
+        return atspi_bounds(registry, pid, name, coordinates, top_level=top_level)
     except FileDragQualificationError:
         return None
 
