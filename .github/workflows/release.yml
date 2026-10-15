@@ -274,6 +274,18 @@ jobs:
               --desktop GNOME --session "${{ matrix.session }}" --companion-source "$companion_source" \
               --compositor-runtime compositor-runtime --compositor-runtime-binding compositor-runtime/binding.json -- "${producer[@]}"
           fi
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: production-compositor-runtime
+          path: public-compositor-runtime
+          run-id: ${{ inputs.artifact_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify diagnostic receipts against exact signed packages
+        run: |
+          python3 scripts/release/verify-linux-native-qualification.py \
+            --root evidence --artifacts current --version "${{ needs.source.outputs.version }}" \
+            --commit "${{ needs.source.outputs.commit }}" --source-run-id "$GITHUB_RUN_ID" \
+            --artifact-run-id "${{ inputs.artifact_run_id }}" --compositor-runtime public-compositor-runtime
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

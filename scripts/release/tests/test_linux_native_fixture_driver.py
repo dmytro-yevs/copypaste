@@ -23,6 +23,56 @@ SPEC.loader.exec_module(driver)
 
 
 class LinuxNativeFixtureDriverTest(unittest.TestCase):
+    def test_clean_install_requires_a_new_profile_and_rejects_existing_or_linked_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            profile = root / "data-home"
+            with mock.patch.object(driver, "emit_result") as emit:
+                driver.require_clean_install_baseline(profile, dict(os.environ))
+            self.assertEqual(emit.call_count, 2)
+            self.assertTrue(all(call.args[0] == "clean_install_baseline" for call in emit.call_args_list))
+            for kind in ("directory", "file", "dangling_link"):
+                if kind == "directory":
+                    profile.mkdir()
+                elif kind == "file":
+                    profile.write_bytes(b"existing state")
+                else:
+                    profile.symlink_to(root / "missing")
+                with self.subTest(kind=kind), self.assertRaises(subprocess.CalledProcessError):
+                    driver.require_clean_install_baseline(profile, dict(os.environ))
+                if profile.is_dir() and not profile.is_symlink():
+                    profile.rmdir()
+                else:
+                    profile.unlink()
+
+    def test_x11_desktop_receipt_requires_its_session_and_live_window_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "desktop.json"
+            receipt = self.desktop_receipt()
+            receipt.update(session="x11", window={"id": "12345", "hide_show": "dbusmenu_open"})
+            path.write_text(json.dumps(receipt))
+            driver.desktop_acceptance_receipt(path, desktop="GNOME", session="x11", gui_pid=4321)
+            for changed in ({"session": "wayland"}, {"gui_pid": 9999},
+                            {"window": {"id": "unknown", "hide_show": "dbusmenu_open"}}):
+                path.write_text(json.dumps({**receipt, **changed}))
+                with self.subTest(changed=changed), self.assertRaises(RuntimeError):
+                    driver.desktop_acceptance_receipt(path, desktop="GNOME", session="x11", gui_pid=4321)
+
+    def test_x11_desktop_helper_must_complete_before_tray_assertion_is_emitted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = root / "helper.py"
+            helper.write_text("# owned helper\n")
+            args = SimpleNamespace(session="x11", desktop="GNOME", evidence_dir=root,
+                                   wayland_desktop_acceptance_helper=helper)
+            with mock.patch.object(driver, "desktop_acceptance_capture_command", return_value=["provider"]), \
+                 mock.patch.object(driver, "run", side_effect=RuntimeError("notification absent")), \
+                 mock.patch.object(driver, "emit_result") as emit:
+                with self.assertRaisesRegex(RuntimeError, "notification absent"):
+                    driver.require_desktop_acceptance(args, gui_pid=4321, cli=Path("cli"), environment={},
+                                                      workspace=root, socket_path=root / "socket")
+            emit.assert_not_called()
+
     def test_native_helper_error_retains_stderr_without_stdout_or_capability(self):
         capability = "a" * 64
         command = ["python3", str(driver.DESKTOP_ACCEPTANCE)]
@@ -427,6 +477,7 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
         marker = b"copypaste-native-overwrite-clipboard_html"
         captured = {
             "id": "original", "content_type": "text",
+            "content": original.decode("utf-8"),
             "source_app_bundle_id": driver.SOURCE_APPLICATION_ID,
             "source_app_name": driver.SOURCE_APPLICATION_NAME,
         }
@@ -506,6 +557,7 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
     def wayland_inputs(self, **overrides):
         values = {
             "wayland_app_permission_target": "Allow keyboard control",
+            "session": "wayland",
         }
         values.update(overrides)
         return SimpleNamespace(**values)
@@ -606,7 +658,7 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             receipt["notification"].pop("capture_command_sha256")
             path.write_text(json.dumps(receipt), encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "capture command digest"):
-                driver.wayland_desktop_receipt(path, desktop="GNOME", gui_pid=4321)
+                driver.desktop_acceptance_receipt(path, desktop="GNOME", session="wayland", gui_pid=4321)
 
     def test_wayland_desktop_receipt_requires_the_exported_menu_object_path(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -616,18 +668,18 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
                 receipt["tray"]["menu_path"] = menu_path
                 path.write_text(json.dumps(receipt), encoding="utf-8")
                 with self.assertRaisesRegex(RuntimeError, "incomplete"):
-                    driver.wayland_desktop_receipt(path, desktop="GNOME", gui_pid=4321)
+                    driver.desktop_acceptance_receipt(path, desktop="GNOME", session="wayland", gui_pid=4321)
 
     def test_wayland_desktop_receipt_binds_the_real_menu_event_arguments(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "linux-desktop-acceptance.json"
             receipt = self.desktop_receipt()
             path.write_text(json.dumps(receipt), encoding="utf-8")
-            driver.wayland_desktop_receipt(path, desktop="GNOME", gui_pid=4321)
+            driver.desktop_acceptance_receipt(path, desktop="GNOME", session="wayland", gui_pid=4321)
             receipt["commands"][0]["argv"][-2] = "unexpected-payload"
             path.write_text(json.dumps(receipt), encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "command evidence"):
-                driver.wayland_desktop_receipt(path, desktop="GNOME", gui_pid=4321)
+                driver.desktop_acceptance_receipt(path, desktop="GNOME", session="wayland", gui_pid=4321)
 
     def test_wayland_wiring_resolves_portal_actors_at_runtime(self):
         with tempfile.TemporaryDirectory() as directory:
