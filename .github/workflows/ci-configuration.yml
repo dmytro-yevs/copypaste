@@ -44,7 +44,7 @@ jobs:
       - name: Test policy, selection, metrics and release contracts
         run: |
           python3 -m unittest discover -s scripts/ci/tests -v
-          python3 -m unittest scripts/test_release_safety.py scripts/test_linux_qualification_bootstrap.py
+          python3 -m unittest scripts/test_release_safety.py scripts/test_linux_qualification_bootstrap.py scripts/test_linux_compositor_runtime.py
           python3 -m unittest discover -s scripts/release/tests -p 'test_*.py'
       - run: python3 scripts/ci/run-gates.py --check
       - run: python3 scripts/ci/run-gates.py --gate rustfmt

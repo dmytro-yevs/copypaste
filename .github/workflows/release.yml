@@ -247,6 +247,7 @@ jobs:
           LINUX_REQUIRED: ${{ steps.version.outputs.linux_required }}
           LINUX_ARTIFACT_RUN_ID: ${{ inputs.linux_artifact_run_id }}
           PREVIOUS_LINUX_ARTIFACT_RUN_ID: ${{ inputs.previous_linux_artifact_run_id }}
+          COMPOSITOR_RUNTIME_RUN_ID: ${{ inputs.compositor_runtime_run_id }}
           BUILD: ${{ steps.version.outputs.reuse_qualified != 'true' && steps.version.outputs.linux_qualification_only != 'true' }}
           PUBLISH: ${{ steps.version.outputs.publish }}
           SUPABASE_MODULE_RUN_ID: ${{ inputs.supabase_module_run_id }}
