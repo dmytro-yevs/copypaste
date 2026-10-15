@@ -381,6 +381,11 @@ if [[ "$FIRST_INSTALL_BASELINE" == false ]]; then
   native_driver_args+=(--qualification-root "$native_profile")
 fi
 python3 "$ROOT/scripts/release/linux-native-fixture-driver.py" "${args[@]}" "${appimage_driver_args[@]}"
+# Diagnostic-only clean input boundary between package runtimes.
+python3 "$ROOT/scripts/release/provision-linux-v4l2loopback.py" cleanup --state "$COPYPASTE_QUALIFICATION_V4L2_STATE"
+reset_environment="$(mktemp)"
+python3 "$ROOT/scripts/release/provision-linux-v4l2loopback.py" provision --state "$COPYPASTE_QUALIFICATION_V4L2_STATE" --environment "$reset_environment"
+rm "$reset_environment"
 python3 "$ROOT/scripts/release/linux-native-fixture-driver.py" "${args[@]}" "${native_driver_args[@]}"
 
 if [[ "$FIRST_INSTALL_BASELINE" == false ]]; then
