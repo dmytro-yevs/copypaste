@@ -17,10 +17,13 @@ jobs:
           - { runner: ubuntu-24.04, platform: linux, architecture: x86_64, target: x86_64-unknown-linux-gnu, library: libcopypaste_module_supabase.so }
           - { runner: ubuntu-24.04-arm, platform: linux, architecture: aarch64, target: aarch64-unknown-linux-gnu, library: libcopypaste_module_supabase.so }
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     env:
       OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.96"
@@ -44,7 +47,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           version="$(python3 -c 'import json; print(json.load(open("modules/supabase/module.json"))["version"])')"
-          python3 scripts/modules/package.py --module-dir modules/supabase --library modules/supabase/target/${{ matrix.target }}/release/${{ matrix.library }} --platform ${{ matrix.platform }} --architecture ${{ matrix.architecture }} --output dist/CopyPasteModule-copypaste.supabase-v${version}-${{ matrix.platform }}-${{ matrix.architecture }}.cpmodule
+          python3 scripts/modules/package.py --module-dir modules/supabase --library modules/supabase/target/${{ matrix.target }}/release/${{ matrix.library }} --platform ${{ matrix.platform }} --architecture ${{ matrix.architecture }} --output "dist/CopyPasteModule-copypaste.supabase-v${version}-${{ matrix.platform }}-${{ matrix.architecture }}.cpmodule"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: supabase-${{ matrix.platform }}-${{ matrix.architecture }}
@@ -53,6 +56,7 @@ jobs:
 
   android:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -62,6 +66,8 @@ jobs:
           - { architecture: x86_64, target: x86_64-linux-android }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.96"
@@ -82,7 +88,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           version="$(python3 -c 'import json; print(json.load(open("modules/supabase/module.json"))["version"])')"
-          python3 scripts/modules/package.py --module-dir modules/supabase --library modules/supabase/target/${{ matrix.target }}/release/libcopypaste_module_supabase.so --platform android --architecture ${{ matrix.architecture }} --output dist/CopyPasteModule-copypaste.supabase-v${version}-android-${{ matrix.architecture }}.cpmodule
+          python3 scripts/modules/package.py --module-dir modules/supabase --library modules/supabase/target/${{ matrix.target }}/release/libcopypaste_module_supabase.so --platform android --architecture ${{ matrix.architecture }} --output "dist/CopyPasteModule-copypaste.supabase-v${version}-android-${{ matrix.architecture }}.cpmodule"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: supabase-android-${{ matrix.architecture }}
