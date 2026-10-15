@@ -347,7 +347,7 @@ jobs:
   linux-native-current:
     name: Qualify current Linux artifacts
     needs: [preflight, policy, linux, compositor-runtime-public, qualification-supabase, qualification-semantic-search, qualification-ocr]
-    if: ${{ always() && needs.preflight.result == 'success' && needs.policy.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && inputs.linux_evidence_run_id == '' && (needs.linux.result == 'success' || inputs.linux_artifact_run_id != '') && needs.compositor-runtime-public.result == 'success' && (needs.qualification-supabase.result == 'success' || inputs.supabase_module_run_id != '') && (needs.qualification-semantic-search.result == 'success' || inputs.semantic_search_module_run_id != '') && (needs.qualification-ocr.result == 'success' || inputs.ocr_module_run_id != '') }}
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.policy.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && inputs.linux_evidence_run_id == '' && (needs.linux.result == 'success' || inputs.linux_artifact_run_id != '') && needs.compositor-runtime-public.result == 'success' && (needs.qualification-supabase.result == 'success' || inputs.supabase_module_run_id != '') && (needs.qualification-semantic-search.result == 'success' || inputs.semantic_search_module_run_id != '') && (needs.qualification-ocr.result == 'success' || inputs.ocr_module_run_id != '') }}
     uses: ./.github/workflows/linux-native-qualification.yml
     with:
       artifact_run_id: ${{ needs.preflight.outputs.linux_artifact_run_id }}
@@ -729,7 +729,7 @@ jobs:
   compositor-runtime-public:
     name: Sign and bind opt-in compositor runtime companions
     needs: [preflight, policy, compositor-runtime-build, compositor-runtime-external]
-    if: ${{ always() && needs.preflight.result == 'success' && needs.policy.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && (needs.compositor-runtime-build.result == 'success' || needs.compositor-runtime-external.result == 'success') }}
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.policy.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && (needs.compositor-runtime-build.result == 'success' || needs.compositor-runtime-external.result == 'success') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -804,7 +804,7 @@ jobs:
   linux-full-parity-evidence:
     name: Linux full parity evidence gate
     needs: [preflight, policy, linux, compositor-runtime-public, linux-native-current]
-    if: ${{ always() && needs.preflight.result == 'success' && needs.policy.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && (needs.linux-native-current.result == 'success' || inputs.linux_evidence_run_id != '') && needs.preflight.outputs.linux_required == 'true' && (needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success') }}
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.policy.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && (needs.linux-native-current.result == 'success' || inputs.linux_evidence_run_id != '') && needs.preflight.outputs.linux_required == 'true' && (needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -899,7 +899,7 @@ jobs:
 
   qualify:
     needs: [preflight, policy, macos, macos-regression, android, windows, linux, compositor-runtime-public, linux-full-parity-evidence]
-    if: ${{ always() && needs.preflight.result == 'success' && needs.policy.result == 'success' && (needs.preflight.outputs.reuse_qualified == 'true' || (needs.macos.result == 'success' && needs.macos-regression.result == 'success' && needs.android.result == 'success' && needs.windows.result == 'success' && (needs.preflight.outputs.linux_required != 'true' || ((needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && needs.linux-full-parity-evidence.result == 'success' && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success'))))) }}
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.policy.result == 'success' && (needs.preflight.outputs.reuse_qualified == 'true' || (needs.macos.result == 'success' && needs.macos-regression.result == 'success' && needs.android.result == 'success' && needs.windows.result == 'success' && (needs.preflight.outputs.linux_required != 'true' || ((needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && needs.linux-full-parity-evidence.result == 'success' && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success'))))) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -971,7 +971,7 @@ jobs:
       cancel-in-progress: false
       queue: max
     needs: [preflight, qualify]
-    if: ${{ always() && needs.preflight.result == 'success' && needs.qualify.result == 'success' && needs.preflight.outputs.publish == 'true' }}
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.qualify.result == 'success' && needs.preflight.outputs.publish == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
