@@ -1,4 +1,5 @@
-name: Experimental Linux validation
+# Branch-only diagnostics; these artifacts never qualify a release.
+name: GTK startup diagnostics
 
 on:
   workflow_dispatch:
@@ -7,261 +8,84 @@ permissions:
   contents: read
 
 jobs:
-  optional-modules:
-    name: Optional modules (${{ matrix.name }})
-    runs-on: ${{ matrix.runner }}
-    defaults:
-      run:
-        shell: bash
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { name: Linux aarch64, platform: linux, runner: ubuntu-24.04-arm }
+  profile:
+    runs-on: ubuntu-24.04
+    env:
+      CARGO_BUILD_JOBS: "2"
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067
         with:
           toolchain: "1.96"
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          workspaces: |
-            .
-            modules/ocr
-      - name: Module lifecycle and OCR contracts
-        env:
-          OPENSSL_SRC_PERL: ${{ matrix.platform == 'windows' && 'C:\Strawberry\perl\bin\perl.exe' || 'perl' }}
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+      - name: Install the production fixture dependency set and profiler
         run: |
-          cargo test -p copypaste-modules --locked
-          cargo test --manifest-path modules/ocr/Cargo.toml --locked
-          cargo clippy --manifest-path modules/ocr/Cargo.toml --locked --all-targets -- -D warnings
-          rustc +1.96 --test modules/ocr/vendor/paddle-ocr-rs/src/dictionary.rs -o "$RUNNER_TEMP/ocr-dictionary-tests.exe"
-          "$RUNNER_TEMP/ocr-dictionary-tests.exe"
-
-  flutter-foundation:
-    name: Flutter foundation (${{ matrix.name }})
-    runs-on: ${{ matrix.runner }}
-    defaults:
-      run:
-        shell: bash
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { name: Linux aarch64, platform: linux, runner: ubuntu-24.04-arm, target: linux }
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - id: flutter
-        run: |
-          set -euo pipefail
-          version="$(tr -d '[:space:]' < .flutter-version)"
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-      - uses: ./.github/actions/setup-flutter
-        with:
-          version: ${{ steps.flutter.outputs.version }}
-      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
-        if: matrix.platform == 'android'
-        with:
-          distribution: temurin
-          java-version: "25"
-      - uses: ./.github/actions/flutter-build-cache
-        with:
-          platform: ${{ matrix.platform }}
-          profile: debug
-      - name: Install Linux Flutter build dependencies
-        if: matrix.platform == 'linux'
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends libgtk-3-dev libsecret-1-dev libssl-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libkeybinder-3.0-dev libxtst-dev libxi-dev ninja-build pkg-config
-      - run: ./scripts/ci/verify-flutter-foundation.sh
-        env:
-          COPYPASTE_FLUTTER_BUILD_TARGET: ${{ matrix.target }}
-          CARGO_BUILD_JOBS: "2"
-          CMAKE_BUILD_PARALLEL_LEVEL: "2"
-
-  linux-native-fixtures:
-    name: Linux native fixtures (${{ matrix.architecture }})
-    runs-on: ${{ matrix.runner }}
-    defaults:
-      run:
-        shell: bash
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { architecture: x86_64, runner: ubuntu-24.04 }
-          - { architecture: aarch64, runner: ubuntu-24.04-arm }
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
-        with:
-          toolchain: "1.96"
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      - name: Install native fixture dependencies
-        run: |
-          set -euo pipefail
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
             at-spi2-core build-essential dbus-x11 gobject-introspection libgirepository1.0-dev \
             libgtk-3-dev libmutter-14-dev libsecret-1-dev libssl-dev \
             libx11-dev libxres-dev libxi-dev libxtst-dev nodejs pkg-config ripgrep sway \
-            x11-utils xvfb wl-clipboard
-      - name: Run X11, GNOME bridge, portal, PackageKit, restart, companion, and Wayland fixtures
-        run: ./scripts/ci/test-linux-native-fixtures.sh
-
-  linux-mutter-bridges:
-    name: Mutter ${{ matrix.mutter }} bridge (${{ matrix.architecture }})
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        mutter: [46, 47]
-        architecture: [x86_64, aarch64]
-        include:
-          - { architecture: x86_64, runner: ubuntu-24.04 }
-          - { architecture: aarch64, runner: ubuntu-24.04-arm }
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Build Mutter 47 in a matching GNOME 47 dependency root
-        if: matrix.mutter == 47
-        run: packaging/linux/desktop-integrations/gnome-shell-extension/mutter/run-fedora47-build.sh "${{ matrix.architecture == 'x86_64' && 'linux/amd64' || 'linux/arm64' }}"
-      - name: Install upstream Mutter 46 build dependencies
-        if: matrix.mutter == 46
+            x11-utils xvfb wl-clipboard strace
+      - name: Compile the unchanged native tests before profiling
+        run: cargo test --locked -p copypaste-daemon live_x11_fixture --no-run
+      - name: Profile the exact X11 fixture and preserve its exit status
         run: |
-          set -euo pipefail
-          sudo python3 - <<'PY'
-          import re
+          set -uo pipefail
+          mkdir -p diagnostics
+          set +e
+          CARGO_NET_OFFLINE=true timeout 120s strace -ff -tt -T -s 128 \
+            -e trace=file,process,connect,poll,ppoll,futex,clock_nanosleep \
+            -o "$PWD/diagnostics/x11" bash scripts/test-linux-clipboard-x11.sh > diagnostics/fixture.log 2>&1
+          result=$?
+          echo "$result" > diagnostics/status
+          exit "$result"
+      - name: Collect payload-free helper traces and startup metadata
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, os, re, shutil, subprocess
           from pathlib import Path
-          source = Path('/etc/apt/sources.list.d/ubuntu.sources').read_text()
-          source, count = re.subn(r'^Types: deb$', 'Types: deb-src', source, flags=re.MULTILINE)
-          if not count:
-              raise ValueError('Ubuntu source repository configuration is unavailable')
-          Path('/etc/apt/sources.list.d/copypaste-mutter.sources').write_text(source)
+          root = Path("diagnostics")
+          public = root / "public"
+          public.mkdir(parents=True, exist_ok=True)
+          text = (root / "fixture.log").read_text(errors="replace") if (root / "fixture.log").is_file() else ""
+          phases = [line for line in text.splitlines() if "GTK_PROVIDER_" in line]
+          (public / "phases.log").write_text("\n".join(phases) + "\n")
+          traces = {path.name.rsplit(".", 1)[-1]: path for path in root.glob("x11.*")}
+          selected = {pid for pid, path in traces.items() if re.search(r'execve\("[^"\n]*/linux-clipboard-provider"', path.read_text(errors="replace"))}
+          pending = list(selected)
+          while pending:
+              pid = pending.pop()
+              for line in traces[pid].read_text(errors="replace").splitlines():
+                  if "clone" in line:
+                      match = re.search(r"= ([0-9]+)(?: |$)", line)
+                      if match and match[1] in traces and match[1] not in selected:
+                          selected.add(match[1])
+                          pending.append(match[1])
+          slow = []
+          for pid in sorted(selected):
+              path = traces[pid]
+              shutil.copyfile(path, public / ("gtk-provider." + pid + ".strace"))
+              for line in path.read_text(errors="replace").splitlines():
+                  match = re.search(r"<([0-9.]+)>$", line)
+                  if match and float(match[1]) >= 0.001:
+                      slow.append({"pid": pid, "seconds": float(match[1]), "call": line})
+          fonts = subprocess.run(["fc-list", "--format=%{file}\n"], capture_output=True, text=True)
+          summary = {
+              "fixture_exit": (root / "status").read_text().strip() if (root / "status").is_file() else None,
+              "helper_pids": sorted(selected), "font_files": len(set(fonts.stdout.splitlines())),
+              "environment": {name: os.environ.get(name) for name in ("GTK_THEME", "GTK_IM_MODULE", "GSETTINGS_BACKEND", "XDG_CURRENT_DESKTOP", "XMODIFIERS", "FONTCONFIG_FILE", "FONTCONFIG_PATH")},
+              "slow_calls": sorted(slow, key=lambda item: item["seconds"], reverse=True)[:30],
+          }
+          (public / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+          print("\n".join(phases))
+          print(json.dumps(summary, indent=2))
           PY
-          sudo apt-get update
-          sudo apt-get build-dep --yes --no-install-recommends mutter
-          sudo apt-get install --yes --no-install-recommends \
-            git meson ninja-build libmutter-14-dev gobject-introspection libgirepository1.0-dev
-      - name: Compile the stock-header shim and introspection metadata
-        if: matrix.mutter == 46
-        run: make -C packaging/linux/desktop-integrations/gnome-shell-extension/native
-      - name: Compile the pinned patched Mutter library
-        if: matrix.mutter == 46
-        working-directory: packaging/linux/desktop-integrations/gnome-shell-extension/mutter
-        run: ./verify-patch.sh "${{ matrix.mutter }}" "$RUNNER_TEMP/mutter-source" "$RUNNER_TEMP/mutter-build"
-
-  linux-kwin-bridges:
-    name: KWin ${{ matrix.kwin }} bridge (${{ matrix.architecture }})
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        kwin: ['6.0', '6.3']
-        architecture: [x86_64, aarch64]
-        include:
-          - { architecture: x86_64, runner: ubuntu-24.04, container_platform: linux/amd64 }
-          - { architecture: aarch64, runner: ubuntu-24.04-arm, container_platform: linux/arm64 }
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Compile and exercise the private Qt D-Bus wire fixture
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends cmake ninja-build qt6-base-dev dbus-x11
-          export COPYPASTE_QT_PREFIX="$(qmake6 -query QT_INSTALL_PREFIX)"
-          packaging/linux/desktop-integrations/kde-native-clipboard/test-wire.sh
-      - name: Compile the pinned patched KWin in an isolated Fedora builder
-        run: packaging/linux/desktop-integrations/kde-native-clipboard/run-fedora-build.sh "${{ matrix.container_platform }}" "${{ matrix.kwin }}"
-
-  linux-pr-release-candidate:
-    name: Linux release candidate (${{ matrix.architecture }})
-    runs-on: ${{ matrix.runner }}
-    defaults:
-      run:
-        shell: bash
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - architecture: x86_64
-            runner: ubuntu-24.04
-            appimagetool_url: https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
-            appimagetool_sha256: 95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6
-          - architecture: aarch64
-            runner: ubuntu-24.04-arm
-            appimagetool_url: https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-aarch64.AppImage
-            appimagetool_sha256: a595ea34cd6136c7f595e9dcbb16f3e9725d7610efb9e43b38c3c6e86cafc270
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - id: flutter
-        run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
-      - uses: ./.github/actions/setup-flutter
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
         with:
-          version: ${{ steps.flutter.outputs.version }}
-      - uses: ./.github/actions/flutter-build-cache
-        with:
-          platform: linux
-          profile: release
-      - name: Install Linux release build dependencies
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
-            cpio desktop-file-utils gobject-introspection libgirepository1.0-dev \
-            libgtk-3-dev libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev \
-            libkeybinder-3.0-dev libmutter-14-dev libsecret-1-dev libssl-dev \
-            libxi-dev libxtst-dev ninja-build pkg-config rpm patchelf \
-            gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good
-      - name: Fetch the pinned AppImageTool
-        run: |
-          set -euo pipefail
-          tool="$RUNNER_TEMP/appimagetool-${{ matrix.architecture }}.AppImage"
-          curl --fail --location --output "$tool" "${{ matrix.appimagetool_url }}"
-          printf '%s  %s\n' "${{ matrix.appimagetool_sha256 }}" "$tool" | sha256sum --check --status
-          chmod 755 "$tool"
-          APPIMAGE_EXTRACT_AND_RUN=1 "$tool" --version
-          echo "APPIMAGETOOL=$tool" >> "$GITHUB_ENV"
-          echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "$GITHUB_ENV"
-      - name: Build the unsigned native Flutter bundle and every package format
-        run: |
-          set -euo pipefail
-          version="$(awk '/^version:[[:space:]]*/ {print $2; exit}' apps/copypaste_flutter/pubspec.yaml)"
-          build_number="${version#*+}"
-          version="${version%%+*}"
-          chmod +x scripts/release/build-linux-flutter.sh scripts/release/build-linux-packages.sh
-          scripts/release/build-linux-flutter.sh "$version" "$build_number" "${{ matrix.architecture }}"
-          python3 scripts/release/verify-linux-runtime-baseline.py \
-            --bundle "dist/linux-${{ matrix.architecture }}/bundle" \
-            --architecture "${{ matrix.architecture }}" \
-            --maximum 2.39 \
-            --output "dist/CopyPaste-v$version-linux-${{ matrix.architecture }}.runtime-baseline.json"
-          scripts/release/build-linux-packages.sh "$version" "${{ matrix.architecture }}"
-          for extension in AppImage deb rpm; do
-            test -s "dist/CopyPaste-v$version-linux-${{ matrix.architecture }}.$extension"
-          done
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: linux-pr-release-candidate-${{ matrix.architecture }}
+          name: gtk-startup-diagnostics
+          path: diagnostics/public
           if-no-files-found: error
-          path: |
-            dist/CopyPaste-v*-linux-${{ matrix.architecture }}.AppImage
-            dist/CopyPaste-v*-linux-${{ matrix.architecture }}.deb
-            dist/CopyPaste-v*-linux-${{ matrix.architecture }}.rpm
-            dist/CopyPaste-v*-linux-${{ matrix.architecture }}.runtime-baseline.json
-
-  linux-package-fixtures:
-    name: Linux package fixtures (${{ matrix.architecture }})
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { architecture: x86_64, runner: ubuntu-24.04 }
-          - { architecture: aarch64, runner: ubuntu-24.04-arm }
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Build and extract every Linux package format
-        env:
-          COPYPASTE_LINUX_PACKAGE_TEST_ARCHITECTURES: ${{ matrix.architecture }}
-        run: scripts/release/test-linux-packages.sh
