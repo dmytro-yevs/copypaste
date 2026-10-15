@@ -120,6 +120,13 @@ def check(root):
             needs = [needs] if isinstance(needs, str) else needs
             if set(parents) - set(needs):
                 errors.append(f"{workflow}: {key} lost required dependency gates")
+    for workflow, concurrency in contract.get("required_concurrency", {}).items():
+        if documents.get(workflow, {}).get("concurrency") != concurrency:
+            errors.append(f"{workflow}: artifact producer concurrency differs from its reviewed contract")
+    for workflow, jobs in contract.get("required_job_concurrency", {}).items():
+        for key, concurrency in jobs.items():
+            if documents.get(workflow, {}).get("jobs", {}).get(key, {}).get("concurrency") != concurrency:
+                errors.append(f"{workflow}: {key} publication concurrency differs from its reviewed contract")
     for workflow, guards in contract.get("qualification_guards", {}).items():
         for key, guard in guards.items():
             if documents.get(workflow, {}).get("jobs", {}).get(key, {}).get("if") != guard:
