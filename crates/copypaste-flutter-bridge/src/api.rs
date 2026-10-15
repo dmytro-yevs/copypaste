@@ -1016,6 +1016,10 @@ pub async fn set_clip_pinned(id: String, pinned: bool) -> Result<Clip, RuntimeEr
     item_response(Method::Pin { id, pinned }).await
 }
 
+pub async fn set_clip_secret(id: String, secret: bool) -> Result<Clip, RuntimeError> {
+    item_response(Method::SetSecret { id, secret }).await
+}
+
 pub async fn reorder_pinned_clips(ids: Vec<String>) -> Result<u64, RuntimeError> {
     let response = client::request(Method::ReorderPinned { ids }).await?;
     match response.data {

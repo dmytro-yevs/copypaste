@@ -2462,6 +2462,10 @@ class _ScreenRepository implements HistoryRepository {
   Future<void> reorderPinned(List<String> ids) async {}
 
   @override
+  Future<HistoryClip> setSecret(String id, bool secret) async =>
+      throw UnimplementedError('setSecret');
+
+  @override
   Future<void> setPinned(String id, bool pinned) async {
     if (failPinUpdate) throw StateError('Pin update failed');
     pinnedUpdates.add((id, pinned));

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+
 import 'platform/lifecycle/application_restarter.dart';
 
 import 'features/modules/controller/modules_controller.dart';
@@ -106,13 +107,29 @@ Future<void> quickPasteMain() async {
     await runtime.attachDesktopRuntime(endpoint: await host.runtimeEndpoint());
   }
   final repository = RuntimeHistoryRepository();
+  final modules = ModulesController(
+    repository: RuntimeModulesRepository(),
+    marketplace: GitHubModuleMarketplaceRepository(
+      temporaryDirectory: getTemporaryDirectory,
+      currentTarget: ModuleMarketplacePlatform().currentTarget,
+    ),
+  );
+  await modules.initialize();
   runApp(
     QuickPasteApp(
       controller: QuickPasteController(
         repository: repository,
-        disposeRepository: repository.dispose,
+        disposeRepository: () async {
+          modules.dispose();
+          await repository.dispose();
+        },
         preferencesStore: SharedPreferencesQuickPastePreferencesStore(),
         host: host,
+        fileDownloader: const FileSelectorHistoryFileDownloader(),
+        ocr: HistoryOcrController(
+          modules: modules,
+          imageInput: TemporaryHistoryImageInput(repository: repository),
+        ),
       ),
     ),
   );

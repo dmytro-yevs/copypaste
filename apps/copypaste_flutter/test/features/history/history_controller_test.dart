@@ -714,6 +714,10 @@ class _HistoryRepository implements HistoryRepository {
   Future<void> reorderPinned(List<String> ids) async {}
 
   @override
+  Future<HistoryClip> setSecret(String id, bool secret) async =>
+      throw UnimplementedError('setSecret');
+
+  @override
   Future<void> setPinned(String id, bool pinned) async {
     setPinnedCalls++;
     await setPinnedPending;

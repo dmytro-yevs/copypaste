@@ -224,8 +224,8 @@ class HistoryClip {
   HistoryClipKind get contentKind =>
       kind ?? HistoryClipKindX.fromContentType(contentType);
 
-  HistoryClip copyWith({bool? pinned}) => HistoryClip(
-    secret: secret,
+  HistoryClip copyWith({bool? pinned, bool? secret}) => HistoryClip(
+    secret: secret ?? this.secret,
     transient: transient,
     id: id,
     contentType: contentType,

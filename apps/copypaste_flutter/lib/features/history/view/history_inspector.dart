@@ -28,7 +28,6 @@ class HistoryInspector extends StatelessWidget {
     required this.controller,
     required this.inDrawer,
     this.onClose,
-    this.showActions = true,
     this.compact = false,
     this.presentationRevision = 0,
   });
@@ -36,7 +35,6 @@ class HistoryInspector extends StatelessWidget {
   final HistoryController controller;
   final bool inDrawer;
   final VoidCallback? onClose;
-  final bool showActions;
   final bool compact;
   final int presentationRevision;
 
@@ -169,229 +167,258 @@ class HistoryInspector extends StatelessWidget {
                     desktop: !inDrawer,
                   ),
           ),
-          if (showActions) const Gap(AppSpacing.lg),
-          if (showActions)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.xs,
-                AppSpacing.zero,
-                AppSpacing.xs,
-                AppSpacing.xs,
-              ),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final iconOnly = _actionsNeedIcons(
-                    context,
-                    clip,
-                    constraints.maxWidth,
-                  );
-                  return Wrap(
-                    key: const ValueKey<String>('history-detail-actions'),
-                    spacing: AppSpacing.sm,
-                    runSpacing: AppSpacing.sm,
-                    children: [
-                      ButtonGroup(
-                        children: [
-                          Tooltip(
-                            tooltip: (_) =>
-                                const TooltipContainer(child: Text('Copy')),
-                            child: Semantics(
-                              label: iconOnly ? 'Copy' : null,
-                              button: true,
-                              child: Button.primary(
-                                key: const ValueKey<String>(
-                                  'history-detail-copy',
-                                ),
-                                style: AppTheme.actionButtonStyle(
-                                  iconOnly
-                                      ? const ButtonStyle.primaryIcon()
-                                      : const ButtonStyle.primary(),
-                                ),
-                                onPressed: () =>
-                                    _copy(context, plainText: false),
-                                leading: iconOnly
-                                    ? null
-                                    : const Icon(LucideIcons.copy),
-                                child: iconOnly
-                                    ? const Icon(LucideIcons.copy)
-                                    : const Text('Copy'),
-                              ),
-                            ),
-                          ),
-                          if (clip.contentKind.isTextual)
-                            Semantics(
-                              label: 'Copy options',
-                              button: true,
-                              child: ComponentTheme<SelectTheme>(
-                                data: AppTheme.selectTheme(
-                                  context,
-                                  variant: AppSelectVariant.primaryAction,
-                                ),
-                                child: Select<bool>(
-                                  key: const ValueKey<String>(
-                                    'history-copy-options',
-                                  ),
-                                  value: false,
-                                  expandIcon: null,
-                                  itemBuilder: (context, _) => Icon(
-                                    LucideIcons.chevronDown,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.primaryForeground,
-                                  ),
-                                  onChanged: (plainText) {
-                                    if (plainText == true) {
-                                      unawaited(
-                                        _copy(context, plainText: true),
-                                      );
-                                    }
-                                  },
-                                  popup:
-                                      const SelectPopup<bool>.noVirtualization(
-                                        items: SelectItemList(
-                                          children: [
-                                            SelectItemButton<bool>(
-                                              value: true,
-                                              child: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Icon(
-                                                    LucideIcons.alignLeft,
-                                                    size: AppIconSize.sm,
-                                                  ),
-                                                  Gap(AppSpacing.sm),
-                                                  Text('Copy plain text'),
-                                                ],
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ).call,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      if (controller.canDownloadSelected)
+          const Gap(AppSpacing.lg),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.xs,
+              AppSpacing.zero,
+              AppSpacing.xs,
+              AppSpacing.xs,
+            ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final iconOnly = _actionsNeedIcons(
+                  context,
+                  clip,
+                  constraints.maxWidth,
+                );
+                return Wrap(
+                  key: const ValueKey<String>('history-detail-actions'),
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: [
+                    ButtonGroup(
+                      children: [
                         Tooltip(
                           tooltip: (_) =>
-                              const TooltipContainer(child: Text('Download')),
+                              const TooltipContainer(child: Text('Copy')),
                           child: Semantics(
-                            label: iconOnly ? 'Download' : null,
+                            label: iconOnly ? 'Copy' : null,
                             button: true,
-                            child: Button.secondary(
+                            child: Button.primary(
                               key: const ValueKey<String>(
-                                'history-detail-download',
+                                'history-detail-copy',
                               ),
                               style: AppTheme.actionButtonStyle(
                                 iconOnly
-                                    ? const ButtonStyle.secondaryIcon()
-                                    : const ButtonStyle.secondary(),
+                                    ? const ButtonStyle.primaryIcon()
+                                    : const ButtonStyle.primary(),
                               ),
-                              onPressed: controller.isDownloadPending(clip.id)
-                                  ? null
-                                  : () => _download(context),
+                              onPressed: () => _copy(context, plainText: false),
                               leading: iconOnly
                                   ? null
-                                  : const Icon(LucideIcons.download),
+                                  : const Icon(LucideIcons.copy),
                               child: iconOnly
-                                  ? const Icon(LucideIcons.download)
-                                  : const Text('Download'),
+                                  ? const Icon(LucideIcons.copy)
+                                  : const Text('Copy'),
                             ),
                           ),
                         ),
-                      Tooltip(
-                        tooltip: (_) => TooltipContainer(
-                          child: Text(clip.pinned ? 'Pinned' : 'Pin'),
-                        ),
-                        child: Semantics(
-                          label: iconOnly
-                              ? (clip.pinned ? 'Pinned' : 'Pin')
-                              : null,
-                          toggled: clip.pinned,
-                          child: Button(
-                            key: ValueKey<String>('history-pin-${clip.id}'),
-                            style: AppTheme.actionButtonStyle(
-                              ButtonStyle(
-                                variance: clip.pinned
-                                    ? ButtonVariance.secondary
-                                    : ButtonVariance.outline,
-                                density: iconOnly
-                                    ? ButtonDensity.icon
-                                    : ButtonDensity.normal,
-                              ),
-                            ),
-                            onPressed: controller.isPinPending(clip.id)
-                                ? null
-                                : () => controller.togglePin(clip),
-                            leading: iconOnly
-                                ? null
-                                : const Icon(LucideIcons.pin),
-                            child: iconOnly
-                                ? const Icon(LucideIcons.pin)
-                                : Text(clip.pinned ? 'Pinned' : 'Pin'),
-                          ),
-                        ),
-                      ),
-                      if (clip.contentKind == HistoryClipKind.image &&
-                          controller.ocr?.available == true)
-                        Tooltip(
-                          tooltip: (_) => const TooltipContainer(
-                            child: Text('Recognize image text'),
-                          ),
-                          child: Semantics(
-                            label: 'Recognize image text',
+                        if (clip.contentKind.isTextual)
+                          Semantics(
+                            label: 'Copy options',
                             button: true,
-                            child: Button.secondary(
-                              key: const ValueKey<String>('history-ocr'),
-                              style: AppTheme.actionButtonStyle(
-                                const ButtonStyle.secondaryIcon(),
+                            child: ComponentTheme<SelectTheme>(
+                              data: AppTheme.selectTheme(
+                                context,
+                                variant: AppSelectVariant.primaryAction,
                               ),
-                              onPressed: controller.ocr!.canRun
-                                  ? () => showHistoryOcrDialog(
-                                      context,
-                                      controller: controller.ocr!,
-                                      clip: clip,
-                                    )
-                                  : null,
-                              child: const Icon(LucideIcons.scanText),
+                              child: Select<bool>(
+                                key: const ValueKey<String>(
+                                  'history-copy-options',
+                                ),
+                                value: false,
+                                expandIcon: null,
+                                itemBuilder: (context, _) => Icon(
+                                  LucideIcons.chevronDown,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.primaryForeground,
+                                ),
+                                onChanged: (plainText) {
+                                  if (plainText == true) {
+                                    unawaited(_copy(context, plainText: true));
+                                  }
+                                },
+                                popup: const SelectPopup<bool>.noVirtualization(
+                                  items: SelectItemList(
+                                    children: [
+                                      SelectItemButton<bool>(
+                                        value: true,
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              LucideIcons.alignLeft,
+                                              size: AppIconSize.sm,
+                                            ),
+                                            Gap(AppSpacing.sm),
+                                            Text('Copy plain text'),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ).call,
+                              ),
                             ),
                           ),
-                        ),
+                      ],
+                    ),
+                    if (controller.canDownloadSelected)
                       Tooltip(
                         tooltip: (_) =>
-                            const TooltipContainer(child: Text('Delete')),
+                            const TooltipContainer(child: Text('Download')),
                         child: Semantics(
-                          label: iconOnly ? 'Delete' : null,
+                          label: iconOnly ? 'Download' : null,
                           button: true,
-                          child: Button.destructive(
+                          child: Button.secondary(
                             key: const ValueKey<String>(
-                              'history-detail-delete',
+                              'history-detail-download',
                             ),
                             style: AppTheme.actionButtonStyle(
                               iconOnly
-                                  ? const ButtonStyle.destructiveIcon()
-                                  : const ButtonStyle.destructive(),
+                                  ? const ButtonStyle.secondaryIcon()
+                                  : const ButtonStyle.secondary(),
                             ),
-                            onPressed: () => showHistoryDeleteDialog(
-                              context,
-                              controller: controller,
-                              clipId: clip.id,
-                            ),
+                            onPressed: controller.isDownloadPending(clip.id)
+                                ? null
+                                : () => _download(context),
                             leading: iconOnly
                                 ? null
-                                : const Icon(LucideIcons.trash2),
+                                : const Icon(LucideIcons.download),
                             child: iconOnly
-                                ? const Icon(LucideIcons.trash2)
-                                : const Text('Delete'),
+                                ? const Icon(LucideIcons.download)
+                                : const Text('Download'),
                           ),
                         ),
                       ),
-                    ],
-                  );
-                },
-              ),
+                    Tooltip(
+                      tooltip: (_) => TooltipContainer(
+                        child: Text(clip.pinned ? 'Pinned' : 'Pin'),
+                      ),
+                      child: Semantics(
+                        label: iconOnly
+                            ? (clip.pinned ? 'Pinned' : 'Pin')
+                            : null,
+                        toggled: clip.pinned,
+                        child: Button(
+                          key: ValueKey<String>('history-pin-${clip.id}'),
+                          style: AppTheme.actionButtonStyle(
+                            ButtonStyle(
+                              variance: clip.pinned
+                                  ? ButtonVariance.secondary
+                                  : ButtonVariance.outline,
+                              density: iconOnly
+                                  ? ButtonDensity.icon
+                                  : ButtonDensity.normal,
+                            ),
+                          ),
+                          onPressed: controller.isPinPending(clip.id)
+                              ? null
+                              : () => controller.togglePin(clip),
+                          leading: iconOnly
+                              ? null
+                              : const Icon(LucideIcons.pin),
+                          child: iconOnly
+                              ? const Icon(LucideIcons.pin)
+                              : Text(clip.pinned ? 'Pinned' : 'Pin'),
+                        ),
+                      ),
+                    ),
+                    Tooltip(
+                      tooltip: (_) => TooltipContainer(
+                        child: Text(
+                          clip.secret ? 'Make non-secret' : 'Make secret',
+                        ),
+                      ),
+                      child: Semantics(
+                        label: clip.secret ? 'Make non-secret' : 'Make secret',
+                        toggled: clip.secret,
+                        child: Button.outline(
+                          key: const ValueKey('history-detail-secret'),
+                          style: AppTheme.actionButtonStyle(
+                            const ButtonStyle.outlineIcon(),
+                          ),
+                          onPressed: controller.isSecretPending(clip.id)
+                              ? null
+                              : () async {
+                                  final changed = await controller.toggleSecret(
+                                    clip,
+                                  );
+                                  if (!changed && context.mounted) {
+                                    AppToast.show(
+                                      context,
+                                      title: 'Update failed',
+                                      message:
+                                          'The clip secrecy could not be updated.',
+                                      tone: AppToastTone.error,
+                                    );
+                                  }
+                                },
+                          child: Icon(
+                            clip.secret ? LucideIcons.eye : LucideIcons.eyeOff,
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (clip.contentKind == HistoryClipKind.image &&
+                        controller.ocr?.available == true)
+                      Tooltip(
+                        tooltip: (_) => const TooltipContainer(
+                          child: Text('Recognize image text'),
+                        ),
+                        child: Semantics(
+                          label: 'Recognize image text',
+                          button: true,
+                          child: Button.secondary(
+                            key: const ValueKey<String>('history-ocr'),
+                            style: AppTheme.actionButtonStyle(
+                              const ButtonStyle.secondaryIcon(),
+                            ),
+                            onPressed: controller.ocr!.canRun
+                                ? () => showHistoryOcrDialog(
+                                    context,
+                                    controller: controller.ocr!,
+                                    clip: clip,
+                                  )
+                                : null,
+                            child: const Icon(LucideIcons.scanText),
+                          ),
+                        ),
+                      ),
+                    Tooltip(
+                      tooltip: (_) =>
+                          const TooltipContainer(child: Text('Delete')),
+                      child: Semantics(
+                        label: iconOnly ? 'Delete' : null,
+                        button: true,
+                        child: Button.destructive(
+                          key: const ValueKey<String>('history-detail-delete'),
+                          style: AppTheme.actionButtonStyle(
+                            iconOnly
+                                ? const ButtonStyle.destructiveIcon()
+                                : const ButtonStyle.destructive(),
+                          ),
+                          onPressed: () => showHistoryDeleteDialog(
+                            context,
+                            controller: controller,
+                            clipId: clip.id,
+                          ),
+                          leading: iconOnly
+                              ? null
+                              : const Icon(LucideIcons.trash2),
+                          child: iconOnly
+                              ? const Icon(LucideIcons.trash2)
+                              : const Text('Delete'),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
+          ),
           if (!inDrawer) ...[
             const Gap(AppSpacing.md),
             Padding(
@@ -446,6 +473,7 @@ class HistoryInspector extends StatelessWidget {
     double availableWidth,
   ) {
     final actions = <(ButtonStyle, String?)>[
+      (const ButtonStyle.outlineIcon(), null),
       (const ButtonStyle.primary(), 'Copy'),
       if (controller.canDownloadSelected)
         (const ButtonStyle.secondary(), 'Download'),
