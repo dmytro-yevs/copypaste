@@ -184,6 +184,18 @@ class ReleasePipelineTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Flutter SDK"):
             metadata(ROOT, environment, "rustc 1.96.0", {**flutter, "frameworkVersion": "0.0.0"})
 
+    def test_fresh_flutter_bootstrap_progress_does_not_corrupt_machine_metadata(self):
+        version = runpy.run_path(str(ROOT / "scripts/ci/build-metadata.py"))["flutter_version"]
+        state = {"initialized": False}
+        def bootstrap(command, **kwargs):
+            if "--version" in command and "--machine" not in command:
+                state["initialized"] = True
+        def machine(command, **kwargs):
+            progress = "" if state["initialized"] else "Resolving dependencies...\n"
+            return progress + '{"frameworkVersion":"3.47.6"}'
+        with patch("subprocess.run", side_effect=bootstrap), patch("subprocess.check_output", side_effect=machine):
+            self.assertEqual(version("flutter")["frameworkVersion"], "3.47.6")
+
     def test_complete_inventory_rejects_unqualified_files_and_changed_signatures(self):
         verify = load("verify-artifact-receipts.py")["verify"]
         with tempfile.TemporaryDirectory() as directory:

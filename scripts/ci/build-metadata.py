@@ -29,10 +29,17 @@ def metadata(root, environment, rustc, flutter):
             "runner": {key: environment.get(key, "unknown") for key in ("RUNNER_OS", "RUNNER_ARCH", "ImageOS", "ImageVersion")}}
 
 
+def flutter_version(executable):
+    # Fresh SDKs bootstrap the Flutter tool and print pub progress on stdout.
+    # Complete that initialization before requesting a machine-readable response.
+    subprocess.run([executable, "--version"], check=True)
+    return json.loads(subprocess.check_output([executable, "--version", "--machine"], text=True))
+
+
 def main():
     root = Path(__file__).resolve().parents[2]
     rustc = subprocess.check_output([shutil.which("rustc") or "rustc", "--version", "--verbose"], text=True)
-    flutter = json.loads(subprocess.check_output([shutil.which("flutter") or "flutter", "--version", "--machine"], text=True))
+    flutter = flutter_version(shutil.which("flutter") or "flutter")
     result = metadata(root, os.environ, rustc, flutter)
     destination = Path(os.environ["RUNNER_TEMP"]) / "copypaste-build-metadata.json"
     destination.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
