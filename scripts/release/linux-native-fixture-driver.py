@@ -1450,10 +1450,6 @@ def main():
                 if not isinstance(response_variant(json.loads(gui_status.stdout), "status"), dict):
                     raise RuntimeError("packaged daemon status has an invalid shape")
                 emit_result("daemon_cli_gui", gui_status)
-                # Diagnostic workload only; this branch uploads no qualification artifact.
-                require_linux_onboarding(args, gui_pid=app.pid, environment=environment)
-                require_camera_qr_scan(prefix, cli, environment, workspace, app.pid, args.runtime_format, gui_process=app)
-                return
                 require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "text/plain;charset=utf-8", b"copypaste-native-text-fixture", "text", "clipboard_text")
                 require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "text/html", b"<b>copypaste-native-html-fixture</b>", "text/html", "clipboard_html")
                 require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "text/rtf", b"{\\rtf1 copypaste native rtf fixture}", "text/rtf", "clipboard_rtf")
