@@ -820,6 +820,24 @@ def newest_item(items, before_ids, content_type):
     raise RuntimeError(f"native backend did not retain a new {content_type} item")
 
 
+def wait_for_fixture_capture(cli, environment, before, before_ids, content_type, payload):
+    """Bind the assertion to this offer rather than a competing startup capture."""
+    deadline = time.monotonic() + CAPTURE_TIMEOUT_SECONDS
+    expected_text = payload.decode("utf-8") if content_type == "text" else None
+    while time.monotonic() < deadline:
+        candidates = [
+            item for item in list_items(cli, environment)
+            if item.get("id") not in before_ids and item.get("content_type") == content_type
+            and (expected_text is None or item.get("content") == expected_text)
+        ]
+        if candidates:
+            if cli_item_count(status(cli, environment)) < before + 1:
+                raise RuntimeError("fixture capture did not increase history count")
+            return candidates[0]
+        time.sleep(0.15)
+    raise RuntimeError("native backend did not retain the requested fixture within its capture deadline")
+
+
 def external_clipboard_bytes(session, mime, environment):
     if session == "x11":
         command = ["xclip", "-selection", "clipboard", "-t", mime, "-o"]
@@ -847,8 +865,7 @@ def require_capture(cli, environment, workspace, evidence_dir, session, mime, pa
     before = cli_item_count(status(cli, environment))
     before_ids = {item.get("id") for item in list_items(cli, environment)}
     with clipboard_provider(workspace, evidence_dir, assertion, {mime: payload}, environment):
-        wait_for_count(cli, environment, before + 1)
-        item = newest_item(list_items(cli, environment), before_ids, content_type)
+        item = wait_for_fixture_capture(cli, environment, before, before_ids, content_type, payload)
         require_source_identity(item)
     overwrite_marker = f"copypaste-native-overwrite-{assertion}".encode("utf-8")
     overwrite_before = cli_item_count(status(cli, environment))

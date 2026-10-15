@@ -427,6 +427,7 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
         marker = b"copypaste-native-overwrite-clipboard_html"
         captured = {
             "id": "original", "content_type": "text",
+            "content": original.decode("utf-8"),
             "source_app_bundle_id": driver.SOURCE_APPLICATION_ID,
             "source_app_name": driver.SOURCE_APPLICATION_NAME,
         }
