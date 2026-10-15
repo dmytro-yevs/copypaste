@@ -2,6 +2,7 @@
 use crate::ModuleError;
 use copypaste_core::Store;
 use copypaste_sync::{
+    account_state::SIGN_OUT_KEYS,
     host::{SyncHostRequest, UNREADABLE_UPLOADS, UPLOAD_FLOOR, UPLOAD_FLOOR_ITEM},
     store::{floor_after_round, Offer, StoreView},
     unreadable::{UnreadableUploads, UploadFloor},
@@ -103,11 +104,26 @@ impl SyncServices {
         self.store
             .clear_module_state(id)
             .map_err(|_| ModuleError::State)?;
+        self.store
+            .clear_semantic_index(id)
+            .map_err(|_| ModuleError::State)?;
         self.progress
             .lock()
             .map_err(|_| ModuleError::State)?
             .remove(id);
         Ok(())
+    }
+
+    /// Clears only the provider-defined signed-out account state. Provider
+    /// availability must not retain credentials after the user signs out.
+    pub(crate) fn clear_cloud_credentials(&self, id: &str) -> Result<(), ModuleError> {
+        let keys = SIGN_OUT_KEYS
+            .iter()
+            .map(|key| Self::key(id, key.as_str()))
+            .collect::<Result<Vec<_>, _>>()?;
+        self.store
+            .clear_state(&keys.iter().map(String::as_str).collect::<Vec<_>>())
+            .map_err(|_| ModuleError::State)
     }
     pub(crate) fn request(&self, id: &str, input: Value) -> Result<Value, ModuleError> {
         let request: SyncHostRequest =
@@ -265,7 +281,7 @@ impl SyncServices {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use copypaste_core::{Keyring, StoreSource};
+    use copypaste_core::{compute_content_hash, Keyring, NewItem, StoreSource};
     fn service() -> SyncServices {
         let keyring = Arc::new(Keyring::from_secret(&[5; 32]));
         let store = Store::open_in_memory(&keyring.db_key()).unwrap();
@@ -359,5 +375,49 @@ mod tests {
                 .unwrap()
             )
             .is_err());
+    }
+
+    #[test]
+    fn removal_cleanup_clears_derived_search_rows_with_module_state() {
+        let service = service();
+        let row = service
+            .store
+            .insert(NewItem {
+                id: "item".into(),
+                content_ciphertext: vec![1],
+                nonce: vec![1],
+                content_type: "text/plain".into(),
+                content_hash: compute_content_hash(b"indexed text"),
+                search_text: Some("indexed text".into()),
+                created_at: 1,
+                app_bundle_id: None,
+                app_name: None,
+                payload_metadata: None,
+            })
+            .unwrap();
+        let work = service.store.semantic_work("scope").unwrap().unwrap();
+        assert_eq!(work.item_id, row.id);
+        service
+            .store
+            .save_semantic_work("copypaste.fixture", "scope", &work, &[vec![1.0]])
+            .unwrap();
+        assert_eq!(
+            service
+                .store
+                .semantic_matches("scope", &[1.0], 0.8)
+                .unwrap()
+                .scores
+                .len(),
+            1
+        );
+
+        service.clear("copypaste.fixture").unwrap();
+
+        assert!(service
+            .store
+            .semantic_matches("scope", &[1.0], 0.8)
+            .unwrap()
+            .scores
+            .is_empty());
     }
 }

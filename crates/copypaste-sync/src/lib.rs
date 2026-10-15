@@ -1,5 +1,6 @@
 //! Transport-neutral history, cursor and merge contracts for sync providers.
 #![forbid(unsafe_code)]
+pub mod account_state;
 pub mod cadence;
 pub mod host;
 pub mod outcome;

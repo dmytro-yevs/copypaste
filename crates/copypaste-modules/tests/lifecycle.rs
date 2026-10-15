@@ -691,6 +691,34 @@ fn interrupted_removal_stays_visible_and_can_finish_after_restart() {
 }
 
 #[test]
+fn removal_commits_cleanup_debt_instead_of_reporting_a_false_failure() {
+    let fixture = Fixture::new();
+    let manager = fixture.manager();
+    let module = manager
+        .install(&fixture.package("1.0.0", b"fixture", |_| {}, None))
+        .unwrap();
+    let packages = fixture
+        .directory
+        .path()
+        .join("modules/packages")
+        .join(&module.id);
+    fs::remove_dir_all(&packages).unwrap();
+    // A regular file at the manager-owned package directory makes cleanup
+    // retryable without leaving active module code behind.
+    fs::write(&packages, b"cleanup debt").unwrap();
+
+    manager.remove(&module.id).unwrap();
+
+    let remaining = manager.list().unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert!(!remaining[0].enabled);
+    assert!(remaining[0]
+        .error
+        .as_deref()
+        .is_some_and(|message| { message.contains("finishing cleanup") }));
+}
+
+#[test]
 fn invalid_preferences_are_recoverable_but_incomplete_required_preferences_are_editable() {
     let fixture = Fixture::new();
     let manager = fixture.manager();

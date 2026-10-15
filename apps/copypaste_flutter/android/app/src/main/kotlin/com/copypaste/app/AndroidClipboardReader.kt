@@ -255,7 +255,7 @@ internal object AndroidClipboardReader {
             val secret = description?.extras?.getBoolean("android.content.extra.IS_SENSITIVE", false) == true
             if (!NativeRuntimeCapture.classify(pending.token, secret, false)) return@read
             val primary = clipboard?.primaryClip
-            if (primary != null && primary.description.label?.toString() != AndroidClipboardWriter.label) {
+            if (primary != null && !AndroidClipboardWriter.isOwned(context, primary.description)) {
                 val currentSecret = primary.description.extras?.getBoolean("android.content.extra.IS_SENSITIVE", false) == true
                 if (!NativeRuntimeCapture.classify(pending.token, currentSecret, false) || currentSecret != secret) return@read
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && description?.timestamp != primary.description.timestamp) return@read

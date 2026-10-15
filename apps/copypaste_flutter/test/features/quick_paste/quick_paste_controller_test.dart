@@ -1953,7 +1953,8 @@ class _Repository implements HistoryRepository {
   }
 
   @override
-  Stream<HistoryRuntimeEvent> watch() => const Stream.empty();
+  Stream<HistoryRuntimeEvent> watch() =>
+      Stream<HistoryRuntimeEvent>.multi((_) {});
 }
 
 void _populateHistory(

@@ -433,7 +433,8 @@ class _GestureRepository implements HistoryRepository {
   final deletedIds = <String>[];
   HistoryImagePreview? preview;
   @override
-  Stream<HistoryRuntimeEvent> watch() => const Stream.empty();
+  Stream<HistoryRuntimeEvent> watch() =>
+      Stream<HistoryRuntimeEvent>.multi((_) {});
   @override
   Future<HistoryFacets> facets() async => const HistoryFacets();
   @override
