@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use rustix::event::{poll, PollFd, PollFlags, Timespec};
 use x11rb::connection::Connection;
-use x11rb::protocol::xfixes::{ConnectionExt as _, SelectionEventMask};
+use x11rb::protocol::xfixes::{ConnectionExt as _, SelectionEvent, SelectionEventMask};
 use x11rb::protocol::xproto::{
     Atom, AtomEnum, ConnectionExt as _, CreateWindowAux, EventMask, PropMode, SelectionNotifyEvent,
     WindowClass,
@@ -34,6 +34,8 @@ const XFIXES_SELECTION_VERSION: (u32, u32) = (2, 0);
 #[derive(Clone)]
 struct Atoms {
     clipboard: Atom,
+    clipboard_manager: Atom,
+    wm_check: Atom,
     targets: Atom,
     utf8: Atom,
     text: Atom,
@@ -55,6 +57,8 @@ impl Atoms {
         };
         Ok(Self {
             clipboard: a(b"CLIPBOARD")?,
+            clipboard_manager: a(b"CLIPBOARD_MANAGER")?,
+            wm_check: a(b"_NET_SUPPORTING_WM_CHECK")?,
             targets: a(b"TARGETS")?,
             utf8: a(b"UTF8_STRING")?,
             text: a(b"TEXT")?,
@@ -87,6 +91,57 @@ enum Command {
 struct OwnedSelection {
     target: Atom,
     bytes: Vec<u8>,
+}
+
+/// Ownership metadata is sufficient to keep a policy-dropped value private
+/// when a clipboard manager restores it after the original writer exits.
+#[derive(Default)]
+struct SelectionPrivacy {
+    owner: Option<u32>,
+    departed_owner: Option<u32>,
+    suppressed_owner: Option<u32>,
+    tainted_cache: bool,
+}
+
+impl SelectionPrivacy {
+    fn observe(&mut self, owner: u32, departed: bool, manager: Option<bool>) -> bool {
+        let previous = self.owner.replace(owner).unwrap_or(0);
+        if owner == 0 {
+            if departed {
+                if previous != 0 {
+                    self.departed_owner = Some(previous);
+                }
+            } else {
+                self.departed_owner = None;
+                self.tainted_cache = false;
+            }
+            self.suppressed_owner = None;
+            return false;
+        }
+        // An uncertain manager identity cannot authorize reading a deferred
+        // replacement. An intervening writer does not prove the manager has
+        // finished replacing its old cache, even if we captured that writer.
+        let suppressed =
+            self.tainted_cache && self.departed_owner.is_some() && manager != Some(false);
+        if !suppressed && manager == Some(true) {
+            // A manager making a new copy while an owner is still alive (or
+            // while it already owns the selection) is not an exit handoff.
+            self.tainted_cache = false;
+        }
+        self.departed_owner = None;
+        self.suppressed_owner = suppressed.then_some(owner);
+        !suppressed
+    }
+
+    fn suppress_current(&mut self) {
+        let owner = self.owner.unwrap_or(0);
+        self.suppressed_owner = (owner != 0).then_some(owner);
+        self.tainted_cache = owner != 0 || self.departed_owner.is_some();
+    }
+
+    fn permits_read(&self, owner: u32) -> bool {
+        owner != 0 && self.owner == Some(owner) && self.suppressed_owner != Some(owner)
+    }
 }
 struct Sender {
     commands: mpsc::Sender<Command>,
@@ -155,7 +210,7 @@ impl X11Clipboard {
         })
     }
     fn read(&mut self, settings: &copypaste_ipc::ConfigData) -> Option<Capture> {
-        if !self.changed.swap(false, Ordering::AcqRel) {
+        if !self.changed.swap(false, Ordering::AcqRel) && !settings.private_mode {
             return None;
         }
         let (tx, rx) = mpsc::channel();
@@ -438,6 +493,7 @@ fn worker(
     }
     availability.mark_ready();
     let mut owned = None;
+    let mut privacy = SelectionPrivacy::default();
     loop {
         while let Ok(request) = commands.try_recv() {
             if !command(
@@ -445,6 +501,7 @@ fn worker(
                 window,
                 &atoms,
                 &mut owned,
+                &mut privacy,
                 request,
                 &changed,
                 &commands,
@@ -460,6 +517,7 @@ fn worker(
                     window,
                     &atoms,
                     &mut owned,
+                    &mut privacy,
                     next_event,
                     &changed,
                 ),
@@ -494,6 +552,7 @@ fn command(
     window: u32,
     a: &Atoms,
     owned: &mut Option<OwnedSelection>,
+    privacy: &mut SelectionPrivacy,
     command: Command,
     changed: &AtomicBool,
     commands: &mpsc::Receiver<Command>,
@@ -514,6 +573,7 @@ fn command(
                 commands,
                 wake,
                 owned,
+                privacy,
                 changed,
                 stopped: false,
             };
@@ -557,17 +617,77 @@ fn event(
     window: u32,
     a: &Atoms,
     owned: &mut Option<OwnedSelection>,
+    privacy: &mut SelectionPrivacy,
     event: Event,
     changed: &AtomicBool,
 ) {
     match event {
         Event::XfixesSelectionNotify(e) if e.selection == a.clipboard => {
-            if e.owner != window {
-                changed.store(true, Ordering::Release);
-            }
+            note_selection(c, window, a, privacy, e, changed);
         }
         Event::SelectionRequest(e) if e.selection == a.clipboard => serve(c, a, owned.as_ref(), e),
         _ => {}
+    }
+}
+
+fn note_selection(
+    c: &RustConnection,
+    window: u32,
+    atoms: &Atoms,
+    privacy: &mut SelectionPrivacy,
+    event: x11rb::protocol::xfixes::SelectionNotifyEvent,
+    changed: &AtomicBool,
+) {
+    let manager = if privacy.tainted_cache && event.owner != 0 && event.owner != window {
+        manager_owns_selection(c, window, atoms, event.owner)
+    } else {
+        Some(false)
+    };
+    let readable = privacy.observe(
+        event.owner,
+        event.subtype != SelectionEvent::SET_SELECTION_OWNER,
+        manager,
+    );
+    changed.store(readable && event.owner != window, Ordering::Release);
+}
+
+fn manager_owns_selection(
+    c: &RustConnection,
+    window: u32,
+    atoms: &Atoms,
+    owner: u32,
+) -> Option<bool> {
+    let manager = c
+        .get_selection_owner(atoms.clipboard_manager)
+        .ok()?
+        .reply()
+        .ok()?
+        .owner;
+    let mut uncertain = false;
+    if manager != 0 {
+        match super::linux_attribution::same_client(c, owner, manager) {
+            Some(true) => return Some(true),
+            Some(false) => {}
+            None => uncertain = true,
+        }
+    }
+    let root = c.query_tree(window).ok()?.reply().ok()?.root;
+    let reply = c
+        .get_property(false, root, atoms.wm_check, AtomEnum::WINDOW, 0, 1)
+        .ok()?
+        .reply()
+        .ok()?;
+    if reply.type_ == u32::from(AtomEnum::NONE) && reply.value.is_empty() {
+        return (!uncertain).then_some(false);
+    }
+    if reply.bytes_after != 0 || reply.value_len != 1 {
+        return None;
+    }
+    let manager = reply.value32()?.next().filter(|value| *value != 0)?;
+    match super::linux_attribution::same_client(c, owner, manager) {
+        Some(true) => Some(true),
+        Some(false) if !uncertain => Some(false),
+        _ => None,
     }
 }
 fn serve(
@@ -634,6 +754,7 @@ struct Transfer<'a> {
     commands: &'a mpsc::Receiver<Command>,
     wake: &'a mut UnixStream,
     owned: &'a mut Option<OwnedSelection>,
+    privacy: &'a mut SelectionPrivacy,
     changed: &'a AtomicBool,
     stopped: bool,
 }
@@ -651,10 +772,33 @@ impl Transfer<'_> {
             .reply()
             .ok()?
             .owner;
+        // The owner reply is a server barrier. Drain earlier XFixes events
+        // before acknowledging a policy drop, even if the idle flag was clear.
+        while let Some(next) = self.c.poll_for_event().ok()? {
+            event(
+                self.c,
+                self.window,
+                self.atoms,
+                self.owned,
+                self.privacy,
+                next,
+                self.changed,
+            );
+        }
+        self.privacy.owner.get_or_insert(owner);
+        if settings.private_mode {
+            self.privacy.suppress_current();
+            self.changed.store(false, Ordering::Release);
+            return None;
+        }
+        if owner == self.window || !self.privacy.permits_read(owner) {
+            return None;
+        }
         let source = (owner != 0)
             .then(|| super::linux_attribution::resolve_owner(self.c, owner))
             .flatten();
         if !Self::can_read_source(settings, source.as_ref()) {
+            self.privacy.suppress_current();
             return None;
         }
         let targets = atoms(&self.read_target(self.atoms.targets, MAX_TARGETS * 4, deadline)?)?;
@@ -669,6 +813,7 @@ impl Transfer<'_> {
             transient: false,
         };
         if !privacy.allows(settings) {
+            self.privacy.suppress_current();
             return None;
         }
         let (target, type_, binary) = if targets.contains(&self.atoms.uri_list) {
@@ -862,9 +1007,14 @@ impl Transfer<'_> {
                         Event::XfixesSelectionNotify(event)
                             if event.selection == self.atoms.clipboard =>
                         {
-                            if event.owner != self.window {
-                                self.changed.store(true, Ordering::Release);
-                            }
+                            note_selection(
+                                self.c,
+                                self.window,
+                                self.atoms,
+                                self.privacy,
+                                event,
+                                self.changed,
+                            );
                         }
                         event => return Some(event),
                     },
@@ -985,6 +1135,91 @@ mod tests {
     use std::time::Duration;
 
     #[test]
+    fn policy_drop_survives_a_deferred_manager_handoff_and_keeps_the_next_copy() {
+        let mut privacy = SelectionPrivacy::default();
+        assert!(privacy.observe(1, false, Some(false)));
+        privacy.suppress_current();
+        assert!(!privacy.permits_read(1));
+        assert!(!privacy.observe(0, true, Some(false)));
+        privacy.suppress_current();
+        assert!(!privacy.observe(2, false, Some(true)));
+        assert!(!privacy.permits_read(2));
+        assert!(privacy.observe(3, false, Some(false)));
+        assert!(privacy.permits_read(3));
+    }
+
+    #[test]
+    fn resume_fences_an_owner_that_closed_before_the_last_private_poll() {
+        let mut privacy = SelectionPrivacy::default();
+        privacy.observe(1, false, Some(false));
+        privacy.observe(0, true, Some(false));
+        privacy.suppress_current();
+        assert!(!privacy.observe(2, false, Some(true)));
+        assert!(!privacy.permits_read(2));
+    }
+
+    #[test]
+    fn a_new_copy_from_the_same_owner_is_not_the_suppressed_snapshot() {
+        let mut privacy = SelectionPrivacy::default();
+        privacy.observe(1, false, Some(false));
+        privacy.suppress_current();
+        assert!(privacy.observe(1, false, Some(false)));
+        assert!(privacy.permits_read(1));
+    }
+
+    #[test]
+    fn intervening_copies_do_not_authorize_a_managers_old_private_cache() {
+        let mut privacy = SelectionPrivacy::default();
+        privacy.observe(1, false, Some(false));
+        privacy.suppress_current();
+        privacy.observe(0, true, Some(false));
+        for writer in [2, 3] {
+            assert!(privacy.observe(writer, false, Some(false)));
+            assert!(privacy.permits_read(writer));
+            privacy.observe(0, true, Some(false));
+            assert!(!privacy.observe(9, false, Some(true)));
+            assert!(!privacy.permits_read(9));
+        }
+        // A new manager-owned copy, unlike an exit handoff, establishes a
+        // fresh origin and remains usable after retained values were rejected.
+        assert!(privacy.observe(9, false, Some(true)));
+        assert!(privacy.permits_read(9));
+        privacy.observe(4, false, Some(false));
+        privacy.observe(0, true, Some(false));
+        assert!(privacy.observe(9, false, Some(true)));
+    }
+
+    #[test]
+    fn a_manager_copy_from_a_live_writer_is_a_fresh_origin() {
+        let mut privacy = SelectionPrivacy::default();
+        privacy.observe(1, false, Some(false));
+        privacy.suppress_current();
+        assert!(privacy.observe(9, false, Some(true)));
+        assert!(privacy.permits_read(9));
+    }
+
+    #[test]
+    fn an_explicit_clear_cancels_the_old_handoff_lineage() {
+        let mut privacy = SelectionPrivacy::default();
+        privacy.observe(1, false, Some(false));
+        privacy.suppress_current();
+        privacy.observe(0, false, Some(false));
+        privacy.suppress_current();
+        assert!(privacy.observe(2, false, Some(true)));
+    }
+
+    #[test]
+    fn an_uncertain_deferred_handoff_fails_closed_without_losing_a_later_copy() {
+        let mut privacy = SelectionPrivacy::default();
+        privacy.observe(1, false, Some(false));
+        privacy.suppress_current();
+        privacy.observe(0, true, Some(false));
+        assert!(!privacy.observe(2, false, None));
+        assert!(!privacy.permits_read(2));
+        assert!(privacy.observe(3, false, Some(false)));
+    }
+
+    #[test]
     fn x11_worker_availability_tracks_setup_and_unwind() {
         let available = Arc::new(AtomicBool::new(false));
         let failed_setup = Arc::clone(&available);
@@ -1036,6 +1271,10 @@ mod tests {
 
     impl FixtureOwner {
         fn start(payload: FixturePayload) -> Self {
+            Self::start_with_manager(payload, false)
+        }
+
+        fn start_with_manager(payload: FixturePayload, manager: bool) -> Self {
             let stop = Arc::new(AtomicBool::new(false));
             let requests = Arc::new(AtomicUsize::new(0));
             let worker_stop = Arc::clone(&stop);
@@ -1119,6 +1358,17 @@ mod tests {
                         b"fixture\0org.example.Fixture\0",
                     )
                     .expect("fixture class");
+                if manager {
+                    let manager_atom = connection
+                        .intern_atom(false, b"CLIPBOARD_MANAGER")
+                        .expect("manager atom")
+                        .reply()
+                        .expect("manager atom reply")
+                        .atom;
+                    connection
+                        .set_selection_owner(owner, manager_atom, x11rb::CURRENT_TIME)
+                        .expect("fixture clipboard manager");
+                }
                 connection
                     .set_selection_owner(owner, atoms.clipboard, x11rb::CURRENT_TIME)
                     .expect("fixture owner");
@@ -1858,6 +2108,113 @@ mod tests {
             None,
             "same-PID metadata from another X client must not be attributed"
         );
+    }
+
+    #[test]
+    fn live_x11_fixture_policy_dropped_manager_handoff_is_not_replayed() {
+        if std::env::var_os("COPYPASTE_X11_FIXTURE") != Some("1".into()) {
+            return;
+        }
+        for (policy, payload, expected_requests, retained) in [
+            (
+                copypaste_ipc::ConfigData {
+                    private_mode: true,
+                    ..Default::default()
+                },
+                FixturePayload::Text(b"private fixture".to_vec()),
+                0,
+                b"private fixture".as_slice(),
+            ),
+            (
+                copypaste_ipc::ConfigData {
+                    skip_secret: true,
+                    ..Default::default()
+                },
+                FixturePayload::Secret,
+                2,
+                b"ignored".as_slice(),
+            ),
+        ] {
+            let directory = tempfile::tempdir().expect("fixture data directory");
+            let mut clipboard = X11Clipboard::new(directory.path()).expect("X11 clipboard");
+            wait_for_available(&clipboard);
+            let sender = Arc::clone(&clipboard.sender);
+            let read_worker = |settings| {
+                let (reply, result) = mpsc::channel();
+                sender
+                    .send(Command::Read { settings, reply })
+                    .expect("worker read barrier");
+                result
+                    .recv_timeout(REQUEST_TIMEOUT)
+                    .expect("worker read reply")
+            };
+            let (observer, _) = x11rb::connect(None).expect("fixture observer");
+            let atoms = Atoms::intern(&observer).expect("fixture atoms");
+            let wait_for_owner = |expected| {
+                let deadline = Instant::now() + Duration::from_secs(2);
+                while observer
+                    .get_selection_owner(atoms.clipboard)
+                    .unwrap()
+                    .reply()
+                    .unwrap()
+                    .owner
+                    != expected
+                {
+                    assert!(
+                        Instant::now() < deadline,
+                        "fixture ownership did not settle"
+                    );
+                    thread::sleep(Duration::from_millis(1));
+                }
+            };
+            let owner = FixtureOwner::start(payload);
+            wait_for_owner(owner.owner());
+            assert!(read_worker(policy.clone()).is_none());
+            assert_eq!(owner.request_count(), expected_requests);
+            drop(owner);
+            wait_for_owner(0);
+            if policy.private_mode {
+                // Resume must acknowledge ownership even when the earlier
+                // private poll already consumed the idle change flag.
+                assert!(clipboard.read(&policy).is_none());
+            }
+            // Cache IO can lag behind a short-lived public writer that the
+            // daemon already captured. Its value must not authorize old cache.
+            let intermediate =
+                FixtureOwner::start(FixturePayload::Text(b"intermediate public copy".to_vec()));
+            wait_for_owner(intermediate.owner());
+            assert_eq!(
+                read_worker(Default::default()).unwrap().content,
+                "intermediate public copy"
+            );
+            drop(intermediate);
+            wait_for_owner(0);
+            let manager =
+                FixtureOwner::start_with_manager(FixturePayload::Text(retained.to_vec()), true);
+            wait_for_owner(manager.owner());
+            // This processes the actual X11 event rather than passing on an
+            // idle flag before the manager's replacement has been observed.
+            assert!(
+                read_worker(Default::default()).is_none(),
+                "a clipboard manager replayed a policy-dropped selection"
+            );
+            assert_eq!(
+                manager.request_count(),
+                0,
+                "protected payload must not be requested"
+            );
+            let next = FixtureOwner::start(FixturePayload::Text(b"first public copy".to_vec()));
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let captured = loop {
+                if let Some(capture) = clipboard.poll() {
+                    break capture;
+                }
+                assert!(Instant::now() < deadline, "first post-policy copy was lost");
+                thread::sleep(Duration::from_millis(1));
+            };
+            assert_eq!(captured.content, "first public copy");
+            assert!(next.request_count() >= 2);
+        }
     }
 
     #[test]

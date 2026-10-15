@@ -35,6 +35,18 @@ pub(crate) fn resolve_owner(
         .or_else(|| resolve_same_client_window(connection, window))
 }
 
+/// Compare server-assigned client identities, never window titles or focus.
+pub(super) fn same_client(
+    connection: &x11rb::rust_connection::RustConnection,
+    first: u32,
+    second: u32,
+) -> Option<bool> {
+    if first == second {
+        return Some(true);
+    }
+    Some(xres_client(connection, first)? == xres_client(connection, second)?)
+}
+
 /// GTK commonly owns CLIPBOARD through an internal, unmapped window with no
 /// EWMH metadata. XRes identifies its X client; only a bounded listed or
 /// reparented window from that same client and local process can supply the
