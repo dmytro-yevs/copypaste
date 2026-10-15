@@ -7,6 +7,8 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 
 internal object ScreenshotCaptureState {
+    private const val mediaPermissionAvailableKey = "media-permission-available"
+
     private fun preferences(context: Context) =
         context.getSharedPreferences("screenshot-capture", Context.MODE_PRIVATE)
 
@@ -14,7 +16,15 @@ internal object ScreenshotCaptureState {
 
     fun initialize(context: Context, now: Long = System.currentTimeMillis()) {
         val preferences = preferences(context)
-        if (!preferences.contains("since")) preferences.edit().putLong("since", now).commit()
+        val editor = preferences.edit()
+        if (!preferences.contains("since")) editor.putLong("since", now)
+        if (!preferences.contains(mediaPermissionAvailableKey)) {
+            // An older installation has no trustworthy permission boundary. Do
+            // not turn its existing MediaStore backlog into "new" screenshots.
+            if (preferences.contains("since")) editor.putLong("since", maxOf(since(context), now))
+            editor.putBoolean(mediaPermissionAvailableKey, mediaGranted(context))
+        }
+        editor.commit()
     }
 
     fun since(context: Context): Long = preferences(context).getLong("since", 0L)
@@ -55,6 +65,23 @@ internal object ScreenshotCaptureState {
 
     fun mediaGranted(context: Context): Boolean =
         ContextCompat.checkSelfPermission(context, mediaPermission()) == PackageManager.PERMISSION_GRANTED
+
+    /**
+     * Records permission availability and starts a fresh screenshot window when
+     * access returns. Screenshots created while photo access was denied must
+     * never be imported after a later grant.
+     */
+    fun reconcileMediaPermission(context: Context, now: Long = System.currentTimeMillis()): Boolean {
+        val preferences = preferences(context)
+        val granted = mediaGranted(context)
+        val observed = preferences.contains(mediaPermissionAvailableKey)
+        val wasGranted = preferences.getBoolean(mediaPermissionAvailableKey, false)
+        if (observed && granted == wasGranted) return granted
+        val editor = preferences.edit().putBoolean(mediaPermissionAvailableKey, granted)
+        if (granted) editor.putLong("since", maxOf(since(context), now))
+        editor.commit()
+        return granted
+    }
 
     fun asMap(context: Context): Map<String, Boolean> = mapOf(
         "enabled" to enabled(context),

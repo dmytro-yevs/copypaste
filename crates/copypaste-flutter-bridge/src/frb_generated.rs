@@ -2436,11 +2436,14 @@ impl SseDecode for crate::api::CaptureState {
         let mut var_running = <bool>::sse_decode(deserializer);
         let mut var_paused = <bool>::sse_decode(deserializer);
         let mut var_privateModeEpoch = <u64>::sse_decode(deserializer);
+        let mut var_settingsHealth =
+            <Option<crate::api::RuntimeSettingsHealth>>::sse_decode(deserializer);
         return crate::api::CaptureState {
             sync_status: var_syncStatus,
             running: var_running,
             paused: var_paused,
             private_mode_epoch: var_privateModeEpoch,
+            settings_health: var_settingsHealth,
         };
     }
 }
@@ -3208,6 +3211,19 @@ impl SseDecode for Option<i64> {
     }
 }
 
+impl SseDecode for Option<crate::api::RuntimeSettingsHealth> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::RuntimeSettingsHealth>::sse_decode(
+                deserializer,
+            ));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<crate::api::RuntimeSyncStatus> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3384,6 +3400,18 @@ impl SseDecode for crate::api::RuntimeSettingsData {
             notify_on_copy: var_notifyOnCopy,
             notification_preview: var_notificationPreview,
             sound_on_copy: var_soundOnCopy,
+        };
+    }
+}
+
+impl SseDecode for crate::api::RuntimeSettingsHealth {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_recordUnreadable = <bool>::sse_decode(deserializer);
+        let mut var_unreadableFields = <Vec<String>>::sse_decode(deserializer);
+        return crate::api::RuntimeSettingsHealth {
+            record_unreadable: var_recordUnreadable,
+            unreadable_fields: var_unreadableFields,
         };
     }
 }
@@ -3641,6 +3669,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::CaptureState {
             self.running.into_into_dart().into_dart(),
             self.paused.into_into_dart().into_dart(),
             self.private_mode_epoch.into_into_dart().into_dart(),
+            self.settings_health.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4354,6 +4383,27 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::RuntimeSettingsData>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::RuntimeSettingsHealth {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.record_unreadable.into_into_dart().into_dart(),
+            self.unreadable_fields.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::RuntimeSettingsHealth
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::RuntimeSettingsHealth>
+    for crate::api::RuntimeSettingsHealth
+{
+    fn into_into_dart(self) -> crate::api::RuntimeSettingsHealth {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::RuntimeSettingsPatch {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -4525,6 +4575,7 @@ impl SseEncode for crate::api::CaptureState {
         <bool>::sse_encode(self.running, serializer);
         <bool>::sse_encode(self.paused, serializer);
         <u64>::sse_encode(self.private_mode_epoch, serializer);
+        <Option<crate::api::RuntimeSettingsHealth>>::sse_encode(self.settings_health, serializer);
     }
 }
 
@@ -5139,6 +5190,16 @@ impl SseEncode for Option<i64> {
     }
 }
 
+impl SseEncode for Option<crate::api::RuntimeSettingsHealth> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::RuntimeSettingsHealth>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<crate::api::RuntimeSyncStatus> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -5258,6 +5319,14 @@ impl SseEncode for crate::api::RuntimeSettingsData {
         <bool>::sse_encode(self.notify_on_copy, serializer);
         <bool>::sse_encode(self.notification_preview, serializer);
         <bool>::sse_encode(self.sound_on_copy, serializer);
+    }
+}
+
+impl SseEncode for crate::api::RuntimeSettingsHealth {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.record_unreadable, serializer);
+        <Vec<String>>::sse_encode(self.unreadable_fields, serializer);
     }
 }
 

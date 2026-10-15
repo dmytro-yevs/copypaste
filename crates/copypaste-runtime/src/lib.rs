@@ -49,6 +49,16 @@ pub struct Runtime {
     instant_clipboard: Arc<copypaste_core::sync::InstantClipboard>,
 }
 
+/// Outcome for one SMS inbox row. Android advances its durable inbox cursor
+/// only for terminal outcomes, so a temporary host or storage failure leaves
+/// the row available for the next existing inbox scan.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SmsCaptureOutcome {
+    Captured,
+    Ignored,
+    Retry,
+}
+
 pub trait ClipboardWriter: Send + Sync {
     fn write(
         &self,
@@ -730,27 +740,42 @@ impl Runtime {
         Ok(())
     }
 
-    pub fn has_sms_module(&self) -> bool {
-        self.modules.has_sms_handler().unwrap_or(false)
+    pub fn has_sms_module(&self) -> Result<bool, copypaste_modules::ModuleError> {
+        self.modules.has_sms_handler()
     }
 
     /// The SMS body is invocation-only. Only the recognized code enters the
     /// encrypted History and the normal sync source. Publication holds the
     /// same admission scope used by native clipboard capture.
-    pub fn capture_sms_operation(&self, token: u64, text: &str) -> Result<bool, RuntimeError> {
-        let mut read = Some(
-            self.capture_admission()
-                .acquire(token, CaptureScope::Read)
-                .ok_or(RuntimeError::CaptureRefused)?,
-        );
-        self.modules
-            .dispatch_sms(text, |code| {
-                drop(read.take());
-                self.publish_sms_code(token, code)
-                    .map_err(|_| copypaste_modules::ModuleError::State)?;
-                Ok(())
-            })
-            .map_err(|_| RuntimeError::Capture)
+    pub fn capture_sms_operation(&self, token: u64, text: &str) -> SmsCaptureOutcome {
+        let mut read = self.capture_admission().acquire(token, CaptureScope::Read);
+        if read.is_none() {
+            return if self.sms_capture_paused() {
+                SmsCaptureOutcome::Ignored
+            } else {
+                SmsCaptureOutcome::Retry
+            };
+        }
+        match self.modules.dispatch_sms(text, |code| {
+            drop(read.take());
+            self.publish_sms_code(token, code)
+                .map_err(|_| copypaste_modules::ModuleError::State)?;
+            Ok(())
+        }) {
+            Ok(true) => SmsCaptureOutcome::Captured,
+            // No unique authentication code is a terminal result. Disabled
+            // handlers also arrive here after the module lifecycle closes.
+            Ok(false) => SmsCaptureOutcome::Ignored,
+            Err(_) if self.sms_capture_paused() => SmsCaptureOutcome::Ignored,
+            Err(_) => SmsCaptureOutcome::Retry,
+        }
+    }
+
+    /// SMS monitoring deliberately discards messages received while private
+    /// mode is on. Other admission failures are transient and must be retried.
+    #[must_use]
+    pub fn sms_capture_paused(&self) -> bool {
+        self.settings.config().private_mode
     }
 
     fn publish_sms_code(&self, token: u64, code: &str) -> Result<(), RuntimeError> {
@@ -2247,15 +2272,18 @@ mod tests {
             .capture_admission()
             .begin(host, Arc::new(|| {}))
             .unwrap();
-        assert!(!runtime
-            .capture_sms_operation(token, "Your code is 007123")
-            .unwrap());
+        assert_eq!(
+            runtime.capture_sms_operation(token, "Your code is 007123"),
+            SmsCaptureOutcome::Ignored
+        );
         assert_eq!(runtime.store.count().unwrap(), 0);
-        let transition = runtime.capture_admission().transition().unwrap();
-        let mut paused = runtime.settings.config();
-        paused.private_mode = true;
-        transition.publish(paused).unwrap();
-        drop(transition);
+        runtime
+            .settings
+            .apply(&copypaste_ipc::ConfigPatch {
+                private_mode: Some(true),
+                ..Default::default()
+            })
+            .unwrap();
         assert!(runtime.publish_sms_code(token, "007123").is_err());
         assert!(runtime
             .capture_admission()
@@ -2263,6 +2291,37 @@ mod tests {
             .is_none());
         assert!(clipboard.0.lock().unwrap().is_empty());
         assert_eq!(runtime.store.count().unwrap(), 0);
+        runtime.capture_admission().revoke_host(host).unwrap();
+    }
+
+    #[test]
+    fn sms_capture_retries_operational_refusal_but_discards_private_mode_messages() {
+        let (runtime, _dir) = fixture();
+        assert_eq!(
+            runtime.capture_sms_operation(999, "Your code is 007123"),
+            SmsCaptureOutcome::Retry
+        );
+
+        let host = runtime
+            .capture_admission()
+            .open_host(CaptureKind::ModuleEvent)
+            .unwrap();
+        let token = runtime
+            .capture_admission()
+            .begin(host, Arc::new(|| {}))
+            .unwrap();
+        runtime
+            .settings
+            .apply(&copypaste_ipc::ConfigPatch {
+                private_mode: Some(true),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(
+            runtime.capture_sms_operation(token, "Your code is 007123"),
+            SmsCaptureOutcome::Ignored
+        );
         runtime.capture_admission().revoke_host(host).unwrap();
     }
 

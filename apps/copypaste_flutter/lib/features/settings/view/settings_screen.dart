@@ -942,9 +942,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 style: AppTheme.actionButtonStyle(
                   const ButtonStyle.secondary(),
                 ),
-                onPressed: widget.controller.busy
-                    ? null
-                    : widget.controller.exportTextHistory,
+                onPressed: widget.controller.busy ? null : _exportTextHistory,
                 leading: const Icon(LucideIcons.fileOutput),
                 child: const Text('Export'),
               ),
@@ -1496,6 +1494,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
     if (confirmed == true) await widget.controller.restoreBackup();
+  }
+
+  Future<void> _exportTextHistory() async {
+    final result = await widget.controller.exportTextHistory();
+    if (!mounted || result == null) return;
+    if (result.skippedUndecryptable == 0) {
+      return;
+    }
+    final omissions = <String>[
+      if (result.skippedNonText > 0)
+        '${result.skippedNonText} non-text ${result.skippedNonText == 1 ? 'clip was' : 'clips were'} excluded',
+      if (result.skippedUndecryptable > 0)
+        '${result.skippedUndecryptable} text ${result.skippedUndecryptable == 1 ? 'clip' : 'clips'} could not be read',
+    ];
+    AppToast.show(
+      context,
+      title: 'Text export is incomplete',
+      message:
+          '${result.exported} text ${result.exported == 1 ? 'clip was' : 'clips were'} saved; ${omissions.join(' and ')}.',
+    );
   }
 
   String _formatQuota(int bytes) {
