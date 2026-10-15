@@ -241,7 +241,7 @@ def invoke_menu_item(environment: dict[str, str], service: str, item_id: int) ->
 def x11_window_for_pid(environment: dict[str, str], gui_pid: int) -> str:
     result = require_ok(
         run(
-            ["xdotool", "search", "--onlyvisible", "--pid", str(gui_pid), "--name", COPYPASTE_TITLE],
+            ["xdotool", "search", "--onlyvisible", "--all", "--pid", str(gui_pid), "--name", f"^{re.escape(COPYPASTE_TITLE)}$"],
             environment=environment,
         ),
         "find CopyPaste X11 window",

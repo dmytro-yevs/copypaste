@@ -178,7 +178,6 @@ def desktop_acceptance_receipt(path, *, desktop, session, gui_pid):
                         and isinstance(window["id"], str) and re.fullmatch(r"[1-9][0-9]*", window["id"])
                         and window["hide_show"] == "dbusmenu_open")
     tray = value["tray"]
-    window = value["window"]
     notification = value["notification"]
     history = value["history"]
     commands = value["commands"]
