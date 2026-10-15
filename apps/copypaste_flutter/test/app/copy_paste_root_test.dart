@@ -16,6 +16,7 @@ import 'package:copypaste_flutter/features/onboarding/repository/android_onboard
 import 'package:copypaste_flutter/features/onboarding/repository/macos_onboarding_store.dart';
 import 'package:copypaste_flutter/platform/android/android_capture_setup_gateway.dart';
 import 'package:copypaste_flutter/platform/desktop/desktop_window_controller.dart';
+import 'package:copypaste_flutter/platform/desktop/flutter_desktop_window_host.dart';
 import 'package:copypaste_flutter/platform/macos/macos_setup_gateway.dart';
 import 'package:copypaste_flutter/platform/permissions/linux_integration.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -24,7 +25,7 @@ import 'package:window_manager/window_manager.dart';
 
 void main() {
   testWidgets(
-    'hidden timeout unloads screens and decoded images, then restores navigation',
+    'hidden timeout unloads screens and images, then native focus restores navigation',
     (tester) async {
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       addTearDown(
@@ -49,6 +50,9 @@ void main() {
         ),
       );
       await desktopWindow.initialize();
+      final nativeEvents = FlutterDesktopWindowHost()
+        ..setVisibilityChangedHandler(host.visibilityHandler);
+      addTearDown(() => nativeEvents.setVisibilityChangedHandler(null));
       await host.requestSettings();
       await tester.pumpAndSettle();
       expect(find.text('Settings runtime is unavailable'), findsOneWidget);
@@ -68,7 +72,7 @@ void main() {
       addTearDown(cache.clear);
       final cachedBytes = cache.currentSizeBytes;
       expect(cachedBytes, greaterThan(0));
-      host.visibilityHandler!(false);
+      nativeEvents.onWindowEvent('hide');
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
       await tester.pump(const Duration(seconds: 59));
       expect(find.byType(CopyPasteApp), findsOneWidget);
@@ -85,8 +89,8 @@ void main() {
       debugPrint(
         'Hidden UI decoded image cache: $cachedBytes bytes -> ${cache.currentSizeBytes} bytes',
       );
+      nativeEvents.onWindowFocus();
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-      await host.requestSettings();
       await tester.pumpAndSettle();
       expect(find.text('Settings runtime is unavailable'), findsOneWidget);
       expect(host.disposeCalls, 0);

@@ -1,7 +1,9 @@
 > Current stable release scope: x86_64, GNOME 46, X11 on Ubuntu 24.04.
 > Every AppImage and Debian artifact must pass the complete installed-product
 > scenario. ARM64, KDE, Wayland, and RPM implementation is retained for
-> development but does not qualify or ship in this release.
+> development outside stable desktop qualification. Releases may include a
+> clearly labeled experimental RPM after the separate Fedora installation
+> gate passes; this does not establish RPM desktop parity.
 
 # Linux native qualification contract
 

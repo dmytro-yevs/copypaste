@@ -62,6 +62,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - run: ./scripts/ci/install-postgresql-server.sh
       - run: python3 -m unittest scripts/test_release_safety.py
+      - run: python3 -m unittest discover -s scripts/release/tests -p 'test_linux_rpm_candidate.py'
       - run: python3 -m unittest discover -s scripts/modules/tests -p 'test_*.py'
       - run: cargo +1.96 test --workspace --locked
       - name: SMS module recognition contracts
@@ -373,9 +374,15 @@ jobs:
             --maximum 2.39 \
             --output "dist/CopyPaste-v$version-linux-${{ matrix.architecture }}.runtime-baseline.json"
           scripts/release/build-linux-packages.sh "$version" "${{ matrix.architecture }}" --release-scope
-          for extension in AppImage deb; do
+          for extension in AppImage deb rpm; do
             test -s "dist/CopyPaste-v$version-linux-${{ matrix.architecture }}.$extension"
           done
+      - name: Install and verify the exact RPM preview on Fedora
+        run: |
+          set -euo pipefail
+          version="$(awk '/^version:[[:space:]]*/ {print $2; exit}' apps/copypaste_flutter/pubspec.yaml)"
+          version="${version%%+*}"
+          scripts/release/test-linux-rpm.sh "dist/CopyPaste-v$version-linux-${{ matrix.architecture }}.rpm" "$version"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: linux-pr-release-candidate-${{ matrix.architecture }}
@@ -383,6 +390,7 @@ jobs:
           path: |
             dist/CopyPaste-v*-linux-${{ matrix.architecture }}.AppImage
             dist/CopyPaste-v*-linux-${{ matrix.architecture }}.deb
+            dist/CopyPaste-v*-linux-${{ matrix.architecture }}.rpm
             dist/CopyPaste-v*-linux-${{ matrix.architecture }}.runtime-baseline.json
 
   linux-package-fixtures:
@@ -398,4 +406,7 @@ jobs:
       - name: Build and extract every Linux package format
         env:
           COPYPASTE_LINUX_PACKAGE_TEST_ARCHITECTURES: ${{ matrix.architecture }}
+          COPYPASTE_LINUX_PACKAGE_TEST_OUTPUT: ${{ runner.temp }}/linux-package-fixtures
         run: scripts/release/test-linux-packages.sh
+      - name: Install and remove the RPM fixture through Fedora DNF
+        run: scripts/release/test-linux-rpm.sh "$RUNNER_TEMP/linux-package-fixtures/CopyPaste-v1.2.3-linux-x86_64.rpm" 1.2.3
