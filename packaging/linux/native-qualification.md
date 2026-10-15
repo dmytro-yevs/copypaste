@@ -18,8 +18,9 @@ Dispatch the workflow from the same immutable commit as the current production
 release run. Supply the current numeric run ID and, for regular releases, the
 prior numeric run ID:
 
-* `artifact_run_id`: the successful current `Production release` run containing
-  `production-linux-x86_64`.
+* `artifact_run_id`: the completed current `Production release` staging run
+  containing `production-linux-x86_64`, with successful preflight and Linux build
+  jobs. Its evidence gate remains closed until native qualification exists.
 * `previous_artifact_run_id`: a successful earlier `Production release` run
   containing the released x86_64 packages, required for real upgrade scenarios.
 
@@ -41,6 +42,18 @@ Dispatch it without `previous_artifact_run_id`; it produces the explicit
 `first_install_baseline` receipt with `clean_install_baseline`, never an
 invented upgrade result. That signed receipt is the valid upgrade baseline for
 the following release, which must use `prior_release` and execute upgrades.
+
+When dispatching the final production workflow, supply `linux_artifact_run_id`
+and `linux_evidence_run_id`, plus `previous_linux_artifact_run_id` set to the
+same prior run used by native qualification. The production gate authenticates
+that prior source, downloads its exact packages, and rechecks upgrade evidence
+against their bytes. Omitting the prior source cannot qualify `prior_release`
+evidence.
+
+Build the standalone compositor runtime before staging an application release.
+Pass its completed run ID as `compositor_runtime_run_id` to the staging,
+native qualification, and final production workflows. All three must consume
+the same producer bytes; separate builds at the same commit are insufficient.
 
 ## Required matrix and scenarios
 
