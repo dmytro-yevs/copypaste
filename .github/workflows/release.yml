@@ -77,7 +77,7 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/current-artifacts.json"
           commit="$(jq -r '.head_sha' "$RUNNER_TEMP/current-run.json")"
           [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
-          [[ "a14733467e5506bf3e980452293c8a621b095a54" == "$commit" ]] || {
+          [[ "5a33c8c3b3ca2a5d2163a93505e27ea80ee00cf9" == "$commit" ]] || {
             echo "ERROR: diagnostics require the frozen signed producer commit" >&2
             exit 1
           }

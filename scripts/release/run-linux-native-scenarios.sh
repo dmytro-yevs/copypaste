@@ -381,11 +381,18 @@ if [[ "$FIRST_INSTALL_BASELINE" == false ]]; then
   native_driver_args+=(--qualification-root "$native_profile")
 fi
 python3 "$ROOT/scripts/release/linux-native-fixture-driver.py" "${args[@]}" "${appimage_driver_args[@]}"
-# Diagnostic-only clean input boundary between package runtimes.
-python3 "$ROOT/scripts/release/provision-linux-v4l2loopback.py" cleanup --state "$COPYPASTE_QUALIFICATION_V4L2_STATE"
-reset_environment="$(mktemp)"
-COPYPASTE_QUALIFICATION_HEADLESS=1 python3 "$ROOT/scripts/release/provision-linux-v4l2loopback.py" provision --state "$COPYPASTE_QUALIFICATION_V4L2_STATE" --environment "$reset_environment"
-rm "$reset_environment"
+if [[ -n "${COPYPASTE_QUALIFICATION_V4L2_STATE:-}" ]]; then
+  # V4L2 loopback retains negotiated capture state after a session. The next
+  # installed format needs a clean job-owned input, after all prior users exit.
+  camera_environment="$(mktemp)"
+  if ! COPYPASTE_QUALIFICATION_HEADLESS=1 python3 "$ROOT/scripts/release/provision-linux-v4l2loopback.py" reset \
+    --state "$COPYPASTE_QUALIFICATION_V4L2_STATE" --environment "$camera_environment" >"$camera_environment.log" 2>&1; then
+    cat "$camera_environment.log" >&2
+    rm "$camera_environment" "$camera_environment.log"
+    exit 1
+  fi
+  rm "$camera_environment" "$camera_environment.log"
+fi
 python3 "$ROOT/scripts/release/linux-native-fixture-driver.py" "${args[@]}" "${native_driver_args[@]}"
 
 if [[ "$FIRST_INSTALL_BASELINE" == false ]]; then
