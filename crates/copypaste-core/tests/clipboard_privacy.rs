@@ -36,6 +36,123 @@ fn record(
     .into_item()
 }
 
+fn legacy_record(
+    store: &Store,
+    keys: &Keyring,
+    text: &str,
+    metadata: &str,
+) -> copypaste_core::StoredItem {
+    let id = "legacy-email";
+    let (nonce, content_ciphertext) =
+        copypaste_core::encrypt(text.as_bytes(), &keys.item_key(), id).unwrap();
+    store
+        .insert(copypaste_core::NewItem {
+            id: id.into(),
+            nonce,
+            content_ciphertext,
+            content_type: "text".into(),
+            content_hash: copypaste_core::compute_content_hash(text.as_bytes()),
+            search_text: None,
+            created_at: 1000,
+            app_bundle_id: None,
+            app_name: None,
+            payload_metadata: Some(metadata.into()),
+        })
+        .unwrap()
+}
+
+#[test]
+fn unrelated_or_unreadable_metadata_does_not_classify_an_email_as_secret() {
+    let keys = Keyring::from_secret(&[95; 32]);
+    for metadata in [
+        "unrecognized old metadata",
+        r#"{"legacy_private":true}"#,
+        r#"{"source_app_icon":{"png_base64":"broken","width":1,"height":1}}"#,
+    ] {
+        let store = Store::open_in_memory(&keys.db_key()).unwrap();
+        let item = legacy_record(&store, &keys, "person.99@example.com", metadata);
+        assert!(item.clipboard_privacy().is_empty(), "{metadata}");
+        assert!(store.payload_metadata_for_sync(&item).unwrap().is_none());
+    }
+}
+
+#[test]
+fn recopy_repairs_a_legacy_emails_index_without_changing_its_identity_or_pin() {
+    let keys = Keyring::from_secret(&[96; 32]);
+    let store = Store::open_in_memory(&keys.db_key()).unwrap();
+    let text = "person.99@example.com";
+    let old = legacy_record(&store, &keys, text, "unrecognized old metadata");
+    store.set_pinned(&old.id, true).unwrap();
+    let old = store.get(&old.id).unwrap().unwrap();
+    assert!(store.search(text, 10).unwrap().is_empty());
+
+    let recopied = record(&store, &keys, text, 2000, false);
+    assert_eq!(recopied.id, old.id);
+    assert_eq!(recopied.content_ciphertext, old.content_ciphertext);
+    assert_eq!(recopied.nonce, old.nonce);
+    assert!(recopied.pinned);
+    assert_eq!(recopied.pin_order, old.pin_order);
+    assert_eq!(recopied.pin_updated_at, old.pin_updated_at);
+    assert!(recopied.clipboard_privacy().is_empty());
+    assert!(recopied.payload_metadata.is_none());
+    assert_eq!(store.search(text, 10).unwrap()[0].id, old.id);
+    assert_eq!(
+        store.semantic_work("model:test").unwrap().unwrap().text,
+        text
+    );
+    assert_eq!(store.count().unwrap(), 1);
+}
+
+#[test]
+fn an_explicit_secret_flag_survives_invalid_optional_metadata() {
+    let keys = Keyring::from_secret(&[97; 32]);
+    let store = Store::open_in_memory(&keys.db_key()).unwrap();
+    let text = "synthetic explicit secret";
+    let old = legacy_record(
+        &store,
+        &keys,
+        text,
+        r#"{"privacy":{"secret":true},"source_app_icon":{"png_base64":"broken","width":1,"height":1}}"#,
+    );
+    assert!(old.clipboard_privacy().secret);
+    let receiver_keys = Keyring::from_secret(&[98; 32]);
+    let receiver = Store::open_in_memory(&receiver_keys.db_key()).unwrap();
+    let sync_metadata = store.payload_metadata_for_sync(&old).unwrap();
+    let incoming = RemoteVersion {
+        item_id: &old.id,
+        content: text,
+        binary_content: None,
+        payload_metadata: sync_metadata.as_deref(),
+        content_type: "text",
+        created_at: old.created_at,
+        deleted: false,
+        content_hash: None,
+        origin_device_id: "sender",
+        app_bundle_id: None,
+        app_name: None,
+    };
+    assert!(apply_remote_version(&receiver, &receiver_keys, "receiver", &incoming).unwrap());
+    assert!(
+        receiver
+            .get(&old.id)
+            .unwrap()
+            .unwrap()
+            .clipboard_privacy()
+            .secret
+    );
+    assert!(receiver.search(text, 10).unwrap().is_empty());
+    let recopied = record(&store, &keys, text, 2000, false);
+    assert!(recopied.clipboard_privacy().secret);
+    assert!(store.search(text, 10).unwrap().is_empty());
+    let metadata = store.payload_metadata_for_sync(&recopied).unwrap().unwrap();
+    assert!(
+        PayloadMetadata::from_json(&metadata, "text")
+            .unwrap()
+            .privacy
+            .secret
+    );
+}
+
 #[test]
 fn secret_dedup_upgrades_remove_indexes_and_never_declassify() {
     let keys = Keyring::from_secret(&[91; 32]);
@@ -274,13 +391,13 @@ async fn confidential_and_legacy_text_sync_through_encrypted_peers_without_refus
         (
             "legacy",
             r#"{"legacy_private":true}"#.into(),
-            private,
+            ClipboardPrivacy::default(),
             false,
         ),
         (
             "malformed",
             "unrecognized old metadata".into(),
-            private,
+            ClipboardPrivacy::default(),
             false,
         ),
     ];
@@ -327,15 +444,17 @@ async fn confidential_and_legacy_text_sync_through_encrypted_peers_without_refus
                 clear.as_slice(),
                 format!("synthetic {id} record").as_bytes()
             );
-            let metadata = target
-                .store
-                .payload_metadata_for_sync(&row)
-                .unwrap()
-                .unwrap();
-            let metadata = PayloadMetadata::from_json(&metadata, "text").unwrap();
-            assert_eq!(metadata.source_app_icon.is_some(), *has_icon);
+            let metadata = target.store.payload_metadata_for_sync(&row).unwrap();
+            if let Some(metadata) = metadata {
+                let metadata = PayloadMetadata::from_json(&metadata, "text").unwrap();
+                assert_eq!(metadata.source_app_icon.is_some(), *has_icon);
+            } else {
+                assert!(privacy.is_empty() && !has_icon);
+            }
             if privacy.secret {
                 assert!(target.store.search(id, 10).unwrap().is_empty());
+            } else {
+                assert_eq!(target.store.search(id, 10).unwrap()[0].id, *id);
             }
         }
         assert_eq!(

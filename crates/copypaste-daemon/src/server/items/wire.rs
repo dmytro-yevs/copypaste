@@ -6,6 +6,47 @@ use tracing::warn;
 
 use crate::AppState;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn email_previews_require_an_explicit_secret_hint_to_hide_content() {
+        let (state, _dir) = crate::testutil::test_state("email-preview");
+        let text = "person.99@example.com";
+        let id = crate::testutil::add(&state, text);
+        let stored = state.store.get(&id).unwrap().unwrap();
+        for (metadata, secret) in [
+            ("unrecognized old metadata", false),
+            (
+                r#"{"privacy":{"secret":true},"source_app_icon":"broken"}"#,
+                true,
+            ),
+        ] {
+            let mut row = stored.clone();
+            row.payload_metadata = Some(metadata.into());
+            for preview in [true, false] {
+                let (item, _) = to_wire_with(
+                    row.clone(),
+                    &state.meta.here(),
+                    state.meta.device_id(),
+                    &state.keyring.item_key(),
+                    preview,
+                )
+                .unwrap();
+                assert_eq!(item.privacy.secret, secret);
+                if secret && preview {
+                    assert!(item.content.is_empty());
+                    assert!(item.semantic_kind.is_none());
+                } else {
+                    assert_eq!(item.content, text);
+                    assert_eq!(item.semantic_kind, Some(copypaste_ipc::SemanticKind::Email));
+                }
+            }
+        }
+    }
+}
+
 pub(super) fn is_oversized_text(payload: &ClipboardPayload) -> bool {
     matches!(payload, ClipboardPayload::Text(_))
         && payload.byte_len() > copypaste_ipc::MAX_CONTENT_BYTES

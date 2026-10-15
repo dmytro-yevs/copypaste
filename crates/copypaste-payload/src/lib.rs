@@ -149,6 +149,22 @@ pub struct PayloadMetadata {
 }
 
 impl PayloadMetadata {
+    /// Read only explicit producer hints. Invalid artwork, legacy fields, and
+    /// unreadable metadata are not evidence that the clipboard is confidential.
+    /// Optional metadata validation must also never erase a valid privacy hint.
+    #[must_use]
+    pub fn privacy_from_json(value: &str) -> copypaste_ipc::ClipboardPrivacy {
+        if value.len() > copypaste_ipc::MAX_SYNC_METADATA_BYTES {
+            return Default::default();
+        }
+        let value = serde_json::from_str::<serde_json::Value>(value).unwrap_or_default();
+        let privacy = &value["privacy"];
+        copypaste_ipc::ClipboardPrivacy {
+            secret: privacy["secret"].as_bool() == Some(true),
+            transient: privacy["transient"].as_bool() == Some(true),
+        }
+    }
+
     #[must_use]
     pub fn new(
         file: Option<FileMetadata>,
@@ -215,6 +231,33 @@ impl PayloadMetadata {
 mod tests {
     use super::*;
     use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
+    #[test]
+    fn privacy_uses_explicit_boolean_hints_independently_of_optional_metadata() {
+        for value in [
+            "not JSON",
+            "null",
+            "[]",
+            r#"{"legacy_private":true}"#,
+            r#"{"privacy":{"secret":"true","transient":1}}"#,
+            r#"{"source_app_icon":{"png_base64":"broken","width":1,"height":1}}"#,
+        ] {
+            assert!(
+                PayloadMetadata::privacy_from_json(value).is_empty(),
+                "{value}"
+            );
+        }
+        let privacy = PayloadMetadata::privacy_from_json(
+            r#"{"privacy":{"secret":true,"transient":"bad"},"file":{},"future_field":true}"#,
+        );
+        assert!(privacy.secret);
+        assert!(!privacy.transient);
+        let privacy = PayloadMetadata::privacy_from_json(
+            r#"{"privacy":{"secret":false,"transient":true},"source_app_icon":"broken"}"#,
+        );
+        assert!(!privacy.secret);
+        assert!(privacy.transient);
+    }
+
     fn png(width: u32, height: u32) -> Vec<u8> {
         let image = DynamicImage::ImageRgba8(ImageBuffer::<Rgba<u8>, Vec<u8>>::new(width, height));
         let mut bytes = Cursor::new(Vec::new());
