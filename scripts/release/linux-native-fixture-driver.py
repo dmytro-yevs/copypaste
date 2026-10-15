@@ -1526,7 +1526,7 @@ def main():
                 app.terminate()
                 app.wait(timeout=5)
                 app, runtime_socket = start_gui_runtime(
-                    prefix / "copypaste", environment, runtime_dir, prior_sockets,
+                    launcher, environment, runtime_dir, prior_sockets,
                 )
                 cli_environment = {**environment, "COPYPASTE_SOCKET": str(runtime_socket)}
                 restart_items = run([str(cli), "--json", "list", "--limit", "100"], env=cli_environment)
@@ -1548,7 +1548,7 @@ def main():
                     app.terminate()
                     app.wait(timeout=5)
                     app, runtime_socket = start_gui_runtime(
-                        prefix / "copypaste", environment, runtime_dir, prior_sockets,
+                        launcher, environment, runtime_dir, prior_sockets,
                     )
                     cli_environment = {**environment, "COPYPASTE_SOCKET": str(runtime_socket)}
                     wait_for_startup_status(cli, cli_environment, require_native_clipboard=True)
