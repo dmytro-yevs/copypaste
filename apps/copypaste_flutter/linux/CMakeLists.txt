@@ -12,7 +12,8 @@ string(REGEX REPLACE "^version: ([0-9]+\\.[0-9]+\\.[0-9]+).*" "\\1" COPYPASTE_VE
   "${COPYPASTE_VERSION_LINE}")
 
 cmake_policy(SET CMP0063 NEW)
-set(CMAKE_INSTALL_RPATH "$ORIGIN/lib")
+# Shared plugins and the Flutter engine are installed beside one another.
+set(CMAKE_INSTALL_RPATH "$ORIGIN")
 
 if(FLUTTER_TARGET_PLATFORM_SYSROOT)
   set(CMAKE_SYSROOT ${FLUTTER_TARGET_PLATFORM_SYSROOT})
@@ -47,8 +48,13 @@ add_subdirectory("runner")
 add_dependencies(${BINARY_NAME} flutter_assemble)
 
 set_target_properties(${BINARY_NAME}
-  PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/intermediates_do_not_run")
+  PROPERTIES
+  INSTALL_RPATH "$ORIGIN/lib"
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/intermediates_do_not_run")
 
+# Linux camera capture uses GStreamer. JNI is needed only by Android APIs;
+# building its optional desktop backend would add an unused system JVM.
+set(CMAKE_DISABLE_FIND_PACKAGE_JNI TRUE)
 include(flutter/generated_plugins.cmake)
 
 set(BUILD_BUNDLE_DIR "${PROJECT_BINARY_DIR}/bundle")

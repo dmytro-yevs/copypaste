@@ -38,13 +38,20 @@ run_architecture() {
         binutils build-essential ca-certificates cpio curl dpkg-dev file rpm xz-utils \
         gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
         libgstreamer1.0-dev libkeybinder-3.0-0 patchelf pkg-config
-      mkdir -p /work/apps/copypaste_flutter/assets/brand
+      mkdir -p /work/apps/copypaste_flutter/assets/brand /work/apps/copypaste_flutter/linux
       cp -a /source/packaging /source/scripts /work/
       cp /source/apps/copypaste_flutter/assets/brand/copypaste.png /work/apps/copypaste_flutter/assets/brand/
+      cp /source/apps/copypaste_flutter/linux/CMakeLists.txt /work/apps/copypaste_flutter/linux/
       cd /work
-      mkdir -p dist/linux-"$ARCHITECTURE"/bundle
-      printf "#include <stdio.h>\nint main(void) { puts(\"%s\"); return 0; }\n" "$VERSION" > /tmp/copypaste-fake.c
-      cc -O2 -o /tmp/copypaste-fake /tmp/copypaste-fake.c
+      mkdir -p dist/linux-"$ARCHITECTURE"/bundle/lib
+      library_rpath="$(python3 -c "import re; from pathlib import Path; print(re.search(r\"set\\(CMAKE_INSTALL_RPATH \\\"([^\\\"]+)\\\"\\)\", Path(\"apps/copypaste_flutter/linux/CMakeLists.txt\").read_text())[1])")"
+      runner_rpath="$(python3 -c "import re; from pathlib import Path; print(re.search(r\"\\bINSTALL_RPATH \\\"([^\\\"]+)\\\"\", Path(\"apps/copypaste_flutter/linux/CMakeLists.txt\").read_text())[1])")"
+      printf "int flutter_fixture(void) { return 0; }\n" > /tmp/copypaste-engine.c
+      cc -shared -fPIC -Wl,-soname,libflutter_linux_gtk.so -o dist/linux-"$ARCHITECTURE"/bundle/lib/libflutter_linux_gtk.so /tmp/copypaste-engine.c
+      printf "extern int flutter_fixture(void); int plugin_fixture(void) { return flutter_fixture(); }\n" > /tmp/copypaste-plugin.c
+      cc -shared -fPIC -Wl,-rpath,"$library_rpath" -o dist/linux-"$ARCHITECTURE"/bundle/lib/libdesktop_drop_plugin.so /tmp/copypaste-plugin.c -Ldist/linux-"$ARCHITECTURE"/bundle/lib -lflutter_linux_gtk
+      printf "#include <stdio.h>\nextern int flutter_fixture(void); int main(void) { puts(\"%s\"); return flutter_fixture(); }\n" "$VERSION" > /tmp/copypaste-fake.c
+      cc -O2 -Wl,-rpath,"$runner_rpath" -o /tmp/copypaste-fake /tmp/copypaste-fake.c -Ldist/linux-"$ARCHITECTURE"/bundle/lib -lflutter_linux_gtk
       install -m 755 /tmp/copypaste-fake dist/linux-"$ARCHITECTURE"/bundle/copypaste
       install -m 755 /tmp/copypaste-fake dist/linux-"$ARCHITECTURE"/bundle/copypaste-daemon
       install -m 755 /tmp/copypaste-fake dist/linux-"$ARCHITECTURE"/bundle/copypaste-cli
