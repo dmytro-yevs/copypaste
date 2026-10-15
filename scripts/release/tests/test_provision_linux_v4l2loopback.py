@@ -15,6 +15,33 @@ SPEC.loader.exec_module(tool)
 
 
 class ProvisionLinuxV4L2Test(unittest.TestCase):
+    def test_reset_checks_headless_scope_before_any_device_mutation(self):
+        with mock.patch.object(tool, "require_ci", side_effect=RuntimeError("headless CI")), \
+             mock.patch.object(tool, "cleanup") as cleanup, \
+             mock.patch.object(tool, "provision") as provision:
+            with self.assertRaisesRegex(RuntimeError, "headless CI"):
+                tool.reset(Path("state"), Path("environment"))
+            cleanup.assert_not_called()
+            provision.assert_not_called()
+
+    def test_reset_does_not_recreate_an_input_when_prior_ownership_or_unload_fails(self):
+        with mock.patch.object(tool, "require_ci"), \
+             mock.patch.object(tool, "cleanup", side_effect=RuntimeError("owned device changed")), \
+             mock.patch.object(tool, "provision") as provision:
+            with self.assertRaisesRegex(RuntimeError, "owned device changed"):
+                tool.reset(Path("state"), Path("environment"))
+            provision.assert_not_called()
+
+    def test_reset_releases_the_exact_prior_device_before_provisioning_the_next(self):
+        calls = []
+        state = Path("state")
+        environment = Path("environment")
+        with mock.patch.object(tool, "require_ci"), \
+             mock.patch.object(tool, "cleanup", side_effect=lambda path, missing: calls.append(("release", path, missing))), \
+             mock.patch.object(tool, "provision", side_effect=lambda path, output: calls.append(("create", path, output))):
+            tool.reset(state, environment)
+        self.assertEqual(calls, [("release", state, False), ("create", state, environment)])
+
     def test_requires_headless_ci(self):
         with mock.patch.dict(os.environ, {"CI": "", "COPYPASTE_QUALIFICATION_HEADLESS": ""}, clear=False):
             with self.assertRaisesRegex(RuntimeError, "headless CI"):
