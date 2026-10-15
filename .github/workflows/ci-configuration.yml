@@ -35,12 +35,10 @@ jobs:
         run: |
           python3 -m pip install -r scripts/ci/requirements.txt
           bash scripts/ci/install-actionlint.sh "$RUNNER_TEMP/ci-tools"
-      - name: Validate workflows and embedded shell
-        run: '"$RUNNER_TEMP/ci-tools/actionlint" -color=false'
+      - name: Validate workflow syntax, embedded shell and CI policy
+        run: python3 scripts/ci/lint-workflows.py --actionlint "$RUNNER_TEMP/ci-tools/actionlint"
       - name: Reject high confidence security findings
         run: zizmor --offline --min-severity high --min-confidence high .github
-      - name: Validate repository CI policy
-        run: python3 scripts/ci/policy.py
       - name: Test policy, selection, metrics and release contracts
         run: |
           python3 -m unittest discover -s scripts/ci/tests -v

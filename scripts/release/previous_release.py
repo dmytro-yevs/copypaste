@@ -8,6 +8,7 @@ import runpy
 import subprocess
 
 from github_inventory import inventory
+from download_artifact import download
 
 
 def version(value):
@@ -84,8 +85,7 @@ def resolve(repository, target, temporary):
         destination = temporary / f"previous-linux-{run['id']}"
         destination.mkdir(parents=True)
         # The source envelope is authenticated before extracting the archive.
-        subprocess.run(["gh", "run", "download", str(run["id"]), "--repo", repository,
-                        "--name", "production-linux-x86_64", "--dir", str(destination)], check=True)
+        download(repository, run["id"], destination, artifact_ids=[matches[0]["id"]], commit=commit)
         receipt = json.loads((destination / "production-receipt.json").read_text())
         # Matching the public GitHub asset digest proves which same-commit build
         # was actually published, without downloading unrelated platform packages.
