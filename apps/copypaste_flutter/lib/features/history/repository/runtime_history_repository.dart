@@ -161,6 +161,12 @@ class RuntimeHistoryRepository implements HistoryRepository {
   }
 
   @override
+  Future<HistoryClip> setSecret(String id, bool secret) async {
+    _ensureActive();
+    return mapDetailClip(await runtime.setClipSecret(id: id, secret: secret));
+  }
+
+  @override
   Future<void> setPinned(String id, bool pinned) async {
     _ensureActive();
     await runtime.setClipPinned(id: id, pinned: pinned);

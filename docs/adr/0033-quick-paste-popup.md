@@ -60,6 +60,16 @@ clip, loads its full content through the History repository, and uses
 11-point metadata text. Expanding, collapsing, and reopening clamp the window
 to its current monitor's work area without changing the paste target.
 
+The inspector exposes the same shared actions as History: copy, plain-text copy,
+pin/unpin, secret/non-secret, delete with confirmation, file download, and image OCR when its module
+is available. Inspector copy keeps the popup open; row and Enter activation keep
+the copy/paste/close behavior. Actions remain outside the scrolling content.
+Pin and delete updates reconcile the focused clip and keyboard shortcuts.
+The popup engine initializes the installed modules and owns its OCR controller.
+Native save sheets on macOS and owned save dialogs on Windows retain the popup
+and paste target until the dialog returns, including cancellation. Android uses
+the same History inspector actions in the main application.
+
 Hovering a clip for 1500 milliseconds opens this same inspector automatically,
 matching Maccy's default preview delay. Leaving the row before the delay cancels
 the pending open. Once open, the inspector stays available and follows the
@@ -87,3 +97,20 @@ synthesis.
 
 Android keeps the same History actions and outcomes without desktop window or
 global-shortcut integration.
+
+
+## Manual secrecy
+
+Both inspectors expose one icon-only eye control to make a clip secret or
+non-secret. An explicit choice is persisted with a timestamp in the encrypted
+payload metadata and travels with the existing item version to paired devices.
+The newest explicit choice takes precedence over producer hints; ties prefer
+secrecy. Recopying old content cannot undo that choice. Content identity and pin
+state remain unchanged. Secret clips leave the full-text and semantic indexes;
+non-secret text returns to full-text search and becomes eligible for semantic
+indexing in the same storage transaction. A failed decrypt leaves the clip secret.
+Receiving a secrecy change does not replace the system clipboard.
+
+Quick Paste's inline spoiler matches one line of its inherited typography,
+including text scaling. Revealing it does not add button padding or change the
+menu row height.

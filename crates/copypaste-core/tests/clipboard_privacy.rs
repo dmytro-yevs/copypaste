@@ -10,6 +10,7 @@ fn record(
     secret: bool,
 ) -> copypaste_core::StoredItem {
     let metadata = secret.then_some(PayloadMetadata {
+        secret_override: None,
         privacy: ClipboardPrivacy {
             secret: true,
             transient: false,
@@ -260,6 +261,7 @@ fn icon_normalization_and_sync_hydration_preserve_classification() {
         .write_to(&mut image, image::ImageFormat::Png)
         .unwrap();
     let metadata = PayloadMetadata {
+        secret_override: None,
         privacy: ClipboardPrivacy {
             secret: true,
             transient: true,

@@ -76,6 +76,7 @@ fn expected(method: &Method) -> Expected {
         | Method::Get { .. }
         | Method::ImagePreview { .. }
         | Method::Delete { .. }
+        | Method::SetSecret { .. }
         | Method::Pin { .. } => Expected::Error(ErrorCode::NotFound),
         Method::PairConfirm { .. } => Expected::Error(ErrorCode::NotReady),
         Method::PairJoin { .. } => Expected::Error(ErrorCode::PairingCode),
@@ -148,6 +149,10 @@ fn cases(root: &Path) -> Vec<Method> {
         },
         Method::DeleteAll { through: None },
         Method::HistoryCeiling,
+        Method::SetSecret {
+            id: "missing".into(),
+            secret: true,
+        },
         Method::Pin {
             id: "missing".into(),
             pinned: true,

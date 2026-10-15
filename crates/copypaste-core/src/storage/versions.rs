@@ -402,6 +402,7 @@ pub(super) fn upsert_in_tx(
             incoming.payload_metadata,
         )?
     };
+    let mut created_at = incoming.created_at;
     if !incoming.deleted {
         let existing: Option<String> = tx
             .query_row(
@@ -411,20 +412,30 @@ pub(super) fn upsert_in_tx(
             )
             .optional()?
             .flatten();
-        let previous = existing
+        let mut previous = existing
+            .as_deref()
+            .and_then(|json| crate::PayloadMetadata::from_json(json, incoming.content_type))
+            .unwrap_or_default();
+        previous.privacy = existing
             .as_deref()
             .map(crate::PayloadMetadata::privacy_from_json)
             .unwrap_or_default();
-        if !previous.is_empty() {
-            let privacy = metadata
-                .as_deref()
-                .map(crate::PayloadMetadata::privacy_from_json)
-                .unwrap_or_default();
-            let mut value = metadata
-                .as_deref()
-                .and_then(|json| crate::PayloadMetadata::from_json(json, incoming.content_type))
-                .unwrap_or_default();
-            value.privacy = privacy.union(previous);
+        let mut value = metadata
+            .as_deref()
+            .and_then(|json| crate::PayloadMetadata::from_json(json, incoming.content_type))
+            .unwrap_or_default();
+        value.privacy = metadata
+            .as_deref()
+            .map(crate::PayloadMetadata::privacy_from_json)
+            .unwrap_or_default();
+        let original = value.clone();
+        let remote_choice = value.secret_override;
+        value.merge_privacy(&previous);
+        if value.secret_override != remote_choice {
+            // Publish the merged choice back to a peer carrying an older hint.
+            created_at = created_at.saturating_add(1);
+        }
+        if value != original {
             metadata = value.to_json(incoming.content_type);
         }
     }
@@ -488,7 +499,7 @@ pub(super) fn upsert_in_tx(
                 pinned,
                 pin_order,
                 pin_updated_at,
-                incoming.created_at,
+                created_at,
                 incoming.deleted,
                 incoming.origin_device_id,
                 incoming.app_bundle_id,

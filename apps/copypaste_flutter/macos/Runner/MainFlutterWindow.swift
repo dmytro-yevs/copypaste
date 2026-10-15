@@ -683,6 +683,8 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
 
   func windowDidResignKey(_ notification: Notification) {
     guard !performingAction else { return }
+    // The file selector transfers key status to an attached save sheet.
+    guard window.attachedSheet == nil else { return }
     if pasteSession.hasPendingPaste && !window.isVisible { return }
     pasteSession.invalidate()
     hide()

@@ -313,14 +313,15 @@ void main() {
       final keys = [
         'history-detail-copy',
         'history-pin-screenshot',
+        'history-detail-secret',
         'history-ocr',
         'history-detail-delete',
       ];
-      await render(520, 1);
+      await render(600, 1);
       expect(find.widgetWithText(Button, 'Copy'), findsOneWidget);
       expect(find.widgetWithText(Button, 'Pin'), findsOneWidget);
       expect(find.widgetWithText(Button, 'Delete'), findsOneWidget);
-      await render(250, 1);
+      await render(340, 1);
       final first = tester.getRect(find.byKey(ValueKey<String>(keys.first)));
       for (final key in keys) {
         final finder = find.byKey(ValueKey<String>(key));
@@ -489,6 +490,10 @@ class _HistoryRepository implements HistoryRepository {
   }) async => HistoryClipPage(items: [clip]);
   @override
   Future<HistoryClip> get(String id) async => clip;
+  @override
+  Future<HistoryClip> setSecret(String id, bool secret) async =>
+      throw UnimplementedError('setSecret');
+
   @override
   Future<void> setPinned(String id, bool pinned) async {
     clip = clip.copyWith(pinned: pinned);

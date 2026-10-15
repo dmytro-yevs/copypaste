@@ -373,6 +373,17 @@ pub(super) fn history_ceiling(state: &AppState, id: u64) -> Response {
     }
 }
 
+pub(super) fn set_secret(state: &AppState, id: u64, item_id: &str, secret: bool) -> Response {
+    match state.store.set_secret(&state.keyring, item_id, secret) {
+        Ok(true) => {
+            state.note_local_change();
+            get(state, id, item_id)
+        }
+        Ok(false) => Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
+        Err(error) => storage_error(id, "set_secret", &error),
+    }
+}
+
 pub(super) fn pin(state: &AppState, id: u64, item_id: &str, pinned: bool) -> Response {
     match state.store.get(item_id) {
         Ok(None) => return Response::err(id, ErrorCode::NotFound, MSG_NOT_FOUND),
@@ -903,6 +914,29 @@ mod tests {
         assert_eq!(page.items[0].id, ranked[0].id);
         assert!(page.next_cursor.is_none());
         assert!(serde_json::to_string(&page).unwrap().len() <= copypaste_ipc::MAX_FRAME_BYTES);
+    }
+
+    #[test]
+    fn secret_choice_returns_updated_content_without_writing_the_clipboard() {
+        let (state, _dir, writes) = crate::testutil::test_state_watching_clipboard("secret-choice");
+        let item = match add(&state, 1, "toggle text").data {
+            Some(ResponseData::Item(item)) => item,
+            _ => panic!("expected item"),
+        };
+        for secret in [true, false] {
+            let response = set_secret(&state, 2, &item.id, secret);
+            assert!(response.ok, "{response:?}");
+            let Some(ResponseData::Item(updated)) = response.data else {
+                panic!("expected item");
+            };
+            assert_eq!(updated.privacy.secret, secret);
+            assert_eq!(updated.content, "toggle text");
+        }
+        assert_eq!(writes.count(), 0);
+        assert_eq!(
+            set_secret(&state, 3, "missing", true).error_code,
+            Some(ErrorCode::NotFound)
+        );
     }
 
     #[test]

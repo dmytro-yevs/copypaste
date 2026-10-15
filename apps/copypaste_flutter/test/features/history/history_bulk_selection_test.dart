@@ -318,6 +318,10 @@ class _BulkRepository implements HistoryRepository {
   }
 
   @override
+  Future<HistoryClip> setSecret(String id, bool secret) async =>
+      throw UnimplementedError('setSecret');
+
+  @override
   Future<void> setPinned(String id, bool pinned) async {
     await mutationPending;
     if (failedPins.contains(id)) throw StateError('offline');

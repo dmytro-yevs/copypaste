@@ -22,7 +22,15 @@ fn refresh_privacy(
     search_text: Option<&str>,
 ) -> rusqlite::Result<()> {
     let previous = item.clipboard_privacy();
-    let combined = previous.union(privacy);
+    let mut combined = previous.union(privacy);
+    if let Some(choice) = item
+        .payload_metadata
+        .as_deref()
+        .and_then(|json| crate::PayloadMetadata::from_json(json, &item.content_type))
+        .and_then(|metadata| metadata.secret_override)
+    {
+        combined.secret = choice.secret;
+    }
     let parsed = item
         .payload_metadata
         .as_deref()
@@ -485,6 +493,7 @@ mod tests {
         let mut candidate = item("not read", T0);
         let icon = source_icon();
         let metadata = crate::PayloadMetadata {
+            secret_override: None,
             privacy: Default::default(),
             file: None,
             source_app_icon: Some(icon.clone()),
