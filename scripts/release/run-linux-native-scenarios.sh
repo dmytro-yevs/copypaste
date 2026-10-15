@@ -384,7 +384,7 @@ python3 "$ROOT/scripts/release/linux-native-fixture-driver.py" "${args[@]}" "${a
 # Diagnostic-only clean input boundary between package runtimes.
 python3 "$ROOT/scripts/release/provision-linux-v4l2loopback.py" cleanup --state "$COPYPASTE_QUALIFICATION_V4L2_STATE"
 reset_environment="$(mktemp)"
-python3 "$ROOT/scripts/release/provision-linux-v4l2loopback.py" provision --state "$COPYPASTE_QUALIFICATION_V4L2_STATE" --environment "$reset_environment"
+COPYPASTE_QUALIFICATION_HEADLESS=1 python3 "$ROOT/scripts/release/provision-linux-v4l2loopback.py" provision --state "$COPYPASTE_QUALIFICATION_V4L2_STATE" --environment "$reset_environment"
 rm "$reset_environment"
 python3 "$ROOT/scripts/release/linux-native-fixture-driver.py" "${args[@]}" "${native_driver_args[@]}"
 
