@@ -858,7 +858,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                                 {"format": native_format, "source_executable": {"path": "/usr/lib/copypaste/copypaste", "sha256": "f" * 64, "size_bytes": 1}, "canary": {"id": "prior-native", "content_sha256": verifier["UPGRADE_CANARY_SHA256"], "executable_sha256": "f" * 64}},
                             ],
                         }
-                        compositor_runtime = {"schema": 1, "producer_run_id": "1", "commit": "a" * 40, "runtime_id": "fixture", "desktop": desktop, "architecture": architecture, "distribution": "ubuntu" if desktop == "GNOME" else "fedora", "format": native_format, "package": {"name": "runtime-package", "sha256": "a" * 64, "size_bytes": 1}, "runtime_receipt": {"name": "runtime-receipt", "sha256": "b" * 64, "size_bytes": 1}}
+                        compositor_runtime = {"schema": 1, "producer_run_id": "1", "commit": "a" * 40, "runtime_id": "fixture", "desktop": desktop, "architecture": architecture, "distribution": {"id": "ubuntu" if desktop == "GNOME" else "fedora", "version": "24.04" if desktop == "GNOME" else "40"}, "format": native_format, "package": {"name": "runtime-package", "sha256": "a" * 64, "size_bytes": 1}, "runtime_receipt": {"name": "runtime-receipt", "sha256": "b" * 64, "size_bytes": 1}}
                         compositor_session = None
                         session_evidence = []
                         if session == "wayland":
@@ -1006,7 +1006,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
             module_artifacts.mkdir()
             module_fixtures.mkdir()
             binding = root / "binding.json"
-            binding.write_text(json.dumps({"schema": 1, "producer_run_id": "1", "commit": "a" * 40, "runtime_id": "fixture", "desktop": "GNOME", "architecture": "x86_64", "distribution": producer["runtime_environment"]()["distribution"], "format": "deb", "package": {"name": "runtime.deb", "sha256": "a" * 64, "size_bytes": 1}, "runtime_receipt": {"name": "runtime.json", "sha256": "b" * 64, "size_bytes": 1}}), encoding="utf-8")
+            binding.write_text(json.dumps({"schema": 1, "producer_run_id": "1", "commit": "a" * 40, "runtime_id": "fixture", "desktop": "GNOME", "architecture": "x86_64", "distribution": {"id": producer["runtime_environment"]()["distribution"], "version": producer["runtime_environment"]()["distribution_version"]}, "format": "deb", "package": {"name": "runtime.deb", "sha256": "a" * 64, "size_bytes": 1}, "runtime_receipt": {"name": "runtime.json", "sha256": "b" * 64, "size_bytes": 1}}), encoding="utf-8")
             driver = root / "driver.py"
             driver_assertions = producer["scenario_assertions"]("prior_release", "wayland")
             module_ipc = []
@@ -1138,7 +1138,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
             module_artifacts.mkdir()
             module_fixtures.mkdir()
             binding = root / "binding.json"
-            binding.write_text(json.dumps({"schema": 1, "producer_run_id": "1", "commit": "a" * 40, "runtime_id": "fixture", "desktop": "GNOME", "architecture": "x86_64", "distribution": producer["runtime_environment"]()["distribution"], "format": "deb", "package": {"name": "runtime.deb", "sha256": "a" * 64, "size_bytes": 1}, "runtime_receipt": {"name": "runtime.json", "sha256": "b" * 64, "size_bytes": 1}}), encoding="utf-8")
+            binding.write_text(json.dumps({"schema": 1, "producer_run_id": "1", "commit": "a" * 40, "runtime_id": "fixture", "desktop": "GNOME", "architecture": "x86_64", "distribution": {"id": producer["runtime_environment"]()["distribution"], "version": producer["runtime_environment"]()["distribution_version"]}, "format": "deb", "package": {"name": "runtime.deb", "sha256": "a" * 64, "size_bytes": 1}, "runtime_receipt": {"name": "runtime.json", "sha256": "b" * 64, "size_bytes": 1}}), encoding="utf-8")
             driver = root / "driver"
             driver.write_text("fixture", encoding="utf-8")
             driver.chmod(0o755)
