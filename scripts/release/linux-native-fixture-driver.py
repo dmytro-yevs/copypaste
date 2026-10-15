@@ -1227,6 +1227,23 @@ def require_camera_qr_scan(prefix, cli, environment, workspace, gui_pid, runtime
             kind="camera_qr_scan_observed", runtime_format=runtime_format,
         )
         emit_result("camera_qr_scan", observed)
+        # End the camera consumer while its owned input producer is still alive.
+        run(['xdotool', 'key', 'Escape'])
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            links = Path(f'/proc/{gui_pid}/fd')
+            held = False
+            for descriptor in links.iterdir():
+                try:
+                    held |= os.readlink(descriptor) == str(device)
+                except OSError:
+                    continue
+            if not held:
+                print('COPYPASTE_CAMERA_DIAGNOSTIC owned camera reader closed before feed shutdown', flush=True)
+                break
+            time.sleep(.05)
+        else:
+            raise RuntimeError('owned GUI camera reader did not close before feed shutdown')
     finally:
         try:
             if pid_file.exists():
