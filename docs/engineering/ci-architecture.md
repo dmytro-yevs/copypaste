@@ -105,7 +105,10 @@ read-only GitHub mirrors. Validation encountered a GitLab Gitaly outage returnin
 HTTP 503; changing the transport preserves the checked commit objects, patches,
 licenses and receipts without retries or weaker source verification.
 
-Rust bridge caches now isolate profiles as well as OS/architecture/toolchain.
+Rust bridge caches share the explicit Rust release profile across Flutter modes,
+while daemon/CLI caches isolate their actual debug/release profiles. Both retain
+OS/architecture/toolchain boundaries; Flutter mode is not a separate Rust bridge
+configuration. Splitting that bridge cache would duplicate identical compilation.
 The portable Rust job includes the separate Supabase/SMS workspaces it actually
 builds. CodeQL reuses SDK/pub dependencies but still traces fresh Swift/C++
 compilation. Compiler caching must never hide those source files from CodeQL.
