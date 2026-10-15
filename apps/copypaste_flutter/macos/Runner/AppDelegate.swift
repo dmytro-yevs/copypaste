@@ -6,7 +6,7 @@ class AppDelegate: FlutterAppDelegate {
   private var pendingPairingURLs: [URL] = []
 
   override func applicationDidFinishLaunching(_ notification: Notification) {
-    super.applicationDidFinishLaunching(notification)
+    // FlutterAppDelegate does not implement this optional delegate callback.
     drainPairingURLs()
   }
 

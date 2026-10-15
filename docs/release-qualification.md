@@ -8,6 +8,8 @@ The shared release contract covers macOS, Android, Windows, and Linux.
 - universal, arm64, and armv7 Android APKs signed by the durable release keystore;
 - an Authenticode-signed current-user Windows NSIS installer;
 - signed Linux AppImage and Debian packages for x86_64.
+- a signed experimental x86_64 RPM, with exact-byte Fedora 44 installation
+  evidence; this package does not claim qualified desktop parity on RPM hosts.
 
 Linux publication requires the exact-artifact GNOME 46 X11 on Ubuntu 24.04
 matrix in [Linux native qualification](../packaging/linux/native-qualification.md).
@@ -86,6 +88,6 @@ self-update, cancellation, and returning to CopyPaste after backgrounding it
 while confirmation is pending. JVM session tests and APK builds do not establish
 that physical-device acceptance.
 
-ARM64, KDE, Wayland, and RPM are excluded from stable Linux qualification.
+ARM64, KDE, Wayland, and RPM desktop parity are excluded from stable Linux qualification.
 Their implementation and opt-in checks remain in `linux-experimental.yml`.
 Optional Linux module publication follows the same x86_64 release scope.

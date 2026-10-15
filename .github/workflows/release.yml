@@ -271,6 +271,9 @@ jobs:
           scripts/release/build-cli-tarball.sh "${{ needs.preflight.outputs.version }}" arm64 --reuse-build
       - name: Install and run exact macOS artifact
         run: scripts/release/smoke-macos-production.sh "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-macos-arm64.dmg" "${{ needs.preflight.outputs.version }}"
+      - name: Verify macOS launch pairing regression
+        working-directory: apps/copypaste_flutter
+        run: xcodebuild test -project macos/Runner.xcodeproj -scheme Runner -configuration Debug -destination 'platform=macOS' -only-testing:RunnerTests/AppDelegateLaunchTests -resultBundlePath "$RUNNER_TEMP/launch-pairing.xcresult"
       - name: Write exact-artifact receipt
         run: python3 scripts/release/write-artifact-receipt.py --platform macos --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-macos-arm64.dmg" --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --output dist/production-receipt.json
       - name: Restore keychain state
@@ -508,6 +511,8 @@ jobs:
           scripts/release/build-linux-flutter.sh "${{ needs.preflight.outputs.version }}" "${{ needs.preflight.outputs.build_number }}" "${{ matrix.architecture }}"
           python3 scripts/release/verify-linux-runtime-baseline.py --bundle "dist/linux-${{ matrix.architecture }}/bundle" --architecture "${{ matrix.architecture }}" --maximum 2.39 --output "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.runtime-baseline.json"
           scripts/release/build-linux-packages.sh "${{ needs.preflight.outputs.version }}" "${{ matrix.architecture }}" --release-scope
+      - name: Install and verify the exact RPM preview on Fedora
+        run: scripts/release/test-linux-rpm.sh "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.rpm" "${{ needs.preflight.outputs.version }}" "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.rpm.installation.json"
       - name: Sign Linux updater artifacts and write SHA-256 receipts
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -515,7 +520,7 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x scripts/release/sign-update-artifact.sh
-          for extension in AppImage deb; do
+          for extension in AppImage deb rpm; do
             artifact="dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.$extension"
             scripts/release/sign-update-artifact.sh "$artifact"
             (cd apps/copypaste_flutter && dart --disable-dart-dev --packages=.dart_tool/package_config.json tool/verify_update_signature.dart "../../$artifact" "../../$artifact.sig")
@@ -525,10 +530,11 @@ jobs:
         run: |
           set -euo pipefail
           args=(--platform linux --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --output "dist/production-receipt.json" --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.runtime-baseline.json")
-          for extension in AppImage deb; do
+          for extension in AppImage deb rpm; do
             artifact="dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.$extension"
             args+=(--artifact "$artifact" --artifact "$artifact.sig" --artifact "$artifact.sha256")
           done
+          args+=(--artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.rpm.installation.json")
           python3 scripts/release/write-artifact-receipt.py "${args[@]}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -541,6 +547,10 @@ jobs:
             dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.deb
             dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.deb.sig
             dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.deb.sha256
+            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.rpm
+            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.rpm.sig
+            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.rpm.sha256
+            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.rpm.installation.json
             dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.runtime-baseline.json
             dist/production-receipt.json
 

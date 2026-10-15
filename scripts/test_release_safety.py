@@ -524,6 +524,7 @@ class ReleaseSafetyTest(unittest.TestCase):
         self.assertEqual(contract["desktops"], ["GNOME"])
         self.assertEqual(contract["sessions"], ["x11"])
         self.assertEqual(contract["formats"], ["AppImage", "deb"])
+        self.assertEqual(contract["preview_formats"], ["rpm"])
         self.assertIn("flutter build linux --release", build)
         self.assertIn("copypaste-daemon", build)
         self.assertIn("copypaste-cli", build)
@@ -560,7 +561,14 @@ class ReleaseSafetyTest(unittest.TestCase):
         self.assertIn("KDE", qualification)
         self.assertIn("Wayland", qualification)
         self.assertIn("AppImage deb", workflow)
-        self.assertNotIn("AppImage deb rpm", workflow)
+        self.assertIn("AppImage deb rpm", workflow)
+        linux_job = workflow.split("\n  linux:\n", 1)[1].split("\n  compositor-runtime-build:\n", 1)[0]
+        stable_receipt = linux_job.split("name: Write exact Linux artifact receipt", 1)[1]
+        self.assertIn("for extension in AppImage deb rpm; do", stable_receipt)
+        self.assertIn(".rpm.installation.json", stable_receipt)
+        stable_upload = linux_job.split("name: production-linux-${{ matrix.architecture }}", 1)[1]
+        self.assertIn(".rpm.installation.json", stable_upload)
+        self.assertIn("test-linux-rpm.sh", linux_job)
         native_workflow = (ROOT / ".github/workflows/linux-native-qualification.yml").read_text(encoding="utf-8")
         self.assertIn("linux-native-qualification", native_workflow)
         self.assertNotIn("ubuntu-24.04-arm", native_workflow)
@@ -619,7 +627,7 @@ class ReleaseSafetyTest(unittest.TestCase):
                     (artifacts / name).touch()
                 notes = render(version, "dmytro-yevs/copypaste", artifacts)
                 links = re.findall(r"https://github.com/[^\s)]+", notes)
-                self.assertEqual(len(links), 7)
+                self.assertEqual(len(links), 8)
                 self.assertTrue(all(f"/download/v{version}/" in link for link in links))
                 self.assertNotIn("{{", notes)
                 rows = [line for line in notes.splitlines() if line.startswith("|")]
@@ -629,7 +637,7 @@ class ReleaseSafetyTest(unittest.TestCase):
                 self.assertEqual(rows[2].count("[AppImage](") + rows[2].count("[deb](") + rows[2].count("[rpm]("), 0)
                 self.assertEqual(rows[3].count("[Download]("), 1)
                 self.assertEqual(rows[4].count("[Download]("), 1)
-                self.assertEqual(rows[4].count("[AppImage](") + rows[4].count("[deb](") + rows[4].count("[rpm]("), 2)
+                self.assertEqual(rows[4].count("[AppImage](") + rows[4].count("[deb](") + rows[4].count("[rpm]("), 3)
                 self.assertEqual(rows[5].count("[Download]("), 1)
                 self.assertTrue(all(link.endswith((".dmg", ".apk", ".exe", ".AppImage", ".deb", ".rpm")) for link in links))
                 for suffix in ("", "-arm64", "-armv7"):
@@ -737,7 +745,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                        "--platform", "linux", "--version", "1.2.3", "--commit", "a" * 40,
                        "--run-id", "123", "--output", str(linux / "production-receipt.json")]
             for architecture in ("x86_64",):
-                for extension in ("AppImage", "deb"):
+                for extension in ("AppImage", "deb", "rpm"):
                     package = linux / f"CopyPaste-v1.2.3-linux-{architecture}.{extension}"
                     package.write_bytes(b"qualified package")
                     signature = linux / f"{package.name}.sig"
@@ -749,8 +757,25 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                 baseline = linux / f"CopyPaste-v1.2.3-linux-{architecture}.runtime-baseline.json"
                 baseline.write_text('{"glibc_minimum":"2.39"}')
                 command.extend(["--artifact", str(baseline)])
+            release = runpy.run_path(str(ROOT / "scripts/release/linux_release_contract.py"))
+            rpm = linux / "CopyPaste-v1.2.3-linux-x86_64.rpm"
+            installation = linux / f"{rpm.name}.installation.json"
+            preview = {
+                "schema": 1, "qualification": "package_installation_only", "version": "1.2.3",
+                "architecture": "x86_64", "commit": "a" * 40, "run_id": "123",
+                "artifact": {"name": rpm.name, "bytes": rpm.stat().st_size,
+                             "sha256": hashlib.sha256(rpm.read_bytes()).hexdigest()},
+                "environment": release["CONTRACT"]["rpm_preview_environment"],
+                "assertions": {name: True for name in release["RPM_PREVIEW_ASSERTIONS"]},
+            }
+            installation.write_text(json.dumps(preview))
+            command.extend(["--artifact", str(installation)])
             subprocess.run(command, check=True, capture_output=True)
             verify(root, "1.2.3", "a" * 40, "123", require_linux=True)
+            installation.unlink()
+            with self.assertRaisesRegex(ValueError, "qualified artifact is missing"):
+                verify(root, "1.2.3", "a" * 40, "123", require_linux=True)
+            installation.write_text(json.dumps(preview))
             missing_signature = linux / "CopyPaste-v1.2.3-linux-x86_64.deb.sig"
             missing_signature.unlink()
             with self.assertRaisesRegex(ValueError, "qualified artifact is missing"):

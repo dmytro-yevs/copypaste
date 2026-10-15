@@ -10,6 +10,12 @@ ARCHITECTURES = tuple(CONTRACT["architectures"])
 DESKTOPS = tuple(CONTRACT["desktops"])
 SESSIONS = tuple(CONTRACT["sessions"])
 FORMATS = tuple(CONTRACT["formats"])
+PREVIEW_FORMATS = tuple(CONTRACT.get("preview_formats", ()))
+PUBLISHED_FORMATS = FORMATS + PREVIEW_FORMATS
+RPM_PREVIEW_ASSERTIONS = (
+    "dnf_install", "rpm_verify", "elf_dependencies", "keybinder", "version",
+    "remove", "reinstall",
+)
 BASELINES = json.loads(
     (ROOT / "packaging/linux/compositor-runtime/release-contract.json").read_text(encoding="utf-8")
 )["baselines"]
@@ -21,9 +27,12 @@ for values, allowed in (
     (DESKTOPS, {"GNOME", "KDE"}),
     (SESSIONS, {"x11", "wayland"}),
     (FORMATS, {"AppImage", "deb", "rpm"}),
+    (PREVIEW_FORMATS, {"rpm"}),
 ):
     if len(set(values)) != len(values) or not set(values) <= allowed:
         raise ValueError("Linux release contract contains duplicate or unsupported targets")
+if set(FORMATS) & set(PREVIEW_FORMATS) or (PREVIEW_FORMATS and ARCHITECTURES != ("x86_64",)):
+    raise ValueError("Linux previews require distinct formats and the x86_64 architecture")
 if {(baseline["desktop"], baseline["architecture"]) for baseline in BASELINES} != {
     (desktop, architecture) for desktop in DESKTOPS for architecture in ARCHITECTURES
 }:

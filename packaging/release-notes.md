@@ -1,13 +1,10 @@
-Add Linux release packages and desktop integrations.
+Fix desktop window restoration and add an experimental Linux RPM download.
 
-- Release AppImage and Debian packages for Linux x86_64 on GNOME X11 (Ubuntu 24.04).
-- Qualify GNOME X11 clipboard, source identity, privacy controls, and Quick Paste integration. ARM64, KDE, Wayland, and RPM implementation remains available for development, outside this release.
-- Keep private and confidential values out of History when the X11 clipboard manager restores an older cached selection after its source closes.
-- Use the desktop Secret Service for device keys and preserve encrypted history across restarts and updates.
-- Verify portable AppImage updates and use the authenticated system package manager for Debian updates.
-- Add Linux packages for optional OCR, Semantic Search, and Supabase modules. Keep the legacy signed marketplace catalog available for older clients.
-- Report screenshot blocking as unavailable on Linux.
-- Complete the macOS plugin migration to Swift Package Manager.
+- Restore the desktop interface and navigation when a native window focus event follows a hidden-window memory timeout, including reopening from the macOS Dock.
+- Show the macOS menu bar icon without a redundant CopyPaste text label.
+- Fix macOS launch handling while preserving queued pairing links.
+- Add a signed experimental x86_64 RPM alongside AppImage and Debian downloads. Require Fedora 44 DNF installation, dependency resolution, file integrity, library loading, removal, and reinstallation evidence before publication.
+- Preserve the fully qualified Ubuntu 24.04 GNOME 46 X11 release scope. ARM64, KDE, Wayland, and full RPM desktop parity remain experimental.
 
 Optional modules remain available from Settings. OCR engines and models are not bundled with the application.
 

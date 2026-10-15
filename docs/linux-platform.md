@@ -87,3 +87,21 @@ KDE/KWin, Mutter 47, and broader Linux package validation. Those scenarios
 remain available for development and do not qualify a stable release.
 Optional module publication uses the same released Linux architecture set;
 its package builders and runtime adapters retain ARM64 support.
+
+## Experimental RPM downloads
+
+The x86_64 release package builds also produce an experimental RPM from
+the same Flutter/Rust bundle using `--release-scope`.
+Each RPM must install through DNF on the pinned Fedora 44 container with
+all dependencies resolved, pass RPM file verification and ELF library checks,
+report the product version, and survive removal and reinstallation. This is a
+package installation check, not native desktop qualification.
+
+Production builds sign the RPM and bind its SHA-256 file, signature, runtime
+baseline, and installation evidence in the production receipt. Publication
+rejects missing, changed, stale, or incomplete RPM installation evidence.
+The release download table explicitly labels RPM as experimental. PR builds
+include the unsigned RPM in `linux-pr-release-candidate-x86_64`.
+GNOME/KDE, clipboard, Quick Paste, privacy, modules, synchronization, and upgrades
+must pass the complete native contract on an RPM host before stable desktop
+support can include this format. ARM64 previews are outside this pipeline.

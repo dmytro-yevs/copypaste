@@ -1,9 +1,44 @@
 import 'package:copypaste_flutter/app/ui_memory_controller.dart';
 import 'package:copypaste_flutter/platform/lifecycle/application_visibility.dart';
+import 'package:copypaste_flutter/platform/desktop/flutter_desktop_window_host.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('native focus restores presentation after a hidden timeout', (
+    tester,
+  ) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    final windowVisible = ValueNotifier(true);
+    final host = FlutterDesktopWindowHost()
+      ..setVisibilityChangedHandler((visible) => windowVisible.value = visible);
+    final visibility = ApplicationVisibility(windowVisible: windowVisible);
+    final controller = UiMemoryController(
+      visible: visibility,
+      canSuspend: () => true,
+    );
+    addTearDown(() {
+      host.setVisibilityChangedHandler(null);
+      controller.dispose();
+      visibility.dispose();
+      windowVisible.dispose();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    });
+
+    host.onWindowEvent('hide');
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    await tester.pump(UiMemoryController.hiddenDelay);
+    expect(controller.suspended, isTrue);
+
+    // Dock and native window opens report focus without a plugin show event.
+    host.onWindowFocus();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    expect(controller.suspended, isFalse);
+    host.onWindowBlur();
+    await tester.pump(UiMemoryController.hiddenDelay);
+    expect(controller.suspended, isFalse);
+  });
+
   testWidgets('requires 60 continuous hidden seconds and restores on show', (
     tester,
   ) async {
