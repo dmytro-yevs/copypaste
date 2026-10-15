@@ -413,22 +413,24 @@ pub(super) fn upsert_in_tx(
             .flatten();
         let previous = existing
             .as_deref()
-            .and_then(|json| crate::PayloadMetadata::from_json(json, incoming.content_type))
-            .map(|value| value.privacy)
+            .map(crate::PayloadMetadata::privacy_from_json)
             .unwrap_or_default();
         if !previous.is_empty() {
+            let privacy = metadata
+                .as_deref()
+                .map(crate::PayloadMetadata::privacy_from_json)
+                .unwrap_or_default();
             let mut value = metadata
                 .as_deref()
                 .and_then(|json| crate::PayloadMetadata::from_json(json, incoming.content_type))
                 .unwrap_or_default();
-            value.privacy = value.privacy.union(previous);
+            value.privacy = privacy.union(previous);
             metadata = value.to_json(incoming.content_type);
         }
     }
     let secret = metadata
         .as_deref()
-        .and_then(|json| crate::PayloadMetadata::from_json(json, incoming.content_type))
-        .is_some_and(|value| value.privacy.secret);
+        .is_some_and(|json| crate::PayloadMetadata::privacy_from_json(json).secret);
     if secret {
         tx.execute(
             "DELETE FROM module_search_documents WHERE item_id = ?1",

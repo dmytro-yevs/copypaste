@@ -350,10 +350,11 @@ fn ingest_text(
             app_name: app_name.map(str::to_owned),
             payload_metadata,
         },
+        indexable.then_some(content),
         || -> Result<_, IngestError> {
             let (nonce, ciphertext) =
                 crate::encrypt(content.as_bytes(), &keyring.item_key(), &seal_id)?;
-            Ok((nonce, ciphertext, indexable.then(|| content.to_string())))
+            Ok((nonce, ciphertext))
         },
     )?;
 
