@@ -273,7 +273,7 @@ jobs:
         run: scripts/release/smoke-macos-production.sh "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-macos-arm64.dmg" "${{ needs.preflight.outputs.version }}"
       - name: Verify macOS launch pairing regression
         working-directory: apps/copypaste_flutter
-        run: xcodebuild test -project macos/Runner.xcodeproj -scheme Runner -configuration Debug -destination 'platform=macOS' -only-testing:RunnerTests/AppDelegateLaunchTests -resultBundlePath "$RUNNER_TEMP/launch-pairing.xcresult"
+        run: xcodebuild test -project macos/Runner.xcodeproj -scheme Runner -configuration Debug -destination 'platform=macOS,arch=arm64' -only-testing:RunnerTests/AppDelegateLaunchTests -resultBundlePath "$RUNNER_TEMP/launch-pairing.xcresult"
       - name: Write exact-artifact receipt
         run: python3 scripts/release/write-artifact-receipt.py --platform macos --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-macos-arm64.dmg" --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --output dist/production-receipt.json
       - name: Restore keychain state
