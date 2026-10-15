@@ -86,6 +86,16 @@ class ReleasePipelineTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Missing release"):
                 require({}, build=build, publish=publish)
 
+    def test_external_compositor_source_is_rejected_during_preflight(self):
+        main = load("preflight-sources.py")["main"]
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {"BUILD": "false", "PUBLISH": "false", "GITHUB_REPOSITORY": "owner/repo",
+                           "RELEASE_COMMIT": "a" * 40, "COMPOSITOR_RUNTIME_RUN_ID": "123",
+                           "RUNNER_TEMP": directory, "GITHUB_OUTPUT": str(Path(directory) / "outputs")}
+            with patch.dict(os.environ, environment, clear=True), patch.dict(main.__globals__, {"inventory": lambda *args: {}}):
+                with self.assertRaisesRegex(ValueError, "compositor runtime source"):
+                    main()
+
     def test_partial_module_matrix_can_never_publish(self):
         matrix = runpy.run_path(str(ROOT / "scripts/ci/module-matrix.py"))["matrix"]
         contract = {"schema": 1, "desktop": {"provider": [{"platform": "linux", "architecture": "x86_64"}, {"platform": "macos", "architecture": "aarch64"}]}}
@@ -168,6 +178,20 @@ class ReleasePipelineTest(unittest.TestCase):
             receipt = json.loads((root / "receipt.json").read_text())
             self.assertEqual(receipt["source_run_id"], 456)
             self.assertEqual(receipt["version"], "1.2.3")
+
+    def test_producer_identity_checks_checkout_sha_and_rejects_input_injection(self):
+        from workflow_yaml import read_workflow
+        workflow = read_workflow(ROOT / ".github/workflows/compositor-runtime.yml")
+        step = next(step for step in workflow["jobs"]["build"]["steps"] if step.get("name") == "Check immutable producer identity")
+        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+        environment = {**os.environ, "CI_INPUT_VERSION": "1.2.3", "CI_INPUT_SOURCE_RUN_ID": "123", "GITHUB_SHA": "b" * 40}
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "injected"
+            for supplied, expected in [(commit, 0), ("b" * 40, 1), (f"$(touch {marker})", 1)]:
+                result = subprocess.run(["bash", "-c", step["run"]], cwd=ROOT, text=True, capture_output=True,
+                                        env={**environment, "CI_INPUT_COMMIT": supplied})
+                self.assertEqual(result.returncode, expected)
+            self.assertFalse(marker.exists())
 
     def test_build_identity_is_toolchain_profile_and_flag_sensitive_without_secrets(self):
         metadata = runpy.run_path(str(ROOT / "scripts/ci/build-metadata.py"))["metadata"]
