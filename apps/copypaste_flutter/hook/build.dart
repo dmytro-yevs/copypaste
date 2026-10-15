@@ -6,6 +6,7 @@ void main(List<String> args) async {
   await build(args, (input, output) async {
     await FlutterRustBridgeNativeAssetsBuilder(
       cratePath: '../../crates/copypaste-flutter-bridge',
+      buildMode: FlutterRustBridgeBuildMode.release,
       extraCargoEnvironmentVariables: _cargoEnvironment(),
     ).run(input: input, output: output);
   });
