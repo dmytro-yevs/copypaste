@@ -23,6 +23,7 @@ def metadata(root, environment, rustc, flutter):
     targets = (["armv7", "arm64", "x86_64"] if environment["BUILD_PLATFORM"] == "android"
                else ["aarch64" if environment["RUNNER_ARCH"] == "ARM64" else "x86_64"])
     configuration = {"platform": environment["BUILD_PLATFORM"], "profile": environment["BUILD_PROFILE"],
+                     "rust_bridge_profile": "release",
                      "target_architectures": targets, "inputs": hashes, "flags": flags, "toolchains": toolchains}
     return {"schema": 1, **configuration,
             "fingerprint": hashlib.sha256(json.dumps(configuration, sort_keys=True).encode()).hexdigest(),
