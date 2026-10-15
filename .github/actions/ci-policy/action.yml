@@ -1,0 +1,35 @@
+name: Validate CI engineering contracts
+description: Run pinned workflow/security tools and portable policy/release regression tests on Ubuntu AMD64.
+runs:
+  using: composite
+  steps:
+  - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+    with:
+      python-version: '3.12'
+  - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067
+    with:
+      toolchain: '1.96'
+      components: rustfmt
+  - name: Install pinned CI policy tools
+    run: |
+      python3 -m pip install -r scripts/ci/requirements.txt
+      bash scripts/ci/install-actionlint.sh "$RUNNER_TEMP/ci-tools"
+    shell: bash
+  - name: Validate workflow syntax, embedded shell and CI policy
+    run: python3 scripts/ci/lint-workflows.py --actionlint "$RUNNER_TEMP/ci-tools/actionlint"
+    shell: bash
+  - name: Reject high confidence security findings
+    run: zizmor --offline --min-severity high --min-confidence high .github
+    shell: bash
+  - name: Test policy, selection, metrics and release contracts
+    run: |
+      python3 -m unittest discover -s scripts/ci/tests -v
+      python3 -m unittest scripts/test_release_safety.py scripts/test_linux_qualification_bootstrap.py scripts/test_linux_compositor_runtime.py
+      python3 -m unittest discover -s scripts/release/tests -p 'test_*.py'
+    shell: bash
+  - run: python3 scripts/ci/run-gates.py --check
+    shell: bash
+  - run: python3 scripts/ci/run-gates.py --gate rustfmt
+    shell: bash
+  - run: python3 scripts/check-docs.py
+    shell: bash
