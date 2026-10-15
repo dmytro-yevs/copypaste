@@ -3,6 +3,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 SPEC = importlib.util.spec_from_file_location(
@@ -16,6 +17,32 @@ SPEC.loader.exec_module(driver)
 
 
 class LinuxGuiEntrypointTest(unittest.TestCase):
+    def test_capture_ignores_unrelated_startup_item_until_its_exact_fixture_arrives(self):
+        unrelated = {"id": "startup", "content_type": "text", "content": "retained clipboard"}
+        expected = {"id": "fixture", "content_type": "text", "content": "owned fixture"}
+        with mock.patch.object(driver, "list_items", side_effect=[[unrelated], [expected, unrelated]]), \
+             mock.patch.object(driver, "status", return_value={"item_count": 2}), \
+             mock.patch.object(driver.time, "monotonic", side_effect=[0, 0, 1]), \
+             mock.patch.object(driver.time, "sleep"):
+            self.assertEqual(driver.wait_for_fixture_capture(None, {}, 0, set(), "text", b"owned fixture"), expected)
+
+    def test_requested_fixture_with_missing_source_still_fails_identity_assertion(self):
+        expected = {"id": "fixture", "content_type": "text", "content": "owned fixture"}
+        with mock.patch.object(driver, "list_items", return_value=[expected]), \
+             mock.patch.object(driver, "status", return_value={"item_count": 1}), \
+             mock.patch.object(driver.time, "monotonic", side_effect=[0, 0]):
+            item = driver.wait_for_fixture_capture(None, {}, 0, set(), "text", b"owned fixture")
+        with self.assertRaisesRegex(RuntimeError, "GTK source application id"):
+            driver.require_source_identity(item)
+
+    def test_unrelated_items_do_not_extend_the_existing_capture_deadline(self):
+        unrelated = {"id": "startup", "content_type": "text", "content": "retained clipboard"}
+        with mock.patch.object(driver, "list_items", return_value=[unrelated]), \
+             mock.patch.object(driver.time, "monotonic", side_effect=[0, 0, driver.CAPTURE_TIMEOUT_SECONDS]), \
+             mock.patch.object(driver.time, "sleep"):
+            with self.assertRaisesRegex(RuntimeError, "capture deadline"):
+                driver.wait_for_fixture_capture(None, {}, 0, set(), "text", b"owned fixture")
+
     def prefix(self, root):
         prefix = root / "usr/lib/copypaste"
         prefix.mkdir(parents=True)
