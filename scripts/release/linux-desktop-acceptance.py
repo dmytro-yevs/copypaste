@@ -675,16 +675,12 @@ def qualify(args: argparse.Namespace) -> None:
     open_item = menu_item_id(layout, "Open")
 
     if args.session == "x11":
-        for program in ("xdotool", "xprop", "xwininfo"):
+        for program in ("xdotool", "xprop", "xwininfo", "wmctrl"):
             require_program(program, environment)
         window = x11_window_for_pid(environment, args.gui_pid)
         if x11_map_state(environment, window) != "IsViewable":
             raise AcceptanceError("CopyPaste X11 window is not visible before its close-to-tray action")
-        require_ok(run(["xdotool", "windowactivate", "--sync", window], environment=environment), "focus CopyPaste before close")
-        focus = require_ok(run(["xdotool", "getwindowfocus"], environment=environment), "read focused X11 window")
-        if focus.stdout.strip() != window:
-            raise AcceptanceError("CopyPaste X11 window did not own focus before close")
-        require_ok(run(["xdotool", "key", "--clearmodifiers", "alt+F4"], environment=environment), "request CopyPaste window close")
+        require_ok(run(["wmctrl", "-i", "-c", f"0x{int(window):x}"], environment=environment), "request CopyPaste window close")
         wait_for_x11_map_state(environment, window, "IsUnMapped")
         menu_command = invoke_menu_item(environment, service, open_item)
         wait_for_x11_map_state(environment, window, "IsViewable")
