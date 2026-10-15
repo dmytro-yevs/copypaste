@@ -3,6 +3,7 @@
 set -euo pipefail
 
 shell_commit=9fca03bb1544c85928041a935f4ce895333722f1 # GNOME Shell 46.9
+source_remote=https://github.com/GNOME/gnome-shell.git
 mutter_runtime=${1:?usage: $0 <private-mutter-destdir> [shell-source] [shell-build]}
 shell_source=${2:-"$(dirname "$mutter_runtime")/gnome-shell-source"}
 shell_build=${3:-"$shell_source/build-copypaste-private"}
@@ -11,9 +12,10 @@ shell_patch="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/gnome-shell-46-reloca
 [[ -f "$shell_patch" && ! -L "$shell_patch" ]] || { echo "ERROR: private GNOME Shell patch is missing or unsafe" >&2; exit 1; }
 if [[ ! -d "$shell_source/.git" ]]; then
   git -C "$(dirname "$shell_source")" init -q "$(basename "$shell_source")"
-  git -C "$shell_source" remote add origin https://gitlab.gnome.org/GNOME/gnome-shell.git
+  git -C "$shell_source" remote add origin "$source_remote"
 fi
-git -C "$shell_source" fetch --depth=1 origin "$shell_commit"
+git -C "$shell_source" fetch --depth=1 "$source_remote" "$shell_commit"
+test "$(git -C "$shell_source" rev-parse "$shell_commit^{commit}")" = "$shell_commit"
 git -C "$shell_source" checkout --detach "$shell_commit"
 git -C "$shell_source" clean -fdx
 git -C "$shell_source" apply --check "$shell_patch"

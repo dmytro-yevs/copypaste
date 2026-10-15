@@ -100,6 +100,11 @@ The module workflows share their existing adapters and a declarative
 `config/module-platforms.json` matrix; Linux-only application qualification
 cannot publish a partial standalone module release.
 
+Mutter and GNOME Shell fetch the same pinned commits from GNOME's official
+read-only GitHub mirrors. Validation encountered a GitLab Gitaly outage returning
+HTTP 503; changing the transport preserves the checked commit objects, patches,
+licenses and receipts without retries or weaker source verification.
+
 Rust bridge caches now isolate profiles as well as OS/architecture/toolchain.
 The portable Rust job includes the separate Supabase/SMS workspaces it actually
 builds. CodeQL reuses SDK/pub dependencies but still traces fresh Swift/C++
