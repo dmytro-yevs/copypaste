@@ -11,17 +11,23 @@ on:
 permissions:
   contents: read
   actions: read
-  security-events: write
 
 jobs:
   analyze-no-build:
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         language: [actions, python, rust]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           languages: ${{ matrix.language }}
@@ -31,9 +37,16 @@ jobs:
           category: "/language:${{ matrix.language }}"
 
   analyze-swift:
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
     runs-on: macos-14
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.96"
@@ -74,9 +87,16 @@ jobs:
           category: /language:swift
 
   analyze-cpp:
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
     runs-on: windows-2022
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.96"

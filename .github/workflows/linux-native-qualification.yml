@@ -49,6 +49,7 @@ jobs:
   source:
     name: Verify exact artifact sources
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     outputs:
       commit: ${{ steps.source.outputs.commit }}
       version: ${{ steps.source.outputs.version }}
@@ -57,6 +58,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
+          persist-credentials: false
           fetch-depth: 0
       - id: source
         env:
@@ -133,6 +135,7 @@ jobs:
     name: ${{ matrix.architecture }} ${{ matrix.desktop }} ${{ matrix.session }}
     needs: source
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -145,6 +148,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
+          persist-credentials: false
           ref: ${{ github.sha }}
       - name: Install disposable desktop scenario dependencies
         run: |
@@ -170,13 +174,15 @@ jobs:
           run-id: ${{ inputs.compositor_runtime_run_id }}
           github-token: ${{ github.token }}
       - name: Bind the exact compositor sidecar runtime
+        env:
+          CI_INPUT_COMPOSITOR_RUNTIME_RUN_ID: ${{ inputs.compositor_runtime_run_id }}
         run: |
           set -euo pipefail
           python3 scripts/release/compositor-runtime-archive.py extract \
             --archive compositor-runtime/runtime.tar --output compositor-runtime/runtime
           python3 scripts/release/verify-linux-compositor-runtime.py artifact \
             --root compositor-runtime --desktop "${{ matrix.desktop }}" --architecture "${{ matrix.architecture }}" \
-            --commit "${{ needs.source.outputs.commit }}" --producer-run-id "${{ inputs.compositor_runtime_run_id }}" \
+            --commit "${{ needs.source.outputs.commit }}" --producer-run-id "${CI_INPUT_COMPOSITOR_RUNTIME_RUN_ID}" \
             --output compositor-runtime/binding.json
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -217,16 +223,22 @@ jobs:
           run-id: ${{ inputs.ocr_module_run_id }}
           github-token: ${{ github.token }}
       - name: Authenticate signed modules and stage offline fixtures
+        env:
+          CI_INPUT_OCR_MODULE_RUN_ID: ${{ inputs.ocr_module_run_id }}
+          CI_INPUT_SEMANTIC_SEARCH_MODULE_RUN_ID: ${{ inputs.semantic_search_module_run_id }}
+          CI_INPUT_SUPABASE_MODULE_RUN_ID: ${{ inputs.supabase_module_run_id }}
         run: |
           set -euo pipefail
           python3 scripts/release/stage-linux-module-qualification.py \
             --downloads module-downloads --module-artifacts module-artifacts --module-fixtures module-fixtures \
             --architecture "${{ matrix.architecture }}" --app-version "${{ needs.source.outputs.version }}" \
             --commit "${{ needs.source.outputs.commit }}" \
-            --supabase-run-id "${{ inputs.supabase_module_run_id }}" \
-            --semantic-search-run-id "${{ inputs.semantic_search_module_run_id }}" \
-            --ocr-run-id "${{ inputs.ocr_module_run_id }}"
+            --supabase-run-id "${CI_INPUT_SUPABASE_MODULE_RUN_ID}" \
+            --semantic-search-run-id "${CI_INPUT_SEMANTIC_SEARCH_MODULE_RUN_ID}" \
+            --ocr-run-id "${CI_INPUT_OCR_MODULE_RUN_ID}"
       - name: Execute exact package scenarios in a nested desktop
+        env:
+          CI_INPUT_ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
         run: |
           set -euo pipefail
           chmod +x scripts/release/run-linux-native-desktop-session.sh scripts/release/run-linux-native-scenarios.sh scripts/release/run-fedora-plasma6-qualification.sh
@@ -246,7 +258,7 @@ jobs:
           producer=(python3 scripts/release/produce-linux-native-qualification.py
             --artifacts current --version "${{ needs.source.outputs.version }}"
             --architecture "${{ matrix.architecture }}" --desktop "${{ matrix.desktop }}" --session "${{ matrix.session }}"
-            --commit "${{ needs.source.outputs.commit }}" --source-run-id "$GITHUB_RUN_ID" --artifact-run-id "${{ inputs.artifact_run_id }}"
+            --commit "${{ needs.source.outputs.commit }}" --source-run-id "$GITHUB_RUN_ID" --artifact-run-id "${CI_INPUT_ARTIFACT_RUN_ID}"
             --driver scripts/release/run-linux-native-scenarios.sh --output evidence
             --module-artifacts module-artifacts --module-fixtures module-fixtures
             --compositor-runtime-binding compositor-runtime/binding.json)
@@ -257,7 +269,7 @@ jobs:
             fedora_producer=(python3 /work/scripts/release/produce-linux-native-qualification.py
               --artifacts /artifacts --version "${{ needs.source.outputs.version }}"
               --architecture "${{ matrix.architecture }}" --desktop KDE --session "${{ matrix.session }}"
-              --commit "${{ needs.source.outputs.commit }}" --source-run-id "$GITHUB_RUN_ID" --artifact-run-id "${{ inputs.artifact_run_id }}"
+              --commit "${{ needs.source.outputs.commit }}" --source-run-id "$GITHUB_RUN_ID" --artifact-run-id "${CI_INPUT_ARTIFACT_RUN_ID}"
               --driver /work/scripts/release/run-linux-native-scenarios.sh --output /evidence
               --module-artifacts /module-artifacts --module-fixtures /module-fixtures
               --compositor-runtime-binding /compositor-runtime/binding.json)
@@ -290,9 +302,11 @@ jobs:
     needs: [source, scenario]
     if: ${{ needs.scenario.result == 'success' }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
+          persist-credentials: false
           ref: ${{ github.sha }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -319,13 +333,15 @@ jobs:
           run-id: ${{ inputs.artifact_run_id }}
           github-token: ${{ github.token }}
       - name: Reject partial, stale, or forged matrix evidence
+        env:
+          CI_INPUT_ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
         run: |
           set -euo pipefail
           mkdir artifacts/all
           find artifacts -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) -exec cp {} artifacts/all/ \;
           verify=(python3 scripts/release/verify-linux-native-qualification.py \
             --root evidence --artifacts artifacts/all --version "${{ needs.source.outputs.version }}" \
-            --commit "${{ needs.source.outputs.commit }}" --source-run-id "$GITHUB_RUN_ID" --artifact-run-id "${{ inputs.artifact_run_id }}" \
+            --commit "${{ needs.source.outputs.commit }}" --source-run-id "$GITHUB_RUN_ID" --artifact-run-id "${CI_INPUT_ARTIFACT_RUN_ID}" \
             --compositor-runtime compositor-runtime)
           if [[ "${{ needs.source.outputs.upgrade_mode }}" == prior_release ]]; then
             mkdir previous-artifacts/all
