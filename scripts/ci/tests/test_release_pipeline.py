@@ -138,6 +138,9 @@ class ReleasePipelineTest(unittest.TestCase):
         jobs["jobs"][-1]["conclusion"] = "failure"
         artifacts = self.artifact("production-qualified")
         verify(run, jobs, artifacts, "owner/repo", "a" * 40)
+        cancelled = deepcopy(jobs)
+        cancelled["jobs"][-1]["conclusion"] = "cancelled"
+        verify({**run, "conclusion": "cancelled"}, cancelled, artifacts, "owner/repo", "a" * 40)
         jobs["jobs"][2]["conclusion"] = "skipped"
         with self.assertRaises(ValueError):
             verify(run, jobs, artifacts, "owner/repo", "a" * 40)

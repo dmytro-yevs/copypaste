@@ -72,6 +72,8 @@ The final publisher has a separate global lock for GitHub assets and the shared
 Homebrew tap. Standalone module workflows retain their original global module
 locks across refs; nested unpublished Linux producers use per-parent-run locks.
 None of these producer/publication locks cancels an active run.
+They also use GitHub's `queue: max` mode so pending requests are preserved up to
+the service's 100-entry queue limit.
 
 The previous Linux upgrade baseline resolves to the newest older published
 stable Linux release. The resolver checks the exact tag commit, original Linux
@@ -82,13 +84,27 @@ compilation; an explicit verified previous run remains available for recovery.
 First-install qualification is used only when no older stable Linux package exists.
 
 Re-run failed jobs to retain successful producers within the same run. A
-publication-only failure can also resume through `qualified_run_id`: all
+publication-only failure or cancellation can also resume through `qualified_run_id`: all
 qualification jobs must have succeeded, and failures outside the publisher
 remain disqualifying. Publication stages new assets as a draft, verifies every
 digest, and only then promotes the release. Existing stable assets are never
 overwritten. An interrupted draft upload or unchanged Homebrew update is
 idempotent. GitHub publication and the separate Homebrew repository cannot be
 one atomic transaction; a failed tap update resumes after the verified release.
+
+Artifact transfers use the shared verified downloader. A failed-job rerun can
+retain several artifacts with the same name, and artifact IDs are not a time
+ordering. Complete inventories therefore resolve the newest creation time,
+reject ties, and never fall back from an expired newest artifact. Downloads use
+the resulting immutable IDs and verify the ZIP SHA-256 before safe extraction.
+Conflicting merged files, symlinks and escaping paths fail closed. The original
+package/receipt/signature checks still run at the consumer boundary.
+
+This behavior was exercised with the isolated
+[failed-job retry fixture](https://github.com/dmytro-yevs/copypaste/actions/runs/38804559983).
+The first attempt deliberately failed after upload; the second retained the
+successful policy job and produced a second same-name artifact. The verified
+downloader selected the newer artifact despite its numerically smaller ID.
 
 ## Build and cache decisions
 

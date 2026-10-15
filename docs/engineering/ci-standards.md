@@ -68,6 +68,10 @@ not retain credentials. Never run untrusted PR code with privileged self-hosted
 runners or use its artifacts as trusted release inputs. Artifact transfers must
 verify repository, workflow, source commit, successful producer jobs, expiry,
 and exact content receipts. Pagination is mandatory for complete inventories.
+Use `.github/actions/download-verified-artifact` for artifact transfers. It
+resolves retry versions to immutable IDs, checks the archive digest and rejects
+unsafe extraction or conflicting merged files. Never select a retry artifact
+by the largest ID or silently fall back to an older expired/failed generation.
 
 Dependency caches, compiler outputs, generated state, and signed artifacts are
 different objects. Only the first two are ordinarily reusable across jobs.
@@ -101,7 +105,7 @@ Use Python 3.12 or newer and the pinned requirements:
 
 ```sh
 python3 -m pip install -r scripts/ci/requirements.txt
-actionlint -color=false
+python3 scripts/ci/lint-workflows.py --actionlint actionlint
 zizmor --offline --min-severity high --min-confidence high .github
 python3 scripts/ci/policy.py
 python3 -m unittest discover -s scripts/ci/tests -v
@@ -116,6 +120,16 @@ preserves GitHub's `on` key. Actionlint owns expression syntax; security tools
 own generic attack-pattern detection. Repository policy owns stable job names,
 dependency contracts, action pinning, timeouts and producer concurrency. New
 rules require both valid fixtures and mutations that should fail.
+
+GitHub supports `queue: max` for non-cancelling concurrency, retaining up to 100
+pending runs. Production locks use it to prevent replacement of a pending
+release. Actionlint 1.7.12 does not yet recognize this field. The lint adapter
+first validates its enum and cancellation constraints using the YAML policy,
+then filters only that obsolete-schema diagnostic. Every invocation proves
+with valid/invalid fixtures that expression and ShellCheck failures still block.
+All other actionlint diagnostics remain errors. Remove this compatibility filter
+when the pinned upstream parser supports the field.
+[GitHub queue behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency)
 
 ## Measurement and runner decisions
 
