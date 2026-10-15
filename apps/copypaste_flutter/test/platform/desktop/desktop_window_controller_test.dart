@@ -20,9 +20,13 @@ void main() {
         host.onWindowEvent('hide');
         host.onWindowEvent('show');
         expect(visibility, [false, true, false, true]);
+        host.onWindowEvent('hide');
+        host.onWindowFocus();
+        expect(visibility, [false, true, false, true, false, true]);
         host.setVisibilityChangedHandler(null);
         host.onWindowMinimize();
-        expect(visibility, hasLength(4));
+        host.onWindowFocus();
+        expect(visibility, hasLength(6));
       },
     );
 
