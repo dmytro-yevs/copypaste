@@ -482,6 +482,7 @@ fn capture_metadata_with(
             copypaste_core::SourceAppIconMetadata::new(&png, icon.width, icon.height)
         });
     let metadata = copypaste_core::PayloadMetadata {
+        secret_override: None,
         privacy: capture.privacy,
         file: capture.file_metadata.clone(),
         source_app_icon,

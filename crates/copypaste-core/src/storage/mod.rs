@@ -46,6 +46,7 @@ mod migrations;
 mod model;
 mod page;
 mod pinning;
+mod privacy;
 mod retention;
 mod schema;
 mod schema_verify;
