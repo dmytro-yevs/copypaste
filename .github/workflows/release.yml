@@ -49,7 +49,7 @@ on:
         type: string
         default: ""
       previous_linux_artifact_run_id:
-        description: Optional completed earlier Linux staging run for upgrade qualification
+        description: Completed earlier Linux staging run used by prior-release qualification evidence
         required: false
         type: string
         default: ""
@@ -699,22 +699,61 @@ jobs:
           path: exact-artifacts/x86_64
           run-id: ${{ needs.preflight.outputs.linux_artifact_run_id }}
           github-token: ${{ github.token }}
+      - name: Verify prior Linux artifact source
+        id: previous-linux
+        if: inputs.previous_linux_artifact_run_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_RUN_ID: ${{ inputs.previous_linux_artifact_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$PREVIOUS_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN_ID" > "$RUNNER_TEMP/previous-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/previous-jobs.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/previous-artifacts.json"
+          previous_commit="$(jq -r '.head_sha' "$RUNNER_TEMP/previous-run.json")"
+          [[ "$previous_commit" =~ ^[0-9a-f]{40}$ ]]
+          python3 scripts/release/verify-linux-artifact-source-run.py \
+            --run "$RUNNER_TEMP/previous-run.json" --jobs "$RUNNER_TEMP/previous-jobs.json" \
+            --artifacts "$RUNNER_TEMP/previous-artifacts.json" --repository "$GITHUB_REPOSITORY" --commit "$previous_commit"
+          git fetch --depth=1 origin "$previous_commit"
+          previous_version="$(git show "$previous_commit:apps/copypaste_flutter/pubspec.yaml" | awk '/^version:[[:space:]]*/ {print $2; exit}')"
+          previous_version="${previous_version%%+*}"
+          [[ "$previous_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "version=$previous_version" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: inputs.previous_linux_artifact_run_id != ''
+        with:
+          name: production-linux-x86_64
+          path: previous-artifacts/x86_64
+          run-id: ${{ inputs.previous_linux_artifact_run_id }}
+          github-token: ${{ github.token }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         if: needs.preflight.outputs.compositor_runtime_required == 'true'
         with:
           name: production-compositor-runtime
           path: compositor-runtime
       - name: Verify full exact-artifact Linux desktop evidence
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          EVIDENCE_RUN_ID: ${{ inputs.linux_evidence_run_id }}
+          ARTIFACT_RUN_ID: ${{ needs.preflight.outputs.linux_artifact_run_id }}
+          COMPOSITOR_RUNTIME_REQUIRED: ${{ needs.preflight.outputs.compositor_runtime_required }}
+          PREVIOUS_VERSION: ${{ steps.previous-linux.outputs.version }}
         run: |
           set -euo pipefail
           mkdir exact-artifacts/all
-          find exact-artifacts -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) -exec cp {} exact-artifacts/all/ \;
+          find exact-artifacts -path exact-artifacts/all -prune -o -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) -exec cp {} exact-artifacts/all/ \;
           args=(--root native-evidence --artifacts exact-artifacts/all
-            --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA"
-            --source-run-id "${{ inputs.linux_evidence_run_id }}"
-            --artifact-run-id "${{ needs.preflight.outputs.linux_artifact_run_id }}")
-          if [[ "${{ needs.preflight.outputs.compositor_runtime_required }}" == true ]]; then
+            --version "$VERSION" --commit "$GITHUB_SHA"
+            --source-run-id "$EVIDENCE_RUN_ID" --artifact-run-id "$ARTIFACT_RUN_ID")
+          if [[ "$COMPOSITOR_RUNTIME_REQUIRED" == true ]]; then
             args+=(--compositor-runtime compositor-runtime)
+          fi
+          if [[ -n "$PREVIOUS_VERSION" ]]; then
+            mkdir previous-artifacts/all
+            find previous-artifacts -path previous-artifacts/all -prune -o -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) -exec cp {} previous-artifacts/all/ \;
+            args+=(--previous-artifacts previous-artifacts/all --previous-version "$PREVIOUS_VERSION")
           fi
           python3 scripts/release/verify-linux-native-qualification.py "${args[@]}"
 
