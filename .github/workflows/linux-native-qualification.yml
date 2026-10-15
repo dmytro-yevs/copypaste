@@ -3,6 +3,7 @@ name: Linux native qualification
 on:
   workflow_call:
     inputs:
+      public_runtime_run_id: {required: false, type: string, default: ""}
       artifact_run_id: {required: true, type: string}
       previous_artifact_run_id: {required: false, type: string, default: ""}
       supabase_module_run_id: {required: true, type: string}
@@ -119,9 +120,10 @@ jobs:
           done
           [[ "$COMPOSITOR_RUNTIME_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$COMPOSITOR_RUNTIME_RUN_ID" > "$RUNNER_TEMP/compositor-runtime-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$COMPOSITOR_RUNTIME_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/compositor-runtime-jobs.json"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$COMPOSITOR_RUNTIME_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/compositor-runtime-artifacts.json"
           python3 scripts/release/verify-linux-compositor-runtime.py source \
-            --run "$RUNNER_TEMP/compositor-runtime-run.json" --artifacts "$RUNNER_TEMP/compositor-runtime-artifacts.json" \
+            --jobs "$RUNNER_TEMP/compositor-runtime-jobs.json" --run "$RUNNER_TEMP/compositor-runtime-run.json" --artifacts "$RUNNER_TEMP/compositor-runtime-artifacts.json" \
             --repository "$GITHUB_REPOSITORY" --commit "$commit"
           [[ "$upgrade_mode" == first_install_baseline || "$previous_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           {
@@ -156,9 +158,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
             dbus-user-session gjs gnome-shell gnome-session gnome-keyring gnome-shell-extension-appindicator \
-            kde-config-screenlocker kwin-wayland kwin-x11 plasma-workspace \
             libsecret-tools wl-clipboard wtype x11-utils xdotool wmctrl xdg-desktop-portal \
-            xdg-desktop-portal-gnome xdg-desktop-portal-kde xvfb rpm cpio xclip python3-gi build-essential pkg-config libgtk-3-dev libxres-dev \
+            xdg-desktop-portal-gnome xvfb rpm cpio xclip python3-gi build-essential pkg-config libgtk-3-dev libxres-dev \
             at-spi2-core python3-pyatspi ffmpeg qrencode v4l-utils
       - name: Provision owned V4L2 loopback camera for this CI job
         env:
@@ -330,7 +331,7 @@ jobs:
         with:
           name: production-compositor-runtime
           path: compositor-runtime
-          run-id: ${{ inputs.artifact_run_id }}
+          run-id: ${{ inputs.public_runtime_run_id || inputs.artifact_run_id }}
           github-token: ${{ github.token }}
       - name: Reject partial, stale, or forged matrix evidence
         env:
