@@ -8,6 +8,10 @@ on:
     - cron: "37 2 * * 1"
   workflow_dispatch:
 
+concurrency:
+  group: codeql-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+
 permissions:
   contents: read
   actions: read
@@ -52,15 +56,14 @@ jobs:
           toolchain: "1.96"
       - id: flutter
         run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+      - uses: ./.github/actions/setup-flutter
         with:
-          channel: stable
-          flutter-version: ${{ steps.flutter.outputs.version }}
+          version: ${{ steps.flutter.outputs.version }}
       - name: Prepare macOS project
         working-directory: apps/copypaste_flutter
         run: |
           flutter pub get --enforce-lockfile
-          flutter build macos --release --config-only
+          flutter build macos --release --config-only --no-pub
       - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           languages: swift
@@ -103,10 +106,9 @@ jobs:
       - id: flutter
         shell: bash
         run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+      - uses: ./.github/actions/setup-flutter
         with:
-          channel: stable
-          flutter-version: ${{ steps.flutter.outputs.version }}
+          version: ${{ steps.flutter.outputs.version }}
       - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           languages: c-cpp
@@ -115,7 +117,7 @@ jobs:
         run: |
           Set-Location apps/copypaste_flutter
           flutter pub get --enforce-lockfile
-          flutter build windows --release
+          flutter build windows --release --no-pub
       - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           category: /language:c-cpp

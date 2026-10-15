@@ -30,6 +30,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.96"
+          components: rustfmt
       - name: Install pinned CI policy tools
         run: |
           python3 -m pip install -r scripts/ci/requirements.txt
