@@ -249,10 +249,34 @@ jobs:
           rustc +1.96 --test modules/ocr/vendor/paddle-ocr-rs/src/dictionary.rs -o "$RUNNER_TEMP/ocr-dictionary-tests.exe"
           "$RUNNER_TEMP/ocr-dictionary-tests.exe"
 
+  flutter-static:
+    name: Flutter static checks
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - id: flutter
+        run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-flutter
+        with:
+          version: ${{ steps.flutter.outputs.version }}
+      - name: Locked dependencies, formatting and analysis
+        working-directory: apps/copypaste_flutter
+        run: |
+          flutter pub get --enforce-lockfile
+          dart format --output=none --set-exit-if-changed lib test
+          flutter analyze --no-pub
+
   flutter-foundation:
     if: needs.changes.outputs.native == 'true'
     needs: changes
     name: Flutter foundation (${{ matrix.name }})
+    env:
+      COPYPASTE_FLUTTER_STATIC_CHECKS: "0"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     defaults:
@@ -487,7 +511,7 @@ jobs:
 
   required:
     name: CI required
-    needs: [changes, compositor-runtime-metadata, compositor-runtime-producer, rust-and-supabase, macos-core, windows-core, optional-modules, flutter-foundation, linux-native-fixtures, linux-mutter-bridges, linux-pr-release-candidate, linux-package-fixtures]
+    needs: [changes, flutter-static, compositor-runtime-metadata, compositor-runtime-producer, rust-and-supabase, macos-core, windows-core, optional-modules, flutter-foundation, linux-native-fixtures, linux-mutter-bridges, linux-pr-release-candidate, linux-package-fixtures]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

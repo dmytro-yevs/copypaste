@@ -1,11 +1,14 @@
 from copy import deepcopy
 from pathlib import Path
 import sys
+import json
+import tempfile
 import unittest
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from changes import select, verify_results
-from policy import dependencies, validate
+from policy import check, dependencies, validate
 
 
 class PolicyTest(unittest.TestCase):
@@ -42,6 +45,28 @@ class PolicyTest(unittest.TestCase):
     def test_rejects_cycles(self):
         with self.assertRaisesRegex(ValueError, "circular"):
             dependencies({"a": {"needs": "b"}, "b": {"needs": "a"}})
+
+    def test_reusable_permission_ceiling_is_checked_before_github_startup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workflows = root / ".github/workflows"
+            workflows.mkdir(parents=True)
+            (root / "config").mkdir()
+            (root / "config/ci-policy.json").write_text(json.dumps({"schema": 1, "required_jobs": {}}))
+            caller = {"name": "CI", "on": {"pull_request": None, "merge_group": None}, "permissions": {"contents": "read"},
+                      "jobs": {"call": {"uses": "./.github/workflows/reusable.yaml", "permissions": {"contents": "write", "actions": "write"}}}}
+            child = {"name": "Reusable", "on": {"workflow_call": None}, "permissions": {"contents": "read"},
+                     "jobs": {"publish": {"runs-on": "ubuntu-24.04", "timeout-minutes": 5,
+                                          "permissions": {"contents": "write", "actions": "write"}, "steps": [{"run": "echo fixture"}]}}}
+            static = deepcopy(self.document)
+            static["name"] = "Policy"
+            static["on"]["merge_group"] = None
+            for name, data in [("ci.yml", caller), ("ci-configuration.yml", static), ("reusable.yaml", child)]:
+                (workflows / name).write_text(yaml.safe_dump(data))
+            self.assertEqual(check(root), [])
+            del caller["jobs"]["call"]["permissions"]["actions"]
+            (workflows / "ci.yml").write_text(yaml.safe_dump(caller))
+            self.assertTrue(any("actions: write" in error for error in check(root)))
 
     def test_change_selection_fails_closed(self):
         for path in ["Cargo.lock", "crates/core/lib.rs", "apps/copypaste_flutter/lib/generated.dart",
