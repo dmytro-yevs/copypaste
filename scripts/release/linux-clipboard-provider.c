@@ -247,7 +247,15 @@ static gboolean stop(gpointer unused) {
   return G_SOURCE_REMOVE;
 }
 
+static void trace_phase(const gchar *phase) {
+  if (g_strcmp0(g_getenv("COPYPASTE_GTK_PROVIDER_DIAGNOSTICS"), "1") == 0) {
+    g_printerr("GTK_PROVIDER_PHASE %s %" G_GINT64_FORMAT " %" G_GINT64_FORMAT "\n",
+               phase, g_get_monotonic_time(), g_get_real_time());
+  }
+}
+
 static gboolean establish_clipboard(Provider *provider, GdkDisplay *display) {
+  trace_phase("clipboard_start");
   GtkTargetEntry targets[MAX_OFFERS];
   for (guint index = 0; index < provider->count; index++) {
     targets[index] = (GtkTargetEntry){.target = provider->offers[index].mime, .flags = 0, .info = index};
@@ -257,17 +265,21 @@ static gboolean establish_clipboard(Provider *provider, GdkDisplay *display) {
     provider->failed = TRUE;
     return FALSE;
   }
+  trace_phase("clipboard_owned");
 
   // GTK3 passes the latest Wayland input serial to set_selection.  This idle
   // task runs after focus delivery has recorded that serial for the mapped
   // source window.
   gdk_display_flush(display);
+  trace_phase("display_sync_start");
   gdk_display_sync(display);
+  trace_phase("display_sync_done");
   if (!write_ready(provider->ready_path)) {
     provider->failed = TRUE;
     return FALSE;
   }
   provider->ready = TRUE;
+  trace_phase("ready");
   g_timeout_add_seconds(provider->hold_seconds, stop, NULL);
   return TRUE;
 }
@@ -343,7 +355,9 @@ int main(int argc, char **argv) {
   g_set_prgname(application_id);
   // Keep the explicit X11 WM class used by the X11 attribution path.
   gdk_set_program_class(application_id);
+  trace_phase("gtk_init_start");
   gtk_init(&argc, &argv);
+  trace_phase("gtk_init_done");
   provider.ready_path = ready_path;
   provider.hold_seconds = hold_seconds;
   gboolean needs_focus = provider.require_focus;
@@ -358,6 +372,7 @@ int main(int argc, char **argv) {
   }
 #endif
   GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+  trace_phase("window_created");
   gtk_window_set_title(GTK_WINDOW(window), "CopyPaste qualification source");
   gtk_window_set_default_size(GTK_WINDOW(window), 240, 80);
   if (needs_focus) {
@@ -368,6 +383,7 @@ int main(int argc, char **argv) {
     gtk_widget_grab_focus(focus_target);
   } else {
     gtk_widget_show_all(window);
+    trace_phase("window_shown");
     if (!establish_clipboard(&provider, gdk_display_get_default())) return 1;
   }
   gtk_main();
