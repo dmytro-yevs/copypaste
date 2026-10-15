@@ -1515,7 +1515,7 @@ mod tests {
     }
 
     #[test]
-    fn live_x11_fixture_captures_metadata_tiff_file_secret_exclusion_and_owned_write() {
+    fn live_x11_fixture_stale_client_list_preserves_capture_and_privacy() {
         if std::env::var_os("COPYPASTE_X11_FIXTURE") != Some("1".into()) {
             return;
         }
@@ -1533,8 +1533,83 @@ mod tests {
         std::fs::write(&file, b"fixture file").expect("fixture file");
         let settings = copypaste_ipc::ConfigData::default();
 
+        let (connection, screen) = x11rb::connect(None).expect("fixture attribution verifier");
+        let root = connection.setup().roots[screen].root;
+        let client_list = connection
+            .intern_atom(false, b"_NET_CLIENT_LIST")
+            .expect("fixture client list atom")
+            .reply()
+            .expect("fixture client list atom reply")
+            .atom;
+        let previous = connection
+            .get_property(false, root, client_list, AtomEnum::WINDOW, 0, 256)
+            .expect("read prior fixture client list")
+            .reply()
+            .expect("prior fixture client list reply")
+            .value32()
+            .map(|values| values.collect::<Vec<_>>());
+        let unrelated = connection
+            .generate_id()
+            .expect("unrelated fixture window id");
+        connection
+            .create_window(
+                0,
+                unrelated,
+                root,
+                0,
+                0,
+                1,
+                1,
+                0,
+                WindowClass::INPUT_OUTPUT,
+                0,
+                &CreateWindowAux::new(),
+            )
+            .expect("create unrelated fixture window");
+        connection
+            .change_property32(
+                PropMode::REPLACE,
+                root,
+                client_list,
+                AtomEnum::WINDOW,
+                &[unrelated],
+            )
+            .expect("publish stale fixture client list");
+        connection.flush().expect("flush stale fixture client list");
+        struct RestoreClientList<'a> {
+            connection: &'a RustConnection,
+            root: u32,
+            atom: u32,
+            previous: Option<Vec<u32>>,
+            unrelated: u32,
+        }
+        impl Drop for RestoreClientList<'_> {
+            fn drop(&mut self) {
+                if let Some(previous) = &self.previous {
+                    let _ = self.connection.change_property32(
+                        PropMode::REPLACE,
+                        self.root,
+                        self.atom,
+                        AtomEnum::WINDOW,
+                        previous,
+                    );
+                } else {
+                    let _ = self.connection.delete_property(self.root, self.atom);
+                }
+                let _ = self.connection.destroy_window(self.unrelated);
+                let _ = self.connection.flush();
+            }
+        }
+        let _restore = RestoreClientList {
+            connection: &connection,
+            root,
+            atom: client_list,
+            previous,
+            unrelated,
+        };
+        // The compositor list names another client throughout all capture and
+        // privacy cases; only the bounded same-writer tree can supply identity.
         let text = FixtureOwner::start(FixturePayload::Text(b"fixture text".to_vec()));
-        let (connection, _) = x11rb::connect(None).expect("fixture attribution verifier");
         let pid = connection
             .intern_atom(false, b"_NET_WM_PID")
             .expect("fixture pid atom")
