@@ -35,7 +35,7 @@ cargo build --manifest-path "$ROOT/Cargo.toml" --release --locked \
 
 cd "$APP_ROOT"
 flutter pub get --enforce-lockfile
-flutter build macos --release \
+flutter build macos --release --no-pub \
     --build-name "$VERSION" \
     --build-number "$BUILD_NUMBER"
 
