@@ -163,7 +163,7 @@ mod tests {
 
     #[cfg(feature = "storage")]
     #[tokio::test(flavor = "multi_thread")]
-    async fn confidential_and_legacy_records_keep_metadata_through_cloud_and_relay() {
+    async fn explicit_privacy_survives_cloud_and_relay_without_inventing_legacy_flags() {
         use copypaste_core::{Keyring, PayloadMetadata, SourceAppIconMetadata, Store, StoreSource};
         use copypaste_ipc::{ClipboardPrivacy, ConfigData};
         let make = |secret, name: &str| {
@@ -192,6 +192,7 @@ mod tests {
             transient: true,
         };
         let metadata = PayloadMetadata {
+            secret_override: None,
             privacy,
             file: None,
             source_app_icon: SourceAppIconMetadata::new(&png.into_inner(), 1, 1),
@@ -284,18 +285,28 @@ mod tests {
             );
             for (store, view) in [(&receiver, &receiver_view), (&relay, &relay_view)] {
                 let row = store.get(id).unwrap().unwrap();
-                assert!(row.clipboard_privacy().secret);
-                assert!(store.search("synthetic", 10).unwrap().is_empty());
-                let json = view
+                assert_eq!(row.clipboard_privacy().secret, id == "private");
+                assert_eq!(
+                    store
+                        .search("synthetic", 10)
+                        .unwrap()
+                        .into_iter()
+                        .map(|item| item.id)
+                        .collect::<Vec<_>>(),
+                    ["legacy"],
+                );
+                let metadata = view
                     .shared()
                     .store()
                     .payload_metadata_for_sync(&row)
-                    .unwrap()
                     .unwrap();
-                let envelope = PayloadMetadata::from_json(&json, "text").unwrap();
                 if id == "private" {
+                    let envelope = PayloadMetadata::from_json(&metadata.unwrap(), "text").unwrap();
                     assert_eq!(envelope.privacy, privacy);
                     assert!(envelope.source_app_icon.is_some());
+                } else {
+                    assert!(row.clipboard_privacy().is_empty());
+                    assert!(metadata.is_none());
                 }
             }
         }

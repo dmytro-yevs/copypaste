@@ -721,8 +721,8 @@ mod tests {
         let s = store();
         let mine = s.insert(item("mine", T0)).unwrap();
 
-        // Same content hash, same bucket, different id: the dedup index owns
-        // that pair.
+        // Same content hash and type, same bucket, different id: the dedup
+        // index owns that pair.
         let applied = s
             .upsert(&IncomingItem {
                 origin_device_id: "",
@@ -904,9 +904,9 @@ mod tests {
     #[test]
     fn a_refused_row_in_a_page_leaves_the_rest_of_the_page_stored() {
         let s = store();
-        // `idx_items_dedup` is (content_hash, minute, origin): a second id
-        // carrying the same hash from the same origin in the same bucket is
-        // the refusal being exercised.
+        // `idx_items_dedup` includes (content_hash, content_type, minute,
+        // origin): a second id carrying the same representation from the same
+        // origin in the same bucket is the refusal being exercised.
         assert!(s.upsert(&incoming("original", "shared-hash", T0)).unwrap());
 
         let written = s

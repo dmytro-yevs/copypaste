@@ -22,10 +22,11 @@
 //!   already owns. v2 briefly shadowed `origin_device_id` in a side table on a
 //!   second connection; two answers to "what is in this device's history" drift
 //!   the first time an eviction lands on one and not the other.
-//! * **One live row per distinct content.** [`Store::insert_or_bump`] promotes
-//!   the existing row rather than writing a second one, across all of history
-//!   and not only a recent window (manifest 01 I-23). Explicit file imports
-//!   retain separate named records and share their encrypted binary payload.
+//! * **One live row per distinct clipboard representation.**
+//!   [`Store::insert_or_bump`] promotes the existing row only when the raw
+//!   content hash and content type both match, across all history and not only a
+//!   recent window (manifest 01 I-23). Explicit file imports retain separate
+//!   named records and share their encrypted binary payload.
 //! * **Errors never contain a filesystem path** (AGENTS.md rule 4 — the path
 //!   discloses the local username). Nothing in [`StoreError`] formats a path,
 //!   and the underlying `rusqlite` errors do not carry one either.
@@ -106,7 +107,8 @@ pub(crate) mod test_support {
             .unwrap();
     }
 
-    /// Distinct content gets a distinct hash; that is all the dedup index needs.
+    /// Distinct content gets a distinct raw-byte hash; the dedup index also
+    /// includes the content type so representations remain distinct.
     pub(super) fn hash_of(text: &str) -> String {
         hex::encode(text.as_bytes())
     }

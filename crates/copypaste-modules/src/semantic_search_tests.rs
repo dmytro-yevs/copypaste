@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 use std::{
     fs,
     io::{Cursor, Write},
+    path::PathBuf,
     sync::atomic::AtomicUsize,
 };
 
@@ -14,6 +15,7 @@ struct Fixture {
     launched: Arc<AtomicUsize>,
     stopped: Arc<AtomicUsize>,
     entered: std::sync::mpsc::Receiver<()>,
+    model_path: PathBuf,
 }
 
 impl Fixture {
@@ -118,6 +120,7 @@ impl Fixture {
             launched,
             stopped,
             entered,
+            model_path: assets.join("model.onnx"),
         }
     }
     fn service(&self) -> Arc<SemanticSearch> {
@@ -129,6 +132,30 @@ impl Fixture {
             },
         )
     }
+}
+
+#[test]
+fn corrupted_model_is_not_reported_ready_and_keeps_lexical_search_available() {
+    let fixture = Fixture::new(Some("lexical fixture"));
+    // Keep the manifest-sized file so readiness must verify integrity rather
+    // than treating a same-length corrupt model as usable.
+    fs::write(&fixture.model_path, b"corrupt").unwrap();
+
+    let module = fixture.manager.list().unwrap().remove(0);
+    assert!(!module.search_models[0].available);
+    assert!(fixture.manager.search_configuration().unwrap().is_none());
+
+    let service = fixture.service();
+    assert_eq!(
+        service
+            .query(&query("lexical"), None, 10, usize::MAX, None)
+            .unwrap()
+            .items
+            .len(),
+        1
+    );
+    assert_eq!(fixture.launched.load(Ordering::SeqCst), 0);
+    service.shutdown();
 }
 
 fn query(text: &str) -> HistoryQuery {

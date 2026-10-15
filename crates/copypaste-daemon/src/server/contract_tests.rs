@@ -280,7 +280,7 @@ async fn every_method_crosses_the_platform_transport_with_a_typed_outcome() {
     let methods = cases(dir.path());
     assert_eq!(
         methods.len(),
-        47,
+        48,
         "a Method has no contract case, or this count was not bumped with it"
     );
 

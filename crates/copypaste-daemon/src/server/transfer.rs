@@ -41,15 +41,9 @@ pub(super) fn import(state: &AppState, id: u64, items: Vec<ExportItem>) -> Respo
     ) {
         Ok(result) => {
             if result.inserted > 0 {
-                // Without this the imported history is stored, listed, and
-                // never offered for upload again: the floor only ever moves
-                // forward. `delete`, `delete_all` and `restore` already do it;
-                // import was the writer that did not.
                 if let Some(oldest) = oldest {
-                    state.modules.note_version(oldest);
-                    state.p2p.node().note_local_version(oldest);
+                    announce_import(state, oldest);
                 }
-                state.note_local_change();
             }
             Response::ok(id, ResponseData::Import(result))
         }
@@ -62,6 +56,21 @@ pub(super) fn import(state: &AppState, id: u64, items: Vec<ExportItem>) -> Respo
         Err(copypaste_core::ImportError::UnsupportedContentType) => {
             Response::err(id, ErrorCode::InvalidRequest, MSG_IMPORT_NON_TEXT)
         }
+        Err(copypaste_core::ImportError::Partial {
+            oldest_inserted_at,
+            source,
+            ..
+        }) => {
+            announce_import(state, oldest_inserted_at);
+            match *source {
+                copypaste_core::ImportError::Crypto(e) => {
+                    warn!(error = ?e, "import partially completed before encryption failed");
+                    Response::err(id, ErrorCode::Internal, MSG_ENCRYPT)
+                }
+                copypaste_core::ImportError::Storage(e) => storage_error(id, "import", &e),
+                _ => unreachable!("only fatal import errors can be partial"),
+            }
+        }
         Err(e @ copypaste_core::ImportError::Crypto(_)) => {
             warn!(error = ?e, "import failed to encrypt an item");
             Response::err(id, ErrorCode::Internal, MSG_ENCRYPT)
@@ -70,11 +79,22 @@ pub(super) fn import(state: &AppState, id: u64, items: Vec<ExportItem>) -> Respo
     }
 }
 
+/// Announces durable imported rows even when a later row made the request fail.
+///
+/// Imported capture stamps usually predate an existing upload floor. Reset it
+/// to the oldest committed row before waking either transport, or those rows
+/// remain stored locally but are never offered to sync.
+fn announce_import(state: &AppState, oldest_inserted_at: i64) {
+    state.modules.note_version(oldest_inserted_at);
+    state.p2p.node().note_local_version(oldest_inserted_at);
+    state.note_local_change();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testutil::test_state;
-    use copypaste_core::MAX_IMPORT_ITEMS;
+    use copypaste_core::{storage::open_validated, MAX_IMPORT_ITEMS};
     use copypaste_ipc::{ExportData, Method};
 
     fn seed_legacy_text(state: &AppState, id: &str, content: &str) {
@@ -175,6 +195,56 @@ mod tests {
         );
         let offered = state.store.versions_since(old, 100).unwrap();
         assert_eq!(offered.len(), 2, "the imported history was not offered");
+    }
+
+    #[test]
+    fn a_failed_import_announces_the_rows_committed_before_the_failure() {
+        let (state, _dir) = test_state("partial-import");
+        let floor = copypaste_core::now_ms().saturating_add(60_000);
+        state
+            .meta
+            .set_state_ms("module:copypaste.supabase:cloud_upload_floor_ms", floor)
+            .unwrap();
+        let conn = open_validated(state.db_path(), &state.keyring.db_key()).unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER reject_second_import BEFORE INSERT ON clipboard_items
+             WHEN (SELECT COUNT(*) FROM clipboard_items) >= 1
+             BEGIN SELECT RAISE(FAIL, 'injected import failure'); END;",
+        )
+        .unwrap();
+        drop(conn);
+
+        let oldest = 1_700_000_000_000;
+        let response = import_of(
+            &state,
+            vec![
+                ExportItem {
+                    content: "committed before failure".into(),
+                    content_type: "text".into(),
+                    created_at: oldest,
+                    pinned: false,
+                },
+                ExportItem {
+                    content: "rejected second item".into(),
+                    content_type: "text".into(),
+                    created_at: oldest + 60_000,
+                    pinned: false,
+                },
+            ],
+        );
+
+        assert!(!response.ok, "the caller must still see the import failure");
+        assert_eq!(response.error_code, Some(ErrorCode::Internal));
+        assert_eq!(state.store.count().unwrap(), 1);
+        assert_eq!(
+            state
+                .meta
+                .state_ms("module:copypaste.supabase:cloud_upload_floor_ms")
+                .unwrap(),
+            oldest,
+            "the committed item must be offered to cloud sync",
+        );
+        assert_eq!(state.store.versions_since(oldest, 100).unwrap().len(), 1);
     }
 
     /// An import that inserted nothing must not drag the floor back and make

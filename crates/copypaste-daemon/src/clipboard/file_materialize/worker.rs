@@ -25,9 +25,9 @@ pub(super) struct CleanupWorker {
 }
 
 impl CleanupWorker {
-    /// `startup` is the pass that ran before the worker existed. Starting at
-    /// `interval` regardless would give plaintext the startup sweep could not
-    /// remove another whole `MAX_AGE` on disk.
+    /// `startup` is the pass that ran before the worker existed. Its earliest
+    /// live-file deadline is retained so a restart does not grant plaintext a
+    /// second receiver window.
     ///
     /// Returns only once the thread is running. `spawn` returning proves a
     /// thread was created, not that it reached its loop, and a worker that
