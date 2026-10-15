@@ -32,6 +32,7 @@ impl InstantClipboard {
     /// Receiving history succeeds even when its native clipboard is unavailable.
     /// The current settings are read inside the gate, so disabling takes effect
     /// for every subsequent write. Never replace newer local or received content.
+    /// Returns true only after a successful native write, for copy feedback.
     pub fn apply(
         &self,
         store: &Store,
@@ -39,7 +40,7 @@ impl InstantClipboard {
         row: &StoredItem,
         settings: impl FnOnce() -> copypaste_ipc::ConfigData,
         write: impl FnOnce(&ClipboardPayload) -> Result<(), ClipboardWriteError>,
-    ) {
+    ) -> bool {
         let _guard = self.0.lock().unwrap_or_else(|error| error.into_inner());
         let config = settings();
         if !config.sync_enabled
@@ -47,26 +48,26 @@ impl InstantClipboard {
             || row.deleted
             || row.clipboard_privacy().secret
         {
-            return;
+            return false;
         }
         let Ok(Some((newest_id, newest_stamp))) = store.newest_live_key() else {
-            return;
+            return false;
         };
         if newest_id != row.id || newest_stamp != row.created_at {
-            return;
+            return false;
         }
         let Ok(stamp) = store.state(APPLIED_STAMP) else {
-            return;
+            return false;
         };
         if stamp
             .as_deref()
             .and_then(|stamp| stamp.parse::<i64>().ok())
             .is_some_and(|stamp| stamp >= row.created_at)
         {
-            return;
+            return false;
         }
         let Ok(mut payload) = ClipboardPayload::open(row, &keyring.item_key()) else {
-            return;
+            return false;
         };
         // A source path belongs to the sending device. Materialize its original
         // file bytes locally instead of copying an unusable foreign path.
@@ -85,8 +86,12 @@ impl InstantClipboard {
                 {
                     tracing::warn!("could not persist the instant clipboard stamp");
                 }
+                true
             }
-            Err(_) => tracing::warn!("could not apply a received clip to the system clipboard"),
+            Err(_) => {
+                tracing::warn!("could not apply a received clip to the system clipboard");
+                false
+            }
         }
     }
 }
@@ -104,6 +109,74 @@ mod tests {
     use crate::sync::{RemoteVersion, StoreSource};
 
     type Writes = Arc<Mutex<Vec<(String, Vec<u8>, Option<String>)>>>;
+
+    #[test]
+    fn copy_feedback_requires_a_successful_new_native_write() {
+        let f = fixture();
+        f.source()
+            .apply_version(&version("received", "remote text", 100))
+            .unwrap();
+        let row = f.store.get("received").unwrap().unwrap();
+        let gate = InstantClipboard::default();
+        let apply = |config, fails| {
+            gate.apply(
+                &f.store,
+                &f.keyring,
+                &row,
+                || config,
+                |_| {
+                    if fails {
+                        Err(ClipboardWriteError::Failed)
+                    } else {
+                        Ok(())
+                    }
+                },
+            )
+        };
+        assert!(!apply(
+            ConfigData {
+                instant_clipboard: false,
+                ..Default::default()
+            },
+            false
+        ));
+        assert!(!apply(
+            ConfigData {
+                sync_enabled: false,
+                ..Default::default()
+            },
+            false
+        ));
+        assert!(!apply(ConfigData::default(), true));
+        assert!(apply(ConfigData::default(), false));
+        assert!(
+            !apply(ConfigData::default(), false),
+            "a replay must be silent"
+        );
+
+        f.source()
+            .apply_version(&version("newer", "newer remote", 200))
+            .unwrap();
+        assert!(
+            !apply(ConfigData::default(), false),
+            "stale content must be silent"
+        );
+        let newer = f.store.get("newer").unwrap().unwrap();
+        let mut deleted = newer.clone();
+        deleted.deleted = true;
+        let applied = gate.apply(&f.store, &f.keyring, &deleted, ConfigData::default, |_| {
+            Ok(())
+        });
+        assert!(!applied, "deletions must be silent");
+        gate.note_local(&f.store, 300);
+        assert!(!gate.apply(
+            &f.store,
+            &f.keyring,
+            &newer,
+            ConfigData::default,
+            |_| Ok(())
+        ));
+    }
 
     fn receiving_source(
         f: &crate::sync::testkit::Fixture,
