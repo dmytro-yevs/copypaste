@@ -6,8 +6,9 @@ VERSION="${1:-}"
 ARCHITECTURE="${2:-}"
 SCOPE="${3:-}"
 [[ -z "$SCOPE" || "$SCOPE" == --release-scope ]] || { echo "ERROR: invalid packaging scope" >&2; exit 1; }
+[[ "$#" -le 3 ]] || { echo "ERROR: too many packaging arguments" >&2; exit 1; }
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
-  echo "ERROR: usage: $0 <stable-version> <x86_64|aarch64>" >&2
+  echo "ERROR: usage: $0 <stable-version> <x86_64|aarch64> [--release-scope]" >&2
   exit 1
 }
 case "$ARCHITECTURE" in x86_64|aarch64) ;; *) echo "ERROR: invalid architecture" >&2; exit 1 ;; esac
@@ -22,7 +23,7 @@ import sys
 contract = json.load(open(sys.argv[1], encoding="utf-8"))
 if sys.argv[2] not in contract["architectures"]:
     raise SystemExit("architecture is outside the Linux release contract")
-print(",".join(contract["formats"]))
+print(",".join(contract["formats"] + contract.get("preview_formats", [])))
 PYCONTRACT
 )"
 fi
@@ -169,6 +170,7 @@ Requires: glibc >= 2.39
 $RUNTIME_RPM_REQUIRES
 Requires: gstreamer1-plugins-base
 Requires: gstreamer1-plugins-good
+Requires: libkeybinder-3.0.so.0()(64bit)
 
 %description
 CopyPaste keeps encrypted clipboard history locally and syncs only with paired devices.

@@ -5,6 +5,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IMAGE="${COPYPASTE_LINUX_VALIDATION_IMAGE:-ubuntu:24.04}"
 VERSION="${COPYPASTE_LINUX_PACKAGE_TEST_VERSION:-1.2.3}"
+OUTPUT="${COPYPASTE_LINUX_PACKAGE_TEST_OUTPUT:-}"
+output_mount=()
+if [[ -n "$OUTPUT" ]]; then
+  mkdir -p "$OUTPUT"
+  output_mount=(--volume "$(cd "$OUTPUT" && pwd):/output")
+fi
 
 run_architecture() {
   local architecture="$1"
@@ -26,16 +32,18 @@ run_architecture() {
   docker run --rm --platform "$platform" -e DEBIAN_FRONTEND=noninteractive \
     -e VERSION="$VERSION" -e ARCHITECTURE="$architecture" \
     -e APPIMAGETOOL_URL="$appimage_url" -e APPIMAGETOOL_SHA256="$appimage_sha" \
-    -v "$ROOT:/source:ro" "$IMAGE" bash -ceu '
+    -v "$ROOT:/source:ro" "${output_mount[@]}" "$IMAGE" bash -ceu '
       apt-get update
       apt-get install --yes --no-install-recommends \
         binutils build-essential ca-certificates cpio curl dpkg-dev file rpm xz-utils \
         gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
         libgstreamer1.0-dev libkeybinder-3.0-0 patchelf pkg-config
-      cp -a /source /work
+      mkdir -p /work/apps/copypaste_flutter/assets/brand
+      cp -a /source/packaging /source/scripts /work/
+      cp /source/apps/copypaste_flutter/assets/brand/copypaste.png /work/apps/copypaste_flutter/assets/brand/
       cd /work
       mkdir -p dist/linux-"$ARCHITECTURE"/bundle
-      printf "int main(void) { return 0; }\n" > /tmp/copypaste-fake.c
+      printf "#include <stdio.h>\nint main(void) { puts(\"%s\"); return 0; }\n" "$VERSION" > /tmp/copypaste-fake.c
       cc -O2 -o /tmp/copypaste-fake /tmp/copypaste-fake.c
       install -m 755 /tmp/copypaste-fake dist/linux-"$ARCHITECTURE"/bundle/copypaste
       install -m 755 /tmp/copypaste-fake dist/linux-"$ARCHITECTURE"/bundle/copypaste-daemon
@@ -55,7 +63,11 @@ run_architecture() {
       curl --fail --location --output /tmp/appimagetool "$APPIMAGETOOL_URL"
       printf "%s  %s\n" "$APPIMAGETOOL_SHA256" /tmp/appimagetool | sha256sum --check --status
       chmod 755 /tmp/appimagetool
-      APPIMAGE_EXTRACT_AND_RUN=1 APPIMAGETOOL=/tmp/appimagetool scripts/release/build-linux-packages.sh "$VERSION" "$ARCHITECTURE"
+      scope=()
+      if [[ "$ARCHITECTURE" == x86_64 ]]; then
+        scope=(--release-scope)
+      fi
+      APPIMAGE_EXTRACT_AND_RUN=1 APPIMAGETOOL=/tmp/appimagetool scripts/release/build-linux-packages.sh "$VERSION" "$ARCHITECTURE" "${scope[@]}"
       for extension in AppImage deb rpm; do test -s "dist/CopyPaste-v$VERSION-linux-$ARCHITECTURE.$extension"; done
       dpkg-deb --field "dist/CopyPaste-v$VERSION-linux-$ARCHITECTURE.deb" Version | grep -Fx "$VERSION"
       dpkg-deb --field "dist/CopyPaste-v$VERSION-linux-$ARCHITECTURE.deb" Architecture | grep -Fx "$(test "$ARCHITECTURE" = x86_64 && echo amd64 || echo arm64)"
@@ -171,6 +183,9 @@ PY
           gst-inspect-1.0 "$element" | grep -F "Filename                 $app_root/usr/lib/gstreamer-1.0/"
       done
       dpkg-deb --ctrl-tarfile "dist/CopyPaste-v$VERSION-linux-$ARCHITECTURE.deb" | tar -tv | grep -E " root/root .*control$"
+      if [[ -d /output ]]; then
+        cp "dist/CopyPaste-v$VERSION-linux-$ARCHITECTURE.rpm" /output/
+      fi
     '
 }
 
