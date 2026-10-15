@@ -274,7 +274,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-module-supabase"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "backon",
  "copypaste-clock",
