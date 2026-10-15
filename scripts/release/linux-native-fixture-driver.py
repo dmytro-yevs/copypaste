@@ -841,6 +841,14 @@ def require_capture(cli, environment, workspace, evidence_dir, session, mime, pa
     with clipboard_provider(workspace, evidence_dir, assertion, {mime: payload}, environment):
         wait_for_count(cli, environment, before + 1)
         item = newest_item(list_items(cli, environment), before_ids, content_type)
+        if item.get('source_app_bundle_id') != SOURCE_APPLICATION_ID:
+            print('COPYPASTE_CLIPBOARD_DIAGNOSTIC ' + json.dumps({
+                'requested_payload_matches': item.get('content') == payload.decode('utf-8', 'replace'),
+                'source_id_absent': item.get('source_app_bundle_id') is None,
+                'source_is_copypaste': item.get('source_app_bundle_id') == 'com.copypaste.CopyPaste',
+                'source_name_absent': item.get('source_app_name') is None,
+                'item_count_before': before,
+            }, sort_keys=True), flush=True)
         require_source_identity(item)
     overwrite_marker = f"copypaste-native-overwrite-{assertion}".encode("utf-8")
     overwrite_before = cli_item_count(status(cli, environment))
