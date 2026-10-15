@@ -8,7 +8,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from changes import select, verify_results
-from policy import check, dependencies, validate
+from policy import check, dependencies, queue_errors, validate
 
 
 class PolicyTest(unittest.TestCase):
@@ -52,6 +52,15 @@ class PolicyTest(unittest.TestCase):
         self.assertEqual(validate(document, Path("release.yml"), Path.cwd()), [])
         document["concurrency"]["cancel-in-progress"] = True
         self.assertTrue(any("must not cancel" in error for error in validate(document, Path("release.yml"), Path.cwd())))
+
+    def test_queue_mode_has_full_structural_validation(self):
+        for configuration in ({"queue": "max"}, {"queue": "max", "cancel-in-progress": False},
+                              {"queue": "single", "cancel-in-progress": True}):
+            self.assertEqual(queue_errors(configuration), [])
+        for value in ("invalid", 100, True, [], {}, "${{ inputs.queue }}"):
+            self.assertTrue(queue_errors({"queue": value}))
+        for value in (True, "true", "${{ inputs.cancel }}"):
+            self.assertTrue(queue_errors({"queue": "max", "cancel-in-progress": value}))
 
     def test_reusable_permission_ceiling_is_checked_before_github_startup(self):
         with tempfile.TemporaryDirectory() as directory:
