@@ -48,6 +48,7 @@ enum AppUpdatePhase {
   upToDate,
   available,
   downloading,
+  preparingModules,
   installing,
   permissionRequired,
   restartRequired,

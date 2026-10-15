@@ -19,13 +19,17 @@ class AppUpdateController extends ChangeNotifier {
     required AppUpdateRepository repository,
     required AppUpdatePlatform platform,
     Future<void> Function()? restart,
+    Future<void> Function(Version)? prepareModules,
   }) : _repository = repository,
        _platform = platform,
-       _restart = restart;
+       _restart = restart,
+       _prepareModules = prepareModules;
 
   final AppUpdateRepository _repository;
   final AppUpdatePlatform _platform;
   final Future<void> Function()? _restart;
+  final Future<void> Function(Version)? _prepareModules;
+  Version? _modulesPreparedFor;
   bool _restarting = false;
 
   AppUpdatePhase _phase = AppUpdatePhase.idle;
@@ -47,6 +51,7 @@ class AppUpdateController extends ChangeNotifier {
       switch (_phase) {
         AppUpdatePhase.checking ||
         AppUpdatePhase.downloading ||
+        AppUpdatePhase.preparingModules ||
         AppUpdatePhase.installing => true,
         _ => false,
       };
@@ -171,6 +176,17 @@ class AppUpdateController extends ChangeNotifier {
         );
         if (_disposed) return;
         _downloaded = package;
+      }
+      final prepareModules = _prepareModules;
+      if (prepareModules != null && _modulesPreparedFor != release.version) {
+        _setPhase(AppUpdatePhase.preparingModules);
+        try {
+          await prepareModules(release.version);
+        } catch (_) {
+          // Optional module updates must never prevent an application update.
+        }
+        if (_disposed) return;
+        _modulesPreparedFor = release.version;
       }
       _setPhase(AppUpdatePhase.installing);
       _message = null;

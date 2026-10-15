@@ -4,7 +4,6 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import 'frb_generated.dart';
-
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `android_runtime_unavailable`, `ceremony_not_found`, `clip`, `cloud_status_response`, `content_class_to_ipc`, `content_class`, `create_private_file`, `daemon_exited_early`, `daemon_spawn_failed`, `daemon_start_failed`, `daemon_unreachable`, `device_class`, `device_details`, `device_endpoint`, `device_latency`, `device_observation_provenance`, `device_observation_trust`, `device_platform`, `device_presence`, `device_profile`, `discovered_response`, `empty_response`, `export_write_failed`, `from_daemon`, `history_query`, `internal`, `item_response`, `module_request`, `not_initialized`, `runtime_attachment_unsupported`, `runtime_conflict`, `runtime_endpoint_invalid`, `runtime_settings`, `runtime_sync_status`, `semantic_kind_to_ipc`, `semantic_kind`, `this_device`, `timeout`, `unsafe_data_directory`, `watch_not_found`
@@ -14,6 +13,16 @@ Future<String> modulesList() => RustLib.instance.api.crateApiModulesList();
 
 Future<String> moduleInstall({required String packagePath}) =>
     RustLib.instance.api.crateApiModuleInstall(packagePath: packagePath);
+
+Future<void> moduleStageUpdate({
+  required String id,
+  required String packagePath,
+  required String appVersion,
+}) => RustLib.instance.api.crateApiModuleStageUpdate(
+  id: id,
+  packagePath: packagePath,
+  appVersion: appVersion,
+);
 
 Future<void> moduleSetEnabled({required String id, required bool enabled}) =>
     RustLib.instance.api.crateApiModuleSetEnabled(id: id, enabled: enabled);
