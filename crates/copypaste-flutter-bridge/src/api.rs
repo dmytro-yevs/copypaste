@@ -26,6 +26,20 @@ pub async fn module_install(package_path: String) -> Result<String, RuntimeError
     module_request(copypaste_ipc::ModuleOperation::Install { package_path }).await
 }
 
+pub async fn module_stage_update(
+    id: String,
+    package_path: String,
+    app_version: String,
+) -> Result<(), RuntimeError> {
+    module_request(copypaste_ipc::ModuleOperation::StageUpdate {
+        id,
+        package_path,
+        app_version,
+    })
+    .await
+    .map(|_| ())
+}
+
 pub async fn module_set_enabled(id: String, enabled: bool) -> Result<(), RuntimeError> {
     module_request(copypaste_ipc::ModuleOperation::SetEnabled { id, enabled })
         .await
