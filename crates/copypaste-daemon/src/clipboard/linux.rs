@@ -98,15 +98,19 @@ struct OwnedSelection {
 #[derive(Default)]
 struct SelectionPrivacy {
     owner: Option<u32>,
+    revision: u64,
     departed_owner: Option<u32>,
     suppressed_owner: Option<u32>,
     tainted_cache: bool,
+    manager_restore: bool,
 }
 
 impl SelectionPrivacy {
     fn observe(&mut self, owner: u32, departed: bool, manager: Option<bool>) -> bool {
+        self.revision = self.revision.wrapping_add(1);
         let previous = self.owner.replace(owner).unwrap_or(0);
         if owner == 0 {
+            self.manager_restore = false;
             if departed {
                 if previous != 0 {
                     self.departed_owner = Some(previous);
@@ -121,8 +125,8 @@ impl SelectionPrivacy {
         // An uncertain manager identity cannot authorize reading a deferred
         // replacement. An intervening writer does not prove the manager has
         // finished replacing its old cache, even if we captured that writer.
-        let suppressed =
-            self.tainted_cache && self.departed_owner.is_some() && manager != Some(false);
+        self.manager_restore = self.departed_owner.is_some() && manager != Some(false);
+        let suppressed = self.tainted_cache && self.manager_restore;
         if !suppressed && manager == Some(true) {
             // A manager making a new copy while an owner is still alive (or
             // while it already owns the selection) is not an exit handoff.
@@ -137,6 +141,15 @@ impl SelectionPrivacy {
         let owner = self.owner.unwrap_or(0);
         self.suppressed_owner = (owner != 0).then_some(owner);
         self.tainted_cache = owner != 0 || self.departed_owner.is_some();
+    }
+
+    fn suppress_snapshot(&mut self, revision: u64) {
+        // The old value may remain in a manager's cache, but a delayed policy
+        // decision must not suppress a newer independently owned selection.
+        self.tainted_cache = true;
+        if self.revision == revision || self.manager_restore {
+            self.suppressed_owner = self.owner.filter(|owner| *owner != 0);
+        }
     }
 
     fn permits_read(&self, owner: u32) -> bool {
@@ -638,7 +651,10 @@ fn note_selection(
     event: x11rb::protocol::xfixes::SelectionNotifyEvent,
     changed: &AtomicBool,
 ) {
-    let manager = if privacy.tainted_cache && event.owner != 0 && event.owner != window {
+    let manager = if (privacy.tainted_cache || privacy.departed_owner.is_some())
+        && event.owner != 0
+        && event.owner != window
+    {
         manager_owns_selection(c, window, atoms, event.owner)
     } else {
         Some(false)
@@ -786,6 +802,7 @@ impl Transfer<'_> {
             );
         }
         self.privacy.owner.get_or_insert(owner);
+        let revision = self.privacy.revision;
         if settings.private_mode {
             self.privacy.suppress_current();
             self.changed.store(false, Ordering::Release);
@@ -798,7 +815,7 @@ impl Transfer<'_> {
             .then(|| super::linux_attribution::resolve_owner(self.c, owner))
             .flatten();
         if !Self::can_read_source(settings, source.as_ref()) {
-            self.privacy.suppress_current();
+            self.privacy.suppress_snapshot(revision);
             return None;
         }
         let targets = atoms(&self.read_target(self.atoms.targets, MAX_TARGETS * 4, deadline)?)?;
@@ -813,7 +830,7 @@ impl Transfer<'_> {
             transient: false,
         };
         if !privacy.allows(settings) {
-            self.privacy.suppress_current();
+            self.privacy.suppress_snapshot(revision);
             return None;
         }
         let (target, type_, binary) = if targets.contains(&self.atoms.uri_list) {
@@ -1196,6 +1213,39 @@ mod tests {
         privacy.suppress_current();
         assert!(privacy.observe(9, false, Some(true)));
         assert!(privacy.permits_read(9));
+    }
+
+    #[test]
+    fn a_delayed_policy_decision_does_not_suppress_the_next_owner() {
+        let mut privacy = SelectionPrivacy::default();
+        privacy.observe(1, false, Some(false));
+        let inspected = privacy.revision;
+        privacy.observe(2, false, Some(false));
+        privacy.suppress_snapshot(inspected);
+        assert!(privacy.permits_read(2));
+        privacy.observe(0, true, Some(false));
+        assert!(!privacy.observe(9, false, Some(true)));
+    }
+
+    #[test]
+    fn a_delayed_policy_decision_does_not_suppress_a_new_copy_from_the_same_owner() {
+        let mut privacy = SelectionPrivacy::default();
+        privacy.observe(1, false, Some(false));
+        let inspected = privacy.revision;
+        privacy.observe(1, false, Some(false));
+        privacy.suppress_snapshot(inspected);
+        assert!(privacy.permits_read(1));
+    }
+
+    #[test]
+    fn a_delayed_policy_decision_still_fences_a_manager_replacement() {
+        let mut privacy = SelectionPrivacy::default();
+        privacy.observe(1, false, Some(false));
+        let inspected = privacy.revision;
+        privacy.observe(0, true, Some(false));
+        privacy.observe(9, false, Some(true));
+        privacy.suppress_snapshot(inspected);
+        assert!(!privacy.permits_read(9));
     }
 
     #[test]
