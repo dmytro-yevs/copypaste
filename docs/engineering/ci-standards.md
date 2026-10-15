@@ -127,6 +127,16 @@ unknown metrics as unknown, never zero. Provisional review thresholds are the
 baseline successful p95 plus 20%; they request investigation and do not justify
 removing checks. A statistically weak baseline is not a hard timing assertion.
 
+For one completed run, use `--run-id <id> --logs --summary path/to/summary.md`.
+Add `--compare docs/engineering/ci-baseline.json` for cohort comparisons. The
+comparison refuses percentage claims for unknown cache state or insufficient
+successful samples; cold and warm samples are never combined.
+The automatic `CI performance report` workflow uploads the same data after each
+major workflow. `config/ci-performance-budgets.json` owns the investigation
+thresholds. Phase timing preserves command exit status; cache log coverage and
+unavailable observations must remain explicit in reports. A trusted reporting
+workflow may read PR run metadata/logs but must never execute PR artifacts or code.
+
 Standard GitHub-hosted runners remain the default. Optimize setup and duplicate
 compilation first. Larger/persistent runners require measured end-to-end gain,
 queue time, costs, maintenance and isolation analysis. No billing change or

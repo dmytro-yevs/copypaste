@@ -46,13 +46,22 @@ requires an existing stable `v<version>` tag at the exact workflow commit and an
 explicit publish request, or a push of that tag. The publish job creates the
 GitHub Release and updates the Homebrew tap only after all platform jobs pass.
 
+Fresh releases automatically call the Linux module and compositor producers,
+then run installed Linux qualification against the parent run's exact artifacts.
+Manual evidence run IDs are recovery overrides. Preflight resolves the preceding
+published Linux upgrade packages and checks their public digests before builds.
+See [delivery architecture](engineering/ci-architecture.md) for the dependency
+graph, permission boundaries, artifact inventories and recovery modes.
+
 Every release uses `packaging/release-template.md` for platform download tables.
 Update `packaging/release-notes.md` with the release's changes. The publish job
 renders the versioned links and rejects missing table artifacts before creating
 the GitHub Release.
 
 The download table groups platforms by architecture. Android ARM variants are
-built with `--split-per-abi --target-platform android-arm,android-arm64`.
+built together with the universal APK using one `--split-per-abi` invocation
+targeting `android-arm,android-arm64,android-x64`. AGP emits the universal output
+and excludes unsupported transitive x86 JNI libraries.
 The universal APK also includes x86_64 and keeps the existing `android.apk`
 filename for older updaters. All three APKs share the same version code;
 `force-version-code-ignoring-abi=true` disables Flutter's per-ABI offsets.
@@ -64,12 +73,14 @@ APK. Recovery still accepts single-artifact receipts from earlier releases.
 
 To finish publication after a publisher interruption, dispatch the production
 workflow with `publish=true` and `qualified_run_id` set to a successful production
-run. Recovery verifies that the source run, every native platform job, and the
-qualification job passed at the exact stable tag commit. It rejects expired
+run, including a run whose only failure was publication. Recovery verifies that
+every native platform job and the qualification job passed at the exact stable
+tag commit. It rejects expired
 artifacts and re-hashes all downloaded files against their original receipts.
 Product binaries are reused without rebuilding or moving the release tag.
 Publication verifies existing assets and uploads only missing files; a different
-published digest fails closed. An unchanged Homebrew tap needs no new commit.
+published digest fails closed. New releases remain drafts until the complete
+asset set passes verification. An unchanged Homebrew tap needs no new commit.
 
 Cloud Sync is not a CopyPaste 1.0.2 product capability. Local encrypted history
 and paired-device synchronization remain fully supported.

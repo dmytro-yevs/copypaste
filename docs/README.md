@@ -2,6 +2,9 @@
 
 - [Flutter foundation](flutter-foundation.md)
 - [Development](development.md)
+- [CI engineering standards](engineering/ci-standards.md)
+- [CI and release architecture](engineering/ci-architecture.md)
+- [CI baseline and audit](engineering/ci-audit.md)
 - [Linux platform contract](linux-platform.md)
 - [Cloud privacy](cloud-privacy.md)
 - [Supabase deployment](supabase-deployment.md)

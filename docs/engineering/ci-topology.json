@@ -1,0 +1,1447 @@
+{
+  "ci-configuration.yml": {
+    "name": "CI configuration",
+    "triggers": {
+      "push": {
+        "branches": [
+          "main"
+        ]
+      },
+      "pull_request": null,
+      "merge_group": {
+        "types": [
+          "checks_requested"
+        ]
+      },
+      "workflow_dispatch": null
+    },
+    "jobs": {
+      "validate": {
+        "name": "CI Policy Gate",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      }
+    }
+  },
+  "ci-metrics.yml": {
+    "name": "CI performance report",
+    "triggers": {
+      "workflow_run": {
+        "workflows": [
+          "CI",
+          "Production release",
+          "CodeQL",
+          "Linux native qualification",
+          "Build and publish OCR module",
+          "Build and publish provider module"
+        ],
+        "types": [
+          "completed"
+        ]
+      },
+      "workflow_dispatch": {
+        "inputs": {
+          "source_run_id": {
+            "description": "Completed workflow run to measure",
+            "required": true,
+            "type": "string"
+          }
+        }
+      }
+    },
+    "jobs": {
+      "report": {
+        "name": "report",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      }
+    }
+  },
+  "ci.yml": {
+    "name": "CI",
+    "triggers": {
+      "push": {
+        "branches": [
+          "main"
+        ]
+      },
+      "pull_request": null,
+      "merge_group": {
+        "types": [
+          "checks_requested"
+        ]
+      }
+    },
+    "jobs": {
+      "changes": {
+        "name": "Select required validation",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      },
+      "compositor-runtime-metadata": {
+        "name": "Compositor runtime metadata",
+        "needs": [
+          "changes"
+        ],
+        "workflow": null,
+        "condition": "needs.changes.outputs.native == 'true' && (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)",
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      },
+      "compositor-runtime-producer": {
+        "name": "Compositor runtime producer",
+        "needs": [
+          "changes",
+          "compositor-runtime-metadata"
+        ],
+        "workflow": "./.github/workflows/compositor-runtime.yml",
+        "condition": "needs.changes.outputs.native == 'true' && (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.compositor-runtime-metadata.result == 'success')",
+        "runner": null,
+        "matrix": null
+      },
+      "rust-and-supabase": {
+        "name": "rust-and-supabase",
+        "needs": [
+          "changes"
+        ],
+        "workflow": null,
+        "condition": "needs.changes.outputs.native == 'true'",
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      },
+      "macos-core": {
+        "name": "macOS Rust capabilities",
+        "needs": [
+          "changes"
+        ],
+        "workflow": null,
+        "condition": "needs.changes.outputs.native == 'true'",
+        "runner": "macos-14",
+        "matrix": null
+      },
+      "windows-core": {
+        "name": "Windows Rust capabilities",
+        "needs": [
+          "changes"
+        ],
+        "workflow": null,
+        "condition": "needs.changes.outputs.native == 'true'",
+        "runner": "windows-2022",
+        "matrix": null
+      },
+      "optional-modules": {
+        "name": "Optional modules (${{ matrix.name }})",
+        "needs": [
+          "changes"
+        ],
+        "workflow": null,
+        "condition": "needs.changes.outputs.native == 'true'",
+        "runner": "${{ matrix.runner }}",
+        "matrix": {
+          "include": [
+            {
+              "name": "macos",
+              "platform": "macos",
+              "runner": "macos-14"
+            },
+            {
+              "name": "windows",
+              "platform": "windows",
+              "runner": "windows-2022"
+            },
+            {
+              "name": "Linux x86_64",
+              "platform": "linux",
+              "runner": "ubuntu-24.04"
+            }
+          ]
+        }
+      },
+      "flutter-static": {
+        "name": "Flutter static checks",
+        "needs": [
+          "changes"
+        ],
+        "workflow": null,
+        "condition": "needs.changes.outputs.native == 'true'",
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      },
+      "flutter-foundation": {
+        "name": "Flutter foundation (${{ matrix.name }})",
+        "needs": [
+          "changes"
+        ],
+        "workflow": null,
+        "condition": "needs.changes.outputs.native == 'true'",
+        "runner": "${{ matrix.runner }}",
+        "matrix": {
+          "include": [
+            {
+              "name": "macos",
+              "platform": "macos",
+              "runner": "macos-14",
+              "target": "macos"
+            },
+            {
+              "name": "android",
+              "platform": "android",
+              "runner": "ubuntu-24.04",
+              "target": "apk"
+            },
+            {
+              "name": "windows",
+              "platform": "windows",
+              "runner": "windows-2022",
+              "target": "windows"
+            },
+            {
+              "name": "Linux x86_64",
+              "platform": "linux",
+              "runner": "ubuntu-24.04",
+              "target": "linux"
+            }
+          ]
+        }
+      },
+      "linux-native-fixtures": {
+        "name": "Linux native fixtures (${{ matrix.architecture }})",
+        "needs": [
+          "changes"
+        ],
+        "workflow": null,
+        "condition": "needs.changes.outputs.native == 'true'",
+        "runner": "${{ matrix.runner }}",
+        "matrix": {
+          "include": [
+            {
+              "architecture": "x86_64",
+              "runner": "ubuntu-24.04"
+            }
+          ]
+        }
+      },
+      "linux-mutter-bridges": {
+        "name": "Mutter ${{ matrix.mutter }} bridge (${{ matrix.architecture }})",
+        "needs": [
+          "changes"
+        ],
+        "workflow": null,
+        "condition": "needs.changes.outputs.native == 'true'",
+        "runner": "${{ matrix.runner }}",
+        "matrix": {
+          "mutter": [
+            46
+          ],
+          "architecture": [
+            "x86_64"
+          ],
+          "include": [
+            {
+              "architecture": "x86_64",
+              "runner": "ubuntu-24.04"
+            }
+          ]
+        }
+      },
+      "linux-pr-release-candidate": {
+        "name": "Linux release candidate (${{ matrix.architecture }})",
+        "needs": [
+          "changes"
+        ],
+        "workflow": null,
+        "condition": "needs.changes.outputs.native == 'true' && (github.event_name == 'pull_request')",
+        "runner": "${{ matrix.runner }}",
+        "matrix": {
+          "include": [
+            {
+              "architecture": "x86_64",
+              "runner": "ubuntu-24.04",
+              "appimagetool_url": "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage",
+              "appimagetool_sha256": "95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6"
+            }
+          ]
+        }
+      },
+      "linux-package-fixtures": {
+        "name": "Linux package fixtures (${{ matrix.architecture }})",
+        "needs": [
+          "changes"
+        ],
+        "workflow": null,
+        "condition": "needs.changes.outputs.native == 'true'",
+        "runner": "${{ matrix.runner }}",
+        "matrix": {
+          "include": [
+            {
+              "architecture": "x86_64",
+              "runner": "ubuntu-24.04"
+            }
+          ]
+        }
+      },
+      "required": {
+        "name": "CI required",
+        "needs": [
+          "changes",
+          "flutter-static",
+          "compositor-runtime-metadata",
+          "compositor-runtime-producer",
+          "rust-and-supabase",
+          "macos-core",
+          "windows-core",
+          "optional-modules",
+          "flutter-foundation",
+          "linux-native-fixtures",
+          "linux-mutter-bridges",
+          "linux-pr-release-candidate",
+          "linux-package-fixtures"
+        ],
+        "workflow": null,
+        "condition": "${{ always() }}",
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      }
+    }
+  },
+  "codeql-scheduled.yml": {
+    "name": "CodeQL",
+    "triggers": {
+      "push": {
+        "branches": [
+          "main"
+        ]
+      },
+      "pull_request": null,
+      "schedule": [
+        {
+          "cron": "37 2 * * 1"
+        }
+      ],
+      "workflow_dispatch": null
+    },
+    "jobs": {
+      "analyze-no-build": {
+        "name": "analyze-no-build",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "ubuntu-24.04",
+        "matrix": {
+          "language": [
+            "actions",
+            "python",
+            "rust"
+          ]
+        }
+      },
+      "analyze-swift": {
+        "name": "analyze-swift",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "macos-14",
+        "matrix": null
+      },
+      "analyze-cpp": {
+        "name": "analyze-cpp",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "windows-2022",
+        "matrix": null
+      }
+    }
+  },
+  "compositor-runtime.yml": {
+    "name": "Compositor runtime producer",
+    "triggers": {
+      "workflow_dispatch": {
+        "inputs": {
+          "version": {
+            "description": "Stable CopyPaste version for immutable companion package names",
+            "required": true,
+            "type": "string"
+          },
+          "commit": {
+            "description": "Exact source commit to build",
+            "required": true,
+            "type": "string"
+          },
+          "source_run_id": {
+            "description": "Release run that requested these source artifacts",
+            "required": true,
+            "type": "string"
+          }
+        }
+      },
+      "workflow_call": {
+        "inputs": {
+          "version": {
+            "required": true,
+            "type": "string"
+          },
+          "commit": {
+            "required": true,
+            "type": "string"
+          },
+          "source_run_id": {
+            "required": true,
+            "type": "string"
+          }
+        },
+        "secrets": {
+          "TAURI_SIGNING_PRIVATE_KEY": {
+            "required": true
+          },
+          "TAURI_SIGNING_PRIVATE_KEY_PASSWORD": {
+            "required": true
+          }
+        }
+      }
+    },
+    "jobs": {
+      "build": {
+        "name": "${{ matrix.desktop }} ${{ matrix.family }} ${{ matrix.distribution }} (${{ matrix.architecture }})",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "${{ matrix.runner }}",
+        "matrix": {
+          "include": [
+            {
+              "desktop": "GNOME",
+              "family": "46",
+              "distribution": "Ubuntu 24.04",
+              "distribution_id": "ubuntu",
+              "distribution_version": "24.04",
+              "architecture": "x86_64",
+              "runner": "ubuntu-24.04",
+              "package_format": "deb",
+              "artifact": "copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64",
+              "platform": "linux/amd64"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "linux-experimental.yml": {
+    "name": "Experimental Linux validation",
+    "triggers": {
+      "workflow_dispatch": null
+    },
+    "jobs": {
+      "optional-modules": {
+        "name": "Optional modules (${{ matrix.name }})",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "${{ matrix.runner }}",
+        "matrix": {
+          "include": [
+            {
+              "name": "Linux aarch64",
+              "platform": "linux",
+              "runner": "ubuntu-24.04-arm"
+            }
+          ]
+        }
+      },
+      "flutter-foundation": {
+        "name": "Flutter foundation (${{ matrix.name }})",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "${{ matrix.runner }}",
+        "matrix": {
+          "include": [
+            {
+              "name": "Linux aarch64",
+              "platform": "linux",
+              "runner": "ubuntu-24.04-arm",
+              "target": "linux"
+            }
+          ]
+        }
+      },
+      "linux-native-fixtures": {
+        "name": "Linux native fixtures (${{ matrix.architecture }})",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "${{ matrix.runner }}",
+        "matrix": {
+          "include": [
+            {
+              "architecture": "x86_64",
+              "runner": "ubuntu-24.04"
+            },
+            {
+              "architecture": "aarch64",
+              "runner": "ubuntu-24.04-arm"
+            }
+          ]
+        }
+      },
+      "linux-mutter-bridges": {
+        "name": "Mutter ${{ matrix.mutter }} bridge (${{ matrix.architecture }})",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "${{ matrix.runner }}",
+        "matrix": {
+          "mutter": [
+            46,
+            47
+          ],
+          "architecture": [
+            "x86_64",
+            "aarch64"
+          ],
+          "include": [
+            {
+              "architecture": "x86_64",
+              "runner": "ubuntu-24.04"
+            },
+            {
+              "architecture": "aarch64",
+              "runner": "ubuntu-24.04-arm"
+            }
+          ]
+        }
+      },
+      "linux-kwin-bridges": {
+        "name": "KWin ${{ matrix.kwin }} bridge (${{ matrix.architecture }})",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "${{ matrix.runner }}",
+        "matrix": {
+          "kwin": [
+            "6.0",
+            "6.3"
+          ],
+          "architecture": [
+            "x86_64",
+            "aarch64"
+          ],
+          "include": [
+            {
+              "architecture": "x86_64",
+              "runner": "ubuntu-24.04",
+              "container_platform": "linux/amd64"
+            },
+            {
+              "architecture": "aarch64",
+              "runner": "ubuntu-24.04-arm",
+              "container_platform": "linux/arm64"
+            }
+          ]
+        }
+      },
+      "linux-pr-release-candidate": {
+        "name": "Linux release candidate (${{ matrix.architecture }})",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "${{ matrix.runner }}",
+        "matrix": {
+          "include": [
+            {
+              "architecture": "x86_64",
+              "runner": "ubuntu-24.04",
+              "appimagetool_url": "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage",
+              "appimagetool_sha256": "95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6"
+            },
+            {
+              "architecture": "aarch64",
+              "runner": "ubuntu-24.04-arm",
+              "appimagetool_url": "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-aarch64.AppImage",
+              "appimagetool_sha256": "a595ea34cd6136c7f595e9dcbb16f3e9725d7610efb9e43b38c3c6e86cafc270"
+            }
+          ]
+        }
+      },
+      "linux-package-fixtures": {
+        "name": "Linux package fixtures (${{ matrix.architecture }})",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "${{ matrix.runner }}",
+        "matrix": {
+          "include": [
+            {
+              "architecture": "x86_64",
+              "runner": "ubuntu-24.04"
+            },
+            {
+              "architecture": "aarch64",
+              "runner": "ubuntu-24.04-arm"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "linux-native-qualification.yml": {
+    "name": "Linux native qualification",
+    "triggers": {
+      "workflow_call": {
+        "inputs": {
+          "public_runtime_run_id": {
+            "required": false,
+            "type": "string",
+            "default": ""
+          },
+          "artifact_run_id": {
+            "required": true,
+            "type": "string"
+          },
+          "previous_artifact_run_id": {
+            "required": false,
+            "type": "string",
+            "default": ""
+          },
+          "supabase_module_run_id": {
+            "required": true,
+            "type": "string"
+          },
+          "semantic_search_module_run_id": {
+            "required": true,
+            "type": "string"
+          },
+          "ocr_module_run_id": {
+            "required": true,
+            "type": "string"
+          },
+          "compositor_runtime_run_id": {
+            "required": true,
+            "type": "string"
+          }
+        }
+      },
+      "workflow_dispatch": {
+        "inputs": {
+          "artifact_run_id": {
+            "description": "Successful production release run containing the exact current Linux packages",
+            "required": true,
+            "type": "string"
+          },
+          "previous_artifact_run_id": {
+            "description": "Successful earlier production release run; omit only when creating the first-install baseline",
+            "required": false,
+            "type": "string",
+            "default": ""
+          },
+          "supabase_module_run_id": {
+            "description": "Successful unpublished Supabase module workflow run at this exact product commit",
+            "required": true,
+            "type": "string"
+          },
+          "semantic_search_module_run_id": {
+            "description": "Successful unpublished Semantic Search module workflow run at this exact product commit",
+            "required": true,
+            "type": "string"
+          },
+          "ocr_module_run_id": {
+            "description": "Successful unpublished OCR module workflow run at this exact product commit",
+            "required": true,
+            "type": "string"
+          },
+          "compositor_runtime_run_id": {
+            "description": "Successful exact-commit compositor sidecar runtime producer run",
+            "required": true,
+            "type": "string"
+          }
+        }
+      }
+    },
+    "jobs": {
+      "source": {
+        "name": "Verify exact artifact sources",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      },
+      "scenario": {
+        "name": "${{ matrix.architecture }} ${{ matrix.desktop }} ${{ matrix.session }}",
+        "needs": [
+          "source"
+        ],
+        "workflow": null,
+        "condition": null,
+        "runner": "${{ matrix.runner }}",
+        "matrix": {
+          "include": [
+            {
+              "architecture": "x86_64",
+              "runner": "ubuntu-24.04",
+              "desktop": "GNOME",
+              "session": "x11",
+              "compositor_artifact": "copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64"
+            }
+          ]
+        }
+      },
+      "evidence": {
+        "name": "Assemble verified Linux native qualification",
+        "needs": [
+          "source",
+          "scenario"
+        ],
+        "workflow": null,
+        "condition": "${{ needs.scenario.result == 'success' }}",
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      }
+    }
+  },
+  "module-marketplace.yml": {
+    "name": "Publish module marketplace",
+    "triggers": {
+      "workflow_dispatch": {
+        "inputs": {
+          "module_release_tag": {
+            "description": "Published, qualified module release (module-copypaste.<id>-v<version>)",
+            "required": true,
+            "type": "string"
+          }
+        }
+      }
+    },
+    "jobs": {
+      "publish": {
+        "name": "publish",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      }
+    }
+  },
+  "mutation-gate.yml": {
+    "name": "Mutation gate",
+    "triggers": {
+      "schedule": [
+        {
+          "cron": "11 2 * * 1"
+        }
+      ],
+      "workflow_dispatch": null
+    },
+    "jobs": {
+      "linux": {
+        "name": "linux",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      }
+    }
+  },
+  "ocr-module.yml": {
+    "name": "Build and publish OCR module",
+    "triggers": {
+      "workflow_call": {
+        "inputs": {
+          "linux_only": {
+            "required": false,
+            "type": "boolean",
+            "default": false
+          },
+          "publish": {
+            "required": false,
+            "type": "boolean",
+            "default": false
+          },
+          "publish_marketplace": {
+            "required": false,
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "secrets": {
+          "TAURI_SIGNING_PRIVATE_KEY": {
+            "required": true
+          },
+          "TAURI_SIGNING_PRIVATE_KEY_PASSWORD": {
+            "required": true
+          }
+        }
+      },
+      "workflow_dispatch": {
+        "inputs": {
+          "publish": {
+            "description": "Publish qualified packages and update the signed marketplace",
+            "required": true,
+            "type": "boolean",
+            "default": false
+          },
+          "publish_marketplace": {
+            "description": "Update the marketplace after publishing packages; defer during an application release",
+            "required": false,
+            "type": "boolean",
+            "default": true
+          }
+        }
+      }
+    },
+    "jobs": {
+      "preflight": {
+        "name": "preflight",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      },
+      "desktop": {
+        "name": "desktop",
+        "needs": [
+          "preflight"
+        ],
+        "workflow": null,
+        "condition": null,
+        "runner": "${{ matrix.runner }}",
+        "matrix": {
+          "include": "${{ fromJSON(needs.preflight.outputs.desktop_matrix) }}"
+        }
+      },
+      "android": {
+        "name": "android",
+        "needs": [
+          "preflight"
+        ],
+        "workflow": null,
+        "condition": "inputs.linux_only != true",
+        "runner": "ubuntu-24.04",
+        "matrix": {
+          "include": [
+            {
+              "architecture": "arm",
+              "target": "armv7-linux-androideabi"
+            },
+            {
+              "architecture": "aarch64",
+              "target": "aarch64-linux-android"
+            },
+            {
+              "architecture": "x86_64",
+              "target": "x86_64-linux-android"
+            }
+          ]
+        }
+      },
+      "android-native": {
+        "name": "android-native",
+        "needs": [
+          "preflight",
+          "android"
+        ],
+        "workflow": null,
+        "condition": null,
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      },
+      "publish": {
+        "name": "publish",
+        "needs": [
+          "preflight",
+          "desktop",
+          "android",
+          "android-native"
+        ],
+        "workflow": null,
+        "condition": "inputs.publish",
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      }
+    }
+  },
+  "provider-module.yml": {
+    "name": "Build and publish provider module",
+    "triggers": {
+      "workflow_call": {
+        "inputs": {
+          "module": {
+            "required": true,
+            "type": "string"
+          },
+          "linux_only": {
+            "required": false,
+            "type": "boolean",
+            "default": false
+          },
+          "publish": {
+            "required": false,
+            "type": "boolean",
+            "default": false
+          },
+          "publish_marketplace": {
+            "required": false,
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "secrets": {
+          "TAURI_SIGNING_PRIVATE_KEY": {
+            "required": true
+          },
+          "TAURI_SIGNING_PRIVATE_KEY_PASSWORD": {
+            "required": true
+          }
+        }
+      },
+      "workflow_dispatch": {
+        "inputs": {
+          "module": {
+            "description": "First-party module to publish",
+            "required": true,
+            "type": "choice",
+            "options": [
+              "supabase",
+              "semantic-search"
+            ]
+          },
+          "publish": {
+            "description": "Publish qualified packages and update the signed marketplace",
+            "required": true,
+            "type": "boolean",
+            "default": false
+          },
+          "publish_marketplace": {
+            "description": "Update the marketplace after publishing packages; defer during an application release",
+            "required": false,
+            "type": "boolean",
+            "default": true
+          }
+        }
+      }
+    },
+    "jobs": {
+      "preflight": {
+        "name": "preflight",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      },
+      "desktop": {
+        "name": "desktop",
+        "needs": [
+          "preflight"
+        ],
+        "workflow": null,
+        "condition": null,
+        "runner": "${{ matrix.runner }}",
+        "matrix": {
+          "include": "${{ fromJSON(needs.preflight.outputs.desktop_matrix) }}"
+        }
+      },
+      "android": {
+        "name": "android",
+        "needs": [
+          "preflight"
+        ],
+        "workflow": null,
+        "condition": "inputs.linux_only != true",
+        "runner": "ubuntu-24.04",
+        "matrix": {
+          "include": [
+            {
+              "architecture": "arm",
+              "target": "armv7-linux-androideabi"
+            },
+            {
+              "architecture": "aarch64",
+              "target": "aarch64-linux-android"
+            },
+            {
+              "architecture": "x86_64",
+              "target": "x86_64-linux-android"
+            }
+          ]
+        }
+      },
+      "android-native": {
+        "name": "android-native",
+        "needs": [
+          "preflight",
+          "android"
+        ],
+        "workflow": null,
+        "condition": null,
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      },
+      "publish": {
+        "name": "publish",
+        "needs": [
+          "preflight",
+          "desktop",
+          "android",
+          "android-native"
+        ],
+        "workflow": null,
+        "condition": "inputs.publish",
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      }
+    }
+  },
+  "release.yml": {
+    "name": "Production release",
+    "triggers": {
+      "workflow_dispatch": {
+        "inputs": {
+          "publish": {
+            "description": "Publish the already-tagged, qualified stable release",
+            "required": true,
+            "type": "boolean",
+            "default": false
+          },
+          "qualified_run_id": {
+            "description": "Optional exact-tag publication recovery source; qualified runs are discovered automatically",
+            "required": false,
+            "type": "string",
+            "default": ""
+          },
+          "linux_evidence_run_id": {
+            "description": "Run containing exact-artifact Linux native qualification evidence",
+            "required": false,
+            "type": "string",
+            "default": ""
+          },
+          "linux_artifact_run_id": {
+            "description": "Prior release run with exact signed Linux artifacts for this tag",
+            "required": false,
+            "type": "string",
+            "default": ""
+          },
+          "compositor_runtime_run_id": {
+            "description": "Completed exact-source compositor runtime producer run for an explicit staging release",
+            "required": false,
+            "type": "string",
+            "default": ""
+          },
+          "linux_qualification_only": {
+            "description": "Run only the exact Linux native qualification against completed staging inputs",
+            "required": false,
+            "type": "boolean",
+            "default": false
+          },
+          "supabase_module_run_id": {
+            "description": "Completed exact-source unpublished Supabase module run",
+            "required": false,
+            "type": "string",
+            "default": ""
+          },
+          "semantic_search_module_run_id": {
+            "description": "Completed exact-source unpublished Semantic Search module run",
+            "required": false,
+            "type": "string",
+            "default": ""
+          },
+          "ocr_module_run_id": {
+            "description": "Completed exact-source unpublished OCR module run",
+            "required": false,
+            "type": "string",
+            "default": ""
+          },
+          "previous_linux_artifact_run_id": {
+            "description": "Completed earlier Linux staging run used by prior-release qualification evidence",
+            "required": false,
+            "type": "string",
+            "default": ""
+          }
+        }
+      },
+      "push": {
+        "tags": [
+          "v*"
+        ]
+      }
+    },
+    "jobs": {
+      "preflight": {
+        "name": "preflight",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      },
+      "linux-native-bootstrap": {
+        "name": "Run exact staged Linux native qualification",
+        "needs": [
+          "preflight"
+        ],
+        "workflow": "./.github/workflows/linux-native-qualification.yml",
+        "condition": "needs.preflight.outputs.linux_qualification_only == 'true'",
+        "runner": null,
+        "matrix": null
+      },
+      "qualification-supabase": {
+        "name": "Build Linux supabase module",
+        "needs": [
+          "preflight"
+        ],
+        "workflow": "./.github/workflows/provider-module.yml",
+        "condition": "needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && inputs.linux_evidence_run_id == '' && inputs.supabase_module_run_id == ''",
+        "runner": null,
+        "matrix": null
+      },
+      "qualification-semantic-search": {
+        "name": "Build Linux semantic-search module",
+        "needs": [
+          "preflight"
+        ],
+        "workflow": "./.github/workflows/provider-module.yml",
+        "condition": "needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && inputs.linux_evidence_run_id == '' && inputs.semantic_search_module_run_id == ''",
+        "runner": null,
+        "matrix": null
+      },
+      "qualification-ocr": {
+        "name": "Build Linux ocr module",
+        "needs": [
+          "preflight"
+        ],
+        "workflow": "./.github/workflows/ocr-module.yml",
+        "condition": "needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && inputs.linux_evidence_run_id == '' && inputs.ocr_module_run_id == ''",
+        "runner": null,
+        "matrix": null
+      },
+      "linux-native-current": {
+        "name": "Qualify current Linux artifacts",
+        "needs": [
+          "preflight",
+          "linux",
+          "compositor-runtime-public",
+          "qualification-supabase",
+          "qualification-semantic-search",
+          "qualification-ocr"
+        ],
+        "workflow": "./.github/workflows/linux-native-qualification.yml",
+        "condition": "${{ always() && needs.preflight.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && inputs.linux_evidence_run_id == '' && (needs.linux.result == 'success' || inputs.linux_artifact_run_id != '') && needs.compositor-runtime-public.result == 'success' && (needs.qualification-supabase.result == 'success' || inputs.supabase_module_run_id != '') && (needs.qualification-semantic-search.result == 'success' || inputs.semantic_search_module_run_id != '') && (needs.qualification-ocr.result == 'success' || inputs.ocr_module_run_id != '') }}",
+        "runner": null,
+        "matrix": null
+      },
+      "macos": {
+        "name": "macos",
+        "needs": [
+          "preflight"
+        ],
+        "workflow": null,
+        "condition": "needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true'",
+        "runner": "macos-14",
+        "matrix": null
+      },
+      "macos-regression": {
+        "name": "macos-regression",
+        "needs": [
+          "preflight"
+        ],
+        "workflow": null,
+        "condition": "needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true'",
+        "runner": "macos-14",
+        "matrix": null
+      },
+      "android": {
+        "name": "android",
+        "needs": [
+          "preflight"
+        ],
+        "workflow": null,
+        "condition": "needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true'",
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      },
+      "windows": {
+        "name": "windows",
+        "needs": [
+          "preflight"
+        ],
+        "workflow": null,
+        "condition": "needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true'",
+        "runner": "windows-2022",
+        "matrix": null
+      },
+      "linux": {
+        "name": "Linux build (${{ matrix.architecture }})",
+        "needs": [
+          "preflight"
+        ],
+        "workflow": null,
+        "condition": "needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && needs.preflight.outputs.linux_artifact_run_id == github.run_id",
+        "runner": "${{ matrix.runner }}",
+        "matrix": {
+          "include": [
+            {
+              "architecture": "x86_64",
+              "runner": "ubuntu-24.04",
+              "appimagetool_url": "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage",
+              "appimagetool_sha256": "95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6"
+            }
+          ]
+        }
+      },
+      "compositor-runtime-build": {
+        "name": "Build opt-in compositor runtime companions",
+        "needs": [
+          "preflight"
+        ],
+        "workflow": "./.github/workflows/compositor-runtime.yml",
+        "condition": "needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && inputs.compositor_runtime_run_id == ''",
+        "runner": null,
+        "matrix": null
+      },
+      "compositor-runtime-external": {
+        "name": "Verify staged compositor runtime companions",
+        "needs": [
+          "preflight"
+        ],
+        "workflow": null,
+        "condition": "needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && inputs.compositor_runtime_run_id != ''",
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      },
+      "compositor-runtime-public": {
+        "name": "Sign and bind opt-in compositor runtime companions",
+        "needs": [
+          "preflight",
+          "compositor-runtime-build",
+          "compositor-runtime-external"
+        ],
+        "workflow": null,
+        "condition": "${{ always() && needs.preflight.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && (needs.compositor-runtime-build.result == 'success' || needs.compositor-runtime-external.result == 'success') }}",
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      },
+      "linux-full-parity-evidence": {
+        "name": "Linux full parity evidence gate",
+        "needs": [
+          "preflight",
+          "linux",
+          "compositor-runtime-public",
+          "linux-native-current"
+        ],
+        "workflow": null,
+        "condition": "${{ always() && needs.preflight.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && (needs.linux-native-current.result == 'success' || inputs.linux_evidence_run_id != '') && needs.preflight.outputs.linux_required == 'true' && (needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success') }}",
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      },
+      "qualify": {
+        "name": "qualify",
+        "needs": [
+          "preflight",
+          "macos",
+          "macos-regression",
+          "android",
+          "windows",
+          "linux",
+          "compositor-runtime-public",
+          "linux-full-parity-evidence"
+        ],
+        "workflow": null,
+        "condition": "${{ always() && needs.preflight.result == 'success' && (needs.preflight.outputs.reuse_qualified == 'true' || (needs.macos.result == 'success' && needs.macos-regression.result == 'success' && needs.android.result == 'success' && needs.windows.result == 'success' && (needs.preflight.outputs.linux_required != 'true' || ((needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && needs.linux-full-parity-evidence.result == 'success' && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success'))))) }}",
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      },
+      "publish": {
+        "name": "publish",
+        "needs": [
+          "preflight",
+          "qualify"
+        ],
+        "workflow": null,
+        "condition": "${{ always() && needs.preflight.result == 'success' && needs.qualify.result == 'success' && needs.preflight.outputs.publish == 'true' }}",
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      },
+      "release-required": {
+        "name": "Release qualification required",
+        "needs": [
+          "preflight",
+          "qualify",
+          "linux-native-bootstrap"
+        ],
+        "workflow": null,
+        "condition": "${{ always() }}",
+        "runner": "ubuntu-24.04",
+        "matrix": null
+      }
+    }
+  },
+  "secret-scan.yml": {
+    "name": "Secret scan",
+    "triggers": {
+      "workflow_call": {
+        "inputs": {
+          "history": {
+            "description": "Scan every commit instead of the checked-out tree.",
+            "type": "boolean",
+            "default": false
+          }
+        }
+      }
+    },
+    "jobs": {
+      "gitleaks": {
+        "name": "gitleaks",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "ubuntu-latest",
+        "matrix": null
+      }
+    }
+  },
+  "sms-codes-module.yml": {
+    "name": "Build SMS Codes module",
+    "triggers": {
+      "workflow_dispatch": null
+    },
+    "jobs": {
+      "android": {
+        "name": "android",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "ubuntu-24.04",
+        "matrix": {
+          "include": [
+            {
+              "architecture": "arm",
+              "target": "armv7-linux-androideabi"
+            },
+            {
+              "architecture": "aarch64",
+              "target": "aarch64-linux-android"
+            },
+            {
+              "architecture": "x86_64",
+              "target": "x86_64-linux-android"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "supabase-module.yml": {
+    "name": "Build Supabase Sync module",
+    "triggers": {
+      "workflow_dispatch": null
+    },
+    "jobs": {
+      "desktop": {
+        "name": "desktop",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "${{ matrix.runner }}",
+        "matrix": {
+          "include": [
+            {
+              "runner": "macos-14",
+              "platform": "macos",
+              "architecture": "aarch64",
+              "target": "aarch64-apple-darwin",
+              "library": "libcopypaste_module_supabase.dylib"
+            },
+            {
+              "runner": "windows-2022",
+              "platform": "windows",
+              "architecture": "x86_64",
+              "target": "x86_64-pc-windows-msvc",
+              "library": "copypaste_module_supabase.dll"
+            },
+            {
+              "runner": "ubuntu-24.04",
+              "platform": "linux",
+              "architecture": "x86_64",
+              "target": "x86_64-unknown-linux-gnu",
+              "library": "libcopypaste_module_supabase.so"
+            },
+            {
+              "runner": "ubuntu-24.04-arm",
+              "platform": "linux",
+              "architecture": "aarch64",
+              "target": "aarch64-unknown-linux-gnu",
+              "library": "libcopypaste_module_supabase.so"
+            }
+          ]
+        }
+      },
+      "android": {
+        "name": "android",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "ubuntu-24.04",
+        "matrix": {
+          "include": [
+            {
+              "architecture": "arm",
+              "target": "armv7-linux-androideabi"
+            },
+            {
+              "architecture": "aarch64",
+              "target": "aarch64-linux-android"
+            },
+            {
+              "architecture": "x86_64",
+              "target": "x86_64-linux-android"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "supply-chain.yml": {
+    "name": "Supply chain",
+    "triggers": {
+      "push": {
+        "branches": [
+          "main"
+        ]
+      },
+      "pull_request": null,
+      "merge_group": {
+        "types": [
+          "checks_requested"
+        ]
+      },
+      "schedule": [
+        {
+          "cron": "17 6 * * 1"
+        }
+      ],
+      "workflow_dispatch": null
+    },
+    "jobs": {
+      "security": {
+        "name": "Secrets and dependencies",
+        "needs": [],
+        "workflow": null,
+        "condition": null,
+        "runner": "ubuntu-latest",
+        "matrix": null
+      }
+    }
+  }
+}
