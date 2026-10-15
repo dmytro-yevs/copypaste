@@ -471,6 +471,10 @@ class _GestureRepository implements HistoryRepository {
   }
 
   @override
+  Future<HistoryClip> setSecret(String id, bool secret) async =>
+      throw UnimplementedError('setSecret');
+
+  @override
   Future<void> setPinned(String id, bool pinned) async {
     final index = clips.indexWhere((clip) => clip.id == id);
     clips[index] = clips[index].copyWith(pinned: pinned);

@@ -177,6 +177,9 @@ pub enum StoreError {
     #[error("the database schema is incompatible with this CopyPaste version")]
     InvalidSchema,
 
+    #[error("the clip payload could not be opened")]
+    InvalidPayload,
+
     #[error("item not found")]
     NotFound,
 

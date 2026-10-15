@@ -51,6 +51,7 @@ class HistoryController extends ChangeNotifier {
       LinkedHashMap();
   final Map<String, Future<HistoryImagePreview?>> _imagePreviewLoads = {};
   final Map<String, Future<HistorySourceAppIcon?>> _sourceIconLoads = {};
+  final Set<String> _secretMutations = <String>{};
   final Set<String> _pinMutations = <String>{};
   final Set<String> _deleteMutations = <String>{};
   final Set<String> _downloadMutations = <String>{};
@@ -92,6 +93,7 @@ class HistoryController extends ChangeNotifier {
       !_isReorderingPinned &&
       !_isDeletingAll &&
       _draggedPinnedId == null &&
+      _secretMutations.isEmpty &&
       _pinMutations.isEmpty &&
       _deleteMutations.isEmpty &&
       _downloadMutations.isEmpty &&
@@ -147,6 +149,7 @@ class HistoryController extends ChangeNotifier {
       !_isReorderingPinned &&
       !_isBulkMutating &&
       _draggedPinnedId == null &&
+      _secretMutations.isEmpty &&
       _pinMutations.isEmpty &&
       _deleteMutations.isEmpty;
   String? get draggedPinnedId => _draggedPinnedId;
@@ -163,10 +166,12 @@ class HistoryController extends ChangeNotifier {
       _state == HistoryLoadState.ready &&
       !_isReorderingPinned &&
       !_isDeletingAll &&
+      _secretMutations.isEmpty &&
       _pinMutations.isEmpty &&
       _deleteMutations.isEmpty &&
       _skippedUndecryptable == 0 &&
       _items.where((item) => item.pinned).take(2).length == 2;
+  bool isSecretPending(String id) => _secretMutations.contains(id);
   bool isPinPending(String id) =>
       _isReorderingPinned || _pinMutations.contains(id);
   bool isDeletePending(String id) =>
@@ -747,6 +752,24 @@ class HistoryController extends ChangeNotifier {
     if (_disposed) return;
     if (failure != null) _errorMessage = failure;
     notifyListeners();
+  }
+
+  Future<bool> toggleSecret(HistoryClip clip) async {
+    if (_disposed || !_secretMutations.add(clip.id)) return false;
+    notifyListeners();
+    try {
+      final updated = await _repository.setSecret(clip.id, !clip.secret);
+      if (_disposed) return true;
+      _replace(updated);
+      if (_selectedId == clip.id) _selectedClip = updated;
+      return true;
+    } catch (_) {
+      if (!_disposed) _errorMessage = 'The clip secrecy could not be updated.';
+      return false;
+    } finally {
+      _secretMutations.remove(clip.id);
+      if (!_disposed) notifyListeners();
+    }
   }
 
   Future<bool> togglePin(HistoryClip clip) async {

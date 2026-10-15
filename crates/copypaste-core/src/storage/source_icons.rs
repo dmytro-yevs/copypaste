@@ -34,7 +34,10 @@ pub(super) fn normalise(
             (excluded.updated_at = source_app_icons.updated_at AND excluded.png_base64 > source_app_icons.png_base64)",
         params![id, icon.png_base64, icon.width, icon.height, captured_at],
     )?;
-    let remaining = if parsed.file.is_some() || !parsed.privacy.is_empty() {
+    let remaining = if parsed.file.is_some()
+        || !parsed.privacy.is_empty()
+        || parsed.secret_override.is_some()
+    {
         parsed.to_json(content_type)
     } else {
         None
@@ -82,6 +85,7 @@ impl Store {
                 // metadata. Unknown fields must not invent confidentiality.
                 None if copypaste_ipc::content_type::is_text(&item.content_type) => {
                     PayloadMetadata {
+                        secret_override: None,
                         privacy: item.clipboard_privacy(),
                         ..Default::default()
                     }
@@ -141,6 +145,7 @@ pub(super) mod tests {
         let mut row = item(text, timestamp);
         row.app_bundle_id = app.map(str::to_owned);
         row.payload_metadata = PayloadMetadata {
+            secret_override: None,
             privacy: Default::default(),
             file: None,
             source_app_icon: Some(icon()),
@@ -229,6 +234,7 @@ pub(super) mod tests {
     fn synced_clips_normalise_assets_without_losing_wire_metadata() {
         let store = store();
         let metadata = PayloadMetadata {
+            secret_override: None,
             privacy: Default::default(),
             file: None,
             source_app_icon: Some(icon()),

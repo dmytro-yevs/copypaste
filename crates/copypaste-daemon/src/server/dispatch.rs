@@ -139,6 +139,7 @@ fn requires_ready(method: &Method) -> bool {
         | Method::DeleteAll { .. }
         | Method::HistoryCeiling
         | Method::Pin { .. }
+        | Method::SetSecret { .. }
         | Method::ReorderPinned { .. }
         | Method::SetDeviceName { .. }
         // Peer operations read and write the same history, and pairing needs
@@ -282,6 +283,10 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
             id: item_id,
             pinned,
         } => items::pin(state, id, &item_id, pinned),
+        Method::SetSecret {
+            id: item_id,
+            secret,
+        } => items::set_secret(state, id, &item_id, secret),
         Method::ReorderPinned { ids } => items::reorder_pinned(state, id, &ids),
         Method::Export { limit } => transfer::export(state, id, limit),
         Method::Import { items } => transfer::import(state, id, items),
