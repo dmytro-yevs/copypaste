@@ -57,8 +57,14 @@ def cache_observations(log):
     if pending:
         result["incomplete_restores"] += 1
     attempts = result["restored"] + result["missed"] + result["incomplete_restores"]
-    result["observed_hit_rate"] = result["restored"] / attempts if attempts else None
-    result["restore_s"] = round(result["restore_s"], 3)
+    complete = attempts and not result["incomplete_restores"]
+    result["observed_hit_rate"] = result["restored"] / attempts if complete else None
+    result["restore_s"] = round(result["restore_s"], 3) if complete else None
+    if result["incomplete_restores"]:
+        # Parallel or differently formatted cache clients cannot be paired
+        # reliably from these markers. This is missing telemetry, not a miss.
+        result["restored_bytes"] = None
+        result["coverage"] += "; unpaired/parallel markers: transfer totals and hit rate are unavailable"
     return result
 
 
