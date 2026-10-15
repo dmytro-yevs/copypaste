@@ -66,6 +66,13 @@ promotes its original bytes instead of compiling again. An explicit
 `qualified_run_id` can select a specific source. A new tag without prior
 qualification builds and qualifies normally; an invalid tag/version fails early.
 
+Release runs serialize by source SHA so a tag cannot race a staging build of
+the same commit; the queued tag can then discover and promote that qualification.
+The final publisher has a separate global lock for GitHub assets and the shared
+Homebrew tap. Standalone module workflows retain their original global module
+locks across refs; nested unpublished Linux producers use per-parent-run locks.
+None of these producer/publication locks cancels an active run.
+
 The previous Linux upgrade baseline resolves to the newest older published
 stable Linux release. The resolver checks the exact tag commit, original Linux
 producer jobs and receipts, and matches every package against the public

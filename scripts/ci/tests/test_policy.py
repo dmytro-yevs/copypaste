@@ -46,6 +46,13 @@ class PolicyTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "circular"):
             dependencies({"a": {"needs": "b"}, "b": {"needs": "a"}})
 
+    def test_active_release_producers_cannot_be_cancelled_by_a_new_run(self):
+        document = deepcopy(self.document)
+        document["concurrency"] = {"group": "production-release-${{ github.sha }}", "cancel-in-progress": False}
+        self.assertEqual(validate(document, Path("release.yml"), Path.cwd()), [])
+        document["concurrency"]["cancel-in-progress"] = True
+        self.assertTrue(any("must not cancel" in error for error in validate(document, Path("release.yml"), Path.cwd())))
+
     def test_reusable_permission_ceiling_is_checked_before_github_startup(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
