@@ -35,7 +35,7 @@ try {
     try {
         & flutter pub get --enforce-lockfile
         if ($LASTEXITCODE -ne 0) { throw "Flutter dependency resolution failed" }
-        & flutter build windows --release --build-name $Version --build-number $BuildNumber
+        & flutter build windows --release --no-pub --build-name $Version --build-number $BuildNumber
         if ($LASTEXITCODE -ne 0) { throw "Flutter Windows release build failed" }
     } finally {
         Pop-Location
