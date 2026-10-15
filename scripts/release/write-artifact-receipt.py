@@ -38,6 +38,7 @@ def main() -> int:
         "version": args.version,
         "commit": args.commit,
         "run_id": args.run_id,
+        "run_attempt": int(os.environ.get("GITHUB_RUN_ATTEMPT", "1")),
     }
     if os.environ.get("COPYPASTE_BUILD_METADATA"):
         build = json.loads(Path(os.environ["COPYPASTE_BUILD_METADATA"]).read_text(encoding="utf-8"))

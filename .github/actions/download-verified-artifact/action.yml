@@ -1,0 +1,39 @@
+name: Download verified immutable artifacts
+description: Resolve rerun artifacts by creation time, verify ZIP SHA-256 and extract safe paths.
+inputs:
+  name:
+    description: Exact artifact name
+    required: false
+  pattern:
+    description: Artifact name glob
+    required: false
+  path:
+    description: Destination directory
+    required: false
+    default: '.'
+  run-id:
+    description: Source workflow run; defaults to the current run
+    required: false
+  github-token:
+    description: Read access to source Actions artifacts
+    required: false
+  merge-multiple:
+    description: Merge selected artifacts and reject conflicting files
+    required: false
+    default: 'false'
+  expected-commit:
+    description: Optional additional source commit constraint
+    required: false
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token || github.token }}
+        ARTIFACT_NAME: ${{ inputs.name }}
+        ARTIFACT_PATTERN: ${{ inputs.pattern }}
+        DOWNLOAD_PATH: ${{ inputs.path }}
+        SOURCE_RUN_ID: ${{ inputs.run-id || github.run_id }}
+        MERGE_MULTIPLE: ${{ inputs.merge-multiple }}
+        EXPECTED_COMMIT: ${{ inputs.expected-commit }}
+      run: python3 "$GITHUB_WORKSPACE/scripts/release/download_artifact.py"

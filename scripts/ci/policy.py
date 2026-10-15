@@ -9,6 +9,16 @@ import re
 from workflow_yaml import read_workflow
 
 
+def queue_errors(concurrency):
+    if not isinstance(concurrency, dict) or "queue" not in concurrency:
+        return []
+    if concurrency["queue"] not in ("single", "max"):
+        return ["concurrency queue must be the literal single or max"]
+    if concurrency["queue"] == "max" and concurrency.get("cancel-in-progress") not in (None, False, "false"):
+        return ["queue: max requires non-cancelling concurrency"]
+    return []
+
+
 def dependencies(jobs):
     graph = {}
     for key, job in jobs.items():
@@ -52,10 +62,14 @@ def validate(document, path, root):
     if "pull_request_target" in triggers:
         errors.append("pull_request_target is forbidden for repository code execution")
     concurrency = document.get("concurrency", {})
+    errors.extend(queue_errors(concurrency))
+    if isinstance(concurrency, str):
+        concurrency = {"group": concurrency}
     if any(name in path.name for name in ("release", "module", "compositor", "qualification")):
         if concurrency.get("cancel-in-progress") not in (None, False, "false"):
             errors.append("artifact producers/publication must not cancel an active run")
     for key, job in jobs.items():
+        errors.extend(f"{key}: {error}" for error in queue_errors(job.get("concurrency", {})))
         if job.get("continue-on-error") not in (None, False, "false"):
             errors.append(f"{key}: required jobs cannot ignore failures")
         if "runs-on" in job:
@@ -67,6 +81,8 @@ def validate(document, path, root):
             use = step.get("uses", "")
             if not use:
                 continue
+            if use.startswith("actions/download-artifact@"):
+                errors.append(f"{key}: use the verified artifact downloader to bind immutable IDs and ZIP digests")
             if use.startswith("./"):
                 if not (root / use).exists():
                     errors.append(f"{key}: local action/workflow does not exist: {use}")
