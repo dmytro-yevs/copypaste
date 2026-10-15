@@ -45,7 +45,9 @@ def verify(
            for job in entries if job.get("name") != "publish"):
         raise ValueError("qualification source contains an unsuccessful required job")
     if run.get("conclusion") in ("failure", "cancelled") and not any(
-        job.get("name") == "publish" and job.get("conclusion") == run["conclusion"] for job in entries
+        job.get("name") == "publish" and job.get("conclusion") in (
+            ("cancelled", "skipped") if run["conclusion"] == "cancelled" else ("failure",)
+        ) for job in entries
     ):
         raise ValueError("unsuccessful source run has no isolated publication failure or cancellation")
     for job in entries:
