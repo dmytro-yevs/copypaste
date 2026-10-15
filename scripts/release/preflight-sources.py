@@ -7,6 +7,7 @@ from pathlib import Path
 import runpy
 
 from github_inventory import inventory
+from previous_release import resolve
 
 
 def require_secrets(environment, *, build, publish):
@@ -28,6 +29,12 @@ def main():
     environment = os.environ
     require_secrets(environment, build=environment["BUILD"] == "true", publish=environment["PUBLISH"] == "true")
     repository, commit = environment["GITHUB_REPOSITORY"], environment["RELEASE_COMMIT"]
+    if environment.get("LINUX_EVIDENCE_RUN_ID") and not environment.get("LINUX_ARTIFACT_RUN_ID"):
+        raise ValueError("External Linux evidence requires its original linux_artifact_run_id")
+    if environment["BUILD"] == "true":
+        source_module = runpy.run_path(str(root / "stage-linux-module-qualification.py"))["source_module"]
+        for name in ("supabase", "semantic-search", "ocr"):
+            source_module(root.parents[1], name, environment["RELEASE_VERSION"])
     snapshots = {}
     for module in ("supabase", "semantic-search", "ocr"):
         run_id = environment.get(module.replace("-", "_").upper() + "_MODULE_RUN_ID")
@@ -41,6 +48,14 @@ def main():
     if run_id:
         runpy.run_path(str(root / "verify-linux-qualification-evidence-source.py"))["verify"](
             inventory(repository, run_id, "run"), inventory(repository, run_id, "jobs"), repository, commit)
+    previous = environment.get("PREVIOUS_LINUX_ARTIFACT_RUN_ID", "")
+    if previous:
+        values = [inventory(repository, previous, kind) for kind in ("run", "jobs", "artifacts")]
+        runpy.run_path(str(root / "verify-linux-artifact-source-run.py"))["verify"](*values, repository, values[0]["head_sha"])
+    elif environment["BUILD"] == "true" and environment.get("LINUX_REQUIRED") == "true":
+        previous = resolve(repository, environment["RELEASE_VERSION"], Path(environment["RUNNER_TEMP"]))
+    with open(environment["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+        output.write("previous_linux_artifact_run_id=" + previous + "\n")
     output = Path(environment["RUNNER_TEMP"]) / "release-source-artifacts.json"
     output.write_text(json.dumps(snapshots, indent=2) + "\n", encoding="utf-8")
     print("External dependency identities and required signing configuration are valid")

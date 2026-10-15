@@ -43,10 +43,26 @@ def verify(root: Path, version: str, commit: str, run_id: str, *, require_linux:
     platforms = ["macos", "android", "windows"]
     if require_linux:
         platforms.append("linux")
+    complete_inventory = True
     for platform in platforms:
         receipt_path = root / platform / "production-receipt.json"
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         schema = receipt.get("schema")
+        complete_inventory = complete_inventory and receipt.get("inventory_complete") is True
+        if "signing" in receipt:
+            scheme = {"macos": "ad-hoc-codesign", "android": "android-release-keystore",
+                      "windows": "authenticode", "linux": "detached-updater"}[platform]
+            if not isinstance(receipt["signing"], dict) or receipt["signing"].get("scheme") != scheme:
+                raise ValueError("artifact signing metadata differs from the platform contract")
+        if "build" in receipt and (not isinstance(receipt["build"], dict) or receipt["build"].get("schema") != 1
+                                   or receipt["build"].get("profile") != "release"
+                                   or receipt["build"].get("platform") != platform):
+            raise ValueError("artifact build configuration differs from production platform")
+        if "builds" in receipt and (not isinstance(receipt["builds"], list) or not receipt["builds"] or any(
+            not isinstance(build, dict) or build.get("schema") != 1 or build.get("profile") != "release" or build.get("platform") != platform
+            for build in receipt["builds"]
+        )):
+            raise ValueError("merged artifact build configurations differ from production platform")
         if schema not in (1, 2) or receipt.get("platform") != platform:
             raise ValueError(f"invalid {platform} receipt identity")
         for key, expected in (
@@ -88,6 +104,19 @@ def verify(root: Path, version: str, commit: str, run_id: str, *, require_linux:
             }
             if set(names) != expected:
                 raise ValueError("Android receipt must cover universal, arm64, and armv7 APKs")
+        if receipt.get("inventory_complete") is True:
+            inventory = set(names) | {"production-receipt.json"}
+            for companion in receipt.get("companions", []):
+                name = companion.get("name", "")
+                if not name or Path(name).name != name or name in inventory:
+                    raise ValueError("invalid or ambiguous companion artifact")
+                path = root / platform / name
+                if (not path.is_file() or path.is_symlink() or path.stat().st_size != companion.get("bytes")
+                        or sha256(path) != companion.get("sha256")):
+                    raise ValueError("companion artifact differs from qualification")
+                inventory.add(name)
+            if {path.name for path in (root / platform).iterdir()} != inventory:
+                raise ValueError(f"{platform} directory contains unqualified files")
         if platform == "linux":
             expected = {
                 f"CopyPaste-v{version}-linux-{architecture}.{extension}"
@@ -122,6 +151,13 @@ def verify(root: Path, version: str, commit: str, run_id: str, *, require_linux:
             raise ValueError("compositor runtime production receipt is missing or invalid") from error
         if actual != expected:
             raise ValueError("compositor runtime production receipt does not bind public companion bytes")
+
+    if complete_inventory:
+        expected_directories = set(platforms) | ({"compositor-runtime"} if require_compositor_runtime else set())
+        if {path.name for path in root.iterdir()} != expected_directories or any(
+            not path.is_dir() or path.is_symlink() for path in root.iterdir()
+        ):
+            raise ValueError("qualified root contains an unverified artifact directory")
 
 
 def main() -> int:
