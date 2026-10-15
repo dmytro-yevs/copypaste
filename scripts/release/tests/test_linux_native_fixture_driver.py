@@ -25,6 +25,36 @@ SPEC.loader.exec_module(driver)
 
 
 class LinuxNativeFixtureDriverTest(unittest.TestCase):
+    def test_upgrade_seed_releases_the_gui_on_early_return_and_failure(self):
+        for error in (None, RuntimeError("seed failed")):
+            with self.subTest(error=error), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                app = mock.Mock()
+                arguments = [
+                    "driver", "--artifacts", str(root), "--version", "1.0.26",
+                    "--architecture", "x86_64", "--desktop", "GNOME", "--session", "x11",
+                    "--evidence-dir", str(root / "evidence"),
+                    "--module-artifacts", str(root), "--module-fixtures", str(root),
+                    "--runtime-format", "deb", "--runtime-prefix", str(root),
+                    "--qualification-root", str(root), "--seed-upgrade-canary",
+                    "--previous-artifacts", str(root), "--previous-version", "1.0.25",
+                ]
+                with mock.patch.object(driver.sys, "argv", arguments), \
+                     mock.patch.object(driver, "runtime_prefix", return_value=root), \
+                     mock.patch.object(driver, "runtime_gui_entrypoint", return_value=root / "gui"), \
+                     mock.patch.object(driver, "start_gui_runtime", return_value=(app, root / "socket")), \
+                     mock.patch.object(driver, "wait_for_startup_status"), \
+                     mock.patch.object(driver, "seed_upgrade_canary", side_effect=error) as seed:
+                    if error:
+                        with self.assertRaisesRegex(RuntimeError, "seed failed"):
+                            driver.main()
+                    else:
+                        driver.main()
+                seed.assert_called_once()
+                app.terminate.assert_called_once()
+                app.wait.assert_called_once_with(timeout=5)
+                app.kill.assert_not_called()
+
     def test_clean_install_requires_a_new_profile_and_rejects_existing_or_linked_state(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
