@@ -18,6 +18,22 @@ VERIFY = runpy.run_path(str(ROOT / "scripts/release/verify-artifact-receipts.py"
 
 
 class RpmPreviewTest(unittest.TestCase):
+    def test_fedora_identity_probe_preserves_the_product_version(self):
+        prefix = INSTALL.read_text().split("bash -ceu '\n", 1)[1].split("    # DNF", 1)[0]
+        setup = '''set -euo pipefail
+VERSION=1.2.3
+PACKAGE_NAME=CopyPaste-v1.2.3-linux-x86_64.rpm
+rpm() {
+  if [[ "$1" == --eval ]]; then printf '44'; else printf 'copypaste 1.2.3 x86_64'; fi
+}
+source() { VERSION='44 (Container Image)'; ID=fedora; VERSION_ID=44; }
+'''
+        result = subprocess.run(
+            ["bash", "-c", setup + prefix + '\n[[ "$VERSION" == 1.2.3 ]]'],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_extra_packaging_options_fail_before_building(self):
         result = subprocess.run(
             ["bash", str(BUILDER), "1.2.3", "x86_64", "--release-scope", "unexpected"],
