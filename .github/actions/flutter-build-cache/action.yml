@@ -110,3 +110,9 @@ runs:
       with:
         path: ${{ steps.cache-paths.outputs.cmake_path }}
         key: android-cmake-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-paths.outputs.cmake_version }}
+    - name: Record build toolchains and configuration
+      shell: bash
+      env:
+        BUILD_PLATFORM: ${{ inputs.platform }}
+        BUILD_PROFILE: ${{ inputs.profile }}
+      run: python3 scripts/ci/build-metadata.py

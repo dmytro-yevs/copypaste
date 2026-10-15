@@ -47,12 +47,12 @@ pubspec_version="$(awk '/^version:[[:space:]]*/ {print $2; exit}' "$APP_ROOT/pub
 export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
 export CARGO_BUILD_JOBS=2
 export CMAKE_BUILD_PARALLEL_LEVEL=2
-cargo build --jobs 2 --manifest-path "$ROOT/Cargo.toml" --release --locked \
+python3 "$ROOT/scripts/ci/timed.py" compilation cargo build --jobs 2 --manifest-path "$ROOT/Cargo.toml" --release --locked \
   -p copypaste-daemon -p copypaste-cli
 
 cd "$APP_ROOT"
-flutter pub get --enforce-lockfile
-flutter build linux --release --no-pub --build-name "$VERSION" --build-number "$BUILD_NUMBER"
+python3 "$ROOT/scripts/ci/timed.py" dependencies flutter pub get --enforce-lockfile
+python3 "$ROOT/scripts/ci/timed.py" compilation flutter build linux --release --no-pub --build-name "$VERSION" --build-number "$BUILD_NUMBER"
 
 mapfile -t bundles < <(find build/linux -type d -path '*/release/bundle' -print | sort)
 [[ "${#bundles[@]}" == 1 ]] || {

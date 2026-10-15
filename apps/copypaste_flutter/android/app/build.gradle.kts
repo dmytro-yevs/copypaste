@@ -21,6 +21,9 @@ android {
     // The universal output retains x86_64 for existing updater compatibility.
     if (providers.gradleProperty("split-per-abi").orNull == "true") {
         splits.abi.isUniversalApk = true
+        // Universal split output also includes transitive dependency ABIs.
+        // Flutter has no x86 engine; preserve the existing three-ABI contract.
+        packaging.jniLibs.excludes.add("**/x86/**")
     }
     namespace = "com.copypaste.app"
     compileSdk = flutter.compileSdkVersion

@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 
 
@@ -38,10 +39,26 @@ def main() -> int:
         "commit": args.commit,
         "run_id": args.run_id,
     }
+    if os.environ.get("COPYPASTE_BUILD_METADATA"):
+        build = json.loads(Path(os.environ["COPYPASTE_BUILD_METADATA"]).read_text(encoding="utf-8"))
+        if build.get("schema") != 1 or build.get("profile") != "release" or build.get("platform") != args.platform:
+            raise ValueError("production receipt requires matching release build metadata")
+        receipt["build"] = build
     metadata = [
         {"name": path.name, "bytes": path.stat().st_size, "sha256": sha256(path)}
         for path in artifacts
     ]
+    names = {path.name for path in artifacts}
+    companions = [Path(str(path) + suffix) for path in artifacts for suffix in (".sig", ".sha256")
+                  if Path(str(path) + suffix).is_file() and path.name + suffix not in names]
+    receipt["inventory_complete"] = True
+    receipt["companions"] = [{"name": path.name, "bytes": path.stat().st_size, "sha256": sha256(path)}
+                             for path in companions]
+    receipt["signing"] = {
+        "scheme": {"macos": "ad-hoc-codesign", "android": "android-release-keystore",
+                   "windows": "authenticode", "linux": "detached-updater"}[args.platform],
+        "detached_signatures": sorted(path.name for path in [*artifacts, *companions] if path.name.endswith(".sig")),
+    }
     if len(metadata) == 1:
         receipt["artifact"] = metadata[0]
     else:
