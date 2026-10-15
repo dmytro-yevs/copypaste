@@ -1228,12 +1228,12 @@ def require_camera_qr_scan(prefix, cli, environment, workspace, gui_pid, runtime
         )
         emit_result("camera_qr_scan", observed)
         # End the camera consumer while its owned input producer is still alive.
-        run(['xdotool', 'key', 'Escape'])
+        os.kill(gui_pid, signal.SIGTERM)
         deadline = time.monotonic() + 8
         while time.monotonic() < deadline:
             links = Path(f'/proc/{gui_pid}/fd')
             held = False
-            for descriptor in links.iterdir():
+            for descriptor in tuple(links.iterdir()) if links.exists() else ():
                 try:
                     held |= os.readlink(descriptor) == str(device)
                 except OSError:
