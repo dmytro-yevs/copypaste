@@ -760,6 +760,22 @@ def runtime_prefix(prefix):
     return prefix
 
 
+def runtime_gui_entrypoint(prefix, runtime_format):
+    """Use the package's public launcher, including AppImage runtime setup."""
+    binary = prefix / "copypaste"
+    if runtime_format == "AppImage":
+        launcher = prefix.parents[2] / "AppRun"
+        if not launcher.is_file() or launcher.is_symlink() or not os.access(launcher, os.X_OK):
+            raise RuntimeError("qualified AppImage is missing its executable AppRun")
+        return launcher
+    if runtime_format not in {"deb", "rpm"}:
+        raise RuntimeError("qualified GUI package format is unsupported")
+    launcher = prefix.parents[1] / "bin/copypaste"
+    if not launcher.is_symlink() or launcher.resolve(strict=True) != binary.resolve(strict=True):
+        raise RuntimeError("qualified native launcher does not resolve to the installed GUI")
+    return launcher
+
+
 def sha256(path):
     import hashlib
     digest = hashlib.sha256()
@@ -804,6 +820,24 @@ def newest_item(items, before_ids, content_type):
     raise RuntimeError(f"native backend did not retain a new {content_type} item")
 
 
+def wait_for_fixture_capture(cli, environment, before, before_ids, content_type, payload):
+    """Bind the assertion to this offer rather than a competing startup capture."""
+    deadline = time.monotonic() + CAPTURE_TIMEOUT_SECONDS
+    expected_text = payload.decode("utf-8") if content_type == "text" else None
+    while time.monotonic() < deadline:
+        candidates = [
+            item for item in list_items(cli, environment)
+            if item.get("id") not in before_ids and item.get("content_type") == content_type
+            and (expected_text is None or item.get("content") == expected_text)
+        ]
+        if candidates:
+            if cli_item_count(status(cli, environment)) < before + 1:
+                raise RuntimeError("fixture capture did not increase history count")
+            return candidates[0]
+        time.sleep(0.15)
+    raise RuntimeError("native backend did not retain the requested fixture within its capture deadline")
+
+
 def external_clipboard_bytes(session, mime, environment):
     if session == "x11":
         command = ["xclip", "-selection", "clipboard", "-t", mime, "-o"]
@@ -831,8 +865,7 @@ def require_capture(cli, environment, workspace, evidence_dir, session, mime, pa
     before = cli_item_count(status(cli, environment))
     before_ids = {item.get("id") for item in list_items(cli, environment)}
     with clipboard_provider(workspace, evidence_dir, assertion, {mime: payload}, environment):
-        wait_for_count(cli, environment, before + 1)
-        item = newest_item(list_items(cli, environment), before_ids, content_type)
+        item = wait_for_fixture_capture(cli, environment, before, before_ids, content_type, payload)
         require_source_identity(item)
     overwrite_marker = f"copypaste-native-overwrite-{assertion}".encode("utf-8")
     overwrite_before = cli_item_count(status(cli, environment))
@@ -1404,6 +1437,7 @@ def main():
         data_home = workspace / "data-home"
         write_source_desktop_entry(data_home)
         prefix = runtime_prefix(args.runtime_prefix)
+        gui_entrypoint = runtime_gui_entrypoint(prefix, args.runtime_format)
         args.evidence_dir = args.evidence_dir / runtime_evidence_namespace(
             args.runtime_format, seed_upgrade_canary=args.seed_upgrade_canary,
         )
@@ -1420,7 +1454,7 @@ def main():
             "TMPDIR": str(runtime_dir),
         }
         app, runtime_socket = start_gui_runtime(
-            prefix / "copypaste", environment, runtime_dir, set(runtime_dir.glob("cp-*.sock")),
+            gui_entrypoint, environment, runtime_dir, set(runtime_dir.glob("cp-*.sock")),
         )
         try:
             cli_environment = {**environment, "COPYPASTE_SOCKET": str(runtime_socket)}
@@ -1513,7 +1547,7 @@ def main():
                 app.terminate()
                 app.wait(timeout=5)
                 app, runtime_socket = start_gui_runtime(
-                    prefix / "copypaste", environment, runtime_dir, prior_sockets,
+                    gui_entrypoint, environment, runtime_dir, prior_sockets,
                 )
                 cli_environment = {**environment, "COPYPASTE_SOCKET": str(runtime_socket)}
                 restart_items = run([str(cli), "--json", "list", "--limit", "100"], env=cli_environment)
@@ -1535,7 +1569,7 @@ def main():
                     app.terminate()
                     app.wait(timeout=5)
                     app, runtime_socket = start_gui_runtime(
-                        prefix / "copypaste", environment, runtime_dir, prior_sockets,
+                        gui_entrypoint, environment, runtime_dir, prior_sockets,
                     )
                     cli_environment = {**environment, "COPYPASTE_SOCKET": str(runtime_socket)}
                     wait_for_startup_status(cli, cli_environment, require_native_clipboard=True)
