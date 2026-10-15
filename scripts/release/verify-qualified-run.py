@@ -34,11 +34,23 @@ def verify(
         or run.get("event") not in ("push", "workflow_dispatch")
     ):
         raise ValueError("qualification source is not the production release workflow")
-    if run.get("status") != "completed" or run.get("conclusion") != "success":
+    if run.get("status") != "completed" or run.get("conclusion") not in ("success", "failure"):
         raise ValueError("qualification source did not complete successfully")
     entries = jobs.get("jobs", [])
     if jobs.get("total_count") != len(entries):
         raise ValueError("qualification job inventory is incomplete")
+    # A failed publisher does not invalidate completed qualification. Every
+    # other failed/cancelled job still rejects recovery, including new gates.
+    if any(job.get("conclusion") not in ("success", "skipped")
+           for job in entries if job.get("name") != "publish"):
+        raise ValueError("qualification source contains an unsuccessful required job")
+    if run.get("conclusion") == "failure" and not any(
+        job.get("name") == "publish" and job.get("conclusion") == "failure" for job in entries
+    ):
+        raise ValueError("failed source run has no isolated publication failure")
+    for job in entries:
+        if job.get("name") == "macos-regression" and job.get("conclusion") != "success":
+            raise ValueError("required macOS launch regression did not pass")
     for name in ("preflight", "macos", "android", "windows", "qualify"):
         matching = [job for job in entries if job.get("name") == name]
         if (

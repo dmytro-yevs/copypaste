@@ -3,12 +3,14 @@
 
 import argparse
 import json
+import os
 import runpy
 from pathlib import Path
 
 
 RELEASE = runpy.run_path(str(Path(__file__).with_name("linux_release_contract.py")))
 ARCHITECTURES = RELEASE["ARCHITECTURES"]
+PIPELINE = runpy.run_path(str(Path(__file__).with_name("current_pipeline.py")))
 
 
 def artifact_name(workflow: str, module: str, architecture: str) -> str:
@@ -16,20 +18,27 @@ def artifact_name(workflow: str, module: str, architecture: str) -> str:
     return f"{prefix}-linux-{architecture}"
 
 
-def verify(run: dict, jobs: dict, artifacts: dict, repository: str, commit: str, workflow: str, module: str) -> None:
+def verify(run: dict, jobs: dict, artifacts: dict, repository: str, commit: str, workflow: str, module: str, *, current_run_id=None) -> None:
+    current = PIPELINE["current_release"](run, current_run_id)
     if (
         type(run.get("id")) is not int
         or run.get("head_sha") != commit
         or run.get("head_repository", {}).get("full_name") != repository
-        or run.get("path") != workflow
-        or run.get("event") != "workflow_dispatch"
-        or run.get("status") != "completed"
-        or run.get("conclusion") != "success"
+        or (not current and (run.get("path") != workflow
+            or run.get("event") != "workflow_dispatch"
+            or run.get("status") != "completed"
+            or run.get("conclusion") != "success"))
     ):
         raise ValueError("Module artifact source is not a successful dispatch at the exact product commit")
     entries = jobs.get("jobs", [])
     if jobs.get("total_count") != len(entries):
         raise ValueError("Module artifact source job inventory is incomplete")
+    if current:
+        prefix = f"Build Linux {module} module / "
+        successful = PIPELINE["successful_jobs"](jobs)
+        if prefix + "preflight" not in successful:
+            raise ValueError("current module producer preflight did not pass")
+        entries = [job for job in entries if str(job.get("name", "")).startswith(prefix + "desktop (")]
     successful_linux_jobs = {
         architecture: any(
             architecture in str(job.get("name", ""))
@@ -76,6 +85,7 @@ def main() -> None:
     verify(
         *(json.loads(path.read_text()) for path in (args.run, args.jobs, args.artifacts)),
         args.repository, args.commit, args.workflow, args.module,
+        current_run_id=os.environ.get("GITHUB_RUN_ID"),
     )
     print("verified exact Linux module artifact source run")
 

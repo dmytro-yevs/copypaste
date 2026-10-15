@@ -1,6 +1,14 @@
 name: Build and publish OCR module
 
 on:
+  workflow_call:
+    inputs:
+      linux_only: {required: false, type: boolean, default: false}
+      publish: {required: false, type: boolean, default: false}
+      publish_marketplace: {required: false, type: boolean, default: false}
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: {required: true}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: {required: true}
   workflow_dispatch:
     inputs:
       publish:
@@ -15,7 +23,7 @@ on:
         default: true
 
 concurrency:
-  group: ocr-module-release
+  group: ocr-module-release-${{ github.ref }}-${{ inputs.linux_only && github.run_id || 'standalone' }}
   cancel-in-progress: false
 
 permissions:
@@ -26,6 +34,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     outputs:
+      desktop_matrix: ${{ steps.matrix.outputs.desktop_matrix }}
       version: ${{ steps.metadata.outputs.version }}
       app_version: ${{ steps.metadata.outputs.app_version }}
     steps:
@@ -44,15 +53,18 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               output.write(f"version={module['version']}\napp_version={application}\n")
           PY
+      - id: matrix
+        env:
+          LINUX_ONLY: ${{ inputs.linux_only }}
+          REQUESTED_PUBLISH: ${{ inputs.publish }}
+        run: python3 scripts/ci/module-matrix.py --kind ocr
+
   desktop:
     needs: preflight
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { platform: macos, architecture: aarch64, runner: macos-14, library: libcopypaste_module_ocr.dylib, program: copypaste-module-qualification }
-          - { platform: windows, architecture: x86_64, runner: windows-2022, library: copypaste_module_ocr.dll, program: copypaste-module-qualification.exe }
-          - { platform: linux, architecture: x86_64, runner: ubuntu-24.04, library: libcopypaste_module_ocr.so, program: copypaste-module-qualification }
+        include: ${{ fromJSON(needs.preflight.outputs.desktop_matrix) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     env:
@@ -112,6 +124,7 @@ jobs:
           path: dist/*
 
   android:
+    if: inputs.linux_only != true
     needs: preflight
     runs-on: ubuntu-24.04
     timeout-minutes: 60

@@ -17,6 +17,11 @@ val releaseSigningConfigured = listOf(
 ).all { !it.isNullOrBlank() }
 
 android {
+    // AGP packages the universal APK and ABI APKs from one Flutter compilation.
+    // The universal output retains x86_64 for existing updater compatibility.
+    if (providers.gradleProperty("split-per-abi").orNull == "true") {
+        splits.abi.isUniversalApk = true
+    }
     namespace = "com.copypaste.app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
