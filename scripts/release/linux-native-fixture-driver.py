@@ -1125,6 +1125,22 @@ def gui_owned_daemon(gui, data_home):
     return candidates[0]
 
 
+def wait_for_pairing_state(socket_path, expected, pairing_id):
+    """Observe asynchronous ceremony progress without repeating mutations."""
+    deadline = time.monotonic() + CAPTURE_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        progress = response_variant(ipc(socket_path, "pair_progress"), "pairing_progress")
+        if not isinstance(progress, dict) or progress.get("pairing_id") != pairing_id:
+            raise RuntimeError("pairing progress does not identify the active ceremony")
+        state = progress.get("state")
+        if state == expected:
+            return progress
+        if state not in {"waiting_for_peer", "handshaking", "awaiting_confirmation"}:
+            raise RuntimeError("pairing ended before the required state")
+        time.sleep(0.05)
+    raise RuntimeError("pairing did not reach the required state before the readiness deadline")
+
+
 def require_pairing_sync(prefix, cli, environment, workspace, primary_socket):
     """Pair two exact bundled daemons and verify one real history transfer."""
     peer_socket = workspace / "peer.sock"
@@ -1152,10 +1168,22 @@ def require_pairing_sync(prefix, cli, environment, workspace, primary_socket):
         joined = ipc(peer_socket, "pair_join", {"code": invite["code"], "addr": invite["listen_addr"]})
         if not isinstance(joined.get("data", {}).get("pairing_progress"), dict):
             raise RuntimeError("paired exact daemon did not report pairing progress")
+        pairing_id = invite.get("pairing_id")
+        if not isinstance(pairing_id, str) or not pairing_id:
+            raise RuntimeError("pairing invitation does not identify its ceremony")
+        primary = wait_for_pairing_state(primary_socket, "awaiting_confirmation", pairing_id)
+        remote = wait_for_pairing_state(peer_socket, "awaiting_confirmation", pairing_id)
+        sas = primary.get("sas")
+        if not isinstance(sas, str) or not re.fullmatch(r"[0-9]{6}", sas) or remote.get("sas") != sas:
+            raise RuntimeError("paired exact daemons did not agree on the verification code")
         for socket_path in (primary_socket, peer_socket):
             response = ipc(socket_path, "pair_confirm", {"accept": True})
             if not isinstance(response.get("data", {}).get("pairing_progress"), dict):
                 raise RuntimeError("pairing confirmation did not return typed progress")
+        for socket_path in (primary_socket, peer_socket):
+            progress = wait_for_pairing_state(socket_path, "confirmed", pairing_id)
+            if not isinstance(progress.get("known_device"), dict):
+                raise RuntimeError("confirmed pairing did not persist the known device")
         marker = "copypaste-pairing-sync-fixture"
         primary_environment = {**environment, "COPYPASTE_SOCKET": str(primary_socket)}
         run([str(cli), "add", marker], env=primary_environment)
