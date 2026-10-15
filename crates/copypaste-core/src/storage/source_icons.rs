@@ -78,9 +78,8 @@ impl Store {
         let mut metadata = match item.payload_metadata.as_deref() {
             Some(json) => match PayloadMetadata::from_json(json, &item.content_type) {
                 Some(metadata) => metadata,
-                // The local reader already classifies unrecognized text
-                // metadata as confidential. Preserve that classification in
-                // the current envelope without rewriting the stored original.
+                // Salvage explicit privacy hints independently of optional
+                // metadata. Unknown fields must not invent confidentiality.
                 None if copypaste_ipc::content_type::is_text(&item.content_type) => {
                     PayloadMetadata {
                         privacy: item.clipboard_privacy(),
