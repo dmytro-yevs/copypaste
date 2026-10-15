@@ -43,7 +43,9 @@ class MetricsTest(unittest.TestCase):
         self.assertEqual(result["restored_bytes"], 1000000)
         incomplete = cache_observations("2026-01-01T00:00:01Z Cache hit for: corrupt")
         self.assertEqual(incomplete["incomplete_restores"], 1)
-        self.assertEqual(incomplete["observed_hit_rate"], 0)
+        self.assertIsNone(incomplete["observed_hit_rate"])
+        self.assertIsNone(incomplete["restore_s"])
+        self.assertIsNone(incomplete["restored_bytes"])
     def test_wall_clock_is_not_sum_of_parallel_jobs_or_updated_at(self):
         run = {"id": 1, "path": ".github/workflows/ci.yml", "html_url": "url", "head_sha": "sha",
                "event": "push", "created_at": "2026-01-01T00:00:00Z", "conclusion": "success",
