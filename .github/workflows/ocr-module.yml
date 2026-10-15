@@ -24,11 +24,14 @@ permissions:
 jobs:
   preflight:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     outputs:
       version: ${{ steps.metadata.outputs.version }}
       app_version: ${{ steps.metadata.outputs.app_version }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - id: metadata
         run: |
           python3 - <<'PY'
@@ -51,6 +54,7 @@ jobs:
           - { platform: windows, architecture: x86_64, runner: windows-2022, library: copypaste_module_ocr.dll, program: copypaste-module-qualification.exe }
           - { platform: linux, architecture: x86_64, runner: ubuntu-24.04, library: libcopypaste_module_ocr.so, program: copypaste-module-qualification }
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     env:
       OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
     defaults:
@@ -58,6 +62,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.96"
@@ -108,6 +114,7 @@ jobs:
   android:
     needs: preflight
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -117,6 +124,8 @@ jobs:
           - { architecture: x86_64, target: x86_64-linux-android }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.96"
@@ -170,8 +179,11 @@ jobs:
   android-native:
     needs: [preflight, android]
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
         with:
           distribution: temurin
@@ -199,11 +211,14 @@ jobs:
     needs: [preflight, desktop, android, android-native]
     if: inputs.publish
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     permissions:
       contents: write
       actions: write
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: ocr-*

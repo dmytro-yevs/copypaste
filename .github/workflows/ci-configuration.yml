@@ -1,23 +1,49 @@
 name: CI configuration
 
 on:
+  push:
+    branches: [main]
   pull_request:
-    paths: [".github/**", "config/**", "scripts/ci/**"]
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
+
+concurrency:
+  group: ci-policy-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   validate:
+    name: CI Policy Gate
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.12"
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.96"
+      - name: Install pinned CI policy tools
+        run: |
+          python3 -m pip install -r scripts/ci/requirements.txt
+          bash scripts/ci/install-actionlint.sh "$RUNNER_TEMP/ci-tools"
+      - name: Validate workflows and embedded shell
+        run: '"$RUNNER_TEMP/ci-tools/actionlint" -color=false'
+      - name: Reject high confidence security findings
+        run: zizmor --offline --min-severity high --min-confidence high .github
+      - name: Validate repository CI policy
+        run: python3 scripts/ci/policy.py
+      - name: Test policy, selection, metrics and release contracts
+        run: |
+          python3 -m unittest discover -s scripts/ci/tests -v
+          python3 -m unittest scripts/test_release_safety.py scripts/test_linux_qualification_bootstrap.py
       - run: python3 scripts/ci/run-gates.py --check
+      - run: python3 scripts/ci/run-gates.py --gate rustfmt
       - run: python3 scripts/check-docs.py

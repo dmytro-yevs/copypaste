@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "required_jobs": {
+    "ci.yml": {
+      "compositor-runtime-metadata": "Compositor runtime metadata",
+      "compositor-runtime-producer": "Compositor runtime producer",
+      "rust-and-supabase": "rust-and-supabase",
+      "macos-core": "macOS Rust capabilities",
+      "windows-core": "Windows Rust capabilities",
+      "optional-modules": "Optional modules (${{ matrix.name }})",
+      "flutter-foundation": "Flutter foundation (${{ matrix.name }})",
+      "linux-native-fixtures": "Linux native fixtures (${{ matrix.architecture }})",
+      "linux-mutter-bridges": "Mutter ${{ matrix.mutter }} bridge (${{ matrix.architecture }})",
+      "linux-pr-release-candidate": "Linux release candidate (${{ matrix.architecture }})",
+      "linux-package-fixtures": "Linux package fixtures (${{ matrix.architecture }})",
+      "changes": "Select required validation",
+      "required": "CI required"
+    },
+    "release.yml": {
+      "preflight": "preflight",
+      "linux-native-bootstrap": "Run exact staged Linux native qualification",
+      "macos": "macos",
+      "android": "android",
+      "windows": "windows",
+      "linux": "Linux build (${{ matrix.architecture }})",
+      "compositor-runtime-build": "Build opt-in compositor runtime companions",
+      "compositor-runtime-external": "Verify staged compositor runtime companions",
+      "compositor-runtime-public": "Sign and bind opt-in compositor runtime companions",
+      "linux-full-parity-evidence": "Linux full parity evidence gate",
+      "qualify": "qualify",
+      "publish": "publish"
+    },
+    "codeql-scheduled.yml": {
+      "analyze-no-build": "analyze-no-build",
+      "analyze-swift": "analyze-swift",
+      "analyze-cpp": "analyze-cpp"
+    },
+    "linux-native-qualification.yml": {
+      "source": "Verify exact artifact sources",
+      "scenario": "${{ matrix.architecture }} ${{ matrix.desktop }} ${{ matrix.session }}",
+      "evidence": "Assemble verified Linux native qualification"
+    },
+    "ci-configuration.yml": {
+      "validate": "CI Policy Gate"
+    }
+  }
+}
