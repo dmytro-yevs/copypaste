@@ -625,6 +625,25 @@ impl copypaste_runtime::ClipboardWriter for AndroidClipboard {
         payload: &copypaste_core::ClipboardPayload,
         content_type: &str,
     ) -> Result<(), copypaste_core::ClipboardWriteError> {
+        self.write_native(payload, content_type, false)
+    }
+
+    fn write_received(
+        &self,
+        payload: &copypaste_core::ClipboardPayload,
+        content_type: &str,
+    ) -> Result<(), copypaste_core::ClipboardWriteError> {
+        self.write_native(payload, content_type, true)
+    }
+}
+
+impl AndroidClipboard {
+    fn write_native(
+        &self,
+        payload: &copypaste_core::ClipboardPayload,
+        content_type: &str,
+        received: bool,
+    ) -> Result<(), copypaste_core::ClipboardWriteError> {
         let vm = JAVA_VM
             .get()
             .ok_or(copypaste_core::ClipboardWriteError::Failed)?;
@@ -632,7 +651,9 @@ impl copypaste_runtime::ClipboardWriter for AndroidClipboard {
             .attach_current_thread()
             .map_err(|_| copypaste_core::ClipboardWriteError::Failed)?;
         let ok = match payload {
-            copypaste_core::ClipboardPayload::Text(text) => call_text(&mut env, text, content_type),
+            copypaste_core::ClipboardPayload::Text(text) => {
+                call_text(&mut env, text, content_type, received)
+            }
             copypaste_core::ClipboardPayload::Image {
                 content_type,
                 bytes,
@@ -645,13 +666,14 @@ impl copypaste_runtime::ClipboardWriter for AndroidClipboard {
                     _ => "copypaste-image",
                 },
                 content_type,
+                received,
             ),
             copypaste_core::ClipboardPayload::File { bytes, metadata } => {
                 if let Some(source_reference) = metadata
                     .as_ref()
                     .and_then(|file| file.source_reference.as_deref())
                 {
-                    call_text(&mut env, source_reference, "text/plain")
+                    call_text(&mut env, source_reference, "text/plain", received)
                 } else {
                     call_binary(
                         &mut env,
@@ -662,6 +684,7 @@ impl copypaste_runtime::ClipboardWriter for AndroidClipboard {
                         metadata
                             .as_ref()
                             .map_or("application/octet-stream", |file| file.mime_type.as_str()),
+                        received,
                     )
                 }
             }
@@ -674,7 +697,7 @@ impl copypaste_runtime::ClipboardWriter for AndroidClipboard {
     }
 }
 
-fn call_text(env: &mut JNIEnv, text: &str, content_type: &str) -> bool {
+fn call_text(env: &mut JNIEnv, text: &str, content_type: &str, received: bool) -> bool {
     let (Ok(text), Ok(content_type)) = (env.new_string(text), env.new_string(content_type)) else {
         return false;
     };
@@ -684,10 +707,11 @@ fn call_text(env: &mut JNIEnv, text: &str, content_type: &str) -> bool {
     env.call_static_method(
         class,
         "writeClipboardText",
-        "(Ljava/lang/String;Ljava/lang/String;)Z",
+        "(Ljava/lang/String;Ljava/lang/String;Z)Z",
         &[
             JValue::Object(&text.into()),
             JValue::Object(&content_type.into()),
+            JValue::Bool(if received { JNI_TRUE } else { JNI_FALSE }),
         ],
     )
     .ok()
@@ -695,7 +719,13 @@ fn call_text(env: &mut JNIEnv, text: &str, content_type: &str) -> bool {
     .unwrap_or(false)
 }
 
-fn call_binary(env: &mut JNIEnv, bytes: &[u8], filename: &str, mime_type: &str) -> bool {
+fn call_binary(
+    env: &mut JNIEnv,
+    bytes: &[u8],
+    filename: &str,
+    mime_type: &str,
+    received: bool,
+) -> bool {
     let (Ok(bytes), Ok(filename), Ok(mime_type)) = (
         env.byte_array_from_slice(bytes),
         env.new_string(filename),
@@ -709,11 +739,12 @@ fn call_binary(env: &mut JNIEnv, bytes: &[u8], filename: &str, mime_type: &str) 
     env.call_static_method(
         class,
         "writeClipboardBinary",
-        "([BLjava/lang/String;Ljava/lang/String;)Z",
+        "([BLjava/lang/String;Ljava/lang/String;Z)Z",
         &[
             JValue::Object(&JObject::from(bytes)),
             JValue::Object(&filename.into()),
             JValue::Object(&mime_type.into()),
+            JValue::Bool(if received { JNI_TRUE } else { JNI_FALSE }),
         ],
     )
     .ok()

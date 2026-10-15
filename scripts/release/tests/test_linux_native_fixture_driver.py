@@ -25,6 +25,72 @@ SPEC.loader.exec_module(driver)
 
 
 class LinuxNativeFixtureDriverTest(unittest.TestCase):
+    def test_pairing_observes_the_responder_handshake_before_confirming_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            primary, peer = root / "primary.sock", root / "peer.sock"
+            states = {primary: iter(["handshaking", "awaiting_confirmation", "awaiting_confirmation", "confirmed"]),
+                      peer: iter(["awaiting_confirmation", "confirmed"])}
+            confirmed = []
+
+            def ipc(path, method, params=None):
+                if method == "pair_create_invite":
+                    return {"data": {"pairing_invite": {"code": "fixture", "listen_addr": "127.0.0.1:1", "pairing_id": "ceremony"}}}
+                if method == "pair_confirm":
+                    confirmed.append(path)
+                    self.assertEqual(params, {"accept": True})
+                if method == "pair_progress":
+                    state = next(states[path])
+                    if state == "confirmed":
+                        self.assertEqual(confirmed, [primary, peer])
+                    return {"data": {"pairing_progress": {"pairing_id": "ceremony", "state": state,
+                                                          "sas": "123456", "known_device": {} if state == "confirmed" else None}}}
+                return {"data": {"pairing_progress": {}}}
+
+            child = mock.Mock()
+            sync = subprocess.CompletedProcess([], 0, stdout=b'{"data":{"sync":[{}]}}')
+            with mock.patch.object(driver.subprocess, "Popen", return_value=child), \
+                 mock.patch.object(driver, "status"), mock.patch.object(driver, "ipc", side_effect=ipc), \
+                 mock.patch.object(driver, "run", return_value=sync), \
+                 mock.patch.object(driver, "list_items", return_value=[{"content": "copypaste-pairing-sync-fixture"}]), \
+                 mock.patch.object(driver, "emit_result") as emit, mock.patch.object(driver.time, "sleep"):
+                driver.require_pairing_sync(root, root / "cli", {}, root, primary)
+            self.assertEqual(confirmed, [primary, peer])
+            emit.assert_called_once_with("pairing_sync", sync)
+            child.terminate.assert_called_once()
+
+    def test_pairing_progress_rejects_terminal_or_unrelated_ceremonies(self):
+        for progress in ({"pairing_id": "other", "state": "awaiting_confirmation"},
+                         {"pairing_id": "ceremony", "state": "failed"},
+                         {"pairing_id": "ceremony", "state": "timed_out"},
+                         {"pairing_id": "ceremony", "state": "rejected"}):
+            with self.subTest(progress=progress), \
+                 mock.patch.object(driver, "ipc", return_value={"data": {"pairing_progress": progress}}), \
+                 self.assertRaises(RuntimeError):
+                driver.wait_for_pairing_state(Path("socket"), "awaiting_confirmation", "ceremony")
+
+    def test_pairing_never_confirms_mismatching_verification_codes(self):
+        invite = {"data": {"pairing_invite": {"code": "fixture", "listen_addr": "127.0.0.1:1", "pairing_id": "ceremony"}}}
+        joined = {"data": {"pairing_progress": {}}}
+        child = mock.Mock()
+        with mock.patch.object(driver.subprocess, "Popen", return_value=child), \
+             mock.patch.object(driver, "status"), \
+             mock.patch.object(driver, "ipc", side_effect=[invite, joined]) as ipc, \
+             mock.patch.object(driver, "wait_for_pairing_state", side_effect=[{"sas": "123456"}, {"sas": "654321"}]), \
+             self.assertRaisesRegex(RuntimeError, "verification code"):
+            driver.require_pairing_sync(Path("prefix"), Path("cli"), {}, Path("workspace"), Path("primary.sock"))
+        self.assertEqual([call.args[1] for call in ipc.call_args_list], ["pair_create_invite", "pair_join"])
+        child.terminate.assert_called_once()
+
+    def test_pairing_readiness_keeps_the_existing_deadline(self):
+        progress = {"data": {"pairing_progress": {"pairing_id": "ceremony", "state": "handshaking"}}}
+        with mock.patch.object(driver, "ipc", return_value=progress) as ipc, \
+             mock.patch.object(driver.time, "monotonic", side_effect=[0, 0, driver.CAPTURE_TIMEOUT_SECONDS]), \
+             mock.patch.object(driver.time, "sleep"), \
+             self.assertRaisesRegex(RuntimeError, "readiness deadline"):
+            driver.wait_for_pairing_state(Path("socket"), "awaiting_confirmation", "ceremony")
+        ipc.assert_called_once_with(Path("socket"), "pair_progress")
+
     def test_upgrade_seed_releases_the_gui_on_early_return_and_failure(self):
         for error in (None, RuntimeError("seed failed")):
             with self.subTest(error=error), tempfile.TemporaryDirectory() as directory:

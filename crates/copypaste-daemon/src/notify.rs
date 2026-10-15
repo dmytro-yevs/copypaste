@@ -1,7 +1,8 @@
-//! Feedback for a newly stored desktop clipboard capture.
+//! Sound feedback for local captures and successfully received clipboard writes.
 //!
 //! The daemon owns capture sound because it knows whether ingest stored a new
-//! item. The bundled app owns notifications because macOS notification centre
+//! item or a received item reached the clipboard. The bundled app owns
+//! notifications because macOS notification centre
 //! requires an app bundle and Windows toast identity belongs to the installed
 //! executable. The two settings and permission paths remain independent.
 
@@ -15,7 +16,7 @@ use crate::AppState;
 /// something — every `cargo test` and every demo script.
 const FAKE_BACKEND_PREFIX: &str = "fake";
 
-/// Something was newly stored. Play the sound, if the user asked for one.
+/// A local capture was saved or a received clip was written. Play the requested sound.
 ///
 /// Never fails and never blocks the caller: this runs on the capture path, and
 /// a capture that has already been stored must not be jeopardised by an audio

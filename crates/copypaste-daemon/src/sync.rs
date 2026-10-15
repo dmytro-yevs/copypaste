@@ -39,13 +39,17 @@ pub fn store_source(state: &Arc<AppState>) -> StoreSource {
         // its stamp, and a settings change cannot race a native write.
         clipboard.settings.with_capture_authority(|settings, _| {
             let mut native = clipboard.clipboard();
-            clipboard.instant_clipboard.apply(
+            let applied = clipboard.instant_clipboard.apply(
                 &clipboard.store,
                 &clipboard.keyring,
                 row,
                 || settings,
                 |payload| native.write_payload(&row.id, payload, &row.content_type),
             );
+            drop(native);
+            if applied {
+                clipboard.note_received_copy(&row.id);
+            }
         });
     })
 }
@@ -107,6 +111,7 @@ mod tests {
     #[test]
     fn receiving_sources_share_the_native_writer_and_live_device_switch() {
         let (state, _dir, writes) = crate::testutil::test_state_watching_clipboard("receiver");
+        let mut events = state.subscribe();
         let remote = |stamp| RemoteVersion {
             item_id: "remote-text",
             content: "received text",
@@ -121,6 +126,9 @@ mod tests {
             app_name: None,
         };
         assert!(store_source(&state).apply_version(&remote(100)).unwrap());
+        let event = events.try_recv().unwrap();
+        assert!(event.captured);
+        assert_eq!(event.captured_item_id.as_deref(), Some("remote-text"));
         assert_eq!(
             writes.entries(),
             [crate::testutil::WrittenPayload::Text(
@@ -129,6 +137,7 @@ mod tests {
         );
         assert!(!peer_source(&state).apply_version(&remote(100)).unwrap());
         assert_eq!(writes.count(), 1);
+        assert!(events.try_recv().is_err());
         state
             .settings
             .apply(
@@ -141,6 +150,7 @@ mod tests {
             .unwrap();
         assert!(peer_source(&state).apply_version(&remote(200)).unwrap());
         assert_eq!(writes.count(), 1);
+        assert!(events.try_recv().is_err());
         assert!(state.settings.get().sync_enabled);
         state
             .settings
@@ -154,5 +164,7 @@ mod tests {
             .unwrap();
         assert!(store_source(&state).apply_version(&remote(300)).unwrap());
         assert_eq!(writes.count(), 2);
+        assert!(events.try_recv().unwrap().captured);
+        assert!(events.try_recv().is_err());
     }
 }

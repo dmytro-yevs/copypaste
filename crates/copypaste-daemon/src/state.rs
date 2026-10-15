@@ -189,6 +189,13 @@ impl AppState {
         self.publish(EventKind::Items, None);
     }
 
+    /// A received item reached the system clipboard. Reuse copy feedback without
+    /// treating the receive as local activity or waking outbound sync.
+    pub fn note_received_copy(&self, item_id: &str) {
+        self.publish(EventKind::Items, Some(item_id));
+        crate::notify::on_capture(self, true);
+    }
+
     pub fn note_sync_status_changed(&self) {
         let _ = self.events.send(EventData {
             sync_status: Some(
