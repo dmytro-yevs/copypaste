@@ -142,7 +142,7 @@ jobs:
               licenses.append(meta(target))
           output.write_text(json.dumps({
               "schema": 1, "commit": os.environ["COMPOSITOR_RUNTIME_COMMIT"], "producer_run_id": int(os.environ["GITHUB_RUN_ID"]),
-              "source_run_id": int("${CI_INPUT_SOURCE_RUN_ID}"), "version": "${CI_INPUT_VERSION}",
+              "source_run_id": int(os.environ["CI_INPUT_SOURCE_RUN_ID"]), "version": os.environ["CI_INPUT_VERSION"],
               "architecture": "${{ matrix.architecture }}", "desktop": "${{ matrix.desktop }}", "family": "${{ matrix.family }}",
               "distribution": {"id": "${{ matrix.distribution_id }}", "version": "${{ matrix.distribution_version }}"},
               "format": "${{ matrix.package_format }}", "runtime_id": runtime["runtime_id"], "glibc_floor": runtime["glibc_floor"],
