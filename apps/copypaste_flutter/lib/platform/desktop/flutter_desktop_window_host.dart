@@ -203,7 +203,7 @@ class FlutterDesktopWindowHost
       }
       icon
         ..icon = image
-        ..setTitle(null)
+        ..setTitle(Platform.isMacOS ? null : 'CopyPaste')
         ..setTooltip('CopyPaste')
         ..setContextMenu(menu)
         ..setContextMenuTrigger(
