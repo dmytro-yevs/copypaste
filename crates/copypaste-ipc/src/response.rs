@@ -40,16 +40,16 @@ pub struct EventData {
     /// Live item count at the time of the event, so a client can render a badge
     /// without a round trip.
     pub item_count: u64,
-    /// True only for a clipboard capture, so the client can apply
-    /// `notify_on_copy`/`sound_on_copy`; the daemon reports what happened and
-    /// does not apply those client-owned settings.
+    /// True for a local capture or a received item successfully written to the
+    /// system clipboard, so the client can apply `notify_on_copy`. Native hosts
+    /// own sound feedback and Android notifications.
     ///
     /// A defaulted flag, not a new [`EventKind`], keeps older watchers decoding:
     /// an unknown enum variant would reject the frame. It carries no clipboard
     /// content; subscribers re-read through ordinary methods.
     #[serde(default)]
     pub captured: bool,
-    /// Identifies the captured clip without including its content in events.
+    /// Identifies the copied clip without including its content in events.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub captured_item_id: Option<String>,
 }

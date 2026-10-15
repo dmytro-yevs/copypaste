@@ -48,6 +48,21 @@ internal object AndroidCaptureFeedback {
         }
     }
 
+    fun binaryPreview(bytes: ByteArray, filename: String, mimeType: String): CaptureFeedbackPreview {
+        if (!mimeType.startsWith("image/")) return CaptureFeedbackPreview(textPreview(filename))
+        // Avoid decoding received image content unless its preview is enabled.
+        if (!NativeRuntimeCapture.notifyOnCopyEnabled() || !NativeRuntimeCapture.notificationPreviewEnabled()) {
+            return CaptureFeedbackPreview("Image")
+        }
+        val image = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            ?: return CaptureFeedbackPreview("Image")
+        return try {
+            imagePreview(image)
+        } finally {
+            image.recycle()
+        }
+    }
+
     fun onCaptured(context: Context, preview: CaptureFeedbackPreview? = null) {
         if (NativeRuntimeCapture.notifyOnCopyEnabled() &&
             AndroidCaptureState.notificationGranted(context)
