@@ -7,6 +7,34 @@ import FlutterMacOS
 import XCTest
 @testable import CopyPaste_Dev
 
+final class AppDelegateLaunchTests: XCTestCase {
+  func testLaunchDrainsPendingPairingURLsOnce() throws {
+    let delegate = AppDelegate()
+    let url = try XCTUnwrap(URL(string: "copypaste://pair/launch-test"))
+    delegate.application(NSApplication.shared, open: [url])
+    let window = LaunchPairingWindow(
+      contentRect: .zero, styleMask: [], backing: .buffered, defer: true
+    )
+    window.isReleasedWhenClosed = false
+    defer { window.close() }
+    delegate.mainFlutterWindow = window
+
+    let notification = Notification(name: NSApplication.didFinishLaunchingNotification)
+    delegate.applicationDidFinishLaunching(notification)
+    XCTAssertEqual(window.receivedURLs, [url])
+    delegate.applicationDidFinishLaunching(notification)
+    XCTAssertEqual(window.receivedURLs, [url])
+  }
+}
+
+private final class LaunchPairingWindow: MainFlutterWindow {
+  var receivedURLs: [URL] = []
+
+  override func receivePairingURL(_ url: URL) {
+    receivedURLs.append(url)
+  }
+}
+
 final class CaptureProtectedRenderingTests: XCTestCase {
   func testProtectedFramesPreserveThemeColorsAndAdvertiseSRGB() throws {
     let srgb = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))

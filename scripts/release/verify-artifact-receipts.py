@@ -18,6 +18,27 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def verify_rpm_preview(root: Path, version: str, commit: str, run_id: str) -> str:
+    name = f"CopyPaste-v{version}-linux-x86_64.rpm"
+    path = root / f"{name}.installation.json"
+    if not path.is_file() or path.is_symlink():
+        raise ValueError("RPM preview installation receipt is missing or invalid")
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+    package = root / name
+    if not package.is_file() or package.is_symlink():
+        raise ValueError("RPM preview package is missing or invalid")
+    expected = {
+        "schema": 1, "qualification": "package_installation_only",
+        "version": version, "architecture": "x86_64", "commit": commit, "run_id": run_id,
+        "artifact": {"name": name, "bytes": package.stat().st_size, "sha256": sha256(package)},
+        "environment": RELEASE["CONTRACT"]["rpm_preview_environment"],
+        "assertions": {name: True for name in RELEASE["RPM_PREVIEW_ASSERTIONS"]},
+    }
+    if receipt != expected or any(value is not True for value in receipt.get("assertions", {}).values()):
+        raise ValueError("RPM preview installation receipt differs from exact artifact qualification")
+    return path.name
+
+
 def verify(root: Path, version: str, commit: str, run_id: str, *, require_linux: bool = False, require_compositor_runtime: bool = False, linux_origin_run_id: Optional[str] = None) -> None:
     platforms = ["macos", "android", "windows"]
     if require_linux:
@@ -71,7 +92,7 @@ def verify(root: Path, version: str, commit: str, run_id: str, *, require_linux:
             expected = {
                 f"CopyPaste-v{version}-linux-{architecture}.{extension}"
                 for architecture in RELEASE["ARCHITECTURES"]
-                for extension in RELEASE["FORMATS"]
+                for extension in RELEASE["PUBLISHED_FORMATS"]
             }
             packages = {name for name in names if name.endswith((".AppImage", ".deb", ".rpm"))}
             if packages != expected:
@@ -85,6 +106,10 @@ def verify(root: Path, version: str, commit: str, run_id: str, *, require_linux:
             }
             if not baselines <= set(names):
                 raise ValueError("Linux receipt must bind each architecture runtime baseline")
+            if "rpm" in RELEASE["PREVIEW_FORMATS"]:
+                preview_receipt = verify_rpm_preview(root / platform, version, commit, linux_origin_run_id or run_id)
+                if preview_receipt not in names:
+                    raise ValueError("Linux receipt must bind the RPM preview installation receipt")
     if require_compositor_runtime:
         if not require_linux:
             raise ValueError("compositor runtime companions require the Linux release contract")

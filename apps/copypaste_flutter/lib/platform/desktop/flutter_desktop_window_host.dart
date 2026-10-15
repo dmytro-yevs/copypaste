@@ -203,7 +203,7 @@ class FlutterDesktopWindowHost
       }
       icon
         ..icon = image
-        ..setTitle('CopyPaste')
+        ..setTitle(null)
         ..setTooltip('CopyPaste')
         ..setContextMenu(menu)
         ..setContextMenuTrigger(
@@ -350,6 +350,12 @@ class FlutterDesktopWindowHost
     if (onCloseRequested != null) {
       unawaited(onCloseRequested());
     }
+  }
+
+  @override
+  void onWindowFocus() {
+    // Native opens, including the macOS Dock, can focus without a show event.
+    _onVisibilityChanged?.call(true);
   }
 
   @override
