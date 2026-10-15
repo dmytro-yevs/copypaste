@@ -59,6 +59,7 @@ on:
 concurrency:
   group: production-release-${{ github.sha }}
   cancel-in-progress: false
+  queue: max
 
 permissions:
   contents: read
@@ -150,8 +151,8 @@ jobs:
               compositor_runtime_required=true
             fi
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFIED_RUN_ID" > "$RUNNER_TEMP/source-run.json"
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFIED_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/source-jobs.json"
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFIED_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/source-artifacts.json"
+            python3 scripts/release/github_inventory.py --run-id "$QUALIFIED_RUN_ID" --kind jobs > "$RUNNER_TEMP/source-jobs.json"
+            python3 scripts/release/github_inventory.py --run-id "$QUALIFIED_RUN_ID" --kind artifacts > "$RUNNER_TEMP/source-artifacts.json"
             # Authenticate the source envelope before extracting any archive.
             # Linux origin bytes are checked after reading its bound receipt.
             python3 scripts/release/verify-qualified-run.py --run "$RUNNER_TEMP/source-run.json" --jobs "$RUNNER_TEMP/source-jobs.json" --artifacts "$RUNNER_TEMP/source-artifacts.json" --repository "$GITHUB_REPOSITORY" --commit "$release_commit"
@@ -160,15 +161,13 @@ jobs:
               linux_required=true
               qualified_artifact_id="$(jq -r '[.artifacts[] | select(.name == "production-qualified" and .expired == false)] | if length == 1 then .[0].id else empty end' "$RUNNER_TEMP/source-artifacts.json")"
               [[ "$qualified_artifact_id" =~ ^[1-9][0-9]*$ ]]
-              mkdir -p "$RUNNER_TEMP/qualified-source"
-              gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$qualified_artifact_id/zip" > "$RUNNER_TEMP/qualified-source.zip"
-              unzip -q "$RUNNER_TEMP/qualified-source.zip" -d "$RUNNER_TEMP/qualified-source"
+              python3 scripts/release/download_artifact.py --run-id "$QUALIFIED_RUN_ID" --artifact-id "$qualified_artifact_id" --commit "$release_commit" --path "$RUNNER_TEMP/qualified-source"
               cp "$RUNNER_TEMP/qualified-source/linux/production-receipt.json" "$RUNNER_TEMP/linux-origin-receipt.json"
               linux_artifact_run_id="$(jq -r '.run_id' "$RUNNER_TEMP/linux-origin-receipt.json")"
               [[ "$linux_artifact_run_id" =~ ^[1-9][0-9]*$ ]]
               gh api "repos/$GITHUB_REPOSITORY/actions/runs/$linux_artifact_run_id" > "$RUNNER_TEMP/linux-origin-run.json"
-              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$linux_artifact_run_id/jobs?per_page=100" > "$RUNNER_TEMP/linux-origin-jobs.json"
-              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$linux_artifact_run_id/artifacts?per_page=100" > "$RUNNER_TEMP/linux-origin-artifacts.json"
+              python3 scripts/release/github_inventory.py --run-id "$linux_artifact_run_id" --kind jobs > "$RUNNER_TEMP/linux-origin-jobs.json"
+              python3 scripts/release/github_inventory.py --run-id "$linux_artifact_run_id" --kind artifacts > "$RUNNER_TEMP/linux-origin-artifacts.json"
             fi
             qualified_args=(--run "$RUNNER_TEMP/source-run.json" --jobs "$RUNNER_TEMP/source-jobs.json" --artifacts "$RUNNER_TEMP/source-artifacts.json" --repository "$GITHUB_REPOSITORY" --commit "$release_commit")
             if [[ "$linux_required" == true ]]; then qualified_args+=(--require-linux); fi
@@ -214,8 +213,8 @@ jobs:
             [[ "$LINUX_ARTIFACT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
             [[ "$linux_required" == true ]]
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$LINUX_ARTIFACT_RUN_ID" > "$RUNNER_TEMP/linux-source-run.json"
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$LINUX_ARTIFACT_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/linux-source-jobs.json"
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$LINUX_ARTIFACT_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/linux-source-artifacts.json"
+            python3 scripts/release/github_inventory.py --run-id "$LINUX_ARTIFACT_RUN_ID" --kind jobs > "$RUNNER_TEMP/linux-source-jobs.json"
+            python3 scripts/release/github_inventory.py --run-id "$LINUX_ARTIFACT_RUN_ID" --kind artifacts > "$RUNNER_TEMP/linux-source-artifacts.json"
             python3 scripts/release/verify-linux-artifact-source-run.py --run "$RUNNER_TEMP/linux-source-run.json" --jobs "$RUNNER_TEMP/linux-source-jobs.json" --artifacts "$RUNNER_TEMP/linux-source-artifacts.json" --repository "$GITHUB_REPOSITORY" --commit "$release_commit"
             linux_artifact_run_id="$LINUX_ARTIFACT_RUN_ID"
           fi
@@ -709,8 +708,8 @@ jobs:
         run: |
           set -euo pipefail
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUNTIME_RUN_ID" > "$RUNNER_TEMP/runtime-run.json"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUNTIME_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/runtime-jobs.json"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUNTIME_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/runtime-artifacts.json"
+          python3 scripts/release/github_inventory.py --run-id "$RUNTIME_RUN_ID" --kind jobs > "$RUNNER_TEMP/runtime-jobs.json"
+          python3 scripts/release/github_inventory.py --run-id "$RUNTIME_RUN_ID" --kind artifacts > "$RUNNER_TEMP/runtime-artifacts.json"
           python3 scripts/release/verify-compositor-runtime-source-run.py \
             --run "$RUNNER_TEMP/runtime-run.json" --jobs "$RUNNER_TEMP/runtime-jobs.json" \
             --artifacts "$RUNNER_TEMP/runtime-artifacts.json" --repository "$GITHUB_REPOSITORY" \
@@ -734,7 +733,7 @@ jobs:
           version: ${{ steps.flutter.outputs.version }}
       - name: Prepare pinned Flutter signature verifier
         run: (cd apps/copypaste_flutter && flutter pub get --enforce-lockfile)
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         if: inputs.compositor_runtime_run_id == ''
         with:
           pattern: copypaste-compositor-runtime-*
@@ -747,7 +746,7 @@ jobs:
         run: |
           set -euo pipefail
           for artifact in copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64; do
-            gh run download "$RUNTIME_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$artifact" --dir "runtime-source/$artifact"
+            python3 scripts/release/download_artifact.py --run-id "$RUNTIME_RUN_ID" --name "$artifact" --path "runtime-source/$artifact"
           done
       - name: Stage exact runtime producer outputs
         env:
@@ -813,17 +812,17 @@ jobs:
             exit 1
           }
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$EVIDENCE_RUN_ID" > "$RUNNER_TEMP/linux-evidence-run.json"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$EVIDENCE_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/linux-evidence-jobs.json"
+          python3 scripts/release/github_inventory.py --run-id "$EVIDENCE_RUN_ID" --kind jobs > "$RUNNER_TEMP/linux-evidence-jobs.json"
           python3 scripts/release/verify-linux-qualification-evidence-source.py \
             --run "$RUNNER_TEMP/linux-evidence-run.json" --jobs "$RUNNER_TEMP/linux-evidence-jobs.json" \
             --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         with:
           name: linux-native-qualification
           path: native-evidence
           run-id: ${{ needs.preflight.outputs.linux_evidence_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         with:
           name: production-linux-x86_64
           path: exact-artifacts/x86_64
@@ -839,8 +838,8 @@ jobs:
           set -euo pipefail
           [[ "$PREVIOUS_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN_ID" > "$RUNNER_TEMP/previous-run.json"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/previous-jobs.json"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/previous-artifacts.json"
+          python3 scripts/release/github_inventory.py --run-id "$PREVIOUS_RUN_ID" --kind jobs > "$RUNNER_TEMP/previous-jobs.json"
+          python3 scripts/release/github_inventory.py --run-id "$PREVIOUS_RUN_ID" --kind artifacts > "$RUNNER_TEMP/previous-artifacts.json"
           previous_commit="$(jq -r '.head_sha' "$RUNNER_TEMP/previous-run.json")"
           [[ "$previous_commit" =~ ^[0-9a-f]{40}$ ]]
           python3 scripts/release/verify-linux-artifact-source-run.py \
@@ -851,14 +850,14 @@ jobs:
           previous_version="${previous_version%%+*}"
           [[ "$previous_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           echo "version=$previous_version" >> "$GITHUB_OUTPUT"
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         if: needs.preflight.outputs.previous_linux_artifact_run_id != ''
         with:
           name: production-linux-x86_64
           path: previous-artifacts/x86_64
           run-id: ${{ needs.preflight.outputs.previous_linux_artifact_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         if: needs.preflight.outputs.compositor_runtime_required == 'true'
         with:
           name: production-compositor-runtime
@@ -898,35 +897,35 @@ jobs:
           persist-credentials: false
       - name: Download previously qualified artifacts
         if: needs.preflight.outputs.reuse_qualified == 'true'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: ./.github/actions/download-verified-artifact
         with:
           name: production-qualified
           path: qualified
           run-id: ${{ needs.preflight.outputs.artifact_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         if: needs.preflight.outputs.reuse_qualified != 'true'
         with:
           name: production-macos
           path: qualified/macos
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         if: needs.preflight.outputs.reuse_qualified != 'true'
         with:
           name: production-android
           path: qualified/android
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         if: needs.preflight.outputs.reuse_qualified != 'true'
         with:
           name: production-windows
           path: qualified/windows
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_required == 'true'
         with:
           name: production-linux-x86_64
           path: qualified/linux-x86_64
           run-id: ${{ needs.preflight.outputs.linux_artifact_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true'
         with:
           name: production-compositor-runtime
@@ -959,18 +958,20 @@ jobs:
     concurrency:
       group: copypaste-stable-publication
       cancel-in-progress: false
+      queue: max
     needs: [preflight, qualify]
     if: ${{ always() && needs.preflight.result == 'success' && needs.qualify.result == 'success' && needs.preflight.outputs.publish == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         with:
           name: production-qualified
           path: qualified

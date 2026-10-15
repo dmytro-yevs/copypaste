@@ -34,7 +34,7 @@ def verify(
         or run.get("event") not in ("push", "workflow_dispatch")
     ):
         raise ValueError("qualification source is not the production release workflow")
-    if run.get("status") != "completed" or run.get("conclusion") not in ("success", "failure"):
+    if run.get("status") != "completed" or run.get("conclusion") not in ("success", "failure", "cancelled"):
         raise ValueError("qualification source did not complete successfully")
     entries = jobs.get("jobs", [])
     if jobs.get("total_count") != len(entries):
@@ -44,10 +44,10 @@ def verify(
     if any(job.get("conclusion") not in ("success", "skipped")
            for job in entries if job.get("name") != "publish"):
         raise ValueError("qualification source contains an unsuccessful required job")
-    if run.get("conclusion") == "failure" and not any(
-        job.get("name") == "publish" and job.get("conclusion") == "failure" for job in entries
+    if run.get("conclusion") in ("failure", "cancelled") and not any(
+        job.get("name") == "publish" and job.get("conclusion") == run["conclusion"] for job in entries
     ):
-        raise ValueError("failed source run has no isolated publication failure")
+        raise ValueError("unsuccessful source run has no isolated publication failure or cancellation")
     for job in entries:
         if job.get("name") == "macos-regression" and job.get("conclusion") != "success":
             raise ValueError("required macOS launch regression did not pass")
