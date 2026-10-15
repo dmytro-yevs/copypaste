@@ -17,6 +17,7 @@ import os
 import re
 import select
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -241,7 +242,7 @@ def invoke_menu_item(environment: dict[str, str], service: str, item_id: int) ->
 def x11_window_for_pid(environment: dict[str, str], gui_pid: int) -> str:
     result = require_ok(
         run(
-            ["xdotool", "search", "--onlyvisible", "--pid", str(gui_pid), "--name", COPYPASTE_TITLE],
+            ["xdotool", "search", "--onlyvisible", "--all", "--pid", str(gui_pid), "--name", f"^{re.escape(COPYPASTE_TITLE)}$"],
             environment=environment,
         ),
         "find CopyPaste X11 window",
@@ -355,6 +356,14 @@ def parse_capture_command(raw: str) -> list[str]:
     if not required <= set(value):
         raise AcceptanceError("GTK clipboard provider command is incomplete")
     return value
+
+
+def read_capture_command(path: Path) -> list[str]:
+    details = path.lstat()
+    if (not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid()
+            or stat.S_IMODE(details.st_mode) != 0o600 or not 0 < details.st_size <= 64 * 1024):
+        raise AcceptanceError("capture command must be a private regular file owned by the job user")
+    return parse_capture_command(path.read_text(encoding="utf-8"))
 
 
 def history_item_count(cli: Path, environment: dict[str, str]) -> int:
@@ -671,7 +680,11 @@ def qualify(args: argparse.Namespace) -> None:
         window = x11_window_for_pid(environment, args.gui_pid)
         if x11_map_state(environment, window) != "IsViewable":
             raise AcceptanceError("CopyPaste X11 window is not visible before its close-to-tray action")
-        require_ok(run(["xdotool", "windowclose", window], environment=environment), "request CopyPaste window close")
+        require_ok(run(["xdotool", "windowactivate", "--sync", window], environment=environment), "focus CopyPaste before close")
+        focus = require_ok(run(["xdotool", "getwindowfocus"], environment=environment), "read focused X11 window")
+        if focus.stdout.strip() != window:
+            raise AcceptanceError("CopyPaste X11 window did not own focus before close")
+        require_ok(run(["xdotool", "key", "--clearmodifiers", "alt+F4"], environment=environment), "request CopyPaste window close")
         wait_for_x11_map_state(environment, window, "IsUnMapped")
         menu_command = invoke_menu_item(environment, service, open_item)
         wait_for_x11_map_state(environment, window, "IsViewable")
@@ -681,7 +694,7 @@ def qualify(args: argparse.Namespace) -> None:
         window_evidence = {"observer": "compositor_dbus_signal", "hide_show": "dbusmenu_open"}
 
     notification, capture, history_count = run_notification_capture(
-        environment, args.cli, args.socket, parse_capture_command(args.capture_command), args.gui_pid,
+        environment, args.cli, args.socket, read_capture_command(args.capture_command_file), args.gui_pid,
     )
     if notification.notification_id is None:
         raise AcceptanceError("desktop notification server did not return a notification id")
@@ -718,8 +731,8 @@ def main() -> int:
     parser.add_argument("--session", choices=("x11", "wayland"), required=True)
     parser.add_argument("--cli", type=Path, required=True)
     parser.add_argument("--socket", type=Path, required=True)
-    parser.add_argument("--capture-command", required=True,
-                        help="JSON argv for the real controlled clipboard-capture trigger")
+    parser.add_argument("--capture-command-file", required=True, type=Path,
+                        help="Private JSON argv file for the real controlled clipboard-capture trigger")
     parser.add_argument("--evidence-dir", type=Path, required=True)
     args = parser.parse_args()
     try:

@@ -157,21 +157,27 @@ def wayland_quick_paste_inputs(args):
     }
 
 
-def wayland_desktop_receipt(path, *, desktop, gui_pid):
+def desktop_acceptance_receipt(path, *, desktop, session, gui_pid):
     try:
         details = path.lstat()
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise RuntimeError("Wayland desktop acceptance evidence is invalid") from error
+        raise RuntimeError("Linux desktop acceptance evidence is invalid") from error
     if stat.S_ISLNK(details.st_mode) or not stat.S_ISREG(details.st_mode):
-        raise RuntimeError("Wayland desktop acceptance evidence is invalid")
+        raise RuntimeError("Linux desktop acceptance evidence is invalid")
     required = {"schema", "desktop", "session", "gui_pid", "tray", "window", "notification", "history", "commands"}
     if not isinstance(value, dict) or set(value) != required:
-        raise RuntimeError("Wayland desktop acceptance evidence is invalid")
-    if value["schema"] != 1 or value["desktop"] != desktop or value["session"] != "wayland" or value["gui_pid"] != gui_pid:
-        raise RuntimeError("Wayland desktop acceptance evidence does not bind the GUI")
-    tray = value["tray"]
+        raise RuntimeError("Linux desktop acceptance evidence is invalid")
+    if value["schema"] != 1 or value["desktop"] != desktop or value["session"] != session or session not in {"x11", "wayland"} or value["gui_pid"] != gui_pid:
+        raise RuntimeError("Linux desktop acceptance evidence does not bind the GUI")
     window = value["window"]
+    if session == "wayland":
+        valid_window = window == {"observer": "compositor_dbus_signal", "hide_show": "dbusmenu_open"}
+    else:
+        valid_window = (isinstance(window, dict) and set(window) == {"id", "hide_show"}
+                        and isinstance(window["id"], str) and re.fullmatch(r"[1-9][0-9]*", window["id"])
+                        and window["hide_show"] == "dbusmenu_open")
+    tray = value["tray"]
     notification = value["notification"]
     history = value["history"]
     commands = value["commands"]
@@ -179,12 +185,12 @@ def wayland_desktop_receipt(path, *, desktop, gui_pid):
             or not isinstance(tray["service"], str) or not tray["service"]
             or tray["menu_path"] != "/StatusNotifierItem/Menu"
             or type(tray["open_item_id"]) is not int or tray["open_item_id"] < 0
-            or window != {"observer": "compositor_dbus_signal", "hide_show": "dbusmenu_open"}
+            or not valid_window
             or not isinstance(notification, dict) or type(notification.get("server_reply_id")) is not int or notification["server_reply_id"] <= 0
             or not isinstance(history, dict) or type(history.get("new_item_count")) is not int or history["new_item_count"] < 1
             or not isinstance(commands, list) or len(commands) != 2):
-        raise RuntimeError("Wayland desktop acceptance evidence is incomplete")
-    require_sha256(notification.get("capture_command_sha256"), "Wayland capture command digest")
+        raise RuntimeError("Linux desktop acceptance evidence is incomplete")
+    require_sha256(notification.get("capture_command_sha256"), "Linux capture command digest")
     menu_command, capture_command = commands
     expected_menu_argv = [
         "busctl", "--user", "call", tray["service"], tray["menu_path"],
@@ -193,11 +199,11 @@ def wayland_desktop_receipt(path, *, desktop, gui_pid):
     ]
     if (not isinstance(menu_command, dict) or set(menu_command) != {"argv", "returncode"}
             or menu_command.get("returncode") != 0 or menu_command["argv"] != expected_menu_argv):
-        raise RuntimeError("Wayland desktop acceptance command evidence is invalid")
+        raise RuntimeError("Linux desktop acceptance command evidence is invalid")
     if (not isinstance(capture_command, dict) or set(capture_command) != {"argv_sha256", "returncode"}
             or capture_command.get("returncode") != 0):
-        raise RuntimeError("Wayland desktop acceptance command evidence is invalid")
-    require_sha256(capture_command["argv_sha256"], "Wayland desktop acceptance command digest")
+        raise RuntimeError("Linux desktop acceptance command evidence is invalid")
+    require_sha256(capture_command["argv_sha256"], "Linux desktop acceptance command digest")
     return value
 
 
@@ -395,28 +401,37 @@ def desktop_acceptance_capture_command(workspace, environment):
     ]
 
 
-def require_wayland_qualification(args, *, gui_pid, cli, environment, workspace, socket_path):
-    """Exercise actual tray, portal, and AT-SPI actors before emitting Wayland assertions."""
-    inputs = wayland_quick_paste_inputs(args)
-    tray_helper = require_helper(args.wayland_desktop_acceptance_helper, "Wayland desktop acceptance helper")
-    quick_paste_helper = require_helper(args.wayland_quick_paste_helper, "Wayland Quick Paste helper")
-    actor = require_helper(args.wayland_actor, "Wayland AT-SPI actor")
+def require_desktop_acceptance(args, *, gui_pid, cli, environment, workspace, socket_path):
+    """Observe the owned GUI tray, close-to-tray, and accepted capture notification."""
+    tray_helper = require_helper(args.wayland_desktop_acceptance_helper, "Linux desktop acceptance helper")
     capture_command = desktop_acceptance_capture_command(workspace, environment)
+    command_file = args.evidence_dir / "desktop-capture-command.json"
+    with command_file.open("x", encoding="utf-8") as stream:
+        os.chmod(command_file, 0o600)
+        json.dump(capture_command, stream, separators=(",", ":"))
     tray_result = run(
         [
             sys.executable, str(tray_helper), "--gui-pid", str(gui_pid), "--desktop", args.desktop,
-            "--session", "wayland", "--cli", str(cli), "--socket", str(socket_path),
-            "--capture-command", json.dumps(capture_command, separators=(",", ":")),
+            "--session", args.session, "--cli", str(cli), "--socket", str(socket_path),
+            "--capture-command-file", str(command_file),
             "--evidence-dir", str(args.evidence_dir),
         ],
         env=environment,
         timeout=45,
     )
-    wayland_desktop_receipt(
-        args.evidence_dir / "linux-desktop-acceptance.json", desktop=args.desktop, gui_pid=gui_pid,
+    desktop_acceptance_receipt(
+        args.evidence_dir / "linux-desktop-acceptance.json", desktop=args.desktop, session=args.session, gui_pid=gui_pid,
     )
     emit_result("tray_window_notification", tray_result)
 
+
+def require_wayland_qualification(args, *, gui_pid, cli, environment, workspace, socket_path):
+    """Exercise actual tray, portal, and AT-SPI actors before emitting Wayland assertions."""
+    inputs = wayland_quick_paste_inputs(args)
+    require_desktop_acceptance(args, gui_pid=gui_pid, cli=cli, environment=environment,
+                               workspace=workspace, socket_path=socket_path)
+    quick_paste_helper = require_helper(args.wayland_quick_paste_helper, "Wayland Quick Paste helper")
+    actor = require_helper(args.wayland_actor, "Wayland AT-SPI actor")
     marker = "copypaste-wayland-quick-paste-fixture"
     cli_environment = {**environment, "COPYPASTE_SOCKET": str(socket_path)}
     prepare_quick_paste_marker(cli, cli_environment, marker)
@@ -565,6 +580,13 @@ def prepare_quick_paste_marker(cli, environment, marker):
     if len(prepared) != 1 or not isinstance(prepared[0].get("id"), str) or not prepared[0]["id"]:
         raise RuntimeError("Quick Paste marker is not uniquely prepared")
     run([str(cli), "--json", "copy", prepared[0]["id"]], env=environment)
+
+
+def require_clean_install_baseline(data_home, environment):
+    """Prove the isolated profile has no existing files or dangling link before launch."""
+    for predicate in ("-e", "-L"):
+        result = run(["test", "!", predicate, str(data_home)], env=environment)
+        emit_result("clean_install_baseline", result)
 
 
 def write_source_desktop_entry(data_home):
@@ -1435,6 +1457,8 @@ def main():
     with context if context is not None else contextmanager(lambda: (yield args.qualification_root))() as temporary:
         workspace = Path(temporary) if args.qualification_root is None else qualification_workspace(temporary)
         data_home = workspace / "data-home"
+        if args.first_install_baseline:
+            require_clean_install_baseline(data_home, dict(os.environ))
         write_source_desktop_entry(data_home)
         prefix = runtime_prefix(args.runtime_prefix)
         gui_entrypoint = runtime_gui_entrypoint(prefix, args.runtime_format)
@@ -1588,6 +1612,8 @@ def main():
                 # The remaining assertions deliberately execute their public probes and fail if the exact product
                 # does not expose an observable successful result. They are never converted into fixture booleans.
                 if args.session == "x11":
+                    require_desktop_acceptance(args, gui_pid=app.pid, cli=cli, environment=environment,
+                                               workspace=workspace, socket_path=runtime_socket)
                     require_x11_quick_paste(cli, cli_environment, workspace)
                 else:
                     require_wayland_qualification(
