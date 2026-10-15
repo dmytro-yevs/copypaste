@@ -264,9 +264,20 @@ jobs:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: python3 scripts/release/preflight-sources.py
 
+  policy:
+    name: Release CI policy
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/ci-policy
+
   linux-native-bootstrap:
     name: Run exact staged Linux native qualification
-    needs: preflight
+    needs: [preflight, policy]
     if: needs.preflight.outputs.linux_qualification_only == 'true'
     uses: ./.github/workflows/linux-native-qualification.yml
     with:
@@ -279,7 +290,7 @@ jobs:
 
   qualification-supabase:
     name: Build Linux supabase module
-    needs: preflight
+    needs: [preflight, policy]
     if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && inputs.linux_evidence_run_id == '' && inputs.supabase_module_run_id == ''
     uses: ./.github/workflows/provider-module.yml
     # Reusable publisher permission ceiling; publish=false leaves that job skipped.
@@ -298,7 +309,7 @@ jobs:
 
   qualification-semantic-search:
     name: Build Linux semantic-search module
-    needs: preflight
+    needs: [preflight, policy]
     if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && inputs.linux_evidence_run_id == '' && inputs.semantic_search_module_run_id == ''
     uses: ./.github/workflows/provider-module.yml
     # Reusable publisher permission ceiling; publish=false leaves that job skipped.
@@ -317,7 +328,7 @@ jobs:
 
   qualification-ocr:
     name: Build Linux ocr module
-    needs: preflight
+    needs: [preflight, policy]
     if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && inputs.linux_evidence_run_id == '' && inputs.ocr_module_run_id == ''
     uses: ./.github/workflows/ocr-module.yml
     # Reusable publisher permission ceiling; publish=false leaves that job skipped.
@@ -335,8 +346,8 @@ jobs:
 
   linux-native-current:
     name: Qualify current Linux artifacts
-    needs: [preflight, linux, compositor-runtime-public, qualification-supabase, qualification-semantic-search, qualification-ocr]
-    if: ${{ always() && needs.preflight.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && inputs.linux_evidence_run_id == '' && (needs.linux.result == 'success' || inputs.linux_artifact_run_id != '') && needs.compositor-runtime-public.result == 'success' && (needs.qualification-supabase.result == 'success' || inputs.supabase_module_run_id != '') && (needs.qualification-semantic-search.result == 'success' || inputs.semantic_search_module_run_id != '') && (needs.qualification-ocr.result == 'success' || inputs.ocr_module_run_id != '') }}
+    needs: [preflight, policy, linux, compositor-runtime-public, qualification-supabase, qualification-semantic-search, qualification-ocr]
+    if: ${{ always() && needs.preflight.result == 'success' && needs.policy.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && inputs.linux_evidence_run_id == '' && (needs.linux.result == 'success' || inputs.linux_artifact_run_id != '') && needs.compositor-runtime-public.result == 'success' && (needs.qualification-supabase.result == 'success' || inputs.supabase_module_run_id != '') && (needs.qualification-semantic-search.result == 'success' || inputs.semantic_search_module_run_id != '') && (needs.qualification-ocr.result == 'success' || inputs.ocr_module_run_id != '') }}
     uses: ./.github/workflows/linux-native-qualification.yml
     with:
       artifact_run_id: ${{ needs.preflight.outputs.linux_artifact_run_id }}
@@ -348,7 +359,7 @@ jobs:
       public_runtime_run_id: ${{ github.run_id }}
 
   macos:
-    needs: preflight
+    needs: [preflight, policy]
     if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true'
     runs-on: macos-14
     timeout-minutes: 60
@@ -392,7 +403,7 @@ jobs:
 
   macos-regression:
     name: macos-regression
-    needs: preflight
+    needs: [preflight, policy]
     if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true'
     runs-on: macos-14
     timeout-minutes: 60
@@ -422,7 +433,7 @@ jobs:
         run: bash scripts/ci/macos-test-keychain.sh restore
 
   android:
-    needs: preflight
+    needs: [preflight, policy]
     if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -504,7 +515,7 @@ jobs:
             dist/production-receipt.json
 
   windows:
-    needs: preflight
+    needs: [preflight, policy]
     if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true'
     runs-on: windows-2022
     timeout-minutes: 60
@@ -583,7 +594,7 @@ jobs:
 
   linux:
     name: Linux build (${{ matrix.architecture }})
-    needs: preflight
+    needs: [preflight, policy]
     if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && needs.preflight.outputs.linux_artifact_run_id == github.run_id
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
@@ -679,7 +690,7 @@ jobs:
 
   compositor-runtime-build:
     name: Build opt-in compositor runtime companions
-    needs: preflight
+    needs: [preflight, policy]
     if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && inputs.compositor_runtime_run_id == ''
     uses: ./.github/workflows/compositor-runtime.yml
     with:
@@ -692,7 +703,7 @@ jobs:
 
   compositor-runtime-external:
     name: Verify staged compositor runtime companions
-    needs: preflight
+    needs: [preflight, policy]
     if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && inputs.compositor_runtime_run_id != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -717,8 +728,8 @@ jobs:
 
   compositor-runtime-public:
     name: Sign and bind opt-in compositor runtime companions
-    needs: [preflight, compositor-runtime-build, compositor-runtime-external]
-    if: ${{ always() && needs.preflight.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && (needs.compositor-runtime-build.result == 'success' || needs.compositor-runtime-external.result == 'success') }}
+    needs: [preflight, policy, compositor-runtime-build, compositor-runtime-external]
+    if: ${{ always() && needs.preflight.result == 'success' && needs.policy.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && (needs.compositor-runtime-build.result == 'success' || needs.compositor-runtime-external.result == 'success') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -792,8 +803,8 @@ jobs:
 
   linux-full-parity-evidence:
     name: Linux full parity evidence gate
-    needs: [preflight, linux, compositor-runtime-public, linux-native-current]
-    if: ${{ always() && needs.preflight.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && (needs.linux-native-current.result == 'success' || inputs.linux_evidence_run_id != '') && needs.preflight.outputs.linux_required == 'true' && (needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success') }}
+    needs: [preflight, policy, linux, compositor-runtime-public, linux-native-current]
+    if: ${{ always() && needs.preflight.result == 'success' && needs.policy.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && (needs.linux-native-current.result == 'success' || inputs.linux_evidence_run_id != '') && needs.preflight.outputs.linux_required == 'true' && (needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -887,8 +898,8 @@ jobs:
           python3 scripts/release/verify-linux-native-qualification.py "${args[@]}"
 
   qualify:
-    needs: [preflight, macos, macos-regression, android, windows, linux, compositor-runtime-public, linux-full-parity-evidence]
-    if: ${{ always() && needs.preflight.result == 'success' && (needs.preflight.outputs.reuse_qualified == 'true' || (needs.macos.result == 'success' && needs.macos-regression.result == 'success' && needs.android.result == 'success' && needs.windows.result == 'success' && (needs.preflight.outputs.linux_required != 'true' || ((needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && needs.linux-full-parity-evidence.result == 'success' && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success'))))) }}
+    needs: [preflight, policy, macos, macos-regression, android, windows, linux, compositor-runtime-public, linux-full-parity-evidence]
+    if: ${{ always() && needs.preflight.result == 'success' && needs.policy.result == 'success' && (needs.preflight.outputs.reuse_qualified == 'true' || (needs.macos.result == 'success' && needs.macos-regression.result == 'success' && needs.android.result == 'success' && needs.windows.result == 'success' && (needs.preflight.outputs.linux_required != 'true' || ((needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && needs.linux-full-parity-evidence.result == 'success' && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success'))))) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
