@@ -29,6 +29,11 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/003_file_import.sql"),
         transform: |_| Ok(()),
     },
+    Migration {
+        version: 4,
+        sql: include_str!("migrations/004_representation_dedup.sql"),
+        transform: |_| Ok(()),
+    },
 ];
 
 pub(super) fn upgrade(conn: &mut Connection) -> Result<(), StoreError> {
@@ -260,9 +265,9 @@ mod tests {
     }
 
     #[test]
-    fn version_one_history_survives_upgrade_to_version_three() {
+    fn version_one_history_survives_upgrade_to_the_current_version() {
         use super::super::{connection::apply_key, Store};
-        assert_eq!(LATEST_VERSION, 3);
+        assert_eq!(LATEST_VERSION, 4);
         let keyring = crate::Keyring::from_secret(&[37; 32]);
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("history.db");
@@ -292,7 +297,7 @@ mod tests {
                 .unwrap()
                 .pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))
                 .unwrap(),
-            3
+            4
         );
         schema_verify::verify_schema(&store.conn().unwrap()).unwrap();
         drop(store);

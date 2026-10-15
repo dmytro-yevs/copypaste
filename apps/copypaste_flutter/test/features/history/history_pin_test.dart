@@ -341,7 +341,8 @@ class _PinRepository implements HistoryRepository {
   final List<(String, bool)> pinnedUpdates = [];
 
   @override
-  Stream<HistoryRuntimeEvent> watch() => const Stream.empty();
+  Stream<HistoryRuntimeEvent> watch() =>
+      Stream<HistoryRuntimeEvent>.multi((_) {});
 
   @override
   Future<HistoryFacets> facets() async => const HistoryFacets();

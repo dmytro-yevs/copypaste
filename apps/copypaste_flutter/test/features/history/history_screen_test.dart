@@ -2385,7 +2385,8 @@ class _ScreenRepository implements HistoryRepository {
   final List<HistoryQuery> queries = [];
 
   @override
-  Stream<HistoryRuntimeEvent> watch() => const Stream.empty();
+  Stream<HistoryRuntimeEvent> watch() =>
+      Stream<HistoryRuntimeEvent>.multi((_) {});
 
   @override
   Future<HistoryFacets> facets() async => availableFacets;

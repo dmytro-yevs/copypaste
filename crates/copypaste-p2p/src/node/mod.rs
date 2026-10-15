@@ -31,8 +31,8 @@ mod probe;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 #[cfg(test)]
@@ -43,7 +43,8 @@ use tracing::{debug, warn};
 
 use crate::discovery::{DiscoveredPeer, Discovery};
 use crate::peers::{CursorStore, Peer, PeerStore, DEFAULT_CURSOR_FILE_NAME};
-use crate::sync::SyncOutcome;
+use crate::protocol::{ItemSummary, SyncItem};
+use crate::sync::{SyncError, SyncOutcome, SyncSource};
 use crate::{AuthenticatedDeviceProfile, DeviceProfile};
 
 pub use channel::{NoiseChannel, READ_TIMEOUT, SESSION_TIMEOUT};
@@ -254,6 +255,172 @@ struct DiscoveryCandidateCooldowns {
     global_attempts: VecDeque<Instant>,
 }
 
+/// A lease on one established sync attempt.
+///
+/// The pairing store remains the authority for future handshakes. This lease
+/// is narrower: it lets an unpair or revocation stop a session which already
+/// authenticated with a key that has just been removed. Dropping it removes
+/// only this attempt, never another simultaneous direction of the same
+/// pairing.
+struct ActiveSync<'a> {
+    node: &'a Node,
+    pairing_id: String,
+    id: u64,
+    state: Arc<ActiveSyncState>,
+}
+
+impl ActiveSync<'_> {
+    fn cancelled(&self) -> CancellationToken {
+        self.state.cancel.clone()
+    }
+}
+
+/// Cancellation plus a bounded in-flight source-operation count.
+///
+/// A session cancellation can interrupt awaits immediately, but a store batch
+/// is synchronous once it starts. Removal therefore cancels first, then waits
+/// for only that already-running source call to return before acknowledging the
+/// action. The registry lock is never held during that wait.
+struct ActiveSyncState {
+    cancel: CancellationToken,
+    operations: Mutex<usize>,
+    drained: Condvar,
+}
+
+impl ActiveSyncState {
+    fn new() -> Self {
+        Self {
+            cancel: CancellationToken::new(),
+            operations: Mutex::new(0),
+            drained: Condvar::new(),
+        }
+    }
+
+    fn enter_operation(self: &Arc<Self>) -> Option<ActiveSourceOperation> {
+        let mut operations = self
+            .operations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if self.cancel.is_cancelled() {
+            return None;
+        }
+        *operations += 1;
+        Some(ActiveSourceOperation {
+            state: Arc::clone(self),
+        })
+    }
+
+    fn cancel(&self) {
+        self.cancel.cancel();
+    }
+
+    fn drain(&self) {
+        let mut operations = self
+            .operations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        while *operations != 0 {
+            operations = self
+                .drained
+                .wait(operations)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+    }
+}
+
+struct ActiveSourceOperation {
+    state: Arc<ActiveSyncState>,
+}
+
+impl Drop for ActiveSourceOperation {
+    fn drop(&mut self) {
+        let mut operations = self
+            .state
+            .operations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *operations = operations.saturating_sub(1);
+        if *operations == 0 {
+            self.state.drained.notify_all();
+        }
+    }
+}
+
+/// A narrow adapter that fences each synchronous source call against removal.
+/// It deliberately does not hold a guard across any network await.
+struct ActiveSyncSource<'a, S> {
+    source: &'a S,
+    state: Arc<ActiveSyncState>,
+}
+
+impl<S: SyncSource> ActiveSyncSource<'_, S> {
+    fn operation(&self) -> Result<ActiveSourceOperation, SyncError> {
+        self.state
+            .enter_operation()
+            .ok_or_else(|| SyncError::Source("sync session was cancelled".into()))
+    }
+}
+
+impl<S: SyncSource> SyncSource for ActiveSyncSource<'_, S> {
+    fn device_id(&self) -> String {
+        self.source.device_id()
+    }
+
+    fn device_name(&self) -> String {
+        self.source.device_name()
+    }
+
+    fn device_profile(&self) -> DeviceProfile {
+        self.source.device_profile()
+    }
+
+    fn summaries(&self, since_ms: i64) -> Result<Vec<ItemSummary>, SyncError> {
+        let _operation = self.operation()?;
+        self.source.summaries(since_ms)
+    }
+
+    fn fetch(&self, ids: &[String]) -> Result<Vec<SyncItem>, SyncError> {
+        let _operation = self.operation()?;
+        self.source.fetch(ids)
+    }
+
+    fn apply(&self, item: SyncItem) -> Result<bool, SyncError> {
+        let _operation = self.operation()?;
+        self.source.apply(item)
+    }
+
+    fn apply_batch(&self, items: Vec<SyncItem>) -> Result<Vec<bool>, SyncError> {
+        let _operation = self.operation()?;
+        self.source.apply_batch(items)
+    }
+
+    fn summary_page(
+        &self,
+        since_ms: i64,
+        after_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<ItemSummary>, SyncError> {
+        let _operation = self.operation()?;
+        self.source.summary_page(since_ms, after_id, limit)
+    }
+}
+
+impl Drop for ActiveSync<'_> {
+    fn drop(&mut self) {
+        let mut active = self
+            .node
+            .active_syncs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(sessions) = active.get_mut(&self.pairing_id) {
+            sessions.remove(&self.id);
+            if sessions.is_empty() {
+                active.remove(&self.pairing_id);
+            }
+        }
+    }
+}
+
 /// Everything the peer half of a device shares.
 ///
 /// Constructed once and never rebuilt; no field is optional except
@@ -272,6 +439,12 @@ pub struct Node {
     listen_addr: RwLock<Option<SocketAddr>>,
     bound_addr: RwLock<Option<SocketAddr>>,
     sessions: Arc<Semaphore>,
+    /// Established or dialling history sessions, indexed by the non-secret
+    /// pairing id. A removal cancels every direction that already holds its
+    /// authenticated transport; new handshakes are still controlled by
+    /// [`PeerStore`].
+    active_syncs: Mutex<HashMap<String, HashMap<u64, Arc<ActiveSyncState>>>>,
+    next_active_sync: AtomicU64,
     browse_until_ms: AtomicI64,
     lan_visible: AtomicBool,
     pairing: pairing::PairingManager,
@@ -322,6 +495,8 @@ impl Node {
             listen_addr: RwLock::new(None),
             bound_addr: RwLock::new(None),
             sessions: Arc::new(Semaphore::new(MAX_CONCURRENT_PEER_SESSIONS)),
+            active_syncs: Mutex::new(HashMap::new()),
+            next_active_sync: AtomicU64::new(1),
             browse_until_ms: AtomicI64::new(0),
             lan_visible: AtomicBool::new(lan_visible),
             pairing: pairing::PairingManager::new(),
@@ -370,6 +545,62 @@ impl Node {
         }
         self.cursors
             .record_session(pairing_id, outcome.cursor.since_ms);
+    }
+
+    /// Register a history session only while this pairing is still present.
+    ///
+    /// The active-session lock also serialises this check with [`unpair`](Self::unpair)
+    /// and [`revoke`](Self::revoke). Once either operation returns success, an
+    /// already registered session has a cancelled token and no late caller can
+    /// register against the removed pairing.
+    fn begin_active_sync(&self, pairing_id: &str) -> Option<ActiveSync<'_>> {
+        let mut active = self
+            .active_syncs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.peers.get(pairing_id)?;
+        let id = self.next_active_sync.fetch_add(1, Ordering::Relaxed);
+        let state = Arc::new(ActiveSyncState::new());
+        active
+            .entry(pairing_id.to_string())
+            .or_default()
+            .insert(id, Arc::clone(&state));
+        Some(ActiveSync {
+            node: self,
+            pairing_id: pairing_id.to_string(),
+            id,
+            state,
+        })
+    }
+
+    /// Run a terminal bookkeeping write only while this session still belongs
+    /// to a live pairing. Holding the same lock as removal means an acknowledged
+    /// unpair or revocation cannot be followed by cursor/profile/presence writes
+    /// from a session that finished at the same instant.
+    fn commit_active_sync<T>(
+        &self,
+        active_sync: &ActiveSync<'_>,
+        write: impl FnOnce() -> T,
+    ) -> Option<T> {
+        let active = self
+            .active_syncs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        (!active_sync.state.cancel.is_cancelled()
+            && active
+                .get(&active_sync.pairing_id)
+                .is_some_and(|sessions| sessions.contains_key(&active_sync.id)))
+        .then(write)
+    }
+
+    fn cancel_active_syncs_locked(
+        active: &HashMap<String, HashMap<u64, Arc<ActiveSyncState>>>,
+        pairing_id: &str,
+    ) -> Vec<Arc<ActiveSyncState>> {
+        if let Some(sessions) = active.get(pairing_id) {
+            return sessions.values().cloned().collect();
+        }
+        Vec::new()
     }
 
     #[must_use]
@@ -788,10 +1019,29 @@ impl Node {
     /// does do is remove the pre-shared key from the listener's candidate list,
     /// so that pairing can no longer authenticate here.
     pub fn unpair(&self, pairing_id: &str) -> Result<bool, NodeError> {
-        let removed = self.peers.remove(pairing_id).map_err(|e| {
-            warn!(error = %e, "could not remove a pairing");
-            NodeError::PeerStore
-        })?;
+        let (removed, active_sessions) = {
+            // Keep removal and session cancellation in one critical section:
+            // a dialler that read its Peer before the click cannot register a
+            // new live session after this returns success.
+            let active = self
+                .active_syncs
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let removed = self.peers.remove(pairing_id).map_err(|e| {
+                warn!(error = %e, "could not remove a pairing");
+                NodeError::PeerStore
+            })?;
+            let active_sessions = removed
+                .then(|| Self::cancel_active_syncs_locked(&active, pairing_id))
+                .unwrap_or_default();
+            (removed, active_sessions)
+        };
+        for session in &active_sessions {
+            session.cancel();
+        }
+        for session in &active_sessions {
+            session.drain();
+        }
         if removed {
             self.cursors.forget(pairing_id);
             self.profiles
@@ -821,10 +1071,27 @@ impl Node {
 
     /// Permanently cut off a pairing and remove all cached non-secret state.
     pub fn revoke(&self, pairing_id: &str, now_ms: i64) -> Result<bool, NodeError> {
-        let removed = self.peers.revoke(pairing_id, now_ms).map_err(|error| {
-            warn!(%error, "could not revoke a pairing");
-            NodeError::PeerStore
-        })?;
+        let (removed, active_sessions) = {
+            // `revoke` can succeed for an id not currently stored. It must
+            // still cancel a session that authenticated just before the bar
+            // was made durable.
+            let active = self
+                .active_syncs
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let removed = self.peers.revoke(pairing_id, now_ms).map_err(|error| {
+                warn!(%error, "could not revoke a pairing");
+                NodeError::PeerStore
+            })?;
+            let active_sessions = Self::cancel_active_syncs_locked(&active, pairing_id);
+            (removed, active_sessions)
+        };
+        for session in &active_sessions {
+            session.cancel();
+        }
+        for session in &active_sessions {
+            session.drain();
+        }
         self.cursors.forget(pairing_id);
         self.profiles
             .write()
@@ -903,6 +1170,9 @@ pub fn placeholder_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+    use std::sync::mpsc;
+    use std::thread;
 
     fn node() -> (Node, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
@@ -1043,6 +1313,174 @@ mod tests {
         assert!(node.unpair(&pairing_id).unwrap());
         assert!(node.peers().psks().is_empty());
         assert!(!node.unpair(&pairing_id).unwrap());
+    }
+
+    #[test]
+    fn unpair_waits_for_an_inflight_source_batch_and_refuses_the_next_one() {
+        struct BlockingSource {
+            entered: mpsc::Sender<()>,
+            release: Mutex<mpsc::Receiver<()>>,
+            writes: AtomicUsize,
+        }
+
+        impl SyncSource for BlockingSource {
+            fn device_id(&self) -> String {
+                "local".into()
+            }
+
+            fn device_name(&self) -> String {
+                "Local".into()
+            }
+
+            fn summaries(&self, _: i64) -> Result<Vec<ItemSummary>, SyncError> {
+                Ok(Vec::new())
+            }
+
+            fn fetch(&self, _: &[String]) -> Result<Vec<SyncItem>, SyncError> {
+                Ok(Vec::new())
+            }
+
+            fn apply(&self, _: SyncItem) -> Result<bool, SyncError> {
+                unreachable!("the batch path is the storage boundary under test")
+            }
+
+            fn apply_batch(&self, items: Vec<SyncItem>) -> Result<Vec<bool>, SyncError> {
+                self.entered.send(()).expect("test observes source entry");
+                self.release
+                    .lock()
+                    .expect("release lock")
+                    .recv()
+                    .expect("test releases source");
+                self.writes.fetch_add(1, AtomicOrdering::SeqCst);
+                Ok(vec![true; items.len()])
+            }
+        }
+
+        let (node, _dir) = node();
+        let node = Arc::new(node);
+        let token = crate::transport::PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        node.peers()
+            .upsert(Peer {
+                pairing_id: pairing_id.clone(),
+                device_id: None,
+                name: "phone".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
+            })
+            .expect("peer");
+        let active = node.begin_active_sync(&pairing_id).expect("active session");
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let source = Arc::new(BlockingSource {
+            entered: entered_tx,
+            release: Mutex::new(release_rx),
+            writes: AtomicUsize::new(0),
+        });
+        let applying_source = Arc::clone(&source);
+        let state = Arc::clone(&active.state);
+        let applying = thread::spawn(move || {
+            ActiveSyncSource {
+                source: applying_source.as_ref(),
+                state,
+            }
+            .apply_batch(vec![crate::sync::testutil::item(
+                "inflight", 1, "content", "remote",
+            )])
+        });
+        entered_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the source batch started");
+
+        let node_for_unpair = Arc::clone(&node);
+        let id_for_unpair = pairing_id.clone();
+        let (done_tx, done_rx) = mpsc::channel();
+        let unpair = thread::spawn(move || {
+            let result = node_for_unpair.unpair(&id_for_unpair);
+            done_tx.send(result).expect("test observes unpair result");
+        });
+        assert!(
+            done_rx.recv_timeout(Duration::from_millis(50)).is_err(),
+            "unpair acknowledged while the source batch could still commit"
+        );
+
+        release_tx.send(()).expect("release source batch");
+        assert_eq!(applying.join().expect("source thread"), Ok(vec![true]));
+        assert_eq!(done_rx.recv().expect("unpair result"), Ok(true));
+        unpair.join().expect("unpair thread");
+        assert_eq!(source.writes.load(AtomicOrdering::SeqCst), 1);
+
+        let refused = ActiveSyncSource {
+            source: source.as_ref(),
+            state: Arc::clone(&active.state),
+        }
+        .apply_batch(vec![crate::sync::testutil::item(
+            "after", 2, "content", "remote",
+        )]);
+        assert!(
+            refused.is_err(),
+            "a later source batch started after unpair"
+        );
+        assert_eq!(source.writes.load(AtomicOrdering::SeqCst), 1);
+    }
+
+    #[test]
+    fn removing_a_pairing_cancels_its_registered_session_before_late_bookkeeping() {
+        let (node, _dir) = node();
+        let token = crate::transport::PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        node.peers()
+            .upsert(Peer {
+                pairing_id: pairing_id.clone(),
+                device_id: None,
+                name: "phone".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
+            })
+            .expect("peer");
+
+        let session = node.begin_active_sync(&pairing_id).expect("active session");
+        let cancel = session.cancelled();
+        assert!(node.unpair(&pairing_id).expect("unpair"));
+        assert!(cancel.is_cancelled());
+        assert!(
+            node.commit_active_sync(&session, || ()).is_none(),
+            "a removed pairing accepted late cursor or profile bookkeeping"
+        );
+    }
+
+    #[test]
+    fn revoking_a_pairing_cancels_its_registered_session_before_late_bookkeeping() {
+        let (node, _dir) = node();
+        let token = crate::transport::PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        node.peers()
+            .upsert(Peer {
+                pairing_id: pairing_id.clone(),
+                device_id: None,
+                name: "phone".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
+            })
+            .expect("peer");
+
+        let session = node.begin_active_sync(&pairing_id).expect("active session");
+        let cancel = session.cancelled();
+        assert!(node.revoke(&pairing_id, crate::now_ms()).expect("revoke"));
+        assert!(cancel.is_cancelled());
+        assert!(
+            node.commit_active_sync(&session, || ()).is_none(),
+            "a revoked pairing accepted late cursor or profile bookkeeping"
+        );
     }
 
     #[test]

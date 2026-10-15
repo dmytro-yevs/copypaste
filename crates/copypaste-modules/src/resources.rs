@@ -7,14 +7,14 @@ use std::{
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 pub(crate) fn directory(data: &Path, model: &SearchModel) -> PathBuf {
     data.join("models").join(model.resource_directory_name())
 }
 
-pub(crate) fn available(data: &Path, model: &SearchModel) -> bool {
+fn present(data: &Path, model: &SearchModel) -> bool {
     let root = directory(data, model);
     model.files.iter().all(|file| {
         fs::symlink_metadata(root.join(&file.path)).is_ok_and(|metadata| {
@@ -23,6 +23,30 @@ pub(crate) fn available(data: &Path, model: &SearchModel) -> bool {
                 && metadata.len() == file.size_bytes
         })
     })
+}
+
+/// Metadata is only a cache validator. The first observation of a resource and
+/// every changed observation still use [`verify`] to authenticate its bytes.
+#[derive(Clone, Eq, PartialEq)]
+pub(crate) struct ResourceFingerprint(Vec<(String, u64, SystemTime)>);
+
+pub(crate) fn fingerprint(data: &Path, model: &SearchModel) -> Option<ResourceFingerprint> {
+    let root = directory(data, model);
+    model
+        .files
+        .iter()
+        .map(|file| {
+            let metadata = fs::symlink_metadata(root.join(&file.path)).ok()?;
+            if !metadata.is_file()
+                || metadata.file_type().is_symlink()
+                || metadata.len() != file.size_bytes
+            {
+                return None;
+            }
+            Some((file.path.clone(), metadata.len(), metadata.modified().ok()?))
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(ResourceFingerprint)
 }
 
 pub(crate) fn verify(data: &Path, model: &SearchModel) -> Result<(), ModuleError> {
@@ -60,7 +84,7 @@ pub(crate) fn prepare(
     admitted: impl Fn() -> bool,
 ) -> Result<Option<PreparedModel>, ModuleError> {
     model.validate()?;
-    if available(data, model) && verify(data, model).is_ok() {
+    if present(data, model) && verify(data, model).is_ok() {
         return Ok(None);
     }
     let stage = tempfile::tempdir_in(staging)?;

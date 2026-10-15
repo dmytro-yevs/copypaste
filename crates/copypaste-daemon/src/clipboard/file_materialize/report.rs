@@ -13,6 +13,12 @@ pub(super) struct SweepReport {
     pub(super) examined: u32,
     pub(super) removed: u32,
     pub(super) directories_removed: u32,
+    /// Plaintext that remains inside its receiver window. It still needs a
+    /// worker: after a restart, the deadline must continue to be enforced even
+    /// when the start-time pass had nothing expired to remove.
+    pub(super) live: u32,
+    /// The shortest remaining receiver window among [`Self::live`] files.
+    pub(super) next_deadline: Option<std::time::Duration>,
     /// Expired plaintext that was still on disk when the sweep ended.
     pub(super) retained: u32,
     /// Entries the sweep could not classify. Each one may be hiding expired
@@ -27,6 +33,18 @@ pub(super) struct SweepReport {
 impl SweepReport {
     pub(super) fn unfinished(&self) -> bool {
         self.retained > 0 || self.unreadable > 0 || self.truncated
+    }
+
+    pub(super) fn owns_plaintext(&self) -> bool {
+        self.live > 0 || self.unfinished()
+    }
+
+    pub(super) fn note_live(&mut self, remaining: std::time::Duration) {
+        self.live += 1;
+        self.next_deadline = Some(
+            self.next_deadline
+                .map_or(remaining, |next| next.min(remaining)),
+        );
     }
 
     pub(super) fn note(&mut self, error: Errno) {

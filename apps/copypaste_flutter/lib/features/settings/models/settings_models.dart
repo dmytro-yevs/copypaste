@@ -5,6 +5,7 @@ enum SettingsLoadState { loading, ready, error }
 class CaptureSettingsState {
   const CaptureSettingsState({
     this.syncStatus = const SyncStatus(),
+    this.settingsHealth,
     required this.running,
     required this.paused,
     required this.epoch,
@@ -14,12 +15,25 @@ class CaptureSettingsState {
   final bool paused;
   final int epoch;
   final SyncStatus syncStatus;
+  final RuntimeSettingsHealth? settingsHealth;
 
   String get label {
     if (paused) return 'Paused';
     if (running) return 'Capturing';
     return 'Not running';
   }
+}
+
+class RuntimeSettingsHealth {
+  const RuntimeSettingsHealth({
+    required this.recordUnreadable,
+    required this.unreadableFields,
+  });
+
+  final bool recordUnreadable;
+  final List<String> unreadableFields;
+
+  bool get degraded => recordUnreadable || unreadableFields.isNotEmpty;
 }
 
 class RuntimeSettings {

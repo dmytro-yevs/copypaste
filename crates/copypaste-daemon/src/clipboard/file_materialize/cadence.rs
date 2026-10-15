@@ -41,14 +41,17 @@ impl SweepCadence {
     }
 
     pub(super) fn after(&mut self, report: &SweepReport) -> Duration {
-        if !report.unfinished() {
-            self.schedule = self.policy.build();
-            return self.interval;
+        if report.unfinished() {
+            return self
+                .schedule
+                .next()
+                .unwrap_or(self.interval)
+                .min(self.interval);
         }
-        self.schedule
-            .next()
-            .unwrap_or(self.interval)
-            .min(self.interval)
+        self.schedule = self.policy.build();
+        report
+            .next_deadline
+            .map_or(self.interval, |deadline| deadline.min(self.interval))
     }
 }
 
@@ -101,5 +104,17 @@ mod tests {
             assert!(next <= interval);
             assert!(next >= retry_floor(interval));
         }
+    }
+
+    #[test]
+    fn a_live_startup_file_keeps_its_remaining_deadline() {
+        let mut cadence = SweepCadence::new(Duration::from_secs(600));
+        let live = SweepReport {
+            live: 1,
+            next_deadline: Some(Duration::from_secs(37)),
+            ..SweepReport::default()
+        };
+
+        assert_eq!(cadence.after(&live), Duration::from_secs(37));
     }
 }

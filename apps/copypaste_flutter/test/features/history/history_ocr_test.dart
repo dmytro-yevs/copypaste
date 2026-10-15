@@ -479,7 +479,8 @@ class _HistoryRepository implements HistoryRepository {
   HistoryClip clip = _image;
 
   @override
-  Stream<HistoryRuntimeEvent> watch() => const Stream.empty();
+  Stream<HistoryRuntimeEvent> watch() =>
+      Stream<HistoryRuntimeEvent>.multi((_) {});
   @override
   Future<HistoryFacets> facets() async => const HistoryFacets();
   @override

@@ -45,6 +45,66 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn origin_lookup_errors_preserve_remote_identity_and_local_file_availability() {
+        for table in ["sync_device_name", "sync_device_state"] {
+            let (state, dir) = crate::testutil::test_state("origin-fallback");
+            let source = dir.path().join("remote-original.txt");
+            std::fs::write(&source, b"file bytes").unwrap();
+            let metadata = copypaste_core::FileMetadata::with_source_reference(
+                "remote-original.txt",
+                "text/plain",
+                source.to_str().unwrap(),
+            )
+            .unwrap();
+            let mut remote = copypaste_core::ingest::ingest_binary_into_with_capture_context(
+                &state.store,
+                &state.keyring,
+                b"file bytes",
+                copypaste_ipc::content_type::FILE,
+                copypaste_core::now_ms(),
+                None,
+                Some(&metadata),
+                &state.settings.get(),
+            )
+            .unwrap()
+            .into_item();
+            remote.origin_device_id = "remote-device".into();
+            let local_id = crate::testutil::add(&state, "local text");
+            let local = state.store.get(&local_id).unwrap().unwrap();
+            let conn =
+                copypaste_core::storage::open_validated(state.db_path(), &state.keyring.db_key())
+                    .unwrap();
+            conn.execute(&format!("DROP TABLE {table}"), []).unwrap();
+            assert!(state.meta.origin_of(&remote).is_err());
+
+            let item = to_wire(&state, remote.clone()).unwrap();
+            assert_eq!(item.origin_device_id, "remote-device");
+            assert_eq!(item.origin_device_name, None);
+            assert_eq!(
+                item.origin_device_class,
+                copypaste_ipc::DeviceClass::Unknown
+            );
+            assert!(!item.file_details.unwrap().source_available);
+
+            let page = decrypt_rows(&state, vec![remote, local]);
+            assert_eq!(page.skipped_undecryptable, 0);
+            assert_eq!(page.items[0].origin_device_id, "remote-device");
+            assert!(
+                !page.items[0]
+                    .file_details
+                    .as_ref()
+                    .unwrap()
+                    .source_available
+            );
+            assert_eq!(page.items[1].origin_device_id, state.meta.device_id());
+            assert_eq!(
+                page.items[1].origin_device_name.as_deref(),
+                Some(state.meta.device_name().as_str()),
+            );
+        }
+    }
 }
 
 pub(super) fn is_oversized_text(payload: &ClipboardPayload) -> bool {
@@ -71,11 +131,8 @@ pub(super) fn to_wire_and_payload(
     row: StoredItem,
 ) -> Result<(Item, ClipboardPayload), copypaste_core::CryptoError> {
     let origin = state.meta.origin_of(&row).unwrap_or_else(|e| {
-        // Attribution is advisory: a row whose origin cannot be read is still
-        // the user's item, and the fallback is the same one the origin table's
-        // absence already means — this device captured it.
         warn!(error = ?e, "could not resolve an item's origin device");
-        state.meta.here()
+        origin_identity(state, &row)
     });
     to_wire_with(
         row,
@@ -84,6 +141,19 @@ pub(super) fn to_wire_and_payload(
         &state.keyring.item_key(),
         false,
     )
+}
+
+fn origin_identity(state: &AppState, row: &StoredItem) -> crate::meta::Origin {
+    let device_id = copypaste_core::origin_or(&row.origin_device_id, state.meta.device_id());
+    if device_id == state.meta.device_id() {
+        state.meta.here()
+    } else {
+        crate::meta::Origin {
+            device_id: device_id.to_owned(),
+            device_name: None,
+            device_class: copypaste_ipc::DeviceClass::Unknown,
+        }
+    }
 }
 
 /// Convert with the origin and item key already resolved.
@@ -223,7 +293,6 @@ pub(super) fn decrypt_rows(state: &AppState, rows: Vec<StoredItem>) -> ItemPage 
         warn!(error = ?e, "could not resolve the origin devices for a page");
         std::collections::HashMap::new()
     });
-    let here = state.meta.here();
     // One HKDF extract-and-expand for the page, not one per row: the derivation
     // is constant for the process. Scoped to the page rather than held on
     // `AppState`, so the key's window in memory is no wider than the plaintexts
@@ -231,7 +300,14 @@ pub(super) fn decrypt_rows(state: &AppState, rows: Vec<StoredItem>) -> ItemPage 
     let key = state.keyring.item_key();
     for row in rows {
         let row_id = row.id.clone();
-        let origin = origins.get(&row_id).unwrap_or(&here);
+        let fallback;
+        let origin = match origins.get(&row_id) {
+            Some(origin) => origin,
+            None => {
+                fallback = origin_identity(state, &row);
+                &fallback
+            }
+        };
         match to_wire_with(row, origin, state.meta.device_id(), &key, true) {
             Ok((item, _)) => page.items.push(item),
             Err(e) => {
