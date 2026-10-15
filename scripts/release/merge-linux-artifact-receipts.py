@@ -4,14 +4,18 @@
 import argparse
 import json
 from pathlib import Path
+import runpy
+
+
+RELEASE = runpy.run_path(str(Path(__file__).with_name("linux_release_contract.py")))
 
 
 IDENTITY_KEYS = ("platform", "version", "commit", "run_id")
 
 
 def merge(receipts: list[Path]) -> dict:
-    if len(receipts) != 2:
-        raise ValueError("Linux qualification requires exactly two architecture receipts")
+    if len(receipts) != len(RELEASE["ARCHITECTURES"]):
+        raise ValueError("Linux qualification requires one receipt per released architecture")
     payloads = [json.loads(path.read_text(encoding="utf-8")) for path in receipts]
     first = payloads[0]
     if first.get("schema") != 2 or first.get("platform") != "linux":
