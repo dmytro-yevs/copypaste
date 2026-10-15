@@ -28,6 +28,14 @@ trace and `linux-module-qualification.json` are release evidence; an inventory
 listing or an independently produced module receipt cannot substitute for this
 installed-product lifecycle.
 
+Before changing the application release version, advance the three first-party
+module versions and set their source `app_versions` lower bound to that exact
+application version. Release safety tests check this binding before native
+builds. During an application release, module producers can publish qualified
+packages with `publish=true` and `publish_marketplace=false`; update the signed
+marketplace through `module-marketplace.yml` after the application is public.
+Normal standalone module publication still updates the marketplace by default.
+
 Every downloadable updater artifact also receives the repository's detached
 updater signature. Each platform job records the exact commit, workflow run,
 filename, byte size, and SHA-256 digest. The qualification job re-hashes those

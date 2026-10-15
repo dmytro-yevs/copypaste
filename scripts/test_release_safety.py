@@ -98,6 +98,17 @@ class FlutterCacheKeyTest(unittest.TestCase):
 
 
 class ReleaseSafetyTest(unittest.TestCase):
+    def test_first_party_module_manifests_bind_the_current_application(self):
+        version = re.search(r'^version = "([^"]+)"$', (ROOT / "Cargo.toml").read_text(), re.MULTILINE)[1]
+        staging = runpy.run_path(str(ROOT / "scripts/release/stage-linux-module-qualification.py"))
+        for name in staging["MODULES"]:
+            with self.subTest(module=name):
+                manifest = staging["source_module"](ROOT, name, version)
+                package_version = re.search(
+                    r'^version = "([^"]+)"$', (ROOT / "modules" / name / "Cargo.toml").read_text(), re.MULTILINE,
+                )[1]
+                self.assertEqual(manifest["version"], package_version)
+
     def test_optimized_capture_contract_rejects_the_stripped_release_callback(self):
         verify = runpy.run_path(str(ROOT / "scripts/release/verify-capture-jni.py"))["verify"]
         callback = ".class public interface abstract Lcom/copypaste/app/CaptureCallback;\n"
