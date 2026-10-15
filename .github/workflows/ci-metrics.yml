@@ -1,0 +1,42 @@
+name: CI performance report
+
+on:
+  workflow_run:
+    workflows: [CI, Production release, CodeQL, Linux native qualification, Build and publish OCR module, Build and publish provider module]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Completed workflow run to measure
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  report:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # workflow_run executes this trusted reporting code. It never checks out
+      # the source PR, downloads its artifacts, or executes anything from its logs.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install -r scripts/ci/requirements.txt
+      - name: Collect completed run timings
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id || github.event.workflow_run.id }}
+        run: python3 scripts/ci/metrics.py --run-id "$SOURCE_RUN_ID" --cache-logs --compare docs/engineering/ci-baseline.json --output ci-metrics.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-performance-report
+          path: ci-metrics.json
+          if-no-files-found: error
+          retention-days: 90
