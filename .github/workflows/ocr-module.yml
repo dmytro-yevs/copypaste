@@ -8,6 +8,11 @@ on:
         required: true
         type: boolean
         default: false
+      publish_marketplace:
+        description: Update the marketplace after publishing packages; defer during an application release
+        required: false
+        type: boolean
+        default: true
 
 concurrency:
   group: ocr-module-release
@@ -211,4 +216,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create module-copypaste.ocr-v${{ needs.preflight.outputs.version }} dist/*.cpmodule dist/*.receipt.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false --title "CopyPaste OCR ${{ needs.preflight.outputs.version }}" --notes "Optional first-party OCR. Signed packages for macOS, Windows, Linux x86_64 (GNOME X11 release scope), and all shipped Android ABIs. Recognition works offline."
-          gh workflow run module-marketplace.yml --repo "$GITHUB_REPOSITORY" --ref module-copypaste.ocr-v${{ needs.preflight.outputs.version }} -f module_release_tag=module-copypaste.ocr-v${{ needs.preflight.outputs.version }}
+          if [[ "${{ inputs.publish_marketplace }}" == true ]]; then
+            gh workflow run module-marketplace.yml --repo "$GITHUB_REPOSITORY" --ref module-copypaste.ocr-v${{ needs.preflight.outputs.version }} -f module_release_tag=module-copypaste.ocr-v${{ needs.preflight.outputs.version }}
+          fi
