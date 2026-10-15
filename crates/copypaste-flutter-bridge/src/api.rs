@@ -547,6 +547,15 @@ pub struct CaptureState {
     pub running: bool,
     pub paused: bool,
     pub private_mode_epoch: u64,
+    pub settings_health: Option<RuntimeSettingsHealth>,
+}
+
+/// Safe diagnostic context for settings that were recovered with protective
+/// fallback values after their persisted record could not be decoded.
+#[derive(Debug, Clone)]
+pub struct RuntimeSettingsHealth {
+    pub record_unreadable: bool,
+    pub unreadable_fields: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -669,6 +678,7 @@ pub async fn capture_state() -> Result<CaptureState, RuntimeError> {
             running: status.capture_running,
             paused: status.private_mode,
             private_mode_epoch: status.private_mode_epoch,
+            settings_health: status.settings_health.map(runtime_settings_health),
         }),
         _ => Err(RuntimeError::internal()),
     }
@@ -1192,6 +1202,13 @@ fn runtime_settings(config: copypaste_ipc::ConfigData) -> RuntimeSettingsData {
     }
 }
 
+fn runtime_settings_health(health: copypaste_ipc::SettingsHealth) -> RuntimeSettingsHealth {
+    RuntimeSettingsHealth {
+        record_unreadable: health.record_unreadable,
+        unreadable_fields: health.unreadable_fields,
+    }
+}
+
 #[cfg(unix)]
 fn create_private_file(path: &str) -> std::io::Result<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
@@ -1458,6 +1475,17 @@ mod tests {
 
         assert_eq!(device.device_id.as_deref(), Some("local-device-id"));
         assert_eq!(device.name, "Desktop");
+    }
+
+    #[test]
+    fn settings_health_maps_for_the_flutter_status_surface() {
+        let health = runtime_settings_health(copypaste_ipc::SettingsHealth {
+            record_unreadable: false,
+            unreadable_fields: vec!["skip_secret".into()],
+        });
+
+        assert!(!health.record_unreadable);
+        assert_eq!(health.unreadable_fields, ["skip_secret"]);
     }
 
     #[test]

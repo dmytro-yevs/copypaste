@@ -34,6 +34,8 @@ class HistoryController extends ChangeNotifier {
   final HistoryOcrController? ocr;
 
   static const int _maxCachedMedia = 48;
+  static const _watchUnavailableMessage =
+      'History updates are temporarily unavailable.';
 
   final HistoryRepository _repository;
   final int pageSize;
@@ -65,6 +67,10 @@ class HistoryController extends ChangeNotifier {
   bool _refreshAfterBulkMutation = false;
 
   StreamSubscription<HistoryRuntimeEvent>? _watchSubscription;
+  Future<void>? _watchCancellation;
+  Timer? _watchReconnectTimer;
+  int _watchGeneration = 0;
+  int _watchReconnectAttempts = 0;
   Timer? _searchTimer;
   HistoryQuery _query = const HistoryQuery();
   HistoryFacets _facets = const HistoryFacets();
@@ -72,6 +78,9 @@ class HistoryController extends ChangeNotifier {
   String? _nextCursor;
   String? _selectedId;
   HistoryClip? _selectedClip;
+  int _selectedDetailEpoch = 0;
+  Future<void>? _selectedDetailLoad;
+  int? _selectedDetailLoadEpoch;
   String? _errorMessage;
   int _skippedUndecryptable = 0;
   bool _isLoadingMore = false;
@@ -100,7 +109,7 @@ class HistoryController extends ChangeNotifier {
       !(ocr?.busy ?? false);
 
   /// Releases loaded payloads while retaining the query, section state, and
-  /// selection identity. The runtime watch remains connected but does no reads.
+  /// selection identity.
   void suspend() {
     if (_disposed || _suspended) return;
     _suspended = true;
@@ -113,6 +122,9 @@ class HistoryController extends ChangeNotifier {
     _items.clear();
     _facets = const HistoryFacets();
     _selectedClip = null;
+    _selectedDetailEpoch++;
+    _selectedDetailLoad = null;
+    _selectedDetailLoadEpoch = null;
     _nextCursor = null;
     _isLoadingMore = false;
     _visibleItemsRefresh = null;
@@ -121,6 +133,7 @@ class HistoryController extends ChangeNotifier {
     _sourceIcons.clear();
     _imagePreviewLoads.clear();
     _sourceIconLoads.clear();
+    _cancelWatch();
   }
 
   HistoryQuery get query => _query;
@@ -388,66 +401,173 @@ class HistoryController extends ChangeNotifier {
 
   Future<void> initialize() async {
     if (_disposed) return;
-    final mediaEpoch = _mediaEpoch;
     _suspended = false;
-    _watchSubscription ??= _repository.watch().listen((event) {
-      if (_suspended) return;
-      if (event == HistoryRuntimeEvent.itemsChanged) {
-        if (_isBulkMutating) {
-          _refreshAfterBulkMutation = true;
-          return;
-        }
-        if (isBulkDragSelecting) {
-          _refreshAfterBulkDrag = true;
-          return;
-        }
-        if (_isImportingFiles) {
-          _refreshAfterFileImport = true;
-          return;
-        }
-        if (_draggedPinnedId != null || _isReorderingPinned) {
-          _refreshAfterPinnedInteraction = true;
-        } else {
-          unawaited(_refreshItemsAndFacets());
-        }
-      }
-    });
+    await _ensureWatch(resetBackoff: true);
     await _reloadItemsAndFacets();
-    final selectedId = _selectedId;
-    if (!_disposed &&
-        !_suspended &&
-        mediaEpoch == _mediaEpoch &&
-        selectedId != null) {
-      await select(selectedId);
+    await _awaitCurrentSelectedDetail();
+  }
+
+  Future<bool> _ensureWatch({bool resetBackoff = false}) async {
+    if (resetBackoff) {
+      _watchReconnectAttempts = 0;
+      _watchReconnectTimer?.cancel();
+      _watchReconnectTimer = null;
+    }
+    await _watchCancellation;
+    if (_disposed || _suspended) return false;
+    if (_watchSubscription != null) return true;
+    final generation = ++_watchGeneration;
+    try {
+      _watchSubscription = _repository.watch().listen(
+        _onWatchEvent,
+        onError: (Object error, StackTrace stackTrace) =>
+            _watchErrored(generation),
+        onDone: () => _watchEnded(generation),
+      );
+      return true;
+    } catch (_) {
+      _watchEnded(generation);
+      return false;
     }
   }
 
-  Future<void> _reloadItemsAndFacets() async {
-    await Future.wait([reload(), refreshFacets()]);
+  void _onWatchEvent(HistoryRuntimeEvent event) {
+    if (_suspended || _disposed) return;
+    if (event == HistoryRuntimeEvent.unavailable) {
+      _watchErrored(_watchGeneration);
+      return;
+    }
+    _watchReconnectAttempts = 0;
+    if (_isBulkMutating) {
+      _refreshAfterBulkMutation = true;
+      return;
+    }
+    if (isBulkDragSelecting) {
+      _refreshAfterBulkDrag = true;
+      return;
+    }
+    if (_isImportingFiles) {
+      _refreshAfterFileImport = true;
+      _refreshSelectedDetail();
+      return;
+    }
+    if (_draggedPinnedId != null || _isReorderingPinned) {
+      _refreshAfterPinnedInteraction = true;
+      _refreshSelectedDetail();
+    } else {
+      unawaited(_refreshItemsAndFacets());
+    }
   }
 
-  Future<void> _refreshItemsAndFacets() {
-    late final Future<void> refresh;
-    refresh = _refreshVisibleItemsAndFacets().whenComplete(() {
-      if (identical(_visibleItemsRefresh, refresh)) _visibleItemsRefresh = null;
+  void _refreshSelectedDetail() {
+    final id = _selectedId;
+    if (id == null) return;
+    final queryEpoch = _queryEpoch;
+    final detailEpoch = ++_selectedDetailEpoch;
+    _selectedClip = null;
+    _selectedDetailLoad = null;
+    _selectedDetailLoadEpoch = null;
+    notifyListeners();
+    unawaited(_startSelectedDetailLoad(id, queryEpoch, detailEpoch));
+  }
+
+  void _watchEnded(int generation) {
+    if (generation != _watchGeneration) return;
+    _watchSubscription = null;
+    _watchUnavailable();
+  }
+
+  void _watchErrored(int generation) {
+    if (generation != _watchGeneration) return;
+    _cancelWatch();
+    _watchUnavailable();
+  }
+
+  void _watchUnavailable() {
+    if (_disposed || _suspended) return;
+    _errorMessage = _watchUnavailableMessage;
+    notifyListeners();
+    _scheduleWatchReconnect();
+  }
+
+  void _scheduleWatchReconnect() {
+    if (_watchReconnectTimer != null) return;
+    final generation = _watchGeneration;
+    final delay = switch (_watchReconnectAttempts++) {
+      0 => const Duration(milliseconds: 100),
+      1 => const Duration(milliseconds: 500),
+      _ => const Duration(seconds: 2),
+    };
+    _watchReconnectTimer = Timer(delay, () {
+      _watchReconnectTimer = null;
+      if (_disposed || _suspended || generation != _watchGeneration) return;
+      unawaited(_reconnectWatch());
     });
+  }
+
+  Future<void> _reconnectWatch() async {
+    if (!await _ensureWatch()) return;
+    if (_disposed || _suspended) return;
+    await _refreshItemsAndFacets(resetWatchBackoff: false);
+  }
+
+  void _cancelWatch() {
+    _watchGeneration++;
+    _watchReconnectTimer?.cancel();
+    _watchReconnectTimer = null;
+    final subscription = _watchSubscription;
+    _watchSubscription = null;
+    if (subscription == null) return;
+    late final Future<void> cancellation;
+    cancellation = subscription.cancel().catchError((Object _) {}).whenComplete(
+      () {
+        if (identical(_watchCancellation, cancellation)) {
+          _watchCancellation = null;
+        }
+      },
+    );
+    _watchCancellation = cancellation;
+    unawaited(cancellation);
+  }
+
+  Future<void> _reloadItemsAndFacets({bool resetWatchBackoff = true}) async {
+    await Future.wait([
+      reload(resetWatchBackoff: resetWatchBackoff),
+      refreshFacets(),
+    ]);
+  }
+
+  Future<void> _refreshItemsAndFacets({bool resetWatchBackoff = true}) {
+    late final Future<void> refresh;
+    refresh =
+        _refreshVisibleItemsAndFacets(
+          resetWatchBackoff: resetWatchBackoff,
+        ).whenComplete(() {
+          if (identical(_visibleItemsRefresh, refresh)) {
+            _visibleItemsRefresh = null;
+          }
+        });
     _visibleItemsRefresh = refresh;
     return refresh;
   }
 
-  Future<void> _refreshVisibleItemsAndFacets() async {
+  Future<void> _refreshVisibleItemsAndFacets({
+    bool resetWatchBackoff = true,
+  }) async {
     if (_state != HistoryLoadState.ready) {
-      await _reloadItemsAndFacets();
+      await _reloadItemsAndFacets(resetWatchBackoff: resetWatchBackoff);
       return;
     }
     final epoch = ++_queryEpoch;
     final retainedCount = _items.length;
     _isLoadingMore = false;
     _nextCursor = null;
+    var refreshed = false;
     await Future.wait([
       () async {
         try {
           await _readVisibleItems(epoch, retainedCount);
+          refreshed = true;
         } catch (_) {
           if (_isCurrent(epoch)) {
             _errorMessage = 'History could not be refreshed. Try again.';
@@ -457,6 +577,12 @@ class HistoryController extends ChangeNotifier {
       }(),
       refreshFacets(),
     ]);
+    if (refreshed &&
+        _isCurrent(epoch) &&
+        _errorMessage == _watchUnavailableMessage) {
+      _errorMessage = null;
+      notifyListeners();
+    }
   }
 
   Future<void> _readVisibleItems(int epoch, int retainedCount) async {
@@ -481,6 +607,10 @@ class HistoryController extends ChangeNotifier {
     _nextCursor = cursor;
     _skippedUndecryptable = skipped;
     _state = _items.isEmpty ? HistoryLoadState.empty : HistoryLoadState.ready;
+    final selectedId = _selectedId;
+    if (selectedId != null) {
+      unawaited(select(selectedId));
+    }
   }
 
   Future<void> refreshFacets() async {
@@ -522,7 +652,9 @@ class HistoryController extends ChangeNotifier {
     await reload();
   }
 
-  Future<void> reload() async {
+  Future<void> reload({bool resetWatchBackoff = true}) async {
+    if (_disposed || _suspended) return;
+    await _ensureWatch(resetBackoff: resetWatchBackoff);
     if (_disposed || _suspended) return;
     if (_draggedPinnedId != null || _isReorderingPinned) {
       _queryEpoch++;
@@ -547,6 +679,10 @@ class HistoryController extends ChangeNotifier {
       _nextCursor = page.nextCursor;
       _skippedUndecryptable = page.skippedUndecryptable;
       _state = _items.isEmpty ? HistoryLoadState.empty : HistoryLoadState.ready;
+      final selectedId = _selectedId;
+      if (selectedId != null) {
+        unawaited(select(selectedId));
+      }
     } catch (_) {
       if (!_isCurrent(epoch)) return;
       _state = HistoryLoadState.error;
@@ -603,24 +739,67 @@ class HistoryController extends ChangeNotifier {
 
   Future<void> select(String id) async {
     if (_isBulkSelecting) return;
-    final epoch = _queryEpoch;
+    final queryEpoch = _queryEpoch;
+    final detailEpoch = ++_selectedDetailEpoch;
     _selectedId = id;
     _selectedClip = _items.where((item) => item.id == id).firstOrNull;
     notifyListeners();
+    await _startSelectedDetailLoad(id, queryEpoch, detailEpoch);
+  }
+
+  Future<void> _startSelectedDetailLoad(
+    String id,
+    int queryEpoch,
+    int detailEpoch,
+  ) {
+    late final Future<void> load;
+    load = _loadSelectedDetail(id, queryEpoch, detailEpoch).whenComplete(() {
+      if (identical(_selectedDetailLoad, load)) {
+        _selectedDetailLoad = null;
+        _selectedDetailLoadEpoch = null;
+      }
+    });
+    _selectedDetailLoad = load;
+    _selectedDetailLoadEpoch = detailEpoch;
+    return load;
+  }
+
+  Future<void> _awaitCurrentSelectedDetail() async {
+    final load = _selectedDetailLoad;
+    final detailEpoch = _selectedDetailLoadEpoch;
+    if (load != null && detailEpoch == _selectedDetailEpoch) await load;
+  }
+
+  Future<void> _loadSelectedDetail(
+    String id,
+    int queryEpoch,
+    int detailEpoch,
+  ) async {
     try {
       final fullClip = await _repository.get(id);
-      if (!_isCurrent(epoch) || _selectedId != id) return;
+      if (!_isCurrent(queryEpoch) ||
+          _selectedId != id ||
+          _selectedDetailEpoch != detailEpoch) {
+        return;
+      }
       _selectedClip = fullClip;
       _replace(fullClip);
       notifyListeners();
     } catch (_) {
-      if (!_isCurrent(epoch) || _selectedId != id) return;
+      if (!_isCurrent(queryEpoch) ||
+          _selectedId != id ||
+          _selectedDetailEpoch != detailEpoch) {
+        return;
+      }
       _errorMessage = 'This clip could not be opened.';
       notifyListeners();
     }
   }
 
   void clearSelection() {
+    _selectedDetailEpoch++;
+    _selectedDetailLoad = null;
+    _selectedDetailLoadEpoch = null;
     _selectedId = null;
     _selectedClip = null;
     notifyListeners();
@@ -756,12 +935,22 @@ class HistoryController extends ChangeNotifier {
 
   Future<bool> toggleSecret(HistoryClip clip) async {
     if (_disposed || !_secretMutations.add(clip.id)) return false;
+    if (_selectedId == clip.id) {
+      _selectedDetailEpoch++;
+      _selectedDetailLoad = null;
+      _selectedDetailLoadEpoch = null;
+    }
     notifyListeners();
     try {
       final updated = await _repository.setSecret(clip.id, !clip.secret);
       if (_disposed) return true;
       _replace(updated);
-      if (_selectedId == clip.id) _selectedClip = updated;
+      if (_selectedId == clip.id) {
+        _selectedDetailEpoch++;
+        _selectedDetailLoad = null;
+        _selectedDetailLoadEpoch = null;
+        _selectedClip = updated;
+      }
       return true;
     } catch (_) {
       if (!_disposed) _errorMessage = 'The clip secrecy could not be updated.';
@@ -1107,7 +1296,7 @@ class HistoryController extends ChangeNotifier {
     ocr?.dispose();
     _queryEpoch++;
     _searchTimer?.cancel();
-    _watchSubscription?.cancel();
+    _cancelWatch();
     _imagePreviewLoads.clear();
     _sourceIconLoads.clear();
     super.dispose();

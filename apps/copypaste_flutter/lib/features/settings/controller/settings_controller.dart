@@ -49,6 +49,7 @@ class SettingsController extends ChangeNotifier {
   SyncStatus _syncStatus = const SyncStatus();
   StreamSubscription<SyncStatus>? _syncSubscription;
   String? _errorMessage;
+  String? _settingsHealthNotice;
   bool _busy = false;
   bool _blockScreenshots = false;
   bool _disposed = false;
@@ -60,7 +61,7 @@ class SettingsController extends ChangeNotifier {
   RuntimeSettings? get settings => _settings;
   CaptureSettingsState? get capture => _capture;
   SyncStatus get syncStatus => _syncStatus;
-  String? get errorMessage => _errorMessage;
+  String? get errorMessage => _errorMessage ?? _settingsHealthNotice;
   bool get busy => _busy;
   bool get blockScreenshots => _blockScreenshots;
   bool get blockScreenshotsSupported => _screenshotProtection.supported;
@@ -68,7 +69,16 @@ class SettingsController extends ChangeNotifier {
   ScreenshotCaptureStatus get screenshotCapture => _screenshotStatus;
 
   Future<bool> setScreenshotCaptureEnabled(bool value) => _run(() async {
-    _screenshotStatus = await _screenshotCapture.setEnabled(value);
+    try {
+      _screenshotStatus = await _screenshotCapture.setEnabled(value);
+    } catch (_) {
+      try {
+        _screenshotStatus = await _screenshotCapture.status();
+      } catch (_) {
+        // Keep the last confirmed status when the native state cannot be read.
+      }
+      rethrow;
+    }
   });
 
   Future<bool> requestScreenshotCapturePermission() => _run(() async {
@@ -95,6 +105,7 @@ class SettingsController extends ChangeNotifier {
       _settings = values[0] as RuntimeSettings;
       _capture = values[1] as CaptureSettingsState;
       _acceptSyncStatus(_capture!.syncStatus);
+      _settingsHealthNotice = _settingsHealthMessage(_capture!.settingsHealth);
       _blockScreenshots = values[2] as bool;
       if (_screenshotCapture.supported) {
         _screenshotStatus = await _screenshotCapture.status();
@@ -140,10 +151,29 @@ class SettingsController extends ChangeNotifier {
       try {
         await _captureControl.setPaused(paused);
       } on CaptureServiceUnavailable {
-        _capture = await _repository.setCapturePaused(true);
+        try {
+          _capture = await _repository.setCapturePaused(true);
+        } catch (_) {
+          // The authoritative read below reports whether compensation persisted.
+        } finally {
+          try {
+            _capture = await _repository.captureState();
+          } catch (_) {
+            // Retain the latest known persisted state when the runtime is unavailable.
+          }
+        }
         throw const CaptureServiceUnavailable();
+      } catch (_) {
+        try {
+          _capture = await _repository.captureState();
+        } catch (_) {
+          // The persisted result above remains the best available state.
+        }
+        if (paused) throw const CaptureServiceStopFailed();
+        rethrow;
       }
       _capture = await _repository.captureState();
+      _settingsHealthNotice = _settingsHealthMessage(_capture!.settingsHealth);
     });
   }
 
@@ -203,6 +233,7 @@ class SettingsController extends ChangeNotifier {
       _settings = await _repository.updateSettings(
         RuntimeSettingsChange(notifyOnCopy: value),
       );
+      _settingsHealthNotice = null;
     });
   }
 
@@ -240,13 +271,15 @@ class SettingsController extends ChangeNotifier {
     _blockScreenshots = await _screenshotProtection.blocked();
   });
 
-  Future<bool> exportTextHistory() async {
+  Future<TextExportResult?> exportTextHistory() async {
     final path = await _filePicker.chooseTextExportPath();
-    if (path == null) return false;
-    return _run(() async {
-      await _repository.exportTextHistory(path);
+    if (path == null) return null;
+    TextExportResult? result;
+    final completed = await _run(() async {
+      result = await _repository.exportTextHistory(path);
       await _filePicker.presentCreatedFile(path, mimeType: 'application/json');
     });
+    return completed ? result : null;
   }
 
   Future<bool> createBackup() async {
@@ -278,6 +311,7 @@ class SettingsController extends ChangeNotifier {
   Future<bool> _update(RuntimeSettingsChange change) {
     return _run(() async {
       _settings = await _repository.updateSettings(change);
+      _settingsHealthNotice = null;
     });
   }
 
@@ -320,6 +354,7 @@ class SettingsController extends ChangeNotifier {
       if (_disposed || next.epoch < (_capture?.epoch ?? 0)) return;
       _capture = next;
       _acceptSyncStatus(next.syncStatus);
+      _settingsHealthNotice = _settingsHealthMessage(next.settingsHealth);
       _notify();
     } catch (_) {
       _invalidateSyncStatus();
@@ -344,9 +379,18 @@ class SettingsController extends ChangeNotifier {
       ? _runtimeMessage(error) ?? error.message
       : error is CaptureServiceUnavailable
       ? 'Clipboard capture permissions must be completed before capture can resume.'
+      : error is CaptureServiceStopFailed
+      ? 'Clipboard capture is paused. The Android capture service did not confirm that it stopped.'
       : error is NotificationPermissionDenied
       ? 'Notification permission is required to enable capture notifications.'
       : fallback;
+
+  String? _settingsHealthMessage(RuntimeSettingsHealth? health) {
+    if (health == null || !health.degraded) return null;
+    return health.recordUnreadable
+        ? 'CopyPaste could not read saved settings. Protective values are active; review and save your preferences to repair them.'
+        : 'CopyPaste recovered unreadable settings with protective values. Review and save your preferences to repair them.';
+  }
 
   String? _runtimeMessage(runtime.RuntimeError error) {
     if (error.code != 'invalid_request') return null;

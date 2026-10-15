@@ -61,6 +61,11 @@ struct State {
     sequence: u64,
 }
 
+struct ResourceHealth {
+    fingerprint: crate::resources::ResourceFingerprint,
+    healthy: bool,
+}
+
 /// One owner per application data directory. Registry mutations are serialized;
 /// native execution uses a separate lock per module, outside the registry lock.
 pub struct ModuleManager {
@@ -69,6 +74,7 @@ pub struct ModuleManager {
     state: Mutex<State>,
     mutation: Mutex<()>,
     sync_services: Mutex<Option<Arc<crate::SyncServices>>>,
+    model_health: Mutex<BTreeMap<String, ResourceHealth>>,
     inference: crate::inference::InferenceClient,
     worker_identity: crate::inference::WorkerIdentity,
 }
@@ -112,6 +118,7 @@ impl ModuleManager {
             }),
             mutation: Mutex::new(()),
             sync_services: Mutex::new(None),
+            model_health: Mutex::new(BTreeMap::new()),
             inference: crate::inference::InferenceClient::new(),
             worker_identity: crate::inference::WorkerIdentity {
                 app_version: app_version.into(),
@@ -133,6 +140,23 @@ impl ModuleManager {
 
     pub(crate) fn stop_inference(&self) {
         self.inference.stop(None);
+    }
+
+    /// Stops a loaded provider before its host-owned credentials are cleared.
+    /// This does not mutate the module registry or broaden provider access.
+    pub(crate) fn stop_module(&self, id: &str) -> Result<(), ModuleError> {
+        let _mutation = self.mutation.lock().map_err(|_| ModuleError::State)?;
+        self.inference.stop(Some(id));
+        let loaded = self
+            .state
+            .lock()
+            .map_err(|_| ModuleError::State)?
+            .loaded
+            .remove(id);
+        if let Some(loaded) = loaded {
+            loaded.instance.stop();
+        }
+        Ok(())
     }
 
     fn manifest(&self, id: &str, record: &Record) -> Result<ModuleManifest, ModuleError> {
@@ -188,7 +212,7 @@ impl ModuleManager {
                         if restart_required {
                             "Restart CopyPaste to finish removing this module."
                         } else {
-                            "Module removal is incomplete. Remove it again to finish."
+                            "Module removal is finishing cleanup. Try again if it remains."
                         }
                         .into(),
                     );
@@ -317,7 +341,7 @@ impl ModuleManager {
             let manifest = self.manifest(id, record)?;
             if let Some(provider) = &manifest.search_provider {
                 let model = selected_model(provider, &record.preferences)?;
-                if !crate::resources::available(&self.root.join("data").join(id), model) {
+                if !self.model_healthy(id, model) {
                     return Err(ModuleError::Invalid("Choose languages and download their model before enabling semantic search.".into()));
                 }
             }
@@ -448,7 +472,7 @@ impl ModuleManager {
                 continue;
             };
             let model = selected_model(provider, &record.preferences)?;
-            if !crate::resources::available(&self.root.join("data").join(id), model) {
+            if !self.model_healthy(id, model) {
                 continue;
             }
             use sha2::Digest;
@@ -509,33 +533,38 @@ impl ModuleManager {
         if let Some(previous) = previous {
             previous.instance.stop();
         }
-        if let Some(services) = self
-            .sync_services
-            .lock()
-            .map_err(|_| ModuleError::State)?
-            .as_ref()
-        {
-            services.clear(id)?;
-        }
-        if crate::native::pinned_under(&self.root.join("packages").join(id)) {
+        let state_cleared = match self.sync_services.lock() {
+            Ok(services) => services
+                .as_ref()
+                .map_or(true, |services| services.clear(id).is_ok()),
+            Err(_) => false,
+        };
+        let packages = self.root.join("packages").join(id);
+        if crate::native::pinned_under(&packages) {
             let data = self.root.join("data").join(id);
-            if data.exists() {
-                fs::remove_dir_all(data)?;
+            let data_cleared = !data.exists() || fs::remove_dir_all(data).is_ok();
+            // The persisted removal state is the durable cleanup debt. The
+            // module is already disabled, so a locked library or a transient
+            // state-store failure must not be reported as a failed removal.
+            if !state_cleared || !data_cleared {
+                return Ok(());
             }
             return Ok(());
         }
-        for directory in [
-            self.root.join("packages").join(id),
-            self.root.join("data").join(id),
-        ] {
-            if directory.exists() {
-                fs::remove_dir_all(directory)?;
-            }
+        let files_cleared = [packages, self.root.join("data").join(id)]
+            .iter()
+            .all(|directory| !directory.exists() || fs::remove_dir_all(directory).is_ok());
+        if !state_cleared || !files_cleared {
+            return Ok(());
         }
-        let mut state = self.state.lock().map_err(|_| ModuleError::State)?;
+        let Ok(mut state) = self.state.lock() else {
+            return Ok(());
+        };
         let mut registry = state.registry.clone();
         registry.modules.remove(id);
-        self.persist(&registry)?;
+        if self.persist(&registry).is_err() {
+            return Ok(());
+        }
         state.registry = registry;
         Ok(())
     }
@@ -551,15 +580,14 @@ impl ModuleManager {
             .collect();
         let mut registry = state.registry.clone();
         for id in pending {
-            if let Some(services) = self
-                .sync_services
-                .lock()
-                .map_err(|_| ModuleError::State)?
-                .as_ref()
-            {
-                if services.clear(&id).is_err() {
-                    continue;
-                }
+            let state_cleared = match self.sync_services.lock() {
+                Ok(services) => services
+                    .as_ref()
+                    .map_or(true, |services| services.clear(&id).is_ok()),
+                Err(_) => false,
+            };
+            if !state_cleared {
+                continue;
             }
             let packages = self.root.join("packages").join(&id);
             if crate::native::pinned_under(&packages) {
@@ -615,10 +643,7 @@ impl ModuleManager {
                         title: model.title.clone(),
                         languages: model.languages.clone(),
                         size_bytes: model.size_bytes(),
-                        available: crate::resources::available(
-                            &self.root.join("data").join(&manifest.id),
-                            model,
-                        ),
+                        available: self.model_healthy(&manifest.id, model),
                     })
                     .collect()
             })
@@ -626,6 +651,32 @@ impl ModuleManager {
         let mut result = summary(manifest, record);
         result.search_models = models;
         result
+    }
+
+    fn model_healthy(&self, id: &str, model: &copypaste_module_sdk::SearchModel) -> bool {
+        let data = self.root.join("data").join(id);
+        let Some(fingerprint) = crate::resources::fingerprint(&data, model) else {
+            return false;
+        };
+        let key = format!("{id}/{}", model.resource_directory_name());
+        let mut health = match self.model_health.lock() {
+            Ok(health) => health,
+            Err(_) => return false,
+        };
+        if let Some(previous) = health.get(&key) {
+            if previous.fingerprint == fingerprint {
+                return previous.healthy;
+            }
+        }
+        let healthy = crate::resources::verify(&data, model).is_ok();
+        health.insert(
+            key,
+            ResourceHealth {
+                fingerprint,
+                healthy,
+            },
+        );
+        healthy
     }
 
     pub fn set_sync_services(&self, services: Arc<crate::SyncServices>) -> Result<(), ModuleError> {

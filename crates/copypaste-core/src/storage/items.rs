@@ -11,7 +11,7 @@ use super::model::{
     is_constraint_violation, item_columns, row_to_item, Ingest, ItemColumns, NewItem, StoreError,
     StoredItem,
 };
-use super::retention::{bump_in_tx, find_in_bucket, live_count, newest_live_with_hash};
+use super::retention::{bump_in_tx, find_in_bucket, live_count, newest_live_with_representation};
 use super::search::{delete_fts_row_in_tx, insert_fts_in_tx};
 use super::store::Store;
 
@@ -96,11 +96,13 @@ impl Store {
             .optional()?)
     }
 
-    /// Stores a capture, or promotes the row that already holds this content.
+    /// Stores a capture, or promotes the row that already holds this clipboard
+    /// representation.
     ///
-    /// Dedup is **unbounded**: a match is looked for across all live history,
-    /// not inside a recency window, and the survivor's `created_at` is moved to
-    /// the new capture time (manifest 01 I-23 / T-36 / T-39, manifest 03 D9).
+    /// Dedup is **unbounded**: a same-hash, same-type match is looked for across
+    /// all live history, not inside a recency window, and the survivor's
+    /// `created_at` is moved to the new capture time (manifest 01 I-23 / T-36 /
+    /// T-39, manifest 03 D9).
     /// Re-copying something from last week promotes it instead of growing a
     /// second row, which is the behaviour a clipboard manager is judged on.
     ///
@@ -164,7 +166,8 @@ impl Store {
         // The probe and the bump share the insert's transaction, so no third
         // capture can land between finding the row and restamping it.
         if let Some(existing) =
-            newest_live_with_hash(&tx, &item.content_hash, i64::MIN).map_err(StoreError::from)?
+            newest_live_with_representation(&tx, &item.content_hash, &item.content_type, i64::MIN)
+                .map_err(StoreError::from)?
         {
             let mut bumped = bump_in_tx(
                 &tx,
@@ -226,8 +229,9 @@ impl Store {
                 // content committed between the probe above and this INSERT.
                 // Resolve the winner *inside* the same transaction so there is
                 // no TOCTOU gap between the failed INSERT and this lookup.
-                let existing = find_in_bucket(&tx, &item.content_hash, item.created_at)
-                    .map_err(StoreError::from)?;
+                let existing =
+                    find_in_bucket(&tx, &item.content_hash, &item.content_type, item.created_at)
+                        .map_err(StoreError::from)?;
                 return match existing {
                     Some(existing) => {
                         let mut bumped = bump_in_tx(
