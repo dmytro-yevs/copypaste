@@ -1948,10 +1948,10 @@
                 "restored": 6,
                 "missed": 1,
                 "incomplete_restores": 6,
-                "restore_s": 52.656,
-                "restored_bytes": 2864928835,
-                "coverage": "actions/cache toolkit log markers; Gradle task cache hits are separate",
-                "observed_hit_rate": 0.46153846153846156
+                "restore_s": null,
+                "restored_bytes": null,
+                "coverage": "actions/cache toolkit log markers; Gradle task cache hits are separate; unpaired/parallel markers: transfer totals and hit rate are unavailable",
+                "observed_hit_rate": null
               }
             },
             {
