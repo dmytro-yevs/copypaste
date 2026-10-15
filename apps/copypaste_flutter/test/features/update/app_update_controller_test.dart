@@ -7,6 +7,70 @@ import 'package:flutter/services.dart';
 import 'package:pub_semver/pub_semver.dart';
 
 void main() {
+  for (final target in [
+    AppUpdateTarget.macos,
+    AppUpdateTarget.android,
+    AppUpdateTarget.windows,
+  ]) {
+    test(
+      'prepares modules before the $target installer and continues on failure',
+      () async {
+        final ready = Completer<void>();
+        final platform = _FakeUpdatePlatform(target: target);
+        final versions = <Version>[];
+        final controller = AppUpdateController(
+          repository: _FakeUpdateRepository(release: _release()),
+          platform: platform,
+          prepareModules: (version) async {
+            versions.add(version);
+            await ready.future;
+            throw Exception('One module could not be prepared.');
+          },
+        );
+        addTearDown(controller.dispose);
+        await controller.initialize();
+        final installation = controller.install();
+        await Future<void>.delayed(Duration.zero);
+        expect(controller.phase, AppUpdatePhase.preparingModules);
+        expect(controller.busy, isTrue);
+        expect(platform.installCalls, 0);
+        await controller.install();
+        expect(versions, [Version.parse('1.0.1')]);
+        ready.complete();
+        await installation;
+        expect(platform.installCalls, 1);
+        expect(controller.phase, AppUpdatePhase.installing);
+        expect(controller.message, isNot(contains('module')));
+      },
+    );
+  }
+
+  test(
+    'Android permission continuation reuses prepared module updates',
+    () async {
+      var preparations = 0;
+      final controller = AppUpdateController(
+        repository: _FakeUpdateRepository(release: _release()),
+        platform: _FakeUpdatePlatform(
+          installResults: [
+            AppUpdateInstallResult.permissionRequired,
+            AppUpdateInstallResult.started,
+          ],
+        ),
+        prepareModules: (_) async {
+          preparations++;
+        },
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await controller.install();
+      expect(controller.phase, AppUpdatePhase.permissionRequired);
+      await controller.install();
+      expect(preparations, 1);
+      expect(controller.phase, AppUpdatePhase.installing);
+    },
+  );
+
   test('waits for Android confirmation and reports cancellation', () async {
     final completion = Completer<AppUpdateInstallResult>();
     final platform = _FakeUpdatePlatform(installCompletion: completion);

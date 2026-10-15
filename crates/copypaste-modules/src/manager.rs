@@ -12,6 +12,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+mod updates;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstalledModule {
     pub search_language_field: Option<String>,
@@ -100,7 +102,7 @@ impl ModuleManager {
         {
             return Err(ModuleError::State);
         }
-        Ok(Self {
+        let manager = Self {
             root,
             verifier: PackageVerifier::new(public_key, app_version, target)?,
             state: Mutex::new(State {
@@ -116,7 +118,9 @@ impl ModuleManager {
                 target,
                 public_key: public_key.into(),
             },
-        })
+        };
+        manager.activate_staged_updates();
+        Ok(manager)
     }
 
     fn directory(&self, id: &str, version: &str) -> PathBuf {
@@ -210,6 +214,14 @@ impl ModuleManager {
         let _mutation = self.mutation.lock().map_err(|_| ModuleError::State)?;
         let stage = tempfile::tempdir_in(self.root.join("packages"))?;
         let manifest = self.verifier.extract(package, stage.path())?;
+        self.activate_package(manifest, stage.path())
+    }
+
+    fn activate_package(
+        &self,
+        manifest: ModuleManifest,
+        stage: &Path,
+    ) -> Result<InstalledModule, ModuleError> {
         let mut state = self.state.lock().map_err(|_| ModuleError::State)?;
         let old = state.registry.modules.get(&manifest.id).cloned();
         if old.as_ref().is_some_and(|record| record.removing) {
@@ -265,7 +277,7 @@ impl ModuleManager {
                 ));
             }
         } else {
-            fs::rename(stage.path(), &destination)?;
+            fs::rename(stage, &destination)?;
         }
         let mut registry = state.registry.clone();
         registry.modules.insert(manifest.id.clone(), record.clone());

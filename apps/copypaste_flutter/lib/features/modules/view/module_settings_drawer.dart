@@ -99,7 +99,6 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
         animation: Listenable.merge([controller, _draft]),
         builder: (context, _) {
           final module = controller.installedModule(moduleId);
-          final update = module == null ? null : controller.updateFor(module);
           return ConstrainedBox(
             key: ValueKey('module-settings-drawer-$moduleId'),
             constraints: AppOverlays.drawerContentConstraints(context),
@@ -254,30 +253,6 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                             ModuleFormFields(
                               draft: draft,
                               enabled: !controller.busy && module.error == null,
-                            ),
-                          ],
-                          if (update != null) ...[
-                            const Gap(AppSpacing.md),
-                            Button.secondary(
-                              style: AppTheme.actionButtonStyle(
-                                const ButtonStyle.secondary(),
-                              ),
-                              alignment: AppTheme.moduleSettingsActionAlignment,
-                              leading: const Center(
-                                child: Icon(LucideIcons.download),
-                              ),
-                              onPressed:
-                                  controller.busy || module.restartRequired
-                                  ? null
-                                  : () => controller.install(update),
-                              child: Text(
-                                controller.activeModuleId == moduleId
-                                    ? controller.installing
-                                          ? 'Installing…'
-                                          : 'Downloading ${((controller.downloadProgress ?? 0) * 100).floor()}%'
-                                    : 'Update to ${update.version}',
-                                textAlign: TextAlign.center,
-                              ),
                             ),
                           ],
                           if (module.restartRequired &&

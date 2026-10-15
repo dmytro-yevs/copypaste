@@ -399,6 +399,7 @@ impl Method {
             self,
             Self::Modules {
                 operation: ModuleOperation::Install { .. }
+                    | ModuleOperation::StageUpdate { .. }
                     | ModuleOperation::Invoke { .. }
                     | ModuleOperation::Remove { .. }
                     | ModuleOperation::SetEnabled { .. }
