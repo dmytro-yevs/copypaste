@@ -40,9 +40,12 @@ impl Fixture {
         }
     }
     fn manager(&self) -> ModuleManager {
+        self.manager_at("1.0.2")
+    }
+    fn manager_at(&self, version: &str) -> ModuleManager {
         ModuleManager::open(
             &self.directory.path().join("modules"),
-            "1.0.2",
+            version,
             target(),
             &self.key.pk.to_base64(),
         )
@@ -104,6 +107,201 @@ impl Fixture {
         archive.finish().unwrap();
         path
     }
+}
+
+#[test]
+fn staged_updates_wait_for_new_app_and_preserve_preferences_and_enabled_state() {
+    let fixture = Fixture::new();
+    let manager = fixture.manager();
+    manager
+        .install(&fixture.package("0.1.0", b"old", |_| {}, None))
+        .unwrap();
+    manager.set_enabled("copypaste.text-tools", false).unwrap();
+    manager
+        .set_preferences(
+            "copypaste.text-tools",
+            BTreeMap::from([("uppercase".into(), json!(true))]),
+        )
+        .unwrap();
+    let update = fixture.package(
+        "0.2.0",
+        b"new",
+        |manifest| {
+            manifest["app_versions"] = json!(">=1.1.0, <2.0.0");
+        },
+        None,
+    );
+    manager
+        .stage_update("copypaste.text-tools", &update, "1.1.0")
+        .unwrap();
+    assert_eq!(manager.list().unwrap()[0].version, "0.1.0");
+    drop(manager);
+    assert_eq!(fixture.manager().list().unwrap()[0].version, "0.1.0");
+    // A package manager may install a newer app than the originally selected one.
+    let upgraded = fixture.manager_at("1.1.1");
+    let modules = upgraded.list().unwrap();
+    assert_eq!(modules[0].version, "0.2.0");
+    assert!(!modules[0].enabled);
+    assert_eq!(modules[0].preferences["uppercase"], json!(true));
+    assert!(!fixture
+        .directory
+        .path()
+        .join("modules/updates/1.1.0")
+        .exists());
+}
+
+#[test]
+fn staged_update_failure_keeps_old_module_and_activates_other_modules() {
+    let fixture = Fixture::new();
+    let manager = fixture.manager();
+    for id in ["copypaste.text-tools", "copypaste.second"] {
+        manager
+            .install(&fixture.package(
+                "0.1.0",
+                b"old",
+                |m| {
+                    m["id"] = json!(id);
+                },
+                None,
+            ))
+            .unwrap();
+        let package = fixture.package(
+            "0.2.0",
+            b"new",
+            |m| {
+                m["id"] = json!(id);
+            },
+            None,
+        );
+        manager.stage_update(id, &package, "1.1.0").unwrap();
+    }
+    fs::write(
+        fixture
+            .directory
+            .path()
+            .join("modules/updates/1.1.0/copypaste.text-tools/0.2.0/package")
+            .join(ENTRYPOINT),
+        b"tampered",
+    )
+    .unwrap();
+    drop(manager);
+    let modules = fixture.manager_at("1.1.0").list().unwrap();
+    assert_eq!(
+        modules
+            .iter()
+            .find(|m| m.id == "copypaste.text-tools")
+            .unwrap()
+            .version,
+        "0.1.0"
+    );
+    assert_eq!(
+        modules
+            .iter()
+            .find(|m| m.id == "copypaste.second")
+            .unwrap()
+            .version,
+        "0.2.0"
+    );
+}
+
+#[test]
+fn staged_update_recovers_a_payload_move_before_registry_commit() {
+    let fixture = Fixture::new();
+    let manager = fixture.manager();
+    manager
+        .install(&fixture.package("0.1.0", b"old", |_| {}, None))
+        .unwrap();
+    let update = fixture.package("0.2.0", b"new", |_| {}, None);
+    manager
+        .stage_update("copypaste.text-tools", &update, "1.1.0")
+        .unwrap();
+    drop(manager);
+    fs::rename(
+        fixture
+            .directory
+            .path()
+            .join("modules/updates/1.1.0/copypaste.text-tools/0.2.0/package"),
+        fixture
+            .directory
+            .path()
+            .join("modules/packages/copypaste.text-tools/0.2.0"),
+    )
+    .unwrap();
+    assert_eq!(
+        fixture.manager_at("1.1.0").list().unwrap()[0].version,
+        "0.2.0"
+    );
+}
+
+#[test]
+fn staged_updates_never_reinstall_removed_modules_or_downgrade() {
+    let fixture = Fixture::new();
+    let manager = fixture.manager();
+    let update = fixture.package("0.2.0", b"new", |_| {}, None);
+    assert!(manager
+        .stage_update("copypaste.text-tools", &update, "1.1.0")
+        .is_err());
+    manager
+        .install(&fixture.package("0.1.0", b"old", |_| {}, None))
+        .unwrap();
+    manager
+        .stage_update("copypaste.text-tools", &update, "1.1.0")
+        .unwrap();
+    manager
+        .install(&fixture.package("0.3.0", b"newer", |_| {}, None))
+        .unwrap();
+    drop(manager);
+    let manager = fixture.manager_at("1.1.0");
+    assert_eq!(manager.list().unwrap()[0].version, "0.3.0");
+    manager
+        .stage_update(
+            "copypaste.text-tools",
+            &fixture.package("0.4.0", b"future", |_| {}, None),
+            "1.2.0",
+        )
+        .unwrap();
+    manager.remove("copypaste.text-tools").unwrap();
+    drop(manager);
+    assert!(fixture.manager_at("1.2.0").list().unwrap().is_empty());
+}
+
+#[test]
+fn staging_requires_the_expected_identity_and_target_app_compatibility() {
+    let fixture = Fixture::new();
+    let manager = fixture.manager();
+    manager
+        .install(&fixture.package("0.1.0", b"old", |_| {}, None))
+        .unwrap();
+    let wrong_id = fixture.package(
+        "0.2.0",
+        b"new",
+        |m| {
+            m["id"] = json!("copypaste.other");
+        },
+        None,
+    );
+    assert!(manager
+        .stage_update("copypaste.text-tools", &wrong_id, "1.1.0")
+        .is_err());
+    let incompatible = fixture.package(
+        "0.2.0",
+        b"new",
+        |m| {
+            m["app_versions"] = json!(">=2.0.0");
+        },
+        None,
+    );
+    assert!(manager
+        .stage_update("copypaste.text-tools", &incompatible, "1.1.0")
+        .is_err());
+    let update = fixture.package("0.2.0", b"new", |_| {}, None);
+    assert!(manager
+        .stage_update("copypaste.text-tools", &update, "1.0.2")
+        .is_err());
+    assert!(manager
+        .stage_update("copypaste.text-tools", &update, "../../escape")
+        .is_err());
+    assert_eq!(manager.list().unwrap()[0].version, "0.1.0");
 }
 
 fn native_library() -> &'static Path {
