@@ -63,6 +63,7 @@ jobs:
       - run: ./scripts/ci/install-postgresql-server.sh
       - run: python3 -m unittest scripts/test_release_safety.py
       - run: python3 -m unittest discover -s scripts/release/tests -p 'test_linux_rpm_candidate.py'
+      - run: python3 -m unittest discover -s scripts/release/tests -p 'test_linux_native_fixture_driver.py'
       - run: python3 -m unittest discover -s scripts/modules/tests -p 'test_*.py'
       - run: cargo +1.96 test --workspace --locked
       - name: SMS module recognition contracts
