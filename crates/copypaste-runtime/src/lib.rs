@@ -240,6 +240,7 @@ impl Runtime {
             Method::Delete { .. }
                 | Method::DeleteAll { .. }
                 | Method::Pin { .. }
+                | Method::SetSecret { .. }
                 | Method::ReorderPinned { .. }
                 | Method::Restore { .. }
                 | Method::ImportFile { .. }
@@ -388,6 +389,24 @@ impl Runtime {
                 Err(_) => {
                     Response::err(id, ErrorCode::Internal, "The history store is unavailable.")
                 }
+            },
+            Method::SetSecret {
+                id: item_id,
+                secret,
+            } => match self.store.set_secret(&self.keyring, &item_id, secret) {
+                Ok(true) => {
+                    if let Ok(Some(item)) = self.store.get(&item_id) {
+                        self.node.note_local_version(item.created_at);
+                        self.peer_sync.wake();
+                    }
+                    self.item(id, &item_id)
+                }
+                Ok(false) => Response::err(id, ErrorCode::NotFound, "The clip was not found."),
+                Err(_) => Response::err(
+                    id,
+                    ErrorCode::Internal,
+                    "The clip privacy could not be updated.",
+                ),
             },
             Method::DeleteAll { through } => match through {
                 Some(through) => self.store.delete_all_through(through),
@@ -688,6 +707,7 @@ impl Runtime {
         let settings = &permit.config;
         let privacy_metadata =
             (!permit.privacy.is_empty()).then_some(copypaste_core::PayloadMetadata {
+                secret_override: None,
                 privacy: permit.privacy,
                 ..Default::default()
             });
@@ -833,6 +853,7 @@ impl Runtime {
             (copypaste_ipc::content_type::FILE, Some(metadata))
         };
         let metadata = copypaste_core::PayloadMetadata {
+            secret_override: None,
             privacy: permit.privacy,
             file: metadata,
             source_app_icon: source_app.and_then(|source| source.icon.clone()),
@@ -1824,6 +1845,55 @@ mod tests {
             assert!(runtime.save_file(2, &item.id, &saved.to_string_lossy()).ok);
             assert_eq!(std::fs::read(saved).unwrap(), b"%PDF original");
         }
+    }
+
+    #[tokio::test]
+    async fn secret_choice_persists_and_publishes_an_item_event_without_copying() {
+        let (runtime, _dir) = fixture();
+        seed_text(&runtime, "privacy-toggle", "toggle text");
+        let mut events = runtime.events.subscribe();
+        for secret in [true, false] {
+            let response = runtime
+                .request(
+                    10,
+                    Method::SetSecret {
+                        id: "privacy-toggle".into(),
+                        secret,
+                    },
+                )
+                .await;
+            assert!(response.ok, "{response:?}");
+            let Some(ResponseData::Item(item)) = response.data else {
+                panic!("expected item");
+            };
+            assert_eq!(item.privacy.secret, secret);
+            assert_eq!(
+                runtime
+                    .store
+                    .get("privacy-toggle")
+                    .unwrap()
+                    .unwrap()
+                    .clipboard_privacy()
+                    .secret,
+                secret
+            );
+            let event = events.recv().await.unwrap();
+            assert_eq!(event.event, EventKind::Items);
+            assert!(!event.captured);
+        }
+        assert_eq!(
+            runtime
+                .request(
+                    11,
+                    Method::SetSecret {
+                        id: "missing".into(),
+                        secret: true
+                    }
+                )
+                .await
+                .error_code,
+            Some(ErrorCode::NotFound)
+        );
     }
 
     fn seed_text(runtime: &Runtime, id: &str, value: &str) {

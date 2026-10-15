@@ -259,6 +259,9 @@ Future<BigInt> historyCeiling() =>
 Future<Clip> setClipPinned({required String id, required bool pinned}) =>
     RustLib.instance.api.crateApiSetClipPinned(id: id, pinned: pinned);
 
+Future<Clip> setClipSecret({required String id, required bool secret}) =>
+    RustLib.instance.api.crateApiSetClipSecret(id: id, secret: secret);
+
 Future<BigInt> reorderPinnedClips({required List<String> ids}) =>
     RustLib.instance.api.crateApiReorderPinnedClips(ids: ids);
 

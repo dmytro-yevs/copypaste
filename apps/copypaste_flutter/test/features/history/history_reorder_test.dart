@@ -531,6 +531,10 @@ class _ReorderRepository implements HistoryRepository {
   @override
   Future<void> saveFile(String id, String destinationPath) async {}
   @override
+  Future<HistoryClip> setSecret(String id, bool secret) async =>
+      throw UnimplementedError('setSecret');
+
+  @override
   Future<void> setPinned(String id, bool pinned) async {}
   @override
   Future<void> delete(String id) async {}
