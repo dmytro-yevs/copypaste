@@ -46,8 +46,33 @@ fn resolve_same_client_window(
     let owner_client = xres_client(connection, owner)?;
     same_uid_regular_executable(owner_client.pid)?;
     let root = connection.query_tree(owner).ok()?.reply().ok()?.root;
+    let mut sources = client_window_sources(
+        connection,
+        owner,
+        owner_client,
+        client_windows(connection, root)?,
+    );
+    // A compositor can deliver focus before its EWMH client list reflects a
+    // new GTK window. The server tree still exposes that writer's resources.
+    if sources.is_empty() {
+        sources = client_window_sources(
+            connection,
+            owner,
+            owner_client,
+            tree_windows(connection, root)?,
+        );
+    }
+    (sources.len() == 1).then(|| sources.remove(0))
+}
+
+fn client_window_sources(
+    connection: &x11rb::rust_connection::RustConnection,
+    owner: u32,
+    owner_client: XresClient,
+    windows: Vec<u32>,
+) -> Vec<SourceApp> {
     let mut sources = Vec::new();
-    for window in client_windows(connection, root)? {
+    for window in windows {
         let source = (window != owner && xres_client(connection, window) == Some(owner_client))
             .then(|| source_for_window(connection, window, Some(owner_client.pid)))
             .flatten();
@@ -55,7 +80,7 @@ fn resolve_same_client_window(
             sources.push(source);
         }
     }
-    (sources.len() == 1).then(|| sources.remove(0))
+    sources
 }
 
 /// Prefer EWMH's client list because a window manager can reparent application
@@ -95,6 +120,13 @@ fn client_windows(
         }
     }
 
+    tree_windows(connection, root)
+}
+
+fn tree_windows(
+    connection: &x11rb::rust_connection::RustConnection,
+    root: u32,
+) -> Option<Vec<u32>> {
     let mut windows = Vec::new();
     let mut parents = VecDeque::from([root]);
     for _ in 0..MAX_CLIENT_TREE_DEPTH {
