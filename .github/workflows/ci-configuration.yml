@@ -7,6 +7,11 @@ on:
   merge_group:
     types: [checks_requested]
   workflow_dispatch:
+    inputs:
+      retry_probe:
+        description: Exercise artifact and job identity across a failed-job rerun
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-policy-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
@@ -49,3 +54,19 @@ jobs:
       - run: python3 scripts/ci/run-gates.py --check
       - run: python3 scripts/ci/run-gates.py --gate rustfmt
       - run: python3 scripts/check-docs.py
+
+  retry-probe:
+    name: Retry contract probe
+    if: inputs.retry_probe == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - run: printf 'immutable retry probe\n' > payload.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: retry-contract-probe
+          path: payload.txt
+          if-no-files-found: error
+      - name: Deliberately fail the first fixture attempt
+        if: github.run_attempt == 1
+        run: exit 1
