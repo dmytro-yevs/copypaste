@@ -21,13 +21,14 @@ flowchart TD
 ```mermaid
 flowchart TD
   release[Tag or explicit release dispatch] --> preflight[Versions / secrets / external source identity / upgrade baseline]
-  preflight --> mac[macOS production build + exact DMG smoke]
-  preflight --> regression[Independent Xcode launch regression]
-  preflight --> android[One Gradle invocation: universal + ABI APKs]
-  preflight --> windows[Windows build + installer smoke]
-  preflight --> linux[One Linux bundle: AppImage / DEB / RPM]
-  preflight --> modules[Reusable Linux OCR / Supabase / Semantic Search producers]
-  preflight --> compositor[Exact-source compositor producer]
+  preflight --> policy[Required CI policy and release contract tests]
+  policy --> mac[macOS production build + exact DMG smoke]
+  policy --> regression[Independent Xcode launch regression]
+  policy --> android[One Gradle invocation: universal + ABI APKs]
+  policy --> windows[Windows build + installer smoke]
+  policy --> linux[One Linux bundle: AppImage / DEB / RPM]
+  policy --> modules[Reusable Linux OCR / Supabase / Semantic Search producers]
+  policy --> compositor[Exact-source compositor producer]
   compositor --> signed[Signed public runtime companions]
   linux --> desktop[Installed Linux native qualification]
   modules --> desktop
@@ -47,6 +48,9 @@ flowchart TD
 ## Source identity and recovery
 
 Fresh releases need no manual module, compositor or Linux evidence run IDs.
+The shared CI policy action is also mandatory before release producers and
+qualification, so a direct release dispatch cannot bypass those code-level
+engineering gates even when repository branch protection is not configured.
 The parent run passes its own identity through reusable workflows. Each
 consumer checks repository, source SHA, workflow identity, successful required
 producer jobs, complete inventories, expiry, receipt identity and package

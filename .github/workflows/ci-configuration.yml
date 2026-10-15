@@ -24,26 +24,4 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.12"
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
-        with:
-          toolchain: "1.96"
-          components: rustfmt
-      - name: Install pinned CI policy tools
-        run: |
-          python3 -m pip install -r scripts/ci/requirements.txt
-          bash scripts/ci/install-actionlint.sh "$RUNNER_TEMP/ci-tools"
-      - name: Validate workflow syntax, embedded shell and CI policy
-        run: python3 scripts/ci/lint-workflows.py --actionlint "$RUNNER_TEMP/ci-tools/actionlint"
-      - name: Reject high confidence security findings
-        run: zizmor --offline --min-severity high --min-confidence high .github
-      - name: Test policy, selection, metrics and release contracts
-        run: |
-          python3 -m unittest discover -s scripts/ci/tests -v
-          python3 -m unittest scripts/test_release_safety.py scripts/test_linux_qualification_bootstrap.py scripts/test_linux_compositor_runtime.py
-          python3 -m unittest discover -s scripts/release/tests -p 'test_*.py'
-      - run: python3 scripts/ci/run-gates.py --check
-      - run: python3 scripts/ci/run-gates.py --gate rustfmt
-      - run: python3 scripts/check-docs.py
+      - uses: ./.github/actions/ci-policy
