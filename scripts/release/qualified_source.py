@@ -29,7 +29,7 @@ def discover(repository, commit, *, linux=True, compositor=True):
     pages = json.loads(subprocess.check_output(["gh", "api", "--paginate", "--slurp",
         f"repos/{repository}/actions/workflows/release.yml/runs?head_sha={commit}&status=completed&per_page=100"], text=True))
     for run in (run for page in pages for run in page["workflow_runs"]):
-        if run.get("conclusion") not in ("success", "failure"):
+        if run.get("conclusion") not in ("success", "failure", "cancelled"):
             continue
         jobs = inventory(repository, run["id"], "jobs")
         artifacts = inventory(repository, run["id"], "artifacts")

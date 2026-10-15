@@ -41,6 +41,7 @@ on:
 concurrency:
   group: linux-native-qualification-${{ inputs.artifact_run_id }}
   cancel-in-progress: false
+  queue: max
 
 permissions:
   actions: read
@@ -74,8 +75,8 @@ jobs:
           set -euo pipefail
           [[ "$ARTIFACT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID" > "$RUNNER_TEMP/current-run.json"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/current-jobs.json"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/current-artifacts.json"
+          python3 scripts/release/github_inventory.py --run-id "$ARTIFACT_RUN_ID" --kind jobs > "$RUNNER_TEMP/current-jobs.json"
+          python3 scripts/release/github_inventory.py --run-id "$ARTIFACT_RUN_ID" --kind artifacts > "$RUNNER_TEMP/current-artifacts.json"
           commit="$(jq -r '.head_sha' "$RUNNER_TEMP/current-run.json")"
           [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
           [[ "$GITHUB_SHA" == "$commit" ]] || {
@@ -90,8 +91,8 @@ jobs:
           if [[ -n "$PREVIOUS_ARTIFACT_RUN_ID" ]]; then
             [[ "$PREVIOUS_ARTIFACT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_ARTIFACT_RUN_ID" > "$RUNNER_TEMP/previous-run.json"
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_ARTIFACT_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/previous-jobs.json"
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_ARTIFACT_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/previous-artifacts.json"
+            python3 scripts/release/github_inventory.py --run-id "$PREVIOUS_ARTIFACT_RUN_ID" --kind jobs > "$RUNNER_TEMP/previous-jobs.json"
+            python3 scripts/release/github_inventory.py --run-id "$PREVIOUS_ARTIFACT_RUN_ID" --kind artifacts > "$RUNNER_TEMP/previous-artifacts.json"
             previous_commit="$(jq -r '.head_sha' "$RUNNER_TEMP/previous-run.json")"
             [[ "$previous_commit" =~ ^[0-9a-f]{40}$ ]]
             python3 scripts/release/verify-linux-artifact-source-run.py \
@@ -112,16 +113,16 @@ jobs:
             prefix="$RUNNER_TEMP/module-$module_name"
             mkdir -p "$prefix"
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$module_run_id" > "$prefix/run.json"
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$module_run_id/jobs?per_page=100" > "$prefix/jobs.json"
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$module_run_id/artifacts?per_page=100" > "$prefix/artifacts.json"
+            python3 scripts/release/github_inventory.py --run-id "$module_run_id" --kind jobs > "$prefix/jobs.json"
+            python3 scripts/release/github_inventory.py --run-id "$module_run_id" --kind artifacts > "$prefix/artifacts.json"
             python3 scripts/release/verify-linux-module-source-run.py \
               --run "$prefix/run.json" --jobs "$prefix/jobs.json" --artifacts "$prefix/artifacts.json" \
               --repository "$GITHUB_REPOSITORY" --commit "$commit" --workflow "$module_workflow" --module "$module_name"
           done
           [[ "$COMPOSITOR_RUNTIME_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$COMPOSITOR_RUNTIME_RUN_ID" > "$RUNNER_TEMP/compositor-runtime-run.json"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$COMPOSITOR_RUNTIME_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/compositor-runtime-jobs.json"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$COMPOSITOR_RUNTIME_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/compositor-runtime-artifacts.json"
+          python3 scripts/release/github_inventory.py --run-id "$COMPOSITOR_RUNTIME_RUN_ID" --kind jobs > "$RUNNER_TEMP/compositor-runtime-jobs.json"
+          python3 scripts/release/github_inventory.py --run-id "$COMPOSITOR_RUNTIME_RUN_ID" --kind artifacts > "$RUNNER_TEMP/compositor-runtime-artifacts.json"
           python3 scripts/release/verify-linux-compositor-runtime.py source \
             --jobs "$RUNNER_TEMP/compositor-runtime-jobs.json" --run "$RUNNER_TEMP/compositor-runtime-run.json" --artifacts "$RUNNER_TEMP/compositor-runtime-artifacts.json" \
             --repository "$GITHUB_REPOSITORY" --commit "$commit"
@@ -168,7 +169,7 @@ jobs:
           set -euo pipefail
           python3 scripts/release/provision-linux-v4l2loopback.py provision \
             --state "$RUNNER_TEMP/copypaste-v4l2loopback.json" --environment "$GITHUB_ENV"
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         with:
           name: ${{ matrix.compositor_artifact }}
           path: compositor-runtime
@@ -185,39 +186,39 @@ jobs:
             --root compositor-runtime --desktop "${{ matrix.desktop }}" --architecture "${{ matrix.architecture }}" \
             --commit "${{ needs.source.outputs.commit }}" --producer-run-id "${CI_INPUT_COMPOSITOR_RUNTIME_RUN_ID}" \
             --output compositor-runtime/binding.json
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         with:
           name: production-linux-${{ matrix.architecture }}
           path: current
           run-id: ${{ inputs.artifact_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         if: needs.source.outputs.upgrade_mode == 'prior_release'
         with:
           name: production-linux-x86_64
           path: previous-artifacts/x86_64
           run-id: ${{ inputs.previous_artifact_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         if: needs.source.outputs.upgrade_mode == 'prior_release'
         with:
           name: production-linux-${{ matrix.architecture }}
           path: previous
           run-id: ${{ inputs.previous_artifact_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         with:
           name: provider-supabase-linux-${{ matrix.architecture }}
           path: module-downloads/supabase
           run-id: ${{ inputs.supabase_module_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         with:
           name: provider-semantic-search-linux-${{ matrix.architecture }}
           path: module-downloads/semantic-search
           run-id: ${{ inputs.semantic_search_module_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         with:
           name: ocr-linux-${{ matrix.architecture }}
           path: module-downloads/ocr
@@ -309,25 +310,25 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         with:
           pattern: linux-native-row-*
           path: evidence
           merge-multiple: true
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         with:
           name: production-linux-x86_64
           path: artifacts/x86_64
           run-id: ${{ inputs.artifact_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         if: needs.source.outputs.upgrade_mode == 'prior_release'
         with:
           name: production-linux-x86_64
           path: previous-artifacts/x86_64
           run-id: ${{ inputs.previous_artifact_run_id }}
           github-token: ${{ github.token }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: ./.github/actions/download-verified-artifact
         with:
           name: production-compositor-runtime
           path: compositor-runtime
