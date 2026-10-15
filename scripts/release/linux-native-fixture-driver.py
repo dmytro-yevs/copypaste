@@ -1491,82 +1491,103 @@ def main():
                 return
             upgrading = verify_upgrade_canary(cli, cli_environment, workspace, prefix / "copypaste") if args.qualification_root else False
             gui_status = run([str(cli), "--json", "status"], env=cli_environment)
+            if not isinstance(response_variant(json.loads(gui_status.stdout), "status"), dict):
+                raise RuntimeError("packaged daemon status has an invalid shape")
+            emit_result("daemon_cli_gui", gui_status)
+            require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "text/plain;charset=utf-8", b"copypaste-native-text-fixture", "text", "clipboard_text")
+            require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "text/html", b"<b>copypaste-native-html-fixture</b>", "text/html", "clipboard_html")
+            require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "text/rtf", b"{\\rtf1 copypaste native rtf fixture}", "text/rtf", "clipboard_rtf")
+            # These are valid, minimal image payloads. The copy-back probe
+            # verifies the exact bytes after daemon storage, not merely a
+            # row count or image label.
+            png = bytes.fromhex(
+                "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+                "0000000d49444154789c63103209fb0f000294019c1d5b465f0000000049454e44ae426082"
+            )
+            tiff = bytes.fromhex(
+                "49492a00080000000b00000104000100000001000000010104000100000001000000"
+                "02010300040000009200000003010300010000000100000006010300010000000200"
+                "000011010400010000009a0000001501030001000000040000001601040001000000"
+                "010000001701040001000000040000001c0103000100000001000000520103000100"
+                "000002000000000000000800080008000800123456ff"
+            )
+            require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "image/png", png, "image/png", "clipboard_png")
+            require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "image/tiff", tiff, "image/tiff", "clipboard_tiff")
+            require_file_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, runtime_socket)
+
+            confidential = b"copypaste-confidential-fixture"
+            owned_daemon = gui_owned_daemon(app, data_home)
+            require_not_captured(
+                cli,
+                cli_environment,
+                workspace,
+                args.evidence_dir,
+                "privacy-confidential",
+                {
+                    "text/plain;charset=utf-8": confidential,
+                    "x-kde-passwordManagerHint": b"secret",
+                },
+                "privacy_confidential",
+                protected_mime="text/plain;charset=utf-8",
+                session=args.session,
+                desktop=args.desktop,
+                owned_daemon=owned_daemon,
+            )
+
+            response = ipc(runtime_socket, "set_private_mode", {"enabled": True})
+            if response.get("data", {}).get("private_mode", {}).get("private_mode") is not True:
+                raise RuntimeError("daemon did not acknowledge private mode enabled")
+            private_marker = b"copypaste-private-cursor-fixture"
+            require_not_captured(cli, cli_environment, workspace, args.evidence_dir, "privacy-private", {"text/plain;charset=utf-8": private_marker})
+            response = ipc(runtime_socket, "set_private_mode", {"enabled": False})
+            if response.get("data", {}).get("private_mode", {}).get("private_mode") is not False:
+                raise RuntimeError("daemon did not acknowledge private mode disabled")
+            # A new post-private value must be captured, while the old
+            # value remains absent. This proves the skip advanced the
+            # source cursor rather than deferring plaintext capture.
+            require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "text/plain;charset=utf-8", b"copypaste-after-private-fixture", "text", "privacy_private_mode")
+            if any(private_marker.decode("utf-8") in item.get("content", "") for item in list_items(cli, cli_environment)):
+                raise RuntimeError("private-mode clipboard content was replayed after private mode ended")
+
+            configured = response_variant(cli_json(cli, cli_environment, "config", "set", "--excluded-apps", SOURCE_APPLICATION_ID), "config")
+            if not isinstance(configured, dict):
+                raise RuntimeError("daemon did not acknowledge the source exclusion")
             try:
-                if not isinstance(response_variant(json.loads(gui_status.stdout), "status"), dict):
-                    raise RuntimeError("packaged daemon status has an invalid shape")
-                emit_result("daemon_cli_gui", gui_status)
-                require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "text/plain;charset=utf-8", b"copypaste-native-text-fixture", "text", "clipboard_text")
-                require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "text/html", b"<b>copypaste-native-html-fixture</b>", "text/html", "clipboard_html")
-                require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "text/rtf", b"{\\rtf1 copypaste native rtf fixture}", "text/rtf", "clipboard_rtf")
-                # These are valid, minimal image payloads. The copy-back probe
-                # verifies the exact bytes after daemon storage, not merely a
-                # row count or image label.
-                png = bytes.fromhex(
-                    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
-                    "0000000d49444154789c63103209fb0f000294019c1d5b465f0000000049454e44ae426082"
-                )
-                tiff = bytes.fromhex(
-                    "49492a00080000000b00000104000100000001000000010104000100000001000000"
-                    "02010300040000009200000003010300010000000100000006010300010000000200"
-                    "000011010400010000009a0000001501030001000000040000001601040001000000"
-                    "010000001701040001000000040000001c0103000100000001000000520103000100"
-                    "000002000000000000000800080008000800123456ff"
-                )
-                require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "image/png", png, "image/png", "clipboard_png")
-                require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "image/tiff", tiff, "image/tiff", "clipboard_tiff")
-                require_file_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, runtime_socket)
+                require_not_captured(cli, cli_environment, workspace, args.evidence_dir, "privacy-excluded-source", {"text/plain;charset=utf-8": b"copypaste-excluded-source-fixture"}, "privacy_excluded_app")
+            finally:
+                response_variant(cli_json(cli, cli_environment, "config", "set", "--excluded-apps", ""), "config")
 
-                confidential = b"copypaste-confidential-fixture"
-                owned_daemon = gui_owned_daemon(app, data_home)
-                require_not_captured(
-                    cli,
-                    cli_environment,
-                    workspace,
-                    args.evidence_dir,
-                    "privacy-confidential",
-                    {
-                        "text/plain;charset=utf-8": confidential,
-                        "x-kde-passwordManagerHint": b"secret",
-                    },
-                    "privacy_confidential",
-                    protected_mime="text/plain;charset=utf-8",
-                    session=args.session,
-                    desktop=args.desktop,
-                    owned_daemon=owned_daemon,
-                )
-
-                response = ipc(runtime_socket, "set_private_mode", {"enabled": True})
-                if response.get("data", {}).get("private_mode", {}).get("private_mode") is not True:
-                    raise RuntimeError("daemon did not acknowledge private mode enabled")
-                private_marker = b"copypaste-private-cursor-fixture"
-                require_not_captured(cli, cli_environment, workspace, args.evidence_dir, "privacy-private", {"text/plain;charset=utf-8": private_marker})
-                response = ipc(runtime_socket, "set_private_mode", {"enabled": False})
-                if response.get("data", {}).get("private_mode", {}).get("private_mode") is not False:
-                    raise RuntimeError("daemon did not acknowledge private mode disabled")
-                # A new post-private value must be captured, while the old
-                # value remains absent. This proves the skip advanced the
-                # source cursor rather than deferring plaintext capture.
-                require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "text/plain;charset=utf-8", b"copypaste-after-private-fixture", "text", "privacy_private_mode")
-                if any(private_marker.decode("utf-8") in item.get("content", "") for item in list_items(cli, cli_environment)):
-                    raise RuntimeError("private-mode clipboard content was replayed after private mode ended")
-
-                configured = response_variant(cli_json(cli, cli_environment, "config", "set", "--excluded-apps", SOURCE_APPLICATION_ID), "config")
-                if not isinstance(configured, dict):
-                    raise RuntimeError("daemon did not acknowledge the source exclusion")
-                try:
-                    require_not_captured(cli, cli_environment, workspace, args.evidence_dir, "privacy-excluded-source", {"text/plain;charset=utf-8": b"copypaste-excluded-source-fixture"}, "privacy_excluded_app")
-                finally:
-                    response_variant(cli_json(cli, cli_environment, "config", "set", "--excluded-apps", ""), "config")
-
-                # A restart must retain a non-sensitive persisted history entry.
-                # Configure feedback before this restart so the GUI loads the
-                # same notification preferences as the GUI-owned daemon.
-                run([
-                    str(cli), "--json", "config", "set", "--notify-on-copy", "true",
-                    "--notification-preview", "false",
-                ], env=cli_environment)
-                persisted = "copypaste-restart-fixture"
-                run([str(cli), "add", persisted], env=cli_environment)
+            # A restart must retain a non-sensitive persisted history entry.
+            # Configure feedback before this restart so the GUI loads the
+            # same notification preferences as the GUI-owned daemon.
+            run([
+                str(cli), "--json", "config", "set", "--notify-on-copy", "true",
+                "--notification-preview", "false",
+            ], env=cli_environment)
+            persisted = "copypaste-restart-fixture"
+            run([str(cli), "add", persisted], env=cli_environment)
+            prior_sockets = set(runtime_dir.glob("cp-*.sock"))
+            app.terminate()
+            app.wait(timeout=5)
+            app, runtime_socket = start_gui_runtime(
+                gui_entrypoint, environment, runtime_dir, prior_sockets,
+            )
+            cli_environment = {**environment, "COPYPASTE_SOCKET": str(runtime_socket)}
+            restart_items = run([str(cli), "--json", "list", "--limit", "100"], env=cli_environment)
+            restart_page = response_variant(json.loads(restart_items.stdout), "page")
+            if not isinstance(restart_page, dict) or not any(persisted in item.get("content", "") for item in restart_page.get("items", [])):
+                raise RuntimeError("encrypted history did not survive daemon restart")
+            emit_result("encrypted_restart_persistence", restart_items)
+            restarted_daemon = gui_owned_daemon(app, data_home)
+            if restarted_daemon.data_dir != owned_daemon.data_dir:
+                raise RuntimeError("GUI-owned daemon changed its data directory during restart")
+            owned_daemon = restarted_daemon
+            if upgrading:
+                verify_upgrade_canary(cli, cli_environment, workspace, prefix / "copypaste")
+                emit_result("package_upgrade", restart_items)
+            daemon_data = owned_daemon.data_dir
+            def restart_gui_for_modules():
+                nonlocal app, runtime_socket, cli_environment, daemon_data
                 prior_sockets = set(runtime_dir.glob("cp-*.sock"))
                 app.terminate()
                 app.wait(timeout=5)
@@ -1574,64 +1595,40 @@ def main():
                     gui_entrypoint, environment, runtime_dir, prior_sockets,
                 )
                 cli_environment = {**environment, "COPYPASTE_SOCKET": str(runtime_socket)}
-                restart_items = run([str(cli), "--json", "list", "--limit", "100"], env=cli_environment)
-                restart_page = response_variant(json.loads(restart_items.stdout), "page")
-                if not isinstance(restart_page, dict) or not any(persisted in item.get("content", "") for item in restart_page.get("items", [])):
-                    raise RuntimeError("encrypted history did not survive daemon restart")
-                emit_result("encrypted_restart_persistence", restart_items)
-                restarted_daemon = gui_owned_daemon(app, data_home)
-                if restarted_daemon.data_dir != owned_daemon.data_dir:
-                    raise RuntimeError("GUI-owned daemon changed its data directory during restart")
-                owned_daemon = restarted_daemon
-                if upgrading:
-                    verify_upgrade_canary(cli, cli_environment, workspace, prefix / "copypaste")
-                    emit_result("package_upgrade", restart_items)
-                daemon_data = owned_daemon.data_dir
-                def restart_gui_for_modules():
-                    nonlocal app, runtime_socket, cli_environment, daemon_data
-                    prior_sockets = set(runtime_dir.glob("cp-*.sock"))
-                    app.terminate()
-                    app.wait(timeout=5)
-                    app, runtime_socket = start_gui_runtime(
-                        gui_entrypoint, environment, runtime_dir, prior_sockets,
-                    )
-                    cli_environment = {**environment, "COPYPASTE_SOCKET": str(runtime_socket)}
-                    wait_for_startup_status(cli, cli_environment, require_native_clipboard=True)
-                    restarted_data = gui_owned_daemon(app, data_home).data_dir
-                    if restarted_data != daemon_data:
-                        raise RuntimeError("GUI-owned daemon changed its data directory during module qualification")
-                    return runtime_socket
+                wait_for_startup_status(cli, cli_environment, require_native_clipboard=True)
+                restarted_data = gui_owned_daemon(app, data_home).data_dir
+                if restarted_data != daemon_data:
+                    raise RuntimeError("GUI-owned daemon changed its data directory during module qualification")
+                return runtime_socket
 
-                runtime_socket = require_modules(
-                    runtime_socket, args.module_artifacts, args.module_fixtures,
-                    daemon_data, args.architecture, args.version, args.evidence_dir, restart_gui_for_modules,
+            runtime_socket = require_modules(
+                runtime_socket, args.module_artifacts, args.module_fixtures,
+                daemon_data, args.architecture, args.version, args.evidence_dir, restart_gui_for_modules,
+            )
+            require_linux_onboarding(args, gui_pid=app.pid, environment=environment)
+            require_pairing_sync(prefix, cli, environment, workspace, runtime_socket)
+
+            # The remaining assertions deliberately execute their public probes and fail if the exact product
+            # does not expose an observable successful result. They are never converted into fixture booleans.
+            if args.session == "x11":
+                require_desktop_acceptance(args, gui_pid=app.pid, cli=cli, environment=environment,
+                                           workspace=workspace, socket_path=runtime_socket)
+                require_x11_quick_paste(cli, cli_environment, workspace)
+            else:
+                require_wayland_qualification(
+                    args, gui_pid=app.pid, cli=cli, environment=environment,
+                    workspace=workspace, socket_path=runtime_socket,
                 )
-                require_linux_onboarding(args, gui_pid=app.pid, environment=environment)
-                require_pairing_sync(prefix, cli, environment, workspace, runtime_socket)
-
-                # The remaining assertions deliberately execute their public probes and fail if the exact product
-                # does not expose an observable successful result. They are never converted into fixture booleans.
-                if args.session == "x11":
-                    require_desktop_acceptance(args, gui_pid=app.pid, cli=cli, environment=environment,
-                                               workspace=workspace, socket_path=runtime_socket)
-                    require_x11_quick_paste(cli, cli_environment, workspace)
-                else:
-                    require_wayland_qualification(
-                        args, gui_pid=app.pid, cli=cli, environment=environment,
-                        workspace=workspace, socket_path=runtime_socket,
-                    )
-                require_external_file_drag(cli, cli_environment, workspace, app.pid, args.session)
-                require_camera_qr_scan(prefix, cli, environment, workspace, app.pid, args.runtime_format)
-                emit_runtime(args.runtime_format, prefix)
-            finally:
-                app.terminate()
-                try:
-                    app.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    app.kill()
-                    app.wait(timeout=5)
+            require_external_file_drag(cli, cli_environment, workspace, app.pid, args.session)
+            require_camera_qr_scan(prefix, cli, environment, workspace, app.pid, args.runtime_format)
+            emit_runtime(args.runtime_format, prefix)
         finally:
-            pass
+            app.terminate()
+            try:
+                app.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                app.kill()
+                app.wait(timeout=5)
 
 
 if __name__ == "__main__":
