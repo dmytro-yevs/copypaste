@@ -10,6 +10,7 @@ jobs:
   optional-modules:
     name: Optional modules (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash
@@ -20,6 +21,8 @@ jobs:
           - { name: Linux aarch64, platform: linux, runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.96"
@@ -41,6 +44,7 @@ jobs:
   flutter-foundation:
     name: Flutter foundation (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash
@@ -51,6 +55,8 @@ jobs:
           - { name: Linux aarch64, platform: linux, runner: ubuntu-24.04-arm, target: linux }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - id: flutter
         run: |
           set -euo pipefail
@@ -84,6 +90,7 @@ jobs:
   linux-native-fixtures:
     name: Linux native fixtures (${{ matrix.architecture }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash
@@ -95,6 +102,8 @@ jobs:
           - { architecture: aarch64, runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.96"
@@ -114,6 +123,7 @@ jobs:
   linux-mutter-bridges:
     name: Mutter ${{ matrix.mutter }} bridge (${{ matrix.architecture }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -124,6 +134,8 @@ jobs:
           - { architecture: aarch64, runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - name: Build Mutter 47 in a matching GNOME 47 dependency root
         if: matrix.mutter == 47
         run: packaging/linux/desktop-integrations/gnome-shell-extension/mutter/run-fedora47-build.sh "${{ matrix.architecture == 'x86_64' && 'linux/amd64' || 'linux/arm64' }}"
@@ -155,6 +167,7 @@ jobs:
   linux-kwin-bridges:
     name: KWin ${{ matrix.kwin }} bridge (${{ matrix.architecture }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -165,11 +178,14 @@ jobs:
           - { architecture: aarch64, runner: ubuntu-24.04-arm, container_platform: linux/arm64 }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - name: Compile and exercise the private Qt D-Bus wire fixture
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends cmake ninja-build qt6-base-dev dbus-x11
-          export COPYPASTE_QT_PREFIX="$(qmake6 -query QT_INSTALL_PREFIX)"
+          COPYPASTE_QT_PREFIX="$(qmake6 -query QT_INSTALL_PREFIX)"
+          export COPYPASTE_QT_PREFIX
           packaging/linux/desktop-integrations/kde-native-clipboard/test-wire.sh
       - name: Compile the pinned patched KWin in an isolated Fedora builder
         run: packaging/linux/desktop-integrations/kde-native-clipboard/run-fedora-build.sh "${{ matrix.container_platform }}" "${{ matrix.kwin }}"
@@ -177,6 +193,7 @@ jobs:
   linux-pr-release-candidate:
     name: Linux release candidate (${{ matrix.architecture }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash
@@ -194,6 +211,8 @@ jobs:
             appimagetool_sha256: a595ea34cd6136c7f595e9dcbb16f3e9725d7610efb9e43b38c3c6e86cafc270
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - id: flutter
         run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/setup-flutter
@@ -253,6 +272,7 @@ jobs:
   linux-package-fixtures:
     name: Linux package fixtures (${{ matrix.architecture }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -261,6 +281,8 @@ jobs:
           - { architecture: aarch64, runner: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - name: Build and extract every Linux package format
         env:
           COPYPASTE_LINUX_PACKAGE_TEST_ARCHITECTURES: ${{ matrix.architecture }}
