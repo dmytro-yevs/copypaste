@@ -1846,6 +1846,35 @@ mod tests {
             .unwrap();
     }
 
+    #[test]
+    fn email_previews_require_an_explicit_secret_hint_to_hide_content() {
+        let (runtime, _dir) = fixture();
+        let text = "person.99@example.com";
+        seed_text(&runtime, "email-preview", text);
+        let stored = runtime.store.get("email-preview").unwrap().unwrap();
+        for (metadata, secret) in [
+            ("unrecognized old metadata", false),
+            (
+                r#"{"privacy":{"secret":true},"source_app_icon":"broken"}"#,
+                true,
+            ),
+        ] {
+            let mut row = stored.clone();
+            row.payload_metadata = Some(metadata.into());
+            for preview in [true, false] {
+                let item = runtime.item_value(row.clone(), preview).unwrap();
+                assert_eq!(item.privacy.secret, secret);
+                if secret && preview {
+                    assert!(item.content.is_empty());
+                    assert!(item.semantic_kind.is_none());
+                } else {
+                    assert_eq!(item.content, text);
+                    assert_eq!(item.semantic_kind, Some(copypaste_ipc::SemanticKind::Email));
+                }
+            }
+        }
+    }
+
     #[tokio::test]
     async fn status_exposes_the_stable_local_device_id() {
         let (runtime, _dir) = fixture();

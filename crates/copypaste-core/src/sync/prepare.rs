@@ -197,8 +197,7 @@ pub(super) fn prepare_remote_version(
         pin_updated_at,
         search_text: if incoming
             .payload_metadata
-            .and_then(|json| crate::PayloadMetadata::from_json(json, incoming.content_type))
-            .is_some_and(|metadata| metadata.privacy.secret)
+            .is_some_and(|json| crate::PayloadMetadata::privacy_from_json(json).secret)
             || incoming.deleted
             || copypaste_ipc::content_type::is_binary(incoming.content_type)
         {
