@@ -33,6 +33,10 @@ def merge(receipts: list[Path]) -> dict:
         "schema": 2,
         **{key: first[key] for key in IDENTITY_KEYS},
         "artifacts": artifacts,
+        **({"inventory_complete": True, "companions": []} if all(payload.get("inventory_complete") is True for payload in payloads) else {}),
+        **({"signing": {"scheme": "detached-updater", "detached_signatures": sorted(name for name in names if name.endswith(".sig"))}}
+           if all("signing" in payload for payload in payloads) else {}),
+        **({"builds": [payload["build"] for payload in payloads]} if all("build" in payload for payload in payloads) else {}),
     }
 
 
