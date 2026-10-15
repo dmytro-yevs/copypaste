@@ -3,20 +3,22 @@
 
 import argparse
 import json
+import os
 import runpy
 from pathlib import Path
 
 
 RELEASE = runpy.run_path(str(Path(__file__).with_name("linux_release_contract.py")))
+PIPELINE = runpy.run_path(str(Path(__file__).with_name("current_pipeline.py")))
 
 
-def verify(run: dict, jobs: dict, artifacts: dict, repository: str, commit: str) -> None:
+def verify(run: dict, jobs: dict, artifacts: dict, repository: str, commit: str, *, current_run_id=None) -> None:
     if (
         type(run.get("id")) is not int or run.get("head_sha") != commit
         or run.get("head_repository", {}).get("full_name") != repository
         or run.get("path") != ".github/workflows/release.yml"
         or run.get("event") not in ("push", "workflow_dispatch")
-        or run.get("status") != "completed"
+        or (run.get("status") != "completed" and not PIPELINE["current_release"](run, current_run_id))
     ):
         raise ValueError("Linux artifact source is not a completed release workflow at the tagged commit")
     entries = jobs.get("jobs", [])
@@ -49,6 +51,7 @@ def main() -> None:
     verify(
         *(json.loads(path.read_text()) for path in (args.run, args.jobs, args.artifacts)),
         args.repository, args.commit,
+        current_run_id=os.environ.get("GITHUB_RUN_ID"),
     )
     print("verified exact Linux artifact source run")
 

@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 import re
 import runpy
 import sys
@@ -12,6 +13,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+PIPELINE = runpy.run_path(str(Path(__file__).with_name("current_pipeline.py")))
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 RUNTIMES = {
     ("GNOME", "x86_64"): ("gnome", "46", "ubuntu", "24.04", "deb"),
@@ -66,21 +68,28 @@ def verify_baseline_source(desktop: str, source: dict) -> None:
         raise ValueError("producer private Shell revision or patch bytes differ from the checked-out baseline")
 
 
-def verify_source(run: dict, artifacts: dict, repository: str, commit: str) -> None:
+def verify_source(run: dict, artifacts: dict, repository: str, commit: str, *, current_run_id=None, jobs=None) -> None:
+    current = PIPELINE["current_release"](run, current_run_id)
     direct = run.get("path") == ".github/workflows/compositor-runtime.yml" and run.get("event") == "workflow_dispatch"
     trusted_ci = (run.get("path") == ".github/workflows/ci.yml" and run.get("event") == "pull_request"
                   and isinstance(run.get("pull_requests"), list) and len(run["pull_requests"]) == 1)
     if (
         type(run.get("id")) is not int or run.get("head_sha") != commit
         or run.get("head_repository", {}).get("full_name") != repository
-        or not (direct or trusted_ci) or run.get("status") != "completed"
-        or run.get("conclusion") != "success"
+        or (not current and (not (direct or trusted_ci) or run.get("status") != "completed"
+            or run.get("conclusion") != "success"))
     ):
         raise ValueError("compositor runtime source is not a successful exact-commit producer run")
     entries = artifacts.get("artifacts", [])
     if artifacts.get("total_count") != len(entries):
         raise ValueError("compositor runtime artifact inventory is incomplete")
     release = runpy.run_path(str(Path(__file__).with_name("linux_release_contract.py")))
+    if current:
+        passed = PIPELINE["successful_jobs"](jobs or {})
+        expected_jobs = {"Build opt-in compositor runtime companions / GNOME 46 Ubuntu 24.04 (" + arch + ")"
+                         for arch in release["ARCHITECTURES"]}
+        if not expected_jobs <= passed:
+            raise ValueError("current compositor producer jobs did not pass")
     expected = {baseline["artifact"] for baseline in release["BASELINES"]}
     for name in expected:
         matches = [entry for entry in entries if entry.get("name") == name]
@@ -219,13 +228,15 @@ def main() -> None:
     source = commands.add_parser("source")
     source.add_argument("--run", required=True, type=Path); source.add_argument("--artifacts", required=True, type=Path)
     source.add_argument("--repository", required=True); source.add_argument("--commit", required=True)
+    source.add_argument("--jobs", type=Path)
     artifact = commands.add_parser("artifact")
     artifact.add_argument("--root", required=True, type=Path); artifact.add_argument("--desktop", required=True, choices=("GNOME", "KDE")); artifact.add_argument("--architecture", required=True, choices=("x86_64", "aarch64")); artifact.add_argument("--commit", required=True); artifact.add_argument("--producer-run-id", required=True); artifact.add_argument("--output", required=True, type=Path)
     installed = commands.add_parser("installed")
     installed.add_argument("--binding", required=True, type=Path); installed.add_argument("--root", required=True, type=Path)
     args = parser.parse_args()
     if args.command == "source":
-        verify_source(read_json(args.run, "runtime producer run"), read_json(args.artifacts, "runtime producer artifacts"), args.repository, args.commit)
+        verify_source(read_json(args.run, "runtime producer run"), read_json(args.artifacts, "runtime producer artifacts"), args.repository, args.commit,
+                      current_run_id=os.environ.get("GITHUB_RUN_ID"), jobs=read_json(args.jobs, "runtime producer jobs") if args.jobs else None)
     elif args.command == "artifact":
         value = binding(args.root, args.desktop, args.architecture, args.commit, args.producer_run_id)
         args.output.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
