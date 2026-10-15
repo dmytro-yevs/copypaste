@@ -1170,7 +1170,7 @@ def remove_private_regular(path):
     path.unlink()
 
 
-def require_camera_qr_scan(prefix, cli, environment, workspace, gui_pid, runtime_format):
+def require_camera_qr_scan(prefix, cli, environment, workspace, gui_pid, runtime_format, gui_process=None):
     """Scan a live peer's pairing URI through the installed GUI's V4L2 camera."""
     device_value = os.environ.get("COPYPASTE_QUALIFICATION_V4L2_DEVICE")
     if not isinstance(device_value, str) or not device_value:
@@ -1227,23 +1227,10 @@ def require_camera_qr_scan(prefix, cli, environment, workspace, gui_pid, runtime
             kind="camera_qr_scan_observed", runtime_format=runtime_format,
         )
         emit_result("camera_qr_scan", observed)
-        # End the camera consumer while its owned input producer is still alive.
-        os.kill(gui_pid, signal.SIGTERM)
-        deadline = time.monotonic() + 8
-        while time.monotonic() < deadline:
-            links = Path(f'/proc/{gui_pid}/fd')
-            held = False
-            for descriptor in tuple(links.iterdir()) if links.exists() else ():
-                try:
-                    held |= os.readlink(descriptor) == str(device)
-                except OSError:
-                    continue
-            if not held:
-                print('COPYPASTE_CAMERA_DIAGNOSTIC owned camera reader closed before feed shutdown', flush=True)
-                break
-            time.sleep(.05)
-        else:
-            raise RuntimeError('owned GUI camera reader did not close before feed shutdown')
+        if gui_process is not None:
+            gui_process.terminate()
+            gui_process.wait(timeout=5)
+            print('COPYPASTE_CAMERA_DIAGNOSTIC owned GUI exited before feed shutdown', flush=True)
     finally:
         try:
             if pid_file.exists():
@@ -1465,7 +1452,7 @@ def main():
                 emit_result("daemon_cli_gui", gui_status)
                 # Diagnostic workload only; this branch uploads no qualification artifact.
                 require_linux_onboarding(args, gui_pid=app.pid, environment=environment)
-                require_camera_qr_scan(prefix, cli, environment, workspace, app.pid, args.runtime_format)
+                require_camera_qr_scan(prefix, cli, environment, workspace, app.pid, args.runtime_format, gui_process=app)
                 return
                 require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "text/plain;charset=utf-8", b"copypaste-native-text-fixture", "text", "clipboard_text")
                 require_capture(cli, cli_environment, workspace, args.evidence_dir, args.session, "text/html", b"<b>copypaste-native-html-fixture</b>", "text/html", "clipboard_html")
