@@ -544,7 +544,8 @@ def start_qr_feed(*, uri_file: Path, device: Path, ready_file: Path) -> tuple[su
     if process.poll() is not None:
         process.wait(timeout=1)
         retained.unlink(missing_ok=True)
-        raise MediaQualificationError("virtual-camera QR feed exited before it became ready")
+        detail = process.stderr.read().decode('utf-8', 'replace').replace(str(retained), '[private QR image]').replace(str(device), device.name)
+        raise MediaQualificationError("virtual-camera QR feed exited before it became ready: " + detail[-2048:])
     try:
         write_exclusive(ready_file, "ready\n")
     except MediaQualificationError:
