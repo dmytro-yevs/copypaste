@@ -15,12 +15,14 @@ esac
 source_dir=${2:-"$PWD/mutter-source-$version"}
 build_dir=${3:-"$source_dir/build-copypaste-writer-identity"}
 runtime_output=${4:-}
+# GNOME's read-only mirror serves the identical pinned objects during GitLab outages.
+source_remote=https://github.com/GNOME/mutter.git
 if [[ ! -d "$source_dir/.git" ]]; then
   mkdir -p "$source_dir"
   git -C "$source_dir" init -q
-  git -C "$source_dir" remote add origin https://gitlab.gnome.org/GNOME/mutter.git
+  git -C "$source_dir" remote add origin "$source_remote"
 fi
-git -C "$source_dir" fetch --depth=1 origin "$commit"
+git -C "$source_dir" fetch --depth=1 "$source_remote" "$commit"
 test "$(git -C "$source_dir" rev-parse "$commit^{commit}")" = "$commit"
 git -C "$source_dir" checkout --detach "$commit"
 git -C "$source_dir" apply --check "$patch"
