@@ -57,7 +57,7 @@ on:
     tags: ["v*"]
 
 concurrency:
-  group: production-release-${{ github.ref }}
+  group: production-release-${{ github.sha }}
   cancel-in-progress: false
 
 permissions:
@@ -956,6 +956,9 @@ jobs:
           path: qualified
 
   publish:
+    concurrency:
+      group: copypaste-stable-publication
+      cancel-in-progress: false
     needs: [preflight, qualify]
     if: ${{ always() && needs.preflight.result == 'success' && needs.qualify.result == 'success' && needs.preflight.outputs.publish == 'true' }}
     runs-on: ubuntu-24.04
