@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 import sys
+import tempfile
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -131,6 +132,53 @@ class FakeGio:
 class LinuxDesktopAcceptanceTest(unittest.TestCase):
     gui_pid = 4321
 
+    def test_x11_close_addresses_the_owned_window_and_observes_tray_restore(self):
+        args = SimpleNamespace(desktop="GNOME", session="x11", gui_pid=4321, cli=Path("cli"),
+                               socket=Path("socket"), capture_command_file=Path("command.json"), evidence_dir=Path("evidence"))
+        command = MODULE.CommandResult(("busctl",), 0, "", "")
+        notification = SimpleNamespace(notification_id=12)
+        def run(argv, **_kwargs):
+            return MODULE.CommandResult(tuple(argv), 0, "12345\n", "")
+        with mock.patch.object(MODULE, "require_program"), \
+             mock.patch.object(MODULE, "expect_tray", return_value="owned-tray"), \
+             mock.patch.object(MODULE, "dbus_menu_layout", return_value=[]), \
+             mock.patch.object(MODULE, "menu_item_id", return_value=7), \
+             mock.patch.object(MODULE, "x11_window_for_pid", return_value="12345"), \
+             mock.patch.object(MODULE, "x11_map_state", return_value="IsViewable"), \
+             mock.patch.object(MODULE, "run", side_effect=run) as calls, \
+             mock.patch.object(MODULE, "wait_for_x11_map_state") as mapped, \
+             mock.patch.object(MODULE, "invoke_menu_item", return_value=command), \
+             mock.patch.object(MODULE, "read_capture_command", return_value=["provider"]), \
+             mock.patch.object(MODULE, "run_notification_capture", return_value=(notification, command, 3)), \
+             mock.patch.object(MODULE, "write_evidence") as evidence:
+            MODULE.qualify(args)
+        self.assertEqual([call.args[0] for call in calls.call_args_list], [
+            ["wmctrl", "-i", "-c", "0x3039"],
+        ])
+        self.assertEqual([call.args[2] for call in mapped.call_args_list], ["IsUnMapped", "IsViewable"])
+        self.assertEqual(evidence.call_args.args[1]["window"], {"id": "12345", "hide_show": "dbusmenu_open"})
+
+    def test_x11_close_refuses_a_window_owned_by_another_process(self):
+        args = SimpleNamespace(desktop="GNOME", session="x11", gui_pid=4321)
+        run = mock.Mock(side_effect=[MODULE.CommandResult(("xdotool",), 0, "12345\n", ""),
+                                    MODULE.CommandResult(("xprop",), 0, "_NET_WM_PID(CARDINAL) = 9999\n", "")])
+        with mock.patch.multiple(MODULE, require_program=mock.Mock(), expect_tray=mock.Mock(return_value="tray"),
+                                 dbus_menu_layout=mock.Mock(return_value=[]), menu_item_id=mock.Mock(return_value=7), run=run), \
+             mock.patch.object(MODULE, "invoke_menu_item") as menu:
+            with self.assertRaisesRegex(MODULE.AcceptanceError, "not owned by the GUI"):
+                MODULE.qualify(args)
+        self.assertFalse(any(call.args[0][0] == "wmctrl" for call in run.call_args_list))
+        menu.assert_not_called()
+
+    def test_x11_discovery_combines_exact_title_with_gui_pid_instead_of_matching_either(self):
+        results = [MODULE.CommandResult(("xdotool",), 0, "12345\n", ""),
+                   MODULE.CommandResult(("xprop",), 0, "_NET_WM_PID(CARDINAL) = 4321\n", "")]
+        with mock.patch.object(MODULE, "run", side_effect=results) as run:
+            self.assertEqual(MODULE.x11_window_for_pid({}, 4321), "12345")
+        self.assertEqual(run.call_args_list[0].args[0], [
+            "xdotool", "search", "--onlyvisible", "--all", "--pid", "4321", "--name", "^CopyPaste$",
+        ])
+
     def test_status_notifier_properties_require_their_protocol_types(self):
         self.assertEqual(MODULE.quoted_property('s "CopyPaste"', "Title"), "CopyPaste")
         self.assertEqual(MODULE.quoted_property('o "/StatusNotifierItem/Menu"', "Menu", "o"), MODULE.MENU_PATH)
@@ -240,6 +288,23 @@ class LinuxDesktopAcceptanceTest(unittest.TestCase):
         transcript.consume('method return sender=:1.9 -> destination=:1.5 serial=72 reply_serial=71')
         transcript.consume(' uint32 24')
         self.assertEqual(transcript.notification_id, 24)
+
+    def test_capture_command_file_rejects_shared_files_and_symbolic_links(self):
+        command = ["python3", str(MODULE.CLIPBOARD_PROVIDER), "--helper", "helper", "--manifest", "manifest",
+                   "--ready-file", "ready", "--activity-log", "activity"]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "command.json"
+            path.write_text(json.dumps(command))
+            path.chmod(0o600)
+            self.assertEqual(MODULE.read_capture_command(path), command)
+            path.chmod(0o644)
+            with self.assertRaisesRegex(MODULE.AcceptanceError, "private regular file"):
+                MODULE.read_capture_command(path)
+            path.chmod(0o600)
+            link = Path(directory) / "link"
+            link.symlink_to(path)
+            with self.assertRaisesRegex(MODULE.AcceptanceError, "private regular file"):
+                MODULE.read_capture_command(link)
 
     def test_capture_command_requires_real_argv(self):
         provider = str(MODULE.CLIPBOARD_PROVIDER)
