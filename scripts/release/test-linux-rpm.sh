@@ -28,8 +28,9 @@ docker run --rm --platform linux/amd64 \
   --env "PACKAGE_NAME=$(basename "$ARTIFACT")" --env "VERSION=$VERSION" \
   "$IMAGE" bash -ceu '
     set -o pipefail
-    source /etc/os-release
-    [[ "$ID" == fedora && "$VERSION_ID" == 44 ]]
+    [[ "$(rpm --eval "%fedora")" == 44 ]] || {
+      echo "ERROR: RPM preview qualification requires Fedora 44" >&2; exit 1;
+    }
     package="/artifacts/$PACKAGE_NAME"
     [[ "$(rpm -qp --queryformat "%{NAME} %{VERSION} %{ARCH}" "$package")" == "copypaste $VERSION x86_64" ]]
     # DNF must resolve every declared dependency. Never bypass its solver.
