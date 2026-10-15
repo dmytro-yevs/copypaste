@@ -5,6 +5,8 @@ import sys
 import hashlib
 import json
 import tempfile
+import os
+import subprocess
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -128,6 +130,27 @@ class ReleasePipelineTest(unittest.TestCase):
         jobs["jobs"][2]["conclusion"] = "skipped"
         with self.assertRaises(ValueError):
             verify(run, jobs, artifacts, "owner/repo", "a" * 40)
+
+    def test_compositor_receipt_reads_inputs_as_environment_data(self):
+        from workflow_yaml import read_workflow
+        workflow = read_workflow(ROOT / ".github/workflows/compositor-runtime.yml")
+        step = next(step for step in workflow["jobs"]["build"]["steps"]
+                    if step.get("name") == "Sign and bind immutable producer files")
+        program = step["run"].split("<<'PY'\n", 1)[1].split("\nPY", 1)[0]
+        for name, value in workflow["jobs"]["build"]["strategy"]["matrix"]["include"][0].items():
+            program = program.replace("${{ matrix." + name + " }}", str(value))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "artifact").mkdir()
+            (root / "package.deb").write_bytes(b"signed package")
+            (root / "runtime.json").write_text(json.dumps({"upstream_licenses": [], "runtime_id": "test",
+                "glibc_floor": "2.39", "source": {"revision": "test"}}))
+            subprocess.run([sys.executable, "-", "package.deb", "runtime.json", "receipt.json"], input=program,
+                text=True, cwd=root, check=True, env={**os.environ, "GITHUB_RUN_ID": "123",
+                "CI_INPUT_SOURCE_RUN_ID": "456", "CI_INPUT_VERSION": "1.2.3", "COMPOSITOR_RUNTIME_COMMIT": "a" * 40})
+            receipt = json.loads((root / "receipt.json").read_text())
+            self.assertEqual(receipt["source_run_id"], 456)
+            self.assertEqual(receipt["version"], "1.2.3")
 
 
 if __name__ == "__main__":
