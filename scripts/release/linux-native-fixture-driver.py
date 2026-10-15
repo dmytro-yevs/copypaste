@@ -1427,8 +1427,9 @@ def main():
             "XDG_DATA_HOME": str(data_home),
             "TMPDIR": str(runtime_dir),
         }
+        launcher = prefix.parents[2] / "AppRun" if args.runtime_format == "AppImage" else Path("/usr/bin/copypaste")
         app, runtime_socket = start_gui_runtime(
-            prefix / "copypaste", environment, runtime_dir, set(runtime_dir.glob("cp-*.sock")),
+            launcher, environment, runtime_dir, set(runtime_dir.glob("cp-*.sock")),
         )
         try:
             cli_environment = {**environment, "COPYPASTE_SOCKET": str(runtime_socket)}
