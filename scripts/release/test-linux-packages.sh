@@ -35,26 +35,25 @@ run_architecture() {
     -v "$ROOT:/source:ro" "${output_mount[@]}" "$IMAGE" bash -ceu '
       apt-get update
       apt-get install --yes --no-install-recommends \
-        binutils build-essential ca-certificates cpio curl dpkg-dev file rpm xz-utils \
+        binutils build-essential ca-certificates cmake cpio curl dpkg-dev file rpm xz-utils \
         gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
         libgstreamer1.0-dev libkeybinder-3.0-0 patchelf pkg-config
       mkdir -p /work/apps/copypaste_flutter/assets/brand /work/apps/copypaste_flutter/linux
       cp -a /source/packaging /source/scripts /work/
       cp /source/apps/copypaste_flutter/assets/brand/copypaste.png /work/apps/copypaste_flutter/assets/brand/
-      cp /source/apps/copypaste_flutter/linux/CMakeLists.txt /work/apps/copypaste_flutter/linux/
+      cp /source/apps/copypaste_flutter/linux/runtime_paths.cmake /work/apps/copypaste_flutter/linux/
       cd /work
       mkdir -p dist/linux-"$ARCHITECTURE"/bundle/lib
-      library_rpath="$(python3 -c "import re; from pathlib import Path; print(re.search(r\"set\\(CMAKE_INSTALL_RPATH \\\"([^\\\"]+)\\\"\\)\", Path(\"apps/copypaste_flutter/linux/CMakeLists.txt\").read_text())[1])")"
-      runner_rpath="$(python3 -c "import re; from pathlib import Path; print(re.search(r\"\\bINSTALL_RPATH \\\"([^\\\"]+)\\\"\", Path(\"apps/copypaste_flutter/linux/CMakeLists.txt\").read_text())[1])")"
-      printf "int flutter_fixture(void) { return 0; }\n" > /tmp/copypaste-engine.c
-      cc -shared -fPIC -Wl,-soname,libflutter_linux_gtk.so -o dist/linux-"$ARCHITECTURE"/bundle/lib/libflutter_linux_gtk.so /tmp/copypaste-engine.c
-      printf "extern int flutter_fixture(void); int plugin_fixture(void) { return flutter_fixture(); }\n" > /tmp/copypaste-plugin.c
-      cc -shared -fPIC -Wl,-rpath,"$library_rpath" -o dist/linux-"$ARCHITECTURE"/bundle/lib/libdesktop_drop_plugin.so /tmp/copypaste-plugin.c -Ldist/linux-"$ARCHITECTURE"/bundle/lib -lflutter_linux_gtk
-      printf "#include <stdio.h>\nextern int flutter_fixture(void); int main(void) { puts(\"%s\"); return flutter_fixture(); }\n" "$VERSION" > /tmp/copypaste-fake.c
-      cc -O2 -Wl,-rpath,"$runner_rpath" -o /tmp/copypaste-fake /tmp/copypaste-fake.c -Ldist/linux-"$ARCHITECTURE"/bundle/lib -lflutter_linux_gtk
-      install -m 755 /tmp/copypaste-fake dist/linux-"$ARCHITECTURE"/bundle/copypaste
-      install -m 755 /tmp/copypaste-fake dist/linux-"$ARCHITECTURE"/bundle/copypaste-daemon
-      install -m 755 /tmp/copypaste-fake dist/linux-"$ARCHITECTURE"/bundle/copypaste-cli
+      bundle="$PWD/dist/linux-$ARCHITECTURE/bundle"
+      cmake -S scripts/release/fixtures/linux-runtime -B /tmp/copypaste-runtime-build \
+        -DCOPYPASTE_RUNTIME_PATHS="$PWD/apps/copypaste_flutter/linux/runtime_paths.cmake" \
+        -DFIXTURE_VERSION="$VERSION" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$bundle"
+      cmake --build /tmp/copypaste-runtime-build --target install --parallel 2
+      rm -rf /tmp/copypaste-runtime-build
+      ldd "$bundle/lib/libdesktop_drop_plugin.so" | grep -F "$bundle/lib/libflutter_linux_gtk.so"
+      [[ "$("$bundle/copypaste" --version)" == "$VERSION" ]]
+      install -m 755 "$bundle/copypaste" "$bundle/copypaste-daemon"
+      install -m 755 "$bundle/copypaste" "$bundle/copypaste-cli"
       printf "#include <gst/gst.h>\nvoid camera_fixture(void) { gst_init(0, 0); }\n" > /tmp/copypaste-camera-fixture.c
       mkdir -p dist/linux-"$ARCHITECTURE"/bundle/lib
       cc -shared -fPIC -o dist/linux-"$ARCHITECTURE"/bundle/lib/libcamera_desktop_plugin.so /tmp/copypaste-camera-fixture.c $(pkg-config --cflags --libs gstreamer-1.0)
