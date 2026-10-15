@@ -196,6 +196,13 @@ def cleanup(state: Path, missing_ok: bool) -> None:
     unwind_provision(state, True)
 
 
+def reset(state: Path, environment: Path) -> None:
+    """Start a clean owned input session after the prior package runtime exited."""
+    require_ci()
+    cleanup(state, False)
+    provision(state, environment)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     actions = parser.add_subparsers(dest="action", required=True)
@@ -205,10 +212,15 @@ def main() -> int:
     cleanup_parser = actions.add_parser("cleanup")
     cleanup_parser.add_argument("--state", required=True, type=Path)
     cleanup_parser.add_argument("--missing-ok", action="store_true")
+    reset_parser = actions.add_parser("reset")
+    reset_parser.add_argument("--state", required=True, type=Path)
+    reset_parser.add_argument("--environment", required=True, type=Path)
     args = parser.parse_args()
     try:
         if args.action == "provision":
             provision(args.state, args.environment)
+        elif args.action == "reset":
+            reset(args.state, args.environment)
         else:
             cleanup(args.state, args.missing_ok)
     except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
