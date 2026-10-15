@@ -11,6 +11,7 @@ import runpy
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from unittest import mock
 from zipfile import ZipFile
@@ -98,6 +99,46 @@ class FlutterCacheKeyTest(unittest.TestCase):
 
 
 class ReleaseSafetyTest(unittest.TestCase):
+    def test_production_linux_gate_forwards_the_exact_upgrade_packages(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        gate = workflow.split("      - name: Verify full exact-artifact Linux desktop evidence\n", 1)[1]
+        command = textwrap.dedent(gate.split("        run: |\n", 1)[1].split("\n  qualify:\n", 1)[0])
+        for prior_version, include_prior in (("1.0.25", True), ("", False), ("1.0.25", False)):
+            with self.subTest(prior_version=prior_version, include_prior=include_prior), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                current = root / "exact-artifacts/x86_64"
+                current.mkdir(parents=True)
+                (current / "current.deb").write_bytes(b"current package")
+                if include_prior:
+                    previous = root / "previous-artifacts/x86_64"
+                    previous.mkdir(parents=True)
+                    (previous / "prior.deb").write_bytes(b"prior package")
+                binary = root / "bin"
+                binary.mkdir()
+                verifier = binary / "python3"
+                verifier.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$CAPTURED_ARGUMENTS"\n')
+                verifier.chmod(0o755)
+                captured = root / "arguments"
+                result = subprocess.run(["bash", "-c", command], cwd=root, text=True, capture_output=True, env={
+                    **os.environ, "PATH": str(binary) + os.pathsep + os.environ["PATH"],
+                    "CAPTURED_ARGUMENTS": str(captured), "VERSION": "1.0.26", "GITHUB_SHA": "commit",
+                    "EVIDENCE_RUN_ID": "123", "ARTIFACT_RUN_ID": "456",
+                    "COMPOSITOR_RUNTIME_REQUIRED": "true", "PREVIOUS_VERSION": prior_version,
+                })
+                if prior_version and not include_prior:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertFalse(captured.exists())
+                    continue
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stderr, "")
+                arguments = captured.read_text().splitlines()
+                self.assertEqual((root / "exact-artifacts/all/current.deb").read_bytes(), b"current package")
+                if prior_version:
+                    self.assertEqual(arguments[-4:], ["--previous-artifacts", "previous-artifacts/all", "--previous-version", "1.0.25"])
+                    self.assertEqual((root / "previous-artifacts/all/prior.deb").read_bytes(), b"prior package")
+                else:
+                    self.assertNotIn("--previous-artifacts", arguments)
+
     def test_first_party_module_manifests_bind_the_current_application(self):
         version = re.search(r'^version = "([^"]+)"$', (ROOT / "Cargo.toml").read_text(), re.MULTILINE)[1]
         staging = runpy.run_path(str(ROOT / "scripts/release/stage-linux-module-qualification.py"))
