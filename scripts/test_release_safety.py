@@ -765,8 +765,10 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                 verify(root, "1.2.3", "a" * 40, "123", require_compositor_runtime=True)
 
     def test_linux_architecture_receipts_merge_only_when_their_identity_matches(self):
-        merge = runpy.run_path(str(ROOT / "scripts/release/merge-linux-artifact-receipts.py"))["merge"]
-        with tempfile.TemporaryDirectory() as directory:
+        merger = runpy.run_path(str(ROOT / "scripts/release/merge-linux-artifact-receipts.py"))
+        merge = merger["merge"]
+        # Exercise cross-architecture identity checks with a synthetic two-target contract.
+        with mock.patch.dict(merger["RELEASE"], {"ARCHITECTURES": ("x86_64", "aarch64")}), tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             receipts = []
             for architecture in ("x86_64", "aarch64"):
