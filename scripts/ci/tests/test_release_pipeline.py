@@ -37,6 +37,7 @@ class ReleasePipelineTest(unittest.TestCase):
         jobs = self.jobs(["preflight", "Linux build (x86_64)"])
         artifacts = self.artifact("production-linux-x86_64")
         verify(self.run, jobs, artifacts, "owner/repo", "a" * 40, current_run_id="123")
+        verify({**self.run, "status": "queued"}, jobs, artifacts, "owner/repo", "a" * 40, current_run_id="123")
         for current in (None, "124"):
             with self.assertRaises(ValueError):
                 verify(self.run, jobs, artifacts, "owner/repo", "a" * 40, current_run_id=current)
@@ -131,6 +132,22 @@ class ReleasePipelineTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             verify(run, jobs, artifacts, "owner/repo", "a" * 40)
 
+    def test_discovery_requires_native_qualification_and_unexpired_exact_source(self):
+        eligible = load("qualified_source.py")["eligible"]
+        run = {**self.run, "status": "completed", "conclusion": "success"}
+        jobs = self.jobs(["preflight", "macos", "android", "windows", "qualify",
+                          "Linux full parity evidence gate", "Sign and bind opt-in compositor runtime companions"])
+        artifacts = self.artifact("production-qualified")
+        eligible(run, jobs, artifacts, "owner/repo", "a" * 40, linux=True, compositor=True)
+        for name in ("qualify", "Linux full parity evidence gate", "Sign and bind opt-in compositor runtime companions"):
+            bad = deepcopy(jobs)
+            next(job for job in bad["jobs"] if job["name"] == name)["conclusion"] = "skipped"
+            with self.assertRaises(ValueError):
+                eligible(run, bad, artifacts, "owner/repo", "a" * 40, linux=True, compositor=True)
+        artifacts["artifacts"][0]["expired"] = True
+        with self.assertRaises(ValueError):
+            eligible(run, jobs, artifacts, "owner/repo", "a" * 40, linux=True, compositor=True)
+
     def test_compositor_receipt_reads_inputs_as_environment_data(self):
         from workflow_yaml import read_workflow
         workflow = read_workflow(ROOT / ".github/workflows/compositor-runtime.yml")
@@ -151,6 +168,50 @@ class ReleasePipelineTest(unittest.TestCase):
             receipt = json.loads((root / "receipt.json").read_text())
             self.assertEqual(receipt["source_run_id"], 456)
             self.assertEqual(receipt["version"], "1.2.3")
+
+    def test_build_identity_is_toolchain_profile_and_flag_sensitive_without_secrets(self):
+        metadata = runpy.run_path(str(ROOT / "scripts/ci/build-metadata.py"))["metadata"]
+        environment = {"BUILD_PLATFORM": "android", "BUILD_PROFILE": "release", "RUNNER_ARCH": "X64",
+                       "ANDROID_KEYSTORE_PASSWORD": "must-not-appear"}
+        flutter = {"frameworkVersion": (ROOT / ".flutter-version").read_text().strip(),
+                   "frameworkRevision": "a" * 40, "dartSdkVersion": "pinned"}
+        original = metadata(ROOT, environment, "rustc 1.96.0", flutter)
+        self.assertEqual(original["target_architectures"], ["armv7", "arm64", "x86_64"])
+        self.assertNotIn("must-not-appear", json.dumps(original))
+        for change in ({"BUILD_PROFILE": "debug"}, {"RUSTFLAGS": "-C opt-level=1"}):
+            self.assertNotEqual(original["fingerprint"], metadata(ROOT, {**environment, **change}, "rustc 1.96.0", flutter)["fingerprint"])
+        self.assertNotEqual(original["fingerprint"], metadata(ROOT, environment, "rustc 1.96.1", flutter)["fingerprint"])
+        with self.assertRaisesRegex(ValueError, "Flutter SDK"):
+            metadata(ROOT, environment, "rustc 1.96.0", {**flutter, "frameworkVersion": "0.0.0"})
+
+    def test_complete_inventory_rejects_unqualified_files_and_changed_signatures(self):
+        verify = load("verify-artifact-receipts.py")["verify"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for platform, names in {
+                "macos": ["app.dmg", "cli.tar.gz"], "windows": ["app.exe"],
+                "android": ["CopyPaste-v1.2.3-android" + suffix + ".apk" for suffix in ("", "-arm64", "-armv7")],
+            }.items():
+                target = root / platform
+                target.mkdir()
+                command = [sys.executable, str(ROOT / "scripts/release/write-artifact-receipt.py"),
+                           "--platform", platform, "--version", "1.2.3", "--commit", "a" * 40,
+                           "--run-id", "123", "--output", str(target / "production-receipt.json")]
+                for name in names:
+                    path = target / name
+                    path.write_bytes(b"qualified")
+                    Path(str(path) + ".sig").write_bytes(b"signature verified by the platform gate")
+                    command += ["--artifact", str(path)]
+                subprocess.run(command, check=True)
+            verify(root, "1.2.3", "a" * 40, "123")
+            extra = root / "macos/unqualified.tar.gz"
+            extra.write_bytes(b"not qualified")
+            with self.assertRaisesRegex(ValueError, "unqualified"):
+                verify(root, "1.2.3", "a" * 40, "123")
+            extra.unlink()
+            (root / "windows/app.exe.sig").write_bytes(b"replaced signature")
+            with self.assertRaisesRegex(ValueError, "companion artifact"):
+                verify(root, "1.2.3", "a" * 40, "123")
 
 
 if __name__ == "__main__":

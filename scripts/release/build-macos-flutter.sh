@@ -30,12 +30,12 @@ pubspec_version="$(awk '/^version:[[:space:]]*/ {print $2; exit}' "$APP_ROOT/pub
 }
 
 export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
-cargo build --manifest-path "$ROOT/Cargo.toml" --release --locked \
+python3 "$ROOT/scripts/ci/timed.py" compilation cargo build --manifest-path "$ROOT/Cargo.toml" --release --locked \
     -p copypaste-daemon -p copypaste-cli
 
 cd "$APP_ROOT"
-flutter pub get --enforce-lockfile
-flutter build macos --release --no-pub \
+python3 "$ROOT/scripts/ci/timed.py" dependencies flutter pub get --enforce-lockfile
+python3 "$ROOT/scripts/ci/timed.py" compilation flutter build macos --release --no-pub \
     --build-name "$VERSION" \
     --build-number "$BUILD_NUMBER"
 
