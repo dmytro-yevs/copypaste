@@ -51,6 +51,7 @@ docker run --rm --platform linux/amd64 \
         dependencies="$(ldd "$candidate")"
         printf "%s\n" "$dependencies"
         if [[ "$dependencies" == *"not found"* ]]; then
+          readelf --dynamic "$candidate" >&2
           echo "ERROR: unresolved runtime library in $candidate" >&2
           exit 1
         fi
