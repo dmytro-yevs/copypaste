@@ -3,6 +3,8 @@ import 'dart:io';
 import 'platform/lifecycle/application_restarter.dart';
 
 import 'features/modules/controller/modules_controller.dart';
+import 'features/modules/controller/module_app_update_preparer.dart';
+import 'features/modules/repository/module_update_stager.dart';
 import 'features/modules/repository/runtime_modules_repository.dart';
 import 'features/modules/repository/file_selector_module_input_picker.dart';
 import 'features/modules/repository/github_module_marketplace_repository.dart';
@@ -80,6 +82,15 @@ Future<void> main([List<String> arguments = const []]) async {
         ),
         platform: MethodChannelAppUpdatePlatform(),
         restart: const ApplicationRestarter().restart,
+        prepareModules: ModuleAppUpdatePreparer(
+          installed: RuntimeModulesRepository(),
+          marketplace: (version) => GitHubModuleMarketplaceRepository(
+            temporaryDirectory: getTemporaryDirectory,
+            currentTarget: () =>
+                ModuleMarketplacePlatform().currentTarget(appVersion: version),
+          ),
+          stager: RuntimeModuleUpdateStager(),
+        ).prepare,
       ),
     ),
   );

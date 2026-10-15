@@ -251,7 +251,9 @@ impl ModuleHost {
             let manager = host.manager()?;
             let changed = !matches!(
                 operation,
-                ModuleOperation::List | ModuleOperation::Invoke { .. }
+                ModuleOperation::List
+                    | ModuleOperation::Invoke { .. }
+                    | ModuleOperation::StageUpdate { .. }
             );
             let removed = if let ModuleOperation::Remove { id } = &operation {
                 Some(id.clone())
@@ -265,6 +267,14 @@ impl ModuleHost {
                 ModuleOperation::Install { package_path } => {
                     serde_json::to_value(manager.install(Path::new(&package_path))?)
                         .map_err(|_| ModuleError::State)?
+                }
+                ModuleOperation::StageUpdate {
+                    id,
+                    package_path,
+                    app_version,
+                } => {
+                    manager.stage_update(&id, Path::new(&package_path), &app_version)?;
+                    serde_json::Value::Null
                 }
                 ModuleOperation::SetEnabled { id, enabled } => {
                     manager.set_enabled(&id, enabled)?;

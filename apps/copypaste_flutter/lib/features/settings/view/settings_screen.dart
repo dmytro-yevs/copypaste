@@ -1282,6 +1282,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'Version $available is available. This device has version $current.',
       AppUpdatePhase.downloading =>
         'Downloading version $available · ${(controller.downloadProgress * 100).round()}%.',
+      AppUpdatePhase.preparingModules => 'Preparing installed module updates.',
       AppUpdatePhase.installing =>
         controller.message ?? 'Installing version $available.',
       AppUpdatePhase.permissionRequired ||
@@ -1322,6 +1323,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         leading: Icon(LucideIcons.download),
         child: Text('Downloading'),
       ),
+      AppUpdatePhase.preparingModules ||
       AppUpdatePhase.installing => const Button.secondary(
         onPressed: null,
         leading: Icon(LucideIcons.loaderCircle),
@@ -1394,6 +1396,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       case AppUpdatePhase.idle ||
           AppUpdatePhase.checking ||
           AppUpdatePhase.downloading ||
+          AppUpdatePhase.preparingModules ||
           AppUpdatePhase.installing ||
           AppUpdatePhase.permissionRequired ||
           AppUpdatePhase.restartRequired:

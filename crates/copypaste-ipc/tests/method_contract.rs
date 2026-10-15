@@ -55,6 +55,22 @@ fn wire_name(method: &Method) -> &'static str {
     }
 }
 
+#[test]
+fn module_update_staging_preserves_its_destination_and_install_budget() {
+    let value = json!({
+        "method": "modules",
+        "params": {"operation": {
+            "operation": "stage_update",
+            "id": "copypaste.ocr",
+            "package_path": "/private/update.cpmodule",
+            "app_version": "1.1.0"
+        }}
+    });
+    let method: Method = serde_json::from_value(value.clone()).unwrap();
+    assert!(method.is_long_running());
+    assert_eq!(serde_json::to_value(method).unwrap(), value);
+}
+
 fn catalog() -> Vec<Value> {
     vec![
         json!({"method":"modules","params":{"operation":{"operation":"list"}}}),

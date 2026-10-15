@@ -171,6 +171,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
     InstalledModule? installed,
   }) {
     final id = installed?.id ?? marketplace!.id;
+    final update = installed == null ? null : controller.updateFor(installed);
     final active = controller.activeModuleId == id;
     final platforms =
         installed != null && installed.supportedPlatforms.isNotEmpty
@@ -254,6 +255,29 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
+                        if (update != null) ...[
+                          Tooltip(
+                            tooltip: (_) => TooltipContainer(
+                              child: Text('Update to ${update.version}'),
+                            ),
+                            child: Semantics(
+                              label: 'Update to ${update.version}',
+                              button: true,
+                              child: Button.secondary(
+                                key: ValueKey('module-update-$id'),
+                                style: AppTheme.controlButtonStyle(
+                                  const ButtonStyle.secondaryIcon(),
+                                ),
+                                onPressed:
+                                    controller.busy || installed.restartRequired
+                                    ? null
+                                    : () => controller.install(update),
+                                child: const Icon(LucideIcons.download),
+                              ),
+                            ),
+                          ),
+                          const Gap(AppSpacing.sm),
+                        ],
                         Tooltip(
                           tooltip: (_) => const TooltipContainer(
                             child: Text('Remove module'),
