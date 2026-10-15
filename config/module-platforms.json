@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "desktop": {
+    "provider": [
+      {
+        "platform": "macos",
+        "architecture": "aarch64",
+        "runner": "macos-14",
+        "prefix": "lib",
+        "suffix": "dylib",
+        "runtime": "libonnxruntime.dylib",
+        "program": "copypaste-module-qualification"
+      },
+      {
+        "platform": "windows",
+        "architecture": "x86_64",
+        "runner": "windows-2022",
+        "prefix": "",
+        "suffix": "dll",
+        "runtime": "onnxruntime.dll",
+        "program": "copypaste-module-qualification.exe"
+      },
+      {
+        "platform": "linux",
+        "architecture": "x86_64",
+        "runner": "ubuntu-24.04",
+        "prefix": "lib",
+        "suffix": "so",
+        "runtime": "libonnxruntime.so",
+        "program": "copypaste-module-qualification"
+      }
+    ],
+    "ocr": [
+      {
+        "platform": "macos",
+        "architecture": "aarch64",
+        "runner": "macos-14",
+        "library": "libcopypaste_module_ocr.dylib",
+        "program": "copypaste-module-qualification"
+      },
+      {
+        "platform": "windows",
+        "architecture": "x86_64",
+        "runner": "windows-2022",
+        "library": "copypaste_module_ocr.dll",
+        "program": "copypaste-module-qualification.exe"
+      },
+      {
+        "platform": "linux",
+        "architecture": "x86_64",
+        "runner": "ubuntu-24.04",
+        "library": "libcopypaste_module_ocr.so",
+        "program": "copypaste-module-qualification"
+      }
+    ]
+  }
+}

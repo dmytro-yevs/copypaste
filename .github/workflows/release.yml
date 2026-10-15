@@ -69,6 +69,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     outputs:
+      linux_evidence_run_id: ${{ inputs.linux_evidence_run_id || github.run_id }}
+      supabase_module_run_id: ${{ inputs.supabase_module_run_id || github.run_id }}
+      semantic_search_module_run_id: ${{ inputs.semantic_search_module_run_id || github.run_id }}
+      ocr_module_run_id: ${{ inputs.ocr_module_run_id || github.run_id }}
+      compositor_runtime_run_id: ${{ inputs.compositor_runtime_run_id || github.run_id }}
       version: ${{ steps.version.outputs.version }}
       build_number: ${{ steps.version.outputs.build_number }}
       android_version_code: ${{ steps.version.outputs.android_version_code }}
@@ -221,6 +226,26 @@ jobs:
             echo "compositor_runtime_required=$compositor_runtime_required"
             echo "linux_qualification_only=$linux_qualification_only"
           } >> "$GITHUB_OUTPUT"
+      - name: Validate external dependencies and signing configuration
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ steps.version.outputs.release_commit }}
+          BUILD: ${{ steps.version.outputs.reuse_qualified != 'true' && steps.version.outputs.linux_qualification_only != 'true' }}
+          PUBLISH: ${{ steps.version.outputs.publish }}
+          SUPABASE_MODULE_RUN_ID: ${{ inputs.supabase_module_run_id }}
+          SEMANTIC_SEARCH_MODULE_RUN_ID: ${{ inputs.semantic_search_module_run_id }}
+          OCR_MODULE_RUN_ID: ${{ inputs.ocr_module_run_id }}
+          LINUX_EVIDENCE_RUN_ID: ${{ inputs.linux_evidence_run_id }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: python3 scripts/release/preflight-sources.py
 
   linux-native-bootstrap:
     name: Run exact staged Linux native qualification
@@ -234,6 +259,67 @@ jobs:
       semantic_search_module_run_id: ${{ inputs.semantic_search_module_run_id }}
       ocr_module_run_id: ${{ inputs.ocr_module_run_id }}
       compositor_runtime_run_id: ${{ inputs.compositor_runtime_run_id }}
+
+  qualification-supabase:
+    name: Build Linux supabase module
+    needs: preflight
+    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && inputs.linux_evidence_run_id == '' && inputs.supabase_module_run_id == ''
+    uses: ./.github/workflows/provider-module.yml
+    permissions:
+      contents: write
+    with:
+      module: supabase
+      linux_only: true
+      publish: false
+      publish_marketplace: false
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+  qualification-semantic-search:
+    name: Build Linux semantic-search module
+    needs: preflight
+    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && inputs.linux_evidence_run_id == '' && inputs.semantic_search_module_run_id == ''
+    uses: ./.github/workflows/provider-module.yml
+    permissions:
+      contents: write
+    with:
+      module: semantic-search
+      linux_only: true
+      publish: false
+      publish_marketplace: false
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+  qualification-ocr:
+    name: Build Linux ocr module
+    needs: preflight
+    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && inputs.linux_evidence_run_id == '' && inputs.ocr_module_run_id == ''
+    uses: ./.github/workflows/ocr-module.yml
+    permissions:
+      contents: write
+    with:
+      linux_only: true
+      publish: false
+      publish_marketplace: false
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+  linux-native-current:
+    name: Qualify current Linux artifacts
+    needs: [preflight, linux, compositor-runtime-public, qualification-supabase, qualification-semantic-search, qualification-ocr]
+    if: ${{ always() && needs.preflight.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && inputs.linux_evidence_run_id == '' && (needs.linux.result == 'success' || inputs.linux_artifact_run_id != '') && needs.compositor-runtime-public.result == 'success' && (needs.qualification-supabase.result == 'success' || inputs.supabase_module_run_id != '') && (needs.qualification-semantic-search.result == 'success' || inputs.semantic_search_module_run_id != '') && (needs.qualification-ocr.result == 'success' || inputs.ocr_module_run_id != '') }}
+    uses: ./.github/workflows/linux-native-qualification.yml
+    with:
+      artifact_run_id: ${{ needs.preflight.outputs.linux_artifact_run_id }}
+      previous_artifact_run_id: ${{ inputs.previous_linux_artifact_run_id }}
+      supabase_module_run_id: ${{ needs.preflight.outputs.supabase_module_run_id }}
+      semantic_search_module_run_id: ${{ needs.preflight.outputs.semantic_search_module_run_id }}
+      ocr_module_run_id: ${{ needs.preflight.outputs.ocr_module_run_id }}
+      compositor_runtime_run_id: ${{ needs.preflight.outputs.compositor_runtime_run_id }}
+      public_runtime_run_id: ${{ github.run_id }}
 
   macos:
     needs: preflight
@@ -254,21 +340,7 @@ jobs:
           platform: macos
           profile: release
       - name: Create disposable release keychain
-        run: |
-          set -euo pipefail
-          state="$RUNNER_TEMP/copypaste-release-keychain-state"
-          keychain="$RUNNER_TEMP/copypaste-release.keychain-db"
-          password="$(openssl rand -base64 24)"
-          mkdir -p "$state"
-          security default-keychain -d user > "$state/default"
-          security list-keychains -d user > "$state/search-list"
-          security create-keychain -p "$password" "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p "$password" "$keychain"
-          security list-keychains -d user -s "$keychain"
-          security default-keychain -d user -s "$keychain"
-          echo "COPYPASTE_KEYCHAIN_TEST=1" >> "$GITHUB_ENV"
-          echo "COPYPASTE_KEYCHAIN_TEST_PATH=$keychain" >> "$GITHUB_ENV"
+        run: bash scripts/ci/macos-test-keychain.sh create
       - name: Build production macOS artifacts
         run: |
           chmod +x packaging/macos/selfsign.sh scripts/release/*.sh
@@ -276,30 +348,11 @@ jobs:
           scripts/release/build-cli-tarball.sh "${{ needs.preflight.outputs.version }}" arm64 --reuse-build
       - name: Install and run exact macOS artifact
         run: scripts/release/smoke-macos-production.sh "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-macos-arm64.dmg" "${{ needs.preflight.outputs.version }}"
-      - name: Verify macOS launch pairing regression
-        working-directory: apps/copypaste_flutter
-        run: xcodebuild test -project macos/Runner.xcodeproj -scheme Runner -configuration Debug -destination 'platform=macOS,arch=arm64' -only-testing:RunnerTests/AppDelegateLaunchTests -resultBundlePath "$RUNNER_TEMP/launch-pairing.xcresult"
       - name: Write exact-artifact receipt
         run: python3 scripts/release/write-artifact-receipt.py --platform macos --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-macos-arm64.dmg" --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --output dist/production-receipt.json
       - name: Restore keychain state
         if: always()
-        run: |
-          set -euo pipefail
-          state="$RUNNER_TEMP/copypaste-release-keychain-state"
-          keychain="$RUNNER_TEMP/copypaste-release.keychain-db"
-          python3 - "$state/default" "$state/search-list" <<'PY'
-          from pathlib import Path
-          import shlex
-          import subprocess
-          import sys
-          default = shlex.split(Path(sys.argv[1]).read_text(encoding="utf-8"), posix=True)
-          search = shlex.split(Path(sys.argv[2]).read_text(encoding="utf-8"), posix=True)
-          if len(default) != 1 or not search:
-              raise SystemExit("saved Keychain state is invalid")
-          subprocess.run(["security", "default-keychain", "-d", "user", "-s", default[0]], check=True)
-          subprocess.run(["security", "list-keychains", "-d", "user", "-s", *search], check=True)
-          PY
-          security delete-keychain "$keychain"
+        run: bash scripts/ci/macos-test-keychain.sh restore
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: production-macos
@@ -310,6 +363,37 @@ jobs:
             dist/*.tar.gz
             dist/*.tar.gz.sha256
             dist/production-receipt.json
+
+  macos-regression:
+    name: macos-regression
+    needs: preflight
+    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true'
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - id: flutter
+        run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-flutter
+        with:
+          version: ${{ steps.flutter.outputs.version }}
+      - uses: ./.github/actions/flutter-build-cache
+        with:
+          platform: macos
+          profile: debug
+      - name: Create disposable test keychain
+        run: bash scripts/ci/macos-test-keychain.sh create
+      - name: Run independent Xcode launch regression
+        working-directory: apps/copypaste_flutter
+        run: |
+          flutter pub get --enforce-lockfile
+          flutter build macos --config-only --debug --no-pub
+          xcodebuild test -project macos/Runner.xcodeproj -scheme Runner -configuration Debug -destination 'platform=macOS,arch=arm64' -only-testing:RunnerTests/AppDelegateLaunchTests -resultBundlePath "$RUNNER_TEMP/launch-pairing.xcresult"
+      - name: Restore test keychain
+        if: always()
+        run: bash scripts/ci/macos-test-keychain.sh restore
 
   android:
     needs: preflight
@@ -359,10 +443,9 @@ jobs:
           tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
           cd apps/copypaste_flutter
           flutter pub get --enforce-lockfile
-          flutter build apk --release --target-platform android-arm,android-arm64,android-x64 --build-name "${{ needs.preflight.outputs.version }}" --build-number "${{ needs.preflight.outputs.android_version_code }}"
+          flutter build apk --release --split-per-abi --no-pub --target-platform android-arm,android-arm64,android-x64 --build-name "${{ needs.preflight.outputs.version }}" --build-number "${{ needs.preflight.outputs.android_version_code }}"
           mkdir -p ../../dist
           cp build/app/outputs/flutter-apk/app-release.apk "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk"
-          flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 --build-name "${{ needs.preflight.outputs.version }}" --build-number "${{ needs.preflight.outputs.android_version_code }}"
           cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android-arm64.apk"
           cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android-armv7.apk"
           cd ../..
@@ -683,8 +766,8 @@ jobs:
 
   linux-full-parity-evidence:
     name: Linux full parity evidence gate
-    needs: [preflight, linux, compositor-runtime-public]
-    if: ${{ always() && needs.preflight.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_required == 'true' && (needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success') }}
+    needs: [preflight, linux, compositor-runtime-public, linux-native-current]
+    if: ${{ always() && needs.preflight.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && (needs.linux-native-current.result == 'success' || inputs.linux_evidence_run_id != '') && needs.preflight.outputs.linux_required == 'true' && (needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -694,7 +777,7 @@ jobs:
           ref: ${{ github.sha }}
       - name: Require an evidence source run
         env:
-          EVIDENCE_RUN_ID: ${{ inputs.linux_evidence_run_id }}
+          EVIDENCE_RUN_ID: ${{ needs.preflight.outputs.linux_evidence_run_id }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -711,7 +794,7 @@ jobs:
         with:
           name: linux-native-qualification
           path: native-evidence
-          run-id: ${{ inputs.linux_evidence_run_id }}
+          run-id: ${{ needs.preflight.outputs.linux_evidence_run_id }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -756,7 +839,7 @@ jobs:
       - name: Verify full exact-artifact Linux desktop evidence
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
-          EVIDENCE_RUN_ID: ${{ inputs.linux_evidence_run_id }}
+          EVIDENCE_RUN_ID: ${{ needs.preflight.outputs.linux_evidence_run_id }}
           ARTIFACT_RUN_ID: ${{ needs.preflight.outputs.linux_artifact_run_id }}
           COMPOSITOR_RUNTIME_REQUIRED: ${{ needs.preflight.outputs.compositor_runtime_required }}
           PREVIOUS_VERSION: ${{ steps.previous-linux.outputs.version }}
@@ -778,8 +861,8 @@ jobs:
           python3 scripts/release/verify-linux-native-qualification.py "${args[@]}"
 
   qualify:
-    needs: [preflight, macos, android, windows, linux, compositor-runtime-public, linux-full-parity-evidence]
-    if: ${{ always() && needs.preflight.result == 'success' && (needs.preflight.outputs.reuse_qualified == 'true' || (needs.macos.result == 'success' && needs.android.result == 'success' && needs.windows.result == 'success' && (needs.preflight.outputs.linux_required != 'true' || ((needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && needs.linux-full-parity-evidence.result == 'success' && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success'))))) }}
+    needs: [preflight, macos, macos-regression, android, windows, linux, compositor-runtime-public, linux-full-parity-evidence]
+    if: ${{ always() && needs.preflight.result == 'success' && (needs.preflight.outputs.reuse_qualified == 'true' || (needs.macos.result == 'success' && needs.macos-regression.result == 'success' && needs.android.result == 'success' && needs.windows.result == 'success' && (needs.preflight.outputs.linux_required != 'true' || ((needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && needs.linux-full-parity-evidence.result == 'success' && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success'))))) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -896,4 +979,25 @@ jobs:
           if ! git diff --cached --quiet; then
             git commit -m "Release CopyPaste $VERSION"
             git push origin HEAD:main
+          fi
+
+  release-required:
+    name: Release qualification required
+    needs: [preflight, qualify, linux-native-bootstrap]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Reject skipped or unsuccessful qualification
+        env:
+          PREFLIGHT: ${{ needs.preflight.result }}
+          QUALIFY: ${{ needs.qualify.result }}
+          BOOTSTRAP: ${{ needs.linux-native-bootstrap.result }}
+          QUALIFICATION_ONLY: ${{ needs.preflight.outputs.linux_qualification_only }}
+        run: |
+          [[ "$PREFLIGHT" == success ]]
+          if [[ "$QUALIFICATION_ONLY" == true ]]; then
+            [[ "$BOOTSTRAP" == success ]]
+          else
+            [[ "$QUALIFY" == success ]]
           fi
