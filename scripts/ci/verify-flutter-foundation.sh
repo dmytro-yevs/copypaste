@@ -18,7 +18,9 @@ actual="$(flutter --version | awk '$1 == "Flutter" { print $2; exit }')"
 [[ "$actual" == "$expected" ]] || { echo "Flutter $expected is required; found ${actual:-unknown}" >&2; exit 1; }
 cd "$APP"
 flutter pub get --enforce-lockfile
-dart format --output=none --set-exit-if-changed lib test
-flutter analyze
-flutter test
-flutter build "${COPYPASTE_FLUTTER_BUILD_TARGET:?missing Flutter build target}" --debug
+if [[ "${COPYPASTE_FLUTTER_STATIC_CHECKS:-1}" == 1 ]]; then
+    dart format --output=none --set-exit-if-changed lib test
+    flutter analyze --no-pub
+fi
+flutter test --no-pub
+flutter build "${COPYPASTE_FLUTTER_BUILD_TARGET:?missing Flutter build target}" --debug --no-pub

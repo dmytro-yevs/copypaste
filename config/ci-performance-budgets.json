@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "policy": "Investigation thresholds, not correctness gates. Successful native validation only; unknown cache cohorts never establish a speedup.",
+  "basis": "Initial successful p95 plus approximately 20 percent, rounded up. Fresh release budget requires a successful comparable lifecycle sample.",
+  "wall_clock_seconds": {
+    "ci.yml": 1860,
+    "codeql-scheduled.yml": 3456,
+    "linux-native-qualification.yml": 432,
+    "compositor-runtime.yml": 324,
+    "release.yml": null
+  }
+}
