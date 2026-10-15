@@ -7,14 +7,37 @@ on:
   merge_group:
     types: [checks_requested]
 
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
-  compositor-runtime-metadata:
-    name: Compositor runtime metadata
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+  changes:
+    name: Select required validation
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      native: ${{ steps.changes.outputs.native }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: python3 scripts/ci/changes.py
+
+  compositor-runtime-metadata:
+    needs: changes
+    name: Compositor runtime metadata
+    if: needs.changes.outputs.native == 'true' && (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     outputs:
       version: ${{ steps.identity.outputs.version }}
       commit: ${{ steps.identity.outputs.commit }}
@@ -22,6 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
+          persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha }}
       - id: identity
         run: |
@@ -40,8 +64,8 @@ jobs:
 
   compositor-runtime-producer:
     name: Compositor runtime producer
-    needs: compositor-runtime-metadata
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.compositor-runtime-metadata.result == 'success'
+    needs: [changes, compositor-runtime-metadata]
+    if: needs.changes.outputs.native == 'true' && (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.compositor-runtime-metadata.result == 'success')
     uses: ./.github/workflows/compositor-runtime.yml
     with:
       version: ${{ needs.compositor-runtime-metadata.outputs.version }}
@@ -52,9 +76,14 @@ jobs:
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
   rust-and-supabase:
+    if: needs.changes.outputs.native == 'true'
+    needs: changes
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.96"
@@ -77,10 +106,15 @@ jobs:
       - run: ./supabase/dev/verify-schema.sh
 
   macos-core:
+    if: needs.changes.outputs.native == 'true'
+    needs: changes
     name: macOS Rust capabilities
     runs-on: macos-14
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.96"
@@ -144,12 +178,17 @@ jobs:
           exit "$restore"
 
   windows-core:
+    if: needs.changes.outputs.native == 'true'
+    needs: changes
     name: Windows Rust capabilities
     runs-on: windows-2022
+    timeout-minutes: 60
     env:
       OPENSSL_SRC_PERL: 'C:\Strawberry\perl\bin\perl.exe'
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.96"
@@ -168,8 +207,11 @@ jobs:
           checked cargo +1.96 test -p copypaste-core --locked crypto::keystore:: -- --nocapture
 
   optional-modules:
+    if: needs.changes.outputs.native == 'true'
+    needs: changes
     name: Optional modules (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash
@@ -182,6 +224,8 @@ jobs:
           - { name: Linux x86_64, platform: linux, runner: ubuntu-24.04 }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.96"
@@ -201,8 +245,11 @@ jobs:
           "$RUNNER_TEMP/ocr-dictionary-tests.exe"
 
   flutter-foundation:
+    if: needs.changes.outputs.native == 'true'
+    needs: changes
     name: Flutter foundation (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash
@@ -216,6 +263,8 @@ jobs:
           - { name: Linux x86_64, platform: linux, runner: ubuntu-24.04, target: linux }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - id: flutter
         run: |
           set -euo pipefail
@@ -247,8 +296,11 @@ jobs:
           CMAKE_BUILD_PARALLEL_LEVEL: "2"
 
   linux-native-fixtures:
+    if: needs.changes.outputs.native == 'true'
+    needs: changes
     name: Linux native fixtures (${{ matrix.architecture }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash
@@ -259,6 +311,8 @@ jobs:
           - { architecture: x86_64, runner: ubuntu-24.04 }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.96"
@@ -276,8 +330,11 @@ jobs:
         run: ./scripts/ci/test-linux-native-fixtures.sh
 
   linux-mutter-bridges:
+    if: needs.changes.outputs.native == 'true'
+    needs: changes
     name: Mutter ${{ matrix.mutter }} bridge (${{ matrix.architecture }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -287,6 +344,8 @@ jobs:
           - { architecture: x86_64, runner: ubuntu-24.04 }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - name: Build Mutter 47 in a matching GNOME 47 dependency root
         if: matrix.mutter == 47
         run: packaging/linux/desktop-integrations/gnome-shell-extension/mutter/run-fedora47-build.sh "${{ matrix.architecture == 'x86_64' && 'linux/amd64' || 'linux/arm64' }}"
@@ -316,9 +375,11 @@ jobs:
         run: ./verify-patch.sh "${{ matrix.mutter }}" "$RUNNER_TEMP/mutter-source" "$RUNNER_TEMP/mutter-build"
 
   linux-pr-release-candidate:
+    needs: changes
     name: Linux release candidate (${{ matrix.architecture }})
-    if: github.event_name == 'pull_request'
+    if: needs.changes.outputs.native == 'true' && (github.event_name == 'pull_request')
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     defaults:
       run:
         shell: bash
@@ -332,6 +393,8 @@ jobs:
             appimagetool_sha256: 95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - id: flutter
         run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/setup-flutter
@@ -395,8 +458,11 @@ jobs:
             dist/CopyPaste-v*-linux-${{ matrix.architecture }}.runtime-baseline.json
 
   linux-package-fixtures:
+    if: needs.changes.outputs.native == 'true'
+    needs: changes
     name: Linux package fixtures (${{ matrix.architecture }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -404,6 +470,8 @@ jobs:
           - { architecture: x86_64, runner: ubuntu-24.04 }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - name: Build and extract every Linux package format
         env:
           COPYPASTE_LINUX_PACKAGE_TEST_ARCHITECTURES: ${{ matrix.architecture }}
@@ -411,3 +479,21 @@ jobs:
         run: scripts/release/test-linux-packages.sh
       - name: Install and remove the RPM fixture through Fedora DNF
         run: scripts/release/test-linux-rpm.sh "$RUNNER_TEMP/linux-package-fixtures/CopyPaste-v1.2.3-linux-x86_64.rpm" 1.2.3
+
+  required:
+    name: CI required
+    needs: [changes, compositor-runtime-metadata, compositor-runtime-producer, rust-and-supabase, macos-core, windows-core, optional-modules, flutter-foundation, linux-native-fixtures, linux-mutter-bridges, linux-pr-release-candidate, linux-package-fixtures]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Require every selected validation job to succeed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          NATIVE: ${{ needs.changes.outputs.native }}
+          IS_PR: ${{ github.event_name == 'pull_request' }}
+          TRUSTED_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+        run: python3 scripts/ci/changes.py --verify

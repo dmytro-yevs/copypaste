@@ -9,6 +9,7 @@ permissions:
 jobs:
   android:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -18,6 +19,8 @@ jobs:
           - { architecture: x86_64, target: x86_64-linux-android }
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: "1.96"
@@ -39,7 +42,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           version="$(python3 -c 'import json; print(json.load(open("modules/sms-codes/module.json"))["version"])')"
-          python3 scripts/modules/package.py --module-dir modules/sms-codes --library modules/sms-codes/target/${{ matrix.target }}/release/libcopypaste_module_sms_codes.so --platform android --architecture ${{ matrix.architecture }} --output dist/CopyPasteModule-copypaste.sms-codes-v${version}-android-${{ matrix.architecture }}.cpmodule
+          python3 scripts/modules/package.py --module-dir modules/sms-codes --library modules/sms-codes/target/${{ matrix.target }}/release/libcopypaste_module_sms_codes.so --platform android --architecture ${{ matrix.architecture }} --output "dist/CopyPasteModule-copypaste.sms-codes-v${version}-android-${{ matrix.architecture }}.cpmodule"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: sms-codes-android-${{ matrix.architecture }}
