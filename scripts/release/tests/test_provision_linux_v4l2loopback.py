@@ -2,6 +2,7 @@ import importlib.util
 import os
 from pathlib import Path
 import stat
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -15,6 +16,34 @@ SPEC.loader.exec_module(tool)
 
 
 class ProvisionLinuxV4L2Test(unittest.TestCase):
+    def scenario_reset(self, succeeds):
+        script = (ROOT / "scripts/release/run-linux-native-scenarios.sh").read_text()
+        start = script.index('if [[ -n "${COPYPASTE_QUALIFICATION_V4L2_STATE:-}" ]]')
+        end = script.index('\npython3 ', start)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stub = root / "python3"
+            stub.write_text("#!/bin/sh\necho 'package preparation output'\necho 'device preparation detail' >&2\nexit " + ("0" if succeeds else "7") + "\n")
+            stub.chmod(0o755)
+            environment = {**os.environ, "PATH": str(root) + os.pathsep + os.environ["PATH"],
+                           "TMPDIR": directory, "ROOT": str(ROOT), "COPYPASTE_QUALIFICATION_V4L2_STATE": "owned-state"}
+            result = subprocess.run(["bash", "-c", "set -euo pipefail\n" + script[start:end]],
+                                    env=environment, capture_output=True, text=True)
+            self.assertEqual(list(root.iterdir()), [stub])
+            return result
+
+    def test_successful_camera_reset_does_not_pollute_scenario_protocol(self):
+        result = self.scenario_reset(True)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
+
+    def test_camera_reset_failure_stays_fatal_and_preserves_complete_diagnostics(self):
+        result = self.scenario_reset(False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "package preparation output\ndevice preparation detail\n")
+
     def test_reset_checks_headless_scope_before_any_device_mutation(self):
         with mock.patch.object(tool, "require_ci", side_effect=RuntimeError("headless CI")), \
              mock.patch.object(tool, "cleanup") as cleanup, \
