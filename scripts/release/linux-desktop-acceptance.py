@@ -17,6 +17,7 @@ import os
 import re
 import select
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -357,6 +358,14 @@ def parse_capture_command(raw: str) -> list[str]:
     return value
 
 
+def read_capture_command(path: Path) -> list[str]:
+    details = path.lstat()
+    if (not stat.S_ISREG(details.st_mode) or details.st_uid != os.getuid()
+            or stat.S_IMODE(details.st_mode) != 0o600 or not 0 < details.st_size <= 64 * 1024):
+        raise AcceptanceError("capture command must be a private regular file owned by the job user")
+    return parse_capture_command(path.read_text(encoding="utf-8"))
+
+
 def history_item_count(cli: Path, environment: dict[str, str]) -> int:
     """Read the daemon's redacted history count through the packaged CLI."""
     response = require_ok(
@@ -685,7 +694,7 @@ def qualify(args: argparse.Namespace) -> None:
         window_evidence = {"observer": "compositor_dbus_signal", "hide_show": "dbusmenu_open"}
 
     notification, capture, history_count = run_notification_capture(
-        environment, args.cli, args.socket, parse_capture_command(args.capture_command), args.gui_pid,
+        environment, args.cli, args.socket, read_capture_command(args.capture_command_file), args.gui_pid,
     )
     if notification.notification_id is None:
         raise AcceptanceError("desktop notification server did not return a notification id")
@@ -722,8 +731,8 @@ def main() -> int:
     parser.add_argument("--session", choices=("x11", "wayland"), required=True)
     parser.add_argument("--cli", type=Path, required=True)
     parser.add_argument("--socket", type=Path, required=True)
-    parser.add_argument("--capture-command", required=True,
-                        help="JSON argv for the real controlled clipboard-capture trigger")
+    parser.add_argument("--capture-command-file", required=True, type=Path,
+                        help="Private JSON argv file for the real controlled clipboard-capture trigger")
     parser.add_argument("--evidence-dir", type=Path, required=True)
     args = parser.parse_args()
     try:

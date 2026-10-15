@@ -405,11 +405,15 @@ def require_desktop_acceptance(args, *, gui_pid, cli, environment, workspace, so
     """Observe the owned GUI tray, close-to-tray, and accepted capture notification."""
     tray_helper = require_helper(args.wayland_desktop_acceptance_helper, "Linux desktop acceptance helper")
     capture_command = desktop_acceptance_capture_command(workspace, environment)
+    command_file = args.evidence_dir / "desktop-capture-command.json"
+    with command_file.open("x", encoding="utf-8") as stream:
+        os.chmod(command_file, 0o600)
+        json.dump(capture_command, stream, separators=(",", ":"))
     tray_result = run(
         [
             sys.executable, str(tray_helper), "--gui-pid", str(gui_pid), "--desktop", args.desktop,
             "--session", args.session, "--cli", str(cli), "--socket", str(socket_path),
-            "--capture-command", json.dumps(capture_command, separators=(",", ":")),
+            "--capture-command-file", str(command_file),
             "--evidence-dir", str(args.evidence_dir),
         ],
         env=environment,

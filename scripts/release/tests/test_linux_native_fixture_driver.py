@@ -1,6 +1,8 @@
 import importlib.util
 import hashlib
 import io
+import contextlib
+import runpy
 import json
 import os
 from pathlib import Path
@@ -57,6 +59,31 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
                 path.write_text(json.dumps({**receipt, **changed}))
                 with self.subTest(changed=changed), self.assertRaises(RuntimeError):
                     driver.desktop_acceptance_receipt(path, desktop="GNOME", session="x11", gui_pid=4321)
+
+    def test_desktop_command_trace_stays_within_protocol_argument_limits(self):
+        producer = runpy.run_path(str(ROOT / "scripts/release/produce-linux-native-qualification.py"))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = root / "helper.py"
+            helper.write_text("# owned observer\n")
+            receipt = self.desktop_receipt()
+            receipt.update(session="x11", window={"id": "12345", "hide_show": "dbusmenu_open"})
+            (root / "linux-desktop-acceptance.json").write_text(json.dumps(receipt))
+            args = SimpleNamespace(session="x11", desktop="GNOME", evidence_dir=root,
+                                   wayland_desktop_acceptance_helper=helper)
+            capture = ["python3", str(driver.PROVIDER), "--helper", "x" * 160, "--manifest", "y" * 160,
+                       "--ready-file", "z" * 160, "--activity-log", "a" * 160]
+            output = io.StringIO()
+            with mock.patch.object(driver, "desktop_acceptance_capture_command", return_value=capture), \
+                 mock.patch.object(driver, "run", side_effect=lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0)), \
+                 contextlib.redirect_stdout(output):
+                driver.require_desktop_acceptance(args, gui_pid=4321, cli=Path("cli"), environment={},
+                                                  workspace=root, socket_path=root / "socket")
+            rows = producer["command_rows"](output.getvalue(), {"tray_window_notification"})
+            self.assertEqual(len(rows), 1)
+            command_file = root / "desktop-capture-command.json"
+            self.assertEqual(json.loads(command_file.read_text()), capture)
+            self.assertEqual(stat.S_IMODE(command_file.stat().st_mode), 0o600)
 
     def test_x11_desktop_helper_must_complete_before_tray_assertion_is_emitted(self):
         with tempfile.TemporaryDirectory() as directory:
