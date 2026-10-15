@@ -47,16 +47,29 @@ class MainActivity : FlutterActivity() {
 
         @Keep
         @JvmStatic
-        fun writeClipboardText(text: String, contentType: String): Boolean {
+        fun writeClipboardText(text: String, contentType: String, received: Boolean): Boolean {
             val context = instance ?: return false
-            return AndroidClipboardWriter.writeText(context, text, contentType)
+            return AndroidClipboardWriter.writeText(context, text, contentType).also { written ->
+                if (written && received) runCatching {
+                    AndroidCaptureFeedback.onCaptured(
+                        context, CaptureFeedbackPreview(AndroidCaptureFeedback.textPreview(text)),
+                    )
+                }
+            }
         }
 
         @Keep
         @JvmStatic
-        fun writeClipboardBinary(bytes: ByteArray, filename: String, mimeType: String): Boolean {
+        fun writeClipboardBinary(bytes: ByteArray, filename: String, mimeType: String, received: Boolean): Boolean {
             val context = instance ?: return false
-            return AndroidClipboardWriter.writeBinary(context, bytes, filename, mimeType)
+            return AndroidClipboardWriter.writeBinary(context, bytes, filename, mimeType).also { written ->
+                if (written && received) {
+                    val preview = runCatching {
+                        AndroidCaptureFeedback.binaryPreview(bytes, filename, mimeType)
+                    }.getOrNull()
+                    runCatching { AndroidCaptureFeedback.onCaptured(context, preview) }
+                }
+            }
         }
 
         @Volatile

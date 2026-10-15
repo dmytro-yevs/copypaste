@@ -55,6 +55,16 @@ pub trait ClipboardWriter: Send + Sync {
         payload: &ClipboardPayload,
         content_type: &str,
     ) -> Result<(), ClipboardWriteError>;
+
+    /// Write received content and acknowledge success through the native host,
+    /// including when no Flutter notification subscriber is running.
+    fn write_received(
+        &self,
+        payload: &ClipboardPayload,
+        content_type: &str,
+    ) -> Result<(), ClipboardWriteError> {
+        self.write(payload, content_type)
+    }
 }
 
 /// Optional application identity captured by a native host with the payload.
@@ -146,7 +156,7 @@ impl Runtime {
                         &clipboard_keyring,
                         row,
                         || settings,
-                        |payload| clipboard_writer.write(payload, &row.content_type),
+                        |payload| clipboard_writer.write_received(payload, &row.content_type),
                     );
                 });
             }),
@@ -1754,6 +1764,28 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct ReceivingClipboard {
+        writes: RecordingClipboard,
+        acknowledgements: Mutex<usize>,
+    }
+
+    impl ClipboardWriter for ReceivingClipboard {
+        fn write(&self, payload: &ClipboardPayload, kind: &str) -> Result<(), ClipboardWriteError> {
+            self.writes.write(payload, kind)
+        }
+
+        fn write_received(
+            &self,
+            payload: &ClipboardPayload,
+            kind: &str,
+        ) -> Result<(), ClipboardWriteError> {
+            self.write(payload, kind)?;
+            *self.acknowledgements.lock().unwrap() += 1;
+            Ok(())
+        }
+    }
+
     #[tokio::test]
     async fn explicit_file_import_publishes_each_named_record_without_capture_admission() {
         let (runtime, dir) = fixture();
@@ -2151,7 +2183,7 @@ mod tests {
     #[test]
     fn the_opened_runtime_applies_received_content_through_its_platform_writer() {
         let dir = tempfile::tempdir().unwrap();
-        let clipboard = Arc::new(RecordingClipboard::default());
+        let clipboard = Arc::new(ReceivingClipboard::default());
         let runtime =
             Runtime::open_with_clipboard(dir.path(), "receiver", 0, clipboard.clone()).unwrap();
         let incoming = copypaste_core::RemoteVersion {
@@ -2168,7 +2200,13 @@ mod tests {
             app_name: None,
         };
         assert!(runtime.source.apply_version(&incoming).unwrap());
-        assert_eq!(*clipboard.0.lock().unwrap(), ["text:from another device"]);
+        assert_eq!(
+            *clipboard.writes.0.lock().unwrap(),
+            ["text:from another device"]
+        );
+        assert_eq!(*clipboard.acknowledgements.lock().unwrap(), 1);
+        assert!(!runtime.source.apply_version(&incoming).unwrap());
+        assert_eq!(*clipboard.acknowledgements.lock().unwrap(), 1);
         runtime
             .settings
             .apply(&copypaste_ipc::ConfigPatch {
@@ -2183,11 +2221,15 @@ mod tests {
                 ..incoming
             })
             .unwrap());
-        assert_eq!(clipboard.0.lock().unwrap().len(), 1);
+        assert_eq!(clipboard.writes.0.lock().unwrap().len(), 1);
+        assert_eq!(*clipboard.acknowledgements.lock().unwrap(), 1);
         assert_eq!(
             runtime.store.get("incoming").unwrap().unwrap().created_at,
             200
         );
+        assert!(runtime.copy(1, "incoming", false).ok);
+        assert_eq!(clipboard.writes.0.lock().unwrap().len(), 2);
+        assert_eq!(*clipboard.acknowledgements.lock().unwrap(), 1);
     }
 
     #[test]
