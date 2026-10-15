@@ -35,7 +35,8 @@
       "linux-full-parity-evidence": "Linux full parity evidence gate",
       "qualify": "qualify",
       "publish": "publish",
-      "release-required": "Release qualification required"
+      "release-required": "Release qualification required",
+      "policy": "Release CI policy"
     },
     "codeql-scheduled.yml": {
       "analyze-no-build": "analyze-no-build",
@@ -86,6 +87,7 @@
     "release.yml": {
       "linux-native-current": [
         "preflight",
+        "policy",
         "linux",
         "compositor-runtime-public",
         "qualification-supabase",
@@ -94,12 +96,14 @@
       ],
       "linux-full-parity-evidence": [
         "preflight",
+        "policy",
         "linux",
         "compositor-runtime-public",
         "linux-native-current"
       ],
       "qualify": [
         "preflight",
+        "policy",
         "macos",
         "macos-regression",
         "android",
@@ -124,9 +128,9 @@
       "required": "${{ always() }}"
     },
     "release.yml": {
-      "linux-native-current": "${{ always() && needs.preflight.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && inputs.linux_evidence_run_id == '' && (needs.linux.result == 'success' || inputs.linux_artifact_run_id != '') && needs.compositor-runtime-public.result == 'success' && (needs.qualification-supabase.result == 'success' || inputs.supabase_module_run_id != '') && (needs.qualification-semantic-search.result == 'success' || inputs.semantic_search_module_run_id != '') && (needs.qualification-ocr.result == 'success' || inputs.ocr_module_run_id != '') }}",
-      "linux-full-parity-evidence": "${{ always() && needs.preflight.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && (needs.linux-native-current.result == 'success' || inputs.linux_evidence_run_id != '') && needs.preflight.outputs.linux_required == 'true' && (needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success') }}",
-      "qualify": "${{ always() && needs.preflight.result == 'success' && (needs.preflight.outputs.reuse_qualified == 'true' || (needs.macos.result == 'success' && needs.macos-regression.result == 'success' && needs.android.result == 'success' && needs.windows.result == 'success' && (needs.preflight.outputs.linux_required != 'true' || ((needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && needs.linux-full-parity-evidence.result == 'success' && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success'))))) }}",
+      "linux-native-current": "${{ always() && needs.preflight.result == 'success' && needs.policy.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && inputs.linux_evidence_run_id == '' && (needs.linux.result == 'success' || inputs.linux_artifact_run_id != '') && needs.compositor-runtime-public.result == 'success' && (needs.qualification-supabase.result == 'success' || inputs.supabase_module_run_id != '') && (needs.qualification-semantic-search.result == 'success' || inputs.semantic_search_module_run_id != '') && (needs.qualification-ocr.result == 'success' || inputs.ocr_module_run_id != '') }}",
+      "linux-full-parity-evidence": "${{ always() && needs.preflight.result == 'success' && needs.policy.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && (needs.linux-native-current.result == 'success' || inputs.linux_evidence_run_id != '') && needs.preflight.outputs.linux_required == 'true' && (needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success') }}",
+      "qualify": "${{ always() && needs.preflight.result == 'success' && needs.policy.result == 'success' && (needs.preflight.outputs.reuse_qualified == 'true' || (needs.macos.result == 'success' && needs.macos-regression.result == 'success' && needs.android.result == 'success' && needs.windows.result == 'success' && (needs.preflight.outputs.linux_required != 'true' || ((needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && needs.linux-full-parity-evidence.result == 'success' && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success'))))) }}",
       "publish": "${{ always() && needs.preflight.result == 'success' && needs.qualify.result == 'success' && needs.preflight.outputs.publish == 'true' }}",
       "release-required": "${{ always() }}"
     }
