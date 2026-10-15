@@ -166,7 +166,7 @@ def verify_compositor_runtime(binding, receipt, native_format):
     if (not isinstance(binding, dict) or set(binding) != required or binding.get("schema") != 1
             or binding.get("commit") != receipt.get("commit") or binding.get("desktop") != receipt.get("desktop")
             or binding.get("architecture") != receipt.get("architecture") or not isinstance(environment, dict)
-            or binding.get("distribution") != environment.get("distribution") or binding.get("format") != native_format
+            or binding.get("distribution") != {"id": environment.get("distribution"), "version": environment.get("distribution_version")} or binding.get("format") != native_format
             or not isinstance(binding.get("producer_run_id"), str) or not re.fullmatch(r"[1-9][0-9]*", binding["producer_run_id"])
             or not isinstance(binding.get("runtime_id"), str) or not binding["runtime_id"]):
         raise ValueError("compositor runtime binding differs from its scenario")
