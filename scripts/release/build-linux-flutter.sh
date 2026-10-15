@@ -52,7 +52,7 @@ cargo build --jobs 2 --manifest-path "$ROOT/Cargo.toml" --release --locked \
 
 cd "$APP_ROOT"
 flutter pub get --enforce-lockfile
-flutter build linux --release --build-name "$VERSION" --build-number "$BUILD_NUMBER"
+flutter build linux --release --no-pub --build-name "$VERSION" --build-number "$BUILD_NUMBER"
 
 mapfile -t bundles < <(find build/linux -type d -path '*/release/bundle' -print | sort)
 [[ "${#bundles[@]}" == 1 ]] || {
