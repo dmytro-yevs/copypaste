@@ -29,13 +29,13 @@ if (-not $pubspecMatch.Success -or $pubspecMatch.Groups[1].Value -cne "$Version+
 
 Push-Location $root
 try {
-    & cargo build --release --locked -p copypaste-daemon -p copypaste-cli
+    & python (Join-Path $root "scripts/ci/timed.py") compilation cargo build --release --locked -p copypaste-daemon -p copypaste-cli
     if ($LASTEXITCODE -ne 0) { throw "Rust release build failed" }
     Push-Location $appRoot
     try {
-        & flutter pub get --enforce-lockfile
+        & python (Join-Path $root "scripts/ci/timed.py") dependencies flutter pub get --enforce-lockfile
         if ($LASTEXITCODE -ne 0) { throw "Flutter dependency resolution failed" }
-        & flutter build windows --release --no-pub --build-name $Version --build-number $BuildNumber
+        & python (Join-Path $root "scripts/ci/timed.py") compilation flutter build windows --release --no-pub --build-name $Version --build-number $BuildNumber
         if ($LASTEXITCODE -ne 0) { throw "Flutter Windows release build failed" }
     } finally {
         Pop-Location
