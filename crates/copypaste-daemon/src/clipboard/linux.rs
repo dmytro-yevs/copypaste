@@ -1621,7 +1621,15 @@ mod tests {
             std::fs::write(&payload, b"fixture text").expect("provider payload");
             let helper =
                 std::env::var("COPYPASTE_GTK_CLIPBOARD_PROVIDER").expect("GTK provider helper");
+            eprintln!(
+                "GTK_PROVIDER_SPAWN {}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("fixture wall clock")
+                    .as_micros()
+            );
             let child = ProcessCommand::new(helper)
+                .env("COPYPASTE_GTK_PROVIDER_DIAGNOSTICS", "1")
                 .args([
                     "--application-id",
                     "org.copypaste.QualificationSource",
@@ -1666,6 +1674,10 @@ mod tests {
         fn drop(&mut self) {
             let _ = self.child.kill();
             let _ = self.child.wait();
+            eprintln!(
+                "GTK provider startup diagnostics: {}",
+                gtk_provider_diagnostics(&self._directory.path().join("stderr"))
+            );
         }
     }
 
