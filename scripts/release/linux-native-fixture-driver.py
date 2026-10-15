@@ -839,8 +839,20 @@ def require_capture(cli, environment, workspace, evidence_dir, session, mime, pa
     before = cli_item_count(status(cli, environment))
     before_ids = {item.get("id") for item in list_items(cli, environment)}
     with clipboard_provider(workspace, evidence_dir, assertion, {mime: payload}, environment):
-        wait_for_count(cli, environment, before + 1)
-        item = newest_item(list_items(cli, environment), before_ids, content_type)
+        deadline = time.monotonic() + CAPTURE_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            items = list_items(cli, environment)
+            candidates = [item for item in items if item.get('id') not in before_ids and item.get('content_type') == content_type]
+            if content_type == 'text':
+                candidates = [item for item in candidates if item.get('content') == payload.decode('utf-8')]
+            if candidates:
+                item = candidates[0]
+                if cli_item_count(status(cli, environment)) < before + 1:
+                    raise RuntimeError('fixture capture did not increase history count')
+                break
+            time.sleep(.15)
+        else:
+            raise RuntimeError('native backend did not retain the requested fixture within its capture deadline')
         if item.get('source_app_bundle_id') != SOURCE_APPLICATION_ID:
             print('COPYPASTE_CLIPBOARD_DIAGNOSTIC ' + json.dumps({
                 'requested_payload_matches': item.get('content') == payload.decode('utf-8', 'replace'),
