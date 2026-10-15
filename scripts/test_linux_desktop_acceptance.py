@@ -132,7 +132,7 @@ class FakeGio:
 class LinuxDesktopAcceptanceTest(unittest.TestCase):
     gui_pid = 4321
 
-    def test_x11_close_uses_the_focused_gui_close_action_and_observes_tray_restore(self):
+    def test_x11_close_addresses_the_owned_window_and_observes_tray_restore(self):
         args = SimpleNamespace(desktop="GNOME", session="x11", gui_pid=4321, cli=Path("cli"),
                                socket=Path("socket"), capture_command_file=Path("command.json"), evidence_dir=Path("evidence"))
         command = MODULE.CommandResult(("busctl",), 0, "", "")
@@ -153,23 +153,21 @@ class LinuxDesktopAcceptanceTest(unittest.TestCase):
              mock.patch.object(MODULE, "write_evidence") as evidence:
             MODULE.qualify(args)
         self.assertEqual([call.args[0] for call in calls.call_args_list], [
-            ["xdotool", "windowactivate", "--sync", "12345"], ["xdotool", "getwindowfocus"],
-            ["xdotool", "key", "--clearmodifiers", "alt+F4"],
+            ["wmctrl", "-i", "-c", "0x3039"],
         ])
         self.assertEqual([call.args[2] for call in mapped.call_args_list], ["IsUnMapped", "IsViewable"])
         self.assertEqual(evidence.call_args.args[1]["window"], {"id": "12345", "hide_show": "dbusmenu_open"})
 
-    def test_x11_close_refuses_to_send_keys_when_another_window_owns_focus(self):
+    def test_x11_close_refuses_a_window_owned_by_another_process(self):
         args = SimpleNamespace(desktop="GNOME", session="x11", gui_pid=4321)
-        run = mock.Mock(return_value=MODULE.CommandResult(("xdotool",), 0, "99999\n", ""))
+        run = mock.Mock(side_effect=[MODULE.CommandResult(("xdotool",), 0, "12345\n", ""),
+                                    MODULE.CommandResult(("xprop",), 0, "_NET_WM_PID(CARDINAL) = 9999\n", "")])
         with mock.patch.multiple(MODULE, require_program=mock.Mock(), expect_tray=mock.Mock(return_value="tray"),
-                                 dbus_menu_layout=mock.Mock(return_value=[]), menu_item_id=mock.Mock(return_value=7),
-                                 x11_window_for_pid=mock.Mock(return_value="12345"),
-                                 x11_map_state=mock.Mock(return_value="IsViewable"), run=run), \
+                                 dbus_menu_layout=mock.Mock(return_value=[]), menu_item_id=mock.Mock(return_value=7), run=run), \
              mock.patch.object(MODULE, "invoke_menu_item") as menu:
-            with self.assertRaisesRegex(MODULE.AcceptanceError, "did not own focus"):
+            with self.assertRaisesRegex(MODULE.AcceptanceError, "not owned by the GUI"):
                 MODULE.qualify(args)
-        self.assertFalse(any("key" in call.args[0] for call in run.call_args_list))
+        self.assertFalse(any(call.args[0][0] == "wmctrl" for call in run.call_args_list))
         menu.assert_not_called()
 
     def test_x11_discovery_combines_exact_title_with_gui_pid_instead_of_matching_either(self):
