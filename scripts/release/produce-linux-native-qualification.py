@@ -417,7 +417,7 @@ def staged_directory(path: Path, label: str) -> Path:
     return resolved
 
 
-def compositor_runtime_binding(path: Path, commit: str, desktop: str, architecture: str, distribution: str, format_name: str) -> dict:
+def compositor_runtime_binding(path: Path, commit: str, desktop: str, architecture: str, distribution: str, distribution_version: str, format_name: str) -> dict:
     try:
         resolved = path.resolve(strict=True)
     except FileNotFoundError as error:
@@ -432,7 +432,7 @@ def compositor_runtime_binding(path: Path, commit: str, desktop: str, architectu
     if not isinstance(binding, dict) or set(binding) != required or binding.get("schema") != 1:
         raise ValueError("compositor runtime binding schema is invalid")
     if (binding.get("commit") != commit or binding.get("desktop") != desktop
-            or binding.get("architecture") != architecture or binding.get("distribution") != distribution
+            or binding.get("architecture") != architecture or binding.get("distribution") != {"id": distribution, "version": distribution_version}
             or binding.get("format") != format_name or not isinstance(binding.get("runtime_id"), str)
             or not binding["runtime_id"] or not isinstance(binding.get("producer_run_id"), str)
             or not re.fullmatch(r"[1-9][0-9]*", binding["producer_run_id"])):
@@ -519,7 +519,7 @@ def produce(args: argparse.Namespace) -> Path:
     environment = runtime_environment()
     binding = compositor_runtime_binding(
         args.compositor_runtime_binding, args.commit, args.desktop, args.architecture,
-        environment["distribution"], installation["formats"][1],
+        environment["distribution"], environment["distribution_version"], installation["formats"][1],
     )
     compositor_session = compositor_session_record(args.compositor_runtime_binding, binding, args.session, output)
     for argv in (installation["appimage_extract_argv"], installation["native_install_argv"]):

@@ -183,7 +183,9 @@ def binding(root: Path, desktop: str, architecture: str, commit: str, producer_r
     if any(receipt.get(key) != producer.get(key) for key in ("runtime_id", "architecture", "desktop", "distribution", "source", "glibc_floor")):
         raise ValueError("immutable runtime receipt differs from producer receipt")
     verify_baseline_source(desktop, receipt["source"])
-    return {"schema": 1, "producer_run_id": producer_run_id, "commit": commit, "runtime_id": producer["runtime_id"], "desktop": desktop, "architecture": architecture, "distribution": producer["distribution"], "format": package_format, "package": package, "runtime_receipt": runtime}
+    # Public staging prefixes this unchanged receipt with its package name.
+    public_runtime = {**runtime, "name": f"{package['name']}.runtime-receipt.json"}
+    return {"schema": 1, "producer_run_id": producer_run_id, "commit": commit, "runtime_id": producer["runtime_id"], "desktop": desktop, "architecture": architecture, "distribution": producer["distribution"], "format": package_format, "package": package, "runtime_receipt": public_runtime}
 
 
 def verify_installed(binding_value: dict, installed_root: Path) -> None:
