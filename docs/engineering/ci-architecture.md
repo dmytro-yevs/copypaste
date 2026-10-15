@@ -95,6 +95,9 @@ digest, and only then promotes the release. Existing stable assets are never
 overwritten. An interrupted draft upload or unchanged Homebrew update is
 idempotent. GitHub publication and the separate Homebrew repository cannot be
 one atomic transaction; a failed tap update resumes after the verified release.
+Work-producing aggregators and publication use `!cancelled()` with explicit
+dependency success checks. Cancellation therefore stops new work and publication;
+`always()` is reserved for cleanup and the final status diagnostic.
 
 Artifact transfers use the shared verified downloader. A failed-job rerun can
 retain several artifacts with the same name, and artifact IDs are not a time
