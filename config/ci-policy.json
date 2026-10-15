@@ -130,5 +130,27 @@
       "publish": "${{ always() && needs.preflight.result == 'success' && needs.qualify.result == 'success' && needs.preflight.outputs.publish == 'true' }}",
       "release-required": "${{ always() }}"
     }
+  },
+  "required_concurrency": {
+    "release.yml": {
+      "group": "production-release-${{ github.sha }}",
+      "cancel-in-progress": false
+    },
+    "provider-module.yml": {
+      "group": "provider-module-${{ inputs.module }}${{ inputs.linux_only && format('-qualification-{0}', github.run_id) || '' }}",
+      "cancel-in-progress": false
+    },
+    "ocr-module.yml": {
+      "group": "ocr-module-release${{ inputs.linux_only && format('-qualification-{0}', github.run_id) || '' }}",
+      "cancel-in-progress": false
+    }
+  },
+  "required_job_concurrency": {
+    "release.yml": {
+      "publish": {
+        "group": "copypaste-stable-publication",
+        "cancel-in-progress": false
+      }
+    }
   }
 }

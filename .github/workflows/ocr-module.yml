@@ -23,7 +23,7 @@ on:
         default: true
 
 concurrency:
-  group: ocr-module-release-${{ github.ref }}-${{ inputs.linux_only && github.run_id || 'standalone' }}
+  group: ocr-module-release${{ inputs.linux_only && format('-qualification-{0}', github.run_id) || '' }}
   cancel-in-progress: false
 
 permissions:
