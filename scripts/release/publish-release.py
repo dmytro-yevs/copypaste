@@ -9,8 +9,8 @@ import re
 import subprocess
 
 
-def missing_assets(directory: Path, release: dict) -> list[Path]:
-    if release.get("draft") is not False or release.get("prerelease") is not False:
+def missing_assets(directory: Path, release: dict, *, allow_draft=False) -> list[Path]:
+    if (release.get("draft") is not False and not (allow_draft and release.get("draft") is True)) or release.get("prerelease") is not False:
         raise ValueError("existing release is not a published stable release")
     paths = sorted(directory.iterdir())
     if not paths or any(not path.is_file() or path.is_symlink() for path in paths):
@@ -35,13 +35,7 @@ def missing_assets(directory: Path, release: dict) -> list[Path]:
     return missing
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", required=True)
-    parser.add_argument("--repository", required=True)
-    parser.add_argument("--artifacts", required=True, type=Path)
-    parser.add_argument("--notes", required=True, type=Path)
-    args = parser.parse_args()
+def publish(args) -> None:
     if (
         not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", args.version)
         or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.repository)
@@ -60,7 +54,7 @@ def main() -> None:
     if len(matching) > 1:
         raise ValueError("release identity is ambiguous")
     if matching:
-        paths = missing_assets(args.artifacts, matching[0])
+        paths = missing_assets(args.artifacts, matching[0], allow_draft=True)
         if paths:
             subprocess.run([
                 "gh", "release", "upload", tag, "--repo", args.repository,
@@ -72,15 +66,32 @@ def main() -> None:
         })
         subprocess.run([
             "gh", "release", "create", tag, "--repo", args.repository,
-            "--verify-tag", "--latest", "--title", f"CopyPaste {args.version}",
+            "--verify-tag", "--draft", "--title", f"CopyPaste {args.version}",
             "--notes-file", str(args.notes), *(str(path) for path in paths),
         ], check=True)
     release = json.loads(subprocess.check_output([
         "gh", "api", f"repos/{args.repository}/releases/tags/{tag}",
     ], text=True))
-    if release.get("tag_name") != tag or missing_assets(args.artifacts, release):
+    if release.get("tag_name") != tag or missing_assets(args.artifacts, release, allow_draft=True):
         raise ValueError("release publication is incomplete")
+    if release["draft"]:
+        subprocess.run(["gh", "release", "edit", tag, "--repo", args.repository,
+                        "--draft=false", "--latest"], check=True)
+        release = json.loads(subprocess.check_output([
+            "gh", "api", f"repos/{args.repository}/releases/tags/{tag}",
+        ], text=True))
+        if release.get("tag_name") != tag or missing_assets(args.artifacts, release):
+            raise ValueError("release promotion did not complete")
     print(f"verified complete stable release {tag}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--version", required=True)
+    parser.add_argument("--repository", required=True)
+    parser.add_argument("--artifacts", required=True, type=Path)
+    parser.add_argument("--notes", required=True, type=Path)
+    publish(parser.parse_args())
 
 
 if __name__ == "__main__":
