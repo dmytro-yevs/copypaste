@@ -48,6 +48,10 @@ def main():
     if run_id:
         runpy.run_path(str(root / "verify-linux-qualification-evidence-source.py"))["verify"](
             inventory(repository, run_id, "run"), inventory(repository, run_id, "jobs"), repository, commit)
+    runtime = environment.get("COMPOSITOR_RUNTIME_RUN_ID")
+    if runtime:
+        values = [inventory(repository, runtime, kind) for kind in ("run", "jobs", "artifacts")]
+        runpy.run_path(str(root / "verify-compositor-runtime-source-run.py"))["verify"](*values, repository, commit)
     previous = environment.get("PREVIOUS_LINUX_ARTIFACT_RUN_ID", "")
     if previous:
         values = [inventory(repository, previous, kind) for kind in ("run", "jobs", "artifacts")]
