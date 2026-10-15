@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import socket
 import stat
@@ -650,7 +651,14 @@ def wait_for_gui_socket(runtime_dir, previous):
 
 
 def start_gui_runtime(executable, environment, runtime_dir, previous_sockets):
-    app = subprocess.Popen([str(executable)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=environment)
+    def camera_messages(stream):
+        for line in iter(stream.readline, b''):
+            marker = line.find(b'[camera_desktop]')
+            if marker >= 0:
+                print('COPYPASTE_CAMERA_DIAGNOSTIC ' + line[marker:marker + 2048].decode('utf-8', 'replace').strip(), flush=True)
+    app = subprocess.Popen([str(executable)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           env={**environment, 'G_MESSAGES_DEBUG': 'all'})
+    threading.Thread(target=camera_messages, args=(app.stdout,), daemon=True).start()
     try:
         socket_path = wait_for_gui_socket(runtime_dir, previous_sockets)
         if app.poll() is not None:

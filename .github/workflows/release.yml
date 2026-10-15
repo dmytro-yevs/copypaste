@@ -1,467 +1,139 @@
-name: Production release
+# Diagnostics only: signed producer binaries stay unchanged. Only redacted driver logs are uploaded.
+# This workflow emits no publishable linux-native-qualification artifact.
+name: Linux camera diagnostics
 
 on:
+  workflow_call:
+    inputs:
+      artifact_run_id: {required: true, type: string}
+      previous_artifact_run_id: {required: false, type: string, default: ""}
+      supabase_module_run_id: {required: true, type: string}
+      semantic_search_module_run_id: {required: true, type: string}
+      ocr_module_run_id: {required: true, type: string}
+      compositor_runtime_run_id: {required: true, type: string}
   workflow_dispatch:
     inputs:
-      publish:
-        description: Publish the already-tagged, qualified stable release
+      artifact_run_id:
+        description: Successful production release run containing the exact current Linux packages
         required: true
-        type: boolean
-        default: false
-      qualified_run_id:
-        description: Complete publication from a successful qualified run at the stable tag
+        type: string
+      previous_artifact_run_id:
+        description: Successful earlier production release run; omit only when creating the first-install baseline
         required: false
         type: string
         default: ""
-      linux_evidence_run_id:
-        description: Run containing exact-artifact Linux native qualification evidence
-        required: false
-        type: string
-        default: ""
-      linux_artifact_run_id:
-        description: Prior release run with exact signed Linux artifacts for this tag
-        required: false
-        type: string
-        default: ""
-      compositor_runtime_run_id:
-        description: Completed exact-source compositor runtime producer run for an explicit staging release
-        required: false
-        type: string
-        default: ""
-      linux_qualification_only:
-        description: Run only the exact Linux native qualification against completed staging inputs
-        required: false
-        type: boolean
-        default: false
       supabase_module_run_id:
-        description: Completed exact-source unpublished Supabase module run
-        required: false
+        description: Successful unpublished Supabase module workflow run at this exact product commit
+        required: true
         type: string
-        default: ""
       semantic_search_module_run_id:
-        description: Completed exact-source unpublished Semantic Search module run
-        required: false
+        description: Successful unpublished Semantic Search module workflow run at this exact product commit
+        required: true
         type: string
-        default: ""
       ocr_module_run_id:
-        description: Completed exact-source unpublished OCR module run
-        required: false
+        description: Successful unpublished OCR module workflow run at this exact product commit
+        required: true
         type: string
-        default: ""
-      previous_linux_artifact_run_id:
-        description: Optional completed earlier Linux staging run for upgrade qualification
-        required: false
+      compositor_runtime_run_id:
+        description: Successful exact-commit compositor sidecar runtime producer run
+        required: true
         type: string
-        default: ""
-  push:
-    tags: ["v*"]
 
 concurrency:
-  group: production-release-${{ github.ref }}
+  group: linux-camera-diagnostics-${{ inputs.artifact_run_id }}
   cancel-in-progress: false
 
 permissions:
-  contents: read
   actions: read
+  contents: read
 
 jobs:
-  preflight:
+  source:
+    name: Verify exact artifact sources
     runs-on: ubuntu-24.04
     outputs:
-      version: ${{ steps.version.outputs.version }}
-      build_number: ${{ steps.version.outputs.build_number }}
-      android_version_code: ${{ steps.version.outputs.android_version_code }}
-      publish: ${{ steps.version.outputs.publish }}
-      release_commit: ${{ steps.version.outputs.release_commit }}
-      artifact_run_id: ${{ steps.version.outputs.artifact_run_id }}
-      reuse_qualified: ${{ steps.version.outputs.reuse_qualified }}
-      linux_required: ${{ steps.version.outputs.linux_required }}
-      linux_artifact_run_id: ${{ steps.version.outputs.linux_artifact_run_id }}
-      compositor_runtime_required: ${{ steps.version.outputs.compositor_runtime_required }}
-      linux_qualification_only: ${{ steps.version.outputs.linux_qualification_only }}
+      commit: ${{ steps.source.outputs.commit }}
+      version: ${{ steps.source.outputs.version }}
+      previous_version: ${{ steps.source.outputs.previous_version }}
+      upgrade_mode: ${{ steps.source.outputs.upgrade_mode }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
-      - id: version
+      - id: source
         env:
-          REQUESTED_PUBLISH: ${{ inputs.publish }}
-          QUALIFIED_RUN_ID: ${{ inputs.qualified_run_id }}
-          LINUX_ARTIFACT_RUN_ID: ${{ inputs.linux_artifact_run_id }}
-          COMPOSITOR_RUNTIME_RUN_ID: ${{ inputs.compositor_runtime_run_id }}
-          LINUX_QUALIFICATION_ONLY: ${{ inputs.linux_qualification_only }}
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+          PREVIOUS_ARTIFACT_RUN_ID: ${{ inputs.previous_artifact_run_id }}
           SUPABASE_MODULE_RUN_ID: ${{ inputs.supabase_module_run_id }}
           SEMANTIC_SEARCH_MODULE_RUN_ID: ${{ inputs.semantic_search_module_run_id }}
           OCR_MODULE_RUN_ID: ${{ inputs.ocr_module_run_id }}
-          LINUX_EVIDENCE_RUN_ID: ${{ inputs.linux_evidence_run_id }}
-          GH_TOKEN: ${{ github.token }}
+          COMPOSITOR_RUNTIME_RUN_ID: ${{ inputs.compositor_runtime_run_id }}
         run: |
           set -euo pipefail
-          cargo_version="$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{gsub(/["[:space:]]/, "", $3); print $3; exit}' Cargo.toml)"
-          pubspec_version="$(awk '/^version:[[:space:]]*/ {print $2; exit}' apps/copypaste_flutter/pubspec.yaml)"
-          version="${pubspec_version%%+*}"
-          build_number="${pubspec_version#*+}"
-          android_version_code="$(awk -F'= *' '/android-release-version-code/{gsub(/[[:space:]]/, "", $2); print $2; exit}' Cargo.toml)"
-          [[ "$version" == "$cargo_version" ]]
+          [[ "$ARTIFACT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID" > "$RUNNER_TEMP/current-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/current-jobs.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ARTIFACT_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/current-artifacts.json"
+          commit="$(jq -r '.head_sha' "$RUNNER_TEMP/current-run.json")"
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+          [[ "a14733467e5506bf3e980452293c8a621b095a54" == "$commit" ]] || {
+            echo "ERROR: diagnostics require the frozen signed producer commit" >&2
+            exit 1
+          }
+          python3 scripts/release/verify-linux-artifact-source-run.py \
+            --run "$RUNNER_TEMP/current-run.json" --jobs "$RUNNER_TEMP/current-jobs.json" --artifacts "$RUNNER_TEMP/current-artifacts.json" \
+            --repository "$GITHUB_REPOSITORY" --commit "$commit"
+          upgrade_mode=first_install_baseline
+          previous_version=""
+          if [[ -n "$PREVIOUS_ARTIFACT_RUN_ID" ]]; then
+            [[ "$PREVIOUS_ARTIFACT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_ARTIFACT_RUN_ID" > "$RUNNER_TEMP/previous-run.json"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_ARTIFACT_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/previous-jobs.json"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PREVIOUS_ARTIFACT_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/previous-artifacts.json"
+            previous_commit="$(jq -r '.head_sha' "$RUNNER_TEMP/previous-run.json")"
+            [[ "$previous_commit" =~ ^[0-9a-f]{40}$ ]]
+            python3 scripts/release/verify-linux-artifact-source-run.py \
+              --run "$RUNNER_TEMP/previous-run.json" --jobs "$RUNNER_TEMP/previous-jobs.json" --artifacts "$RUNNER_TEMP/previous-artifacts.json" \
+              --repository "$GITHUB_REPOSITORY" --commit "$previous_commit"
+            previous_version="$(git show "$previous_commit:apps/copypaste_flutter/pubspec.yaml" | awk '/^version:[[:space:]]*/ {print $2; exit}')"
+            previous_version="${previous_version%%+*}"
+            upgrade_mode=prior_release
+          fi
+          version="$(awk '/^version:[[:space:]]*/ {print $2; exit}' apps/copypaste_flutter/pubspec.yaml)"
+          version="${version%%+*}"
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          [[ "$build_number" =~ ^[1-9][0-9]*$ ]]
-          [[ "$android_version_code" =~ ^[1-9][0-9]*$ ]]
-          (( android_version_code > 200000038 && android_version_code <= 2100000000 ))
-          publish=false
-          release_commit="$GITHUB_SHA"
-          artifact_run_id="$GITHUB_RUN_ID"
-          reuse_qualified=false
-          linux_artifact_run_id="$GITHUB_RUN_ID"
-          compositor_runtime_required=false
-          linux_qualification_only=false
-          if [[ "${LINUX_QUALIFICATION_ONLY:-false}" == true ]]; then
-            [[ "${REQUESTED_PUBLISH:-false}" == false ]]
-            [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && -z "${QUALIFIED_RUN_ID:-}" && -z "${LINUX_EVIDENCE_RUN_ID:-}" ]]
-            for value in "$LINUX_ARTIFACT_RUN_ID" "$COMPOSITOR_RUNTIME_RUN_ID" "$SUPABASE_MODULE_RUN_ID" "$SEMANTIC_SEARCH_MODULE_RUN_ID" "$OCR_MODULE_RUN_ID"; do [[ "$value" =~ ^[1-9][0-9]*$ ]]; done
-            linux_qualification_only=true
-          fi
-          if [[ -n "${QUALIFIED_RUN_ID:-}" ]]; then
-            [[ "$QUALIFIED_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-            [[ "${REQUESTED_PUBLISH:-false}" == true ]]
-            git fetch origin "refs/tags/v$version:refs/tags/v$version"
-            release_commit="$(git rev-list -n 1 "v$version")"
-            linux_required=false
-            compositor_runtime_required=false
-            if git cat-file -e "$release_commit:packaging/linux/release-contract.json" 2>/dev/null; then
-              linux_required=true
-            fi
-            if git cat-file -e "$release_commit:.github/workflows/compositor-runtime.yml" 2>/dev/null; then
-              compositor_runtime_required=true
-            fi
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFIED_RUN_ID" > "$RUNNER_TEMP/source-run.json"
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFIED_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/source-jobs.json"
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$QUALIFIED_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/source-artifacts.json"
-            linux_required=false
-            if git cat-file -e "$release_commit:packaging/linux/release-contract.json" 2>/dev/null; then
-              linux_required=true
-              qualified_artifact_id="$(jq -r '[.artifacts[] | select(.name == "production-qualified" and .expired == false)] | if length == 1 then .[0].id else empty end' "$RUNNER_TEMP/source-artifacts.json")"
-              [[ "$qualified_artifact_id" =~ ^[1-9][0-9]*$ ]]
-              mkdir -p "$RUNNER_TEMP/qualified-source"
-              gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$qualified_artifact_id/zip" > "$RUNNER_TEMP/qualified-source.zip"
-              unzip -q "$RUNNER_TEMP/qualified-source.zip" -d "$RUNNER_TEMP/qualified-source"
-              cp "$RUNNER_TEMP/qualified-source/linux/production-receipt.json" "$RUNNER_TEMP/linux-origin-receipt.json"
-              linux_artifact_run_id="$(jq -r '.run_id' "$RUNNER_TEMP/linux-origin-receipt.json")"
-              [[ "$linux_artifact_run_id" =~ ^[1-9][0-9]*$ ]]
-              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$linux_artifact_run_id" > "$RUNNER_TEMP/linux-origin-run.json"
-              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$linux_artifact_run_id/jobs?per_page=100" > "$RUNNER_TEMP/linux-origin-jobs.json"
-              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$linux_artifact_run_id/artifacts?per_page=100" > "$RUNNER_TEMP/linux-origin-artifacts.json"
-            fi
-            qualified_args=(--run "$RUNNER_TEMP/source-run.json" --jobs "$RUNNER_TEMP/source-jobs.json" --artifacts "$RUNNER_TEMP/source-artifacts.json" --repository "$GITHUB_REPOSITORY" --commit "$release_commit")
-            if [[ "$linux_required" == true ]]; then qualified_args+=(--require-linux); fi
-            if [[ "$compositor_runtime_required" == true ]]; then qualified_args+=(--require-compositor-runtime); fi
-            if [[ "$linux_required" == true ]]; then qualified_args+=(--linux-origin-run "$RUNNER_TEMP/linux-origin-run.json" --linux-origin-jobs "$RUNNER_TEMP/linux-origin-jobs.json" --linux-origin-artifacts "$RUNNER_TEMP/linux-origin-artifacts.json" --linux-receipt "$RUNNER_TEMP/linux-origin-receipt.json"); fi
-            python3 scripts/release/verify-qualified-run.py "${qualified_args[@]}"
-            artifact_run_id="$QUALIFIED_RUN_ID"
-            reuse_qualified=true
-            publish=true
-          elif [[ "${GITHUB_REF_TYPE:-}" == tag ]]; then
-            [[ "$GITHUB_REF_NAME" == "v$version" ]]
-            publish=true
-          elif [[ "${REQUESTED_PUBLISH:-false}" == true ]]; then
-            git fetch origin "refs/tags/v$version:refs/tags/v$version"
-            [[ "$(git rev-list -n 1 "v$version")" == "$GITHUB_SHA" ]]
-            publish=true
-          fi
-          if [[ -z "${linux_required+x}" ]]; then
-            linux_required=false
-            if git cat-file -e "$release_commit:packaging/linux/release-contract.json" 2>/dev/null; then
-              linux_required=true
-            fi
-          fi
-          if git cat-file -e "$release_commit:.github/workflows/compositor-runtime.yml" 2>/dev/null; then
-            compositor_runtime_required=true
-            [[ "$linux_required" == true ]] || {
-              echo "ERROR: compositor runtime contract requires Linux release artifacts" >&2
-              exit 1
-            }
-          fi
-          if [[ -n "${COMPOSITOR_RUNTIME_RUN_ID:-}" ]]; then
-            [[ "$COMPOSITOR_RUNTIME_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-            [[ "$compositor_runtime_required" == true ]] || {
-              echo "ERROR: compositor_runtime_run_id is only valid for a compositor runtime release contract" >&2
-              exit 1
-            }
-            [[ "$reuse_qualified" != true ]] || {
-              echo "ERROR: a previously qualified release already binds its compositor runtime companions" >&2
-              exit 1
-            }
-          fi
-          if [[ -n "${LINUX_ARTIFACT_RUN_ID:-}" ]]; then
-            [[ "$LINUX_ARTIFACT_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-            [[ "$linux_required" == true ]]
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$LINUX_ARTIFACT_RUN_ID" > "$RUNNER_TEMP/linux-source-run.json"
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$LINUX_ARTIFACT_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/linux-source-jobs.json"
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$LINUX_ARTIFACT_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/linux-source-artifacts.json"
-            python3 scripts/release/verify-linux-artifact-source-run.py --run "$RUNNER_TEMP/linux-source-run.json" --jobs "$RUNNER_TEMP/linux-source-jobs.json" --artifacts "$RUNNER_TEMP/linux-source-artifacts.json" --repository "$GITHUB_REPOSITORY" --commit "$release_commit"
-            linux_artifact_run_id="$LINUX_ARTIFACT_RUN_ID"
-          fi
-          if [[ "$linux_qualification_only" == true ]]; then
-            [[ "$publish" == false && "$GITHUB_REF_TYPE" != tag ]] || {
-              echo "ERROR: qualification-only staging must be an unpublished branch dispatch" >&2
-              exit 1
-            }
-          fi
+          cargo_version="$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{gsub(/["[:space:]]/, "", $3); print $3; exit}' Cargo.toml)"
+          [[ "$version" == "$cargo_version" ]] || { echo "ERROR: Flutter and module-host app versions differ" >&2; exit 1; }
+          for module_source in "$SUPABASE_MODULE_RUN_ID:.github/workflows/provider-module.yml:supabase" "$SEMANTIC_SEARCH_MODULE_RUN_ID:.github/workflows/provider-module.yml:semantic-search" "$OCR_MODULE_RUN_ID:.github/workflows/ocr-module.yml:ocr"; do
+            IFS=: read -r module_run_id module_workflow module_name <<< "$module_source"
+            [[ "$module_run_id" =~ ^[1-9][0-9]*$ ]]
+            prefix="$RUNNER_TEMP/module-$module_name"
+            mkdir -p "$prefix"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$module_run_id" > "$prefix/run.json"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$module_run_id/jobs?per_page=100" > "$prefix/jobs.json"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$module_run_id/artifacts?per_page=100" > "$prefix/artifacts.json"
+            python3 scripts/release/verify-linux-module-source-run.py \
+              --run "$prefix/run.json" --jobs "$prefix/jobs.json" --artifacts "$prefix/artifacts.json" \
+              --repository "$GITHUB_REPOSITORY" --commit "$commit" --workflow "$module_workflow" --module "$module_name"
+          done
+          [[ "$COMPOSITOR_RUNTIME_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$COMPOSITOR_RUNTIME_RUN_ID" > "$RUNNER_TEMP/compositor-runtime-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$COMPOSITOR_RUNTIME_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/compositor-runtime-artifacts.json"
+          python3 scripts/release/verify-linux-compositor-runtime.py source \
+            --run "$RUNNER_TEMP/compositor-runtime-run.json" --artifacts "$RUNNER_TEMP/compositor-runtime-artifacts.json" \
+            --repository "$GITHUB_REPOSITORY" --commit "$commit"
+          [[ "$upgrade_mode" == first_install_baseline || "$previous_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           {
+            echo "commit=$commit"
             echo "version=$version"
-            echo "build_number=$build_number"
-            echo "android_version_code=$android_version_code"
-            echo "publish=$publish"
-            echo "release_commit=$release_commit"
-            echo "artifact_run_id=$artifact_run_id"
-            echo "reuse_qualified=$reuse_qualified"
-            echo "linux_required=$linux_required"
-            echo "linux_artifact_run_id=$linux_artifact_run_id"
-            echo "compositor_runtime_required=$compositor_runtime_required"
-            echo "linux_qualification_only=$linux_qualification_only"
+            echo "previous_version=$previous_version"
+            echo "upgrade_mode=$upgrade_mode"
           } >> "$GITHUB_OUTPUT"
 
-  linux-native-bootstrap:
-    name: Run exact staged Linux native qualification
-    needs: preflight
-    if: needs.preflight.outputs.linux_qualification_only == 'true'
-    uses: ./.github/workflows/linux-native-qualification.yml
-    with:
-      artifact_run_id: ${{ inputs.linux_artifact_run_id }}
-      previous_artifact_run_id: ${{ inputs.previous_linux_artifact_run_id }}
-      supabase_module_run_id: ${{ inputs.supabase_module_run_id }}
-      semantic_search_module_run_id: ${{ inputs.semantic_search_module_run_id }}
-      ocr_module_run_id: ${{ inputs.ocr_module_run_id }}
-      compositor_runtime_run_id: ${{ inputs.compositor_runtime_run_id }}
-
-  macos:
-    needs: preflight
-    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true'
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - id: flutter
-        run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
-      - uses: ./.github/actions/setup-flutter
-        with:
-          version: ${{ steps.flutter.outputs.version }}
-      - uses: ./.github/actions/flutter-build-cache
-        with:
-          platform: macos
-          profile: release
-      - name: Create disposable release keychain
-        run: |
-          set -euo pipefail
-          state="$RUNNER_TEMP/copypaste-release-keychain-state"
-          keychain="$RUNNER_TEMP/copypaste-release.keychain-db"
-          password="$(openssl rand -base64 24)"
-          mkdir -p "$state"
-          security default-keychain -d user > "$state/default"
-          security list-keychains -d user > "$state/search-list"
-          security create-keychain -p "$password" "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p "$password" "$keychain"
-          security list-keychains -d user -s "$keychain"
-          security default-keychain -d user -s "$keychain"
-          echo "COPYPASTE_KEYCHAIN_TEST=1" >> "$GITHUB_ENV"
-          echo "COPYPASTE_KEYCHAIN_TEST_PATH=$keychain" >> "$GITHUB_ENV"
-      - name: Build production macOS artifacts
-        run: |
-          chmod +x packaging/macos/selfsign.sh scripts/release/*.sh
-          scripts/release/build-macos-flutter.sh "${{ needs.preflight.outputs.version }}" "${{ needs.preflight.outputs.build_number }}"
-          scripts/release/build-cli-tarball.sh "${{ needs.preflight.outputs.version }}" arm64 --reuse-build
-      - name: Install and run exact macOS artifact
-        run: scripts/release/smoke-macos-production.sh "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-macos-arm64.dmg" "${{ needs.preflight.outputs.version }}"
-      - name: Write exact-artifact receipt
-        run: python3 scripts/release/write-artifact-receipt.py --platform macos --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-macos-arm64.dmg" --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --output dist/production-receipt.json
-      - name: Restore keychain state
-        if: always()
-        run: |
-          set -euo pipefail
-          state="$RUNNER_TEMP/copypaste-release-keychain-state"
-          keychain="$RUNNER_TEMP/copypaste-release.keychain-db"
-          python3 - "$state/default" "$state/search-list" <<'PY'
-          from pathlib import Path
-          import shlex
-          import subprocess
-          import sys
-          default = shlex.split(Path(sys.argv[1]).read_text(encoding="utf-8"), posix=True)
-          search = shlex.split(Path(sys.argv[2]).read_text(encoding="utf-8"), posix=True)
-          if len(default) != 1 or not search:
-              raise SystemExit("saved Keychain state is invalid")
-          subprocess.run(["security", "default-keychain", "-d", "user", "-s", default[0]], check=True)
-          subprocess.run(["security", "list-keychains", "-d", "user", "-s", *search], check=True)
-          PY
-          security delete-keychain "$keychain"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: production-macos
-          if-no-files-found: error
-          path: |
-            dist/*.dmg
-            dist/*.dmg.sha256
-            dist/*.tar.gz
-            dist/*.tar.gz.sha256
-            dist/production-receipt.json
-
-  android:
-    needs: preflight
-    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true'
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - id: flutter
-        run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
-      - uses: ./.github/actions/setup-flutter
-        with:
-          version: ${{ steps.flutter.outputs.version }}
-      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
-        with:
-          distribution: temurin
-          java-version: "25"
-      - uses: ./.github/actions/flutter-build-cache
-        with:
-          platform: android
-          profile: release
-      - name: Build signed universal and ARM Android APKs
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          : "${ANDROID_KEYSTORE_BASE64:?missing Android keystore}"
-          : "${ANDROID_KEYSTORE_PASSWORD:?missing Android keystore password}"
-          : "${ANDROID_KEY_ALIAS:?missing Android key alias}"
-          : "${ANDROID_KEY_PASSWORD:?missing Android key password}"
-          export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/copypaste-release.jks"
-          trap 'rm -f "$ANDROID_KEYSTORE_PATH"' EXIT
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$ANDROID_KEYSTORE_PATH"
-          expected="$(awk -F'"' '/android-release-certificate-sha256/{print $2; exit}' Cargo.toml)"
-          actual="$(keytool -exportcert -keystore "$ANDROID_KEYSTORE_PATH" -alias "$ANDROID_KEY_ALIAS" -storepass:env ANDROID_KEYSTORE_PASSWORD | openssl dgst -sha256 | awk '{print $NF}')"
-          if [[ "$actual" != "$expected" ]]; then
-            echo "ERROR: Android release keystore certificate mismatch: expected=$expected actual=$actual" >&2
-            exit 1
-          fi
-          tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
-          cd apps/copypaste_flutter
-          flutter pub get --enforce-lockfile
-          flutter build apk --release --target-platform android-arm,android-arm64,android-x64 --build-name "${{ needs.preflight.outputs.version }}" --build-number "${{ needs.preflight.outputs.android_version_code }}"
-          mkdir -p ../../dist
-          cp build/app/outputs/flutter-apk/app-release.apk "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk"
-          flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64 --build-name "${{ needs.preflight.outputs.version }}" --build-number "${{ needs.preflight.outputs.android_version_code }}"
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android-arm64.apk"
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android-armv7.apk"
-          cd ../..
-          chmod +x scripts/release/*.sh
-          for architecture in universal arm64 armv7; do
-            suffix="-$architecture"
-            [[ "$architecture" != universal ]] || suffix=""
-            artifact="dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android$suffix.apk"
-            "$tools/apksigner" sign --ks "$ANDROID_KEYSTORE_PATH" --ks-key-alias "$ANDROID_KEY_ALIAS" --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEY_PASSWORD "$artifact"
-            AAPT2="$tools/aapt2" APKSIGNER="$tools/apksigner" scripts/release/verify-android-release.sh "$artifact" "${{ needs.preflight.outputs.version }}" "${{ needs.preflight.outputs.android_version_code }}" "$expected" "$architecture"
-            scripts/release/sign-update-artifact.sh "$artifact"
-            # Run the pure Dart verifier without rebuilding native assets.
-            (cd apps/copypaste_flutter && dart --disable-dart-dev --packages=.dart_tool/package_config.json tool/verify_update_signature.dart "../../$artifact" "../../$artifact.sig")
-          done
-      - name: Write exact-artifact receipt
-        run: |
-          python3 scripts/release/write-artifact-receipt.py --platform android \
-            --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android.apk" \
-            --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android-arm64.apk" \
-            --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-android-armv7.apk" \
-            --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --output dist/production-receipt.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: production-android
-          if-no-files-found: error
-          path: |
-            dist/*.apk
-            dist/*.apk.sig
-            dist/*.apk.sha256
-            dist/production-receipt.json
-
-  windows:
-    needs: preflight
-    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true'
-    runs-on: windows-2022
-    env:
-      OPENSSL_NO_VENDOR: "1"
-      OPENSSL_STATIC: "1"
-      OPENSSL_INCLUDE_DIR: 'C:\Program Files\OpenSSL\include'
-      OPENSSL_LIB_DIR: 'C:\Program Files\OpenSSL\lib\VC\x64\MT'
-      OPENSSL_LIBS: 'libssl_static:libcrypto_static'
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - id: flutter
-        shell: bash
-        run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
-      - uses: ./.github/actions/setup-flutter
-        with:
-          version: ${{ steps.flutter.outputs.version }}
-      - uses: ./.github/actions/flutter-build-cache
-        with:
-          platform: windows
-          profile: release
-      - name: Install NSIS
-        shell: pwsh
-        run: choco install nsis --version=3.11 -y --no-progress
-      - name: Verify Windows OpenSSL SDK
-        shell: pwsh
-        run: |
-          if (-not (Test-Path "$env:OPENSSL_INCLUDE_DIR\openssl\ssl.h") -or
-              -not (Test-Path "$env:OPENSSL_LIB_DIR\libssl_static.lib") -or
-              -not (Test-Path "$env:OPENSSL_LIB_DIR\libcrypto_static.lib")) {
-            throw "Windows OpenSSL SDK is incomplete"
-          }
-      - name: Prepare Windows signing
-        shell: pwsh
-        env:
-          WINDOWS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
-          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
-          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
-        run: ./scripts/release/windows-sign.ps1 -Operation Prepare -OutputPfxPath "$env:RUNNER_TEMP\copypaste-release.pfx" -PersistEnvironment
-      - name: Build signed Windows installer
-        shell: pwsh
-        env:
-          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
-        run: ./scripts/release/build-windows-flutter.ps1 -Version '${{ needs.preflight.outputs.version }}' -BuildNumber ${{ needs.preflight.outputs.build_number }}
-      - name: Sign updater artifact
-        shell: bash
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          chmod +x scripts/release/sign-update-artifact.sh
-          scripts/release/sign-update-artifact.sh "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-windows-x86_64-setup.exe"
-          # Use the VM directly; signature verification has no native assets.
-          (cd apps/copypaste_flutter && dart --disable-dart-dev --packages=.dart_tool/package_config.json tool/verify_update_signature.dart "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-windows-x86_64-setup.exe" "../../dist/CopyPaste-v${{ needs.preflight.outputs.version }}-windows-x86_64-setup.exe.sig")
-      - name: Install and run exact Windows artifact
-        shell: pwsh
-        run: ./scripts/release/smoke-windows-production.ps1 -Installer "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-windows-x86_64-setup.exe" -Version '${{ needs.preflight.outputs.version }}'
-      - name: Write exact-artifact receipt
-        shell: pwsh
-        run: python scripts/release/write-artifact-receipt.py --platform windows --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-windows-x86_64-setup.exe" --version '${{ needs.preflight.outputs.version }}' --commit "$env:GITHUB_SHA" --run-id "$env:GITHUB_RUN_ID" --output dist/production-receipt.json
-      - name: Clean signing key
-        if: always()
-        shell: pwsh
-        run: ./scripts/release/windows-sign.ps1 -Operation Cleanup
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: production-windows
-          if-no-files-found: error
-          path: |
-            dist/*.exe
-            dist/*.exe.sig
-            dist/*.exe.sha256
-            dist/production-receipt.json
-
-  linux:
-    name: Linux build (${{ matrix.architecture }})
-    needs: preflight
-    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && needs.preflight.outputs.linux_artifact_run_id == github.run_id
+  scenario:
+    name: ${{ matrix.architecture }} ${{ matrix.desktop }} ${{ matrix.session }}
+    needs: source
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -469,357 +141,148 @@ jobs:
         include:
           - architecture: x86_64
             runner: ubuntu-24.04
-            appimagetool_url: https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
-            appimagetool_sha256: 95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6
+            desktop: GNOME
+            session: x11
+            compositor_artifact: copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - id: flutter
-        run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
-      - uses: ./.github/actions/setup-flutter
         with:
-          version: ${{ steps.flutter.outputs.version }}
-      - uses: ./.github/actions/flutter-build-cache
-        with:
-          platform: linux
-          profile: release
-      - name: Install Linux release packaging tools
+          ref: ${{ github.sha }}
+      - name: Install disposable desktop scenario dependencies
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
-            cpio desktop-file-utils libgtk-3-dev libsecret-1-dev libssl-dev \
-            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libkeybinder-3.0-dev libxtst-dev libxi-dev \
-            gobject-introspection libgirepository1.0-dev libmutter-14-dev ninja-build pkg-config rpm patchelf \
-            gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good
-      - name: Fetch pinned upstream AppImageTool
-        run: |
-          set -euo pipefail
-          tool="$RUNNER_TEMP/appimagetool-${{ matrix.architecture }}.AppImage"
-          curl --fail --location --output "$tool" "${{ matrix.appimagetool_url }}"
-          printf '%s  %s\n' "${{ matrix.appimagetool_sha256 }}" "$tool" | sha256sum --check --status
-          chmod 755 "$tool"
-          APPIMAGE_EXTRACT_AND_RUN=1 "$tool" --version
-          echo "APPIMAGETOOL=$tool" >> "$GITHUB_ENV"
-          echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "$GITHUB_ENV"
-      - name: Build Linux packages
-        run: |
-          set -euo pipefail
-          chmod +x scripts/release/build-linux-flutter.sh scripts/release/build-linux-packages.sh
-          scripts/release/build-linux-flutter.sh "${{ needs.preflight.outputs.version }}" "${{ needs.preflight.outputs.build_number }}" "${{ matrix.architecture }}"
-          python3 scripts/release/verify-linux-runtime-baseline.py --bundle "dist/linux-${{ matrix.architecture }}/bundle" --architecture "${{ matrix.architecture }}" --maximum 2.39 --output "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.runtime-baseline.json"
-          scripts/release/build-linux-packages.sh "${{ needs.preflight.outputs.version }}" "${{ matrix.architecture }}" --release-scope
-      - name: Sign Linux updater artifacts and write SHA-256 receipts
+            dbus-user-session gjs gnome-shell gnome-session gnome-keyring gnome-shell-extension-appindicator \
+            kde-config-screenlocker kwin-wayland kwin-x11 plasma-workspace \
+            libsecret-tools wl-clipboard wtype x11-utils xdotool xdg-desktop-portal \
+            xdg-desktop-portal-gnome xdg-desktop-portal-kde xvfb rpm cpio xclip python3-gi build-essential pkg-config libgtk-3-dev libxres-dev \
+            at-spi2-core python3-pyatspi ffmpeg qrencode v4l-utils
+      - name: Provision owned V4L2 loopback camera for this CI job
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          COPYPASTE_QUALIFICATION_HEADLESS: "1"
         run: |
           set -euo pipefail
-          chmod +x scripts/release/sign-update-artifact.sh
-          for extension in AppImage deb; do
-            artifact="dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.$extension"
-            scripts/release/sign-update-artifact.sh "$artifact"
-            (cd apps/copypaste_flutter && dart --disable-dart-dev --packages=.dart_tool/package_config.json tool/verify_update_signature.dart "../../$artifact" "../../$artifact.sig")
-            (cd dist && sha256sum "$(basename "$artifact")" > "$(basename "$artifact").sha256")
-          done
-      - name: Write exact Linux artifact receipt
+          python3 scripts/release/provision-linux-v4l2loopback.py provision \
+            --state "$RUNNER_TEMP/copypaste-v4l2loopback.json" --environment "$GITHUB_ENV"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ matrix.compositor_artifact }}
+          path: compositor-runtime
+          run-id: ${{ inputs.compositor_runtime_run_id }}
+          github-token: ${{ github.token }}
+      - name: Bind the exact compositor sidecar runtime
         run: |
           set -euo pipefail
-          args=(--platform linux --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --output "dist/production-receipt.json" --artifact "dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.runtime-baseline.json")
-          for extension in AppImage deb; do
-            artifact="dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.$extension"
-            args+=(--artifact "$artifact" --artifact "$artifact.sig" --artifact "$artifact.sha256")
-          done
-          python3 scripts/release/write-artifact-receipt.py "${args[@]}"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+          python3 scripts/release/compositor-runtime-archive.py extract \
+            --archive compositor-runtime/runtime.tar --output compositor-runtime/runtime
+          python3 scripts/release/verify-linux-compositor-runtime.py artifact \
+            --root compositor-runtime --desktop "${{ matrix.desktop }}" --architecture "${{ matrix.architecture }}" \
+            --commit "${{ needs.source.outputs.commit }}" --producer-run-id "${{ inputs.compositor_runtime_run_id }}" \
+            --output compositor-runtime/binding.json
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: production-linux-${{ matrix.architecture }}
-          if-no-files-found: error
-          path: |
-            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.AppImage
-            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.AppImage.sig
-            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.AppImage.sha256
-            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.deb
-            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.deb.sig
-            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.deb.sha256
-            dist/CopyPaste-v${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.runtime-baseline.json
-            dist/production-receipt.json
-
-  compositor-runtime-build:
-    name: Build opt-in compositor runtime companions
-    needs: preflight
-    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && inputs.compositor_runtime_run_id == ''
-    uses: ./.github/workflows/compositor-runtime.yml
-    with:
-      version: ${{ needs.preflight.outputs.version }}
-      source_run_id: ${{ github.run_id }}
-      commit: ${{ needs.preflight.outputs.release_commit }}
-    secrets:
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-
-  compositor-runtime-external:
-    name: Verify staged compositor runtime companions
-    needs: preflight
-    if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && inputs.compositor_runtime_run_id != ''
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          ref: ${{ github.sha }}
-      - name: Verify trusted exact-source runtime producer run
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RUNTIME_RUN_ID: ${{ inputs.compositor_runtime_run_id }}
-        run: |
-          set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUNTIME_RUN_ID" > "$RUNNER_TEMP/runtime-run.json"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUNTIME_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/runtime-jobs.json"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUNTIME_RUN_ID/artifacts?per_page=100" > "$RUNNER_TEMP/runtime-artifacts.json"
-          python3 scripts/release/verify-compositor-runtime-source-run.py \
-            --run "$RUNNER_TEMP/runtime-run.json" --jobs "$RUNNER_TEMP/runtime-jobs.json" \
-            --artifacts "$RUNNER_TEMP/runtime-artifacts.json" --repository "$GITHUB_REPOSITORY" \
-            --commit "${{ needs.preflight.outputs.release_commit }}"
-
-  compositor-runtime-public:
-    name: Sign and bind opt-in compositor runtime companions
-    needs: [preflight, compositor-runtime-build, compositor-runtime-external]
-    if: ${{ always() && needs.preflight.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true' && (needs.compositor-runtime-build.result == 'success' || needs.compositor-runtime-external.result == 'success') }}
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          ref: ${{ github.sha }}
-      - id: flutter
-        run: echo "version=$(tr -d '\r\n[:space:]' < .flutter-version)" >> "$GITHUB_OUTPUT"
-      - uses: ./.github/actions/setup-flutter
-        with:
-          version: ${{ steps.flutter.outputs.version }}
-      - name: Prepare pinned Flutter signature verifier
-        run: (cd apps/copypaste_flutter && flutter pub get --enforce-lockfile)
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: inputs.compositor_runtime_run_id == ''
-        with:
-          pattern: copypaste-compositor-runtime-*
-          path: runtime-source
-      - name: Download verified staged compositor runtime companions
-        if: inputs.compositor_runtime_run_id != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RUNTIME_RUN_ID: ${{ inputs.compositor_runtime_run_id }}
-        run: |
-          set -euo pipefail
-          for artifact in copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64; do
-            gh run download "$RUNTIME_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$artifact" --dir "runtime-source/$artifact"
-          done
-      - name: Stage exact runtime producer outputs
-        env:
-          PRODUCER_RUN_ID: ${{ inputs.compositor_runtime_run_id || github.run_id }}
-        run: |
-          set -euo pipefail
-          for archive in runtime-source/*/runtime.tar; do
-            python3 scripts/release/compositor-runtime-archive.py extract \
-              --archive "$archive" --output "$(dirname "$archive")/runtime"
-          done
-          python3 scripts/release/stage-compositor-runtime-release.py stage \
-            --source-root runtime-source --output runtime-public \
-            --version "${{ needs.preflight.outputs.version }}" \
-            --commit "${{ needs.preflight.outputs.release_commit }}" \
-            --producer-run-id "$PRODUCER_RUN_ID"
-      - name: Sign exact runtime companion packages
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          chmod +x scripts/release/sign-update-artifact.sh
-          shopt -s nullglob
-          packages=(runtime-public/*.deb runtime-public/*.rpm)
-          (( ${#packages[@]} == 1 ))
-          for package in "${packages[@]}"; do
-            scripts/release/sign-update-artifact.sh "$package"
-            (cd apps/copypaste_flutter && dart --disable-dart-dev --packages=.dart_tool/package_config.json tool/verify_update_signature.dart "../../$package" "../../$package.sig")
-            (cd runtime-public && sha256sum "$(basename "$package")" > "$(basename "$package").sha256")
-          done
-      - name: Bind public companion signatures and receipts
-        run: |
-          set -euo pipefail
-          python3 scripts/release/stage-compositor-runtime-release.py finalize \
-            --root runtime-public --version "${{ needs.preflight.outputs.version }}" \
-            --commit "${{ needs.preflight.outputs.release_commit }}" --release-run-id "$GITHUB_RUN_ID" \
-            --output runtime-public/production-receipt.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: production-compositor-runtime
-          if-no-files-found: error
-          path: runtime-public
-
-  linux-full-parity-evidence:
-    name: Linux full parity evidence gate
-    needs: [preflight, linux, compositor-runtime-public]
-    if: ${{ always() && needs.preflight.result == 'success' && needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_required == 'true' && (needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success') }}
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          ref: ${{ github.sha }}
-      - name: Require an evidence source run
-        env:
-          EVIDENCE_RUN_ID: ${{ inputs.linux_evidence_run_id }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          [[ "$EVIDENCE_RUN_ID" =~ ^[1-9][0-9]*$ ]] || {
-            echo "ERROR: provide linux_evidence_run_id from the real desktop qualification run described in packaging/linux/native-qualification.md" >&2
-            exit 1
-          }
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$EVIDENCE_RUN_ID" > "$RUNNER_TEMP/linux-evidence-run.json"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$EVIDENCE_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/linux-evidence-jobs.json"
-          python3 scripts/release/verify-linux-qualification-evidence-source.py \
-            --run "$RUNNER_TEMP/linux-evidence-run.json" --jobs "$RUNNER_TEMP/linux-evidence-jobs.json" \
-            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: linux-native-qualification
-          path: native-evidence
-          run-id: ${{ inputs.linux_evidence_run_id }}
+          path: current
+          run-id: ${{ inputs.artifact_run_id }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.source.outputs.upgrade_mode == 'prior_release'
         with:
           name: production-linux-x86_64
-          path: exact-artifacts/x86_64
-          run-id: ${{ needs.preflight.outputs.linux_artifact_run_id }}
+          path: previous-artifacts/x86_64
+          run-id: ${{ inputs.previous_artifact_run_id }}
           github-token: ${{ github.token }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: needs.preflight.outputs.compositor_runtime_required == 'true'
+        if: needs.source.outputs.upgrade_mode == 'prior_release'
         with:
-          name: production-compositor-runtime
-          path: compositor-runtime
-      - name: Verify full exact-artifact Linux desktop evidence
+          name: production-linux-${{ matrix.architecture }}
+          path: previous
+          run-id: ${{ inputs.previous_artifact_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: provider-supabase-linux-${{ matrix.architecture }}
+          path: module-downloads/supabase
+          run-id: ${{ inputs.supabase_module_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: provider-semantic-search-linux-${{ matrix.architecture }}
+          path: module-downloads/semantic-search
+          run-id: ${{ inputs.semantic_search_module_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ocr-linux-${{ matrix.architecture }}
+          path: module-downloads/ocr
+          run-id: ${{ inputs.ocr_module_run_id }}
+          github-token: ${{ github.token }}
+      - name: Authenticate signed modules and stage offline fixtures
         run: |
           set -euo pipefail
-          mkdir exact-artifacts/all
-          find exact-artifacts -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) -exec cp {} exact-artifacts/all/ \;
-          args=(--root native-evidence --artifacts exact-artifacts/all
-            --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA"
-            --source-run-id "${{ inputs.linux_evidence_run_id }}"
-            --artifact-run-id "${{ needs.preflight.outputs.linux_artifact_run_id }}")
-          if [[ "${{ needs.preflight.outputs.compositor_runtime_required }}" == true ]]; then
-            args+=(--compositor-runtime compositor-runtime)
+          python3 scripts/release/stage-linux-module-qualification.py \
+            --downloads module-downloads --module-artifacts module-artifacts --module-fixtures module-fixtures \
+            --architecture "${{ matrix.architecture }}" --app-version "${{ needs.source.outputs.version }}" \
+            --commit "${{ needs.source.outputs.commit }}" \
+            --supabase-run-id "${{ inputs.supabase_module_run_id }}" \
+            --semantic-search-run-id "${{ inputs.semantic_search_module_run_id }}" \
+            --ocr-run-id "${{ inputs.ocr_module_run_id }}"
+      - name: Execute exact package scenarios in a nested desktop
+        run: |
+          set -euo pipefail
+          chmod +x scripts/release/run-linux-native-desktop-session.sh scripts/release/run-linux-native-scenarios.sh scripts/release/run-fedora-plasma6-qualification.sh
+          mkdir -p evidence
+          appimage="current/CopyPaste-v${{ needs.source.outputs.version }}-linux-${{ matrix.architecture }}.AppImage"
+          [[ -f "$appimage" && ! -L "$appimage" ]]
+          chmod u+x "$appimage"
+          if [[ "${{ needs.source.outputs.upgrade_mode }}" == prior_release ]]; then
+            previous_appimage="previous/CopyPaste-v${{ needs.source.outputs.previous_version }}-linux-${{ matrix.architecture }}.AppImage"
+            [[ -f "$previous_appimage" && ! -L "$previous_appimage" ]]
+            chmod u+x "$previous_appimage"
           fi
-          python3 scripts/release/verify-linux-native-qualification.py "${args[@]}"
-
-  qualify:
-    needs: [preflight, macos, android, windows, linux, compositor-runtime-public, linux-full-parity-evidence]
-    if: ${{ always() && needs.preflight.result == 'success' && (needs.preflight.outputs.reuse_qualified == 'true' || (needs.macos.result == 'success' && needs.android.result == 'success' && needs.windows.result == 'success' && (needs.preflight.outputs.linux_required != 'true' || ((needs.linux.result == 'success' || needs.preflight.outputs.linux_artifact_run_id != github.run_id) && needs.linux-full-parity-evidence.result == 'success' && (needs.preflight.outputs.compositor_runtime_required != 'true' || needs.compositor-runtime-public.result == 'success'))))) }}
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Download previously qualified artifacts
-        if: needs.preflight.outputs.reuse_qualified == 'true'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: production-qualified
-          path: qualified
-          run-id: ${{ needs.preflight.outputs.artifact_run_id }}
-          github-token: ${{ github.token }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: needs.preflight.outputs.reuse_qualified != 'true'
-        with:
-          name: production-macos
-          path: qualified/macos
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: needs.preflight.outputs.reuse_qualified != 'true'
-        with:
-          name: production-android
-          path: qualified/android
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: needs.preflight.outputs.reuse_qualified != 'true'
-        with:
-          name: production-windows
-          path: qualified/windows
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_required == 'true'
-        with:
-          name: production-linux-x86_64
-          path: qualified/linux-x86_64
-          run-id: ${{ needs.preflight.outputs.linux_artifact_run_id }}
-          github-token: ${{ github.token }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.compositor_runtime_required == 'true'
-        with:
-          name: production-compositor-runtime
-          path: qualified/compositor-runtime
-      - name: Assemble one Linux qualification receipt
-        if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_required == 'true'
-        run: |
-          set -euo pipefail
-          mkdir -p qualified/linux
-          find qualified/linux-x86_64 -type f ! -name production-receipt.json -exec cp {} qualified/linux/ \;
-          python3 scripts/release/merge-linux-artifact-receipts.py \
-            --receipt qualified/linux-x86_64/production-receipt.json \
-            --output qualified/linux/production-receipt.json
-      - name: Verify exact qualified artifacts
-        run: |
-          set -euo pipefail
-          args=(--root qualified --version "${{ needs.preflight.outputs.version }}" --commit "${{ needs.preflight.outputs.release_commit }}" --run-id "${{ needs.preflight.outputs.artifact_run_id }}")
-          if [[ "${{ needs.preflight.outputs.linux_required }}" == true ]]; then args+=(--require-linux); fi
-          if [[ "${{ needs.preflight.outputs.compositor_runtime_required }}" == true ]]; then args+=(--require-compositor-runtime); fi
-          if [[ "${{ needs.preflight.outputs.linux_artifact_run_id }}" != "$GITHUB_RUN_ID" ]]; then args+=(--linux-origin-run-id "${{ needs.preflight.outputs.linux_artifact_run_id }}"); fi
-          python3 scripts/release/verify-artifact-receipts.py "${args[@]}"
+          mkdir companion
+          (cd companion && APPIMAGE_EXTRACT_AND_RUN=1 "../$appimage" --appimage-extract >/dev/null)
+          companion_source="$PWD/companion/squashfs-root/usr/share/copypaste/desktop-integrations"
+          test -d "$companion_source"
+          producer=(python3 scripts/release/produce-linux-native-qualification.py
+            --artifacts current --version "${{ needs.source.outputs.version }}"
+            --architecture "${{ matrix.architecture }}" --desktop "${{ matrix.desktop }}" --session "${{ matrix.session }}"
+            --commit "${{ needs.source.outputs.commit }}" --source-run-id "$GITHUB_RUN_ID" --artifact-run-id "${{ inputs.artifact_run_id }}"
+            --driver scripts/release/run-linux-native-scenarios.sh --output evidence
+            --module-artifacts module-artifacts --module-fixtures module-fixtures
+            --compositor-runtime-binding compositor-runtime/binding.json)
+          if [[ "${{ needs.source.outputs.upgrade_mode }}" == prior_release ]]; then
+            producer+=(--previous-artifacts previous --previous-version "${{ needs.source.outputs.previous_version }}")
+          fi
+          if [[ "${{ matrix.desktop }}" == KDE ]]; then
+            fedora_producer=(python3 /work/scripts/release/produce-linux-native-qualification.py
+              --artifacts /artifacts --version "${{ needs.source.outputs.version }}"
+              --architecture "${{ matrix.architecture }}" --desktop KDE --session "${{ matrix.session }}"
+              --commit "${{ needs.source.outputs.commit }}" --source-run-id "$GITHUB_RUN_ID" --artifact-run-id "${{ inputs.artifact_run_id }}"
+              --driver /work/scripts/release/run-linux-native-scenarios.sh --output /evidence
+              --module-artifacts /module-artifacts --module-fixtures /module-fixtures
+              --compositor-runtime-binding /compositor-runtime/binding.json)
+            fedora_args=(--session "${{ matrix.session }}" --architecture "${{ matrix.architecture }}" --artifacts current --evidence evidence --companion-source "$companion_source" --module-artifacts module-artifacts --module-fixtures module-fixtures --compositor-runtime compositor-runtime --compositor-runtime-binding compositor-runtime/binding.json --v4l2-device "$COPYPASTE_QUALIFICATION_V4L2_DEVICE")
+            if [[ "${{ needs.source.outputs.upgrade_mode }}" == prior_release ]]; then
+              fedora_args+=(--previous-artifacts previous)
+              fedora_producer+=(--previous-artifacts /previous --previous-version "${{ needs.source.outputs.previous_version }}")
+            fi
+            scripts/release/run-fedora-plasma6-qualification.sh "${fedora_args[@]}" -- "${fedora_producer[@]}"
+          else
+            scripts/release/run-linux-native-desktop-session.sh \
+              --desktop GNOME --session "${{ matrix.session }}" --companion-source "$companion_source" \
+              --compositor-runtime compositor-runtime --compositor-runtime-binding compositor-runtime/binding.json -- "${producer[@]}"
+          fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
         with:
-          name: production-qualified
-          if-no-files-found: error
-          path: qualified
-
-  publish:
-    needs: [preflight, qualify]
-    if: ${{ always() && needs.preflight.result == 'success' && needs.qualify.result == 'success' && needs.preflight.outputs.publish == 'true' }}
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          fetch-depth: 0
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: production-qualified
-          path: qualified
-      - name: Publish stable GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.preflight.outputs.version }}
-          RELEASE_COMMIT: ${{ needs.preflight.outputs.release_commit }}
+          name: linux-camera-diagnostics-${{ matrix.architecture }}-${{ matrix.desktop }}-${{ matrix.session }}
+          if-no-files-found: warn
+          path: evidence/**/*.driver.log
+      - name: Remove owned V4L2 loopback camera
+        if: always()
         run: |
           set -euo pipefail
-          mkdir -p dist
-          find qualified -type f ! -name production-receipt.json -exec cp {} dist/ \;
-          git show "$RELEASE_COMMIT:packaging/release-notes.md" > packaging/release-notes.md
-          git show "$RELEASE_COMMIT:packaging/release-template.md" > packaging/release-template.md
-          python3 scripts/release/render-release-notes.py --version "$VERSION" --repository "$GITHUB_REPOSITORY" --artifacts dist --output "$RUNNER_TEMP/release-notes.md"
-          python3 scripts/release/publish-release.py --version "$VERSION" --repository "$GITHUB_REPOSITORY" --artifacts dist --notes "$RUNNER_TEMP/release-notes.md"
-      - name: Update Homebrew tap
-        env:
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          set -euo pipefail
-          : "${TAP_TOKEN:?missing Homebrew tap token}"
-          dmg="dist/CopyPaste-v${VERSION}-macos-arm64.dmg"
-          tarball="dist/copypaste-cli-v${VERSION}-macos-arm64.tar.gz"
-          chmod +x scripts/release/gen-cask.sh scripts/release/gen-formula.sh
-          scripts/release/gen-cask.sh "$VERSION" "$(sha256sum "$dmg" | cut -d' ' -f1)" --out tap
-          scripts/release/gen-formula.sh "$VERSION" "$(sha256sum "$tarball" | cut -d' ' -f1)" --out tap
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/dmytro-yevs/homebrew-copypaste.git" homebrew-tap
-          mkdir -p homebrew-tap/Casks homebrew-tap/Formula
-          cp tap/Casks/copypaste.rb homebrew-tap/Casks/copypaste.rb
-          cp tap/Formula/copypaste-cli.rb homebrew-tap/Formula/copypaste-cli.rb
-          cd homebrew-tap
-          git config user.name github-actions
-          git config user.email github-actions@github.com
-          git add Casks/copypaste.rb Formula/copypaste-cli.rb
-          if ! git diff --cached --quiet; then
-            git commit -m "Release CopyPaste $VERSION"
-            git push origin HEAD:main
-          fi
+          python3 scripts/release/provision-linux-v4l2loopback.py cleanup \
+            --state "$RUNNER_TEMP/copypaste-v4l2loopback.json" --missing-ok

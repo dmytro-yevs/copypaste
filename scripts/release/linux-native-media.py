@@ -209,6 +209,30 @@ def invoke_accessible(registry: Any, *, pid: int, target: str) -> dict[str, Any]
     )
 
 
+def public_camera_diagnostic(application: Any, pid: int, expected: str) -> dict[str, Any]:
+    states = ('QR scanner', 'Start scanner', 'Scan QR code', 'Pairing action failed',
+              'Pairing failed', 'Verifying device', 'Confirm on both devices',
+              'Pairing timed out', 'Device paired')
+    present = {state: False for state in states}
+    merged_expected = False
+    for node in accessible_descendants(application):
+        try:
+            name = node.name
+        except Exception:
+            continue
+        if not isinstance(name, str):
+            continue
+        lines = name.split('\n')
+        for state in states:
+            present[state] |= state in lines
+        merged_expected |= expected in lines and name != expected
+    libraries = ('libcamera_desktop_plugin.so', 'libgstreamer-1.0.so',
+                 'libgstvideo4linux2.so', 'libgstvideofilter.so', 'libgstcoreelements.so')
+    mappings = Path(f'/proc/{pid}/maps').read_text(encoding='utf-8')
+    return {'public_states': present, 'expected_label_merged': merged_expected,
+            'mapped_camera_libraries': {name: name in mappings for name in libraries}}
+
+
 def click_accessible(registry: Any, *, pid: int, target: str, expected: str, timeout_seconds: int) -> dict[str, Any]:
     record = invoke_accessible(registry, pid=pid, target=target)
     application = atspi_application(registry, pid)
@@ -217,7 +241,8 @@ def click_accessible(registry: Any, *, pid: int, target: str, expected: str, tim
         if matching_accessible(application, expected) is not None:
             return {**record, "expected_name_sha256": hashlib.sha256(expected.encode("utf-8")).hexdigest()}
         time.sleep(0.1)
-    raise MediaQualificationError("installed UI did not reach the expected state")
+    diagnostic = public_camera_diagnostic(application, pid, expected)
+    raise MediaQualificationError("installed UI did not reach the expected state: " + json.dumps(diagnostic, sort_keys=True))
 
 
 def mapped_file(mappings: str, fragment: str) -> Path:
