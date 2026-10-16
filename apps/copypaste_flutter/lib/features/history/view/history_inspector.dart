@@ -114,7 +114,7 @@ class HistoryInspector extends StatelessWidget {
                   const Gap(AppSpacing.sm),
                   SecondaryBadge(child: Text(highlighted.language)),
                 ],
-                if (!inDrawer && !clip.secret) ...[
+                if (!inDrawer) ...[
                   const Gap(AppSpacing.sm),
                   Tooltip(
                     showDuration: AppMotion.resolve(
@@ -151,12 +151,14 @@ class HistoryInspector extends StatelessWidget {
                     key: ValueKey(
                       'inspector-spoiler-${clip.id}-$presentationRevision',
                     ),
-                    reveal: (_) => _HistoryDetailContent(
+                    clipId: clip.id,
+                    controller: controller.spoilers,
+                    child: _HistoryDetailContent(
                       clip: clip,
                       controller: controller,
                       body: body,
                       highlighted: highlighted,
-                      desktop: false,
+                      desktop: !inDrawer,
                     ),
                   )
                 : _HistoryDetailContent(
@@ -182,6 +184,14 @@ class HistoryInspector extends StatelessWidget {
                   clip,
                   constraints.maxWidth,
                 );
+                final secretIconOnly =
+                    iconOnly ||
+                    _actionsNeedIcons(
+                      context,
+                      clip,
+                      constraints.maxWidth,
+                      includeSpoilerLabel: true,
+                    );
                 return Wrap(
                   key: const ValueKey<String>('history-detail-actions'),
                   spacing: AppSpacing.sm,
@@ -329,16 +339,18 @@ class HistoryInspector extends StatelessWidget {
                     Tooltip(
                       tooltip: (_) => TooltipContainer(
                         child: Text(
-                          clip.secret ? 'Make non-secret' : 'Make secret',
+                          clip.secret ? 'Remove spoiler' : 'Add spoiler',
                         ),
                       ),
                       child: Semantics(
-                        label: clip.secret ? 'Make non-secret' : 'Make secret',
+                        label: clip.secret ? 'Remove spoiler' : 'Add spoiler',
                         toggled: clip.secret,
                         child: Button.outline(
                           key: const ValueKey('history-detail-secret'),
                           style: AppTheme.actionButtonStyle(
-                            const ButtonStyle.outlineIcon(),
+                            secretIconOnly
+                                ? const ButtonStyle.outlineIcon()
+                                : const ButtonStyle.outline(),
                           ),
                           onPressed: controller.isSecretPending(clip.id)
                               ? null
@@ -356,9 +368,24 @@ class HistoryInspector extends StatelessWidget {
                                     );
                                   }
                                 },
-                          child: Icon(
-                            clip.secret ? LucideIcons.eye : LucideIcons.eyeOff,
-                          ),
+                          leading: secretIconOnly
+                              ? null
+                              : Icon(
+                                  clip.secret
+                                      ? LucideIcons.lockOpen
+                                      : LucideIcons.lockKeyhole,
+                                ),
+                          child: secretIconOnly
+                              ? Icon(
+                                  clip.secret
+                                      ? LucideIcons.lockOpen
+                                      : LucideIcons.lockKeyhole,
+                                )
+                              : Text(
+                                  clip.secret
+                                      ? 'Remove spoiler'
+                                      : 'Add spoiler',
+                                ),
                         ),
                       ),
                     ),
@@ -428,11 +455,25 @@ class HistoryInspector extends StatelessWidget {
                 AppSpacing.xs,
                 AppSpacing.xs,
               ),
-              child: _HistoryMetadataTable(
-                clip: clip,
-                controller: controller,
-                compact: compact,
-              ),
+              child: clip.secret
+                  ? SecretSpoiler(
+                      key: ValueKey(
+                        'inspector-metadata-spoiler-${clip.id}-$presentationRevision',
+                      ),
+                      clipId: clip.id,
+                      controller: controller.spoilers,
+                      child: _HistoryMetadataTable(
+                        clip: clip,
+                        controller: controller,
+                        compact: compact,
+                        revealConfidential: true,
+                      ),
+                    )
+                  : _HistoryMetadataTable(
+                      clip: clip,
+                      controller: controller,
+                      compact: compact,
+                    ),
             ),
           ],
         ],
@@ -470,10 +511,18 @@ class HistoryInspector extends StatelessWidget {
   bool _actionsNeedIcons(
     BuildContext context,
     HistoryClip clip,
-    double availableWidth,
-  ) {
+    double availableWidth, {
+    bool includeSpoilerLabel = false,
+  }) {
     final actions = <(ButtonStyle, String?)>[
-      (const ButtonStyle.outlineIcon(), null),
+      (
+        includeSpoilerLabel
+            ? const ButtonStyle.outline()
+            : const ButtonStyle.outlineIcon(),
+        includeSpoilerLabel
+            ? (clip.secret ? 'Remove spoiler' : 'Add spoiler')
+            : null,
+      ),
       (const ButtonStyle.primary(), 'Copy'),
       if (controller.canDownloadSelected)
         (const ButtonStyle.secondary(), 'Download'),

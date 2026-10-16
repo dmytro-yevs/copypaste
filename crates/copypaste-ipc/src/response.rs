@@ -284,6 +284,10 @@ pub enum ResponseData {
     Event(EventData),
     Page(ItemPage),
     HistoryFacets(HistoryFacets),
+    SpoilerState {
+        revision: u64,
+        revealed_ids: Vec<String>,
+    },
     Item(Item),
     ImagePreview(ImagePreview),
     SourceAppIcon(ImagePreview),

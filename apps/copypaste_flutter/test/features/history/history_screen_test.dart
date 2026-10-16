@@ -64,18 +64,18 @@ void main() {
       await tester.tapAt(tester.getCenter(spoiler));
       await tester.pump();
       expect(controller.bulkSelectedIds, {'bulk-secret'});
-      expect(find.text('SYNTHETIC BULK SECRET'), findsNothing);
+      expect(find.text('SYNTHETIC BULK SECRET').hitTestable(), findsNothing);
       expect(controller.selectedId, isNull);
       await tester.tapAt(tester.getCenter(spoiler));
       await tester.pump();
       expect(controller.bulkSelectedIds, isEmpty);
-      expect(find.text('SYNTHETIC BULK SECRET'), findsNothing);
+      expect(find.text('SYNTHETIC BULK SECRET').hitTestable(), findsNothing);
       await tester.tap(find.byKey(const ValueKey('history-bulk-close')));
       await tester.pump();
       await tester.tapAt(tester.getCenter(spoiler));
       await tester.pump();
       await tester.pump(AppMotion.spoilerReveal);
-      expect(find.text('SYNTHETIC BULK SECRET'), findsOneWidget);
+      expect(find.text('SYNTHETIC BULK SECRET').hitTestable(), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },
@@ -261,7 +261,7 @@ void main() {
   );
 
   testWidgets(
-    'History and inspector never display a secret before spoiler reveal',
+    'History and inspector share reveal, reselection and conceal without exposing hidden content',
     (tester) async {
       addTearDown(() => tester.binding.setSurfaceSize(null));
       await tester.binding.setSurfaceSize(const Size(1280, 800));
@@ -290,10 +290,10 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(find.text('SYNTHETIC HISTORY SECRET'), findsNothing);
+      expect(find.text('SYNTHETIC HISTORY SECRET').hitTestable(), findsNothing);
       await controller.select('secret-fixture');
       await tester.pump();
-      expect(find.text('SYNTHETIC HISTORY SECRET'), findsNothing);
+      expect(find.text('SYNTHETIC HISTORY SECRET').hitTestable(), findsNothing);
       await tester.tap(
         find.descendant(
           of: find.byKey(const ValueKey('inspector-spoiler-secret-fixture-0')),
@@ -302,12 +302,22 @@ void main() {
       );
       await tester.pump();
       await tester.pump(AppMotion.spoilerReveal);
-      expect(find.text('SYNTHETIC HISTORY SECRET'), findsOneWidget);
+      expect(
+        find.text('SYNTHETIC HISTORY SECRET').hitTestable(),
+        findsNWidgets(2),
+      );
       controller.clearSelection();
       await tester.pump();
       await controller.select('secret-fixture');
       await tester.pump();
-      expect(find.text('SYNTHETIC HISTORY SECRET'), findsNothing);
+      await tester.pump(AppMotion.spoilerReveal);
+      expect(
+        find.text('SYNTHETIC HISTORY SECRET').hitTestable(),
+        findsNWidgets(2),
+      );
+      await controller.spoilers.setRevealed('secret-fixture', false);
+      await tester.pump();
+      expect(find.text('SYNTHETIC HISTORY SECRET').hitTestable(), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },

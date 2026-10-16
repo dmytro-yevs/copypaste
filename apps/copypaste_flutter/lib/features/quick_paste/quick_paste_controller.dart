@@ -124,6 +124,8 @@ class QuickPasteController extends ChangeNotifier {
     _pageLoad = null;
     _paginationFailed = false;
     _presentationGeneration += 1;
+    await history.spoilers.setRevealed(null, false);
+    if (!_isCurrent(presentationId)) return;
     final preferences = await _preferencesStore.read();
     if (!_isCurrent(presentationId)) return;
     _preferences = preferences;

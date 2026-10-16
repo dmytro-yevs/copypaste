@@ -25,6 +25,8 @@ fn wire_name(method: &Method) -> &'static str {
         Method::HistoryCeiling => "history_ceiling",
         Method::Pin { .. } => "pin",
         Method::SetSecret { .. } => "set_secret",
+        Method::GetSpoilerState => "get_spoiler_state",
+        Method::SetSpoilerRevealed { .. } => "set_spoiler_revealed",
         Method::ReorderPinned { .. } => "reorder_pinned",
         Method::PairCreateInvite => "pair_create_invite",
         Method::PairJoin { .. } => "pair_join",
@@ -94,6 +96,8 @@ fn catalog() -> Vec<Value> {
         json!({"method":"history_ceiling"}),
         json!({"method":"pin","params":{"id":"item","pinned":true}}),
         json!({"method":"set_secret","params":{"id":"item","secret":true}}),
+        json!({"method":"get_spoiler_state"}),
+        json!({"method":"set_spoiler_revealed","params":{"id":"item","revealed":true}}),
         json!({"method":"reorder_pinned","params":{"ids":["item"]}}),
         json!({"method":"pair_create_invite"}),
         json!({"method":"pair_join","params":{"code":"code","addr":"127.0.0.1:1"}}),
@@ -139,7 +143,7 @@ fn every_ipc_method_has_one_executable_wire_contract() {
     }
     assert_eq!(
         names.len(),
-        48,
+        50,
         "a Method has no wire fixture, or this count was not bumped with it"
     );
 }
