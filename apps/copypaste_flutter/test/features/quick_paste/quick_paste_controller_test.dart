@@ -52,7 +52,7 @@ void main() {
       await controller.opened(1);
       await tester.pumpWidget(QuickPasteApp(controller: controller));
       await tester.pump();
-      expect(find.text('SYNTHETIC MENU SECRET'), findsNothing);
+      expect(find.text('SYNTHETIC MENU SECRET').hitTestable(), findsNothing);
       final generation = controller.presentationGeneration;
       await tester.tap(
         find.descendant(
@@ -62,11 +62,11 @@ void main() {
       );
       await tester.pump();
       await tester.pump(AppMotion.spoilerReveal);
-      expect(find.text('SYNTHETIC MENU SECRET'), findsOneWidget);
+      expect(find.text('SYNTHETIC MENU SECRET').hitTestable(), findsOneWidget);
       expect(repository.copied, isEmpty);
       await controller.opened(2);
       await tester.pump();
-      expect(find.text('SYNTHETIC MENU SECRET'), findsNothing);
+      expect(find.text('SYNTHETIC MENU SECRET').hitTestable(), findsNothing);
       expect(repository.copied, isEmpty);
       await controller.toggleInspector();
       await tester.pump();
@@ -81,13 +81,16 @@ void main() {
       );
       await tester.pump();
       await tester.pump(AppMotion.spoilerReveal);
-      expect(find.text('SYNTHETIC MENU SECRET'), findsOneWidget);
+      expect(
+        find.text('SYNTHETIC MENU SECRET').hitTestable(),
+        findsNWidgets(2),
+      );
       await controller.opened(3);
       if (!controller.inspectorOpen) {
         await controller.toggleInspector();
       }
       await tester.pump();
-      expect(find.text('SYNTHETIC MENU SECRET'), findsNothing);
+      expect(find.text('SYNTHETIC MENU SECRET').hitTestable(), findsNothing);
       expect(repository.copied, isEmpty);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -130,6 +133,114 @@ void main() {
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox.shrink());
       },
+    );
+  }
+
+  for (final platform in [
+    TargetPlatform.macOS,
+    TargetPlatform.windows,
+    TargetPlatform.android,
+  ]) {
+    testWidgets(
+      'inspector keeps scroll positions and menu geometry on $platform',
+      (tester) async {
+        final repository = _Repository();
+        _populateHistory(repository, 40);
+        repository.clips.addAll(
+          List.generate(
+            15,
+            (index) => HistoryClip(
+              id: 'pin-$index',
+              contentType: 'text',
+              preview: 'Pinned $index',
+              createdAt: DateTime.utc(2026),
+              pinned: true,
+            ),
+          ),
+        );
+        final host = _ContextHost();
+        final controller = QuickPasteController(
+          repository: repository,
+          preferencesStore: MemoryQuickPastePreferencesStore(),
+          host: host,
+        );
+        await tester.binding.setSurfaceSize(const Size(448, 800));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        await controller.initialize();
+        await controller.opened(1);
+        await tester.pumpWidget(QuickPasteApp(controller: controller));
+        await tester.pumpAndSettle();
+        final recentFinder = find.byKey(
+          const ValueKey('quick-paste-history-scroll'),
+        );
+        final pinnedFinder = find.byKey(
+          const ValueKey('quick-paste-pinned-scroll'),
+        );
+        final recent = tester.widget<ListView>(recentFinder).controller!;
+        final pinned = tester.widget<ListView>(pinnedFinder).controller!;
+        recent.jumpTo(400);
+        pinned.jumpTo(80);
+        await tester.pumpAndSettle();
+        final recentPosition = recent.position;
+        final pinnedPosition = pinned.position;
+        final headerWidth = tester
+            .getSize(find.byKey(const ValueKey('quick-paste-header')))
+            .width;
+        host.inspectorGate = Completer<void>();
+        final opening = controller.toggleInspector();
+        await tester.pump();
+        // Model native resize arriving before its method-channel reply.
+        await tester.binding.setSurfaceSize(const Size(816, 800));
+        await tester.pump();
+        expect(
+          tester
+              .getSize(find.byKey(const ValueKey('quick-paste-header')))
+              .width,
+          headerWidth,
+        );
+        host.inspectorGate!.complete();
+        await opening;
+        await tester.pumpAndSettle();
+        expect(recent.position, same(recentPosition));
+        expect(pinned.position, same(pinnedPosition));
+        expect(recent.offset, 400);
+        expect(pinned.offset, 80);
+        expect(
+          tester
+              .getSize(find.byKey(const ValueKey('quick-paste-header')))
+              .width,
+          headerWidth,
+        );
+        host.inspectorGate = null;
+        await controller.toggleInspector();
+        await tester.binding.setSurfaceSize(const Size(448, 800));
+        await tester.pumpAndSettle();
+        expect(recent.position, same(recentPosition));
+        expect(pinned.position, same(pinnedPosition));
+        expect(recent.offset, 400);
+        expect(pinned.offset, 80);
+        for (final label in ['Clear', 'Preferences…', 'About', 'Quit']) {
+          final buttons = find.ancestor(
+            of: find.text(label),
+            matching: find.byType(Button),
+          );
+          final button = tester.widget<Button>(buttons.first);
+          for (final states in [
+            <WidgetState>{},
+            {WidgetState.hovered},
+            {WidgetState.focused},
+            {WidgetState.pressed},
+          ]) {
+            final decoration =
+                button.style.decoration(tester.element(buttons.first), states)
+                    as BoxDecoration;
+            expect(decoration.border?.top.style, BorderStyle.none);
+          }
+        }
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+      variant: TargetPlatformVariant({platform}),
     );
   }
 
@@ -732,6 +843,19 @@ void main() {
     expect(find.text('[image]'), findsNothing);
     expect(tester.getSize(preview).height, 120);
     expect(repository.imagePreviewEdges, contains(480));
+    final row = find.byKey(const ValueKey('quick-paste-image'));
+    final size = tester.getSize(row);
+    await controller.history.toggleSecret(repository.clips.first);
+    await tester.pump();
+    await tester.pump();
+    expect(tester.getSize(row), size);
+    expect(preview.hitTestable(), findsNothing);
+    await controller.history.spoilers.setRevealed('image', true);
+    await tester.pump();
+    await tester.pump(AppMotion.spoilerReveal);
+    expect(tester.getSize(row), size);
+    expect(preview.hitTestable(), findsOneWidget);
+    expect(repository.copied, isEmpty);
     expect(tester.takeException(), isNull);
   });
 

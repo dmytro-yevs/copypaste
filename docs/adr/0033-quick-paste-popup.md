@@ -101,8 +101,8 @@ global-shortcut integration.
 
 ## Manual secrecy
 
-Both inspectors expose one icon-only eye control to make a clip secret or
-non-secret. An explicit choice is persisted with a timestamp in the encrypted
+Both inspectors expose an Add spoiler / Remove spoiler action with a locked /
+unlocked Lucide icon. Narrow layouts retain the icon, tooltip and semantic label. An explicit choice is persisted with a timestamp in the encrypted
 payload metadata and travels with the existing item version to paired devices.
 The newest explicit choice takes precedence over producer hints; ties prefer
 secrecy. Recopying old content cannot undo that choice. Content identity and pin
@@ -111,6 +111,23 @@ non-secret text returns to full-text search and becomes eligible for semantic
 indexing in the same storage transaction. A failed decrypt leaves the clip secret.
 Receiving a secrecy change does not replace the system clipboard.
 
-Quick Paste's inline spoiler matches one line of its inherited typography,
-including text scaling. Revealing it does not add button padding or change the
-menu row height.
+Spoiler masks use the content's actual layout, including text scaling and image
+aspect ratio, without painting hidden content or exposing its focus, pointer
+or accessibility targets. Mounted secret previews may load detail for this
+layout; ordinary history queries continue to redact secret previews. Layout
+content uses a bounded controller cache cleared when History suspends.
+
+Temporary reveals are shared by clip ID across History, Quick Paste and both
+inspectors through the local runtime. `GetSpoilerState` and
+`SetSpoilerRevealed` return a monotonically revisioned snapshot of revealed IDs;
+the existing item invalidation wakes each local client. The snapshot contains
+no content, is neither persisted nor sent to paired devices, and resets on
+runtime restart. An explicit secrecy change conceals that clip. Reopening Quick
+Paste or hiding/backgrounding a surface conceals the shared session; moving
+focus between local windows does not. macOS and Windows use the daemon;
+Android uses the same state contract in its embedded runtime.
+
+The menu subtree and its recent/pinned scroll positions survive inspector
+opening and closing. Its width remains stable during native expansion, and the
+inspector enters with shared motion timing and reduced-motion support. Menu
+footer rows use the same borderless style as clipboard rows.

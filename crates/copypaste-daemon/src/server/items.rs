@@ -373,9 +373,39 @@ pub(super) fn history_ceiling(state: &AppState, id: u64) -> Response {
     }
 }
 
+pub(super) fn set_spoiler_revealed(
+    state: &AppState,
+    id: u64,
+    item_id: Option<&str>,
+    revealed: bool,
+) -> Response {
+    if revealed {
+        let Some(item_id) = item_id else {
+            return Response::err(id, ErrorCode::InvalidRequest, "A clip is required.");
+        };
+        match state.store.get(item_id) {
+            Ok(Some(item)) if item.clipboard_privacy().secret => {}
+            Ok(_) => {
+                return Response::err(id, ErrorCode::NotFound, "The secret clip was not found.")
+            }
+            Err(error) => return storage_error(id, "reveal", &error),
+        }
+    }
+    let (revision, revealed_ids) = state.spoilers.set(item_id, revealed);
+    state.note_remote_change();
+    Response::ok(
+        id,
+        ResponseData::SpoilerState {
+            revision,
+            revealed_ids,
+        },
+    )
+}
+
 pub(super) fn set_secret(state: &AppState, id: u64, item_id: &str, secret: bool) -> Response {
     match state.store.set_secret(&state.keyring, item_id, secret) {
         Ok(true) => {
+            state.spoilers.set(Some(item_id), false);
             state.note_local_change();
             get(state, id, item_id)
         }
@@ -914,6 +944,43 @@ mod tests {
         assert_eq!(page.items[0].id, ranked[0].id);
         assert!(page.next_cursor.is_none());
         assert!(serde_json::to_string(&page).unwrap().len() <= copypaste_ipc::MAX_FRAME_BYTES);
+    }
+
+    #[test]
+    fn spoiler_visibility_notifies_both_windows_without_copy_or_persistence() {
+        let (state, _dir, writes) =
+            crate::testutil::test_state_watching_clipboard("spoiler-visibility");
+        let item = match add(&state, 1, "hidden body").data {
+            Some(ResponseData::Item(item)) => item,
+            _ => panic!("expected item"),
+        };
+        assert!(set_secret(&state, 2, &item.id, true).ok);
+        let mut first = state.subscribe();
+        let mut second = state.subscribe();
+        let revealed = set_spoiler_revealed(&state, 3, Some(&item.id), true);
+        assert!(
+            matches!(revealed.data, Some(ResponseData::SpoilerState { revealed_ids, .. }) if revealed_ids == [item.id.clone()])
+        );
+        for receiver in [&mut first, &mut second] {
+            let event = receiver.try_recv().unwrap();
+            assert_eq!(event.event, copypaste_ipc::EventKind::Items);
+            assert!(!event.captured);
+        }
+        let snapshot = super::super::dispatch::dispatch_store(
+            &state,
+            4,
+            copypaste_ipc::Method::GetSpoilerState,
+        );
+        assert!(
+            matches!(snapshot.data, Some(ResponseData::SpoilerState { revealed_ids, .. }) if revealed_ids == [item.id.clone()])
+        );
+        assert!(set_secret(&state, 5, &item.id, true).ok);
+        assert!(state.spoilers.snapshot().1.is_empty());
+        assert!(set_spoiler_revealed(&state, 6, Some(&item.id), true).ok);
+        assert!(set_spoiler_revealed(&state, 7, None, false).ok);
+        assert!(state.spoilers.snapshot().1.is_empty());
+        assert!(!set_spoiler_revealed(&state, 8, Some("missing"), true).ok);
+        assert_eq!(writes.count(), 0);
     }
 
     #[test]

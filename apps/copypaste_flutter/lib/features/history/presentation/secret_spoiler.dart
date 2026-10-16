@@ -1,17 +1,24 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../../../app/theme/app_tokens.dart';
 import '../../../app/theme/app_motion.dart';
 import '../../../app/theme/app_theme.dart';
+import '../controller/history_spoiler_controller.dart';
 
-/// A dust spoiler with an explicit reveal and no hidden plaintext semantics.
-/// Particle masking and a circular reveal follow Telegram's spoiler behavior;
-/// this is an independent Flutter implementation, not a native-code port.
+/// Uses the content's actual layout while excluding its paint, focus, pointer
+/// targets and semantics until the shared presentation state reveals the clip.
 class SecretSpoiler extends StatefulWidget {
-  const SecretSpoiler({super.key, required this.reveal, this.inline = false});
-  final bool inline;
-  final WidgetBuilder reveal;
+  const SecretSpoiler({
+    super.key,
+    required this.clipId,
+    required this.controller,
+    required this.child,
+  });
+  final String clipId;
+  final HistorySpoilerController controller;
+  final Widget child;
 
   @override
   State<SecretSpoiler> createState() => _SecretSpoilerState();
@@ -27,85 +34,107 @@ class _SecretSpoilerState extends State<SecretSpoiler>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    widget.controller.addListener(_changed);
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (!_revealed) {
+    _updateMotion();
+  }
+
+  @override
+  void didUpdateWidget(SecretSpoiler oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_changed);
+      widget.controller.addListener(_changed);
+    }
+    _updateMotion();
+  }
+
+  void _changed() {
+    if (!mounted) return;
+    setState(_updateMotion);
+  }
+
+  void _updateMotion() {
+    final revealed = widget.controller.isRevealed(widget.clipId);
+    if (revealed) {
+      if (!_revealed) {
+        _motion.open(reducedMotion: AppMotion.reducedMotionOf(context));
+      }
+    } else {
       _motion.conceal(reducedMotion: AppMotion.reducedMotionOf(context));
     }
+    _revealed = revealed;
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed && _revealed) {
-      setState(() => _revealed = false);
-      _motion.conceal(reducedMotion: AppMotion.reducedMotionOf(context));
+    if ((state == AppLifecycleState.hidden ||
+            state == AppLifecycleState.paused ||
+            state == AppLifecycleState.detached) &&
+        widget.controller.isRevealed(widget.clipId)) {
+      unawaited(widget.controller.setRevealed(null, false));
     }
-  }
-
-  void _open() {
-    setState(() => _revealed = true);
-    _motion.open(reducedMotion: AppMotion.reducedMotionOf(context));
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.controller.removeListener(_changed);
     _motion.dispose();
     super.dispose();
-  }
-
-  double _lineHeight(BuildContext context) {
-    final painter = TextPainter(
-      text: TextSpan(text: ' ', style: DefaultTextStyle.of(context).style),
-      textDirection: Directionality.of(context),
-      textScaler: MediaQuery.textScalerOf(context),
-      maxLines: 1,
-    )..layout();
-    final height = painter.height;
-    painter.dispose();
-    return height;
   }
 
   @override
   Widget build(BuildContext context) {
     final color = Theme.of(context).colorScheme.mutedForeground;
-    if (_revealed) {
-      return AnimatedBuilder(
-        animation: _motion.reveal,
-        child: widget.reveal(context),
-        builder: (context, child) => ClipPath(
-          clipper: _RevealClipper(
-            AppMotion.spoilerRevealCurve.transform(_motion.reveal.value),
-            _origin,
-          ),
-          child: child,
-        ),
-      );
-    }
-    return Semantics(
-      label: 'Confidential content. Reveal spoiler',
-      child: Listener(
-        onPointerDown: (event) => _origin = event.localPosition,
-        child: Button.ghost(
-          style: widget.inline
-              ? AppTheme.inlineSpoilerButtonStyle
-              : AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
-          onPressed: _open,
-          child: ExcludeSemantics(
-            child: SizedBox(
-              width: double.infinity,
-              height: widget.inline ? _lineHeight(context) : AppIconSize.sm,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(AppRadius.sm),
-                child: CustomPaint(painter: _DustPainter(_motion.dust, color)),
+    return Stack(
+      children: [
+        Visibility(
+          visible: _revealed,
+          maintainState: true,
+          maintainAnimation: true,
+          maintainSize: true,
+          child: AnimatedBuilder(
+            animation: _motion.reveal,
+            child: widget.child,
+            builder: (context, child) => ClipPath(
+              clipper: _RevealClipper(
+                AppMotion.spoilerRevealCurve.transform(_motion.reveal.value),
+                _origin,
               ),
+              child: child,
             ),
           ),
         ),
-      ),
+        if (!_revealed)
+          Positioned.fill(
+            child: Semantics(
+              label: 'Confidential content. Reveal spoiler',
+              child: Listener(
+                onPointerDown: (event) => _origin = event.localPosition,
+                child: Button.ghost(
+                  style: AppTheme.spoilerButtonStyle,
+                  onPressed: () =>
+                      widget.controller.setRevealed(widget.clipId, true),
+                  child: ExcludeSemantics(
+                    child: SizedBox.expand(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(AppRadius.sm),
+                        child: CustomPaint(
+                          painter: _DustPainter(_motion.dust, color),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

@@ -357,3 +357,16 @@ Stable rule IDs used by source comments:
 - Treat a second protocol or alias command as a new product surface requiring a
   decision, UI ownership and acceptance tests. Do not add one as compatibility
   scaffolding.
+
+### Local spoiler presentation
+
+`get_spoiler_state` returns `spoiler_state` with `revision` and `revealed_ids`.
+`set_spoiler_revealed` takes an optional `id` and `revealed` boolean. Revealing
+requires an existing secret clip; a missing ID with `revealed=false` conceals
+all. Successful changes publish the existing content-free items invalidation.
+Clients reject older snapshot revisions. This in-memory state is shared by all
+local clients, never encrypted into a clip or transmitted to peers. Persisted
+`set_secret` changes conceal that clip before notifying clients. The desktop
+daemon (macOS/Windows) and Android embedded runtime implement the same methods.
+Contract tests cover both dispatchers, two watchers, conceal-all, missing IDs,
+revision ordering and the absence of clipboard writes.

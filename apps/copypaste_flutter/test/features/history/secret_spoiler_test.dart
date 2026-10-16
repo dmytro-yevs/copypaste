@@ -1,113 +1,134 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 
-import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/features/history/presentation/secret_spoiler.dart';
+import 'package:copypaste_flutter/features/history/controller/history_spoiler_controller.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
-  testWidgets(
-    'spoiler never builds plaintext before explicit reveal and hides on inactivity',
-    (tester) async {
-      await _loadFonts(tester);
-      final semantics = tester.ensureSemantics();
-      try {
-        var reads = 0;
-        final boundary = GlobalKey();
-        await tester.pumpWidget(
-          ShadcnApp(
-            theme: AppTheme.light,
-            builder: AppTheme.builder,
-            home: RepaintBoundary(
-              key: boundary,
-              child: Scaffold(
-                child: Center(
-                  child: SizedBox(
-                    width: 280,
-                    child: SecretSpoiler(
-                      reveal: (_) {
-                        reads++;
-                        return const Text(
-                          'SYNTHETIC SECRET FIXTURE',
-                          style: TextStyle(
-                            fontFamily: 'GeistSans',
-                            package: 'shadcn_flutter',
-                          ),
-                        );
-                      },
+  for (final scale in [1.0, 2.0]) {
+    for (final imageContent in [false, true]) {
+      testWidgets(
+        'mask keeps exact content geometry and shared visibility: scale=$scale image=$imageContent',
+        (tester) async {
+          await _loadFonts(tester);
+          final semantics = tester.ensureSemantics();
+          final controller = HistorySpoilerController(null);
+          addTearDown(controller.dispose);
+          final boundary = GlobalKey();
+          final content = imageContent
+              ? SizedBox(
+                  width: 190,
+                  height: 130,
+                  child: ColoredBox(
+                    color: Color(0xffff0000),
+                    child: Semantics(label: 'SYNTHETIC SECRET FIXTURE'),
+                  ),
+                )
+              : const Text(
+                  'SYNTHETIC SECRET FIXTURE\nSecond line\nThird line',
+                  style: TextStyle(
+                    fontFamily: 'GeistSans',
+                    package: 'shadcn_flutter',
+                  ),
+                );
+          await tester.pumpWidget(
+            ShadcnApp(
+              theme: AppTheme.light,
+              builder: (context, child) => AppTheme.builder(
+                context,
+                MediaQuery(
+                  data: MediaQuery.of(context).copyWith(
+                    textScaler: TextScaler.linear(scale),
+                    disableAnimations: true,
+                  ),
+                  child: child!,
+                ),
+              ),
+              home: Scaffold(
+                child: RepaintBoundary(
+                  key: boundary,
+                  child: Center(
+                    child: SizedBox(
+                      width: 280,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final index in [0, 1])
+                            SecretSpoiler(
+                              key: ValueKey('mask-$index'),
+                              clipId: 'clip',
+                              controller: controller,
+                              child: content,
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-        );
-        await tester.pump();
-        expect(reads, 0);
-        expect(find.text('SYNTHETIC SECRET FIXTURE'), findsNothing);
-        expect(
-          find.bySemanticsLabel('Confidential content. Reveal spoiler'),
-          findsOneWidget,
-        );
-        await tester.runAsync(() => _capture(boundary, 'spoiler-hidden.png'));
-        await tester.tap(find.byType(Button));
-        await tester.pump();
-        await tester.pump(AppMotion.spoilerReveal);
-        expect(reads, 1);
-        expect(find.text('SYNTHETIC SECRET FIXTURE'), findsOneWidget);
-        await tester.runAsync(() => _capture(boundary, 'spoiler-revealed.png'));
-        tester.binding.handleAppLifecycleStateChanged(
-          AppLifecycleState.inactive,
-        );
-        await tester.pump();
-        expect(find.text('SYNTHETIC SECRET FIXTURE'), findsNothing);
-        expect(reads, 1);
-        tester.binding.handleAppLifecycleStateChanged(
-          AppLifecycleState.resumed,
-        );
-        await tester.pumpWidget(const SizedBox.shrink());
-      } finally {
-        semantics.dispose();
-      }
-    },
-  );
-
-  testWidgets(
-    'spoiler remains usable at 320px and 200 percent text with reduced motion',
-    (tester) async {
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      await tester.binding.setSurfaceSize(const Size(320, 640));
-      await tester.pumpWidget(
-        ShadcnApp(
-          theme: AppTheme.light,
-          builder: (context, child) => AppTheme.builder(
-            context,
-            MediaQuery(
-              data: MediaQuery.of(context).copyWith(
-                disableAnimations: true,
-                textScaler: TextScaler.linear(2),
-              ),
-              child: child!,
-            ),
-          ),
-          home: Scaffold(
-            child: SecretSpoiler(reveal: (_) => const Text('Synthetic secret')),
-          ),
-        ),
+          );
+          await tester.pumpAndSettle();
+          final size = tester.getSize(find.byKey(const ValueKey('mask-0')));
+          expect(
+            _semantics(tester),
+            isNot(contains('SYNTHETIC SECRET FIXTURE')),
+          );
+          expect(
+            find.bySemanticsLabel('Confidential content. Reveal spoiler'),
+            findsNWidgets(2),
+          );
+          await tester.runAsync(
+            () => _capture(boundary, 'spoiler-hidden-$scale-$imageContent.png'),
+          );
+          await tester.tap(find.byType(Button).first);
+          await tester.pumpAndSettle();
+          expect(controller.isRevealed('clip'), isTrue);
+          expect(find.byType(Button), findsNothing);
+          expect(_semantics(tester), contains('SYNTHETIC SECRET FIXTURE'));
+          expect(tester.getSize(find.byKey(const ValueKey('mask-0'))), size);
+          expect(tester.getSize(find.byKey(const ValueKey('mask-1'))), size);
+          await tester.runAsync(
+            () =>
+                _capture(boundary, 'spoiler-revealed-$scale-$imageContent.png'),
+          );
+          tester.binding.handleAppLifecycleStateChanged(
+            AppLifecycleState.inactive,
+          );
+          await tester.pump();
+          expect(controller.isRevealed('clip'), isTrue);
+          tester.binding.handleAppLifecycleStateChanged(
+            AppLifecycleState.hidden,
+          );
+          await tester.pumpAndSettle();
+          expect(controller.isRevealed('clip'), isFalse);
+          // Hidden applications do not produce frames; verify the first frame
+          // after resuming is already concealed.
+          tester.binding.handleAppLifecycleStateChanged(
+            AppLifecycleState.resumed,
+          );
+          await tester.pumpAndSettle();
+          expect(
+            _semantics(tester),
+            isNot(contains('SYNTHETIC SECRET FIXTURE')),
+          );
+          expect(tester.getSize(find.byKey(const ValueKey('mask-0'))), size);
+          tester.binding.handleAppLifecycleStateChanged(
+            AppLifecycleState.resumed,
+          );
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+          semantics.dispose();
+        },
       );
-      await tester.pumpAndSettle();
-      expect(find.text('Synthetic secret'), findsNothing);
-      await tester.tap(find.byType(Button));
-      await tester.pumpAndSettle();
-      expect(find.text('Synthetic secret'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
+    }
+  }
 }
 
 Future<void> _capture(GlobalKey boundary, String filename) async {
@@ -132,3 +153,12 @@ Future<void> _loadFonts(WidgetTester tester) async {
     await font.load();
   });
 }
+
+String _semantics(WidgetTester tester) => tester
+    .binding
+    .renderViews
+    .first
+    .owner!
+    .semanticsOwner!
+    .rootSemanticsNode!
+    .toStringDeep();
