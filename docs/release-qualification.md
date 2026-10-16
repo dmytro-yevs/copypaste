@@ -46,8 +46,11 @@ requires an existing stable `v<version>` tag at the exact workflow commit and an
 explicit publish request, or a push of that tag. The publish job creates the
 GitHub Release and updates the Homebrew tap only after all platform jobs pass.
 
-Fresh releases automatically call the Linux module and compositor producers,
+Fresh releases automatically call the complete module and compositor producers,
 then run installed Linux qualification against the parent run's exact artifacts.
+The complete module matrices produce the publishable packages; installed Linux
+qualification exercises those same Linux package bytes. Publish their qualified
+packages from this parent run instead of rebuilding a separate module release.
 Manual evidence run IDs are recovery overrides. Preflight resolves the preceding
 published Linux upgrade packages and checks their public digests before builds.
 See [delivery architecture](engineering/ci-architecture.md) for the dependency

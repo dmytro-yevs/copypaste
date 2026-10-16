@@ -27,7 +27,7 @@ flowchart TD
   policy --> android[One Gradle invocation: universal + ABI APKs]
   policy --> windows[Windows build + installer smoke]
   policy --> linux[One Linux bundle: AppImage / DEB / RPM]
-  policy --> modules[Reusable Linux OCR / Supabase / Semantic Search producers]
+  policy --> modules[Reusable full OCR / Supabase / Semantic Search producers]
   policy --> compositor[Exact-source compositor producer]
   compositor --> signed[Signed public runtime companions]
   linux --> desktop[Installed Linux native qualification]
@@ -127,8 +127,13 @@ disposable Keychain. Both regression and exact DMG smoke are required.
 Linux still packages one application bundle in three formats and preserves
 Fedora RPM installation evidence; GNOME qualification no longer installs KDE.
 The module workflows share their existing adapters and a declarative
-`config/module-platforms.json` matrix; Linux-only application qualification
-cannot publish a partial standalone module release.
+`config/module-platforms.json` matrix. Fresh application releases qualify the
+complete publishable module matrices once, including macOS, Windows, Linux,
+and Android. Their exact Linux packages feed installed-product qualification;
+all packages and native receipts remain in the parent run for later publication.
+This avoids rebuilding Linux module packages separately for publication.
+Explicit Linux-only module probes remain supported and cannot publish a partial
+standalone module release.
 
 Mutter and GNOME Shell fetch the same pinned commits from GNOME's official
 read-only GitHub mirrors. Validation encountered a GitLab Gitaly outage returning

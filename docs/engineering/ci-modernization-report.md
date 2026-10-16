@@ -18,7 +18,7 @@ flowchart TD
   Release[Release request at exact SHA] --> Preflight[Inputs, signatures, prior release, recovery discovery]
   Preflight --> ReleasePolicy[Release CI policy]
   ReleasePolicy --> Builds[Parallel macOS, Android, Windows, Linux production builds]
-  ReleasePolicy --> Modules[Qualified Linux modules]
+  ReleasePolicy --> Modules[Full qualified module matrices]
   ReleasePolicy --> Runtime[Exact-source compositor runtime]
   ReleasePolicy --> Regression[Isolated macOS launch regression]
   Builds --> Linux[Installed Linux scenarios and upgrade]
@@ -54,6 +54,10 @@ The release chain observation compares delivery procedures, not compiler
 performance. The historical graph and exact source run IDs are retained in the
 machine-readable summary. A later automatic run at 93198da took 25m 22s including
 5m 59s initial queue, demonstrating why runner delay must remain visible.
+These early qualification measurements built Linux module inputs only. The final
+release pipeline also qualifies every publishable module target in the same
+parent run, so publication reuses the exact packages tested by the application.
+Do not present the early timings as measurements of that larger final matrix.
 
 ## Removed duplication
 
@@ -106,6 +110,10 @@ zizmor findings block CI; this is not a claim of zero informational findings.
 - Exact-source qualified artifacts can recover a failed publisher. Native and
   qualification failures still reject recovery. Existing assets must match;
   missing draft assets can be uploaded before complete verification and promotion.
+- Draft verification reads the release by its immutable API ID. GitHub's tag
+  endpoint exposes published releases only; an actual private OCR draft returned
+  HTTP 404 through that endpoint during release preparation. A regression fixture
+  reproduces this API behavior and prevents promotion before ID-based verification.
 - Release work serializes by source SHA; pending runs queue instead of replacing
   one another. Explicit cancellation stops new qualification/publication work;
   cleanup and diagnostic aggregates still run.
