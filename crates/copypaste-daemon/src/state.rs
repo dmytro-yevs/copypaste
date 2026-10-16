@@ -22,6 +22,7 @@ use crate::settings::Settings;
 pub struct AppState {
     pub modules: Arc<copypaste_modules::ModuleHost>,
     pub store: Store,
+    pub spoilers: copypaste_core::spoiler::Spoilers,
     pub instant_clipboard: copypaste_core::sync::InstantClipboard,
     /// `Arc` because `copypaste_core::StoreSource` holds one for as long as the
     /// peer listener runs, and the device secret is not `Clone` on purpose.
@@ -92,6 +93,7 @@ impl AppState {
             modules,
             store,
             instant_clipboard: Default::default(),
+            spoilers: Default::default(),
             keyring,
             clipboard: Mutex::new(clipboard),
             meta,

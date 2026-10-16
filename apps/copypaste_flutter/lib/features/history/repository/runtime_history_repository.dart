@@ -7,13 +7,15 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import '../../devices/flutter_rust_devices_gateway.dart';
 import '../models/history_models.dart';
 import 'history_repository.dart';
+import '../controller/history_spoiler_controller.dart';
 import 'history_file_importer.dart';
 
 /// Production History port backed only by generated Flutter/Rust bindings.
 ///
 /// Runtime startup and its isolated debug profile are owned by app integration.
 /// This adapter never starts a daemon and never supplies a fallback data source.
-class RuntimeHistoryRepository implements HistoryRepository {
+class RuntimeHistoryRepository
+    implements HistoryRepository, HistorySpoilerRepository {
   RuntimeHistoryRepository({RuntimeWatchLease? watchLease})
     : _watchLease =
           watchLease ??
@@ -165,6 +167,29 @@ class RuntimeHistoryRepository implements HistoryRepository {
       filename: file.name,
       mimeType: file.mimeType,
       sourceReference: file.sourceReference,
+    );
+  }
+
+  @override
+  Future<HistorySpoilerState> readSpoilers() async {
+    _ensureActive();
+    final state = await runtime.getSpoilerState();
+    return HistorySpoilerState(
+      state.revision.toInt(),
+      state.revealedIds.toSet(),
+    );
+  }
+
+  @override
+  Future<HistorySpoilerState> setSpoilerRevealed(
+    String? id,
+    bool revealed,
+  ) async {
+    _ensureActive();
+    final state = await runtime.setSpoilerRevealed(id: id, revealed: revealed);
+    return HistorySpoilerState(
+      state.revision.toInt(),
+      state.revealedIds.toSet(),
     );
   }
 

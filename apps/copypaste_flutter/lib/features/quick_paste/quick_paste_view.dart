@@ -7,6 +7,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import '../history/presentation/secret_spoiler.dart';
 
 import '../../app/theme/app_overlays.dart';
+import '../../app/theme/app_motion.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_tokens.dart';
 import '../../shared/state_view.dart';
@@ -89,27 +90,35 @@ class _QuickPasteViewState extends State<QuickPasteView> {
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final menu = _menu(context);
-                  if (!controller.inspectorOpen) return menu;
                   final menuWidth =
                       (AppLayoutSize.quickPasteMenuWidth - AppSpacing.sm * 2)
-                          .clamp(0.0, constraints.maxWidth * 0.55)
+                          .clamp(
+                            0.0,
+                            constraints.maxWidth *
+                                (controller.inspectorOpen ? 0.55 : 1),
+                          )
                           .toDouble();
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       SizedBox(width: menuWidth, child: menu),
-                      const Gap(AppSpacing.sm),
-                      Expanded(
-                        child: HistoryInspector(
-                          controller: controller.history,
-                          presentationRevision:
-                              controller.presentationGeneration,
-                          inDrawer: false,
-                          compact: true,
-                          onClose: () =>
-                              unawaited(controller.toggleInspector()),
+                      if (controller.inspectorOpen) ...[
+                        const Gap(AppSpacing.sm),
+                        Expanded(
+                          child: AppMotion.inspectorEntrance(
+                            context,
+                            child: HistoryInspector(
+                              controller: controller.history,
+                              presentationRevision:
+                                  controller.presentationGeneration,
+                              inDrawer: false,
+                              compact: true,
+                              onClose: () =>
+                                  unawaited(controller.toggleInspector()),
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ],
                   );
                 },
@@ -491,25 +500,21 @@ class _ClipContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (clip.secret && !revealed) {
-      return SecretSpoiler(
-        inline: true,
-        key: ValueKey(
-          'quick-spoiler-${clip.id}-${controller.presentationGeneration}',
-        ),
-        reveal: (_) => FutureBuilder<HistoryClip>(
-          future: controller.history.revealClip(clip.id),
-          builder: (context, snapshot) {
-            if (snapshot.hasError) {
-              return const StateView.error(title: 'Clip unavailable');
-            }
-            final full = snapshot.data;
-            if (full == null) return const StateView.loading();
-            return _ClipContent(
-              clip: full,
-              controller: controller,
-              revealed: true,
-            );
-          },
+      return FutureBuilder<HistoryClip>(
+        future: controller.history.spoilerContent(clip.id),
+        builder: (context, snapshot) => SecretSpoiler(
+          clipId: clip.id,
+          controller: controller.history.spoilers,
+          key: ValueKey(
+            'quick-spoiler-${clip.id}-${controller.presentationGeneration}',
+          ),
+          child: snapshot.hasError
+              ? const StateView.error(title: 'Clip unavailable')
+              : _ClipContent(
+                  clip: snapshot.data ?? clip,
+                  controller: controller,
+                  revealed: true,
+                ),
         ),
       );
     }
@@ -558,9 +563,7 @@ class _Footer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final style = AppTheme.actionButtonStyle(
-      AppTheme.clipboardMenuButtonStyle(),
-    );
+    final style = AppTheme.clipboardMenuButtonStyle();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [

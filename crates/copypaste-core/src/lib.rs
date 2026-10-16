@@ -21,6 +21,7 @@ pub mod peer_store;
 pub mod retention;
 pub mod semantic;
 pub mod settings_record;
+pub mod spoiler;
 pub mod storage;
 pub mod sync;
 pub mod transfer;
