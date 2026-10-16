@@ -587,6 +587,9 @@ impl Node {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         (!active_sync.state.cancel.is_cancelled()
+            // Removal becomes durable before cancellation is delivered outside
+            // this lock. Do not commit through that narrow delivery interval.
+            && self.peers.get(&active_sync.pairing_id).is_some()
             && active
                 .get(&active_sync.pairing_id)
                 .is_some_and(|sessions| sessions.contains_key(&active_sync.id)))
@@ -1425,6 +1428,33 @@ mod tests {
             "a later source batch started after unpair"
         );
         assert_eq!(source.writes.load(AtomicOrdering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_removed_pairing_rejects_bookkeeping_before_cancellation_is_delivered() {
+        let (node, _dir) = node();
+        let token = crate::transport::PairingToken::generate();
+        let pairing_id = token.pairing_id();
+        node.peers()
+            .upsert(Peer {
+                pairing_id: pairing_id.clone(),
+                device_id: None,
+                name: "phone".into(),
+                psk: token.psk(),
+                last_addr: None,
+                last_seen_ms: 1,
+                profile: None,
+                profile_observed_at_ms: 0,
+            })
+            .unwrap();
+        let session = node.begin_active_sync(&pairing_id).unwrap();
+        // Model the point where the store removal is durable but the caller
+        // has not yet delivered cancellation to the registered session.
+        assert!(node.peers.remove(&pairing_id).unwrap());
+        assert!(!session.cancelled().is_cancelled());
+        let mut wrote = false;
+        assert!(node.commit_active_sync(&session, || wrote = true).is_none());
+        assert!(!wrote, "removed pairing accepted a late bookkeeping write");
     }
 
     #[test]
