@@ -1,0 +1,557 @@
+{
+  "schema": 1,
+  "scope": "Observed modernization validation before the combined product release candidate. These samples do not establish controlled speedup.",
+  "runs": [
+    {
+      "workflow": "release.yml",
+      "id": 38811404575,
+      "url": "https://github.com/dmytro-yevs/copypaste/actions/runs/38811404575",
+      "commit": "0c3a4353d108c9bbbc210310c0b2e37cdbb14563",
+      "attempt": 1,
+      "event": "workflow_dispatch",
+      "mode": "integrated-build",
+      "conclusion": "success",
+      "created_at": "2026-10-15T21:38:28Z",
+      "wall_clock_s": 1238.0,
+      "initial_queue_s": 4.0,
+      "job_execution_s": 5485.0,
+      "cache_cohort": "unknown",
+      "jobs": [
+        {
+          "name": "preflight",
+          "conclusion": "success",
+          "duration_s": 14.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Release CI policy",
+          "conclusion": "success",
+          "duration_s": 26.0,
+          "phases_s": {}
+        },
+        {
+          "name": "macos-regression",
+          "conclusion": "success",
+          "duration_s": 457.0,
+          "phases_s": {}
+        },
+        {
+          "name": "macos",
+          "conclusion": "success",
+          "duration_s": 1036.0,
+          "phases_s": {
+            "compilation": 945.909,
+            "dependencies": 1.482,
+            "packaging": 0.881
+          }
+        },
+        {
+          "name": "android",
+          "conclusion": "success",
+          "duration_s": 1138.0,
+          "phases_s": {
+            "compilation": 1025.085
+          }
+        },
+        {
+          "name": "Linux build (x86_64)",
+          "conclusion": "success",
+          "duration_s": 726.0,
+          "phases_s": {
+            "compilation": 512.885,
+            "dependencies": 0.649,
+            "packaging": 30.826
+          }
+        },
+        {
+          "name": "windows",
+          "conclusion": "success",
+          "duration_s": 1078.0,
+          "phases_s": {
+            "compilation": 790.078,
+            "dependencies": 1.437
+          }
+        },
+        {
+          "name": "Build opt-in compositor runtime companions / GNOME 46 Ubuntu 24.04 (x86_64)",
+          "conclusion": "success",
+          "duration_s": 172.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Build Linux semantic-search module / preflight",
+          "conclusion": "success",
+          "duration_s": 6.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Build Linux ocr module / preflight",
+          "conclusion": "success",
+          "duration_s": 5.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Build Linux supabase module / preflight",
+          "conclusion": "success",
+          "duration_s": 5.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Run exact staged Linux native qualification",
+          "conclusion": "skipped",
+          "duration_s": 0,
+          "phases_s": {}
+        },
+        {
+          "name": "Verify staged compositor runtime companions",
+          "conclusion": "skipped",
+          "duration_s": 0,
+          "phases_s": {}
+        },
+        {
+          "name": "Build Linux supabase module / desktop (linux, x86_64, ubuntu-24.04, lib, so, libonnxruntime.so, copypaste-module-qualification)",
+          "conclusion": "success",
+          "duration_s": 144.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Build Linux ocr module / desktop (linux, x86_64, ubuntu-24.04, libcopypaste_module_ocr.so, copypaste-module-qualification)",
+          "conclusion": "success",
+          "duration_s": 110.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Build Linux supabase module / android-native",
+          "conclusion": "skipped",
+          "duration_s": 0,
+          "phases_s": {}
+        },
+        {
+          "name": "Build Linux ocr module / android",
+          "conclusion": "skipped",
+          "duration_s": 0,
+          "phases_s": {}
+        },
+        {
+          "name": "Build Linux supabase module / android",
+          "conclusion": "skipped",
+          "duration_s": 0,
+          "phases_s": {}
+        },
+        {
+          "name": "Build Linux ocr module / android-native",
+          "conclusion": "skipped",
+          "duration_s": 0,
+          "phases_s": {}
+        },
+        {
+          "name": "Build Linux semantic-search module / desktop (linux, x86_64, ubuntu-24.04, lib, so, libonnxruntime.so, copypaste-module-qualification)",
+          "conclusion": "success",
+          "duration_s": 177.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Build Linux semantic-search module / android",
+          "conclusion": "skipped",
+          "duration_s": 0,
+          "phases_s": {}
+        },
+        {
+          "name": "Build Linux semantic-search module / android-native",
+          "conclusion": "skipped",
+          "duration_s": 0,
+          "phases_s": {}
+        },
+        {
+          "name": "Build Linux ocr module / publish",
+          "conclusion": "skipped",
+          "duration_s": 0,
+          "phases_s": {}
+        },
+        {
+          "name": "Build Linux supabase module / publish",
+          "conclusion": "skipped",
+          "duration_s": 0,
+          "phases_s": {}
+        },
+        {
+          "name": "Sign and bind opt-in compositor runtime companions",
+          "conclusion": "success",
+          "duration_s": 53.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Build Linux semantic-search module / publish",
+          "conclusion": "skipped",
+          "duration_s": 0,
+          "phases_s": {}
+        },
+        {
+          "name": "Qualify current Linux artifacts / Verify exact artifact sources",
+          "conclusion": "success",
+          "duration_s": 14.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Qualify current Linux artifacts / x86_64 GNOME x11",
+          "conclusion": "success",
+          "duration_s": 245.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Qualify current Linux artifacts / Assemble verified Linux native qualification",
+          "conclusion": "success",
+          "duration_s": 14.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Linux full parity evidence gate",
+          "conclusion": "success",
+          "duration_s": 23.0,
+          "phases_s": {}
+        },
+        {
+          "name": "qualify",
+          "conclusion": "success",
+          "duration_s": 39.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Release qualification required",
+          "conclusion": "success",
+          "duration_s": 3.0,
+          "phases_s": {}
+        },
+        {
+          "name": "publish",
+          "conclusion": "skipped",
+          "duration_s": 0,
+          "phases_s": {}
+        }
+      ]
+    },
+    {
+      "workflow": "ci.yml",
+      "id": 38802576443,
+      "url": "https://github.com/dmytro-yevs/copypaste/actions/runs/38802576443",
+      "commit": "b6a9e6c25a8908241616eae508e26db4919b18f5",
+      "attempt": 1,
+      "event": "pull_request",
+      "mode": "validation",
+      "conclusion": "success",
+      "created_at": "2026-10-15T20:30:59Z",
+      "wall_clock_s": 1178.0,
+      "initial_queue_s": 45.0,
+      "job_execution_s": 5189.0,
+      "cache_cohort": "unknown",
+      "jobs": [
+        {
+          "name": "Select required validation",
+          "conclusion": "success",
+          "duration_s": 8.0,
+          "phases_s": {}
+        },
+        {
+          "name": "macOS Rust capabilities",
+          "conclusion": "success",
+          "duration_s": 110.0,
+          "phases_s": {}
+        },
+        {
+          "name": "rust-and-supabase",
+          "conclusion": "success",
+          "duration_s": 321.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Flutter static checks",
+          "conclusion": "success",
+          "duration_s": 41.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Optional modules (macos)",
+          "conclusion": "success",
+          "duration_s": 136.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Linux native fixtures (x86_64)",
+          "conclusion": "success",
+          "duration_s": 121.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Optional modules (windows)",
+          "conclusion": "success",
+          "duration_s": 265.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Linux package fixtures (x86_64)",
+          "conclusion": "success",
+          "duration_s": 119.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Flutter foundation (macos)",
+          "conclusion": "success",
+          "duration_s": 683.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Linux release candidate (x86_64)",
+          "conclusion": "success",
+          "duration_s": 619.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Flutter foundation (android)",
+          "conclusion": "success",
+          "duration_s": 1112.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Optional modules (Linux x86_64)",
+          "conclusion": "success",
+          "duration_s": 133.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Compositor runtime metadata",
+          "conclusion": "success",
+          "duration_s": 5.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Windows Rust capabilities",
+          "conclusion": "success",
+          "duration_s": 148.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Flutter foundation (Linux x86_64)",
+          "conclusion": "success",
+          "duration_s": 496.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Flutter foundation (windows)",
+          "conclusion": "success",
+          "duration_s": 546.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Mutter 46 bridge (x86_64)",
+          "conclusion": "success",
+          "duration_s": 150.0,
+          "phases_s": {}
+        },
+        {
+          "name": "Compositor runtime producer / GNOME 46 Ubuntu 24.04 (x86_64)",
+          "conclusion": "success",
+          "duration_s": 170.0,
+          "phases_s": {}
+        },
+        {
+          "name": "CI required",
+          "conclusion": "success",
+          "duration_s": 6.0,
+          "phases_s": {}
+        }
+      ]
+    },
+    {
+      "workflow": "codeql-scheduled.yml",
+      "id": 38802576386,
+      "url": "https://github.com/dmytro-yevs/copypaste/actions/runs/38802576386",
+      "commit": "b6a9e6c25a8908241616eae508e26db4919b18f5",
+      "attempt": 1,
+      "event": "pull_request",
+      "mode": "validation",
+      "conclusion": "success",
+      "created_at": "2026-10-15T20:30:59Z",
+      "wall_clock_s": 2000.0,
+      "initial_queue_s": 132.0,
+      "job_execution_s": 3463.0,
+      "cache_cohort": "unknown",
+      "jobs": [
+        {
+          "name": "analyze-swift",
+          "conclusion": "success",
+          "duration_s": 1818.0,
+          "phases_s": {}
+        },
+        {
+          "name": "analyze-no-build (python)",
+          "conclusion": "success",
+          "duration_s": 65.0,
+          "phases_s": {}
+        },
+        {
+          "name": "analyze-cpp",
+          "conclusion": "success",
+          "duration_s": 1055.0,
+          "phases_s": {}
+        },
+        {
+          "name": "analyze-no-build (rust)",
+          "conclusion": "success",
+          "duration_s": 482.0,
+          "phases_s": {}
+        },
+        {
+          "name": "analyze-no-build (actions)",
+          "conclusion": "success",
+          "duration_s": 43.0,
+          "phases_s": {}
+        }
+      ]
+    }
+  ],
+  "historical_lifecycle": {
+    "schema": 1,
+    "scope": "Observed application release qualification lifecycle, including required Linux dependencies; optional-module marketplace publication is separate.",
+    "baseline_nodes": [
+      {
+        "run_id": 38778738218,
+        "workflow": "compositor-runtime.yml",
+        "commit": "852aae607d7e3914001a1d0623c1d676640b4884",
+        "created_at": "2026-10-15T17:36:24Z",
+        "completed_at": "2026-10-15T17:40:02+00:00",
+        "conclusion": "success",
+        "wall_clock_s": 218.0,
+        "url": "https://github.com/dmytro-yevs/copypaste/actions/runs/38778738218"
+      },
+      {
+        "run_id": 38778742627,
+        "workflow": "provider-module.yml",
+        "commit": "852aae607d7e3914001a1d0623c1d676640b4884",
+        "created_at": "2026-10-15T17:36:26Z",
+        "completed_at": "2026-10-15T18:01:16+00:00",
+        "conclusion": "success",
+        "wall_clock_s": 1490.0,
+        "url": "https://github.com/dmytro-yevs/copypaste/actions/runs/38778742627"
+      },
+      {
+        "run_id": 38778747181,
+        "workflow": "provider-module.yml",
+        "commit": "852aae607d7e3914001a1d0623c1d676640b4884",
+        "created_at": "2026-10-15T17:36:28Z",
+        "completed_at": "2026-10-15T18:07:30+00:00",
+        "conclusion": "success",
+        "wall_clock_s": 1862.0,
+        "url": "https://github.com/dmytro-yevs/copypaste/actions/runs/38778747181"
+      },
+      {
+        "run_id": 38778751295,
+        "workflow": "ocr-module.yml",
+        "commit": "852aae607d7e3914001a1d0623c1d676640b4884",
+        "created_at": "2026-10-15T17:36:30Z",
+        "completed_at": "2026-10-15T17:50:28+00:00",
+        "conclusion": "success",
+        "wall_clock_s": 838.0,
+        "url": "https://github.com/dmytro-yevs/copypaste/actions/runs/38778751295"
+      },
+      {
+        "run_id": 38779236382,
+        "workflow": "release.yml",
+        "commit": "852aae607d7e3914001a1d0623c1d676640b4884",
+        "created_at": "2026-10-15T17:40:07Z",
+        "completed_at": "2026-10-15T18:12:35+00:00",
+        "conclusion": "failure",
+        "wall_clock_s": 1948.0,
+        "url": "https://github.com/dmytro-yevs/copypaste/actions/runs/38779236382"
+      },
+      {
+        "run_id": 38783834206,
+        "workflow": "linux-native-qualification.yml",
+        "commit": "852aae607d7e3914001a1d0623c1d676640b4884",
+        "created_at": "2026-10-15T18:13:27Z",
+        "completed_at": "2026-10-15T18:19:27+00:00",
+        "conclusion": "success",
+        "wall_clock_s": 360.0,
+        "url": "https://github.com/dmytro-yevs/copypaste/actions/runs/38783834206"
+      },
+      {
+        "run_id": 38784703676,
+        "workflow": "release.yml",
+        "commit": "852aae607d7e3914001a1d0623c1d676640b4884",
+        "created_at": "2026-10-15T18:19:47Z",
+        "completed_at": "2026-10-15T18:39:38+00:00",
+        "conclusion": "success",
+        "wall_clock_s": 1191.0,
+        "url": "https://github.com/dmytro-yevs/copypaste/actions/runs/38784703676"
+      },
+      {
+        "run_id": 38787782550,
+        "workflow": "release.yml",
+        "commit": "852aae607d7e3914001a1d0623c1d676640b4884",
+        "created_at": "2026-10-15T18:42:00Z",
+        "completed_at": "2026-10-15T18:45:01+00:00",
+        "conclusion": "success",
+        "wall_clock_s": 181.0,
+        "url": "https://github.com/dmytro-yevs/copypaste/actions/runs/38787782550"
+      }
+    ],
+    "baseline_edges": [
+      {
+        "from": 38778738218,
+        "to": 38783834206,
+        "evidence": "workflow input recorded in source verification job 116590610021"
+      },
+      {
+        "from": 38778742627,
+        "to": 38783834206,
+        "evidence": "workflow input recorded in source verification job 116590610021"
+      },
+      {
+        "from": 38778747181,
+        "to": 38783834206,
+        "evidence": "workflow input recorded in source verification job 116590610021"
+      },
+      {
+        "from": 38778751295,
+        "to": 38783834206,
+        "evidence": "workflow input recorded in source verification job 116590610021"
+      },
+      {
+        "from": 38779236382,
+        "to": 38783834206,
+        "evidence": "workflow input recorded in source verification job 116590610021"
+      },
+      {
+        "from": 38779236382,
+        "to": 38784703676,
+        "evidence": "linux_artifact_run_id in preflight job 116593610988"
+      },
+      {
+        "from": 38783834206,
+        "to": 38784703676,
+        "evidence": "linux_evidence_run_id in preflight job 116593610988"
+      },
+      {
+        "from": 38778738218,
+        "to": 38784703676,
+        "evidence": "compositor_runtime_run_id in preflight job 116593610988"
+      },
+      {
+        "from": 38784703676,
+        "to": 38787782550,
+        "evidence": "qualified_run_id in preflight job 116604738081"
+      }
+    ],
+    "baseline_to_qualified_s": 3794.0,
+    "baseline_to_published_s": 4117.0,
+    "limitations": [
+      "The historical lifecycle includes failed staging, duplicate native builds, queue delay and operator handoffs. It is not a controlled compiler benchmark.",
+      "Post-change production publication was not performed, as requested. Compare qualification boundaries only.",
+      "Cold/warm cache cohorts are not fully classified; no general percentage speedup is claimed."
+    ],
+    "after_reports": [
+      "after-release-93198da.json",
+      "after-ci-b6a9e6c.json",
+      "after-codeql-b6a9e6c.json"
+    ]
+  }
+}
