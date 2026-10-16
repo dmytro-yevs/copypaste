@@ -230,7 +230,28 @@ class ModulesController extends ChangeNotifier {
     await _repository.setEnabled(id, enabled);
     if (sms && _access != null && !await _access.synchronize()) {
       if (enabled) {
-        await _repository.setEnabled(id, false);
+        try {
+          await _repository.setEnabled(id, false);
+        } catch (_) {
+          bool? persistedEnabled;
+          try {
+            final modules = await _repository.list();
+            persistedEnabled = modules
+                .where((module) => module.id == id)
+                .firstOrNull
+                ?.enabled;
+          } catch (_) {
+            // _perform refreshes again before it presents this error.
+          }
+          throw ModulesException(switch (persistedEnabled) {
+            true =>
+              'SMS monitoring could not be started. The module is still enabled; disable it again to retry.',
+            false =>
+              'SMS monitoring could not be started. The module was disabled.',
+            null =>
+              'SMS monitoring could not be started. The module enabled state could not be confirmed.',
+          });
+        }
       }
       throw const ModulesException('SMS monitoring could not be started.');
     }

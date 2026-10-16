@@ -341,7 +341,8 @@ class _PinRepository implements HistoryRepository {
   final List<(String, bool)> pinnedUpdates = [];
 
   @override
-  Stream<HistoryRuntimeEvent> watch() => const Stream.empty();
+  Stream<HistoryRuntimeEvent> watch() =>
+      Stream<HistoryRuntimeEvent>.multi((_) {});
 
   @override
   Future<HistoryFacets> facets() async => const HistoryFacets();
@@ -382,6 +383,10 @@ class _PinRepository implements HistoryRepository {
 
   @override
   Future<void> saveFile(String id, String destinationPath) async {}
+
+  @override
+  Future<HistoryClip> setSecret(String id, bool secret) async =>
+      throw UnimplementedError('setSecret');
 
   @override
   Future<void> setPinned(String id, bool pinned) async {

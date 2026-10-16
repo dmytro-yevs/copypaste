@@ -23,12 +23,12 @@ class ModuleMarketplacePlatform {
   final MethodChannel _systemChannel;
   final Abi Function() _currentAbi;
 
-  Future<ModuleMarketplaceTarget> currentTarget() async {
+  Future<ModuleMarketplaceTarget> currentTarget({Version? appVersion}) async {
     final (platform, architecture) = targetForAbi(_currentAbi());
     return ModuleMarketplaceTarget(
       platform: platform,
       architecture: architecture,
-      appVersion: await _readVersion(_appPlatform.currentVersion),
+      appVersion: appVersion ?? await _readVersion(_appPlatform.currentVersion),
       systemVersion: await _readVersion(
         () => _systemChannel.invokeMethod<String>('systemVersion'),
         system: true,

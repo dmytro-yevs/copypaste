@@ -36,16 +36,19 @@ void main() {
     expect(restored.screenshotCapture.enabled, isTrue);
   });
 
-  test('native failure retains the last confirmed switch state', () async {
-    final port = _Capture();
-    final settings = controller(port);
-    addTearDown(settings.dispose);
-    await settings.initialize();
-    port.fail = true;
-    expect(await settings.setScreenshotCaptureEnabled(false), isFalse);
-    expect(settings.screenshotCapture.enabled, isTrue);
-    expect(settings.errorMessage, isNotNull);
-  });
+  test(
+    'native drain failure rereads the persisted screenshot switch state',
+    () async {
+      final port = _Capture();
+      final settings = controller(port);
+      addTearDown(settings.dispose);
+      await settings.initialize();
+      port.fail = true;
+      expect(await settings.setScreenshotCaptureEnabled(false), isFalse);
+      expect(settings.screenshotCapture.enabled, isFalse);
+      expect(settings.errorMessage, isNotNull);
+    },
+  );
 
   for (final (width, textScale) in [
     (390.0, 1.0),
@@ -151,12 +154,12 @@ class _Capture implements ScreenshotCapture {
   Future<ScreenshotCaptureStatus> status() async => current;
   @override
   Future<ScreenshotCaptureStatus> setEnabled(bool enabled) async {
-    if (fail) throw PlatformException(code: 'capture_drain_failed');
     current = ScreenshotCaptureStatus(
       enabled: enabled,
       mediaGranted: current.mediaGranted,
       notificationGranted: current.notificationGranted,
     );
+    if (fail) throw PlatformException(code: 'capture_drain_failed');
     return current;
   }
 

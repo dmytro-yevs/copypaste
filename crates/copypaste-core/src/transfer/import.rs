@@ -32,6 +32,17 @@ pub enum ImportError {
     Crypto(#[from] CryptoError),
     #[error("the items could not be stored")]
     Storage(#[from] StoreError),
+    /// Some earlier rows were committed before a later fatal failure.
+    ///
+    /// Callers must still report the failure, but they also need this progress
+    /// to announce the durable rows to sync rather than leaving them local-only.
+    #[error("some items were imported before a later failure")]
+    Partial {
+        result: ImportData,
+        oldest_inserted_at: i64,
+        #[source]
+        source: Box<ImportError>,
+    },
 }
 
 /// Put exported items back, through the same ingest a capture takes.
@@ -88,6 +99,7 @@ pub fn import_with_current_retention(
     let mut pin: Vec<String> = Vec::new();
     let batch = retention::batch_with_current_policy(store, settings.clone(), &current_settings);
     let mut fatal: Option<ImportError> = None;
+    let mut oldest_inserted_at: Option<i64> = None;
 
     for item in items {
         let created_at = item
@@ -102,6 +114,10 @@ pub fn import_with_current_retention(
         ) {
             Ok(Ingested::Stored(stored)) => {
                 result.inserted += 1;
+                oldest_inserted_at = Some(
+                    oldest_inserted_at
+                        .map_or(stored.created_at, |oldest| oldest.min(stored.created_at)),
+                );
                 if item.pinned {
                     pin.push(stored.id);
                 }
@@ -173,8 +189,15 @@ pub fn import_with_current_retention(
         pins_failed = result.pins_failed,
         "imported history"
     );
-    if let Some(e) = fatal {
-        return Err(e);
+    if let Some(source) = fatal {
+        if let Some(oldest_inserted_at) = oldest_inserted_at {
+            return Err(ImportError::Partial {
+                result,
+                oldest_inserted_at,
+                source: Box::new(source),
+            });
+        }
+        return Err(source);
     }
     Ok(result)
 }
@@ -782,7 +805,17 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(matches!(error, ImportError::Storage(_)), "{error:?}");
+        let ImportError::Partial {
+            result,
+            oldest_inserted_at,
+            source,
+        } = error
+        else {
+            panic!("expected a partial import error");
+        };
+        assert_eq!(result.inserted, 1);
+        assert_eq!(oldest_inserted_at, 1_700_000_000_000);
+        assert!(matches!(*source, ImportError::Storage(_)));
         let rows = f.store.list(10, 0).unwrap();
         assert_eq!(rows.len(), 1);
         assert!(
@@ -804,6 +837,19 @@ mod tests {
             ImportError::UnsupportedContentType.to_string(),
             ImportError::Storage(StoreError::InvalidKey).to_string(),
             ImportError::Crypto(CryptoError::AuthFailed).to_string(),
+            ImportError::Partial {
+                result: ImportData {
+                    inserted: 1,
+                    skipped: 0,
+                    skipped_duplicate: 0,
+                    skipped_empty: 0,
+                    skipped_too_large: 0,
+                    pins_failed: 0,
+                },
+                oldest_inserted_at: 1,
+                source: Box::new(ImportError::Storage(StoreError::InvalidKey)),
+            }
+            .to_string(),
         ] {
             assert!(!message.contains('/'), "{message}");
         }

@@ -26,8 +26,8 @@ pub use crate::retention::enforce_retention;
 pub enum Ingested {
     /// A new row.
     Stored(StoredItem),
-    /// The same content was already stored; this is the existing row after the
-    /// forward-only recency bump.
+    /// The same clipboard representation was already stored; this is the
+    /// existing row after the forward-only recency bump.
     Duplicate(StoredItem),
 }
 
@@ -350,10 +350,11 @@ fn ingest_text(
             app_name: app_name.map(str::to_owned),
             payload_metadata,
         },
+        indexable.then_some(content),
         || -> Result<_, IngestError> {
             let (nonce, ciphertext) =
                 crate::encrypt(content.as_bytes(), &keyring.item_key(), &seal_id)?;
-            Ok((nonce, ciphertext, indexable.then(|| content.to_string())))
+            Ok((nonce, ciphertext))
         },
     )?;
 
@@ -405,6 +406,7 @@ pub fn ingest_binary_into_with_capture_source(
     settings: &copypaste_ipc::ConfigData,
 ) -> Result<Ingested, IngestError> {
     let payload_metadata = payload_metadata.map(|file| crate::PayloadMetadata {
+        secret_override: None,
         privacy: Default::default(),
         file: Some(file.clone()),
         source_app_icon: None,
@@ -454,7 +456,7 @@ pub fn ingest_binary_into_with_capture_source_metadata(
     // cost a 4 MiB screenshot three redundant passes on the capture path.
     let payload_metadata = encode_payload_metadata(payload_metadata, content_type)?;
     let digest = crate::binary::content_digest(bytes);
-    let item_id = crate::binary::item_id_from_digest(&digest);
+    let item_id = crate::binary::capture_item_id_from_digest(&digest, content_type);
     let ciphertext =
         crate::binary::seal_with_digest(bytes, &digest, &keyring.item_key(), &item_id)?;
     let ingested = store.insert_or_bump(NewItem {
@@ -537,11 +539,20 @@ mod tests {
         }
 
         fn binary_at(&self, bytes: &[u8], created_at: i64) -> Result<Ingested, IngestError> {
+            self.binary_at_type(bytes, copypaste_ipc::content_type::IMAGE_PNG, created_at)
+        }
+
+        fn binary_at_type(
+            &self,
+            bytes: &[u8],
+            content_type: &str,
+            created_at: i64,
+        ) -> Result<Ingested, IngestError> {
             ingest_binary_into_with_capture_context(
                 &self.store,
                 &self.keyring,
                 bytes,
-                copypaste_ipc::content_type::IMAGE_PNG,
+                content_type,
                 created_at,
                 None,
                 None,
@@ -590,6 +601,7 @@ mod tests {
             let ingress = ingress.clone();
             std::thread::spawn(move || {
                 let metadata = crate::PayloadMetadata {
+                    secret_override: None,
                     privacy: Default::default(),
                     file: None,
                     source_app_icon: Some(source_icon()),
@@ -773,7 +785,7 @@ mod tests {
     }
 
     #[test]
-    fn binary_ingest_is_chunked_content_addressed_and_never_indexed() {
+    fn binary_ingest_is_chunked_representation_addressed_and_never_indexed() {
         let f = fixture();
         let bytes = vec![0x89; crate::CHUNK_BYTES + 19];
         let stored = ingest_binary_into_with_capture_context(
@@ -789,7 +801,13 @@ mod tests {
         .unwrap()
         .into_item();
 
-        assert_eq!(stored.id, crate::binary_item_id(&bytes));
+        assert_eq!(
+            stored.id,
+            crate::binary::capture_item_id_from_digest(
+                &crate::binary::content_digest(&bytes),
+                copypaste_ipc::content_type::IMAGE_PNG,
+            )
+        );
         assert!(stored.nonce.is_empty());
         assert!(f.store.search("89", 10).unwrap().is_empty());
         assert_eq!(
@@ -808,6 +826,7 @@ mod tests {
     fn capture_source_metadata_is_stored_atomically_with_a_binary_item() {
         let f = fixture();
         let metadata = crate::PayloadMetadata {
+            secret_override: None,
             privacy: Default::default(),
             file: Some(crate::FileMetadata::new("report.pdf", "application/pdf").unwrap()),
             source_app_icon: Some(source_icon()),
@@ -839,6 +858,7 @@ mod tests {
     fn text_capture_preserves_source_icon_metadata() {
         let f = fixture();
         let metadata = crate::PayloadMetadata {
+            secret_override: None,
             privacy: Default::default(),
             file: None,
             source_app_icon: Some(source_icon()),
@@ -882,11 +902,159 @@ mod tests {
         assert!(matches!(recopy, Ingested::Duplicate(_)));
         let bumped = recopy.into_item();
         assert_eq!(bumped.id, first.id);
-        assert_eq!(bumped.id, crate::binary_item_id(&bytes));
+        assert_eq!(
+            bumped.id,
+            crate::binary::capture_item_id_from_digest(
+                &crate::binary::content_digest(&bytes),
+                copypaste_ipc::content_type::IMAGE_PNG,
+            )
+        );
         assert_eq!(bumped.created_at, T0 + 7 * 86_400_000);
         assert_eq!(f.store.count().unwrap(), 2);
         assert_eq!(f.store.list(2, 0).unwrap()[0].id, first.id);
         assert!(f.store.get(&other.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn identical_bytes_with_distinct_text_and_file_representations_stay_distinct_in_both_orders() {
+        let bytes = b"same bytes, different clipboard representation";
+        for text_first in [true, false] {
+            let f = fixture();
+            let (text, file) = if text_first {
+                (
+                    f.at(std::str::from_utf8(bytes).unwrap(), T0)
+                        .unwrap()
+                        .into_item(),
+                    f.binary_at_type(bytes, copypaste_ipc::content_type::FILE, T0 + 1)
+                        .unwrap()
+                        .into_item(),
+                )
+            } else {
+                (
+                    f.at(std::str::from_utf8(bytes).unwrap(), T0 + 1)
+                        .unwrap()
+                        .into_item(),
+                    f.binary_at_type(bytes, copypaste_ipc::content_type::FILE, T0)
+                        .unwrap()
+                        .into_item(),
+                )
+            };
+
+            assert_eq!(text.content_hash, file.content_hash);
+            assert_ne!(text.id, file.id);
+            assert_eq!(text.content_type, copypaste_ipc::content_type::TEXT);
+            assert_eq!(file.content_type, copypaste_ipc::content_type::FILE);
+            assert_eq!(f.store.count().unwrap(), 2);
+
+            let text_recopy = f.at(std::str::from_utf8(bytes).unwrap(), T0 + 2).unwrap();
+            assert!(matches!(text_recopy, Ingested::Duplicate(_)));
+            assert_eq!(text_recopy.into_item().id, text.id);
+            let file_recopy = f
+                .binary_at_type(bytes, copypaste_ipc::content_type::FILE, T0 + 3)
+                .unwrap();
+            assert!(matches!(file_recopy, Ingested::Duplicate(_)));
+            assert_eq!(file_recopy.into_item().id, file.id);
+        }
+    }
+
+    #[test]
+    fn identical_text_bytes_keep_their_format_representations() {
+        let f = fixture();
+        let content = "<b>same bytes</b>";
+        let mut items = Vec::new();
+        for (offset, content_type) in [
+            copypaste_ipc::content_type::TEXT,
+            copypaste_ipc::content_type::HTML,
+            copypaste_ipc::content_type::RICH_TEXT,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let item = ingest_into(
+                &f.store,
+                &f.keyring,
+                content,
+                content_type,
+                T0 + offset as i64,
+                &f.settings,
+            )
+            .unwrap()
+            .into_item();
+            assert_eq!(item.content_type, content_type);
+            items.push(item);
+        }
+        assert_eq!(f.store.count().unwrap(), items.len() as u64);
+        assert!(items.windows(2).all(|pair| pair[0].id != pair[1].id));
+
+        for (offset, item) in items.into_iter().enumerate() {
+            let recopy = ingest_into(
+                &f.store,
+                &f.keyring,
+                content,
+                &item.content_type,
+                T0 + 10 + offset as i64,
+                &f.settings,
+            )
+            .unwrap();
+            assert!(matches!(recopy, Ingested::Duplicate(_)));
+            assert_eq!(recopy.into_item().id, item.id);
+        }
+    }
+
+    #[test]
+    fn identical_binary_bytes_keep_their_image_and_file_representations() {
+        let f = fixture();
+        let bytes = b"identical binary bytes";
+        let image = f
+            .binary_at_type(bytes, copypaste_ipc::content_type::IMAGE_PNG, T0)
+            .unwrap()
+            .into_item();
+        let file = f
+            .binary_at_type(bytes, copypaste_ipc::content_type::FILE, T0 + 1)
+            .unwrap()
+            .into_item();
+
+        assert_eq!(image.content_hash, file.content_hash);
+        assert_ne!(image.id, file.id);
+        assert_eq!(f.store.count().unwrap(), 2);
+        for item in [&image, &file] {
+            assert_eq!(
+                crate::open_binary(&item.content_ciphertext, &f.keyring.item_key(), &item.id)
+                    .unwrap()
+                    .as_slice(),
+                bytes
+            );
+        }
+    }
+
+    #[test]
+    fn a_same_type_recopy_deduplicates_a_legacy_binary_id() {
+        let f = fixture();
+        let bytes = b"legacy binary identity";
+        let digest = crate::binary::content_digest(bytes);
+        let legacy_id = crate::binary::item_id_from_digest(&digest);
+        let ciphertext =
+            crate::binary::seal_with_digest(bytes, &digest, &f.keyring.item_key(), &legacy_id)
+                .unwrap();
+        f.store
+            .insert(NewItem {
+                id: legacy_id.clone(),
+                content_ciphertext: ciphertext,
+                nonce: Vec::new(),
+                content_type: copypaste_ipc::content_type::IMAGE_PNG.into(),
+                content_hash: crate::binary::content_hash(&digest),
+                search_text: None,
+                created_at: T0,
+                app_bundle_id: None,
+                app_name: None,
+                payload_metadata: None,
+            })
+            .unwrap();
+
+        let recopy = f.binary_at(bytes, T0 + 1).unwrap();
+        assert!(matches!(recopy, Ingested::Duplicate(_)));
+        assert_eq!(recopy.into_item().id, legacy_id);
+        assert_eq!(f.store.count().unwrap(), 1);
     }
 
     #[test]

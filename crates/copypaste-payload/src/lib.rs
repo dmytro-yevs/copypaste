@@ -134,6 +134,14 @@ fn valid_icon_dimensions(png: &[u8], width: u32, height: u32) -> bool {
         .is_some_and(|image| image.dimensions() == (width, height))
 }
 
+/// An explicit user choice outranks producer hints; ties prefer concealment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SecretOverride {
+    pub updated_at: i64,
+    pub secret: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct PayloadMetadata {
@@ -142,6 +150,8 @@ pub struct PayloadMetadata {
         skip_serializing_if = "copypaste_ipc::ClipboardPrivacy::is_empty"
     )]
     pub privacy: copypaste_ipc::ClipboardPrivacy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_override: Option<SecretOverride>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<FileMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -149,6 +159,36 @@ pub struct PayloadMetadata {
 }
 
 impl PayloadMetadata {
+    pub fn set_secret(&mut self, secret: bool, updated_at: i64) {
+        self.secret_override = Some(SecretOverride { updated_at, secret });
+        self.privacy.secret = secret;
+    }
+
+    /// Preserve automatic restrictions unless a newer explicit choice exists.
+    pub fn merge_privacy(&mut self, previous: &Self) {
+        self.privacy = self.privacy.union(previous.privacy);
+        self.secret_override = self.secret_override.max(previous.secret_override);
+        if let Some(choice) = self.secret_override {
+            self.privacy.secret = choice.secret;
+        }
+    }
+
+    /// Read only explicit producer hints. Invalid artwork, legacy fields, and
+    /// unreadable metadata are not evidence that the clipboard is confidential.
+    /// Optional metadata validation must also never erase a valid privacy hint.
+    #[must_use]
+    pub fn privacy_from_json(value: &str) -> copypaste_ipc::ClipboardPrivacy {
+        if value.len() > copypaste_ipc::MAX_SYNC_METADATA_BYTES {
+            return Default::default();
+        }
+        let value = serde_json::from_str::<serde_json::Value>(value).unwrap_or_default();
+        let privacy = &value["privacy"];
+        copypaste_ipc::ClipboardPrivacy {
+            secret: privacy["secret"].as_bool() == Some(true),
+            transient: privacy["transient"].as_bool() == Some(true),
+        }
+    }
+
     #[must_use]
     pub fn new(
         file: Option<FileMetadata>,
@@ -156,6 +196,7 @@ impl PayloadMetadata {
     ) -> Option<Self> {
         let metadata = Self {
             privacy: Default::default(),
+            secret_override: None,
             file,
             source_app_icon,
         };
@@ -172,7 +213,9 @@ impl PayloadMetadata {
                     == copypaste_ipc::ContentClass::Image
                     && self.file.is_some())
                     || (self.file.is_none()
-                        && (self.source_app_icon.is_some() || !self.privacy.is_empty()))
+                        && (self.source_app_icon.is_some()
+                            || !self.privacy.is_empty()
+                            || self.secret_override.is_some()))
             }
     }
 
@@ -184,7 +227,13 @@ impl PayloadMetadata {
             .is_none_or(|icon| icon.png().is_some());
         file_is_valid
             && icon_is_valid
-            && (self.file.is_some() || self.source_app_icon.is_some() || !self.privacy.is_empty())
+            && self
+                .secret_override
+                .is_none_or(|choice| choice.updated_at > 0 && choice.secret == self.privacy.secret)
+            && (self.file.is_some()
+                || self.source_app_icon.is_some()
+                || !self.privacy.is_empty()
+                || self.secret_override.is_some())
     }
 
     #[must_use]
@@ -202,6 +251,7 @@ impl PayloadMetadata {
         if let Some(file) = FileMetadata::from_json(value) {
             return (content_type == copypaste_ipc::content_type::FILE).then_some(Self {
                 privacy: Default::default(),
+                secret_override: None,
                 file: Some(file),
                 source_app_icon: None,
             });
@@ -215,6 +265,60 @@ impl PayloadMetadata {
 mod tests {
     use super::*;
     use image::{DynamicImage, ImageBuffer, ImageFormat, Rgba};
+
+    #[test]
+    fn privacy_uses_explicit_boolean_hints_independently_of_optional_metadata() {
+        for value in [
+            "not JSON",
+            "null",
+            "[]",
+            r#"{"legacy_private":true}"#,
+            r#"{"privacy":{"secret":"true","transient":1}}"#,
+            r#"{"source_app_icon":{"png_base64":"broken","width":1,"height":1}}"#,
+        ] {
+            assert!(
+                PayloadMetadata::privacy_from_json(value).is_empty(),
+                "{value}"
+            );
+        }
+        let privacy = PayloadMetadata::privacy_from_json(
+            r#"{"privacy":{"secret":true,"transient":"bad"},"file":{},"future_field":true}"#,
+        );
+        assert!(privacy.secret);
+        assert!(!privacy.transient);
+        let privacy = PayloadMetadata::privacy_from_json(
+            r#"{"privacy":{"secret":false,"transient":true},"source_app_icon":"broken"}"#,
+        );
+        assert!(!privacy.secret);
+        assert!(privacy.transient);
+    }
+
+    #[test]
+    fn manual_privacy_choices_round_trip_and_resolve_by_stamp_then_secrecy() {
+        let mut visible = PayloadMetadata::default();
+        visible.set_secret(false, 20);
+        let json = visible.to_json("text").unwrap();
+        assert_eq!(
+            PayloadMetadata::from_json(&json, "text"),
+            Some(visible.clone())
+        );
+        let mut secret = PayloadMetadata::default();
+        secret.set_secret(true, 10);
+        secret.privacy.transient = true;
+        visible.merge_privacy(&secret);
+        assert!(!visible.privacy.secret);
+        assert!(visible.privacy.transient);
+        secret.set_secret(true, 20);
+        visible.merge_privacy(&secret);
+        assert!(visible.privacy.secret);
+        secret.set_secret(false, 21);
+        visible.merge_privacy(&secret);
+        assert!(!visible.privacy.secret);
+        assert!(visible.privacy.transient);
+        visible.privacy.secret = true;
+        assert!(visible.to_json("text").is_none());
+    }
+
     fn png(width: u32, height: u32) -> Vec<u8> {
         let image = DynamicImage::ImageRgba8(ImageBuffer::<Rgba<u8>, Vec<u8>>::new(width, height));
         let mut bytes = Cursor::new(Vec::new());
@@ -251,6 +355,7 @@ mod tests {
         let icon = SourceAppIconMetadata::new(&png(64, 128), 64, 128).expect("valid icon");
         let file = FileMetadata::new("report.pdf", "application/pdf").unwrap();
         let metadata = PayloadMetadata {
+            secret_override: None,
             privacy: Default::default(),
             file: Some(file.clone()),
             source_app_icon: Some(icon.clone()),
@@ -262,6 +367,7 @@ mod tests {
         );
 
         let icon_only = PayloadMetadata {
+            secret_override: None,
             privacy: Default::default(),
             file: None,
             source_app_icon: Some(icon),

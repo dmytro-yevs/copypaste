@@ -433,7 +433,8 @@ class _GestureRepository implements HistoryRepository {
   final deletedIds = <String>[];
   HistoryImagePreview? preview;
   @override
-  Stream<HistoryRuntimeEvent> watch() => const Stream.empty();
+  Stream<HistoryRuntimeEvent> watch() =>
+      Stream<HistoryRuntimeEvent>.multi((_) {});
   @override
   Future<HistoryFacets> facets() async => const HistoryFacets();
   @override
@@ -469,6 +470,10 @@ class _GestureRepository implements HistoryRepository {
     deletedIds.add(id);
     clips.removeWhere((clip) => clip.id == id);
   }
+
+  @override
+  Future<HistoryClip> setSecret(String id, bool secret) async =>
+      throw UnimplementedError('setSecret');
 
   @override
   Future<void> setPinned(String id, bool pinned) async {

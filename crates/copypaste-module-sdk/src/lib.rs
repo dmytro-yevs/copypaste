@@ -23,6 +23,11 @@ pub enum ModuleOperation {
     Install {
         package_path: String,
     },
+    StageUpdate {
+        id: String,
+        package_path: String,
+        app_version: String,
+    },
     SetEnabled {
         id: String,
         enabled: bool,

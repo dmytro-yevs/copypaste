@@ -5,6 +5,7 @@ import 'package:copypaste_flutter/features/history/repository/history_file_impor
 import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
+import 'package:copypaste_flutter/features/history/repository/history_file_downloader.dart';
 import 'package:copypaste_flutter/features/history/presentation/source_app_label.dart';
 import 'package:copypaste_flutter/features/history/repository/history_repository.dart';
 import 'package:copypaste_flutter/features/quick_paste/quick_paste_app.dart';
@@ -15,6 +16,15 @@ import 'package:copypaste_flutter/platform/desktop/quick_paste_host.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as image;
 import 'package:shadcn_flutter/shadcn_flutter.dart';
+
+import 'package:copypaste_flutter/features/history/controller/history_ocr_controller.dart';
+import 'package:copypaste_flutter/features/history/repository/history_image_input.dart';
+import 'package:copypaste_flutter/features/modules/controller/modules_controller.dart';
+import 'package:copypaste_flutter/features/modules/models/module_models.dart';
+import 'package:copypaste_flutter/features/modules/repository/modules_repository.dart';
+import 'package:copypaste_flutter/platform/clipboard/clipboard_writer.dart';
+
+import '../modules/modules_test_support.dart';
 
 void main() {
   testWidgets(
@@ -83,6 +93,45 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
+
+  for (final scale in [1.0, 2.0]) {
+    testWidgets(
+      'spoiler retains the ordinary menu row height at scale $scale',
+      (tester) async {
+        final repository = _Repository();
+        repository.clips[0] = repository.clips[0].copyWith(
+          secret: true,
+          pinned: false,
+        );
+        final controller = QuickPasteController(
+          repository: repository,
+          preferencesStore: MemoryQuickPastePreferencesStore(),
+          host: _ContextHost(),
+        );
+        tester.platformDispatcher.textScaleFactorTestValue = scale;
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        await tester.binding.setSurfaceSize(const Size(816, 800));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        await controller.initialize();
+        await controller.opened(1);
+        await tester.pumpWidget(QuickPasteApp(controller: controller));
+        await tester.pump();
+        final secret = find.byKey(const ValueKey('quick-paste-pinned'));
+        final ordinary = find.byKey(const ValueKey('quick-paste-recent'));
+        final height = tester.getSize(ordinary).height;
+        expect(tester.getSize(secret).height, closeTo(height, 0.01));
+        await tester.tap(
+          find.descendant(of: secret, matching: find.byType(Button)).last,
+        );
+        await tester.pump();
+        await tester.pump(AppMotion.spoilerReveal);
+        expect(tester.getSize(secret).height, closeTo(height, 0.01));
+        expect(repository.copied, isEmpty);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
 
   test('cold engine restores the native inspector state', () async {
     final host = _ContextHost()
@@ -1132,6 +1181,203 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.windows]) {
+    testWidgets('inspector actions work and retain the popup on $platform', (
+      tester,
+    ) async {
+      final repository = _Repository();
+      final host = _ContextHost();
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: host,
+      );
+      await tester.binding.setSurfaceSize(const Size(816, 600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(QuickPasteApp(controller: controller));
+      await tester.pumpAndSettle();
+      await controller.opened(1, inspectorVisible: true);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('history-detail-secret')));
+      await tester.pump();
+      expect(controller.history.selectedClip!.secret, isTrue);
+      await tester.tap(find.byKey(const ValueKey('history-detail-secret')));
+      await tester.pumpAndSettle();
+      expect(controller.history.selectedClip!.secret, isFalse);
+
+      await tester.tap(find.byKey(const ValueKey('history-detail-copy')));
+      await tester.pumpAndSettle();
+      expect(repository.copied, ['recent']);
+      await tester.tap(find.byKey(const ValueKey('history-copy-options')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text('Copy plain text'));
+      await tester.pumpAndSettle();
+      expect(repository.plainCopied, ['recent']);
+      expect(host.closeCalls, 0);
+      expect(host.pasteCalls, 0);
+
+      controller.focus(controller.history.selectedClip!);
+      final pin = find.byKey(const ValueKey('history-pin-recent'));
+      await tester.tap(pin);
+      await tester.pumpAndSettle();
+      expect(controller.history.selectedClip!.pinned, isTrue);
+      expect(controller.focusedClip!.pinned, isTrue);
+      expect(controller.shortcutFor(controller.focusedClip!), isNotNull);
+      expect(
+        controller.shortcutFor(controller.focusedClip!),
+        isNot(LogicalKeyboardKey.digit1),
+      );
+      await tester.tap(pin);
+      await tester.pumpAndSettle();
+      expect(controller.history.selectedClip!.pinned, isFalse);
+      expect(
+        controller.shortcutFor(controller.focusedClip!),
+        LogicalKeyboardKey.digit1,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('history-detail-delete')));
+      await tester.pumpAndSettle();
+      expect(find.text('Delete this clip?'), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(repository.clips.length, 2);
+      await tester.tap(find.byKey(const ValueKey('history-detail-delete')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(Button, 'Delete').last);
+      await tester.pumpAndSettle();
+      expect(repository.clips.map((clip) => clip.id), ['pinned']);
+      expect(controller.focusedClip?.id, 'pinned');
+      expect(controller.history.selectedClip?.id, 'pinned');
+      expect(host.closeCalls, 0);
+      expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox.shrink());
+    }, variant: TargetPlatformVariant({platform}));
+  }
+
+  testWidgets('inspector download saves, cancels, and reports failure', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    repository.clips
+      ..clear()
+      ..add(
+        HistoryClip(
+          id: 'download',
+          contentType: 'file',
+          preview: 'report.pdf',
+          createdAt: DateTime.utc(2026),
+          pinned: false,
+          file: const HistoryFileDetails(
+            name: 'report.pdf',
+            mimeType: 'application/pdf',
+          ),
+        ),
+      );
+    final downloader = _Downloader();
+    final host = _ContextHost();
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: host,
+      fileDownloader: downloader,
+    );
+    await tester.binding.setSurfaceSize(const Size(816, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(QuickPasteApp(controller: controller));
+    await tester.pumpAndSettle();
+    await controller.opened(1, inspectorVisible: true);
+    await tester.pumpAndSettle();
+    final download = find.byKey(const ValueKey('history-detail-download'));
+    await tester.tap(download);
+    await tester.pumpAndSettle();
+    expect(repository.saved, [('download', '/tmp/report.pdf')]);
+    expect(downloader.presented, ['/tmp/report.pdf']);
+    downloader.destination = null;
+    await tester.tap(download);
+    await tester.pumpAndSettle();
+    expect(repository.saved.length, 1);
+    downloader.destination = '/tmp/report.pdf';
+    repository.failSave = true;
+    await tester.tap(download);
+    await tester.pumpAndSettle();
+    expect(
+      controller.history.errorMessage,
+      'This file could not be downloaded.',
+    );
+    expect(tester.widget<Button>(download).onPressed, isNotNull);
+    expect(host.closeCalls, 0);
+    expect(tester.takeException(), isNull);
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+    'Quick Paste image OCR recognizes and copies through the shared dialog',
+    (tester) async {
+      final repository = _Repository();
+      repository.clips
+        ..clear()
+        ..add(
+          HistoryClip(
+            id: 'image',
+            contentType: 'image/png',
+            preview: '[Image]',
+            createdAt: DateTime.utc(2026),
+            pinned: false,
+          ),
+        );
+      final moduleRepository = _OcrModules();
+      final modules = ModulesController(
+        repository: moduleRepository,
+        marketplace: MemoryModuleMarketplace(),
+      );
+      await modules.initialize();
+      addTearDown(modules.dispose);
+      final input = _OcrInput();
+      final clipboard = _OcrClipboard();
+      final host = _ContextHost();
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: host,
+        ocr: HistoryOcrController(
+          modules: modules,
+          imageInput: input,
+          clipboard: clipboard,
+        ),
+      );
+      await tester.binding.setSurfaceSize(const Size(816, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(QuickPasteApp(controller: controller));
+      await tester.pumpAndSettle();
+      await controller.opened(1, inspectorVisible: true);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('history-ocr')));
+      await tester.pumpAndSettle();
+      expect(find.text('Recognized fixture text'), findsOneWidget);
+      expect(moduleRepository.lastArguments, {
+        'image_path': '/tmp/ocr-fixture.png',
+      });
+      expect(input.cleaned, isTrue);
+      await tester.tap(find.byKey(const ValueKey('history-ocr-copy')));
+      await tester.pumpAndSettle();
+      expect(clipboard.text, 'Recognized fixture text');
+      expect(host.closeCalls, 0);
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+      await modules.setEnabled('copypaste.ocr', false);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('history-ocr')), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   test(
     'pinned letter shortcuts remain stable across filtering and restart',
     () async {
@@ -1609,6 +1855,9 @@ class _Repository implements HistoryRepository {
     ),
   ];
   final copied = <String>[];
+  final plainCopied = <String>[];
+  final saved = <(String, String)>[];
+  bool failSave = false;
   final imagePreviewEdges = <int?>[];
   final imagePreviewIds = <String>[];
   int deleteAllCalls = 0;
@@ -1626,10 +1875,16 @@ class _Repository implements HistoryRepository {
   }
 
   @override
-  Future<void> copyPlainText(String id) => copy(id);
+  Future<void> copyPlainText(String id) async {
+    plainCopied.add(id);
+    await copy(id);
+  }
 
   @override
-  Future<void> saveFile(String id, String destinationPath) async {}
+  Future<void> saveFile(String id, String destinationPath) async {
+    if (failSave) throw StateError('Save failed');
+    saved.add((id, destinationPath));
+  }
 
   @override
   Future<void> delete(String id) async {
@@ -1681,6 +1936,12 @@ class _Repository implements HistoryRepository {
   Future<void> reorderPinned(List<String> ids) async {}
 
   @override
+  Future<HistoryClip> setSecret(String id, bool secret) async {
+    final index = clips.indexWhere((clip) => clip.id == id);
+    return clips[index] = clips[index].copyWith(secret: secret);
+  }
+
+  @override
   Future<void> setPinned(String id, bool pinned) async {}
 
   @override
@@ -1692,7 +1953,8 @@ class _Repository implements HistoryRepository {
   }
 
   @override
-  Stream<HistoryRuntimeEvent> watch() => const Stream.empty();
+  Stream<HistoryRuntimeEvent> watch() =>
+      Stream<HistoryRuntimeEvent>.multi((_) {});
 }
 
 void _populateHistory(
@@ -1843,5 +2105,72 @@ class _ContextHost implements QuickPasteContextHost {
   @override
   void setOpenedHandler(QuickPasteOpenedHandler? handler) {
     openedHandler = handler;
+  }
+}
+
+class _Downloader implements HistoryFileDownloader {
+  String? destination = '/tmp/report.pdf';
+  final presented = <String>[];
+  @override
+  Future<String?> chooseDestination(HistoryFileDetails file) async =>
+      destination;
+  @override
+  Future<void> presentSavedFile(String path, HistoryFileDetails file) async {
+    presented.add(path);
+  }
+}
+
+class _OcrModules extends MemoryModulesRepository {
+  _OcrModules() {
+    modules = [
+      const InstalledModule(
+        id: 'copypaste.ocr',
+        title: 'OCR',
+        description: '',
+        version: '1.0.0',
+        enabled: true,
+        sizeBytes: 1,
+        commands: [
+          ModuleCommand(
+            id: 'recognize-image',
+            title: 'Recognize image text',
+            description: '',
+            arguments: [],
+          ),
+        ],
+        preferenceFields: [],
+        preferences: {},
+      ),
+    ];
+  }
+  @override
+  Future<ModuleResult> invoke(
+    String id,
+    String command,
+    Map<String, Object> arguments,
+  ) async {
+    lastArguments = arguments;
+    return const ModuleResult('Recognized fixture text');
+  }
+}
+
+class _OcrInput implements HistoryImageInput {
+  bool cleaned = false;
+  @override
+  Future<SelectedModuleInput> prepare(HistoryClip clip) async =>
+      SelectedModuleInput(
+        path: '/tmp/ocr-fixture.png',
+        name: 'ocr-fixture.png',
+        dispose: () async {
+          cleaned = true;
+        },
+      );
+}
+
+class _OcrClipboard implements ClipboardWriter {
+  String? text;
+  @override
+  Future<void> writeText(String text) async {
+    this.text = text;
   }
 }

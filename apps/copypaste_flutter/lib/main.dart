@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:io';
+
 import 'platform/lifecycle/application_restarter.dart';
 
 import 'features/modules/controller/modules_controller.dart';
+import 'features/modules/controller/module_app_update_preparer.dart';
+import 'features/modules/repository/module_update_stager.dart';
 import 'features/modules/repository/runtime_modules_repository.dart';
 import 'features/modules/repository/file_selector_module_input_picker.dart';
 import 'features/modules/repository/github_module_marketplace_repository.dart';
@@ -80,6 +83,15 @@ Future<void> main([List<String> arguments = const []]) async {
         ),
         platform: MethodChannelAppUpdatePlatform(),
         restart: const ApplicationRestarter().restart,
+        prepareModules: ModuleAppUpdatePreparer(
+          installed: RuntimeModulesRepository(),
+          marketplace: (version) => GitHubModuleMarketplaceRepository(
+            temporaryDirectory: getTemporaryDirectory,
+            currentTarget: () =>
+                ModuleMarketplacePlatform().currentTarget(appVersion: version),
+          ),
+          stager: RuntimeModuleUpdateStager(),
+        ).prepare,
       ),
     ),
   );
@@ -95,13 +107,29 @@ Future<void> quickPasteMain() async {
     await runtime.attachDesktopRuntime(endpoint: await host.runtimeEndpoint());
   }
   final repository = RuntimeHistoryRepository();
+  final modules = ModulesController(
+    repository: RuntimeModulesRepository(),
+    marketplace: GitHubModuleMarketplaceRepository(
+      temporaryDirectory: getTemporaryDirectory,
+      currentTarget: ModuleMarketplacePlatform().currentTarget,
+    ),
+  );
+  await modules.initialize();
   runApp(
     QuickPasteApp(
       controller: QuickPasteController(
         repository: repository,
-        disposeRepository: repository.dispose,
+        disposeRepository: () async {
+          modules.dispose();
+          await repository.dispose();
+        },
         preferencesStore: SharedPreferencesQuickPastePreferencesStore(),
         host: host,
+        fileDownloader: const FileSelectorHistoryFileDownloader(),
+        ocr: HistoryOcrController(
+          modules: modules,
+          imageInput: TemporaryHistoryImageInput(repository: repository),
+        ),
       ),
     ),
   );
