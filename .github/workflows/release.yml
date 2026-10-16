@@ -289,7 +289,7 @@ jobs:
       compositor_runtime_run_id: ${{ inputs.compositor_runtime_run_id }}
 
   qualification-supabase:
-    name: Build supabase module
+    name: Build Linux supabase module
     needs: [preflight, policy]
     if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && inputs.linux_evidence_run_id == '' && inputs.supabase_module_run_id == ''
     uses: ./.github/workflows/provider-module.yml
@@ -308,7 +308,7 @@ jobs:
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
   qualification-semantic-search:
-    name: Build semantic-search module
+    name: Build Linux semantic-search module
     needs: [preflight, policy]
     if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && inputs.linux_evidence_run_id == '' && inputs.semantic_search_module_run_id == ''
     uses: ./.github/workflows/provider-module.yml
@@ -327,7 +327,7 @@ jobs:
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
   qualification-ocr:
-    name: Build ocr module
+    name: Build Linux ocr module
     needs: [preflight, policy]
     if: needs.preflight.outputs.reuse_qualified != 'true' && needs.preflight.outputs.linux_qualification_only != 'true' && needs.preflight.outputs.linux_required == 'true' && inputs.linux_evidence_run_id == '' && inputs.ocr_module_run_id == ''
     uses: ./.github/workflows/ocr-module.yml
