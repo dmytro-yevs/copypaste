@@ -172,18 +172,39 @@ async fn serve_peer<S, F, P>(
         }
         return;
     }
+    // Register after the first message distinguishes a history session from a
+    // probe, but before any summary or payload reaches the source. If removal
+    // won the race after Noise authenticated, do not let this old transport
+    // begin a history exchange.
+    let Some(active) = node.begin_active_sync(&pairing_id) else {
+        channel.close().await;
+        return;
+    };
+    let active_cancel = active.cancelled();
+    let guarded_source = super::ActiveSyncSource {
+        source,
+        state: Arc::clone(&active.state),
+    };
     let observation = node.sync_activity.begin(&pairing_id);
     let cursor = node.cursors().get(&pairing_id);
-    let outcome = tokio::time::timeout(
-        SESSION_TIMEOUT,
-        run_responder_from_first(&mut channel, source, listen_addr.as_deref(), cursor, first),
-    )
-    .await;
+    let outcome = tokio::select! {
+        _ = active_cancel.cancelled() => None,
+        outcome = tokio::time::timeout(
+            SESSION_TIMEOUT,
+            run_responder_from_first(&mut channel, &guarded_source, listen_addr.as_deref(), cursor, first),
+        ) => Some(outcome),
+    };
     channel.close().await;
 
     match outcome {
-        Ok(Ok(outcome)) => {
+        None => {
+            observation.finish(None, Some("Peer synchronization was cancelled.".into()));
+        }
+        Some(Ok(Ok(outcome))) => {
             if outcome.peer_device_id == source.device_id() {
+                // The self-pairing path removes the same pairing; release its
+                // active-session lease before it takes the removal lock.
+                drop(active);
                 if let Err(error) = node.unpair(&pairing_id) {
                     warn!(%pairing_id, %error, "could not remove a self-pairing");
                 }
@@ -196,26 +217,34 @@ async fn serve_peer<S, F, P>(
                 skipped = outcome.stats.skipped,
                 "served a peer sync session"
             );
-            node.record_cursor(&pairing_id, &outcome);
-            node.record_authenticated_profile(&pairing_id, outcome.peer_profile.as_ref());
-            if let Some(peer) = node.peers().get(&pairing_id) {
-                node.touch_peer(
-                    &peer,
-                    Some(&outcome.peer_device_id),
-                    outcome
-                        .peer_listen_addr
-                        .and_then(super::ListenerEndpoint::advertised),
-                    Some(&outcome.peer_device_name),
-                );
+            if node
+                .commit_active_sync(&active, || {
+                    node.record_cursor(&pairing_id, &outcome);
+                    node.record_authenticated_profile(&pairing_id, outcome.peer_profile.as_ref());
+                    if let Some(peer) = node.peers().get(&pairing_id) {
+                        node.touch_peer(
+                            &peer,
+                            Some(&outcome.peer_device_id),
+                            outcome
+                                .peer_listen_addr
+                                .and_then(super::ListenerEndpoint::advertised),
+                            Some(&outcome.peer_device_name),
+                        );
+                    }
+                })
+                .is_some()
+            {
+                on_session(&pairing_id, &outcome);
+                observation.finish(Some(&outcome.stats), None);
+            } else {
+                observation.finish(None, Some("Peer synchronization was cancelled.".into()));
             }
-            on_session(&pairing_id, &outcome);
-            observation.finish(Some(&outcome.stats), None);
         }
-        Ok(Err(e)) => {
+        Some(Ok(Err(e))) => {
             warn!(%pairing_id, error = %e, "peer sync session failed");
             observation.finish(None, Some("Peer synchronization failed.".into()));
         }
-        Err(_) => {
+        Some(Err(_)) => {
             warn!(%pairing_id, "peer sync session timed out");
             observation.finish(None, Some("Peer synchronization timed out.".into()));
         }
@@ -228,6 +257,7 @@ mod tests {
     use crate::peers::{Peer, PeerStore};
     use crate::sync::testutil::{item, TestSource};
     use crate::transport::PairingToken;
+    use crate::NodeError;
 
     #[tokio::test]
     async fn inbound_probes_preserve_the_authenticated_listener_endpoint() {
@@ -548,11 +578,9 @@ mod tests {
         (b, b_peer)
     }
 
-    /// A sync pass that started before the user unpaired must not put the
-    /// device back. `sync_one` works from the `Peer` its caller read before the
-    /// click, so the record it writes when the session ends is stale by exactly
-    /// that unpair — and `upsert` bars only *revoked* ids, so the pairing was
-    /// re-enrolled with its key intact and the device reappeared in the list.
+    /// A stale peer snapshot cannot start a new transfer after the user
+    /// unpairs. The remote device may still retain its half, but this node must
+    /// neither authenticate a fresh session nor write the stale pairing back.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_session_that_outlives_an_unpair_does_not_restore_the_device() {
         let (a_dir, b_dir) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
@@ -563,9 +591,7 @@ mod tests {
         // The click lands while the pass holds `b_peer`.
         assert!(b.unpair(&b_peer.pairing_id).expect("unpair"));
 
-        b.sync_one(&b_peer, &source)
-            .await
-            .expect("the far side still holds the pairing, so the session runs");
+        assert_eq!(b.sync_one(&b_peer, &source).await, Err(NodeError::NoPeer));
 
         assert!(
             b.peers().get(&b_peer.pairing_id).is_none(),
@@ -580,10 +606,7 @@ mod tests {
         let _ = shutdown_tx.send(true);
     }
 
-    /// The same race against the action that cannot be taken back. Revocation
-    /// was already closed to it — `upsert` refuses a revoked id — and this is
-    /// what says so, because it is the property `PeerStore::touch` must not
-    /// weaken.
+    /// Revocation also rejects a peer snapshot that was read before the click.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_session_that_outlives_a_revoke_does_not_restore_the_device() {
         let (a_dir, b_dir) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
@@ -592,13 +615,10 @@ mod tests {
         let source = TestSource::new("phone", Vec::new());
 
         assert!(b
-            .peers()
             .revoke(&b_peer.pairing_id, crate::now_ms())
             .expect("revoke"));
 
-        b.sync_one(&b_peer, &source)
-            .await
-            .expect("the far side still holds the pairing, so the session runs");
+        assert_eq!(b.sync_one(&b_peer, &source).await, Err(NodeError::NoPeer));
 
         assert!(b.peers().get(&b_peer.pairing_id).is_none());
         assert!(b.peers().psks().is_empty());

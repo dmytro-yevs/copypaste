@@ -26,6 +26,7 @@ abstract interface class HistoryRepository {
   Future<void> copyPlainText(String id);
   Future<void> saveFile(String id, String destinationPath);
   Future<void> importFile(HistoryImportFile file);
+  Future<HistoryClip> setSecret(String id, bool secret);
   Future<void> setPinned(String id, bool pinned);
   Future<void> delete(String id);
   Future<void> deleteAll();

@@ -295,6 +295,46 @@ void main() {
       controller.dispose();
     });
 
+    test('reconnects a completed watch and refreshes missed history', () async {
+      final first = StreamController<HistoryRuntimeEvent>.broadcast();
+      final second = StreamController<HistoryRuntimeEvent>.broadcast();
+      final repository = _RestartingWatchRepository([first, second]);
+      final controller = HistoryController(repository);
+      addTearDown(controller.dispose);
+      addTearDown(second.close);
+
+      await controller.initialize();
+      expect(repository.watchCalls, 1);
+      repository.current = _clip('after-reconnect');
+      await first.close();
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(repository.watchCalls, 2);
+      expect(controller.items.single.id, 'after-reconnect');
+      expect(controller.errorMessage, isNull);
+    });
+
+    test(
+      'suspension cancels the watch before initialize opens a replacement',
+      () async {
+        final first = StreamController<HistoryRuntimeEvent>.broadcast();
+        final second = StreamController<HistoryRuntimeEvent>.broadcast();
+        final repository = _RestartingWatchRepository([first, second]);
+        final controller = HistoryController(repository);
+        addTearDown(controller.dispose);
+        addTearDown(first.close);
+        addTearDown(second.close);
+
+        await controller.initialize();
+        expect(first.hasListener, isTrue);
+        controller.suspend();
+        await Future<void>.delayed(Duration.zero);
+        expect(first.hasListener, isFalse);
+
+        await controller.initialize();
+        expect(repository.watchCalls, 2);
+      },
+    );
+
     test('retains skipped-row state when the returned page is empty', () async {
       final repository = _HistoryRepository()
         ..pages.add(
@@ -714,11 +754,39 @@ class _HistoryRepository implements HistoryRepository {
   Future<void> reorderPinned(List<String> ids) async {}
 
   @override
+  Future<HistoryClip> setSecret(String id, bool secret) async =>
+      throw UnimplementedError('setSecret');
+
+  @override
   Future<void> setPinned(String id, bool pinned) async {
     setPinnedCalls++;
     await setPinnedPending;
     if (setPinnedError != null) throw setPinnedError!;
   }
+}
+
+class _RestartingWatchRepository extends Fake implements HistoryRepository {
+  _RestartingWatchRepository(this._watches);
+
+  final List<StreamController<HistoryRuntimeEvent>> _watches;
+  int watchCalls = 0;
+  HistoryClip current = _clip('initial');
+
+  @override
+  Stream<HistoryRuntimeEvent> watch() => _watches[watchCalls++].stream;
+
+  @override
+  Future<HistoryFacets> facets() async => const HistoryFacets();
+
+  @override
+  Future<HistoryClipPage> query({
+    required HistoryQuery query,
+    required int limit,
+    String? cursor,
+  }) async => HistoryClipPage(items: [current]);
+
+  @override
+  Future<HistoryClip> get(String id) async => current;
 }
 
 class _HistoryFileDownloader implements HistoryFileDownloader {

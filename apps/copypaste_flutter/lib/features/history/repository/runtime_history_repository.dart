@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:copypaste_flutter/generated/api.dart' as runtime;
@@ -28,11 +29,18 @@ class RuntimeHistoryRepository implements HistoryRepository {
   @override
   Stream<HistoryRuntimeEvent> watch() {
     _ensureActive();
-    return _watchLease.watchId
-        .asStream()
-        .asyncExpand((watchId) => runtime.watchRuntime(watchId: watchId))
-        .where((event) => event.kind == 'items')
-        .map((_) => HistoryRuntimeEvent.itemsChanged);
+    return _watch();
+  }
+
+  Stream<HistoryRuntimeEvent> _watch() async* {
+    final watchId = await _watchLease.watchId;
+    try {
+      await for (final event in runtime.watchRuntime(watchId: watchId)) {
+        if (event.kind == 'items') yield HistoryRuntimeEvent.itemsChanged;
+      }
+    } finally {
+      await _watchLease.release(watchId);
+    }
   }
 
   @override
@@ -161,6 +169,12 @@ class RuntimeHistoryRepository implements HistoryRepository {
   }
 
   @override
+  Future<HistoryClip> setSecret(String id, bool secret) async {
+    _ensureActive();
+    return mapDetailClip(await runtime.setClipSecret(id: id, secret: secret));
+  }
+
+  @override
   Future<void> setPinned(String id, bool pinned) async {
     _ensureActive();
     await runtime.setClipPinned(id: id, pinned: pinned);
@@ -226,13 +240,38 @@ class RuntimeWatchLease {
         StateError('Runtime Watch lease is disposed.'),
       );
     }
-    return _watchId ??= allocate();
+    final active = _watchId;
+    if (active != null) return active;
+    final allocated = allocate();
+    _watchId = allocated;
+    unawaited(_clearFailedAllocation(allocated));
+    return allocated;
+  }
+
+  Future<void> _clearFailedAllocation(Future<BigInt> allocation) async {
+    try {
+      await allocation;
+    } catch (_) {
+      if (identical(_watchId, allocation)) _watchId = null;
+    }
+  }
+
+  Future<void> release(BigInt watchId) async {
+    final active = _watchId;
+    if (active == null ||
+        await active != watchId ||
+        !identical(_watchId, active)) {
+      return;
+    }
+    _watchId = null;
+    await cancel(watchId);
   }
 
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
     final watchId = _watchId;
+    _watchId = null;
     if (watchId != null) await cancel(await watchId);
   }
 }

@@ -795,6 +795,9 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     }
     if (message == WM_ACTIVATE && LOWORD(wparam) == WA_INACTIVE) {
       if (quick_paste_session_.internally_hiding()) return 0;
+      // A save dialog owns focus until the inspector's download completes.
+      const auto activated_window = reinterpret_cast<HWND>(lparam);
+      if (activated_window && ::GetAncestor(activated_window, GA_ROOTOWNER) == hwnd) return 0;
       quick_paste_session_.Invalidate();
       ::ShowWindow(hwnd, SW_HIDE);
       ScheduleQuickPasteRetirement();

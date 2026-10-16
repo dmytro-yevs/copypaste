@@ -16,6 +16,9 @@ pub const CHUNK_BYTES: usize = 512 * 1024;
 const STREAM_NONCE_OFFSET: usize = 4 + 1 + 8 + 32;
 const HEADER_BYTES: usize = STREAM_NONCE_OFFSET + STREAM_NONCE_LEN;
 const AAD_PREFIX: &[u8] = b"copypaste/v2/binary-stream|";
+/// Separates a captured binary representation from the legacy raw-byte id.
+/// The raw digest remains the public content hash and transport merge key.
+const CAPTURE_ID_DOMAIN: &[u8] = b"copypaste/v2/binary-capture-id|";
 /// Binary capture is bounded by the same ceiling that storage and every sync
 /// transport enforce.  This header is untrusted until every chunk authenticates,
 /// so it must not be able to request an arbitrary allocation.
@@ -32,9 +35,9 @@ pub struct BinaryMetadata {
 
 pub use copypaste_payload::{FileMetadata, PayloadMetadata, SourceAppIconMetadata};
 
-/// SHA-256 of the payload — the one identity every other spelling is derived
-/// from: the item id, the envelope header the STREAM AAD covers, and the row's
-/// `content_hash`. Computing it once and threading it through is what keeps a
+/// SHA-256 of the payload — the stable raw-byte identity carried by the
+/// envelope header and the row's `content_hash`. A new capture derives its
+/// row/AAD id from this digest and its content type. Computing it once keeps a
 /// 4 MiB capture from being hashed four times over.
 #[must_use]
 pub fn content_digest(bytes: &[u8]) -> [u8; 32] {
@@ -49,8 +52,10 @@ pub fn content_hash(digest: &[u8; 32]) -> String {
     hex::encode(digest)
 }
 
-/// A deterministic logical id for a binary value.  The UUID spelling preserves
-/// the existing item-id contract while the full digest remains the dedup key.
+/// The legacy deterministic id for a binary value.
+///
+/// Existing rows and staging use this raw-byte spelling. New captures use the
+/// representation-aware id below while retaining this spelling for compatibility.
 #[must_use]
 pub fn item_id(bytes: &[u8]) -> String {
     item_id_from_digest(&content_digest(bytes))
@@ -58,6 +63,26 @@ pub fn item_id(bytes: &[u8]) -> String {
 
 #[must_use]
 pub fn item_id_from_digest(digest: &[u8; 32]) -> String {
+    let mut id = [0u8; 16];
+    id.copy_from_slice(&digest[..16]);
+    uuid::Uuid::from_bytes(id).to_string()
+}
+
+/// A deterministic id for a newly captured binary representation.
+///
+/// A raw byte digest is still the content hash shared by every representation.
+/// It cannot also be the row id: the same bytes can validly be a file and an
+/// image, and their distinct content types require distinct rows and AEAD AAD.
+/// Legacy rows keep using [`item_id_from_digest`]; sync authenticates against
+/// the id carried by each row, so both spellings remain readable.
+#[must_use]
+pub(crate) fn capture_item_id_from_digest(digest: &[u8; 32], content_type: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(CAPTURE_ID_DOMAIN);
+    hasher.update((content_type.len() as u64).to_be_bytes());
+    hasher.update(content_type.as_bytes());
+    hasher.update(digest);
+    let digest = hasher.finalize();
     let mut id = [0u8; 16];
     id.copy_from_slice(&digest[..16]);
     uuid::Uuid::from_bytes(id).to_string()
@@ -396,6 +421,24 @@ mod tests {
             assert_eq!(item_id_from_digest(&digest), item_id(bytes));
             assert_eq!(metadata(bytes).content_hash, content_hash(&digest));
         }
+    }
+
+    #[test]
+    fn captured_binary_identity_separates_representations_without_changing_the_hash() {
+        let bytes = b"same raw payload";
+        let digest = content_digest(bytes);
+        assert_ne!(
+            capture_item_id_from_digest(&digest, copypaste_ipc::content_type::FILE),
+            capture_item_id_from_digest(&digest, copypaste_ipc::content_type::IMAGE_PNG)
+        );
+        assert_eq!(
+            capture_item_id_from_digest(&digest, copypaste_ipc::content_type::FILE),
+            capture_item_id_from_digest(&digest, copypaste_ipc::content_type::FILE)
+        );
+        assert_eq!(
+            content_hash(&digest),
+            crate::storage::compute_content_hash(bytes)
+        );
     }
 
     /// `seal_with_digest` must produce an envelope indistinguishable from

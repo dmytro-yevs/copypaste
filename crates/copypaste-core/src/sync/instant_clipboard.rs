@@ -50,6 +50,16 @@ impl InstantClipboard {
         {
             return false;
         }
+        // A secrecy action publishes metadata, not a new clipboard capture.
+        if row
+            .payload_metadata
+            .as_deref()
+            .and_then(|json| crate::PayloadMetadata::from_json(json, &row.content_type))
+            .and_then(|metadata| metadata.secret_override)
+            .is_some_and(|choice| choice.updated_at >= row.created_at)
+        {
+            return false;
+        }
         let Ok(Some((newest_id, newest_stamp))) = store.newest_live_key() else {
             return false;
         };

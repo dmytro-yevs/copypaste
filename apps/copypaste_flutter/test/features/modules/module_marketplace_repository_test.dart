@@ -247,6 +247,13 @@ void main() {
       final versions = await platform.currentTarget();
       expect(versions.appVersion, Version.parse('1.0.6-beta.1'));
       expect(versions.systemVersion, Version.parse('16.0.0'));
+      final upcoming = await platform.currentTarget(
+        appVersion: Version.parse('1.1.0'),
+      );
+      expect(upcoming.appVersion, Version.parse('1.1.0'));
+      expect(upcoming.platform, versions.platform);
+      expect(upcoming.architecture, versions.architecture);
+      expect(upcoming.systemVersion, versions.systemVersion);
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(channel, (call) async => null);
       final unknown = await platform.currentTarget();

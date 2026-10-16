@@ -315,10 +315,12 @@ fn sweep_content_dir(
         let Some(stat) = classify(content_fd, name, report) else {
             continue;
         };
-        if FileType::from_raw_mode(stat.st_mode) == FileType::RegularFile
-            && is_expired(&stat, now, max_age)
-        {
-            remove_file(content_fd, name, report);
+        if FileType::from_raw_mode(stat.st_mode) == FileType::RegularFile {
+            if is_expired(&stat, now, max_age) {
+                remove_file(content_fd, name, report);
+            } else {
+                report.note_live(remaining_age(&stat, now, max_age));
+            }
         }
     }
     report.truncated = true;
@@ -378,6 +380,19 @@ fn is_expired(stat: &Stat, now: SystemTime, max_age: Duration) -> bool {
         }
     }
     modified > epoch_parts(since_epoch.saturating_add(max_age))
+}
+
+fn remaining_age(stat: &Stat, now: SystemTime, max_age: Duration) -> Duration {
+    let modified = Duration::new(
+        u64::try_from(stat.st_mtime).unwrap_or(0),
+        u32::try_from(modified_nanos(stat)).unwrap_or(0),
+    );
+    let expires = UNIX_EPOCH
+        .checked_add(modified)
+        .and_then(|modified| modified.checked_add(max_age));
+    expires
+        .and_then(|expires| expires.duration_since(now).ok())
+        .unwrap_or_default()
 }
 
 fn epoch_parts(offset: Duration) -> (i64, i64) {

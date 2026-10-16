@@ -6,7 +6,9 @@ import 'package:flutter/services.dart';
 
 import '../../platform/desktop/quick_paste_host.dart';
 import '../history/controller/history_controller.dart';
+import '../history/controller/history_ocr_controller.dart';
 import '../history/models/history_models.dart';
+import '../history/repository/history_file_downloader.dart';
 import '../history/repository/history_repository.dart';
 import '../settings/repository/quick_paste_preferences_store.dart';
 
@@ -18,6 +20,8 @@ class QuickPasteController extends ChangeNotifier {
     Future<void> Function()? disposeRepository,
     required QuickPastePreferencesStore preferencesStore,
     required QuickPasteContextHost host,
+    HistoryFileDownloader? fileDownloader,
+    HistoryOcrController? ocr,
   }) : _disposeRepository = disposeRepository,
        _preferencesStore = preferencesStore,
        _host = host,
@@ -25,6 +29,8 @@ class QuickPasteController extends ChangeNotifier {
          repository,
          pageSize: 50,
          searchDebounce: Duration.zero,
+         fileDownloader: fileDownloader,
+         ocr: ocr,
        ),
        _preferences = QuickPastePreferences.defaults() {
     history.addListener(_historyChanged);
@@ -39,6 +45,7 @@ class QuickPasteController extends ChangeNotifier {
 
   QuickPastePreferences _preferences;
   HistoryClip? _focusedClip;
+  String? _inspectedClipId;
   bool _accessibilityGranted = false;
   bool _initialized = false;
   bool _activating = false;
@@ -371,9 +378,7 @@ class QuickPasteController extends ChangeNotifier {
     final clip = _focusedClip;
     if (clip == null) return;
     await history.select(clip.id);
-    if (await history.deleteSelected()) {
-      _focusedClip = history.items.firstOrNull;
-    }
+    await history.deleteSelected();
   }
 
   Future<bool> clearUnpinned() => history.deleteAll();
@@ -432,22 +437,46 @@ class QuickPasteController extends ChangeNotifier {
 
   void _historyChanged() {
     if (_disposed) return;
+    final previousSelection = _inspectedClipId;
+    final removedSelection =
+        _inspectedClipId != null &&
+        history.selectedId == null &&
+        !history.items.any((clip) => clip.id == _inspectedClipId);
+    _inspectedClipId = history.selectedId;
     final focusedId = _focusedClip?.id;
-    if (focusedId != null) {
+    if (focusedId != null || removedSelection) {
       _focusedClip = history.items
           .where((clip) => clip.id == focusedId)
           .firstOrNull;
-      if (_focusedClip == null) _cancelInspectorHover();
+      if (_focusedClip == null) {
+        _cancelInspectorHover();
+        _focusedClip = items.firstOrNull;
+        final next = _focusedClip;
+        if (_inspectorOpen && next != null) unawaited(history.select(next.id));
+      }
     }
-    unawaited(_reconcilePinnedShortcuts().catchError((Object error) {}));
+    final deletedId =
+        removedSelection && history.isDeletePending(previousSelection!)
+        ? previousSelection
+        : focusedId != null &&
+              history.isDeletePending(focusedId) &&
+              !history.items.any((clip) => clip.id == focusedId)
+        ? focusedId
+        : null;
+    unawaited(
+      _reconcilePinnedShortcuts(
+        deletedId: deletedId,
+      ).catchError((Object error) {}),
+    );
     notifyListeners();
   }
 
-  Future<void> _reconcilePinnedShortcuts() {
+  Future<void> _reconcilePinnedShortcuts({String? deletedId}) {
     final operation = _shortcutSync.then((_) async {
       if (_disposed) return;
       final next = <String, String>{};
       for (final entry in _pinnedShortcuts.entries) {
+        if (entry.key == deletedId) continue;
         if (_pinKeys.containsKey(entry.value) &&
             !next.containsValue(entry.value)) {
           next[entry.key] = entry.value;
