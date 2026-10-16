@@ -49,7 +49,7 @@ class ReleasePipelineTest(unittest.TestCase):
 
     def test_current_module_requires_its_own_producer_and_exact_provenance(self):
         verify = load("verify-linux-module-source-run.py")["verify"]
-        jobs = self.jobs(["Build supabase module / preflight", "Build supabase module / desktop (linux, x86_64, ubuntu-24.04)"])
+        jobs = self.jobs(["Build Linux supabase module / preflight", "Build Linux supabase module / desktop (linux, x86_64, ubuntu-24.04)"])
         artifacts = self.artifact("provider-supabase-linux-x86_64")
         args = [self.run, jobs, artifacts, "owner/repo", "a" * 40, ".github/workflows/provider-module.yml", "supabase"]
         verify(*args, current_run_id="123")
