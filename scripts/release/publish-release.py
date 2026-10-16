@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Publish qualified files without replacing an existing release asset."""
 
+from __future__ import annotations
+
 import argparse
 import hashlib
 import json
@@ -35,17 +37,11 @@ def missing_assets(directory: Path, release: dict, *, allow_draft=False) -> list
     return missing
 
 
-def publish(args) -> None:
-    if (
-        not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", args.version)
-        or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.repository)
-    ):
-        raise ValueError("invalid stable release identity")
-    tag = f"v{args.version}"
+def find_release(repository: str, tag: str) -> dict | None:
     # An API failure must never be interpreted as an absent release.
     releases = json.loads(subprocess.check_output([
         "gh", "api", "--paginate", "--slurp",
-        f"repos/{args.repository}/releases?per_page=100",
+        f"repos/{repository}/releases?per_page=100",
     ], text=True))
     matching = [
         release for page in releases for release in page
@@ -53,8 +49,19 @@ def publish(args) -> None:
     ]
     if len(matching) > 1:
         raise ValueError("release identity is ambiguous")
-    if matching:
-        paths = missing_assets(args.artifacts, matching[0], allow_draft=True)
+    return matching[0] if matching else None
+
+
+def publish(args) -> None:
+    if (
+        not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", args.version)
+        or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.repository)
+    ):
+        raise ValueError("invalid stable release identity")
+    tag = f"v{args.version}"
+    release = find_release(args.repository, tag)
+    if release:
+        paths = missing_assets(args.artifacts, release, allow_draft=True)
         if paths:
             subprocess.run([
                 "gh", "release", "upload", tag, "--repo", args.repository,
@@ -69,8 +76,14 @@ def publish(args) -> None:
             "--verify-tag", "--draft", "--title", f"CopyPaste {args.version}",
             "--notes-file", str(args.notes), *(str(path) for path in paths),
         ], check=True)
+        release = find_release(args.repository, tag)
+    if not release or type(release.get("id")) is not int or release["id"] <= 0:
+        raise ValueError("release has no unique API identity")
+    # The tag endpoint exposes published releases only. A draft must be read
+    # through its immutable API ID, including after an interrupted upload.
+    endpoint = f"repos/{args.repository}/releases/{release['id']}"
     release = json.loads(subprocess.check_output([
-        "gh", "api", f"repos/{args.repository}/releases/tags/{tag}",
+        "gh", "api", endpoint,
     ], text=True))
     if release.get("tag_name") != tag or missing_assets(args.artifacts, release, allow_draft=True):
         raise ValueError("release publication is incomplete")
@@ -78,7 +91,7 @@ def publish(args) -> None:
         subprocess.run(["gh", "release", "edit", tag, "--repo", args.repository,
                         "--draft=false", "--latest"], check=True)
         release = json.loads(subprocess.check_output([
-            "gh", "api", f"repos/{args.repository}/releases/tags/{tag}",
+            "gh", "api", endpoint,
         ], text=True))
         if release.get("tag_name") != tag or missing_assets(args.artifacts, release):
             raise ValueError("release promotion did not complete")
