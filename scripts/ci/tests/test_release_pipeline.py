@@ -49,7 +49,7 @@ class ReleasePipelineTest(unittest.TestCase):
 
     def test_current_module_requires_its_own_producer_and_exact_provenance(self):
         verify = load("verify-linux-module-source-run.py")["verify"]
-        jobs = self.jobs(["Build Linux supabase module / preflight", "Build Linux supabase module / desktop (linux, x86_64, ubuntu-24.04)"])
+        jobs = self.jobs(["Build supabase module / preflight", "Build supabase module / desktop (linux, x86_64, ubuntu-24.04)"])
         artifacts = self.artifact("provider-supabase-linux-x86_64")
         args = [self.run, jobs, artifacts, "owner/repo", "a" * 40, ".github/workflows/provider-module.yml", "supabase"]
         verify(*args, current_run_id="123")
@@ -104,6 +104,16 @@ class ReleasePipelineTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             matrix(contract, "provider", True, True)
 
+    def test_fresh_release_qualifies_complete_publishable_module_matrices(self):
+        from workflow_yaml import read_workflow
+        workflow = read_workflow(ROOT / ".github/workflows/release.yml")
+        for module in ("supabase", "semantic-search", "ocr"):
+            with self.subTest(module=module):
+                producer = workflow["jobs"]["qualification-" + module]
+                self.assertIs(producer["with"]["linux_only"], False)
+                self.assertIs(producer["with"]["publish"], False)
+                self.assertIn("qualification-" + module, workflow["jobs"]["linux-native-current"]["needs"])
+
     def test_publication_stays_draft_until_every_asset_matches(self):
         publish = load("publish-release.py")["publish"]
         with tempfile.TemporaryDirectory() as directory:
@@ -111,15 +121,15 @@ class ReleasePipelineTest(unittest.TestCase):
             (root / "package.deb").write_bytes(b"qualified bytes")
             assets = [{"name": "package.deb", "size": 15,
                        "digest": "sha256:" + hashlib.sha256(b"qualified bytes").hexdigest()}]
-            draft = {"tag_name": "v1.2.3", "draft": True, "prerelease": False, "assets": assets}
+            draft = {"id": 42, "tag_name": "v1.2.3", "draft": True, "prerelease": False, "assets": assets}
             stable = {**draft, "draft": False}
             args = SimpleNamespace(repository="owner/repo", version="1.2.3", artifacts=root, notes=Path("notes.md"))
-            with patch("subprocess.check_output", side_effect=["[[]]", json.dumps(draft), json.dumps(stable)]), patch("subprocess.run") as execute:
+            with patch("subprocess.check_output", side_effect=["[[]]", json.dumps([[draft]]), json.dumps(draft), json.dumps(stable)]), patch("subprocess.run") as execute:
                 publish(args)
                 self.assertIn("--draft", execute.call_args_list[0].args[0])
                 self.assertIn("--draft=false", execute.call_args_list[1].args[0])
             incomplete = {**draft, "assets": []}
-            with patch("subprocess.check_output", side_effect=["[[]]", json.dumps(incomplete)]), patch("subprocess.run") as execute:
+            with patch("subprocess.check_output", side_effect=["[[]]", json.dumps([[incomplete]]), json.dumps(incomplete)]), patch("subprocess.run") as execute:
                 with self.assertRaisesRegex(ValueError, "incomplete"):
                     publish(args)
                 self.assertEqual(execute.call_count, 1)
@@ -130,6 +140,43 @@ class ReleasePipelineTest(unittest.TestCase):
             with patch("subprocess.check_output", side_effect=[json.dumps([[stable]]), json.dumps(stable)]), patch("subprocess.run") as execute:
                 publish(args)
                 execute.assert_not_called()
+
+    def test_draft_promotion_survives_the_published_tag_endpoints_404(self):
+        publish = load("publish-release.py")["publish"]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            payload = b"qualified bytes"
+            (root / "package.deb").write_bytes(payload)
+            state = {"release": None}
+            reads = []
+
+            def read(command, **kwargs):
+                endpoint = command[-1]
+                reads.append(endpoint)
+                if "/releases/tags/" in endpoint:
+                    raise subprocess.CalledProcessError(1, command, stderr="HTTP 404")
+                if endpoint.endswith("/releases?per_page=100"):
+                    return json.dumps([[state["release"]] if state["release"] else []])
+                self.assertEqual(endpoint, "repos/owner/repo/releases/42")
+                return json.dumps(state["release"])
+
+            def execute(command, **kwargs):
+                if command[1:3] == ["release", "create"]:
+                    self.assertIn("--draft", command)
+                    state["release"] = {"id": 42, "tag_name": "v1.2.3", "draft": True,
+                        "prerelease": False, "assets": [{"name": "package.deb", "size": len(payload),
+                        "digest": "sha256:" + hashlib.sha256(payload).hexdigest()}]}
+                else:
+                    self.assertEqual(command[1:3], ["release", "edit"])
+                    self.assertIn("--draft=false", command)
+                    self.assertIn("repos/owner/repo/releases/42", reads)
+                    state["release"]["draft"] = False
+
+            args = SimpleNamespace(repository="owner/repo", version="1.2.3", artifacts=root, notes=Path("notes.md"))
+            with patch("subprocess.check_output", side_effect=read), patch("subprocess.run", side_effect=execute):
+                publish(args)
+            self.assertFalse(state["release"]["draft"])
+            self.assertFalse(any("/releases/tags/" in endpoint for endpoint in reads))
 
     def test_recovery_accepts_only_isolated_publisher_failure(self):
         verify = load("verify-qualified-run.py")["verify"]
