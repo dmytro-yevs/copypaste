@@ -56,11 +56,19 @@ impl Node {
         if candidates.is_empty() {
             return Err(NodeError::NoAddress);
         }
+        let active = self
+            .begin_active_sync(&peer.pairing_id)
+            .ok_or(NodeError::NoPeer)?;
+        let active_cancel = active.cancelled();
 
         let mut session = None;
         let mut addr = None;
         for candidate in candidates {
-            match Session::connect(candidate.addr, &peer.psk).await {
+            let connected = tokio::select! {
+                _ = active_cancel.cancelled() => return Err(NodeError::Session),
+                result = Session::connect(candidate.addr, &peer.psk) => result,
+            };
+            match connected {
                 Ok(connected) => {
                     session = Some(connected);
                     addr = Some(candidate.addr);
@@ -85,31 +93,34 @@ impl Node {
         };
 
         let cursor = self.cursors().get(&peer.pairing_id);
-        let outcome = self.run_session(session, source, cursor).await?;
+        let outcome = self.run_session(session, source, cursor, &active).await?;
         #[cfg(test)]
         cycle.wait_before_commit().await;
         if outcome.peer_device_id == source.device_id() {
+            // `unpair` serialises against active sessions. This session has
+            // reached its terminal self-pairing check, so release its lease
+            // before taking that same lock.
+            drop(active);
             self.unpair(&peer.pairing_id)?;
             return Err(NodeError::SelfPairing);
         }
-        let committed = cycle.commit(&cancel, || -> Result<(), NodeError> {
-            self.record_cursor(&peer.pairing_id, &outcome);
-            self.record_authenticated_profile(&peer.pairing_id, outcome.peer_profile.as_ref());
-            self.touch_peer(
-                peer,
-                Some(&outcome.peer_device_id),
-                outcome
-                    .peer_listen_addr
-                    .and_then(super::ListenerEndpoint::advertised)
-                    .or(Some(super::ListenerEndpoint::dialled(addr))),
-                Some(&outcome.peer_device_name),
-            );
-            Ok(())
+        let committed = cycle.commit(&cancel, || {
+            self.commit_active_sync(&active, || {
+                self.record_cursor(&peer.pairing_id, &outcome);
+                self.record_authenticated_profile(&peer.pairing_id, outcome.peer_profile.as_ref());
+                self.touch_peer(
+                    peer,
+                    Some(&outcome.peer_device_id),
+                    outcome
+                        .peer_listen_addr
+                        .and_then(super::ListenerEndpoint::advertised)
+                        .or(Some(super::ListenerEndpoint::dialled(addr))),
+                    Some(&outcome.peer_device_name),
+                );
+            })
         });
-        match committed {
-            Some(Ok(())) => {}
-            Some(Err(error)) => return Err(error),
-            None => return Err(NodeError::Session),
+        if committed.flatten().is_none() {
+            return Err(NodeError::Session);
         }
         info!(
             pairing_id = %peer.pairing_id,
@@ -131,20 +142,32 @@ impl Node {
         session: Session,
         source: &S,
         cursor: SyncCursor,
+        active: &super::ActiveSync<'_>,
     ) -> Result<SyncOutcome, NodeError> {
         let listen_addr = self.session_listen_addr(session.local_addr());
         let mut channel = NoiseChannel::new(session);
+        let guarded_source = super::ActiveSyncSource {
+            source,
+            state: std::sync::Arc::clone(&active.state),
+        };
+        let active_cancel = active.cancelled();
         // The wait for the peer's close is inside the same budget on purpose:
         // see `NoiseChannel::wait_for_close` for why a session is not over when
         // `run_initiator` returns.
-        let outcome = tokio::time::timeout(SESSION_TIMEOUT, async {
-            let outcome =
-                run_initiator(&mut channel, source, listen_addr.as_deref(), cursor).await?;
-            channel.wait_for_close().await;
-            Ok::<_, SyncError>(outcome)
-        })
-        .await;
+        let outcome = tokio::select! {
+            _ = active_cancel.cancelled() => None,
+            outcome = tokio::time::timeout(SESSION_TIMEOUT, async {
+                let outcome =
+                    run_initiator(&mut channel, &guarded_source, listen_addr.as_deref(), cursor).await?;
+                channel.wait_for_close().await;
+                Ok::<_, SyncError>(outcome)
+            }) => Some(outcome),
+        };
         channel.close().await;
+
+        let Some(outcome) = outcome else {
+            return Err(NodeError::Session);
+        };
 
         match outcome {
             Ok(Ok(outcome)) => Ok(outcome),

@@ -9,6 +9,7 @@ import 'package:copypaste_flutter/features/settings/controller/settings_controll
 import 'package:copypaste_flutter/features/settings/models/settings_models.dart';
 import 'package:copypaste_flutter/features/settings/view/settings_screen.dart';
 import 'package:copypaste_flutter/features/update/update.dart';
+import 'package:copypaste_flutter/platform/capture/capture_service_control.dart';
 import 'package:copypaste_flutter/platform/update/app_update_platform.dart';
 import 'package:copypaste_flutter/platform/notifications/capture_notification_preview.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -176,7 +177,9 @@ void main() {
     expect(await controller.addExcludedApp('com.example.private'), isTrue);
     expect(controller.settings?.excludedAppIds, ['com.example.private']);
 
-    expect(await controller.exportTextHistory(), isTrue);
+    final export = await controller.exportTextHistory();
+    expect(export?.exported, 4);
+    expect(export?.skippedNonText, 1);
     expect(await controller.createBackup(), isTrue);
     expect(await controller.restoreBackup(), isTrue);
     expect(repository.exportCalls, 1);
@@ -184,6 +187,99 @@ void main() {
     expect(repository.restoreCalls, 1);
     expect(picker.presentedPaths, [picker.exportPath, picker.backupPath]);
   });
+
+  testWidgets(
+    'warns when protected settings were recovered after a read failure',
+    (tester) async {
+      final repository = FakeSettingsRepository()
+        ..capture = const CaptureSettingsState(
+          running: true,
+          paused: false,
+          epoch: 0,
+          settingsHealth: RuntimeSettingsHealth(
+            recordUnreadable: false,
+            unreadableFields: ['skip_secret'],
+          ),
+        );
+      final controller = SettingsController(
+        screenshotProtection: FakeScreenshotProtection(),
+        repository: repository,
+        filePicker: FakeSettingsFilePicker(),
+        notifications: FakeCaptureNotificationPort(),
+        captureRefreshInterval: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+
+      await controller.initialize();
+
+      expect(
+        controller.errorMessage,
+        contains('recovered unreadable settings'),
+      );
+      await tester.pumpWidget(
+        ShadcnApp(home: SettingsScreen(controller: controller)),
+      );
+      await tester.pump();
+      expect(find.text('Settings need attention'), findsOneWidget);
+      expect(
+        find.textContaining('recovered unreadable settings'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  test(
+    'reports a persisted pause when the native capture service does not drain',
+    () async {
+      final repository = FakeSettingsRepository();
+      final controller = SettingsController(
+        screenshotProtection: FakeScreenshotProtection(),
+        repository: repository,
+        filePicker: FakeSettingsFilePicker(),
+        notifications: FakeCaptureNotificationPort(),
+        captureControl: _FailingStopCaptureControl(),
+        captureRefreshInterval: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      expect(await controller.toggleCapture(), isFalse);
+      expect(controller.capture?.paused, isTrue);
+      expect(
+        controller.errorMessage,
+        'Clipboard capture is paused. The Android capture service did not confirm that it stopped.',
+      );
+    },
+  );
+
+  test(
+    'rereads capture state when resume compensation cannot be persisted',
+    () async {
+      final repository = _ResumeCompensationFailsRepository()
+        ..capture = const CaptureSettingsState(
+          running: false,
+          paused: true,
+          epoch: 0,
+        );
+      final controller = SettingsController(
+        screenshotProtection: FakeScreenshotProtection(),
+        repository: repository,
+        filePicker: FakeSettingsFilePicker(),
+        notifications: FakeCaptureNotificationPort(),
+        captureControl: _UnavailableCaptureControl(),
+        captureRefreshInterval: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+
+      expect(await controller.toggleCapture(), isFalse);
+      expect(controller.capture?.paused, isFalse);
+      expect(
+        controller.errorMessage,
+        'Clipboard capture permissions must be completed before capture can resume.',
+      );
+    },
+  );
 
   test('posts capture feedback only after notification opt-in', () async {
     final repository = FakeSettingsRepository();
@@ -828,6 +924,7 @@ void main() {
       await tester.tap(find.text('Export'));
       await tester.pump();
       expect(repository.exportCalls, 1);
+      expect(find.text('Text export is incomplete'), findsNothing);
       await tester.tap(find.text('Create backup'));
       await tester.pump();
       expect(repository.backupCalls, 1);
@@ -850,6 +947,55 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('warns when unreadable text clips are omitted from an export', (
+    tester,
+  ) async {
+    final repository = FakeSettingsRepository()..exportSkippedUndecryptable = 2;
+    final controller = SettingsController(
+      screenshotProtection: FakeScreenshotProtection(),
+      repository: repository,
+      filePicker: FakeSettingsFilePicker(),
+      notifications: FakeCaptureNotificationPort(),
+      captureRefreshInterval: Duration.zero,
+    );
+    await controller.initialize();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      ShadcnApp(home: SettingsScreen(controller: controller)),
+    );
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey<String>('settings-section-data')),
+        matching: find.text('Data'),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('Export'));
+    await tester.pump();
+
+    expect(find.text('Text export is incomplete'), findsOneWidget);
+    expect(
+      find.text(
+        '4 text clips were saved; 1 non-text clip was excluded and 2 text clips could not be read.',
+      ),
+      findsOneWidget,
+    );
+    await tester.pump(kDefaultDuration);
+    await tester.pump();
+    expect(
+      find.text('Text export is incomplete').hitTestable(),
+      findsOneWidget,
+    );
+    await tester.drag(
+      find.text('Text export is incomplete'),
+      Offset(-tester.getSize(find.byType(ToastEntryLayout)).width, 0),
+    );
+    await tester.pump();
+    await tester.pump(kDefaultDuration);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets('Modules stays inside Settings with its existing manager', (
     tester,
@@ -1046,6 +1192,31 @@ class _RejectedExclusionRepository extends FakeSettingsRepository {
       );
     }
     return super.updateSettings(change);
+  }
+}
+
+class _FailingStopCaptureControl implements CaptureServiceControl {
+  @override
+  Future<void> setPaused(bool paused) async {
+    if (paused) throw StateError('capture drain failed');
+  }
+}
+
+class _UnavailableCaptureControl implements CaptureServiceControl {
+  @override
+  Future<void> setPaused(bool paused) async {
+    if (!paused) throw const CaptureServiceUnavailable();
+  }
+}
+
+class _ResumeCompensationFailsRepository extends FakeSettingsRepository {
+  var captureWrites = 0;
+
+  @override
+  Future<CaptureSettingsState> setCapturePaused(bool paused) async {
+    captureWrites++;
+    if (captureWrites == 2) throw StateError('compensation unavailable');
+    return super.setCapturePaused(paused);
   }
 }
 

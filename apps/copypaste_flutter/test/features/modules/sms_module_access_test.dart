@@ -538,4 +538,65 @@ void main() {
     expect(controller.modules.single.enabled, isFalse);
     expect(controller.errorMessage, contains('could not be started'));
   });
+
+  test('failed SMS rollback reports the persisted enabled state', () async {
+    final repository = _RollbackFailingRepository()..modules = [sms];
+    final access = Access()
+      ..granted = true
+      ..starts = false;
+    final controller = ModulesController(
+      repository: repository,
+      marketplace: MemoryModuleMarketplace(),
+      access: access,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    await controller.setEnabled(sms.id, true);
+
+    expect(repository.calls, ['enabled:true', 'enabled:false']);
+    expect(controller.modules.single.enabled, isTrue);
+    expect(controller.errorMessage, contains('still enabled'));
+  });
+
+  test('a rollback response failure reports a committed disable', () async {
+    final repository = _RollbackResponseFailingRepository()..modules = [sms];
+    final access = Access()
+      ..granted = true
+      ..starts = false;
+    final controller = ModulesController(
+      repository: repository,
+      marketplace: MemoryModuleMarketplace(),
+      access: access,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+
+    await controller.setEnabled(sms.id, true);
+
+    expect(repository.calls, ['enabled:true', 'enabled:false']);
+    expect(controller.modules.single.enabled, isFalse);
+    expect(controller.errorMessage, contains('was disabled'));
+  });
+}
+
+class _RollbackFailingRepository extends MemoryModulesRepository {
+  @override
+  Future<void> setEnabled(String id, bool enabled) async {
+    if (!enabled) {
+      calls.add('enabled:false');
+      throw const ModulesException('Rollback storage unavailable.');
+    }
+    await super.setEnabled(id, enabled);
+  }
+}
+
+class _RollbackResponseFailingRepository extends MemoryModulesRepository {
+  @override
+  Future<void> setEnabled(String id, bool enabled) async {
+    await super.setEnabled(id, enabled);
+    if (!enabled) {
+      throw const ModulesException('Rollback response unavailable.');
+    }
+  }
 }

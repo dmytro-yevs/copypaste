@@ -35,7 +35,9 @@ internal class AndroidSmsModuleChannel(private val activity: MainActivity, messe
                 }
             }
             "synchronize" -> worker.execute {
-                val success = runCatching { SmsModuleService.synchronize(activity, NativeSmsModules.hasHandler()) }.getOrDefault(false)
+                val success = runCatching {
+                    SmsModuleService.synchronize(activity, NativeSmsModules.handlerState())
+                }.getOrDefault(false)
                 activity.runOnUiThread { result.success(success) }
             }
             else -> result.notImplemented()

@@ -28,3 +28,7 @@ class PlatformCaptureServiceControl implements CaptureServiceControl {
 class CaptureServiceUnavailable implements Exception {
   const CaptureServiceUnavailable();
 }
+
+class CaptureServiceStopFailed implements Exception {
+  const CaptureServiceStopFailed();
+}

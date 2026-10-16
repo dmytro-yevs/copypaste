@@ -15,7 +15,7 @@ class SmsModuleReceiver : BroadcastReceiver() {
         worker.execute {
             try {
                 MainActivity.ensureRuntime(context.applicationContext)
-                SmsModuleService.synchronize(context, NativeSmsModules.hasHandler())
+                SmsModuleService.synchronize(context, NativeSmsModules.handlerState())
             } finally { pending.finish() }
         }
     }

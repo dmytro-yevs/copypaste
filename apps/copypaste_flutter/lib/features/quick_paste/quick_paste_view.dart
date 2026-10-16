@@ -105,7 +105,6 @@ class _QuickPasteViewState extends State<QuickPasteView> {
                           presentationRevision:
                               controller.presentationGeneration,
                           inDrawer: false,
-                          showActions: false,
                           compact: true,
                           onClose: () =>
                               unawaited(controller.toggleInspector()),
@@ -493,6 +492,7 @@ class _ClipContent extends StatelessWidget {
   Widget build(BuildContext context) {
     if (clip.secret && !revealed) {
       return SecretSpoiler(
+        inline: true,
         key: ValueKey(
           'quick-spoiler-${clip.id}-${controller.presentationGeneration}',
         ),
