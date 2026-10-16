@@ -79,7 +79,9 @@ the same primitive.
 
 ### 3.1 Pre-read privacy gates
 
-- **I-5:** Third-party sensitivity and opt-out metadata do not independently suppress capture. No sensitivity detector or sensitivity-marker filter is enabled.
+- **I-5:** Explicit producer privacy hints follow the user's `skip_secret` and
+  `skip_transient` settings. Content heuristics and errors reading optional
+  metadata never assign confidentiality.
 - **I-6:** Private mode acknowledges changes and stores nothing.
 - **I-7:** With exclusions configured, macOS denies incomplete generation
   coverage or a candidate set containing any excluded app before type, data,
@@ -104,6 +106,16 @@ the same primitive.
   categories and bounded events, never item ids, digests, source identities,
   native error descriptions or dynamic I/O errors.
 - **I-10:** A plaintext dedup digest is never logged with correlating metadata.
+
+Stored confidentiality comes only from explicit `privacy.secret` and
+`privacy.transient` boolean hints. Missing, legacy, or unreadable optional
+metadata does not classify content as confidential. Privacy hints are read
+independently of file and source-icon validation, so damaged artwork neither
+hides ordinary text nor removes an explicit secret flag. The shared core uses
+this rule for macOS, Android, Windows, history previews, and sync. Re-copying
+ordinary text with invalid legacy metadata repairs its search index while
+preserving its item identity, encrypted payload, and pin order. Explicit secret
+flags remain restrictive across deduplication and synchronization.
 
 macOS skips observed excluded activity. Arbitrary unobserved background or
 delayed writers may bypass exclusions; foreground/count evidence does not

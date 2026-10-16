@@ -91,7 +91,8 @@ internal class ScreenshotCaptureMonitor(
     }
 
     internal fun scan() {
-        if (closed || !ScreenshotCaptureState.enabled(context) || !ScreenshotCaptureState.mediaGranted(context)) return
+        if (closed || !ScreenshotCaptureState.enabled(context)) return
+        if (!ScreenshotCaptureState.reconcileMediaPermission(context)) return
         if (ScreenshotCaptureState.paused(context)) {
             ScreenshotCaptureState.skipThrough(context)
             return
@@ -130,15 +131,20 @@ internal class ScreenshotCaptureMonitor(
                 return
             }
             for ((uri, type, receipt, displayName) in candidates) {
-                if (closed || !ScreenshotCaptureState.enabled(context) || !ScreenshotCaptureState.mediaGranted(context)) return
+                if (closed || !ScreenshotCaptureState.enabled(context)) return
+                if (!ScreenshotCaptureState.reconcileMediaPermission(context)) return
                 if (reader.capture(uri, type, displayName)) receipts.record(receipt)
-                else if (!reader.readMetadata {}) {
-                    if (!reader.policyAllowsCapture()) ScreenshotCaptureState.skipThrough(context)
-                    return
+                else {
+                    if (!ScreenshotCaptureState.reconcileMediaPermission(context)) return
+                    if (!reader.readMetadata {}) {
+                        if (!reader.policyAllowsCapture()) ScreenshotCaptureState.skipThrough(context)
+                        return
+                    }
                 }
             }
         } catch (_: RuntimeException) {
             // Permission revocation and provider failures carry no image data into logs.
+            ScreenshotCaptureState.reconcileMediaPermission(context)
         }
     }
 

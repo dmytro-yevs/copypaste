@@ -283,7 +283,7 @@ class MainActivity : FlutterActivity() {
 
     internal fun requestScreenshotPermission(completion: () -> Unit) {
         ScreenshotCaptureState.markPermissionRequested(this)
-        if (ScreenshotCaptureState.mediaGranted(this)) {
+        if (ScreenshotCaptureState.reconcileMediaPermission(this)) {
             if (Build.VERSION.SDK_INT >= 33 && !AndroidCaptureState.notificationGranted(this)) {
                 if (ScreenshotCaptureState.permissionAttempts(this) >= 2 &&
                     !ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.POST_NOTIFICATIONS)) {
@@ -326,7 +326,7 @@ class MainActivity : FlutterActivity() {
         if (requestCode == screenshotPermissionRequest) {
             val completion = pendingScreenshotPermission ?: return
             pendingScreenshotPermission = null
-            if (ScreenshotCaptureState.mediaGranted(this)) requestCaptureNotificationPermission {
+            if (ScreenshotCaptureState.reconcileMediaPermission(this)) requestCaptureNotificationPermission {
                 ScreenshotCaptureService.restoreIfEnabled(this)
                 completion()
             } else completion()
@@ -394,6 +394,7 @@ class MainActivity : FlutterActivity() {
         super.onResume()
         isForeground = true
         appUpdateChannel?.onResume()
+        ScreenshotCaptureState.reconcileMediaPermission(this)
         if (ScreenshotCaptureState.enabled(this)) {
             if (!ScreenshotCaptureState.permissionRequested(this)) requestScreenshotPermission {}
             else ScreenshotCaptureService.restoreIfEnabled(this)

@@ -12,9 +12,16 @@ use std::sync::{Arc, OnceLock};
 
 use jni::{
     objects::{GlobalRef, JByteArray, JClass, JObject, JValue},
-    sys::{jboolean, jlong, JNI_FALSE, JNI_TRUE},
+    sys::{jboolean, jint, jlong, JNI_FALSE, JNI_TRUE},
     JNIEnv, JavaVM,
 };
+
+const SMS_HANDLER_UNAVAILABLE: jint = -1;
+const SMS_HANDLER_DISABLED: jint = 0;
+const SMS_HANDLER_ENABLED: jint = 1;
+const SMS_INGEST_RETRY: jint = -1;
+const SMS_INGEST_IGNORED: jint = 0;
+const SMS_INGEST_CAPTURED: jint = 1;
 
 /// Keeps the application context alive for as long as Rust can access Android
 /// Keystore or other context-backed services.
@@ -539,13 +546,26 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_soundOnCopyEn
 
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_copypaste_app_NativeSmsModules_hasHandler(
+pub extern "system" fn Java_com_copypaste_app_NativeSmsModules_handlerState(
+    _env: JNIEnv,
+    _class: JClass,
+) -> jint {
+    match RUNTIME.get().map(|runtime| runtime.has_sms_module()) {
+        Some(Ok(true)) => SMS_HANDLER_ENABLED,
+        Some(Ok(false)) => SMS_HANDLER_DISABLED,
+        Some(Err(_)) | None => SMS_HANDLER_UNAVAILABLE,
+    }
+}
+
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_copypaste_app_NativeSmsModules_capturePaused(
     _env: JNIEnv,
     _class: JClass,
 ) -> jboolean {
     if RUNTIME
         .get()
-        .is_some_and(|runtime| runtime.has_sms_module())
+        .is_some_and(|runtime| runtime.sms_capture_paused())
     {
         JNI_TRUE
     } else {
@@ -576,21 +596,25 @@ pub extern "system" fn Java_com_copypaste_app_NativeSmsModules_ingest(
     _class: JClass,
     token: jlong,
     text: JObject,
-) -> jboolean {
+) -> jint {
     let Some(runtime) = RUNTIME.get() else {
-        return JNI_FALSE;
+        return SMS_INGEST_RETRY;
     };
     if token <= 0 {
-        return JNI_FALSE;
+        return SMS_INGEST_RETRY;
     }
     let Some(read) = runtime.capture_admission().acquire(
         token as u64,
         copypaste_runtime::capture_admission::CaptureScope::Read,
     ) else {
-        return JNI_FALSE;
+        return if runtime.sms_capture_paused() {
+            SMS_INGEST_IGNORED
+        } else {
+            SMS_INGEST_RETRY
+        };
     };
     let Ok(text) = env.get_string((&text).into()) else {
-        return JNI_FALSE;
+        return SMS_INGEST_RETRY;
     };
     let text = text.to_string_lossy().into_owned();
     drop(read);
@@ -607,13 +631,10 @@ pub extern "system" fn Java_com_copypaste_app_NativeSmsModules_ingest(
         // Local clipboard capture remains available while networking is down.
         let _ = network.block_on(runtime.start_listener());
     }
-    if runtime
-        .capture_sms_operation(token as u64, &text)
-        .unwrap_or(false)
-    {
-        JNI_TRUE
-    } else {
-        JNI_FALSE
+    match runtime.capture_sms_operation(token as u64, &text) {
+        copypaste_runtime::SmsCaptureOutcome::Captured => SMS_INGEST_CAPTURED,
+        copypaste_runtime::SmsCaptureOutcome::Ignored => SMS_INGEST_IGNORED,
+        copypaste_runtime::SmsCaptureOutcome::Retry => SMS_INGEST_RETRY,
     }
 }
 

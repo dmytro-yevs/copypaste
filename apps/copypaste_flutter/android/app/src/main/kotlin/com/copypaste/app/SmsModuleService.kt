@@ -25,7 +25,11 @@ class SmsModuleService : Service() {
     override fun onDestroy() { monitor?.close(); monitor = null; super.onDestroy() }
 
     companion object {
-        fun synchronize(context: Context, enabled: Boolean): Boolean {
+        fun synchronize(context: Context, handlerState: Int): Boolean {
+            if (handlerState != NativeSmsModules.HANDLER_ENABLED &&
+                handlerState != NativeSmsModules.HANDLER_DISABLED
+            ) return false
+            val enabled = handlerState == NativeSmsModules.HANDLER_ENABLED
             SmsInboxMonitor.setEnabled(context, enabled)
             context.packageManager.setComponentEnabledSetting(
                 ComponentName(context, SmsModuleReceiver::class.java),

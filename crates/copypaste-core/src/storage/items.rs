@@ -11,29 +11,39 @@ use super::model::{
     is_constraint_violation, item_columns, row_to_item, Ingest, ItemColumns, NewItem, StoreError,
     StoredItem,
 };
-use super::retention::{bump_in_tx, find_in_bucket, live_count, newest_live_with_hash};
+use super::retention::{bump_in_tx, find_in_bucket, live_count, newest_live_with_representation};
 use super::search::{delete_fts_row_in_tx, insert_fts_in_tx};
 use super::store::Store;
 
-fn restrict_privacy(
+fn refresh_privacy(
     conn: &rusqlite::Connection,
     item: &mut StoredItem,
     privacy: copypaste_ipc::ClipboardPrivacy,
+    search_text: Option<&str>,
 ) -> rusqlite::Result<()> {
     let previous = item.clipboard_privacy();
-    let combined = previous.union(privacy);
-    if combined.is_empty() {
-        return Ok(());
-    }
-    let mut metadata = item
+    let mut combined = previous.union(privacy);
+    if let Some(choice) = item
         .payload_metadata
         .as_deref()
         .and_then(|json| crate::PayloadMetadata::from_json(json, &item.content_type))
-        .unwrap_or_default();
+        .and_then(|metadata| metadata.secret_override)
+    {
+        combined.secret = choice.secret;
+    }
+    let parsed = item
+        .payload_metadata
+        .as_deref()
+        .and_then(|json| crate::PayloadMetadata::from_json(json, &item.content_type));
+    let repair_text = item.payload_metadata.is_some() && parsed.is_none() && search_text.is_some();
+    if combined.is_empty() && !repair_text {
+        return Ok(());
+    }
+    let mut metadata = parsed.unwrap_or_default();
     metadata.privacy = combined;
     item.payload_metadata = metadata.to_json(&item.content_type);
     // Classification is versioned too: even a same-tick recopy must reach peers.
-    if combined != previous {
+    if combined != previous || repair_text {
         item.created_at = item.created_at.saturating_add(1);
     }
     conn.execute("UPDATE clipboard_items SET payload_metadata = ?2, created_at = ?3, content_bytes = LENGTH(content_ciphertext) + LENGTH(COALESCE(?2, '')) WHERE id = ?1", rusqlite::params![item.id, item.payload_metadata, item.created_at])?;
@@ -50,6 +60,15 @@ fn restrict_privacy(
         conn.execute(
             "DELETE FROM module_search_vectors WHERE item_id = ?1",
             [&item.id],
+        )?;
+    } else if repair_text {
+        // Earlier versions hid unrecognized metadata and could remove its
+        // index. Reuse this capture's plaintext without resealing the winner.
+        delete_fts_row_in_tx(conn, &item.id)?;
+        let rowid = insert_fts_in_tx(conn, &item.id, search_text.unwrap(), &item.content_type)?;
+        conn.execute(
+            "UPDATE clipboard_items SET fts_rowid = ?2 WHERE id = ?1",
+            params![item.id, rowid],
         )?;
     }
     Ok(())
@@ -77,11 +96,13 @@ impl Store {
             .optional()?)
     }
 
-    /// Stores a capture, or promotes the row that already holds this content.
+    /// Stores a capture, or promotes the row that already holds this clipboard
+    /// representation.
     ///
-    /// Dedup is **unbounded**: a match is looked for across all live history,
-    /// not inside a recency window, and the survivor's `created_at` is moved to
-    /// the new capture time (manifest 01 I-23 / T-36 / T-39, manifest 03 D9).
+    /// Dedup is **unbounded**: a same-hash, same-type match is looked for across
+    /// all live history, not inside a recency window, and the survivor's
+    /// `created_at` is moved to the new capture time (manifest 01 I-23 / T-36 /
+    /// T-39, manifest 03 D9).
     /// Re-copying something from last week promotes it instead of growing a
     /// second row, which is the behaviour a clipboard manager is judged on.
     ///
@@ -104,27 +125,28 @@ impl Store {
         let sealed = (
             std::mem::take(&mut item.nonce),
             std::mem::take(&mut item.content_ciphertext),
-            item.search_text.take(),
         );
-        self.insert_or_bump_late_sealed(item, move || Ok(sealed))
+        let search_text = item.search_text.take();
+        self.insert_or_bump_late_sealed(item, search_text.as_deref(), move || Ok(sealed))
     }
 
     pub(crate) fn insert_or_bump_late_sealed<E, F>(
         &self,
         mut item: NewItem,
+        search_text: Option<&str>,
         seal: F,
     ) -> Result<Ingest, E>
     where
         E: From<StoreError>,
-        F: FnOnce() -> Result<(Vec<u8>, Vec<u8>, Option<String>), E>,
+        F: FnOnce() -> Result<(Vec<u8>, Vec<u8>), E>,
     {
         let privacy = item
             .payload_metadata
             .as_deref()
-            .and_then(|json| crate::PayloadMetadata::from_json(json, &item.content_type))
-            .map(|metadata| metadata.privacy)
+            .map(crate::PayloadMetadata::privacy_from_json)
             .unwrap_or_default();
         let indexable = copypaste_ipc::content_type::is_text(&item.content_type) && !privacy.secret;
+        let search_text = search_text.filter(|text| indexable && !text.trim().is_empty());
 
         // The caller's id, not a fresh one: the ciphertext is already sealed
         // against it (see `NewItem::id`).
@@ -144,7 +166,8 @@ impl Store {
         // The probe and the bump share the insert's transaction, so no third
         // capture can land between finding the row and restamping it.
         if let Some(existing) =
-            newest_live_with_hash(&tx, &item.content_hash, i64::MIN).map_err(StoreError::from)?
+            newest_live_with_representation(&tx, &item.content_hash, &item.content_type, i64::MIN)
+                .map_err(StoreError::from)?
         {
             let mut bumped = bump_in_tx(
                 &tx,
@@ -155,17 +178,14 @@ impl Store {
                 &source_icon_id,
             )
             .map_err(StoreError::from)?;
-            restrict_privacy(&tx, &mut bumped, privacy).map_err(StoreError::from)?;
+            refresh_privacy(&tx, &mut bumped, privacy, search_text).map_err(StoreError::from)?;
             super::source_icons::release_unused(&tx, source_icon_id.as_deref())
                 .map_err(StoreError::from)?;
             tx.commit().map_err(StoreError::from)?;
             return Ok(Ingest::Bumped(bumped));
         }
 
-        let (nonce, content_ciphertext, plaintext) = seal()?;
-        let search_text = plaintext
-            .as_deref()
-            .filter(|t| indexable && !t.trim().is_empty());
+        let (nonce, content_ciphertext) = seal()?;
         let fts_rowid = match search_text {
             Some(text) => {
                 insert_fts_in_tx(&tx, &id, text, &item.content_type).map_err(StoreError::from)?
@@ -209,8 +229,9 @@ impl Store {
                 // content committed between the probe above and this INSERT.
                 // Resolve the winner *inside* the same transaction so there is
                 // no TOCTOU gap between the failed INSERT and this lookup.
-                let existing = find_in_bucket(&tx, &item.content_hash, item.created_at)
-                    .map_err(StoreError::from)?;
+                let existing =
+                    find_in_bucket(&tx, &item.content_hash, &item.content_type, item.created_at)
+                        .map_err(StoreError::from)?;
                 return match existing {
                     Some(existing) => {
                         let mut bumped = bump_in_tx(
@@ -224,7 +245,8 @@ impl Store {
                         .map_err(StoreError::from)?;
                         super::source_icons::release_unused(&tx, source_icon_id.as_deref())
                             .map_err(StoreError::from)?;
-                        restrict_privacy(&tx, &mut bumped, privacy).map_err(StoreError::from)?;
+                        refresh_privacy(&tx, &mut bumped, privacy, search_text)
+                            .map_err(StoreError::from)?;
                         tx.commit().map_err(StoreError::from)?;
                         Ok(Ingest::Bumped(bumped))
                     }
@@ -455,11 +477,27 @@ mod tests {
     }
 
     #[test]
+    fn invalid_artwork_does_not_allow_indexing_an_explicit_secret() {
+        let s = store();
+        let mut candidate = item("synthetic secret marker", T0);
+        candidate.payload_metadata = Some(
+            r#"{"privacy":{"secret":true},"source_app_icon":{"png_base64":"broken","width":1,"height":1}}"#
+                .into(),
+        );
+        let stored = s.insert(candidate).unwrap();
+        assert!(stored.clipboard_privacy().secret);
+        assert_eq!(fts_row_count(&s, &stored.id), 0);
+        assert!(s.search("marker", 10).unwrap().is_empty());
+        assert!(s.semantic_work("model:test").unwrap().is_none());
+    }
+
+    #[test]
     fn source_icon_lookup_never_reads_the_item_body() {
         let s = store();
         let mut candidate = item("not read", T0);
         let icon = source_icon();
         let metadata = crate::PayloadMetadata {
+            secret_override: None,
             privacy: Default::default(),
             file: None,
             source_app_icon: Some(icon.clone()),

@@ -98,6 +98,20 @@ bounded streaming, SHA-256 verification, and private staging cleanup. The
 runtime then verifies the signed manifest and file inventory before activation.
 Installed management remains available when the marketplace is offline.
 
+Each installed module's card exposes Update beside Remove and Settings when a
+newer compatible release is available; the settings drawer does not duplicate
+the update action. About application updates also prepare updates for installed
+modules, using compatibility with the destination application version. Each
+download is authenticated and extracted into persistent staging before the
+native application installer starts. No module is activated in the old process.
+On the new application's first module-host initialization, eligible staged
+packages are reverified and activated before any module consumer runs. The
+registry transition preserves valid preferences and enabled state; an activation
+receipt survives a process exit between moving the payload and committing the
+registry. A missing release, offline catalog, or failed module update is skipped
+without blocking application installation or showing a module error. Other
+module updates continue, and skipped modules retain their previous versions.
+
 The legacy catalog remains in the `modules` GitHub Release as `modules.json`
 and its base64-encoded Minisign `modules.json.sig`. Linux-capable clients use
 the separately signed `modules-v2.json` and `modules-v2.json.sig`, with the

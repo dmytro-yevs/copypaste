@@ -9,7 +9,8 @@ import '../../../app/theme/app_theme.dart';
 /// Particle masking and a circular reveal follow Telegram's spoiler behavior;
 /// this is an independent Flutter implementation, not a native-code port.
 class SecretSpoiler extends StatefulWidget {
-  const SecretSpoiler({super.key, required this.reveal});
+  const SecretSpoiler({super.key, required this.reveal, this.inline = false});
+  final bool inline;
   final WidgetBuilder reveal;
 
   @override
@@ -56,6 +57,18 @@ class _SecretSpoilerState extends State<SecretSpoiler>
     super.dispose();
   }
 
+  double _lineHeight(BuildContext context) {
+    final painter = TextPainter(
+      text: TextSpan(text: ' ', style: DefaultTextStyle.of(context).style),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout();
+    final height = painter.height;
+    painter.dispose();
+    return height;
+  }
+
   @override
   Widget build(BuildContext context) {
     final color = Theme.of(context).colorScheme.mutedForeground;
@@ -77,12 +90,14 @@ class _SecretSpoilerState extends State<SecretSpoiler>
       child: Listener(
         onPointerDown: (event) => _origin = event.localPosition,
         child: Button.ghost(
-          style: AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
+          style: widget.inline
+              ? AppTheme.inlineSpoilerButtonStyle
+              : AppTheme.controlButtonStyle(const ButtonStyle.ghostIcon()),
           onPressed: _open,
           child: ExcludeSemantics(
             child: SizedBox(
               width: double.infinity,
-              height: AppIconSize.sm,
+              height: widget.inline ? _lineHeight(context) : AppIconSize.sm,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(AppRadius.sm),
                 child: CustomPaint(painter: _DustPainter(_motion.dust, color)),

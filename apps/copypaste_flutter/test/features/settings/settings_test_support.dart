@@ -44,6 +44,8 @@ class FakeSettingsRepository implements SettingsRepository {
     soundOnCopy: false,
   );
   int exportCalls = 0;
+  int exportSkippedNonText = 1;
+  int exportSkippedUndecryptable = 0;
   int backupCalls = 0;
   int restoreCalls = 0;
 
@@ -68,10 +70,10 @@ class FakeSettingsRepository implements SettingsRepository {
   @override
   Future<TextExportResult> exportTextHistory(String path) async {
     exportCalls += 1;
-    return const TextExportResult(
+    return TextExportResult(
       exported: 4,
-      skippedNonText: 1,
-      skippedUndecryptable: 0,
+      skippedNonText: exportSkippedNonText,
+      skippedUndecryptable: exportSkippedUndecryptable,
     );
   }
 

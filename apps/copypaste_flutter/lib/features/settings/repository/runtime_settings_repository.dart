@@ -130,6 +130,13 @@ class RuntimeSettingsRepository implements SettingsRepository {
         running: state.running,
         paused: state.paused,
         epoch: state.privateModeEpoch.toInt(),
+        settingsHealth: switch (state.settingsHealth) {
+          final health? => RuntimeSettingsHealth(
+            recordUnreadable: health.recordUnreadable,
+            unreadableFields: List.unmodifiable(health.unreadableFields),
+          ),
+          null => null,
+        },
       );
 
   SyncStatus _syncStatus(runtime.RuntimeSyncStatus status) => SyncStatus(

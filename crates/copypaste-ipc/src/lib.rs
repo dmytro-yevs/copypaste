@@ -195,6 +195,11 @@ pub enum Method {
         id: String,
         pinned: bool,
     },
+    /// Persist an explicit, synchronized secrecy choice for a live clip.
+    SetSecret {
+        id: String,
+        secret: bool,
+    },
     /// Rewrite the order of the pinned section.
     ///
     /// `ids` is the **complete** pinned ordering, first to last — not a
@@ -399,6 +404,7 @@ impl Method {
             self,
             Self::Modules {
                 operation: ModuleOperation::Install { .. }
+                    | ModuleOperation::StageUpdate { .. }
                     | ModuleOperation::Invoke { .. }
                     | ModuleOperation::Remove { .. }
                     | ModuleOperation::SetEnabled { .. }

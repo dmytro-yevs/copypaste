@@ -2385,7 +2385,8 @@ class _ScreenRepository implements HistoryRepository {
   final List<HistoryQuery> queries = [];
 
   @override
-  Stream<HistoryRuntimeEvent> watch() => const Stream.empty();
+  Stream<HistoryRuntimeEvent> watch() =>
+      Stream<HistoryRuntimeEvent>.multi((_) {});
 
   @override
   Future<HistoryFacets> facets() async => availableFacets;
@@ -2460,6 +2461,10 @@ class _ScreenRepository implements HistoryRepository {
 
   @override
   Future<void> reorderPinned(List<String> ids) async {}
+
+  @override
+  Future<HistoryClip> setSecret(String id, bool secret) async =>
+      throw UnimplementedError('setSecret');
 
   @override
   Future<void> setPinned(String id, bool pinned) async {
