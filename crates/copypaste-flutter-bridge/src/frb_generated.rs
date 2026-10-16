@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0-beta.5";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1831520740;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 28785543;
 
 // Section: executor
 
@@ -909,6 +909,41 @@ fn wire__crate__api__get_runtime_settings_impl(
                 transform_result_sse::<_, crate::api::RuntimeError>(
                     (move || async move {
                         let output_ok = crate::api::get_runtime_settings().await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__get_spoiler_state_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "get_spoiler_state",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, crate::api::RuntimeError>(
+                    (move || async move {
+                        let output_ok = crate::api::get_spoiler_state().await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -2047,6 +2082,44 @@ fn wire__crate__api__set_clip_secret_impl(
                 transform_result_sse::<_, crate::api::RuntimeError>(
                     (move || async move {
                         let output_ok = crate::api::set_clip_secret(api_id, api_secret).await?;
+                        Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__set_spoiler_revealed_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "set_spoiler_revealed",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_id = <Option<String>>::sse_decode(&mut deserializer);
+            let api_revealed = <bool>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, crate::api::RuntimeError>(
+                    (move || async move {
+                        let output_ok =
+                            crate::api::set_spoiler_revealed(api_id, api_revealed).await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -3460,6 +3533,18 @@ impl SseDecode for crate::api::RuntimeSyncStatus {
     }
 }
 
+impl SseDecode for crate::api::SpoilerState {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_revision = <u64>::sse_decode(deserializer);
+        let mut var_revealedIds = <Vec<String>>::sse_decode(deserializer);
+        return crate::api::SpoilerState {
+            revision: var_revision,
+            revealed_ids: var_revealedIds,
+        };
+    }
+}
+
 impl SseDecode for crate::api::SyncOutcome {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3587,50 +3672,52 @@ fn pde_ffi_dispatcher_primary_impl(
         22 => wire__crate__api__export_text_history_impl(port, ptr, rust_vec_len, data_len),
         23 => wire__crate__api__get_clip_impl(port, ptr, rust_vec_len, data_len),
         24 => wire__crate__api__get_runtime_settings_impl(port, ptr, rust_vec_len, data_len),
-        25 => wire__crate__api__history_ceiling_impl(port, ptr, rust_vec_len, data_len),
-        26 => wire__crate__api__history_facets_impl(port, ptr, rust_vec_len, data_len),
-        27 => {
+        25 => wire__crate__api__get_spoiler_state_impl(port, ptr, rust_vec_len, data_len),
+        26 => wire__crate__api__history_ceiling_impl(port, ptr, rust_vec_len, data_len),
+        27 => wire__crate__api__history_facets_impl(port, ptr, rust_vec_len, data_len),
+        28 => {
             wire__crate__api__history_file_import_max_bytes_impl(port, ptr, rust_vec_len, data_len)
         }
-        28 => wire__crate__api__import_clip_file_impl(port, ptr, rust_vec_len, data_len),
-        29 => wire__crate__api__join_pairing_ceremony_impl(port, ptr, rust_vec_len, data_len),
-        30 => wire__crate__api__join_pairing_uri_impl(port, ptr, rust_vec_len, data_len),
-        31 => wire__crate__api__list_clips_impl(port, ptr, rust_vec_len, data_len),
-        32 => wire__crate__api__list_discovered_devices_impl(port, ptr, rust_vec_len, data_len),
-        33 => wire__crate__api__list_peers_impl(port, ptr, rust_vec_len, data_len),
-        34 => wire__crate__api__module_install_impl(port, ptr, rust_vec_len, data_len),
-        35 => wire__crate__api__module_invoke_impl(port, ptr, rust_vec_len, data_len),
-        36 => wire__crate__api__module_remove_impl(port, ptr, rust_vec_len, data_len),
-        37 => wire__crate__api__module_set_enabled_impl(port, ptr, rust_vec_len, data_len),
-        38 => wire__crate__api__module_set_preferences_impl(port, ptr, rust_vec_len, data_len),
-        39 => wire__crate__api__module_stage_update_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__api__modules_list_impl(port, ptr, rust_vec_len, data_len),
-        41 => wire__crate__api__pairing_ceremony_status_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__api__query_clips_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__api__reorder_pinned_clips_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__api__rescan_devices_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__api__restore_history_impl(port, ptr, rust_vec_len, data_len),
-        46 => wire__crate__api__reveal_pairing_invitation_impl(port, ptr, rust_vec_len, data_len),
-        47 => wire__crate__api__reveal_pairing_sas_impl(port, ptr, rust_vec_len, data_len),
-        48 => wire__crate__api__revoke_device_impl(port, ptr, rust_vec_len, data_len),
-        49 => {
+        29 => wire__crate__api__import_clip_file_impl(port, ptr, rust_vec_len, data_len),
+        30 => wire__crate__api__join_pairing_ceremony_impl(port, ptr, rust_vec_len, data_len),
+        31 => wire__crate__api__join_pairing_uri_impl(port, ptr, rust_vec_len, data_len),
+        32 => wire__crate__api__list_clips_impl(port, ptr, rust_vec_len, data_len),
+        33 => wire__crate__api__list_discovered_devices_impl(port, ptr, rust_vec_len, data_len),
+        34 => wire__crate__api__list_peers_impl(port, ptr, rust_vec_len, data_len),
+        35 => wire__crate__api__module_install_impl(port, ptr, rust_vec_len, data_len),
+        36 => wire__crate__api__module_invoke_impl(port, ptr, rust_vec_len, data_len),
+        37 => wire__crate__api__module_remove_impl(port, ptr, rust_vec_len, data_len),
+        38 => wire__crate__api__module_set_enabled_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__module_set_preferences_impl(port, ptr, rust_vec_len, data_len),
+        40 => wire__crate__api__module_stage_update_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__modules_list_impl(port, ptr, rust_vec_len, data_len),
+        42 => wire__crate__api__pairing_ceremony_status_impl(port, ptr, rust_vec_len, data_len),
+        43 => wire__crate__api__query_clips_impl(port, ptr, rust_vec_len, data_len),
+        44 => wire__crate__api__reorder_pinned_clips_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__api__rescan_devices_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__api__restore_history_impl(port, ptr, rust_vec_len, data_len),
+        47 => wire__crate__api__reveal_pairing_invitation_impl(port, ptr, rust_vec_len, data_len),
+        48 => wire__crate__api__reveal_pairing_sas_impl(port, ptr, rust_vec_len, data_len),
+        49 => wire__crate__api__revoke_device_impl(port, ptr, rust_vec_len, data_len),
+        50 => {
             wire__crate__api__runtime_settings_patch_default_impl(port, ptr, rust_vec_len, data_len)
         }
-        50 => wire__crate__api__runtime_status_impl(port, ptr, rust_vec_len, data_len),
-        51 => wire__crate__api__save_clip_file_impl(port, ptr, rust_vec_len, data_len),
-        52 => wire__crate__api__search_clips_impl(port, ptr, rust_vec_len, data_len),
-        53 => wire__crate__api__set_capture_paused_impl(port, ptr, rust_vec_len, data_len),
-        54 => wire__crate__api__set_clip_pinned_impl(port, ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__set_clip_secret_impl(port, ptr, rust_vec_len, data_len),
-        56 => wire__crate__api__set_this_device_name_impl(port, ptr, rust_vec_len, data_len),
-        57 => wire__crate__api__source_app_icon_impl(port, ptr, rust_vec_len, data_len),
-        58 => wire__crate__api__start_desktop_runtime_impl(port, ptr, rust_vec_len, data_len),
-        59 => wire__crate__api__stop_desktop_runtime_impl(port, ptr, rust_vec_len, data_len),
-        60 => wire__crate__api__sync_devices_impl(port, ptr, rust_vec_len, data_len),
-        61 => wire__crate__api__this_device_name_impl(port, ptr, rust_vec_len, data_len),
-        62 => wire__crate__api__unpair_device_impl(port, ptr, rust_vec_len, data_len),
-        63 => wire__crate__api__update_runtime_settings_impl(port, ptr, rust_vec_len, data_len),
-        64 => wire__crate__api__watch_runtime_impl(port, ptr, rust_vec_len, data_len),
+        51 => wire__crate__api__runtime_status_impl(port, ptr, rust_vec_len, data_len),
+        52 => wire__crate__api__save_clip_file_impl(port, ptr, rust_vec_len, data_len),
+        53 => wire__crate__api__search_clips_impl(port, ptr, rust_vec_len, data_len),
+        54 => wire__crate__api__set_capture_paused_impl(port, ptr, rust_vec_len, data_len),
+        55 => wire__crate__api__set_clip_pinned_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__set_clip_secret_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__api__set_spoiler_revealed_impl(port, ptr, rust_vec_len, data_len),
+        58 => wire__crate__api__set_this_device_name_impl(port, ptr, rust_vec_len, data_len),
+        59 => wire__crate__api__source_app_icon_impl(port, ptr, rust_vec_len, data_len),
+        60 => wire__crate__api__start_desktop_runtime_impl(port, ptr, rust_vec_len, data_len),
+        61 => wire__crate__api__stop_desktop_runtime_impl(port, ptr, rust_vec_len, data_len),
+        62 => wire__crate__api__sync_devices_impl(port, ptr, rust_vec_len, data_len),
+        63 => wire__crate__api__this_device_name_impl(port, ptr, rust_vec_len, data_len),
+        64 => wire__crate__api__unpair_device_impl(port, ptr, rust_vec_len, data_len),
+        65 => wire__crate__api__update_runtime_settings_impl(port, ptr, rust_vec_len, data_len),
+        66 => wire__crate__api__watch_runtime_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -4449,6 +4536,22 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::RuntimeSyncStatus>
     for crate::api::RuntimeSyncStatus
 {
     fn into_into_dart(self) -> crate::api::RuntimeSyncStatus {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::SpoilerState {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.revision.into_into_dart().into_dart(),
+            self.revealed_ids.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::SpoilerState {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::SpoilerState> for crate::api::SpoilerState {
+    fn into_into_dart(self) -> crate::api::SpoilerState {
         self
     }
 }
@@ -5353,6 +5456,14 @@ impl SseEncode for crate::api::RuntimeSyncStatus {
         <u64>::sse_encode(self.revision, serializer);
         <crate::api::SyncPhase>::sse_encode(self.phase, serializer);
         <Vec<crate::api::RuntimePeerSyncStatus>>::sse_encode(self.peers, serializer);
+    }
+}
+
+impl SseEncode for crate::api::SpoilerState {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <u64>::sse_encode(self.revision, serializer);
+        <Vec<String>>::sse_encode(self.revealed_ids, serializer);
     }
 }
 

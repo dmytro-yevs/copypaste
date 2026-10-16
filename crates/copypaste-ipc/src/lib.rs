@@ -195,6 +195,13 @@ pub enum Method {
         id: String,
         pinned: bool,
     },
+    /// Read temporary spoiler visibility shared by local windows.
+    GetSpoilerState,
+    /// Reveal/conceal one clip, or conceal all when id is absent.
+    SetSpoilerRevealed {
+        id: Option<String>,
+        revealed: bool,
+    },
     /// Persist an explicit, synchronized secrecy choice for a live clip.
     SetSecret {
         id: String,

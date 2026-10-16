@@ -314,6 +314,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RuntimeSyncStatus dco_decode_runtime_sync_status(dynamic raw);
 
   @protected
+  SpoilerState dco_decode_spoiler_state(dynamic raw);
+
+  @protected
   SyncOutcome dco_decode_sync_outcome(dynamic raw);
 
   @protected
@@ -697,6 +700,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RuntimeSyncStatus sse_decode_runtime_sync_status(
     SseDeserializer deserializer,
   );
+
+  @protected
+  SpoilerState sse_decode_spoiler_state(SseDeserializer deserializer);
 
   @protected
   SyncOutcome sse_decode_sync_outcome(SseDeserializer deserializer);
@@ -1182,6 +1188,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     RuntimeSyncStatus self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_spoiler_state(SpoilerState self, SseSerializer serializer);
 
   @protected
   void sse_encode_sync_outcome(SyncOutcome self, SseSerializer serializer);
