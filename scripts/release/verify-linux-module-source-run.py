@@ -34,7 +34,7 @@ def verify(run: dict, jobs: dict, artifacts: dict, repository: str, commit: str,
     if jobs.get("total_count") != len(entries):
         raise ValueError("Module artifact source job inventory is incomplete")
     if current:
-        prefix = f"Build {module} module / "
+        prefix = f"Build Linux {module} module / "
         successful = PIPELINE["successful_jobs"](jobs)
         if prefix + "preflight" not in successful:
             raise ValueError("current module producer preflight did not pass")
