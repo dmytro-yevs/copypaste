@@ -1026,6 +1026,36 @@ pub async fn set_clip_pinned(id: String, pinned: bool) -> Result<Clip, RuntimeEr
     item_response(Method::Pin { id, pinned }).await
 }
 
+/// Revisioned, content-free local spoiler visibility. Never synchronized to peers.
+pub struct SpoilerState {
+    pub revision: u64,
+    pub revealed_ids: Vec<String>,
+}
+
+fn spoiler_state(response: copypaste_ipc::Response) -> Result<SpoilerState, RuntimeError> {
+    match response.data {
+        Some(ResponseData::SpoilerState {
+            revision,
+            revealed_ids,
+        }) => Ok(SpoilerState {
+            revision,
+            revealed_ids,
+        }),
+        _ => Err(RuntimeError::internal()),
+    }
+}
+
+pub async fn get_spoiler_state() -> Result<SpoilerState, RuntimeError> {
+    spoiler_state(crate::client::request(Method::GetSpoilerState).await?)
+}
+
+pub async fn set_spoiler_revealed(
+    id: Option<String>,
+    revealed: bool,
+) -> Result<SpoilerState, RuntimeError> {
+    spoiler_state(crate::client::request(Method::SetSpoilerRevealed { id, revealed }).await?)
+}
+
 pub async fn set_clip_secret(id: String, secret: bool) -> Result<Clip, RuntimeError> {
     item_response(Method::SetSecret { id, secret }).await
 }

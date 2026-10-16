@@ -39,6 +39,7 @@ pub struct Runtime {
     pub device_id: String,
     pub device_name: String,
     pub device_class: copypaste_ipc::DeviceClass,
+    spoilers: copypaste_core::spoiler::Spoilers,
     settings: Arc<RuntimeSettings>,
     events: tokio::sync::broadcast::Sender<EventData>,
     shutdown: tokio::sync::watch::Sender<bool>,
@@ -233,6 +234,7 @@ impl Runtime {
             listener_started: AtomicBool::new(false),
             capture_running: AtomicBool::new(false),
             module_sync_started: AtomicBool::new(false),
+            spoilers: Default::default(),
             clipboard,
             instant_clipboard,
         })
@@ -400,11 +402,51 @@ impl Runtime {
                     Response::err(id, ErrorCode::Internal, "The history store is unavailable.")
                 }
             },
+            Method::GetSpoilerState => {
+                let (revision, revealed_ids) = self.spoilers.snapshot();
+                Response::ok(
+                    id,
+                    ResponseData::SpoilerState {
+                        revision,
+                        revealed_ids,
+                    },
+                )
+            }
+            Method::SetSpoilerRevealed {
+                id: item_id,
+                revealed,
+            } => {
+                if revealed
+                    && !item_id.as_deref().is_some_and(|id| {
+                        self.store
+                            .get(id)
+                            .ok()
+                            .flatten()
+                            .is_some_and(|item| item.clipboard_privacy().secret)
+                    })
+                {
+                    return Response::err(
+                        id,
+                        ErrorCode::NotFound,
+                        "The secret clip was not found.",
+                    );
+                }
+                let (revision, revealed_ids) = self.spoilers.set(item_id.as_deref(), revealed);
+                self.emit(EventKind::Items);
+                Response::ok(
+                    id,
+                    ResponseData::SpoilerState {
+                        revision,
+                        revealed_ids,
+                    },
+                )
+            }
             Method::SetSecret {
                 id: item_id,
                 secret,
             } => match self.store.set_secret(&self.keyring, &item_id, secret) {
                 Ok(true) => {
+                    self.spoilers.set(Some(&item_id), false);
                     if let Ok(Some(item)) = self.store.get(&item_id) {
                         self.node.note_local_version(item.created_at);
                         self.peer_sync.wake();
@@ -1777,6 +1819,7 @@ mod tests {
                 listener_started: AtomicBool::new(false),
                 capture_running: AtomicBool::new(false),
                 module_sync_started: AtomicBool::new(false),
+                spoilers: Default::default(),
                 clipboard,
                 instant_clipboard: Arc::default(),
             }),
@@ -1870,6 +1913,100 @@ mod tests {
             assert!(runtime.save_file(2, &item.id, &saved.to_string_lossy()).ok);
             assert_eq!(std::fs::read(saved).unwrap(), b"%PDF original");
         }
+    }
+
+    #[tokio::test]
+    async fn spoiler_visibility_is_shared_locally_and_reset_by_a_secret_choice() {
+        let (runtime, _dir) = fixture();
+        seed_text(&runtime, "private", "private body");
+        assert!(
+            runtime
+                .request(
+                    1,
+                    Method::SetSecret {
+                        id: "private".into(),
+                        secret: true
+                    }
+                )
+                .await
+                .ok
+        );
+        let mut first = runtime.subscribe_events();
+        let mut second = runtime.subscribe_events();
+        let revealed = runtime
+            .request(
+                2,
+                Method::SetSpoilerRevealed {
+                    id: Some("private".into()),
+                    revealed: true,
+                },
+            )
+            .await;
+        assert!(revealed.ok);
+        assert!(
+            matches!(revealed.data, Some(ResponseData::SpoilerState { revealed_ids, .. }) if revealed_ids == ["private"])
+        );
+        for receiver in [&mut first, &mut second] {
+            let event = receiver.try_recv().unwrap();
+            assert_eq!(event.event, EventKind::Items);
+            assert!(!event.captured);
+        }
+        let snapshot = runtime.request(3, Method::GetSpoilerState).await;
+        assert!(
+            matches!(snapshot.data, Some(ResponseData::SpoilerState { revealed_ids, .. }) if revealed_ids == ["private"])
+        );
+        assert!(
+            runtime
+                .request(
+                    4,
+                    Method::SetSecret {
+                        id: "private".into(),
+                        secret: true
+                    }
+                )
+                .await
+                .ok
+        );
+        let snapshot = runtime.request(5, Method::GetSpoilerState).await;
+        assert!(
+            matches!(snapshot.data, Some(ResponseData::SpoilerState { revealed_ids, .. }) if revealed_ids.is_empty())
+        );
+        assert!(
+            runtime
+                .request(
+                    6,
+                    Method::SetSpoilerRevealed {
+                        id: Some("private".into()),
+                        revealed: true
+                    }
+                )
+                .await
+                .ok
+        );
+        let concealed = runtime
+            .request(
+                7,
+                Method::SetSpoilerRevealed {
+                    id: None,
+                    revealed: false,
+                },
+            )
+            .await;
+        assert!(
+            matches!(concealed.data, Some(ResponseData::SpoilerState { revealed_ids, .. }) if revealed_ids.is_empty())
+        );
+        assert!(
+            !runtime
+                .request(
+                    8,
+                    Method::SetSpoilerRevealed {
+                        id: Some("missing".into()),
+                        revealed: true
+                    }
+                )
+                .await
+                .ok
+        );
     }
 
     #[tokio::test]

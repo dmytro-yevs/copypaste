@@ -15,7 +15,7 @@ void main() {
     TargetPlatform.windows,
     TargetPlatform.android,
   ]) {
-    testWidgets('eye action persists both secret states on $platform', (
+    testWidgets('spoiler action persists both secret states on $platform', (
       tester,
     ) async {
       await tester.binding.setSurfaceSize(const Size(440, 750));
@@ -42,18 +42,29 @@ void main() {
       await tester.pumpAndSettle();
       final action = find.byKey(const ValueKey('history-detail-secret'));
       expect(tester.widget<Button>(action).child, isA<Icon>());
-      expect(find.text('Synthetic private text'), findsOneWidget);
+      expect(find.text('Synthetic private text').hitTestable(), findsOneWidget);
+      final contentRect = tester.getRect(
+        find.byKey(const ValueKey('history-detail-scroll-content')),
+      );
+      final footerRect = tester.getRect(action);
       await tester.tap(action);
       await tester.pump();
       expect(repository.clip.secret, isTrue);
       expect(controller.selectedClip!.secret, isTrue);
-      expect(find.text('Synthetic private text'), findsNothing);
-      expect(find.byIcon(LucideIcons.eye), findsOneWidget);
+      expect(find.text('Synthetic private text').hitTestable(), findsNothing);
+      expect(find.byIcon(LucideIcons.lockOpen), findsOneWidget);
+      expect(
+        tester.getRect(
+          find.byKey(const ValueKey('history-detail-scroll-content')),
+        ),
+        contentRect,
+      );
+      expect(tester.getRect(action), footerRect);
       await tester.tap(action);
       await tester.pumpAndSettle();
       expect(repository.clip.secret, isFalse);
-      expect(find.text('Synthetic private text'), findsOneWidget);
-      expect(find.byIcon(LucideIcons.eyeOff), findsOneWidget);
+      expect(find.text('Synthetic private text').hitTestable(), findsOneWidget);
+      expect(find.byIcon(LucideIcons.lockKeyhole), findsOneWidget);
       await controller.select('clip');
       expect(controller.selectedClip!.secret, isFalse);
       expect(repository.choices, [true, false]);
@@ -89,7 +100,10 @@ void main() {
             ),
           );
           await tester.pumpAndSettle();
-          expect(find.text('Synthetic private text'), findsOneWidget);
+          expect(
+            find.text('Synthetic private text').hitTestable(),
+            findsOneWidget,
+          );
 
           repository.clip = repository.clip.copyWith(secret: true);
           repository.pendingGet = Completer<HistoryClip>();
@@ -99,12 +113,18 @@ void main() {
 
           expect(controller.items.single.secret, isTrue);
           expect(controller.selectedClip!.secret, isTrue);
-          expect(find.text('Synthetic private text'), findsNothing);
+          expect(
+            find.text('Synthetic private text').hitTestable(),
+            findsNothing,
+          );
 
           repository.pendingGet!.complete(repository.clip);
           repository.pendingGet = null;
           await tester.pump();
-          expect(find.text('Synthetic private text'), findsNothing);
+          expect(
+            find.text('Synthetic private text').hitTestable(),
+            findsNothing,
+          );
           expect(tester.takeException(), isNull);
           await tester.pumpWidget(const SizedBox.shrink());
         },
