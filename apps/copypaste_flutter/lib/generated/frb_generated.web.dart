@@ -7,12 +7,9 @@
 // ignore_for_file: argument_type_not_assignable
 
 import 'api.dart';
-
 import 'dart:async';
 import 'dart:convert';
-
 import 'frb_generated.dart';
-
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_web.dart';
 
 abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
@@ -80,6 +77,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
+
+  @protected
+  RuntimeSettingsHealth dco_decode_box_autoadd_runtime_settings_health(
+    dynamic raw,
+  );
 
   @protected
   RuntimeSettingsPatch dco_decode_box_autoadd_runtime_settings_patch(
@@ -263,6 +265,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
 
   @protected
+  RuntimeSettingsHealth? dco_decode_opt_box_autoadd_runtime_settings_health(
+    dynamic raw,
+  );
+
+  @protected
   RuntimeSyncStatus? dco_decode_opt_box_autoadd_runtime_sync_status(
     dynamic raw,
   );
@@ -296,6 +303,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RuntimeSettingsData dco_decode_runtime_settings_data(dynamic raw);
+
+  @protected
+  RuntimeSettingsHealth dco_decode_runtime_settings_health(dynamic raw);
 
   @protected
   RuntimeSettingsPatch dco_decode_runtime_settings_patch(dynamic raw);
@@ -402,6 +412,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
+
+  @protected
+  RuntimeSettingsHealth sse_decode_box_autoadd_runtime_settings_health(
+    SseDeserializer deserializer,
+  );
 
   @protected
   RuntimeSettingsPatch sse_decode_box_autoadd_runtime_settings_patch(
@@ -625,6 +640,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer);
 
   @protected
+  RuntimeSettingsHealth? sse_decode_opt_box_autoadd_runtime_settings_health(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   RuntimeSyncStatus? sse_decode_opt_box_autoadd_runtime_sync_status(
     SseDeserializer deserializer,
   );
@@ -660,6 +680,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RuntimeSettingsData sse_decode_runtime_settings_data(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  RuntimeSettingsHealth sse_decode_runtime_settings_health(
     SseDeserializer deserializer,
   );
 
@@ -792,6 +817,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_i_64(
     PlatformInt64 self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_runtime_settings_health(
+    RuntimeSettingsHealth self,
     SseSerializer serializer,
   );
 
@@ -1081,6 +1112,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_runtime_settings_health(
+    RuntimeSettingsHealth? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_runtime_sync_status(
     RuntimeSyncStatus? self,
     SseSerializer serializer,
@@ -1125,6 +1162,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_runtime_settings_data(
     RuntimeSettingsData self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_runtime_settings_health(
+    RuntimeSettingsHealth self,
     SseSerializer serializer,
   );
 

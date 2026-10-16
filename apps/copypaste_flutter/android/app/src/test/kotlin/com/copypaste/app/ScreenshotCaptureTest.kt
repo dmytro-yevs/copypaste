@@ -30,8 +30,8 @@ class ScreenshotCaptureTest {
         app.getSharedPreferences("screenshot-capture", 0).edit().clear().commit()
         app.deleteDatabase("screenshot-receipts.db")
         since = System.currentTimeMillis() - 10_000
-        ScreenshotCaptureState.initialize(app, since)
         shadowOf(app).grantPermissions(Manifest.permission.READ_MEDIA_IMAGES)
+        ScreenshotCaptureState.initialize(app, since)
         provider = ImagesProvider()
         ShadowContentResolver.registerProviderInternal("media", provider)
     }
@@ -65,6 +65,89 @@ class ScreenshotCaptureTest {
         shadowOf(app).denyPermissions(Manifest.permission.READ_MEDIA_IMAGES)
         shadowOf(app).grantPermissions(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
         assertFalse(ScreenshotCaptureState.mediaGranted(app))
+    }
+
+    @Test fun initialGrantAndRegrantStartFreshScreenshotWindows() {
+        app.getSharedPreferences("screenshot-capture", 0).edit().clear().commit()
+        shadowOf(app).denyPermissions(Manifest.permission.READ_MEDIA_IMAGES)
+        ScreenshotCaptureState.initialize(app, since)
+        assertFalse(ScreenshotCaptureState.reconcileMediaPermission(app, since + 1_000))
+
+        shadowOf(app).grantPermissions(Manifest.permission.READ_MEDIA_IMAGES)
+        assertTrue(ScreenshotCaptureState.reconcileMediaPermission(app, since + 2_000))
+        assertEquals(since + 2_000, ScreenshotCaptureState.since(app))
+
+        shadowOf(app).denyPermissions(Manifest.permission.READ_MEDIA_IMAGES)
+        assertFalse(ScreenshotCaptureState.reconcileMediaPermission(app, since + 3_000))
+        shadowOf(app).grantPermissions(Manifest.permission.READ_MEDIA_IMAGES)
+        assertTrue(ScreenshotCaptureState.reconcileMediaPermission(app, since + 4_000))
+        assertEquals(since + 4_000, ScreenshotCaptureState.since(app))
+    }
+
+    @Test fun screenshotsCreatedWhilePhotoPermissionWasDeniedAreNotBackfilled() {
+        val deniedAt = since + 1_000
+        val regrantedAt = since + 5_000
+        shadowOf(app).denyPermissions(Manifest.permission.READ_MEDIA_IMAGES)
+        ScreenshotCaptureState.reconcileMediaPermission(app, deniedAt)
+        provider.rows = listOf(row(1, "Screenshot_denied.png", deniedAt + 1_000))
+
+        shadowOf(app).grantPermissions(Manifest.permission.READ_MEDIA_IMAGES)
+        ScreenshotCaptureState.reconcileMediaPermission(app, regrantedAt)
+        val reader = Reader()
+        val monitor = ScreenshotCaptureMonitor(app, reader)
+        monitor.scan()
+        assertTrue(reader.ids.isEmpty())
+
+        provider.rows = provider.rows + row(2, "Screenshot_after_grant.png", regrantedAt + 1_000)
+        monitor.scan()
+        assertEquals(listOf(2L), reader.ids)
+        monitor.close()
+    }
+
+    @Test fun monitorRecordsPermissionLossBeforeLaterRegrant() {
+        val monitor = ScreenshotCaptureMonitor(app, Reader())
+        shadowOf(app).denyPermissions(Manifest.permission.READ_MEDIA_IMAGES)
+        monitor.scan()
+        assertEquals(0, provider.queries)
+        provider.rows = listOf(
+            row(1, "Screenshot_while_denied.png", System.currentTimeMillis() - 1_000),
+        )
+
+        shadowOf(app).grantPermissions(Manifest.permission.READ_MEDIA_IMAGES)
+        val reader = Reader()
+        monitor.close()
+        val resumed = ScreenshotCaptureMonitor(app, reader)
+        resumed.scan()
+        assertTrue(reader.ids.isEmpty())
+
+        provider.rows = provider.rows + row(
+            2,
+            "Screenshot_after_regrant.png",
+            System.currentTimeMillis() + 1_000,
+        )
+        resumed.scan()
+        assertEquals(listOf(2L), reader.ids)
+        resumed.close()
+    }
+
+    @Test fun midScanPermissionLossStartsTheNextGrantAtAFreshBoundary() {
+        val capturedAt = System.currentTimeMillis() - 1_000
+        provider.rows = listOf(
+            row(1, "Screenshot_before_revoke.png", capturedAt),
+            row(2, "Screenshot_during_revoke.png", capturedAt),
+        )
+        val reader = Reader()
+        reader.onCapture = {
+            shadowOf(app).denyPermissions(Manifest.permission.READ_MEDIA_IMAGES)
+        }
+        val monitor = ScreenshotCaptureMonitor(app, reader)
+        monitor.scan()
+        assertEquals(listOf(1L), reader.ids)
+
+        shadowOf(app).grantPermissions(Manifest.permission.READ_MEDIA_IMAGES)
+        monitor.scan()
+        assertEquals(listOf(1L), reader.ids)
+        monitor.close()
     }
 
     @Test fun standardScreenshotNamesAndFoldersExcludeCameraPhotos() {
@@ -174,6 +257,7 @@ class ScreenshotCaptureTest {
         var allowed = true
         var saves = true
         var busy = false
+        var onCapture: (() -> Unit)? = null
         val ids = mutableListOf<Long>()
         val displayNames = mutableListOf<String>()
         override fun policyAllowsCapture(): Boolean = allowed
@@ -182,6 +266,10 @@ class ScreenshotCaptureTest {
             return allowed && !busy
         }
         override fun capture(uri: Uri, type: String, displayName: String): Boolean {
+            onCapture?.also { action ->
+                onCapture = null
+                action()
+            }
             if (saves) {
                 ids.add(uri.lastPathSegment!!.toLong())
                 displayNames.add(displayName)

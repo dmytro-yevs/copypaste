@@ -378,6 +378,11 @@ abstract final class AppTheme {
     );
   }
 
+  static final inlineSpoilerButtonStyle = const ButtonStyle.ghost().copyWith(
+    padding: (context, states, value) => EdgeInsets.zero,
+    textStyle: (context, states, value) => DefaultTextStyle.of(context).style,
+  );
+
   static AbstractButtonStyle clipboardMenuButtonStyle({bool selected = false}) {
     return const ButtonStyle.ghost().copyWith(
       padding: (context, states, value) => const EdgeInsets.symmetric(

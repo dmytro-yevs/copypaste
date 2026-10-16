@@ -235,11 +235,11 @@ impl Store {
     }
 }
 
-/// Newest live row carrying `content_hash`, at or after `since_ms`.
+/// Newest live row carrying the raw `content_hash`, at or after `since_ms`.
 ///
-/// One body for both callers: the bounded probe [`Store::find_recent_by_hash`]
-/// exposes, and the unbounded one [`Store::insert_or_bump`] runs inside its
-/// transaction with `i64::MIN`. One lookup owns tombstone handling.
+/// This supports the public bounded raw-hash probe. Dedup uses
+/// [`newest_live_with_representation`] so matching bytes in different clipboard
+/// representations remain separate history rows.
 ///
 /// `deleted = 0` is mandatory: tombstones keep their `content_hash`, and without
 /// the filter a re-copy of a deleted item would match the tombstone and never
@@ -261,6 +261,34 @@ pub(super) fn newest_live_with_hash(
     ))?;
     let columns = ItemColumns::resolve(&stmt)?;
     stmt.query_row(params![content_hash, since_ms], |row| {
+        row_to_item(row, &columns)
+    })
+    .optional()
+}
+
+/// Newest live row with the same raw bytes and clipboard representation.
+///
+/// Raw `content_hash` alone is deliberately not a dedup identity: a text clip,
+/// a file, and an image can have identical bytes while retaining distinct user
+/// actions and paste behavior.
+pub(super) fn newest_live_with_representation(
+    conn: &Connection,
+    content_hash: &str,
+    content_type: &str,
+    since_ms: i64,
+) -> rusqlite::Result<Option<StoredItem>> {
+    if content_hash.is_empty() {
+        return Ok(None);
+    }
+    let mut stmt = conn.prepare_cached(concat!(
+        "SELECT ",
+        item_columns!(),
+        " FROM clipboard_items \
+          WHERE content_hash = ?1 AND content_type = ?2 AND created_at >= ?3 AND deleted = 0 \
+          ORDER BY created_at DESC, id DESC LIMIT 1"
+    ))?;
+    let columns = ItemColumns::resolve(&stmt)?;
+    stmt.query_row(params![content_hash, content_type, since_ms], |row| {
         row_to_item(row, &columns)
     })
     .optional()
@@ -312,6 +340,7 @@ pub(super) fn bump_in_tx(
 pub(super) fn find_in_bucket(
     tx: &Transaction<'_>,
     content_hash: &str,
+    content_type: &str,
     created_at: i64,
 ) -> rusqlite::Result<Option<StoredItem>> {
     if content_hash.is_empty() {
@@ -321,12 +350,17 @@ pub(super) fn find_in_bucket(
         "SELECT ",
         item_columns!(),
         " FROM clipboard_items \
-          WHERE content_hash = ?1 AND created_at / ?2 = ?3 AND deleted = 0 \
+          WHERE content_hash = ?1 AND content_type = ?2 AND created_at / ?3 = ?4 AND deleted = 0 \
           ORDER BY created_at DESC, id DESC LIMIT 1"
     ))?;
     let columns = ItemColumns::resolve(&stmt)?;
     stmt.query_row(
-        params![content_hash, DEDUP_BUCKET_MS, created_at / DEDUP_BUCKET_MS],
+        params![
+            content_hash,
+            content_type,
+            DEDUP_BUCKET_MS,
+            created_at / DEDUP_BUCKET_MS
+        ],
         |row| row_to_item(row, &columns),
     )
     .optional()
@@ -353,8 +387,9 @@ fn hard_delete_in_tx(tx: &Transaction<'_>, ids: &[String]) -> rusqlite::Result<u
     Ok(removed)
 }
 
-/// The content hash used for dedup: the **full** 64-character lowercase
-/// SHA-256 hex digest of the raw, pre-encryption bytes.
+/// The raw-byte component of the dedup identity: the **full** 64-character
+/// lowercase SHA-256 hex digest of the pre-encryption bytes. The content type
+/// supplies the representation component.
 ///
 /// Never truncate it. Truncating the digest to 16 bytes / 32 hex
 /// chars, which threw away second-preimage resistance for nothing

@@ -186,7 +186,9 @@ void main() {
                 description: index == 1
                     ? 'Automatically copy login, verification, and transaction codes from new SMS messages.'
                     : testModule.description,
-                version: testMarketplaceModule.version,
+                version: index == 0
+                    ? Version.parse('1.1.0')
+                    : testMarketplaceModule.version,
                 artifact: index == 1 ? null : testMarketplaceModule.artifact,
                 supportedPlatforms: index == 1
                     ? [ModulePlatform.android]
@@ -226,6 +228,15 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
+        final update = find.byKey(ValueKey('module-update-${testModule.id}'));
+        final settings = find.byKey(
+          ValueKey('module-settings-${testModule.id}'),
+        );
+        final remove = find.byKey(ValueKey('module-remove-${testModule.id}'));
+        expect(update, findsOneWidget);
+        expect(tester.getSize(update).height, tester.getSize(settings).height);
+        expect(tester.getSize(update).height, tester.getSize(remove).height);
+        expect(tester.getCenter(update).dy, tester.getCenter(settings).dy);
         final ids = [testModule.id, 'module-1', 'module-2', 'module-3'];
         final size = tester.getSize(
           find.byKey(ValueKey('module-${ids.first}')),
@@ -344,7 +355,7 @@ void main() {
     expect(restarts, 1);
   });
 
-  testWidgets('an installed module is updated from settings', (tester) async {
+  testWidgets('an installed module is updated from its card', (tester) async {
     final repository = MemoryModulesRepository()..modules = [testModule];
     final marketplace = MemoryModuleMarketplace()
       ..modules = [
@@ -374,12 +385,39 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Update to 1.1.0'), findsNothing);
+    final update = find.byKey(
+      const ValueKey('module-update-copypaste.text-tools'),
+    );
+    final remove = find.byKey(
+      const ValueKey('module-remove-copypaste.text-tools'),
+    );
+    final settings = find.byKey(
+      const ValueKey('module-settings-copypaste.text-tools'),
+    );
+    expect(update, findsOneWidget);
+    expect(tester.getSize(update).height, tester.getSize(settings).height);
+    expect(tester.getSize(update).height, tester.getSize(remove).height);
+    expect(tester.getCenter(update).dy, tester.getCenter(settings).dy);
+    expect(tester.getCenter(update).dx, lessThan(tester.getCenter(remove).dx));
     await tester.tap(
       find.byKey(const ValueKey('module-settings-copypaste.text-tools')),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Update to 1.1.0'));
+    final drawer = find.byKey(
+      const ValueKey('module-settings-drawer-copypaste.text-tools'),
+    );
+    expect(
+      find.descendant(of: drawer, matching: find.byIcon(LucideIcons.download)),
+      findsNothing,
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('module-settings-close-copypaste.text-tools')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Installed'));
+    await tester.pumpAndSettle();
+    expect(update, findsOneWidget);
+    await tester.tap(update);
     await tester.pumpAndSettle();
     expect(repository.calls, ['install']);
     expect(marketplace.disposedPackages, 1);
