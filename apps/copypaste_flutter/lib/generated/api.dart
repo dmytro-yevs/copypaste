@@ -4,16 +4,25 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import 'frb_generated.dart';
-
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `android_runtime_unavailable`, `ceremony_not_found`, `clip`, `cloud_status_response`, `content_class_to_ipc`, `content_class`, `create_private_file`, `daemon_exited_early`, `daemon_spawn_failed`, `daemon_start_failed`, `daemon_unreachable`, `device_class`, `device_details`, `device_endpoint`, `device_latency`, `device_observation_provenance`, `device_observation_trust`, `device_platform`, `device_presence`, `device_profile`, `discovered_response`, `empty_response`, `export_write_failed`, `from_daemon`, `history_query`, `internal`, `item_response`, `module_request`, `not_initialized`, `runtime_attachment_unsupported`, `runtime_conflict`, `runtime_endpoint_invalid`, `runtime_settings`, `runtime_sync_status`, `semantic_kind_to_ipc`, `semantic_kind`, `this_device`, `timeout`, `unsafe_data_directory`, `watch_not_found`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `android_runtime_unavailable`, `ceremony_not_found`, `clip`, `cloud_status_response`, `content_class_to_ipc`, `content_class`, `create_private_file`, `daemon_exited_early`, `daemon_spawn_failed`, `daemon_start_failed`, `daemon_unreachable`, `device_class`, `device_details`, `device_endpoint`, `device_latency`, `device_observation_provenance`, `device_observation_trust`, `device_platform`, `device_presence`, `device_profile`, `discovered_response`, `empty_response`, `export_write_failed`, `from_daemon`, `history_query`, `internal`, `item_response`, `module_request`, `not_initialized`, `runtime_attachment_unsupported`, `runtime_conflict`, `runtime_endpoint_invalid`, `runtime_settings_health`, `runtime_settings`, `runtime_sync_status`, `semantic_kind_to_ipc`, `semantic_kind`, `this_device`, `timeout`, `unsafe_data_directory`, `watch_not_found`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 Future<String> modulesList() => RustLib.instance.api.crateApiModulesList();
 
 Future<String> moduleInstall({required String packagePath}) =>
     RustLib.instance.api.crateApiModuleInstall(packagePath: packagePath);
+
+Future<void> moduleStageUpdate({
+  required String id,
+  required String packagePath,
+  required String appVersion,
+}) => RustLib.instance.api.crateApiModuleStageUpdate(
+  id: id,
+  packagePath: packagePath,
+  appVersion: appVersion,
+);
 
 Future<void> moduleSetEnabled({required String id, required bool enabled}) =>
     RustLib.instance.api.crateApiModuleSetEnabled(id: id, enabled: enabled);
@@ -250,6 +259,9 @@ Future<BigInt> historyCeiling() =>
 Future<Clip> setClipPinned({required String id, required bool pinned}) =>
     RustLib.instance.api.crateApiSetClipPinned(id: id, pinned: pinned);
 
+Future<Clip> setClipSecret({required String id, required bool secret}) =>
+    RustLib.instance.api.crateApiSetClipSecret(id: id, secret: secret);
+
 Future<BigInt> reorderPinnedClips({required List<String> ids}) =>
     RustLib.instance.api.crateApiReorderPinnedClips(ids: ids);
 
@@ -312,12 +324,14 @@ class CaptureState {
   final bool running;
   final bool paused;
   final BigInt privateModeEpoch;
+  final RuntimeSettingsHealth? settingsHealth;
 
   const CaptureState({
     required this.syncStatus,
     required this.running,
     required this.paused,
     required this.privateModeEpoch,
+    this.settingsHealth,
   });
 
   @override
@@ -325,7 +339,8 @@ class CaptureState {
       syncStatus.hashCode ^
       running.hashCode ^
       paused.hashCode ^
-      privateModeEpoch.hashCode;
+      privateModeEpoch.hashCode ^
+      settingsHealth.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -335,7 +350,8 @@ class CaptureState {
           syncStatus == other.syncStatus &&
           running == other.running &&
           paused == other.paused &&
-          privateModeEpoch == other.privateModeEpoch;
+          privateModeEpoch == other.privateModeEpoch &&
+          settingsHealth == other.settingsHealth;
 }
 
 class Clip {
@@ -1279,6 +1295,29 @@ class RuntimeSettingsData {
           notifyOnCopy == other.notifyOnCopy &&
           notificationPreview == other.notificationPreview &&
           soundOnCopy == other.soundOnCopy;
+}
+
+/// Safe diagnostic context for settings that were recovered with protective
+/// fallback values after their persisted record could not be decoded.
+class RuntimeSettingsHealth {
+  final bool recordUnreadable;
+  final List<String> unreadableFields;
+
+  const RuntimeSettingsHealth({
+    required this.recordUnreadable,
+    required this.unreadableFields,
+  });
+
+  @override
+  int get hashCode => recordUnreadable.hashCode ^ unreadableFields.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RuntimeSettingsHealth &&
+          runtimeType == other.runtimeType &&
+          recordUnreadable == other.recordUnreadable &&
+          unreadableFields == other.unreadableFields;
 }
 
 class RuntimeSettingsPatch {

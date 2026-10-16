@@ -26,6 +26,20 @@ pub async fn module_install(package_path: String) -> Result<String, RuntimeError
     module_request(copypaste_ipc::ModuleOperation::Install { package_path }).await
 }
 
+pub async fn module_stage_update(
+    id: String,
+    package_path: String,
+    app_version: String,
+) -> Result<(), RuntimeError> {
+    module_request(copypaste_ipc::ModuleOperation::StageUpdate {
+        id,
+        package_path,
+        app_version,
+    })
+    .await
+    .map(|_| ())
+}
+
 pub async fn module_set_enabled(id: String, enabled: bool) -> Result<(), RuntimeError> {
     module_request(copypaste_ipc::ModuleOperation::SetEnabled { id, enabled })
         .await
@@ -533,6 +547,15 @@ pub struct CaptureState {
     pub running: bool,
     pub paused: bool,
     pub private_mode_epoch: u64,
+    pub settings_health: Option<RuntimeSettingsHealth>,
+}
+
+/// Safe diagnostic context for settings that were recovered with protective
+/// fallback values after their persisted record could not be decoded.
+#[derive(Debug, Clone)]
+pub struct RuntimeSettingsHealth {
+    pub record_unreadable: bool,
+    pub unreadable_fields: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -655,6 +678,7 @@ pub async fn capture_state() -> Result<CaptureState, RuntimeError> {
             running: status.capture_running,
             paused: status.private_mode,
             private_mode_epoch: status.private_mode_epoch,
+            settings_health: status.settings_health.map(runtime_settings_health),
         }),
         _ => Err(RuntimeError::internal()),
     }
@@ -1002,6 +1026,10 @@ pub async fn set_clip_pinned(id: String, pinned: bool) -> Result<Clip, RuntimeEr
     item_response(Method::Pin { id, pinned }).await
 }
 
+pub async fn set_clip_secret(id: String, secret: bool) -> Result<Clip, RuntimeError> {
+    item_response(Method::SetSecret { id, secret }).await
+}
+
 pub async fn reorder_pinned_clips(ids: Vec<String>) -> Result<u64, RuntimeError> {
     let response = client::request(Method::ReorderPinned { ids }).await?;
     match response.data {
@@ -1171,6 +1199,13 @@ fn runtime_settings(config: copypaste_ipc::ConfigData) -> RuntimeSettingsData {
         notify_on_copy: config.notify_on_copy,
         notification_preview: config.notification_preview,
         sound_on_copy: config.sound_on_copy,
+    }
+}
+
+fn runtime_settings_health(health: copypaste_ipc::SettingsHealth) -> RuntimeSettingsHealth {
+    RuntimeSettingsHealth {
+        record_unreadable: health.record_unreadable,
+        unreadable_fields: health.unreadable_fields,
     }
 }
 
@@ -1440,6 +1475,17 @@ mod tests {
 
         assert_eq!(device.device_id.as_deref(), Some("local-device-id"));
         assert_eq!(device.name, "Desktop");
+    }
+
+    #[test]
+    fn settings_health_maps_for_the_flutter_status_surface() {
+        let health = runtime_settings_health(copypaste_ipc::SettingsHealth {
+            record_unreadable: false,
+            unreadable_fields: vec!["skip_secret".into()],
+        });
+
+        assert!(!health.record_unreadable);
+        assert_eq!(health.unreadable_fields, ["skip_secret"]);
     }
 
     #[test]

@@ -49,6 +49,16 @@ pub struct Runtime {
     instant_clipboard: Arc<copypaste_core::sync::InstantClipboard>,
 }
 
+/// Outcome for one SMS inbox row. Android advances its durable inbox cursor
+/// only for terminal outcomes, so a temporary host or storage failure leaves
+/// the row available for the next existing inbox scan.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SmsCaptureOutcome {
+    Captured,
+    Ignored,
+    Retry,
+}
+
 pub trait ClipboardWriter: Send + Sync {
     fn write(
         &self,
@@ -240,6 +250,7 @@ impl Runtime {
             Method::Delete { .. }
                 | Method::DeleteAll { .. }
                 | Method::Pin { .. }
+                | Method::SetSecret { .. }
                 | Method::ReorderPinned { .. }
                 | Method::Restore { .. }
                 | Method::ImportFile { .. }
@@ -388,6 +399,24 @@ impl Runtime {
                 Err(_) => {
                     Response::err(id, ErrorCode::Internal, "The history store is unavailable.")
                 }
+            },
+            Method::SetSecret {
+                id: item_id,
+                secret,
+            } => match self.store.set_secret(&self.keyring, &item_id, secret) {
+                Ok(true) => {
+                    if let Ok(Some(item)) = self.store.get(&item_id) {
+                        self.node.note_local_version(item.created_at);
+                        self.peer_sync.wake();
+                    }
+                    self.item(id, &item_id)
+                }
+                Ok(false) => Response::err(id, ErrorCode::NotFound, "The clip was not found."),
+                Err(_) => Response::err(
+                    id,
+                    ErrorCode::Internal,
+                    "The clip privacy could not be updated.",
+                ),
             },
             Method::DeleteAll { through } => match through {
                 Some(through) => self.store.delete_all_through(through),
@@ -688,6 +717,7 @@ impl Runtime {
         let settings = &permit.config;
         let privacy_metadata =
             (!permit.privacy.is_empty()).then_some(copypaste_core::PayloadMetadata {
+                secret_override: None,
                 privacy: permit.privacy,
                 ..Default::default()
             });
@@ -710,27 +740,42 @@ impl Runtime {
         Ok(())
     }
 
-    pub fn has_sms_module(&self) -> bool {
-        self.modules.has_sms_handler().unwrap_or(false)
+    pub fn has_sms_module(&self) -> Result<bool, copypaste_modules::ModuleError> {
+        self.modules.has_sms_handler()
     }
 
     /// The SMS body is invocation-only. Only the recognized code enters the
     /// encrypted History and the normal sync source. Publication holds the
     /// same admission scope used by native clipboard capture.
-    pub fn capture_sms_operation(&self, token: u64, text: &str) -> Result<bool, RuntimeError> {
-        let mut read = Some(
-            self.capture_admission()
-                .acquire(token, CaptureScope::Read)
-                .ok_or(RuntimeError::CaptureRefused)?,
-        );
-        self.modules
-            .dispatch_sms(text, |code| {
-                drop(read.take());
-                self.publish_sms_code(token, code)
-                    .map_err(|_| copypaste_modules::ModuleError::State)?;
-                Ok(())
-            })
-            .map_err(|_| RuntimeError::Capture)
+    pub fn capture_sms_operation(&self, token: u64, text: &str) -> SmsCaptureOutcome {
+        let mut read = self.capture_admission().acquire(token, CaptureScope::Read);
+        if read.is_none() {
+            return if self.sms_capture_paused() {
+                SmsCaptureOutcome::Ignored
+            } else {
+                SmsCaptureOutcome::Retry
+            };
+        }
+        match self.modules.dispatch_sms(text, |code| {
+            drop(read.take());
+            self.publish_sms_code(token, code)
+                .map_err(|_| copypaste_modules::ModuleError::State)?;
+            Ok(())
+        }) {
+            Ok(true) => SmsCaptureOutcome::Captured,
+            // No unique authentication code is a terminal result. Disabled
+            // handlers also arrive here after the module lifecycle closes.
+            Ok(false) => SmsCaptureOutcome::Ignored,
+            Err(_) if self.sms_capture_paused() => SmsCaptureOutcome::Ignored,
+            Err(_) => SmsCaptureOutcome::Retry,
+        }
+    }
+
+    /// SMS monitoring deliberately discards messages received while private
+    /// mode is on. Other admission failures are transient and must be retried.
+    #[must_use]
+    pub fn sms_capture_paused(&self) -> bool {
+        self.settings.config().private_mode
     }
 
     fn publish_sms_code(&self, token: u64, code: &str) -> Result<(), RuntimeError> {
@@ -833,6 +878,7 @@ impl Runtime {
             (copypaste_ipc::content_type::FILE, Some(metadata))
         };
         let metadata = copypaste_core::PayloadMetadata {
+            secret_override: None,
             privacy: permit.privacy,
             file: metadata,
             source_app_icon: source_app.and_then(|source| source.icon.clone()),
@@ -1826,6 +1872,55 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn secret_choice_persists_and_publishes_an_item_event_without_copying() {
+        let (runtime, _dir) = fixture();
+        seed_text(&runtime, "privacy-toggle", "toggle text");
+        let mut events = runtime.events.subscribe();
+        for secret in [true, false] {
+            let response = runtime
+                .request(
+                    10,
+                    Method::SetSecret {
+                        id: "privacy-toggle".into(),
+                        secret,
+                    },
+                )
+                .await;
+            assert!(response.ok, "{response:?}");
+            let Some(ResponseData::Item(item)) = response.data else {
+                panic!("expected item");
+            };
+            assert_eq!(item.privacy.secret, secret);
+            assert_eq!(
+                runtime
+                    .store
+                    .get("privacy-toggle")
+                    .unwrap()
+                    .unwrap()
+                    .clipboard_privacy()
+                    .secret,
+                secret
+            );
+            let event = events.recv().await.unwrap();
+            assert_eq!(event.event, EventKind::Items);
+            assert!(!event.captured);
+        }
+        assert_eq!(
+            runtime
+                .request(
+                    11,
+                    Method::SetSecret {
+                        id: "missing".into(),
+                        secret: true
+                    }
+                )
+                .await
+                .error_code,
+            Some(ErrorCode::NotFound)
+        );
+    }
+
     fn seed_text(runtime: &Runtime, id: &str, value: &str) {
         let (nonce, content_ciphertext) =
             copypaste_core::encrypt(value.as_bytes(), &runtime.keyring.item_key(), id).unwrap();
@@ -1844,6 +1939,35 @@ mod tests {
                 payload_metadata: None,
             })
             .unwrap();
+    }
+
+    #[test]
+    fn email_previews_require_an_explicit_secret_hint_to_hide_content() {
+        let (runtime, _dir) = fixture();
+        let text = "person.99@example.com";
+        seed_text(&runtime, "email-preview", text);
+        let stored = runtime.store.get("email-preview").unwrap().unwrap();
+        for (metadata, secret) in [
+            ("unrecognized old metadata", false),
+            (
+                r#"{"privacy":{"secret":true},"source_app_icon":"broken"}"#,
+                true,
+            ),
+        ] {
+            let mut row = stored.clone();
+            row.payload_metadata = Some(metadata.into());
+            for preview in [true, false] {
+                let item = runtime.item_value(row.clone(), preview).unwrap();
+                assert_eq!(item.privacy.secret, secret);
+                if secret && preview {
+                    assert!(item.content.is_empty());
+                    assert!(item.semantic_kind.is_none());
+                } else {
+                    assert_eq!(item.content, text);
+                    assert_eq!(item.semantic_kind, Some(copypaste_ipc::SemanticKind::Email));
+                }
+            }
+        }
     }
 
     #[tokio::test]
@@ -2148,15 +2272,18 @@ mod tests {
             .capture_admission()
             .begin(host, Arc::new(|| {}))
             .unwrap();
-        assert!(!runtime
-            .capture_sms_operation(token, "Your code is 007123")
-            .unwrap());
+        assert_eq!(
+            runtime.capture_sms_operation(token, "Your code is 007123"),
+            SmsCaptureOutcome::Ignored
+        );
         assert_eq!(runtime.store.count().unwrap(), 0);
-        let transition = runtime.capture_admission().transition().unwrap();
-        let mut paused = runtime.settings.config();
-        paused.private_mode = true;
-        transition.publish(paused).unwrap();
-        drop(transition);
+        runtime
+            .settings
+            .apply(&copypaste_ipc::ConfigPatch {
+                private_mode: Some(true),
+                ..Default::default()
+            })
+            .unwrap();
         assert!(runtime.publish_sms_code(token, "007123").is_err());
         assert!(runtime
             .capture_admission()
@@ -2164,6 +2291,37 @@ mod tests {
             .is_none());
         assert!(clipboard.0.lock().unwrap().is_empty());
         assert_eq!(runtime.store.count().unwrap(), 0);
+        runtime.capture_admission().revoke_host(host).unwrap();
+    }
+
+    #[test]
+    fn sms_capture_retries_operational_refusal_but_discards_private_mode_messages() {
+        let (runtime, _dir) = fixture();
+        assert_eq!(
+            runtime.capture_sms_operation(999, "Your code is 007123"),
+            SmsCaptureOutcome::Retry
+        );
+
+        let host = runtime
+            .capture_admission()
+            .open_host(CaptureKind::ModuleEvent)
+            .unwrap();
+        let token = runtime
+            .capture_admission()
+            .begin(host, Arc::new(|| {}))
+            .unwrap();
+        runtime
+            .settings
+            .apply(&copypaste_ipc::ConfigPatch {
+                private_mode: Some(true),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(
+            runtime.capture_sms_operation(token, "Your code is 007123"),
+            SmsCaptureOutcome::Ignored
+        );
         runtime.capture_admission().revoke_host(host).unwrap();
     }
 

@@ -20,7 +20,7 @@ internal class SmsInboxMonitor(private val context: Context) {
 
     fun start(completion: (Boolean) -> Unit) = worker.post {
         MainActivity.ensureRuntime(context)
-        if (closed || !NativeSmsModules.hasHandler() || !AndroidSmsAccess.granted(context)) {
+        if (closed || NativeSmsModules.handlerState() != NativeSmsModules.HANDLER_ENABLED || !AndroidSmsAccess.granted(context)) {
             completion(false); return@post
         }
         host = NativeSmsModules.openHost()
@@ -49,11 +49,12 @@ internal class SmsInboxMonitor(private val context: Context) {
     }
 
     private fun scan() {
-        if (closed || host == 0L || !NativeSmsModules.hasHandler() || !AndroidSmsAccess.granted(context)) return
+        if (closed || host == 0L || NativeSmsModules.handlerState() != NativeSmsModules.HANDLER_ENABLED || !AndroidSmsAccess.granted(context)) return
         val activated = maxOf(preferences.getLong("activated-at", 0L), preferences.getLong("skip-before", 0L))
         if (activated == 0L) return
         val token = NativeRuntimeCapture.begin(host, Runnable {})
         if (token == 0L) {
+            if (!NativeSmsModules.capturePaused()) return
             preferences.edit().putLong("skip-before", System.currentTimeMillis() + 1L).commit()
             return
         }
@@ -78,12 +79,17 @@ internal class SmsInboxMonitor(private val context: Context) {
             if (!read || closed) return
             for ((id, text) in messages) {
                 if (closed) return
-                // Metadata only. Mark each row once, even when paused or no code matches.
-                preferences.edit().putLong("last-id", id).commit()
                 val operation = NativeRuntimeCapture.begin(host, Runnable {})
-                if (operation == 0L) continue
-                try { NativeSmsModules.ingest(operation, text) }
-                finally { NativeRuntimeCapture.abandon(operation) }
+                if (operation == 0L) {
+                    if (NativeSmsModules.capturePaused()) {
+                        preferences.edit().putLong("skip-before", System.currentTimeMillis() + 1L).commit()
+                    }
+                    return
+                }
+                if (!ingestAndAcknowledge(preferences, id) {
+                    try { NativeSmsModules.ingest(operation, text) }
+                    finally { NativeRuntimeCapture.abandon(operation) }
+                }) return
             }
             if (messages.size == 32) worker.post { scan() }
         } catch (_: Exception) {
@@ -92,6 +98,21 @@ internal class SmsInboxMonitor(private val context: Context) {
     }
 
     companion object {
+        /// The callback runs before the inbox cursor is advanced. A nonterminal
+        /// result or exception keeps this SMS eligible for the next inbox scan.
+        internal fun ingestAndAcknowledge(
+            preferences: android.content.SharedPreferences,
+            id: Long,
+            ingest: () -> Int,
+        ): Boolean {
+            val outcome = try { ingest() } catch (_: Exception) { return false }
+            if (!isTerminalIngest(outcome)) return false
+            return preferences.edit().putLong("last-id", id).commit()
+        }
+
+        internal fun isTerminalIngest(outcome: Int): Boolean =
+            outcome == NativeSmsModules.INGEST_CAPTURED || outcome == NativeSmsModules.INGEST_IGNORED
+
         fun setEnabled(context: Context, enabled: Boolean) {
             val preferences = context.getSharedPreferences("sms-module-inbox", Context.MODE_PRIVATE)
             if (!enabled) preferences.edit().clear().commit()

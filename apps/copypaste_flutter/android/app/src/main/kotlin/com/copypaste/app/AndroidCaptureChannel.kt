@@ -1,5 +1,6 @@
 package com.copypaste.app
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
@@ -112,9 +113,12 @@ internal class AndroidCaptureChannel(
                 if (enabled == null) {
                     result.error("invalid_arguments", null, null)
                 } else {
-                    AndroidCaptureState.setForegroundCaptureEnabled(activity, enabled)
-                    activity.refreshForegroundCapture { drained ->
-                        if (drained) result.success(true) else result.error(
+                    applyForegroundCapturePreference(
+                        activity,
+                        enabled,
+                        refresh = { completion -> activity.refreshForegroundCapture(completion) },
+                    ) { settled ->
+                        if (settled) result.success(true) else result.error(
                             if (enabled) "capture_admission_refused" else "capture_drain_failed", null, null,
                         )
                     }
@@ -171,5 +175,21 @@ internal class AndroidCaptureChannel(
 
     companion object {
         private const val channelName = "com.copypaste.app/android_capture"
+    }
+}
+
+internal fun applyForegroundCapturePreference(
+    context: Context,
+    requested: Boolean,
+    refresh: ((Boolean) -> Unit) -> Unit,
+    complete: (Boolean) -> Unit,
+) {
+    val previous = AndroidCaptureState.foregroundCaptureEnabled(context)
+    AndroidCaptureState.setForegroundCaptureEnabled(context, requested)
+    refresh { settled ->
+        if (!settled && requested) {
+            AndroidCaptureState.setForegroundCaptureEnabled(context, previous)
+        }
+        complete(settled)
     }
 }

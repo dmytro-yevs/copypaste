@@ -40,10 +40,10 @@ pub(super) struct StagingArea {
     root_fd: std::os::fd::OwnedFd,
     access: Arc<Mutex<()>>,
     /// Started on the first `materialize` that put plaintext on disk, or at
-    /// construction when the start-time sweep could not finish. On a machine
-    /// that never pastes a file back and has nothing left over, the sweeper has
-    /// nothing to sweep and was costing a resident OS thread for the life of
-    /// the daemon.
+    /// construction when the start-time sweep found retained plaintext or could
+    /// not finish. On a machine that never pastes a file back and has nothing
+    /// left over, the sweeper has nothing to sweep and was costing a resident
+    /// OS thread for the life of the daemon.
     ///
     /// Replaceable, not write-once: a worker whose thread has died owns nothing,
     /// and the next paste-back has to be able to install a live one.
@@ -64,11 +64,10 @@ impl StagingArea {
     fn with_timing(data_dir: &Path, max_age: Duration, interval: Duration) -> io::Result<Self> {
         let root = std::path::absolute(data_dir)?.join("paste-files");
         let root_fd = open_or_create_root(&root)?;
-        // Whatever the previous run left is already decrypted and already past
-        // its deadline. If this pass could not finish the job the sweeper has
-        // to start now — on a machine that never pastes a file back, nothing
-        // else ever will — and it carries this sweeper, so the retry lands at
-        // the floor and resumes where the pass stopped.
+        // Whatever the previous run left is already decrypted. A file still
+        // inside its receiver window needs the same owner as an expired file:
+        // otherwise a restart just before its deadline leaves it past that
+        // deadline with no worker until somebody pastes another file.
         let mut sweeper = Sweeper::new(root_fd.try_clone()?);
         let startup = sweeper.pass(SystemTime::now(), max_age);
         let area = Self {
@@ -83,11 +82,9 @@ impl StagingArea {
             #[cfg(test)]
             worker_fault: Arc::new(sweep::SweepFault::default()),
         };
-        if startup.unfinished() {
-            // The plaintext this pass could not remove is already decrypted and
-            // already past its deadline. Nothing but the worker will ever take
-            // it, so failing here is better than handing back a staging area
-            // that only looks supervised. The slot was empty, so nothing is
+        if startup.owns_plaintext() {
+            // Nothing but the worker will enforce the deadline for plaintext
+            // left by the previous process. The slot was empty, so nothing is
             // retired here.
             let _ = area.install_worker(sweeper, startup)?;
         }
@@ -604,6 +601,42 @@ mod tests {
             "staged plaintext must be under a running TTL sweeper"
         );
         assert_eq!(staging.worker_starts(), 1);
+    }
+
+    #[test]
+    fn a_restart_keeps_a_live_staged_file_under_a_deadline_worker() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let max_age = Duration::from_millis(500);
+        let interval = Duration::from_secs(2);
+        let staged = {
+            let staging = StagingArea::with_timing(data_dir.path(), max_age, interval).unwrap();
+            let path = staging
+                .materialize(b"decrypted", &metadata("resume.txt"))
+                .unwrap();
+            assert!(staging.has_live_cleanup());
+            path
+        };
+        assert!(
+            staged.exists(),
+            "shutdown must not delete a still-live receiver file"
+        );
+
+        let resumed = StagingArea::with_timing(data_dir.path(), max_age, interval).unwrap();
+
+        assert!(
+            resumed.has_live_cleanup(),
+            "a live staged file from the previous process must regain a TTL owner"
+        );
+        let resumed_at = std::time::Instant::now();
+        wait_until_gone(&staged, Duration::from_secs(5));
+        assert!(
+            !staged.exists(),
+            "the resumed worker did not remove plaintext after its original deadline"
+        );
+        assert!(
+            resumed_at.elapsed() < Duration::from_millis(1500),
+            "restart reset the original receiver deadline rather than retaining it"
+        );
     }
 
     #[test]

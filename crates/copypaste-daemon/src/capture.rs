@@ -482,6 +482,7 @@ fn capture_metadata_with(
             copypaste_core::SourceAppIconMetadata::new(&png, icon.width, icon.height)
         });
     let metadata = copypaste_core::PayloadMetadata {
+        secret_override: None,
         privacy: capture.privacy,
         file: capture.file_metadata.clone(),
         source_app_icon,
@@ -1463,10 +1464,11 @@ mod tests {
         assert_eq!(polls.load(Ordering::SeqCst), 1);
         assert_eq!(crate::clipboard::file_capture::test_open_count(), 1);
         assert!(slot.is_none());
-        assert!(events.try_recv().unwrap().captured);
+        let event = events.try_recv().unwrap();
+        assert!(event.captured);
         let stored = state
             .store
-            .get(&copypaste_core::binary_item_id(&original))
+            .get(event.captured_item_id.as_deref().unwrap())
             .unwrap()
             .unwrap();
         assert_eq!(stored.created_at, time);
