@@ -431,8 +431,11 @@ impl Runtime {
                         "The secret clip was not found.",
                     );
                 }
-                let (revision, revealed_ids) = self.spoilers.set(item_id.as_deref(), revealed);
-                self.emit(EventKind::Items);
+                let (revision, revealed_ids, changed) =
+                    self.spoilers.set_with_change(item_id.as_deref(), revealed);
+                if changed {
+                    self.emit(EventKind::Items);
+                }
                 Response::ok(
                     id,
                     ResponseData::SpoilerState {
@@ -1913,6 +1916,26 @@ mod tests {
             assert!(runtime.save_file(2, &item.id, &saved.to_string_lossy()).ok);
             assert_eq!(std::fs::read(saved).unwrap(), b"%PDF original");
         }
+    }
+
+    #[tokio::test]
+    async fn spoiler_conceal_of_an_empty_session_does_not_reload_history() {
+        let (runtime, _dir) = fixture();
+        let mut events = runtime.subscribe_events();
+        let response = runtime
+            .request(
+                1,
+                Method::SetSpoilerRevealed {
+                    id: None,
+                    revealed: false,
+                },
+            )
+            .await;
+        assert!(response.ok);
+        assert!(matches!(
+            events.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
     }
 
     #[tokio::test]

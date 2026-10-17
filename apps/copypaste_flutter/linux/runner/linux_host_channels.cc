@@ -951,7 +951,7 @@ void quick_paste_call(FlMethodChannel*, FlMethodCall* call, gpointer) {
              is_method(call, "requestAccessibility")) {
     success(call, fl_value_new_bool(x11 || (portal != nullptr &&
                                             portal->remote_desktop_active())));
-  } else if (is_method(call, "open")) {
+  } else if (is_method(call, "open") || is_method(call, "openFromTray")) {
     const guint32 shortcut_time = x11 ? x11_quick_paste->take_activation_time()
                                       : GDK_CURRENT_TIME;
     const guint32 activation_time = shortcut_time == GDK_CURRENT_TIME

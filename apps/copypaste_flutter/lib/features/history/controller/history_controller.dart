@@ -26,6 +26,7 @@ class HistoryController extends ChangeNotifier {
   HistoryController(
     this._repository, {
     this.pageSize = 50,
+    this.includeFacets = true,
     Duration? searchDebounce,
     HistoryFileDownloader? fileDownloader,
     this.ocr,
@@ -63,6 +64,7 @@ class HistoryController extends ChangeNotifier {
 
   final HistoryRepository _repository;
   final int pageSize;
+  final bool includeFacets;
   final Duration _searchDebounce;
   final HistoryFileDownloader? _fileDownloader;
   final HistoryFilePicker? _filePicker;
@@ -649,7 +651,7 @@ class HistoryController extends ChangeNotifier {
   }
 
   Future<void> refreshFacets() async {
-    if (_disposed || _suspended) return;
+    if (_disposed || _suspended || !includeFacets) return;
     final epoch = _mediaEpoch;
     try {
       final facets = await _repository.facets();
