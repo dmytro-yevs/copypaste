@@ -548,7 +548,7 @@ def capability_report(cli, environment, evidence_dir, architecture, desktop, ses
     for name, entry in capabilities.items():
         allowed = {"state", "backend", "guarantee", "reason", "permissions"}
         if name == "clipboard_read_write":
-            allowed |= {"mime_formats", "limitations"}
+            allowed |= {"mime_formats", "limitations", "max_bytes"}
         if (not isinstance(entry, dict) or not allowed.issuperset(entry)
                 or not {"state", "backend", "guarantee", "reason", "permissions"} <= set(entry)
                 or entry["state"] not in {"available", "needs_permission", "needs_companion", "unsupported", "error"}
@@ -560,6 +560,13 @@ def capability_report(cli, environment, evidence_dir, architecture, desktop, ses
             raise RuntimeError(f"installed CLI capability report is invalid: {name}")
         if entry["state"] == "available" and (not entry["backend"] or entry["guarantee"] == "none"):
             raise RuntimeError(f"installed CLI capability lacks an active backend: {name}")
+        if name == "clipboard_read_write" and entry["state"] == "available":
+            if (not isinstance(entry.get("mime_formats"), list)
+                    or not entry["mime_formats"]
+                    or any(not isinstance(mime, str) for mime in entry["mime_formats"])
+                    or type(entry.get("max_bytes")) is not int
+                    or not 0 < entry["max_bytes"] <= 4 * 1024 * 1024):
+                raise RuntimeError("installed CLI clipboard formats or size limit are invalid")
     if capabilities["clipboard_capture"]["state"] != "available":
         raise RuntimeError("installed CLI did not report active clipboard capture")
     output = Path(evidence_dir) / f"capabilities-{architecture}-{desktop.lower()}-{session}-{runtime_format}.json"

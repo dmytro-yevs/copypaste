@@ -284,6 +284,7 @@ class MethodChannelLinuxIntegrationPort implements LinuxIntegrationPort {
     }
     if (!clipboard) {
       for (final kind in daemonClipboardKinds) {
+        if (daemon.capabilities.containsKey(kind)) continue;
         capabilities[kind] = const LinuxCapabilityStatus(
           state: LinuxCapabilityState.error,
           backend: null,

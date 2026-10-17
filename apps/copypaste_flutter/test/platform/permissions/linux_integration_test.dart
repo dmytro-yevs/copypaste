@@ -185,6 +185,39 @@ void main() {
     expect(status.globalShortcuts, isTrue);
   });
 
+  test('keeps the daemon reason when a protocol is unsupported', () async {
+    port = MethodChannelLinuxIntegrationPort(
+      channel: channel,
+      platformCapabilitiesJson: () async => jsonEncode({
+        'clipboard_available': false,
+        'capabilities': {
+          'clipboard_capture': {
+            'state': 'unsupported',
+            'backend': 'linux-wayland-data-control',
+            'guarantee': 'none',
+            'reason': 'Data-control protocol unavailable.',
+            'permissions': [],
+          },
+        },
+      }),
+    );
+
+    final status = await port.status();
+    expect(status.clipboard, isFalse);
+    expect(
+      status.capability(LinuxCapabilityKind.clipboardCapture).state,
+      LinuxCapabilityState.unsupported,
+    );
+    expect(
+      status.capability(LinuxCapabilityKind.clipboardCapture).reason,
+      'Data-control protocol unavailable.',
+    );
+    expect(
+      status.capability(LinuxCapabilityKind.clipboardReadWrite).state,
+      LinuxCapabilityState.error,
+    );
+  });
+
   test(
     'restores readiness when the daemon clipboard becomes available',
     () async {
