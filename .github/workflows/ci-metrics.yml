@@ -39,4 +39,4 @@ jobs:
           name: ci-performance-report
           path: ci-metrics.json
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 3
