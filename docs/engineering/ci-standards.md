@@ -84,6 +84,26 @@ cleanly; corrupt caches must fail validation or be discarded, never accepted as
 qualified output. Measure restore/save cost and storage/eviction before adding
 another cache layer. Benchmark sccache separately before adoption.
 
+## Artifact retention
+
+`config/ci-policy.json` owns each artifact producer's explicit retention period.
+Diagnostics, performance reports, PR candidates and standalone preview builds
+expire after three days. Intermediate signed builds expire after seven days.
+The final qualified package set and assembled qualification receipts retain the
+public repository maximum of 90 days. The original Linux package producer also
+retains 90 days because upgrade qualification authenticates that producer against
+the previous published release. Shorter retention must not remove that baseline.
+Per-scenario diagnostic artifacts expire after three days; successful assembly
+preserves the required qualification evidence in the final evidence artifact.
+
+Published installer assets are separate from Actions storage. Application release
+cleanup retains the five newest published stable `v*` application releases while
+preserving their Git tags. Module releases and the signed marketplace are separate
+distribution dependencies and must not be counted against that application limit.
+Retention changes apply to new artifacts; existing artifacts require a separately
+reviewed cleanup inventory. Keep repository-wide check/run/log retention unchanged
+so shortening temporary artifact storage does not erase release identity metadata.
+
 ## Platform registration
 
 Stable Linux eligibility is owned by `packaging/linux/release-contract.json`

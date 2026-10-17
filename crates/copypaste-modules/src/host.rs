@@ -355,6 +355,19 @@ fn decode_values(
         .map_err(|_| ModuleError::Invalid("The module input is invalid.".into()))
 }
 
+impl Drop for ModuleHost {
+    fn drop(&mut self) {
+        if let Some(service) = self
+            .search
+            .get_mut()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+        {
+            service.shutdown();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -518,18 +531,5 @@ mod tests {
             .execute_batch("DROP TRIGGER reject_semantic_remove;")
             .unwrap();
         assert!(manager.list().unwrap().is_empty());
-    }
-}
-
-impl Drop for ModuleHost {
-    fn drop(&mut self) {
-        if let Some(service) = self
-            .search
-            .get_mut()
-            .unwrap_or_else(|error| error.into_inner())
-            .take()
-        {
-            service.shutdown();
-        }
     }
 }
