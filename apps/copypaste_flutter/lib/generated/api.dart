@@ -83,6 +83,12 @@ Future<ThisDevice> runtimeStatus() =>
 Future<bool> clipboardAvailable() =>
     RustLib.instance.api.crateApiClipboardAvailable();
 
+/// Return only the daemon's clipboard readiness and typed capabilities. The
+/// status response also contains device identity and counters, which stay
+/// behind this narrow boundary.
+Future<String> platformCapabilitiesJson() =>
+    RustLib.instance.api.crateApiPlatformCapabilitiesJson();
+
 Future<CaptureState> captureState() =>
     RustLib.instance.api.crateApiCaptureState();
 

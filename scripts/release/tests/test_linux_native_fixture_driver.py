@@ -25,6 +25,33 @@ SPEC.loader.exec_module(driver)
 
 
 class LinuxNativeFixtureDriverTest(unittest.TestCase):
+    def test_capability_report_requires_active_capture_and_writes_redacted_evidence(self):
+        names = (
+            "clipboard_capture", "clipboard_read_write", "source_attribution",
+            "privacy_enforcement", "global_shortcuts", "quick_paste",
+            "secure_storage", "desktop_integration", "updates",
+        )
+        unavailable = {"state": "error", "backend": None, "guarantee": "none",
+                       "reason": "No probe is registered.", "permissions": []}
+        report = {"schema": 1, "capabilities": {name: dict(unavailable) for name in names}}
+        report["capabilities"]["clipboard_capture"] = {
+            "state": "available", "backend": "linux-x11-system-clipboard",
+            "guarantee": "verified", "reason": None, "permissions": [],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            result = SimpleNamespace(args=["copypaste-cli", "doctor", "--json"], returncode=0,
+                                     stdout=json.dumps(report).encode())
+            with mock.patch.object(driver, "run", return_value=result):
+                driver.capability_report(Path("copypaste-cli"), {}, directory,
+                                         "x86_64", "GNOME", "x11", "AppImage")
+                path = Path(directory) / "capabilities-x86_64-gnome-x11-AppImage.json"
+                self.assertEqual(json.loads(path.read_text()), report)
+                report["capabilities"]["clipboard_capture"] = dict(unavailable)
+                result.stdout = json.dumps(report).encode()
+                with self.assertRaisesRegex(RuntimeError, "active clipboard capture"):
+                    driver.capability_report(Path("copypaste-cli"), {}, directory,
+                                             "x86_64", "GNOME", "x11", "deb")
+
     def test_pairing_observes_the_responder_handshake_before_confirming_once(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
