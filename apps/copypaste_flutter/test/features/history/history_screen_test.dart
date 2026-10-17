@@ -311,7 +311,17 @@ void main() {
         tester.getSize(inspectorSpoiler).width,
         tester.getSize(inspectorBody).width,
       );
-      expect(tester.getSize(inspectorSpoiler).width, lessThan(300));
+      expect(
+        tester.getSize(inspectorSpoiler).width,
+        lessThan(
+          tester
+                  .getSize(
+                    find.byKey(const ValueKey('history-detail-inspector')),
+                  )
+                  .width -
+              AppSpacing.lg,
+        ),
+      );
       expect(tester.getSize(inspectorSpoiler).height, lessThan(100));
       final historySpoiler = find.byKey(
         const ValueKey('history-spoiler-secret-fixture'),
