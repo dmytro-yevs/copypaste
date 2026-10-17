@@ -170,5 +170,48 @@
         "queue": "max"
       }
     }
+  },
+  "artifact_retention_days": {
+    "ci-metrics.yml": {
+      "report": 3
+    },
+    "ci.yml": {
+      "linux-pr-release-candidate": 3
+    },
+    "compositor-runtime.yml": {
+      "build": 7
+    },
+    "linux-experimental.yml": {
+      "linux-pr-release-candidate": 3
+    },
+    "linux-native-qualification.yml": {
+      "scenario": 3,
+      "evidence": 90
+    },
+    "ocr-module.yml": {
+      "desktop": 7,
+      "android": 7,
+      "android-native": 90
+    },
+    "provider-module.yml": {
+      "desktop": 7,
+      "android": 7,
+      "android-native": 90
+    },
+    "release.yml": {
+      "macos": 7,
+      "android": 7,
+      "windows": 7,
+      "linux": 90,
+      "compositor-runtime-public": 7,
+      "qualify": 90
+    },
+    "sms-codes-module.yml": {
+      "android": 3
+    },
+    "supabase-module.yml": {
+      "desktop": 3,
+      "android": 3
+    }
   }
 }
