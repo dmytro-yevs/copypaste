@@ -38,6 +38,11 @@ class LinuxNativeFixtureDriverTest(unittest.TestCase):
             "state": "available", "backend": "linux-x11-system-clipboard",
             "guarantee": "verified", "reason": None, "permissions": [],
         }
+        report["capabilities"]["clipboard_read_write"] = {
+            **report["capabilities"]["clipboard_capture"],
+            "mime_formats": ["text/plain;charset=utf-8", "image/png"],
+            "max_bytes": 4 * 1024 * 1024,
+        }
         with tempfile.TemporaryDirectory() as directory:
             result = SimpleNamespace(args=["copypaste-cli", "doctor", "--json"], returncode=0,
                                      stdout=json.dumps(report).encode())

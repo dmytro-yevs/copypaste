@@ -566,11 +566,22 @@ impl ClipboardSource for LinuxClipboard {
         if let Self::Adaptive(source) = self {
             return source.active.platform_capabilities();
         }
-        clipboard_capabilities(
+        let mut capabilities = clipboard_capabilities(
             self.is_available(),
             self.backend_name(),
             matches!(self, Self::Wayland(_)),
-        )
+        );
+        if matches!(self, Self::Wayland(source) if source.protocol_unsupported()) {
+            for status in capabilities.values_mut() {
+                status.state = CapabilityState::Unsupported;
+                status.guarantee = CapabilityGuarantee::None;
+                status.reason = Some(
+                    "The compositor exposes neither ext-data-control-v1 nor wlr-data-control with a seat."
+                        .into(),
+                );
+            }
+        }
+        capabilities
     }
 
     fn poll(&mut self) -> Option<Capture> {

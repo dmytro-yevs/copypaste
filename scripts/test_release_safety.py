@@ -1000,6 +1000,11 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                             capability_rows = {name: dict(unprobed) for name in verifier["CAPABILITY_NAMES"]}
                             for kind in ("clipboard_capture", "clipboard_read_write", "privacy_enforcement"):
                                 capability_rows[kind] = dict(available)
+                            capability_rows["clipboard_read_write"].update({
+                                "mime_formats": ["text/plain;charset=utf-8", "image/png"],
+                                "max_bytes": 4 * 1024 * 1024,
+                                "limitations": ["One local file per clipboard change."],
+                            })
                             capability_rows["source_attribution"] = {
                                 **available, "guarantee": "best_effort",
                             }
