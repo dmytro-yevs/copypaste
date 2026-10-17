@@ -683,10 +683,10 @@ void present_root_window() {
 
 bool open_root_surface(bool settings) {
   present_root_window();
-  if (!settings || engine_states.empty() || engine_states.front()->channels[2] == nullptr) {
-    return !settings;
+  if (engine_states.empty() || engine_states.front()->channels[2] == nullptr) {
+    return false;
   }
-  fl_method_channel_invoke_method(engine_states.front()->channels[2], "openSettings",
+  fl_method_channel_invoke_method(engine_states.front()->channels[2], settings ? "openSettings" : "openMain",
                                   nullptr, nullptr, nullptr, nullptr);
   return true;
 }

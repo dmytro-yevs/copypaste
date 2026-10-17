@@ -1,14 +1,22 @@
 //! Safe, bounded thumbnails for binary clipboard images.
 
 use std::io::Cursor;
+use std::sync::Mutex;
 
 use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader, Limits};
 use thiserror::Error;
+
+mod streaming_png;
 
 /// A preview is deliberately much smaller than its source. It is displayed in
 /// a history row, never used to restore an image to the system clipboard.
 pub const DEFAULT_THUMBNAIL_EDGE: u32 = 384;
 pub const MAX_THUMBNAIL_EDGE: u32 = 2_048;
+
+// All callers in a process share decoder admission. A per-image allocation
+// limit alone otherwise multiplies with concurrent IPC preview requests.
+// This bounds decoded overlap, not encoded inputs, engine images or total RAM.
+static PREVIEW_DECODER: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageThumbnail {
@@ -65,6 +73,9 @@ pub fn thumbnail_png(
     max_edge: Option<u32>,
     bounds: Option<(u32, u32)>,
 ) -> Result<ImageThumbnail, ImagePreviewError> {
+    let _decoder = PREVIEW_DECODER
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let edge = max_edge
         .unwrap_or(if bounds.is_some() {
             MAX_THUMBNAIL_EDGE
@@ -81,38 +92,25 @@ pub fn thumbnail_png(
     let mut reader = ImageReader::new(Cursor::new(source))
         .with_guessed_format()
         .map_err(|_| ImagePreviewError::Decode)?;
+    if reader.format() == Some(ImageFormat::Png) {
+        if let Some(thumbnail) = streaming_png::thumbnail(source, budget, max_width, max_height)? {
+            return Ok(thumbnail);
+        }
+    }
     reader.limits(limits.clone());
     let mut decoder = reader
         .into_decoder()
         .map_err(|_| ImagePreviewError::Decode)?;
     let (source_width, source_height) = decoder.dimensions();
-    if source_width == 0 || source_height == 0 {
-        return Err(ImagePreviewError::Decode);
-    }
-    let (numerator, denominator) = if u64::from(source_width) * u64::from(max_height)
-        > u64::from(source_height) * u64::from(max_width)
-    {
-        (max_width, source_width)
-    } else {
-        (max_height, source_height)
-    };
-    let target_width = u64::from(source_width)
-        .saturating_mul(u64::from(numerator))
-        .div_ceil(u64::from(denominator))
-        .min(u64::from(source_width));
-    let target_height = u64::from(source_height)
-        .saturating_mul(u64::from(numerator))
-        .div_ceil(u64::from(denominator))
-        .min(u64::from(source_height));
-    let thumbnail_bytes = target_width
-        .saturating_mul(target_height)
-        .saturating_mul(u64::from(decoder.color_type().bytes_per_pixel()));
-    limits
-        .reserve(thumbnail_bytes)
-        .map_err(|_| ImagePreviewError::TooLarge)?;
-    limits
-        .reserve(decoder.total_bytes())
-        .map_err(|_| ImagePreviewError::TooLarge)?;
+    let limits = decode_limits(
+        source_width,
+        source_height,
+        decoder.total_bytes(),
+        decoder.color_type().bytes_per_pixel(),
+        max_width,
+        max_height,
+        budget,
+    )?;
     decoder
         .set_limits(limits)
         .map_err(|_| ImagePreviewError::TooLarge)?;
@@ -131,6 +129,47 @@ pub fn thumbnail_png(
         .map_err(|_| ImagePreviewError::Encode)?;
 
     Ok(ImageThumbnail { png, width, height })
+}
+
+fn decode_limits(
+    source_width: u32,
+    source_height: u32,
+    source_bytes: u64,
+    bytes_per_pixel: u8,
+    max_width: u32,
+    max_height: u32,
+    budget: u64,
+) -> Result<Limits, ImagePreviewError> {
+    if source_width == 0 || source_height == 0 {
+        return Err(ImagePreviewError::Decode);
+    }
+    let mut limits = Limits::default();
+    limits.max_alloc = Some(budget);
+    let (numerator, denominator) = if u64::from(source_width) * u64::from(max_height)
+        > u64::from(source_height) * u64::from(max_width)
+    {
+        (max_width, source_width)
+    } else {
+        (max_height, source_height)
+    };
+    let target_width = u64::from(source_width)
+        .saturating_mul(u64::from(numerator))
+        .div_ceil(u64::from(denominator))
+        .min(u64::from(source_width));
+    let target_height = u64::from(source_height)
+        .saturating_mul(u64::from(numerator))
+        .div_ceil(u64::from(denominator))
+        .min(u64::from(source_height));
+    let thumbnail_bytes = target_width
+        .saturating_mul(target_height)
+        .saturating_mul(u64::from(bytes_per_pixel));
+    limits
+        .reserve(thumbnail_bytes)
+        .map_err(|_| ImagePreviewError::TooLarge)?;
+    limits
+        .reserve(source_bytes)
+        .map_err(|_| ImagePreviewError::TooLarge)?;
+    Ok(limits)
 }
 
 #[cfg(test)]

@@ -146,6 +146,10 @@ abstract final class AppTheme {
   static final navigationIconButtonStyle = const ButtonStyle.ghostIcon()
       .copyWith(decoration: _navigationButtonDecoration);
 
+  static final brandButtonStyle = const ButtonStyle.ghost().withPadding(
+    padding: EdgeInsets.zero,
+  );
+
   static AbstractButtonStyle navigationRailButtonStyle(
     BuildContext context, {
     required bool selected,

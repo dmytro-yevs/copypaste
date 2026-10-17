@@ -3,7 +3,7 @@ use crate::{native::ModuleInstance, package::PackageVerifier, ModuleError};
 use copypaste_module_sdk::resolve_fields;
 use std::io::{Read, Write};
 
-/// Serves only authenticated search modules over an inherited private channel.
+/// Serves authenticated search and OCR modules over an inherited private channel.
 /// EOF ends the worker; no database, key store, clipboard, or listener is opened.
 pub fn run_inference_worker(
     mut reader: impl Read,
@@ -28,7 +28,7 @@ pub fn run_inference_worker(
         }
         context_key = Some(key);
         let reply: InferenceReply = invoke(&instance, &request)
-            .map_err(|_| "The search worker could not complete the request.".into());
+            .map_err(|_| "The inference worker could not complete the request.".into());
         write_frame(&mut writer, &reply)?;
     }
     Ok(())
@@ -44,17 +44,18 @@ fn invoke(
         request.identity.target,
     )?;
     let manifest = verifier.installed(&request.package_dir, false)?;
-    let provider = manifest
+    let allowed = manifest
         .search_provider
         .as_ref()
-        .ok_or(ModuleError::State)?;
-    if manifest.id != request.id || provider.command != request.invocation.command {
+        .is_some_and(|provider| provider.command == request.invocation.command)
+        || super::is_ocr_command(&manifest.id, &request.invocation.command);
+    if manifest.id != request.id || !allowed {
         return Err(ModuleError::State);
     }
     let command = manifest
         .commands
         .iter()
-        .find(|command| command.id == provider.command)
+        .find(|command| command.id == request.invocation.command)
         .ok_or(ModuleError::State)?;
     resolve_fields(&command.arguments, &request.invocation.arguments)?;
     resolve_fields(&manifest.preferences, &request.invocation.preferences)?;
