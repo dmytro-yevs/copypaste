@@ -109,18 +109,31 @@ pub(crate) fn diagnostics(status: &StatusData) -> Value {
             PlatformCapability::DesktopIntegration => "desktop_integration",
             PlatformCapability::Updates => "updates",
         };
-        report["capabilities"][name] =
-            serde_json::to_value(value).expect("typed capability is serializable");
+        let mut serialized = serde_json::to_value(value).expect("typed capability is serializable");
+        if *kind == PlatformCapability::ClipboardReadWrite {
+            serialized
+                .as_object_mut()
+                .expect("typed capability is a JSON object")
+                .remove("mime_types");
+        }
+        report["capabilities"][name] = serialized;
     }
     if report["capabilities"]["clipboard_read_write"]["state"] == "available" {
-        report["capabilities"]["clipboard_read_write"]["mime_formats"] = json!([
-            "text/plain;charset=utf-8",
-            "text/html",
-            "text/rtf",
-            "image/png",
-            "image/tiff",
-            "text/uri-list",
-        ]);
+        report["capabilities"]["clipboard_read_write"]["mime_formats"] = status
+            .platform_capabilities
+            .get(&PlatformCapability::ClipboardReadWrite)
+            .filter(|capability| !capability.mime_types.is_empty())
+            .map(|capability| json!(capability.mime_types))
+            .unwrap_or_else(|| {
+                json!([
+                    "text/plain;charset=utf-8",
+                    "text/html",
+                    "text/rtf",
+                    "image/png",
+                    "image/tiff",
+                    "text/uri-list",
+                ])
+            });
         report["capabilities"]["clipboard_read_write"]["limitations"] = json!([
             "One local file per clipboard change.",
             "Capture size limits follow the current settings and transport bounds.",
@@ -277,6 +290,28 @@ mod tests {
             report["capabilities"]["source_attribution"]["reason"],
             "Adapter lost its source probe."
         );
+    }
+
+    #[test]
+    fn typed_clipboard_formats_keep_the_ipc_size_limit_in_diagnostics() {
+        let mut status = status("linux-x11-system-clipboard", true);
+        status.platform_capabilities.insert(
+            PlatformCapability::ClipboardReadWrite,
+            CapabilityStatus {
+                state: CapabilityState::Available,
+                backend: Some("linux-x11-system-clipboard".into()),
+                reason: None,
+                permissions: Vec::new(),
+                guarantee: CapabilityGuarantee::Verified,
+                mime_types: vec!["image/png".into()],
+                max_bytes: Some(4 * 1024 * 1024),
+            },
+        );
+        let value = diagnostics(&status);
+        let read_write = &value["capabilities"]["clipboard_read_write"];
+        assert_eq!(read_write["mime_formats"], json!(["image/png"]));
+        assert_eq!(read_write["max_bytes"], 4 * 1024 * 1024);
+        assert!(read_write.get("mime_types").is_none());
     }
 
     #[test]

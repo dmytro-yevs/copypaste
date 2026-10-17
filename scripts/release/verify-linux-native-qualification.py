@@ -56,7 +56,7 @@ def verify_capability_report(root: Path, evidence_names: set[str], architecture:
     for kind, value in capabilities.items():
         allowed = {"state", "backend", "reason", "permissions", "guarantee"}
         if kind == "clipboard_read_write":
-            allowed |= {"mime_formats", "limitations"}
+            allowed |= {"mime_formats", "limitations", "max_bytes"}
         if (not isinstance(value, dict) or not allowed.issuperset(value)
                 or not {"state", "backend", "reason", "permissions", "guarantee"} <= set(value)
                 or value["state"] not in {"available", "needs_permission", "needs_companion", "unsupported", "error"}
@@ -68,6 +68,13 @@ def verify_capability_report(root: Path, evidence_names: set[str], architecture:
             raise ValueError(f"installed capability status is invalid: {kind}")
         if value["state"] == "available" and (not value["backend"] or value["guarantee"] == "none"):
             raise ValueError(f"installed capability lacks an active backend: {kind}")
+        if kind == "clipboard_read_write" and value["state"] == "available":
+            if (not isinstance(value.get("mime_formats"), list)
+                    or not value["mime_formats"]
+                    or any(not isinstance(mime, str) for mime in value["mime_formats"])
+                    or type(value.get("max_bytes")) is not int
+                    or not 0 < value["max_bytes"] <= 4 * 1024 * 1024):
+                raise ValueError(f"installed clipboard formats or size limit are invalid: {name}")
     if capabilities["clipboard_capture"]["state"] != "available":
         raise ValueError(f"installed capability report does not prove capture: {name}")
 
