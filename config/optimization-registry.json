@@ -1466,6 +1466,31 @@
       ],
       "supersedes": [],
       "functional_validation": "Final integrated validation passed: full Flutter analysis, formatting, 267 targeted Flutter tests including History/spoiler layouts, 6 Rust spoiler/event tests, windowless native Cocoa tray checks, and macOS Dev debug build. Temporary instrumentation and comparison shortcut were removed/restored before commit. Installed Windows and physical Android evidence and complete native resource qualification remain missing."
+    },
+    {
+      "id": "RUN-035",
+      "title": "Bound on-demand file materialization for Quick Paste",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P2",
+      "owner_module": "History file transfer",
+      "platforms": ["macOS", "Android", "Windows"],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/history/repository/history_file_transfer.dart",
+        "apps/copypaste_flutter/lib/features/quick_paste/quick_paste_controller.dart",
+        "crates/copypaste-daemon/src/clipboard/file_materialize/mod.rs"
+      ],
+      "invariant": "File bytes are materialized only on an explicit action. One Quick Paste controller starts at most one transfer per clip; the temporary copy is reused while fresh and stale copies are removed on the next file action. File-size polling and its timer exist only during the save operation, and progress follows bytes on disk rather than elapsed time.",
+      "next_step": "Measure temporary disk use and transfer CPU, I/O, peak memory, and cleanup across supported platforms. Confirm behavior on installed macOS, Windows, and Android builds; native resource qualification is not established.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Targeted Flutter and Rust tests cover transfer progress, cancellation, reuse, and remote clipboard fallback; installed-platform and native resource evidence remain pending."
     }
   ]
 }
