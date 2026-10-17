@@ -8,6 +8,7 @@ import '../repository/history_file_downloader.dart';
 import '../repository/history_repository.dart';
 import '../repository/history_file_importer.dart';
 import 'history_ocr_controller.dart';
+import 'history_spoiler_controller.dart';
 
 enum HistoryLoadState { initial, loading, ready, empty, error }
 
@@ -28,10 +29,29 @@ class HistoryController extends ChangeNotifier {
   }) : _filePicker = filePicker,
        _fileDownloader = fileDownloader,
        _searchDebounce = searchDebounce ?? const Duration(milliseconds: 250) {
+    spoilers.addListener(notifyListeners);
     ocr?.addListener(notifyListeners);
   }
 
   final HistoryOcrController? ocr;
+  late final spoilers = HistorySpoilerController(
+    _repository is HistorySpoilerRepository
+        ? _repository as HistorySpoilerRepository
+        : null,
+  );
+  final LinkedHashMap<String, Future<HistoryClip>> _spoilerContent =
+      LinkedHashMap();
+
+  /// Loads only mounted secret content for layout beneath a nonpainting mask.
+  Future<HistoryClip> spoilerContent(String id) {
+    final cached = _spoilerContent.remove(id);
+    final result = cached ?? _repository.get(id);
+    _spoilerContent[id] = result;
+    while (_spoilerContent.length > _maxCachedMedia) {
+      _spoilerContent.remove(_spoilerContent.keys.first);
+    }
+    return result;
+  }
 
   static const int _maxCachedMedia = 48;
   static const _watchUnavailableMessage =
@@ -113,6 +133,7 @@ class HistoryController extends ChangeNotifier {
   void suspend() {
     if (_disposed || _suspended) return;
     _suspended = true;
+    unawaited(spoilers.setRevealed(null, false));
     _isBulkSelecting = false;
     _bulkSelectedIds.clear();
     _bulkAnchorId = null;
@@ -129,6 +150,7 @@ class HistoryController extends ChangeNotifier {
     _isLoadingMore = false;
     _visibleItemsRefresh = null;
     _state = HistoryLoadState.initial;
+    _spoilerContent.clear();
     _imagePreviews.clear();
     _sourceIcons.clear();
     _imagePreviewLoads.clear();
@@ -402,8 +424,10 @@ class HistoryController extends ChangeNotifier {
   Future<void> initialize() async {
     if (_disposed) return;
     _suspended = false;
+    spoilers.disconnected();
     await _ensureWatch(resetBackoff: true);
     await _reloadItemsAndFacets();
+    await spoilers.refresh();
     await _awaitCurrentSelectedDetail();
   }
 
@@ -437,6 +461,7 @@ class HistoryController extends ChangeNotifier {
       _watchErrored(_watchGeneration);
       return;
     }
+    unawaited(spoilers.refresh());
     _watchReconnectAttempts = 0;
     if (_isBulkMutating) {
       _refreshAfterBulkMutation = true;
@@ -485,6 +510,7 @@ class HistoryController extends ChangeNotifier {
 
   void _watchUnavailable() {
     if (_disposed || _suspended) return;
+    spoilers.disconnected();
     _errorMessage = _watchUnavailableMessage;
     notifyListeners();
     _scheduleWatchReconnect();
@@ -600,6 +626,10 @@ class HistoryController extends ChangeNotifier {
       skipped += page.skippedUndecryptable;
       cursor = page.nextCursor;
     } while (cursor != null && refreshed.length < retainedCount);
+    if (_repository is HistorySpoilerRepository) {
+      await spoilers.refresh();
+      if (!_isCurrent(epoch)) return;
+    }
     _items
       ..clear()
       ..addAll(refreshed);
@@ -734,9 +764,6 @@ class HistoryController extends ChangeNotifier {
     }
   }
 
-  /// Explicitly opens a spoiler without changing selection or caching its plaintext.
-  Future<HistoryClip> revealClip(String id) => _repository.get(id);
-
   Future<void> select(String id) async {
     if (_isBulkSelecting) return;
     final queryEpoch = _queryEpoch;
@@ -777,6 +804,9 @@ class HistoryController extends ChangeNotifier {
   ) async {
     try {
       final fullClip = await _repository.get(id);
+      if (fullClip.secret && _repository is HistorySpoilerRepository) {
+        await spoilers.refresh();
+      }
       if (!_isCurrent(queryEpoch) ||
           _selectedId != id ||
           _selectedDetailEpoch != detailEpoch) {
@@ -944,6 +974,8 @@ class HistoryController extends ChangeNotifier {
     try {
       final updated = await _repository.setSecret(clip.id, !clip.secret);
       if (_disposed) return true;
+      final concealed = spoilers.setRevealed(clip.id, false);
+      _spoilerContent.remove(clip.id);
       _replace(updated);
       if (_selectedId == clip.id) {
         _selectedDetailEpoch++;
@@ -951,6 +983,8 @@ class HistoryController extends ChangeNotifier {
         _selectedDetailLoadEpoch = null;
         _selectedClip = updated;
       }
+      notifyListeners();
+      await concealed;
       return true;
     } catch (_) {
       if (!_disposed) _errorMessage = 'The clip secrecy could not be updated.';
@@ -1292,6 +1326,9 @@ class HistoryController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _spoilerContent.clear();
+    spoilers.removeListener(notifyListeners);
+    spoilers.dispose();
     ocr?.removeListener(notifyListeners);
     ocr?.dispose();
     _queryEpoch++;

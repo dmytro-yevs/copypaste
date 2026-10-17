@@ -1503,22 +1503,19 @@ class _ClipContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (clip.secret && !revealed) {
-      return SecretSpoiler(
-        key: ValueKey('history-spoiler-${clip.id}'),
-        reveal: (_) => FutureBuilder<HistoryClip>(
-          future: controller.revealClip(clip.id),
-          builder: (context, snapshot) {
-            if (snapshot.hasError) {
-              return const StateView.error(title: 'Clip unavailable');
-            }
-            final full = snapshot.data;
-            if (full == null) return const StateView.loading();
-            return _ClipContent(
-              clip: full,
-              controller: controller,
-              revealed: true,
-            );
-          },
+      return FutureBuilder<HistoryClip>(
+        future: controller.spoilerContent(clip.id),
+        builder: (context, snapshot) => SecretSpoiler(
+          key: ValueKey('history-spoiler-${clip.id}'),
+          clipId: clip.id,
+          controller: controller.spoilers,
+          child: snapshot.hasError
+              ? const StateView.error(title: 'Clip unavailable')
+              : _ClipContent(
+                  clip: snapshot.data ?? clip,
+                  controller: controller,
+                  revealed: true,
+                ),
         ),
       );
     }

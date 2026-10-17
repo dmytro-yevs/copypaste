@@ -140,6 +140,8 @@ fn requires_ready(method: &Method) -> bool {
         | Method::HistoryCeiling
         | Method::Pin { .. }
         | Method::SetSecret { .. }
+        | Method::GetSpoilerState
+        | Method::SetSpoilerRevealed { .. }
         | Method::ReorderPinned { .. }
         | Method::SetDeviceName { .. }
         // Peer operations read and write the same history, and pairing needs
@@ -249,6 +251,20 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
             cursor,
         } => items::history_query(state, id, &query, limit, cursor.as_deref()),
         Method::HistoryFacets => items::history_facets(state, id),
+        Method::GetSpoilerState => {
+            let (revision, revealed_ids) = state.spoilers.snapshot();
+            Response::ok(
+                id,
+                copypaste_ipc::ResponseData::SpoilerState {
+                    revision,
+                    revealed_ids,
+                },
+            )
+        }
+        Method::SetSpoilerRevealed {
+            id: item_id,
+            revealed,
+        } => items::set_spoiler_revealed(state, id, item_id.as_deref(), revealed),
         Method::Copy { id: item_id } => items::copy(state, id, &item_id),
         Method::CopyPlainText { id: item_id } => items::copy_plain_text(state, id, &item_id),
         Method::Get { id: item_id } => items::get(state, id, &item_id),

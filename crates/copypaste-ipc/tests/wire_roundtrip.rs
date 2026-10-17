@@ -80,6 +80,7 @@ fn variant_tag(data: &ResponseData) -> &'static str {
         ResponseData::Event(_) => "event",
         ResponseData::Page(_) => "page",
         ResponseData::HistoryFacets(_) => "history_facets",
+        ResponseData::SpoilerState { .. } => "spoiler_state",
         ResponseData::Item(_) => "item",
         ResponseData::ImagePreview(_) => "image_preview",
         ResponseData::SourceAppIcon(_) => "source_app_icon",
@@ -184,6 +185,10 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
             }],
         }),
         ResponseData::Item(item()),
+        ResponseData::SpoilerState {
+            revision: 7,
+            revealed_ids: vec!["item-1".into()],
+        },
         ResponseData::ImagePreview(ImagePreview {
             png_base64: "iVBORw0KGgo=".into(),
             width: 1,
@@ -242,7 +247,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
         ResponseData::Empty {},
     ];
 
-    assert_eq!(variants.len(), 22);
+    assert_eq!(variants.len(), 23);
     for variant in variants {
         assert_tagged_round_trip(variant);
     }
@@ -300,6 +305,10 @@ fn collection_variants_round_trip_when_empty() {
         }),
         ResponseData::Peers(Vec::new()),
         ResponseData::Sync(Vec::new()),
+        ResponseData::SpoilerState {
+            revision: 8,
+            revealed_ids: Vec::new(),
+        },
     ] {
         assert_tagged_round_trip(variant);
     }

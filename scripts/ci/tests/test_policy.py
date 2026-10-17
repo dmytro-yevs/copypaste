@@ -42,6 +42,34 @@ class PolicyTest(unittest.TestCase):
             with self.subTest(data=data):
                 self.assertTrue(self.check(data))
 
+    def test_artifact_upload_requires_bounded_literal_retention(self):
+        for value in (None, 0, 91, True, "3", "${{ inputs.days }}"):
+            document = deepcopy(self.document)
+            document["jobs"]["test"]["steps"] = [{
+                "uses": "actions/upload-artifact@" + "a" * 40,
+                "with": {"retention-days": value},
+            }]
+            with self.subTest(value=value):
+                self.assertTrue(any("artifact retention" in error for error in self.check(document)))
+        document["jobs"]["test"]["steps"][0]["with"]["retention-days"] = 3
+        self.assertEqual(self.check(document), [])
+
+    def test_artifact_retention_contract_rejects_longer_diagnostics_and_shorter_baselines(self):
+        from unittest.mock import patch
+        import policy
+        root = Path(__file__).resolve().parents[3]
+        read = policy.read_workflow
+        for workflow, job, days in (("ci-metrics.yml", "report", 90), ("release.yml", "linux", 3)):
+            def modified(path):
+                document = read(path)
+                if path.name == workflow:
+                    for step in document["jobs"][job]["steps"]:
+                        if step.get("uses", "").startswith("actions/upload-artifact@"):
+                            step["with"]["retention-days"] = days
+                return document
+            with self.subTest(workflow=workflow, job=job), patch.object(policy, "read_workflow", modified):
+                self.assertTrue(any("artifact retention differs" in error for error in check(root)))
+
     def test_rejects_cycles(self):
         with self.assertRaisesRegex(ValueError, "circular"):
             dependencies({"a": {"needs": "b"}, "b": {"needs": "a"}})

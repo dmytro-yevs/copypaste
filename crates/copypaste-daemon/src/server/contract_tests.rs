@@ -38,6 +38,9 @@ fn expected(method: &Method) -> Expected {
         Method::HistoryFacets => {
             Expected::Data(|data| matches!(data, ResponseData::HistoryFacets(_)))
         }
+        Method::GetSpoilerState | Method::SetSpoilerRevealed { .. } => {
+            Expected::Data(|data| matches!(data, ResponseData::SpoilerState { .. }))
+        }
         Method::Add { .. } => Expected::Data(|data| matches!(data, ResponseData::Item(_))),
         Method::DeleteAll { .. } | Method::ReorderPinned { .. } | Method::HistoryCeiling => {
             Expected::Data(|data| matches!(data, ResponseData::Count(_)))
@@ -114,6 +117,11 @@ fn cases(root: &Path) -> Vec<Method> {
             cursor: None,
         },
         Method::HistoryFacets,
+        Method::GetSpoilerState,
+        Method::SetSpoilerRevealed {
+            id: None,
+            revealed: false,
+        },
         Method::Copy {
             id: "missing".into(),
         },
@@ -280,7 +288,7 @@ async fn every_method_crosses_the_platform_transport_with_a_typed_outcome() {
     let methods = cases(dir.path());
     assert_eq!(
         methods.len(),
-        48,
+        50,
         "a Method has no contract case, or this count was not bumped with it"
     );
 

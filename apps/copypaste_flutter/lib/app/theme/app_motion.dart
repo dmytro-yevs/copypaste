@@ -104,6 +104,17 @@ abstract final class AppMotion {
     FadeEffect(begin: 1, end: 0, duration: quick, curve: exitCurve),
   ];
 
+  static Widget inspectorEntrance(
+    BuildContext context, {
+    required Widget child,
+  }) => TweenAnimationBuilder<double>(
+    tween: Tween(begin: 0, end: 1),
+    duration: resolve(context, standard),
+    curve: enterCurve,
+    builder: (context, value, child) => Opacity(opacity: value, child: child),
+    child: child,
+  );
+
   static bool reducedMotionOf(BuildContext context) =>
       MediaQuery.disableAnimationsOf(context);
 

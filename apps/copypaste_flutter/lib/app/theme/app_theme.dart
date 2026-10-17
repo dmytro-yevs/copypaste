@@ -378,8 +378,10 @@ abstract final class AppTheme {
     );
   }
 
-  static final inlineSpoilerButtonStyle = const ButtonStyle.ghost().copyWith(
+  static final spoilerButtonStyle = const ButtonStyle.ghost().copyWith(
     padding: (context, states, value) => EdgeInsets.zero,
+    margin: (context, states, value) => EdgeInsets.zero,
+    decoration: _navigationButtonDecoration,
     textStyle: (context, states, value) => DefaultTextStyle.of(context).style,
   );
 
@@ -397,6 +399,7 @@ abstract final class AppTheme {
       decoration: (context, states, value) {
         if (value is! BoxDecoration) return value;
         return value.copyWith(
+          border: const Border.fromBorderSide(BorderSide.none),
           color: selected ? Theme.of(context).colorScheme.accent : value.color,
           borderRadius: const BorderRadius.all(Radius.circular(AppRadius.sm)),
         );
