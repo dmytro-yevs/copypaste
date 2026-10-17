@@ -136,6 +136,37 @@ void main() {
     },
   );
 
+  test(
+    'source exclusions cannot pass setup while capture needs a companion',
+    () async {
+      final integration = _Integration(
+        const LinuxIntegrationStatus(
+          session: LinuxDesktopSession.wayland,
+          globalShortcuts: true,
+          remoteDesktop: LinuxRemoteDesktopState.active,
+          companion: LinuxCompanionState.active,
+          clipboard: true,
+          quickPaste: true,
+          screenshotProtection: false,
+          capabilities: {
+            LinuxCapabilityKind.clipboardCapture: LinuxCapabilityStatus(
+              state: LinuxCapabilityState.needsCompanion,
+              backend: 'linux-wayland-data-control',
+              guarantee: LinuxCapabilityGuarantee.none,
+            ),
+          },
+        ),
+      );
+      final controller = LinuxOnboardingController(
+        store: MemoryLinuxOnboardingStore(),
+        integration: integration,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      expect(controller.integrationReady, isFalse);
+    },
+  );
+
   test('refreshes Linux readiness when integration setup opens', () async {
     final integration = _Integration(
       const LinuxIntegrationStatus(
@@ -212,6 +243,54 @@ void main() {
     );
     expect(find.widgetWithText(Button, 'Open setup'), findsOneWidget);
     expect(find.widgetWithText(Button, 'Register links'), findsOneWidget);
+  });
+
+  testWidgets('Wayland data control shows the source policy limitation', (
+    tester,
+  ) async {
+    final controller = LinuxOnboardingController(
+      store: MemoryLinuxOnboardingStore(),
+      integration: _Integration(
+        const LinuxIntegrationStatus(
+          session: LinuxDesktopSession.wayland,
+          globalShortcuts: false,
+          remoteDesktop: LinuxRemoteDesktopState.unsupported,
+          companion: LinuxCompanionState.unavailable,
+          clipboard: true,
+          quickPaste: false,
+          screenshotProtection: false,
+          capabilities: {
+            LinuxCapabilityKind.sourceAttribution: LinuxCapabilityStatus(
+              state: LinuxCapabilityState.unsupported,
+              backend: 'daemonClipboard',
+              guarantee: LinuxCapabilityGuarantee.none,
+            ),
+          },
+        ),
+      ),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    await controller.showIntegration();
+
+    await tester.pumpWidget(
+      ShadcnApp(
+        home: LinuxOnboardingScreen(
+          controller: controller,
+          onFinished: () async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('Basic clipboard access is ready.'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('Source app exclusions and Quick Paste'),
+      findsOneWidget,
+    );
   });
 
   test(
