@@ -14,6 +14,7 @@
 
 #include "win32_window.h"
 #include "app_update_channel.h"
+#include "startup_channel.h"
 
 // OS-call seam for the existing Quick Paste presentation operation.
 struct QuickPastePresentationApi {
@@ -104,7 +105,7 @@ class FlutterWindow : public Win32Window {
   bool OpenQuickPasteContext();
   void CloseQuickPasteContext();
   bool ShowQuickPasteAtCursor(HWND sampled_foreground);
-  bool SetQuickPasteInspectorVisible(int64_t presentation_id, bool visible);
+  bool SetQuickPasteInspectorVisible(int64_t presentation_id, bool visible, bool remember);
   bool PasteIntoPreviousWindow(int64_t presentation_id);
   void NotifyQuickPasteOpened();
   void ScheduleQuickPasteRetirement();
@@ -119,6 +120,7 @@ class FlutterWindow : public Win32Window {
   std::string pending_pairing_uri_;
   bool is_quick_paste_context_;
   bool quick_paste_inspector_visible_ = false;
+  bool quick_paste_inspector_pinned_ = false;
   bool quick_paste_ready_ = false;
   bool quick_paste_retiring_ = false;
   uint64_t quick_paste_generation_ = 0;
@@ -132,6 +134,7 @@ class FlutterWindow : public Win32Window {
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
+  std::unique_ptr<StartupChannel> startup_channel_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       pairing_presentation_channel_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>

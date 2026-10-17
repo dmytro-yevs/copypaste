@@ -8,6 +8,8 @@ mod capture;
 mod cli;
 mod clipboard;
 #[cfg(target_os = "macos")]
+mod macos_allocator;
+#[cfg(target_os = "macos")]
 mod macos_workspace;
 mod meta;
 mod notify;
@@ -47,6 +49,9 @@ pub use crate::state::AppState;
 pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() -> anyhow::Result<()> {
+    #[cfg(target_os = "macos")]
+    macos_allocator::configure_before_runtime()?;
+
     if std::env::args_os()
         .nth(1)
         .is_some_and(|arg| arg == "--inference-worker")

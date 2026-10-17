@@ -78,6 +78,22 @@ for that clip until selection changes. Scrolling, search, paste, popup close,
 reopen, and shutdown cancel pending hover work. Manual controls remain available
 for keyboard and touch input.
 
+Only explicit inspector toggles persist the expanded state across popup
+presentations. Hover expansion lasts until that Quick Paste presentation closes;
+it never overwrites the manually selected state. The native resize channel
+receives visibility and persistence separately.
+
+The shared OCR dialog reserves the same content area while loading, displaying
+text, reporting errors, and showing an empty result. Text scrolls inside that
+area and actions remain visible. OCR runs in the authenticated inference worker;
+the host reaps the worker after every request so model allocator memory cannot
+remain in the daemon or Android application process.
+
+The header logo opens the main History destination. The main application also
+accepts Command-Comma on macOS and Control-Comma on Windows and Android hardware
+keyboards to open Settings. The native macOS Settings menu routes to that same
+destination.
+
 Reference: [Maccy preview controller](https://github.com/p0deje/Maccy/blob/a92c11ae3e7a86a57dc6359bad59e330e4625ede/Maccy/Observables/SlideoutController.swift)
 and [default delay](https://github.com/p0deje/Maccy/blob/a92c11ae3e7a86a57dc6359bad59e330e4625ede/Maccy/Extensions/Defaults.Keys%2BNames.swift).
 

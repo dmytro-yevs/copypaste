@@ -1,6 +1,27 @@
 # Release qualification
 
 The shared release contract covers macOS, Android, Windows, and Linux.
+
+Settings and Quick Paste qualification includes the following platform contract:
+
+| Behavior | macOS | Windows | Android |
+| --- | --- | --- | --- |
+| Module enable switch | Installed module card in both catalog sections | Same | Same |
+| Startup preference | General → Start at login, backed by SMAppService; approval remains visible | General → Start at login, current-user Run registration; uninstall removes it | General → Start on device boot; gates restoration of enabled background services |
+| Settings keyboard action | Command-Comma and native Settings menu | Control-Comma | Control-Comma with a hardware keyboard |
+| Brand action | Open main History | Open main History | Open main History |
+| Inspector lifetime | Hover state ends with Quick Paste; explicit toggle persists | Same | Shared History inspector, without a separate popup |
+| OCR geometry | Stable loading/result/error bounds; scrolling text and fixed actions | Same | Same shared dialog |
+| OCR memory | Signed module in an authenticated worker; process reaped after every request and failure | Same | Bound inference service terminated after every request and failure |
+
+Qualify startup on/off and an actual sign-in or device restart, including denied
+macOS approval. Exercise native Settings while a search field has focus. For OCR,
+repeat a large image at least three times, verify identical recognition results,
+and confirm the inference process is gone before each response completes. Capture
+parent and worker memory separately; bounded Flutter caches and RSS alone do not
+establish released native allocator memory. Portable tests do not replace installed
+macOS, Windows, or physical Android evidence for these rows.
+
 `.github/workflows/release.yml` builds only production artifacts:
 
 - an ad-hoc sealed macOS DMG with the bundled release daemon and Homebrew

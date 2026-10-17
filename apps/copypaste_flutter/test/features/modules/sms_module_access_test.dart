@@ -234,9 +234,18 @@ void main() {
           ),
           findsOneWidget,
         );
-        await tester.ensureVisible(find.byType(Switch));
+        await tester.tap(
+          find.byKey(
+            const ValueKey('module-settings-done-copypaste.sms-codes'),
+          ),
+        );
         await tester.pumpAndSettle();
-        await tester.tap(find.byType(Switch));
+        final enabled = find.byKey(
+          const ValueKey('module-enabled-copypaste.sms-codes'),
+        );
+        await tester.ensureVisible(enabled);
+        await tester.pumpAndSettle();
+        await tester.tap(enabled);
         await tester.pumpAndSettle();
         expect(repository.calls, ['enabled:true']);
         expect(tester.takeException(), isNull);

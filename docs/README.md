@@ -5,6 +5,7 @@
 - [CI engineering standards](engineering/ci-standards.md)
 - [CI and release architecture](engineering/ci-architecture.md)
 - [CI baseline and audit](engineering/ci-audit.md)
+- [Resource budgets and optimization lifecycle](engineering/resource-contract.md)
 - [Linux platform contract](linux-platform.md)
 - [Cloud privacy](cloud-privacy.md)
 - [Supabase deployment](supabase-deployment.md)

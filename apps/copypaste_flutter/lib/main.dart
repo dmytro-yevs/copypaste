@@ -19,6 +19,7 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import 'app/app.dart';
 import 'app/ui_memory_controller.dart';
+import 'app/resource_policy.dart';
 import 'platform/lifecycle/application_visibility.dart';
 import 'app/navigation/navigation.dart';
 import 'app/shell/macos_window_header.dart';
@@ -48,6 +49,8 @@ import 'features/quick_paste/quick_paste_app.dart';
 import 'features/quick_paste/quick_paste_controller.dart';
 import 'features/settings/controller/quick_paste_settings_controller.dart';
 import 'features/settings/controller/settings_controller.dart';
+import 'features/settings/controller/launch_at_login_controller.dart';
+import 'platform/startup/launch_at_login.dart';
 import 'features/settings/repository/file_selector_settings_file_picker.dart';
 import 'features/settings/repository/quick_paste_preferences_store.dart';
 import 'features/settings/repository/runtime_settings_repository.dart';
@@ -71,6 +74,7 @@ Future<void> main([List<String> arguments = const []]) async {
     return;
   }
   WidgetsFlutterBinding.ensureInitialized();
+  await AppResourcePolicy.configure();
   AppMotion.configureLibrary();
   await RustLib.init();
   final desktopWindow = await initializeDesktopWindow();
@@ -100,6 +104,7 @@ Future<void> main([List<String> arguments = const []]) async {
 @pragma('vm:entry-point')
 Future<void> quickPasteMain() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await AppResourcePolicy.configure();
   AppMotion.configureLibrary();
   await RustLib.init();
   final host = MethodChannelQuickPasteContextHost();
@@ -189,6 +194,9 @@ class CopyPasteRoot extends StatefulWidget {
 }
 
 class _CopyPasteRootState extends State<CopyPasteRoot> {
+  final _launchAtLogin = LaunchAtLoginController(
+    MethodChannelLaunchAtLoginGateway(),
+  );
   late final AppNavigationController _navigation = AppNavigationController();
   late final DesktopWindowController? _desktopWindow = widget.desktopWindow;
   late final AppUpdateController? _appUpdateController =
@@ -225,9 +233,11 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   @override
   void initState() {
     super.initState();
+    unawaited(_launchAtLogin.refresh());
     _visibility = ApplicationVisibility(
       windowVisible: _desktopWindow?.isVisible,
     );
+    _visibility.addListener(_settingsVisibilityChanged);
     _uiMemory = UiMemoryController(
       visible: _visibility,
       canSuspend: _canSuspendPresentation,
@@ -287,7 +297,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   void dispose() {
     _uiMemory.removeListener(_memoryStateChanged);
     _uiMemory.dispose();
+    _visibility.removeListener(_settingsVisibilityChanged);
     _visibility.dispose();
+    _launchAtLogin.dispose();
     _pairingLinksChannel.setMethodCallHandler(null);
     _desktopWindow?.setOpenSettings(null);
     if (_ownsMacosOnboarding) {
@@ -329,6 +341,10 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       !_navigation.bottomOverlayOpen &&
       !(_navigation.navigatorKey.currentState?.canPop() ?? false) &&
       !(_rootNavigatorKey.currentState?.canPop() ?? false);
+
+  void _settingsVisibilityChanged() {
+    _settingsController?.setPresentationActive(_visibility.value);
+  }
 
   void _memoryStateChanged() {
     if (!mounted) return;
@@ -409,9 +425,11 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
         _settingsController = SettingsController(
           repository: RuntimeSettingsRepository(),
           filePicker: const FileSelectorSettingsFilePicker(),
+          backgroundCaptureStatusRequired: _desktopWindow != null,
         );
       });
       final settingsController = _settingsController!;
+      _settingsVisibilityChanged();
       settingsController.addListener(_syncCaptureControls);
       _desktopWindow?.setCaptureToggle(() async {
         await settingsController.toggleCapture();
@@ -676,8 +694,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   }
 
   Future<void> _finishOnboarding() async {
-    _navigation.selectDestination(AppDestination.history);
+    await _launchAtLogin.refresh();
     if (!mounted) return;
+    _navigation.selectDestination(AppDestination.history);
     setState(() {});
     await _activatePendingPairingLink();
   }
@@ -691,6 +710,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   Future<void> _initializeQuickPaste() async {
     if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) return;
     final host = MethodChannelQuickPasteWindowHost();
+    host.setOpenMainHandler(() {
+      _navigation.selectDestination(AppDestination.history);
+    });
     host.setOpenSettingsHandler(() {
       _navigation.selectDestination(AppDestination.settings);
     });
@@ -732,6 +754,20 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   }
 
   Widget _buildApplication({required bool windowReady}) {
+    // Keep the native accessibility root stable while releasing presentation.
+    // Replacing the entire semantics tree with an empty render object leaves
+    // macOS accessibility clients with references to the retired subtree.
+    return Semantics(
+      key: const ValueKey('application-semantics'),
+      container: true,
+      explicitChildNodes: true,
+      label: 'CopyPaste',
+      textDirection: TextDirection.ltr,
+      child: _buildPresentation(windowReady: windowReady),
+    );
+  }
+
+  Widget _buildPresentation({required bool windowReady}) {
     if (_uiMemory.suspended) return const SizedBox.expand();
     final unifiedTitleBar = _usesUnifiedMacosTitleBar(windowReady);
     if (!_macosOnboardingReady ||
@@ -816,6 +852,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       devicesController: _devicesController,
       quickPasteSettings: _quickPasteSettings,
       settingsController: _settingsController,
+      launchAtLogin: _launchAtLogin,
       modulesController: _modulesController,
       appUpdateController: _appUpdateController,
       desktopWindow: _desktopWindow,

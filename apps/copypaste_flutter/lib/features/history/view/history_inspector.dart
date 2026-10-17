@@ -907,6 +907,20 @@ class _DetailImagePreview extends StatelessWidget {
                 key: ValueKey<String>('history-detail-image-${clip.id}'),
                 fit: BoxFit.contain,
                 alignment: Alignment.topLeft,
+                cacheWidth: math.min(
+                  preview.width,
+                  (sourceWidth * scale * MediaQuery.devicePixelRatioOf(context))
+                      .ceil()
+                      .clamp(1, preview.width),
+                ),
+                cacheHeight: math.min(
+                  preview.height,
+                  (sourceHeight *
+                          scale *
+                          MediaQuery.devicePixelRatioOf(context))
+                      .ceil()
+                      .clamp(1, preview.height),
+                ),
                 errorBuilder: (context, error, stackTrace) => const Center(
                   child: Icon(LucideIcons.imageOff, size: AppIconSize.hero),
                 ),

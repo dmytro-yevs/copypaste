@@ -191,9 +191,25 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Align(
-                alignment: Alignment.centerLeft,
-                child: Icon(LucideIcons.puzzle, size: AppIconSize.xl),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Icon(LucideIcons.puzzle, size: AppIconSize.xl),
+                  if (installed != null)
+                    Semantics(
+                      label: 'Enable ${installed.title}',
+                      child: Switch(
+                        key: ValueKey('module-enabled-$id'),
+                        value: installed.enabled,
+                        onChanged:
+                            controller.busy ||
+                                installed.error != null ||
+                                installed.restartRequired
+                            ? null
+                            : (value) => controller.setEnabled(id, value),
+                      ),
+                    ),
+                ],
               ),
               const Gap(AppSpacing.lg),
               Text(installed?.title ?? marketplace!.title).semiBold(),

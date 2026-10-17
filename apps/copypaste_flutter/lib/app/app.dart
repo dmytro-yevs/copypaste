@@ -11,6 +11,7 @@ import '../features/history/controller/history_controller.dart';
 import '../features/history/view/history_screen.dart';
 import '../features/settings/controller/quick_paste_settings_controller.dart';
 import '../features/settings/controller/settings_controller.dart';
+import '../features/settings/controller/launch_at_login_controller.dart';
 import '../features/settings/view/capture_header_action.dart';
 import '../features/settings/view/sync_header_action.dart';
 import '../features/settings/view/settings_screen.dart';
@@ -30,6 +31,7 @@ class CopyPasteApp extends StatelessWidget {
     this.devicesController,
     this.quickPasteSettings,
     this.settingsController,
+    this.launchAtLogin,
     this.modulesController,
     this.appUpdateController,
     this.desktopWindow,
@@ -44,6 +46,7 @@ class CopyPasteApp extends StatelessWidget {
   final DevicesController? devicesController;
   final QuickPasteSettingsController? quickPasteSettings;
   final SettingsController? settingsController;
+  final LaunchAtLoginController? launchAtLogin;
   final ModulesController? modulesController;
   final AppUpdateController? appUpdateController;
   final DesktopWindowController? desktopWindow;
@@ -155,6 +158,7 @@ class CopyPasteApp extends StatelessWidget {
                     : SettingsScreen(
                         controller: settingsController!,
                         quickPaste: quickPasteSettings,
+                        launchAtLogin: launchAtLogin,
                         desktopVisibility: desktopWindow?.visibility,
                         appUpdate: appUpdateController,
                         modules: modulesController,

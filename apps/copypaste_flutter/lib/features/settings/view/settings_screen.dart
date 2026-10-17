@@ -21,6 +21,8 @@ import '../../../shared/adaptive_breakpoints.dart';
 import '../../../shared/state_view.dart';
 import '../controller/quick_paste_settings_controller.dart';
 import '../controller/settings_controller.dart';
+import '../controller/launch_at_login_controller.dart';
+import '../../../platform/startup/launch_at_login.dart';
 import '../controller/settings_navigation_state.dart';
 import '../models/settings_models.dart';
 import '../../update/controller/app_update_controller.dart';
@@ -32,6 +34,7 @@ class SettingsScreen extends StatefulWidget {
     required this.controller,
     this.quickPaste,
     this.desktopVisibility,
+    this.launchAtLogin,
     this.appUpdate,
     this.modules,
     this.onOpenAndroidCaptureSetup,
@@ -40,6 +43,7 @@ class SettingsScreen extends StatefulWidget {
   final SettingsController controller;
   final QuickPasteSettingsController? quickPaste;
   final DesktopVisibilityController? desktopVisibility;
+  final LaunchAtLoginController? launchAtLogin;
   final AppUpdateController? appUpdate;
   final ModulesController? modules;
   final Future<void> Function()? onOpenAndroidCaptureSetup;
@@ -63,6 +67,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   ];
 
   final _generalSectionKey = GlobalKey();
+  final _launchAtLoginKey = GlobalKey();
   final _taskbarVisibilityKey = GlobalKey();
   final _trayVisibilityKey = GlobalKey();
   final _clipboardSectionKey = GlobalKey();
@@ -130,6 +135,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       animation: Listenable.merge([
         widget.controller,
         widget.desktopVisibility,
+        widget.launchAtLogin,
       ]),
       builder: (context, _) => _loadedContent(() => _content(context)),
     );
@@ -403,6 +409,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         animation: Listenable.merge([
           widget.controller,
           widget.desktopVisibility,
+          widget.launchAtLogin,
           _detailRevision,
         ]),
         builder: (context, _) => Scaffold(
@@ -460,7 +467,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   SettingsSectionId get _effectiveSelectedSection {
     if ((_selectedSection == SettingsSectionId.general &&
-            widget.desktopVisibility == null) ||
+            widget.desktopVisibility == null &&
+            widget.launchAtLogin == null) ||
         (_selectedSection == SettingsSectionId.quickPaste &&
             widget.quickPaste == null) ||
         (_selectedSection == SettingsSectionId.modules &&
@@ -481,7 +489,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return [
       for (final section in SettingsSectionId.values)
         if ((section != SettingsSectionId.general ||
-                widget.desktopVisibility != null) &&
+                widget.desktopVisibility != null ||
+                widget.launchAtLogin != null) &&
             (section != SettingsSectionId.quickPaste ||
                 widget.quickPaste != null) &&
             (section != SettingsSectionId.modules || widget.modules != null))
@@ -497,6 +506,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   List<_SettingsNavigationTarget> _searchTargets() {
     return [
+      if (widget.launchAtLogin != null)
+        _SettingsNavigationTarget(
+          id: 'result-start-at-login',
+          section: SettingsSectionId.general,
+          label: _startupLabel,
+          description: 'Start CopyPaste automatically.',
+          keywords: 'startup login boot launch automatically autostart',
+          targetKey: _launchAtLoginKey,
+        ),
       if (widget.desktopVisibility != null) ...[
         _SettingsNavigationTarget(
           id: 'result-taskbar-visibility',
@@ -761,53 +779,95 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   bool get _isMacOS => defaultTargetPlatform == TargetPlatform.macOS;
+  String get _startupLabel => defaultTargetPlatform == TargetPlatform.android
+      ? 'Start on device boot'
+      : 'Start at login';
   String get _taskbarVisibilityLabel =>
       _isMacOS ? 'Show in Dock' : 'Show in taskbar';
   String get _trayVisibilityLabel =>
       _isMacOS ? 'Show in menu bar' : 'Show in system tray';
 
   Widget _generalSection({required bool showHeading}) {
-    final controller = widget.desktopVisibility!;
-    final preferences = controller.preferences;
+    final controller = widget.desktopVisibility;
+    final preferences = controller?.preferences;
     return _SettingsSection(
       key: _generalSectionKey,
       title: 'General',
       showHeading: showHeading,
-      description:
-          'Choose where CopyPaste appears. Open CopyPaste again to restore its window when both icons are hidden.',
+      description: 'Manage automatic startup and application visibility.',
       children: [
-        if (controller.error case final message?)
+        if (widget.launchAtLogin case final startup?)
+          _SettingRow(
+            key: _launchAtLoginKey,
+            highlighted: _isHighlighted('result-start-at-login'),
+            title: _startupLabel,
+            description:
+                startup.error ??
+                switch (startup.status) {
+                  LaunchAtLoginStatus.requiresApproval =>
+                    'Allow CopyPaste in System Settings → General → Login Items.',
+                  LaunchAtLoginStatus.unavailable =>
+                    'Automatic startup is unavailable in this installation.',
+                  _ =>
+                    defaultTargetPlatform == TargetPlatform.android
+                        ? 'Resume enabled background services after restarting the device.'
+                        : 'Open CopyPaste automatically when you sign in.',
+                },
+            trailing: Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: AppSpacing.sm,
+              children: [
+                if (startup.status == LaunchAtLoginStatus.requiresApproval)
+                  Button.secondary(
+                    onPressed: startup.openSystemSettings,
+                    child: const Text('Open settings'),
+                  ),
+                Switch(
+                  key: const ValueKey('settings-start-at-login'),
+                  value: startup.enabled,
+                  onChanged:
+                      startup.busy ||
+                          startup.status == LaunchAtLoginStatus.unavailable
+                      ? null
+                      : startup.setEnabled,
+                ),
+              ],
+            ),
+          ),
+        if (controller?.error case final message?)
           Alert.destructive(
             leading: const Icon(LucideIcons.circleAlert),
             title: const Text('Visibility could not be changed'),
             content: Text(message),
           ),
-        _SettingRow(
-          key: _taskbarVisibilityKey,
-          highlighted: _isHighlighted('result-taskbar-visibility'),
-          title: _taskbarVisibilityLabel,
-          description: 'Show the application icon for switching windows.',
-          trailing: Switch(
-            key: const ValueKey('settings-show-in-taskbar'),
-            value: preferences.showInTaskbar,
-            onChanged: controller.busy
-                ? null
-                : (value) => unawaited(controller.setTaskbarVisible(value)),
+        if (controller != null && preferences != null) ...[
+          _SettingRow(
+            key: _taskbarVisibilityKey,
+            highlighted: _isHighlighted('result-taskbar-visibility'),
+            title: _taskbarVisibilityLabel,
+            description: 'Show the application icon for switching windows.',
+            trailing: Switch(
+              key: const ValueKey('settings-show-in-taskbar'),
+              value: preferences.showInTaskbar,
+              onChanged: controller.busy
+                  ? null
+                  : (value) => unawaited(controller.setTaskbarVisible(value)),
+            ),
           ),
-        ),
-        _SettingRow(
-          key: _trayVisibilityKey,
-          highlighted: _isHighlighted('result-tray-visibility'),
-          title: _trayVisibilityLabel,
-          description: 'Show quick access to CopyPaste and capture controls.',
-          trailing: Switch(
-            key: const ValueKey('settings-show-in-tray'),
-            value: preferences.showInTray,
-            onChanged: controller.busy
-                ? null
-                : (value) => unawaited(controller.setTrayVisible(value)),
+          _SettingRow(
+            key: _trayVisibilityKey,
+            highlighted: _isHighlighted('result-tray-visibility'),
+            title: _trayVisibilityLabel,
+            description: 'Show quick access to CopyPaste and capture controls.',
+            trailing: Switch(
+              key: const ValueKey('settings-show-in-tray'),
+              value: preferences.showInTray,
+              onChanged: controller.busy
+                  ? null
+                  : (value) => unawaited(controller.setTrayVisible(value)),
+            ),
           ),
-        ),
+        ],
       ],
     );
   }

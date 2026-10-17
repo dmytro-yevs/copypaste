@@ -61,5 +61,6 @@ Section "Uninstall"
   RMDir "$SMPROGRAMS\CopyPaste"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\CopyPaste"
   DeleteRegKey HKCU "Software\CopyPaste"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "CopyPaste"
   RMDir /r "$INSTDIR"
 SectionEnd

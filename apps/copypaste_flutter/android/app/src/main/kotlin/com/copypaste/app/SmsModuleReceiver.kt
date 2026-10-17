@@ -8,6 +8,7 @@ import java.util.concurrent.Executors
 
 class SmsModuleReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED && !StartupPreferences.enabled(context)) return
         if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION &&
             intent.action != Intent.ACTION_BOOT_COMPLETED) return
         if (!AndroidSmsAccess.granted(context)) return
