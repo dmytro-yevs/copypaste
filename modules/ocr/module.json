@@ -4,8 +4,8 @@
   "id": "copypaste.ocr",
   "title": "OCR",
   "description": "Recognize text from an image locally, with automatic script routing.",
-  "version": "0.1.20",
-  "app_versions": ">=1.0.29, <2.0.0",
+  "version": "0.1.21",
+  "app_versions": ">=1.0.30, <2.0.0",
   "supported_platforms": ["macos", "windows", "linux", "android"],
   "unload_policy": "process",
   "commands": [

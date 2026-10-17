@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 
@@ -7,10 +8,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
 import 'package:copypaste_flutter/features/history/repository/history_file_downloader.dart';
+import 'package:copypaste_flutter/features/history/repository/history_file_transfer.dart';
 import 'package:copypaste_flutter/features/history/presentation/source_app_label.dart';
 import 'package:copypaste_flutter/features/history/repository/history_repository.dart';
 import 'package:copypaste_flutter/features/quick_paste/quick_paste_app.dart';
 import 'package:copypaste_flutter/features/quick_paste/quick_paste_controller.dart';
+import 'package:copypaste_flutter/features/quick_paste/middle_ellipsis.dart';
 import 'package:copypaste_flutter/features/settings/repository/quick_paste_preferences_store.dart';
 import 'package:copypaste_flutter/platform/desktop/global_shortcut.dart';
 import 'package:copypaste_flutter/platform/desktop/quick_paste_host.dart';
@@ -28,6 +31,219 @@ import 'package:copypaste_flutter/platform/clipboard/clipboard_writer.dart';
 import '../modules/modules_test_support.dart';
 
 void main() {
+  test(
+    'file transfer reports written bytes, reuses a copy, and retries failure',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'copypaste-transfer-test-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final repository = _Repository()..savedBytes = [1, 2, 3, 4];
+      final transfer = HistoryFileTransfer(
+        repository,
+        temporaryDirectory: () async => directory,
+      );
+      final clip = HistoryClip(
+        id: 'remote-file',
+        contentType: 'file',
+        preview: '/remote/report.bin',
+        createdAt: DateTime.utc(2026),
+        pinned: false,
+        file: const HistoryFileDetails(name: 'report.bin', sizeBytes: 4),
+      );
+      repository.failSave = true;
+      await expectLater(
+        transfer.prepare(clip, onProgress: (_) {}),
+        throwsStateError,
+      );
+      repository.failSave = false;
+      repository.saveGate = Completer<void>();
+      final progress = <double>[];
+      final preparation = transfer.prepare(clip, onProgress: progress.add);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(progress, contains(0.5));
+      repository.saveGate!.complete();
+      final path = await preparation;
+      repository.saveGate = null;
+      expect(await File(path).readAsBytes(), [1, 2, 3, 4]);
+      expect(progress.first, 0);
+      expect(progress.last, 1);
+      expect(await transfer.prepare(clip, onProgress: progress.add), path);
+      expect(repository.saved.length, 1);
+      repository.saveGate = Completer<void>();
+      var cancelled = false;
+      final destination = File('${directory.path}/cancelled.bin');
+      final cancelledSave = transfer.saveTo(
+        clip,
+        destination.path,
+        onProgress: (_) {},
+        isCancelled: () => cancelled,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      cancelled = true;
+      repository.saveGate!.complete();
+      await expectLater(
+        cancelledSave,
+        throwsA(isA<HistoryFileTransferCancelled>()),
+      );
+      expect(await destination.exists(), isFalse);
+    },
+  );
+
+  test('remote file waits for one transfer before copying', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'copypaste-transfer-action-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final repository = _Repository()
+      ..savedBytes = [1, 2, 3, 4]
+      ..saveGate = Completer<void>();
+    final clip = HistoryClip(
+      id: 'remote-file',
+      contentType: 'file',
+      preview: '/source/report.bin',
+      createdAt: DateTime.utc(2026),
+      pinned: false,
+      file: const HistoryFileDetails(name: 'report.bin', sizeBytes: 4),
+    );
+    repository.clips
+      ..clear()
+      ..add(clip);
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: _ContextHost(),
+      fileTransfer: HistoryFileTransfer(
+        repository,
+        temporaryDirectory: () async => directory,
+      ),
+    );
+    await controller.initialize();
+    await controller.opened(1);
+    final activation = controller.activate(clip);
+    await repository.saveStarted.future;
+    expect(repository.copied, isEmpty);
+    expect(controller.activating, isTrue);
+    expect(controller.transferProgressFor(clip.id), isNotNull);
+    await controller.activate(clip);
+    expect(repository.saved.length, 1);
+    repository.saveGate!.complete();
+    await activation;
+    expect(repository.copied, [clip.id]);
+    controller.dispose();
+  });
+
+  test(
+    'Quick Paste offers retry after a failed remote file transfer',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'copypaste-transfer-retry-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final repository = _Repository()
+        ..savedBytes = [1, 2]
+        ..failSave = true;
+      final clip = HistoryClip(
+        id: 'retry-file',
+        contentType: 'file',
+        preview: '/source/retry.bin',
+        createdAt: DateTime.utc(2026),
+        pinned: false,
+        file: const HistoryFileDetails(name: 'retry.bin', sizeBytes: 2),
+      );
+      repository.clips
+        ..clear()
+        ..add(clip);
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: _ContextHost(),
+        fileTransfer: HistoryFileTransfer(
+          repository,
+          temporaryDirectory: () async => directory,
+        ),
+      );
+      await controller.initialize();
+      await controller.opened(1);
+      await controller.activate(clip);
+      expect(controller.transferFailedFor(clip.id), isTrue);
+      expect(repository.copied, isEmpty);
+      repository.failSave = false;
+      await controller.activate(clip);
+      expect(controller.transferFailedFor(clip.id), isFalse);
+      expect(repository.copied, [clip.id]);
+      controller.dispose();
+    },
+  );
+
+  testWidgets('file clip shows its name and a one-line middle-ellipsized path', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    final path =
+        '/Users/source/Documents/${List.filled(12, 'nested/').join()}report.bin';
+    final clip = HistoryClip(
+      id: 'remote-file',
+      contentType: 'file',
+      preview: path,
+      createdAt: DateTime.utc(2026),
+      pinned: false,
+      file: HistoryFileDetails(
+        name: 'report.bin',
+        sourceReference: path,
+        sizeBytes: 4,
+      ),
+    );
+    repository.clips
+      ..clear()
+      ..add(clip);
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: _ContextHost(),
+    );
+    await tester.binding.setSurfaceSize(const Size(448, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(QuickPasteApp(controller: controller));
+    await tester.pumpAndSettle();
+    await controller.opened(1);
+    await tester.pumpAndSettle();
+    expect(find.text('report.bin'), findsOneWidget);
+    final rendered = tester.widget<Text>(
+      find.byKey(const ValueKey('quick-paste-file-path-remote-file')),
+    );
+    expect(rendered.maxLines, 1);
+    expect(rendered.data, startsWith('/Users'));
+    expect(rendered.data, endsWith('report.bin'));
+    expect(rendered.data, contains('…'));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('middle ellipsis keeps both ends within the measured width', (
+    tester,
+  ) async {
+    const style = TextStyle(fontSize: 12);
+    final shortened = middleEllipsis(
+      '/Users/source/Documents/deep/folder/report.bin',
+      maxWidth: 240,
+      style: style,
+      direction: TextDirection.ltr,
+    );
+    expect(shortened, startsWith('/Users'));
+    expect(shortened, endsWith('report.bin'));
+    expect(shortened, contains('…'));
+    expect(
+      middleEllipsis(
+        'short',
+        maxWidth: 240,
+        style: style,
+        direction: TextDirection.ltr,
+      ),
+      'short',
+    );
+  });
+
   testWidgets(
     'native reveal waits for the visible image and its rendered frame',
     (tester) async {
@@ -895,6 +1111,9 @@ void main() {
         expect(preview, findsOneWidget);
         expect(tester.widget<Image>(preview).image, isA<MemoryImage>());
         expect(find.text('[image]'), findsNothing);
+      } else if (kind == HistoryClipKind.file) {
+        expect(find.text(label).hitTestable(), findsOneWidget);
+        expect(find.text('Path unavailable').hitTestable(), findsOneWidget);
       } else {
         expect(find.text(label).hitTestable(), findsOneWidget);
       }
@@ -1666,17 +1885,58 @@ void main() {
     await tester.pumpAndSettle();
     expect(repository.saved, [('download', '/tmp/report.pdf')]);
     expect(downloader.presented, ['/tmp/report.pdf']);
+    repository.saveGate = Completer<void>();
+    await tester.tap(download);
+    await tester.pump();
+    expect(
+      find.descendant(of: download, matching: find.text('0%')),
+      findsOneWidget,
+    );
+    final progressButtonSize = tester.getSize(download);
+    expect(progressButtonSize.width, progressButtonSize.height);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    await mouse.moveTo(tester.getCenter(download));
+    await tester.pump();
+    await tester.pump();
+    expect(
+      find.descendant(of: download, matching: find.byIcon(LucideIcons.x)),
+      findsOneWidget,
+    );
+    final cancelButtonSize = tester.getSize(download);
+    expect(cancelButtonSize.width, cancelButtonSize.height);
+    await tester.tap(download);
+    await tester.pump();
+    expect(controller.history.isDownloadCancelling('download'), isTrue);
+    repository.saveGate!.complete();
+    repository.saveGate = null;
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pumpAndSettle();
+    expect(downloader.presented, ['/tmp/report.pdf']);
+    expect(controller.history.isDownloadPending('download'), isFalse);
+    await mouse.removePointer();
     downloader.destination = null;
     await tester.tap(download);
     await tester.pumpAndSettle();
-    expect(repository.saved.length, 1);
+    expect(repository.saved.length, 2);
     downloader.destination = '/tmp/report.pdf';
     repository.failSave = true;
+    expect(tester.widget<Button>(download).onPressed, isNotNull);
     await tester.tap(download);
     await tester.pumpAndSettle();
     expect(
       controller.history.errorMessage,
       'This file could not be downloaded.',
+    );
+    expect(controller.history.downloadFailedFor('download'), isTrue);
+    expect(
+      find.descendant(
+        of: download,
+        matching: find.byIcon(LucideIcons.rotateCcw),
+      ),
+      findsOneWidget,
     );
     expect(tester.widget<Button>(download).onPressed, isNotNull);
     expect(host.closeCalls, 0);
@@ -2245,6 +2505,9 @@ class _Repository implements HistoryRepository {
   final plainCopied = <String>[];
   final saved = <(String, String)>[];
   bool failSave = false;
+  List<int>? savedBytes;
+  Completer<void>? saveGate;
+  final saveStarted = Completer<void>();
   final imagePreviewEdges = <int?>[];
   final imagePreviewIds = <String>[];
   Completer<void>? imageLoadGate;
@@ -2272,6 +2535,20 @@ class _Repository implements HistoryRepository {
   Future<void> saveFile(String id, String destinationPath) async {
     if (failSave) throw StateError('Save failed');
     saved.add((id, destinationPath));
+    if (!saveStarted.isCompleted) saveStarted.complete();
+    final gate = saveGate;
+    final bytes = savedBytes;
+    if (bytes != null) {
+      final file = File(destinationPath);
+      await file.writeAsBytes(bytes.take(bytes.length ~/ 2).toList());
+      await gate?.future;
+      await file.writeAsBytes(
+        bytes.skip(bytes.length ~/ 2).toList(),
+        mode: FileMode.append,
+      );
+    } else {
+      await gate?.future;
+    }
   }
 
   @override

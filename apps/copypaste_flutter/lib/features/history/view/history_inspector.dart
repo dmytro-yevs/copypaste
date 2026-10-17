@@ -262,32 +262,11 @@ class HistoryInspector extends StatelessWidget {
                       ],
                     ),
                     if (controller.canDownloadSelected)
-                      Tooltip(
-                        tooltip: (_) =>
-                            const TooltipContainer(child: Text('Download')),
-                        child: Semantics(
-                          label: iconOnly ? 'Download' : null,
-                          button: true,
-                          child: Button.secondary(
-                            key: const ValueKey<String>(
-                              'history-detail-download',
-                            ),
-                            style: AppTheme.actionButtonStyle(
-                              iconOnly
-                                  ? const ButtonStyle.secondaryIcon()
-                                  : const ButtonStyle.secondary(),
-                            ),
-                            onPressed: controller.isDownloadPending(clip.id)
-                                ? null
-                                : () => _download(context),
-                            leading: iconOnly
-                                ? null
-                                : const Icon(LucideIcons.download),
-                            child: iconOnly
-                                ? const Icon(LucideIcons.download)
-                                : const Text('Download'),
-                          ),
-                        ),
+                      _DownloadButton(
+                        controller: controller,
+                        clip: clip,
+                        iconOnly: iconOnly,
+                        onDownload: () => _download(context),
                       ),
                     Tooltip(
                       tooltip: (_) => TooltipContainer(
@@ -586,6 +565,133 @@ class HistoryInspector extends StatelessWidget {
   }
 }
 
+class _DownloadButton extends StatefulWidget {
+  const _DownloadButton({
+    required this.controller,
+    required this.clip,
+    required this.iconOnly,
+    required this.onDownload,
+  });
+
+  final HistoryController controller;
+  final HistoryClip clip;
+  final bool iconOnly;
+  final VoidCallback onDownload;
+
+  @override
+  State<_DownloadButton> createState() => _DownloadButtonState();
+}
+
+class _DownloadButtonState extends State<_DownloadButton> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = widget.controller;
+    final id = widget.clip.id;
+    final pending = controller.isDownloadPending(id);
+    final failed = controller.downloadFailedFor(id);
+    final cancelling = controller.isDownloadCancelling(id);
+    final progress = controller.downloadProgressFor(id);
+    final percentage = ((progress ?? 0) * 100).floor();
+    final showCancel = pending && _hovered && !cancelling;
+    final label = cancelling
+        ? 'Cancelling…'
+        : showCancel
+        ? 'Cancel'
+        : pending && progress != null
+        ? '$percentage%'
+        : failed
+        ? 'Retry'
+        : 'Download';
+    final indicator = CircularProgressIndicator(
+      value: progress,
+      animated: !MediaQuery.disableAnimationsOf(context),
+      theme: const CircularProgressIndicatorTheme(size: AppIconSize.sm),
+    );
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: Tooltip(
+        tooltip: (_) => TooltipContainer(
+          child: Text(
+            cancelling
+                ? 'Cancelling download'
+                : pending
+                ? 'Downloading $percentage% · Click to cancel'
+                : failed
+                ? 'Download failed · Click to retry'
+                : 'Download',
+          ),
+        ),
+        child: Semantics(
+          label: widget.iconOnly
+              ? pending
+                    ? 'Cancel download, $percentage% complete'
+                    : failed
+                    ? 'Retry download'
+                    : 'Download'
+              : null,
+          button: true,
+          child: SizedBox(
+            width: widget.iconOnly ? AppTheme.controlHeight(context) : null,
+            height: widget.iconOnly ? AppTheme.controlHeight(context) : null,
+            child: Button.secondary(
+              key: const ValueKey<String>('history-detail-download'),
+              style: AppTheme.actionButtonStyle(
+                widget.iconOnly
+                    ? const ButtonStyle.secondaryIcon()
+                    : const ButtonStyle.secondary(),
+              ),
+              onPressed: cancelling
+                  ? null
+                  : pending
+                  ? () => controller.cancelDownload(id)
+                  : widget.onDownload,
+              leading: widget.iconOnly
+                  ? null
+                  : showCancel
+                  ? const Icon(LucideIcons.x)
+                  : pending
+                  ? indicator
+                  : failed
+                  ? const Icon(LucideIcons.rotateCcw)
+                  : const Icon(LucideIcons.download),
+              child: widget.iconOnly
+                  ? showCancel
+                        ? const Icon(LucideIcons.x)
+                        : pending
+                        ? Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              CircularProgressIndicator(
+                                value: progress,
+                                animated: !MediaQuery.disableAnimationsOf(
+                                  context,
+                                ),
+                                theme: const CircularProgressIndicatorTheme(
+                                  size: AppIconSize.lg,
+                                ),
+                              ),
+                              if (progress != null)
+                                SizedBox(
+                                  width: AppIconSize.lg,
+                                  child: FittedBox(child: Text('$percentage%')),
+                                ),
+                            ],
+                          )
+                        : failed
+                        ? const Icon(LucideIcons.rotateCcw)
+                        : const Icon(LucideIcons.download)
+                  : Text(label),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _HistoryDetailContent extends StatelessWidget {
   const _HistoryDetailContent({
     required this.clip,
@@ -702,30 +808,7 @@ class _HistoryDetailContent extends StatelessWidget {
         clip.contentKind == HistoryClipKind.color) {
       return content;
     }
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final style =
-            clip.contentKind == HistoryClipKind.path ||
-                clip.contentKind == HistoryClipKind.file
-            ? Theme.of(context).typography.mono
-            : DefaultTextStyle.of(context).style;
-        final painter = TextPainter(
-          text: TextSpan(
-            style: style,
-            children: [highlighted?.span ?? TextSpan(text: body)],
-          ),
-          textDirection: Directionality.of(context),
-          textScaler: MediaQuery.textScalerOf(context),
-        )..layout(maxWidth: constraints.maxWidth);
-        final width = painter
-            .computeLineMetrics()
-            .fold<double>(0, (longest, line) => math.max(longest, line.width))
-            .ceilToDouble()
-            .clamp(0.0, constraints.maxWidth);
-        painter.dispose();
-        return SizedBox(width: width, child: content);
-      },
-    );
+    return IntrinsicWidth(child: content);
   }
 
   Widget _body(BuildContext context) {
