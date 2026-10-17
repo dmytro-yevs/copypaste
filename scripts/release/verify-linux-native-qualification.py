@@ -35,6 +35,41 @@ TRACE_PLACEHOLDERS = {
 MODULE_IDS = ("copypaste.ocr", "copypaste.semantic-search", "copypaste.supabase")
 IPC_OPERATIONS = {"list", "install", "set_preferences", "set_enabled", "invoke", "remove"}
 UPGRADE_CANARY_SHA256 = hashlib.sha256(b"copypaste-upgrade-canary").hexdigest()
+CAPABILITY_NAMES = {
+    "clipboard_capture", "clipboard_read_write", "source_attribution",
+    "privacy_enforcement", "global_shortcuts", "quick_paste",
+    "secure_storage", "desktop_integration", "updates",
+}
+
+
+def verify_capability_report(root: Path, evidence_names: set[str], architecture: str,
+                             desktop: str, session: str, format_name: str) -> None:
+    name = f"capabilities-{architecture}-{desktop.lower()}-{session}-{format_name}.json"
+    if name not in evidence_names:
+        raise ValueError(f"installed capability report is missing from receipt: {name}")
+    report = json.loads(regular_file(root, name).read_text(encoding="utf-8"))
+    if not isinstance(report, dict) or set(report) != {"schema", "capabilities"} or report["schema"] != 1:
+        raise ValueError(f"installed capability report has an invalid schema: {name}")
+    capabilities = report["capabilities"]
+    if not isinstance(capabilities, dict) or set(capabilities) != CAPABILITY_NAMES:
+        raise ValueError(f"installed capability report is incomplete: {name}")
+    for kind, value in capabilities.items():
+        allowed = {"state", "backend", "reason", "permissions", "guarantee"}
+        if kind == "clipboard_read_write":
+            allowed |= {"mime_formats", "limitations"}
+        if (not isinstance(value, dict) or not allowed.issuperset(value)
+                or not {"state", "backend", "reason", "permissions", "guarantee"} <= set(value)
+                or value["state"] not in {"available", "needs_permission", "needs_companion", "unsupported", "error"}
+                or value["guarantee"] not in {"none", "best_effort", "verified"}
+                or (value["backend"] is not None and not isinstance(value["backend"], str))
+                or (value["reason"] is not None and not isinstance(value["reason"], str))
+                or not isinstance(value["permissions"], list)
+                or any(not isinstance(permission, str) for permission in value["permissions"])):
+            raise ValueError(f"installed capability status is invalid: {kind}")
+        if value["state"] == "available" and (not value["backend"] or value["guarantee"] == "none"):
+            raise ValueError(f"installed capability lacks an active backend: {kind}")
+    if capabilities["clipboard_capture"]["state"] != "available":
+        raise ValueError(f"installed capability report does not prove capture: {name}")
 
 
 def verify_camera_media(records: object, runtimes: object, name: str) -> None:
@@ -523,6 +558,9 @@ def verify(root: Path, artifacts: Path, version: str, commit: str, source_run_id
                     if item["name"] in evidence_names or item["sha256"] != digest(path) or item["size_bytes"] != path.stat().st_size:
                         raise ValueError(f"evidence attachment differs from its receipt: {name}")
                     evidence_names.add(item["name"])
+                for format_name in installed_formats:
+                    verify_capability_report(root, evidence_names, architecture,
+                                             desktop, session, format_name)
                 verify_trace(root, receipt, architecture, desktop, session, version, commit, source_run_id, artifact_run_id, expected_assertions, previous_version, expected_previous)
                 seen.add(identity)
     if len(seen) != len(ARCHITECTURES) * len(DESKTOPS) * len(SESSIONS):

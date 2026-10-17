@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:copypaste_flutter/platform/permissions/linux_integration.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -108,6 +110,79 @@ void main() {
 
     expect(status.clipboard, isFalse);
     expect(status.quickPaste, isFalse);
+  });
+
+  test(
+    'reports daemon data control without claiming source attribution',
+    () async {
+      messenger.setMockMethodCallHandler(
+        channel,
+        (call) async => {
+          'session': 'wayland',
+          'globalShortcuts': false,
+          'remoteDesktop': 'unsupported',
+          'companion': 'unavailable',
+          'clipboard': false,
+          'quickPaste': false,
+          'screenshotProtection': false,
+          'startAtLogin': false,
+          'uriRegistered': false,
+        },
+      );
+
+      final status = await port.status();
+
+      expect(status.clipboard, isTrue);
+      expect(
+        status.capability(LinuxCapabilityKind.clipboardCapture).state,
+        LinuxCapabilityState.available,
+      );
+      expect(
+        status.capability(LinuxCapabilityKind.sourceAttribution).state,
+        LinuxCapabilityState.unsupported,
+      );
+      expect(status.quickPaste, isFalse);
+    },
+  );
+
+  test('daemon backend overrides a GUI bridge clipboard probe', () async {
+    port = MethodChannelLinuxIntegrationPort(
+      channel: channel,
+      platformCapabilitiesJson: () async => jsonEncode({
+        'clipboard_available': true,
+        'capabilities': {
+          'clipboard_capture': {
+            'state': 'available',
+            'backend': 'linux-wayland-data-control',
+            'guarantee': 'verified',
+            'reason': null,
+            'permissions': [],
+          },
+          'source_attribution': {
+            'state': 'unsupported',
+            'backend': 'linux-wayland-data-control',
+            'guarantee': 'none',
+            'reason': 'No authenticated source.',
+            'permissions': [],
+          },
+        },
+      }),
+    );
+
+    final status = await port.status();
+    expect(
+      status.capability(LinuxCapabilityKind.clipboardCapture).backend,
+      'linux-wayland-data-control',
+    );
+    expect(
+      status.capability(LinuxCapabilityKind.sourceAttribution).state,
+      LinuxCapabilityState.unsupported,
+    );
+    expect(
+      status.capability(LinuxCapabilityKind.globalShortcuts).state,
+      LinuxCapabilityState.error,
+    );
+    expect(status.globalShortcuts, isTrue);
   });
 
   test(

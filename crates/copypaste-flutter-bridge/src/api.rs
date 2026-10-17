@@ -670,6 +670,21 @@ pub async fn clipboard_available() -> Result<bool, RuntimeError> {
     }
 }
 
+/// Return only the daemon's clipboard readiness and typed capabilities. The
+/// status response also contains device identity and counters, which stay
+/// behind this narrow boundary.
+pub async fn platform_capabilities_json() -> Result<String, RuntimeError> {
+    let response = client::request(Method::Status).await?;
+    match response.data {
+        Some(ResponseData::Status(status)) => serde_json::to_string(&serde_json::json!({
+            "clipboard_available": status.clipboard_available,
+            "capabilities": status.platform_capabilities,
+        }))
+        .map_err(|_| RuntimeError::internal()),
+        _ => Err(RuntimeError::internal()),
+    }
+}
+
 pub async fn capture_state() -> Result<CaptureState, RuntimeError> {
     let response = client::request(Method::Status).await?;
     match response.data {
