@@ -224,12 +224,18 @@ class HistoryClip {
   HistoryClipKind get contentKind =>
       kind ?? HistoryClipKindX.fromContentType(contentType);
 
-  HistoryClip copyWith({bool? pinned, bool? secret}) => HistoryClip(
+  HistoryClip copyWith({
+    bool? pinned,
+    bool? secret,
+    String? preview,
+    bool? truncated,
+    bool clearBody = false,
+  }) => HistoryClip(
     secret: secret ?? this.secret,
     transient: transient,
     id: id,
     contentType: contentType,
-    preview: preview,
+    preview: preview ?? this.preview,
     createdAt: createdAt,
     pinned: pinned ?? this.pinned,
     kind: kind,
@@ -237,8 +243,8 @@ class HistoryClip {
     originDeviceClass: originDeviceClass,
     sourceApp: sourceApp,
     sourceAppIconId: sourceAppIconId,
-    truncated: truncated,
-    body: body,
+    truncated: truncated ?? this.truncated,
+    body: clearBody ? null : body,
     file: file,
     image: image,
     colorRgba: colorRgba,

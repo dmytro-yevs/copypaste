@@ -99,58 +99,77 @@ internal class ScreenshotCaptureMonitor(
         }
         val since = ScreenshotCaptureState.since(context)
         if (since == 0L) return
-        val candidates = mutableListOf<Candidate>()
-        try {
-            val allowed = reader.readMetadata {
-                val pathColumn = if (Build.VERSION.SDK_INT >= 29) MediaStore.Images.Media.RELATIVE_PATH else MediaStore.Images.Media.DATA
-                val columns = mutableListOf(Images._ID, Images.DISPLAY_NAME, pathColumn, Images.MIME_TYPE, Images.DATE_ADDED, Images.DATE_TAKEN)
-                if (Build.VERSION.SDK_INT >= 29) columns.add(Images.IS_PENDING)
-                context.contentResolver.query(
-                    Images.EXTERNAL_CONTENT_URI, columns.toTypedArray(), "${Images.DATE_ADDED} >= ?",
-                    arrayOf((since / 1000).toString()), "${Images.DATE_ADDED} ASC, ${Images._ID} ASC",
-                )?.use { cursor ->
-                    while (!closed && cursor.moveToNext()) {
-                        if (Build.VERSION.SDK_INT >= 29 && cursor.getInt(6) != 0) continue
-                        val name = cursor.getString(1).orEmpty()
-                        val path = cursor.getString(2).orEmpty()
-                        val type = cursor.getString(3).orEmpty()
-                        val added = cursor.getLong(4)
-                        val taken = cursor.getLong(5)
-                        if (!isScreenshot(name, path) || !type.startsWith("image/") ||
-                            !isNew(since, added, taken)) continue
-                        val uri = ContentUris.withAppendedId(Images.EXTERNAL_CONTENT_URI, cursor.getLong(0))
-                        val receipt = "$uri:$added:$taken"
-                        if (!receipts.contains(receipt)) candidates.add(Candidate(uri, type, receipt, name))
+        // The continuation belongs to this scan only. A later scan starts at
+        // the policy cutoff so pending or failed captures are reconsidered.
+        var afterAdded: Long? = null
+        var afterId = 0L
+        while (!closed) {
+            val candidates = mutableListOf<Candidate>()
+            var rowsRead = 0
+            try {
+                val allowed = reader.readMetadata {
+                    val pathColumn = if (Build.VERSION.SDK_INT >= 29) MediaStore.Images.Media.RELATIVE_PATH else MediaStore.Images.Media.DATA
+                    val columns = mutableListOf(Images._ID, Images.DISPLAY_NAME, pathColumn, Images.MIME_TYPE, Images.DATE_ADDED, Images.DATE_TAKEN)
+                    if (Build.VERSION.SDK_INT >= 29) columns.add(Images.IS_PENDING)
+                    val selection = "${Images.DATE_ADDED} >= ?" + if (afterAdded == null) "" else
+                        " AND (${Images.DATE_ADDED} > ? OR (${Images.DATE_ADDED} = ? AND ${Images._ID} > ?))"
+                    val arguments = if (afterAdded == null) arrayOf((since / 1000).toString()) else
+                        arrayOf((since / 1000).toString(), afterAdded.toString(), afterAdded.toString(), afterId.toString())
+                    context.contentResolver.query(
+                        Images.EXTERNAL_CONTENT_URI, columns.toTypedArray(), selection,
+                        arguments, "${Images.DATE_ADDED} ASC, ${Images._ID} ASC",
+                    )?.use { cursor ->
+                        while (!closed && rowsRead < CANDIDATE_PAGE_SIZE && cursor.moveToNext()) {
+                            rowsRead++
+                            afterAdded = cursor.getLong(4)
+                            afterId = cursor.getLong(0)
+                            if (Build.VERSION.SDK_INT >= 29 && cursor.getInt(6) != 0) continue
+                            val name = cursor.getString(1).orEmpty()
+                            val path = cursor.getString(2).orEmpty()
+                            val type = cursor.getString(3).orEmpty()
+                            val added = cursor.getLong(4)
+                            val taken = cursor.getLong(5)
+                            if (!isScreenshot(name, path) || !type.startsWith("image/") ||
+                                !isNew(since, added, taken)) continue
+                            val uri = ContentUris.withAppendedId(Images.EXTERNAL_CONTENT_URI, cursor.getLong(0))
+                            val receipt = "$uri:$added:$taken"
+                            if (!receipts.contains(receipt)) candidates.add(Candidate(uri, type, receipt, name))
+                        }
                     }
                 }
-            }
-            if (!allowed) {
-                // Paused/private/excluded capture must never replay these screenshots later.
-                if (!reader.policyAllowsCapture()) ScreenshotCaptureState.skipThrough(context)
-                else if (!closed) worker.postDelayed(scanTask, 250L)
+                if (!allowed) {
+                    // Paused/private/excluded capture must never replay these screenshots later.
+                    if (!reader.policyAllowsCapture()) ScreenshotCaptureState.skipThrough(context)
+                    else if (!closed) worker.postDelayed(scanTask, 250L)
+                    return
+                }
+                for ((uri, type, receipt, displayName) in candidates) {
+                    if (closed || !ScreenshotCaptureState.enabled(context)) return
+                    if (!ScreenshotCaptureState.reconcileMediaPermission(context)) return
+                    if (reader.capture(uri, type, displayName)) receipts.record(receipt)
+                    else {
+                        if (!ScreenshotCaptureState.reconcileMediaPermission(context)) return
+                        if (!reader.readMetadata {}) {
+                            if (!reader.policyAllowsCapture()) ScreenshotCaptureState.skipThrough(context)
+                            return
+                        }
+                    }
+                }
+            } catch (_: RuntimeException) {
+                // Permission revocation and provider failures carry no image data into logs.
+                ScreenshotCaptureState.reconcileMediaPermission(context)
                 return
             }
-            for ((uri, type, receipt, displayName) in candidates) {
-                if (closed || !ScreenshotCaptureState.enabled(context)) return
-                if (!ScreenshotCaptureState.reconcileMediaPermission(context)) return
-                if (reader.capture(uri, type, displayName)) receipts.record(receipt)
-                else {
-                    if (!ScreenshotCaptureState.reconcileMediaPermission(context)) return
-                    if (!reader.readMetadata {}) {
-                        if (!reader.policyAllowsCapture()) ScreenshotCaptureState.skipThrough(context)
-                        return
-                    }
-                }
-            }
-        } catch (_: RuntimeException) {
-            // Permission revocation and provider failures carry no image data into logs.
-            ScreenshotCaptureState.reconcileMediaPermission(context)
+            if (rowsRead < CANDIDATE_PAGE_SIZE) return
+            if (!ScreenshotCaptureState.enabled(context) ||
+                ScreenshotCaptureState.since(context) != since) return
         }
     }
 
     private data class Candidate(val uri: Uri, val type: String, val receipt: String, val displayName: String)
 
     companion object {
+        internal const val CANDIDATE_PAGE_SIZE = 32
         internal fun isScreenshot(name: String, path: String): Boolean {
             val normalizedName = name.lowercase(Locale.ROOT).replace("_", "").replace("-", "").replace(" ", "")
             val directories = path.lowercase(Locale.ROOT).replace('\\', '/').split('/')

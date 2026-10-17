@@ -55,9 +55,13 @@ manifest. Do not package unsigned artifacts.
 
 ONNX Runtime owns a process-global environment. This module disables its
 telemetry and does not register custom log or thread callbacks, while its model
-sessions are owned by and dropped with the module instance. Its manifest uses
+sessions are owned by and dropped with the module instance. The host runs OCR
+in its authenticated inference worker and terminates that worker after each
+recognition request, including failures. This releases ONNX Runtime globals,
+model sessions, allocator arenas, and temporary inference buffers without
+retaining them in the daemon or Android application process. Its manifest uses
 `"unload_policy": "process"`, so CopyPaste pins the native OCR code until the
-application exits and never unloads it while ORT globals exist.
+worker exits and never unloads it while ORT globals exist.
 
 ## Routing and coverage
 

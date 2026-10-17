@@ -13,6 +13,45 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:window_manager/window_manager.dart';
 
 void main() {
+  for (final platform in [
+    TargetPlatform.macOS,
+    TargetPlatform.windows,
+    TargetPlatform.android,
+  ]) {
+    for (final width in [390.0, 1400.0]) {
+      testWidgets(
+        'platform Settings shortcut and brand return to History at $width',
+        (tester) async {
+          await tester.binding.setSurfaceSize(Size(width, 900));
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+          final controller = AppNavigationController();
+          addTearDown(controller.dispose);
+          await tester.pumpWidget(_shell(controller: controller));
+          await tester.pump(const Duration(milliseconds: 500));
+          final modifier = platform == TargetPlatform.macOS
+              ? LogicalKeyboardKey.metaLeft
+              : LogicalKeyboardKey.controlLeft;
+          await tester.sendKeyDownEvent(modifier);
+          await tester.sendKeyEvent(LogicalKeyboardKey.comma);
+          await tester.sendKeyUpEvent(modifier);
+          await tester.pump(const Duration(milliseconds: 500));
+          expect(controller.selectedDestination, AppDestination.settings);
+          await tester.tap(
+            find.byKey(
+              ValueKey(
+                width < 640 ? 'header-brand-logo' : 'copypaste-brand-logo',
+              ),
+            ),
+          );
+          await tester.pump(const Duration(milliseconds: 500));
+          expect(controller.selectedDestination, AppDestination.history);
+          expect(tester.takeException(), isNull);
+        },
+        variant: TargetPlatformVariant({platform}),
+      );
+    }
+  }
+
   testWidgets('mobile header logo keeps the existing app bar height', (
     tester,
   ) async {

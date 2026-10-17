@@ -812,8 +812,11 @@ impl ModuleManager {
             arguments: resolve_fields(&command.arguments, &arguments)?,
             preferences: resolve_fields(&manifest.preferences, &record.preferences)?,
         };
-        if manifest.search_provider.is_some() {
+        if manifest.search_provider.is_some() || crate::inference::is_ocr_command(id, &command.id) {
             let generation = self.inference.generation();
+            drop(state);
+            let _inputs =
+                crate::input::snapshot(&self.root, &command.arguments, &mut invocation.arguments)?;
             let request = crate::inference::InferenceRequest {
                 identity: self.worker_identity.clone(),
                 id: id.into(),
@@ -821,7 +824,6 @@ impl ModuleManager {
                 data_dir: self.root.join("data").join(id),
                 invocation,
             };
-            drop(state);
             return self.inference.invoke(request, generation);
         }
         state.sequence = state.sequence.saturating_add(1);

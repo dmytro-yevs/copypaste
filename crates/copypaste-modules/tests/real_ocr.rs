@@ -75,16 +75,50 @@ fn signed_ocr_package_uses_shared_install_invoke_and_removal_contracts() {
     )
     .unwrap();
     manager.install(&package).unwrap();
-    let output = manager
-        .invoke(
-            "copypaste.ocr",
-            "recognize-image",
-            BTreeMap::from([("image_path".into(), json!(image))]),
-        )
-        .unwrap();
-    assert_eq!(output, ModuleOutput::Text { text: expected });
+    manager.set_inference_launcher(std::sync::Arc::new(
+        copypaste_modules::DesktopInferenceLauncher::new(PathBuf::from(env!(
+            "CARGO_BIN_EXE_copypaste-inference-worker"
+        ))),
+    ));
+    memory_evidence("before OCR");
+    for iteration in 1..=3 {
+        let output = manager
+            .invoke(
+                "copypaste.ocr",
+                "recognize-image",
+                BTreeMap::from([("image_path".into(), json!(image))]),
+            )
+            .unwrap();
+        assert_eq!(
+            output,
+            ModuleOutput::Text {
+                text: expected.clone()
+            }
+        );
+        println!("OCR request {iteration} completed in a retired worker");
+        memory_evidence(&format!("after OCR {iteration}"));
+    }
     manager.remove("copypaste.ocr").unwrap();
-    assert!(manager.list().unwrap()[0].restart_required);
+    assert!(manager.list().unwrap().is_empty());
+}
+
+fn memory_evidence(label: &str) {
+    #[cfg(target_os = "macos")]
+    if std::env::var_os("COPYPASTE_OCR_MEMORY_EVIDENCE").is_some() {
+        let memory = std::process::Command::new("/usr/bin/vmmap")
+            .args(["-summary", &std::process::id().to_string()])
+            .output()
+            .unwrap();
+        assert!(memory.status.success());
+        println!("{label}");
+        for line in String::from_utf8_lossy(&memory.stdout).lines() {
+            if line.contains("Physical footprint") {
+                println!("{line}");
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = label;
 }
 
 fn collect_files(directory: &Path, root: &Path, output: &mut Vec<(String, PathBuf)>) {

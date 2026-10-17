@@ -12,6 +12,184 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   group('HistoryController', () {
     test(
+      'reuses identical bounded pixels without reducing preview quality',
+      () async {
+        final repository = _HistoryRepository();
+        final controller = HistoryController(repository);
+        addTearDown(controller.dispose);
+        final preview = HistoryImagePreview(
+          Uint8List(32),
+          width: 568,
+          height: 320,
+        );
+        repository.imagePreviewFutures.add(Future.value(preview));
+        expect(
+          await controller.requestImagePreview(
+            'one',
+            bounds: const HistoryImagePreviewBounds(width: 1400, height: 320),
+          ),
+          same(preview),
+        );
+        expect(
+          await controller.requestImagePreview(
+            'one',
+            bounds: const HistoryImagePreviewBounds(width: 900, height: 320),
+          ),
+          same(preview),
+        );
+        expect(repository.imagePreviewEdges, hasLength(1));
+        await controller.requestImagePreview(
+          'one',
+          bounds: const HistoryImagePreviewBounds(width: 900, height: 640),
+        );
+        await controller.requestImagePreview(
+          'one',
+          bounds: const HistoryImagePreviewBounds(width: 400, height: 320),
+        );
+        await controller.requestImagePreview(
+          'other',
+          bounds: const HistoryImagePreviewBounds(width: 900, height: 320),
+        );
+        expect(repository.imagePreviewEdges, hasLength(4));
+        controller.suspend();
+        expect(
+          await controller.requestImagePreview(
+            'one',
+            bounds: const HistoryImagePreviewBounds(width: 900, height: 320),
+          ),
+          isNull,
+        );
+      },
+    );
+
+    test(
+      'opening a large detail does not retain its body in history rows',
+      () async {
+        final body = 'x' * (2 * 1024 * 1024);
+        final repository = _HistoryRepository()
+          ..pages.add(Future.value(HistoryClipPage(items: [_clip('large')])))
+          ..detailClip = HistoryClip(
+            id: 'large',
+            contentType: 'text/plain',
+            preview: body,
+            body: body,
+            createdAt: DateTime.utc(2026),
+            pinned: false,
+          );
+        final controller = HistoryController(repository);
+        addTearDown(controller.dispose);
+        await controller.initialize();
+        await controller.select('large');
+        expect(controller.selectedClip?.body, body);
+        expect(controller.items.single.body, isNull);
+        expect(controller.items.single.preview.length, 1024);
+        expect((await controller.spoilerContent('large')).body, isNull);
+        expect((await controller.spoilerContent('large')).preview.length, 1024);
+      },
+    );
+
+    test(
+      'media completion updates its future without rebuilding all History',
+      () async {
+        final repository = _HistoryRepository();
+        final image = Completer<HistoryImagePreview?>();
+        final icon = Completer<HistorySourceAppIcon?>();
+        repository.imagePreviewFutures.add(image.future);
+        repository.sourceIconFuture = icon.future;
+        final controller = HistoryController(repository);
+        addTearDown(controller.dispose);
+        var rebuilds = 0;
+        controller.addListener(() => rebuilds++);
+        final loadedImage = controller.requestImagePreview('image');
+        final loadedIcon = controller.requestSourceIcon('icon');
+        final imageValue = HistoryImagePreview(
+          Uint8List(4),
+          width: 1,
+          height: 1,
+        );
+        final iconValue = HistorySourceAppIcon(Uint8List(4));
+        image.complete(imageValue);
+        icon.complete(iconValue);
+        expect(await loadedImage, same(imageValue));
+        expect(await loadedIcon, same(iconValue));
+        expect(rebuilds, 0);
+      },
+    );
+
+    test(
+      'a small byte view cannot hide an oversized retained backing buffer',
+      () async {
+        final repository = _HistoryRepository();
+        final controller = HistoryController(repository);
+        addTearDown(controller.dispose);
+        final allocation = Uint8List(17 * 1024 * 1024);
+        repository.imagePreviewFutures.add(
+          Future.value(
+            HistoryImagePreview(
+              Uint8List.sublistView(allocation, 0, 1),
+              width: 1,
+              height: 1,
+            ),
+          ),
+        );
+        await controller.requestImagePreview('view');
+        await controller.requestImagePreview('view');
+        expect(repository.imagePreviewEdges, hasLength(2));
+      },
+    );
+
+    test(
+      'preview cache evicts by bytes before its entry count limit',
+      () async {
+        final repository = _HistoryRepository();
+        final controller = HistoryController(repository);
+        addTearDown(controller.dispose);
+        for (final id in ['first', 'second', 'third']) {
+          repository.imagePreviewFutures.add(
+            Future.value(
+              HistoryImagePreview(
+                Uint8List(6 * 1024 * 1024),
+                width: 2048,
+                height: 2048,
+              ),
+            ),
+          );
+          await controller.requestImagePreview(id);
+        }
+        expect(repository.imagePreviewEdges, hasLength(3));
+        await controller.requestImagePreview('second');
+        expect(repository.imagePreviewEdges, hasLength(3));
+        await controller.requestImagePreview('first');
+        expect(repository.imagePreviewEdges, hasLength(4));
+      },
+    );
+
+    test(
+      'oversized preview is returned without flushing reusable thumbnails',
+      () async {
+        final repository = _HistoryRepository();
+        final controller = HistoryController(repository);
+        addTearDown(controller.dispose);
+        final small = HistoryImagePreview(Uint8List(32), width: 2, height: 2);
+        final large = HistoryImagePreview(
+          Uint8List(17 * 1024 * 1024),
+          width: 2048,
+          height: 2048,
+        );
+        repository.imagePreviewFutures.addAll([
+          Future.value(small),
+          Future.value(large),
+        ]);
+        expect(await controller.requestImagePreview('small'), same(small));
+        expect(await controller.requestImagePreview('large'), same(large));
+        expect(await controller.requestImagePreview('small'), same(small));
+        expect(repository.imagePreviewEdges, hasLength(2));
+        await controller.requestImagePreview('large');
+        expect(repository.imagePreviewEdges, hasLength(3));
+      },
+    );
+
+    test(
       'suspension releases payloads and restores the same search and selection',
       () async {
         final repository = _HistoryRepository()

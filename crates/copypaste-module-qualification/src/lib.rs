@@ -81,14 +81,8 @@ pub(crate) fn qualify_with_inference(
         .remove(&installed.id)
         .map_err(|error| error.to_string())?;
     let pending = manager.list().map_err(|error| error.to_string())?;
-    let restart_required = installed.id == "copypaste.ocr";
-    if restart_required {
-        if pending.len() != 1 || !pending[0].restart_required || pending[0].enabled {
-            return Err(
-                "Process-scoped module removal must disable it and require restart.".into(),
-            );
-        }
-    } else if !pending.is_empty()
+    let restart_required = false;
+    if !pending.is_empty()
         || data.join("packages").join(&installed.id).exists()
         || data.join("data").join(&installed.id).exists()
         || manager
