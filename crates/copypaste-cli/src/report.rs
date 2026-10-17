@@ -50,7 +50,6 @@ pub fn report(command: &Command, data: Option<ResponseData>) -> Result<(), CliEr
             let status = client::expect_status(data)?;
             out(&(render::status_text(&status)));
         }
-        Command::Doctor => unreachable!("doctor renders a redacted status before this call"),
         Command::Add { .. } => match client::optional_item(&data) {
             Some(item) => out(&format!("added {}", item.id)),
             None => out("added"),
