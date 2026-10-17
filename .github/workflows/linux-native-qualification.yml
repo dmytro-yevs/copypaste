@@ -289,6 +289,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
+          retention-days: 3
           name: linux-native-row-${{ matrix.architecture }}-${{ matrix.desktop }}-${{ matrix.session }}
           if-no-files-found: warn
           path: evidence
@@ -353,6 +354,7 @@ jobs:
           "${verify[@]}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
+          retention-days: 90
           name: linux-native-qualification
           if-no-files-found: error
           path: evidence
