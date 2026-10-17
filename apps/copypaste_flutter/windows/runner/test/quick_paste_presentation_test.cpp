@@ -11,6 +11,8 @@ std::vector<std::string> calls;
 std::string fail_at;
 int position_count;
 bool presentation_visible;
+RECT presentation_frame;
+UINT presentation_flags;
 std::function<void(const std::string&)> during_presentation;
 bool Succeeds(const std::string& operation) {
   calls.push_back(operation);
@@ -30,9 +32,13 @@ BOOL WINAPI MonitorInfo(HMONITOR, LPMONITORINFO info) {
   info->rcWork = RECT{0, 0, 1920, 1080};
   return Succeeds("monitor-info");
 }
-BOOL WINAPI Position(HWND, HWND, int, int, int, int, UINT) {
+BOOL WINAPI Position(HWND, HWND, int x, int y, int width, int height, UINT flags) {
   const bool showing = ++position_count != 1;
-  if (showing) presentation_visible = true;
+  if (showing) {
+    presentation_visible = (flags & SWP_SHOWWINDOW) != 0;
+    presentation_flags = flags;
+    presentation_frame = RECT{x, y, x + width, y + height};
+  }
   return Succeeds(showing ? "show" : "move");
 }
 UINT WINAPI Dpi(HWND) { return Succeeds("dpi") ? 96 : 0; }
@@ -45,18 +51,56 @@ class QuickPastePresentation : public testing::Test {
   HWND window = reinterpret_cast<HWND>(static_cast<uintptr_t>(1));
 };
 TEST_F(QuickPastePresentation, SuccessTraversesNativeSequenceBeforeOpened) {
-  EXPECT_TRUE(PresentQuickPasteAtCursor(window, api, [] { calls.push_back("opened"); }));
+  EXPECT_TRUE(PresentQuickPaste(window, api, [] { calls.push_back("opened"); }));
   EXPECT_EQ(calls, (std::vector<std::string>{"cursor", "monitor", "monitor-info", "move", "dpi", "show", "foreground", "opened"}));
 }
 TEST_F(QuickPastePresentation, EachFailureStopsLaterOperationsAndOpened) {
   const std::vector<std::string> sequence{"cursor", "monitor", "monitor-info", "move", "dpi", "show", "foreground"};
   for (size_t index = 0; index < sequence.size(); ++index) {
     calls.clear(); position_count = 0; fail_at = sequence[index];
-    EXPECT_FALSE(PresentQuickPasteAtCursor(window, api, [] { calls.push_back("opened"); }));
+    EXPECT_FALSE(PresentQuickPaste(window, api, [] { calls.push_back("opened"); }));
     auto expected = std::vector<std::string>(sequence.begin(), sequence.begin() + index + 1);
     expected.push_back("hide");
     EXPECT_EQ(calls, expected);
   }
+}
+TEST_F(QuickPastePresentation, TrayUsesIconInsteadOfCursorAndRetainsFocusSequence) {
+  fail_at = "cursor";
+  const RECT anchor{1800, 1056, 1824, 1080};
+  EXPECT_TRUE(PresentQuickPaste(window, api, [] { calls.push_back("opened"); },
+                               [] { return true; }, {}, false, anchor));
+  EXPECT_EQ(calls, (std::vector<std::string>{"monitor", "monitor-info", "move", "dpi", "show", "foreground", "opened"}));
+  EXPECT_EQ(presentation_frame.right, anchor.right);
+  EXPECT_EQ(presentation_frame.bottom, anchor.top - 8);
+  EXPECT_EQ(presentation_frame.bottom - presentation_frame.top, 600);
+}
+TEST_F(QuickPastePresentation, PreparingTheMediaFrameDoesNotShowOrActivateTheWindow) {
+  const RECT anchor{1800, 1056, 1824, 1080};
+  EXPECT_TRUE(PresentQuickPaste(window, api, [] { calls.push_back("opened"); },
+                               [] { return true; }, {}, false, anchor, false));
+  EXPECT_EQ(calls, (std::vector<std::string>{"monitor", "monitor-info", "move", "dpi", "show", "opened"}));
+  EXPECT_FALSE(presentation_visible);
+  EXPECT_EQ(presentation_flags & SWP_SHOWWINDOW, 0u);
+  EXPECT_NE(presentation_flags & SWP_NOACTIVATE, 0u);
+}
+TEST(QuickPasteTrayGeometry, TopTrayOpensBelowAndLeftEdgeClamps) {
+  const auto frame = QuickPasteTrayFrame(RECT{4, 0, 28, 24}, RECT{0, 24, 1920, 1080}, 448, 600, 8);
+  EXPECT_EQ(frame.left, 0);
+  EXPECT_EQ(frame.top, 32);
+  EXPECT_EQ(frame.bottom - frame.top, 600);
+}
+TEST(QuickPasteTrayGeometry, ShortSecondaryMonitorConstrainsExpandedInspector) {
+  const auto frame = QuickPasteTrayFrame(RECT{-80, 476, -56, 500}, RECT{-900, 0, 0, 476}, 816, 600, 8);
+  EXPECT_EQ(frame.left, -872);
+  EXPECT_EQ(frame.right, -56);
+  EXPECT_EQ(frame.top, 0);
+  EXPECT_EQ(frame.bottom, 468);
+}
+TEST(QuickPasteTrayGeometry, ScaledDimensionsRemainBoundedAboveTheTaskbar) {
+  const auto frame = QuickPasteTrayFrame(RECT{3600, 2112, 3648, 2160}, RECT{0, 0, 3840, 2112}, 896, 1200, 16);
+  EXPECT_EQ(frame.right, 3648);
+  EXPECT_EQ(frame.bottom, 2096);
+  EXPECT_EQ(frame.top, 896);
 }
 }  // namespace
 
@@ -203,12 +247,12 @@ TEST_F(QuickPasteTarget, SupersededNativePresentationStagesCannotHideOrInvalidat
         during_presentation = nullptr;
         newer_id = owner.Begin(target_b, popup);
         fail_at.clear(); position_count = 0;
-        EXPECT_TRUE(ShowQuickPastePresentationAtCursor(
+        EXPECT_TRUE(ShowQuickPastePresentation(
             popup, owner, newer_id, presentation_api, [&] {
               ++newer_opened; calls.push_back("new-opened");
             }));
       };
-      EXPECT_FALSE(ShowQuickPastePresentationAtCursor(
+      EXPECT_FALSE(ShowQuickPastePresentation(
           popup, owner, id, presentation_api, [&] { ++opened; }));
       EXPECT_GT(newer_id, id);
       EXPECT_EQ(owner.id(), newer_id);
@@ -230,7 +274,7 @@ TEST_F(QuickPasteTarget, SameOwnerPresentationFailureCleansPartialWindowOnce) {
     calls.clear(); position_count = 0; fail_at = stage;
     const auto id = owner.Begin(target_a, popup);
     int opened = 0;
-    EXPECT_FALSE(ShowQuickPastePresentationAtCursor(
+    EXPECT_FALSE(ShowQuickPastePresentation(
         popup, owner, id, presentation_api, [&] { ++opened; }));
     EXPECT_EQ(owner.id(), 0);
     EXPECT_EQ(opened, 0);
