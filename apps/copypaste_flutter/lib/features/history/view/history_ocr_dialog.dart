@@ -40,12 +40,12 @@ Future<void> showHistoryOcrDialog(
         return AppOverlays.alertDialog(
           icon: LucideIcons.scanText,
           title: const Text('Image text'),
-          content: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight:
-                  MediaQuery.sizeOf(context).height *
-                  AppOverlaySize.dialogContentHeightFactor,
-            ),
+          content: SizedBox(
+            key: const ValueKey('history-ocr-content'),
+            width: AppOverlaySize.dialogMaxWidth,
+            height:
+                MediaQuery.sizeOf(context).height *
+                AppOverlaySize.dialogContentHeightFactor,
             child: content,
           ),
           actions: [

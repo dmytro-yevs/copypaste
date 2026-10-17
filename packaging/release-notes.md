@@ -1,11 +1,12 @@
-Fix spoiler consistency and Quick Paste interactions.
+Improve startup controls, Settings navigation, and resource lifecycle in CopyPaste 1.0.29.
 
-- Match spoiler masks to the actual text, image preview, and inspector metadata dimensions, including scaled text.
-- Share temporary spoiler reveals across History, Quick Paste, and their inspectors through revisioned local runtime state. Keep persisted secret choices synchronized and reject stale visibility responses.
-- Replace eye controls with lock icons and explicit Add spoiler / Remove spoiler action labels.
-- Remove borders from Quick Paste menu buttons in every interaction state.
-- Preserve recent and pinned list scroll positions while opening or closing the Quick Paste inspector. Keep the menu width stable during native expansion and use the shared entrance animation.
-- Refresh OCR, Semantic Search, and Supabase packages to 0.1.19 for CopyPaste 1.0.28.
+- Add Start at login on macOS and Windows, and Start on device boot on Android, with platform-backed preference state.
+- Open Settings with Command-Comma on macOS or Control-Comma on Windows and Android; open History from the app brand control.
+- Keep History and Quick Paste responsive with bounded media caches, smaller retained summaries, and on-demand presentation resources.
+- Reduce image-preview memory by streaming supported PNG thumbnails through a bounded row window and releasing macOS decoder scratch memory.
+- Release OCR workers after each request and bound Android screenshot metadata scans to small batches.
+- Stabilize OCR dialog layout and keep module drawer actions visible below scrolling content.
+- Refresh OCR, Semantic Search, and Supabase packages to 0.1.20 for CopyPaste 1.0.29.
 
 Optional modules remain available from Settings. OCR engines and models are not bundled with the application. Cloud Sync is not part of this release.
 

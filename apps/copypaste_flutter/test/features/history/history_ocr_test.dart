@@ -10,6 +10,7 @@ import 'package:copypaste_flutter/features/history/repository/history_repository
 import 'package:copypaste_flutter/features/history/repository/temporary_history_image_input.dart';
 import 'package:copypaste_flutter/features/history/view/history_screen.dart';
 import 'package:copypaste_flutter/features/history/view/history_inspector.dart';
+import 'package:copypaste_flutter/features/history/view/history_ocr_dialog.dart';
 import 'package:copypaste_flutter/features/modules/controller/modules_controller.dart';
 import 'package:copypaste_flutter/features/modules/models/module_models.dart';
 import 'package:copypaste_flutter/features/modules/repository/modules_repository.dart';
@@ -81,6 +82,72 @@ _fixture() async {
 }
 
 void main() {
+  for (final width in [320.0, 448.0, 816.0, 1400.0]) {
+    for (final scale in [1.0, 2.0]) {
+      testWidgets(
+        'OCR dialog keeps loading geometry at $width and scale $scale',
+        (tester) async {
+          await tester.binding.setSurfaceSize(Size(width, 800));
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+          final fixture = await _fixture();
+          addTearDown(fixture.modules.dispose);
+          addTearDown(fixture.ocr.dispose);
+          fixture.repository.pending = Completer<ModuleResult>();
+          await tester.pumpWidget(
+            ShadcnApp(
+              theme: AppTheme.light,
+              builder: (context, child) => AppTheme.builder(
+                context,
+                MediaQuery(
+                  data: MediaQuery.of(
+                    context,
+                  ).copyWith(textScaler: TextScaler.linear(scale)),
+                  child: child!,
+                ),
+              ),
+              home: Scaffold(
+                child: Builder(
+                  builder: (context) => Button.primary(
+                    onPressed: () => showHistoryOcrDialog(
+                      context,
+                      controller: fixture.ocr,
+                      clip: _image,
+                    ),
+                    child: const Text('Recognize'),
+                  ),
+                ),
+              ),
+            ),
+          );
+          await tester.tap(find.text('Recognize'));
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 500));
+          final loading = tester.getRect(find.byType(AlertDialog));
+          final copy = tester.getRect(
+            find.byKey(const ValueKey('history-ocr-copy')),
+          );
+          fixture.repository.pending!.complete(
+            ModuleResult(List.filled(100, 'Recognized text').join('\n')),
+          );
+          await tester.pumpAndSettle();
+          expect(tester.getRect(find.byType(AlertDialog)), loading);
+          expect(
+            tester.getRect(find.byKey(const ValueKey('history-ocr-copy'))),
+            copy,
+          );
+          expect(copy.bottom, lessThanOrEqualTo(800));
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+        },
+        variant: TargetPlatformVariant({
+          TargetPlatform.macOS,
+          TargetPlatform.windows,
+          TargetPlatform.android,
+        }),
+      );
+    }
+  }
+
   test(
     'availability follows module enable, remove, and restart state',
     () async {

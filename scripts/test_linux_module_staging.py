@@ -122,7 +122,7 @@ class LinuxModuleStagingTest(unittest.TestCase):
                 "package_sha256": hashlib.sha256(package.read_bytes()).hexdigest(),
                 "package_size_bytes": package.stat().st_size, "signature_verified": True,
                 "cases_passed": 3, "removal_completed_after_restart": True,
-                "restart_required": name == "ocr",
+                "restart_required": False,
             }
             self.write(package.with_name(package.name + ".receipt.json"), json.dumps(receipt))
 

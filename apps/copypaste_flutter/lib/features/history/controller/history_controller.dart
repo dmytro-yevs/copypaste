@@ -8,6 +8,8 @@ import '../repository/history_file_downloader.dart';
 import '../repository/history_repository.dart';
 import '../repository/history_file_importer.dart';
 import 'history_ocr_controller.dart';
+import 'history_resource_limits.dart';
+import 'history_summary.dart';
 import 'history_spoiler_controller.dart';
 
 enum HistoryLoadState { initial, loading, ready, empty, error }
@@ -15,6 +17,8 @@ enum HistoryLoadState { initial, loading, ready, empty, error }
 enum HistoryFileDownloadResult { saved, cancelled, failed }
 
 enum _HistoryBulkMutation { delete, pin, unpin }
+
+typedef _ImagePreviewKey = ({String id, int? edge, int? width, int? height});
 
 /// Keeps paged history, selection, query cancellation and bounded media caches
 /// outside the widget tree.
@@ -45,7 +49,7 @@ class HistoryController extends ChangeNotifier {
   /// Loads only mounted secret content for layout beneath a nonpainting mask.
   Future<HistoryClip> spoilerContent(String id) {
     final cached = _spoilerContent.remove(id);
-    final result = cached ?? _repository.get(id);
+    final result = cached ?? _repository.get(id).then(historySummary);
     _spoilerContent[id] = result;
     while (_spoilerContent.length > _maxCachedMedia) {
       _spoilerContent.remove(_spoilerContent.keys.first);
@@ -67,11 +71,12 @@ class HistoryController extends ChangeNotifier {
   bool get canImportFiles => _filePicker != null && !_disposed;
   bool get isImportingFiles => _isImportingFiles;
   final List<HistoryClip> _items = [];
-  final LinkedHashMap<String, HistoryImagePreview?> _imagePreviews =
+  final LinkedHashMap<_ImagePreviewKey, HistoryImagePreview?> _imagePreviews =
       LinkedHashMap();
   final LinkedHashMap<String, HistorySourceAppIcon?> _sourceIcons =
       LinkedHashMap();
-  final Map<String, Future<HistoryImagePreview?>> _imagePreviewLoads = {};
+  final Map<_ImagePreviewKey, Future<HistoryImagePreview?>> _imagePreviewLoads =
+      {};
   final Map<String, Future<HistorySourceAppIcon?>> _sourceIconLoads = {};
   final Set<String> _secretMutations = <String>{};
   final Set<String> _pinMutations = <String>{};
@@ -1218,8 +1223,35 @@ class HistoryController extends ChangeNotifier {
     int? maxEdge,
     HistoryImagePreviewBounds? bounds,
   }) {
-    final cacheKey =
-        '$id:${maxEdge ?? 'thumbnail'}:${bounds?.width}x${bounds?.height}';
+    final cacheKey = (
+      id: id,
+      edge: maxEdge,
+      width: bounds?.width,
+      height: bounds?.height,
+    );
+    if (!_disposed && !_suspended && bounds != null) {
+      final edge = (maxEdge ?? 2048).clamp(1, 2048);
+      final width = bounds.width.clamp(1, edge);
+      final height = bounds.height.clamp(1, edge);
+      // Resizing the inspector can change the row width while height remains
+      // the limiting dimension. Reuse the exact pixels in that case, avoiding
+      // another native decode and a second engine image with identical content.
+      // A smaller preview must never satisfy a request for higher resolution.
+      for (final entry in _imagePreviews.entries) {
+        final preview = entry.value;
+        if (entry.key.id == id &&
+            preview != null &&
+            preview.width > 0 &&
+            preview.height > 0 &&
+            preview.width <= width &&
+            preview.height <= height &&
+            (preview.width == width || preview.height == height)) {
+          _imagePreviews.remove(entry.key);
+          _imagePreviews[entry.key] = preview;
+          return SynchronousFuture(preview);
+        }
+      }
+    }
     return _loadCached(
       cache: _imagePreviews,
       inFlight: _imagePreviewLoads,
@@ -1247,28 +1279,47 @@ class HistoryController extends ChangeNotifier {
     for (final app in _facets.sourceApps) ?app.iconId,
   };
 
-  void _trimCachedMedia<T>(
-    LinkedHashMap<String, T?> cache, {
-    Set<String> retainedIds = const {},
+  void _trimCachedMedia<K, T>(
+    LinkedHashMap<K, T?> cache, {
+    Set<K> retainedIds = const {},
   }) {
-    final excess = cache.length - _maxCachedMedia;
-    if (excess <= 0) return;
-    // Displayed icons must not evict one another and trigger reloads on repaint.
-    final retired = cache.keys
-        .where((id) => !retainedIds.contains(id))
-        .take(excess)
-        .toList();
-    for (final id in retired) {
-      cache.remove(id);
+    final maxBytes = _mediaCacheLimit(cache);
+    var bytes = cache.values.fold<int>(
+      0,
+      (sum, value) => sum + _mediaBytes(value),
+    );
+    // Prefer retiring invisible entries, but visibility cannot bypass the byte
+    // ceiling. Mounted images retain their own reference until disposed.
+    final candidates = [
+      ...cache.keys.where((id) => !retainedIds.contains(id)),
+      ...cache.keys.where(retainedIds.contains),
+    ];
+    for (final id in candidates) {
+      final overBytes = bytes > maxBytes;
+      final overCount =
+          cache.length > HistoryResourceLimits.retainedSourceIcons ||
+          (cache.length > _maxCachedMedia && !retainedIds.contains(id));
+      if (!overBytes && !overCount) continue;
+      bytes -= _mediaBytes(cache.remove(id));
     }
   }
 
-  Future<T?> _loadCached<T>({
-    required LinkedHashMap<String, T?> cache,
-    required Map<String, Future<T?>> inFlight,
-    required String id,
+  int _mediaCacheLimit(Object cache) => identical(cache, _sourceIcons)
+      ? HistoryResourceLimits.sourceIconCacheBytes
+      : HistoryResourceLimits.previewCacheBytes;
+
+  int _mediaBytes(Object? value) => switch (value) {
+    HistoryImagePreview() => value.bytes.buffer.lengthInBytes,
+    HistorySourceAppIcon() => value.bytes.buffer.lengthInBytes,
+    _ => 0,
+  };
+
+  Future<T?> _loadCached<K, T>({
+    required LinkedHashMap<K, T?> cache,
+    required Map<K, Future<T?>> inFlight,
+    required K id,
     required Future<T?> Function() loader,
-    Set<String> Function()? retainedIds,
+    Set<K> Function()? retainedIds,
     bool queryBound = true,
   }) {
     if (_disposed || _suspended) return SynchronousFuture<T?>(null);
@@ -1292,9 +1343,12 @@ class HistoryController extends ChangeNotifier {
             (queryBound && !_isCurrent(epoch))) {
           return null;
         }
-        cache[id] = value;
-        _trimCachedMedia(cache, retainedIds: retainedIds?.call() ?? const {});
-        notifyListeners();
+        // An oversized preview may still be displayed by its caller. It must
+        // not evict every reusable thumbnail only to be evicted itself.
+        if (_mediaBytes(value) <= _mediaCacheLimit(cache)) {
+          cache[id] = value;
+          _trimCachedMedia(cache, retainedIds: retainedIds?.call() ?? const {});
+        }
         return value;
       } catch (_) {
         if (!_disposed &&
@@ -1316,7 +1370,7 @@ class HistoryController extends ChangeNotifier {
   void _replace(HistoryClip clip) {
     final index = _items.indexWhere((item) => item.id == clip.id);
     if (index >= 0) {
-      _items[index] = clip;
+      _items[index] = historySummary(clip);
     }
   }
 

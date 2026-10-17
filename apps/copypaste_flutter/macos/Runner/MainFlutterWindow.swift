@@ -65,6 +65,10 @@ class MainFlutterWindow: NSWindow {
       binaryMessenger: flutterViewController.engine.binaryMessenger
     )
     super.awakeFromNib()
+    if Bundle.main.bundleIdentifier?.hasSuffix(".dev") == true {
+      title = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+        ?? "CopyPaste Dev"
+    }
     installTrafficLightLayoutObservers()
     scheduleTrafficLightLayout()
   }
@@ -236,6 +240,9 @@ class MainFlutterWindow: NSWindow {
       onOpenSettings: { [weak self] in
         self?.quickPasteHostMethodChannel?.invokeMethod("openSettings", arguments: nil)
       },
+      onOpenMain: { [weak self] in
+        self?.quickPasteHostMethodChannel?.invokeMethod("openMain", arguments: nil)
+      },
       onClose: { [weak self] inspectorVisible in
         self?.quickPasteInspectorVisible = inspectorVisible
         self?.quickPastePresentation = nil
@@ -245,6 +252,13 @@ class MainFlutterWindow: NSWindow {
     }
     quickPastePresentation = presentation
     return true
+  }
+
+  func openSettings() {
+    quickPastePresentation?.shutdown()
+    makeKeyAndOrderFront(nil)
+    NSApplication.shared.activate(ignoringOtherApps: true)
+    quickPasteHostMethodChannel?.invokeMethod("openSettings", arguments: nil)
   }
 
   func receivePairingURL(_ url: URL) {
@@ -552,6 +566,7 @@ final class QuickPasteRetirement {
 private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
   private let mainWindow: NSWindow
   private let onOpenSettings: () -> Void
+  private let onOpenMain: () -> Void
   private let onClose: (Bool) -> Void
   private let window: QuickPastePanel
   private let engine: FlutterEngine
@@ -561,6 +576,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
   private var performingAction = false
   private var closed = false
   private var inspectorVisible = false
+  private var inspectorPinned = false
   private var contextReady = false
   private var engineStopped = false
   private let retirement = QuickPasteRetirement()
@@ -569,11 +585,14 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     mainWindow: NSWindow,
     inspectorVisible: Bool,
     onOpenSettings: @escaping () -> Void,
+    onOpenMain: @escaping () -> Void,
     onClose: @escaping (Bool) -> Void
   ) {
     self.mainWindow = mainWindow
     self.inspectorVisible = inspectorVisible
+    self.inspectorPinned = inspectorVisible
     self.onOpenSettings = onOpenSettings
+    self.onOpenMain = onOpenMain
     self.onClose = onClose
     let project = FlutterDartProject()
     let engine = FlutterEngine(
@@ -625,6 +644,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
       if pasteSession.id == 0 { hide() }
       return false
     }
+    inspectorVisible = inspectorPinned
     return presentQuickPaste(
       id: id,
       session: pasteSession,
@@ -672,7 +692,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     closed = true
     retirement.cancel()
     pasteSession.invalidate()
-    onClose(inspectorVisible)
+    onClose(inspectorPinned)
     // Drop the Dart/Rust watch lease before terminating its isolate. The
     // deadline also retires a context that failed during Dart startup.
     DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.stopEngine() }
@@ -720,7 +740,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     hide()
     mainWindow.makeKeyAndOrderFront(nil)
     NSApplication.shared.activate(ignoringOtherApps: true)
-    if openSettings { onOpenSettings() }
+    if openSettings { onOpenSettings() } else { onOpenMain() }
   }
 
   private static func presentationID(_ arguments: Any?) -> Int64? {
@@ -762,6 +782,9 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
         ), display: true)
         guard self.pasteSession.matches(id) else { result(false); return }
         self.inspectorVisible = visible
+        if arguments["remember"] as? Bool ?? true {
+          self.inspectorPinned = visible
+        }
         result(true)
       case "paste":
         guard let id = Self.presentationID(call.arguments) else { result(false); return }

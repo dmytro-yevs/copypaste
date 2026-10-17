@@ -13,6 +13,7 @@ class ClipboardCaptureService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        MainActivity.ensureRuntime(applicationContext)
         running.set(true)
         NativeRuntimeCapture.setCaptureRunning(true)
     }

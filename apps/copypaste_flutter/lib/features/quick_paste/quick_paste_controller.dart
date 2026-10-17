@@ -242,7 +242,7 @@ class QuickPasteController extends ChangeNotifier {
           !_autoOpenSuppressed &&
           _hoveredClipId == clip.id &&
           _focusedClip?.id == clip.id) {
-        unawaited(_setInspectorVisible(true));
+        unawaited(_setInspectorVisible(true, remember: false));
       }
     });
   }
@@ -262,7 +262,7 @@ class QuickPasteController extends ChangeNotifier {
     return _setInspectorVisible(visible);
   }
 
-  Future<void> _setInspectorVisible(bool visible) {
+  Future<void> _setInspectorVisible(bool visible, {bool remember = true}) {
     final id = _presentationId;
     if (id == null || _disposed || _activating) return Future<void>.value();
     _requestedInspectorVisible = visible;
@@ -276,6 +276,7 @@ class QuickPasteController extends ChangeNotifier {
             await _host.setInspectorVisible(
               presentationId: id,
               visible: visible,
+              remember: remember,
             );
           } on PlatformException {
             return;

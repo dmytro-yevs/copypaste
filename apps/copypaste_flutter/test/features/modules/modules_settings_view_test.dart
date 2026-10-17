@@ -90,7 +90,13 @@ void main() {
       expect(tester.widget<Button>(remove).child, isA<Icon>());
       expect(tester.widget<Button>(settings).child, isA<Icon>());
       expect(find.text('Recognize image text'), findsNothing);
-      expect(find.byType(Switch), findsNothing);
+      final toggle = find.byKey(const ValueKey('module-enabled-copypaste.ocr'));
+      expect(find.descendant(of: card, matching: toggle), findsOneWidget);
+      expect(tester.widget<Switch>(toggle).value, isTrue);
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(repository.calls, ['enabled:false']);
+      expect(tester.widget<Switch>(toggle).value, isFalse);
       await tester.tap(find.text('Installed'));
       await tester.pumpAndSettle();
       expect(tester.getSize(card), marketplaceSize);
@@ -136,10 +142,6 @@ void main() {
         tester.getBottomRight(close).dy,
         lessThan(tester.getBottomRight(drawer).dy),
       );
-      final enabledIcon = find.descendant(
-        of: drawer,
-        matching: find.byIcon(LucideIcons.power),
-      );
       final done = find.byKey(
         const ValueKey('module-settings-done-copypaste.ocr'),
       );
@@ -147,17 +149,11 @@ void main() {
         tester.getCenter(find.text('Done')).dx,
         closeTo(tester.getCenter(done).dx, 0.01),
       );
-      final enabledCenter = tester.getCenter(find.text('Enabled')).dy;
-      expect(tester.getCenter(enabledIcon).dy, closeTo(enabledCenter, 0.01));
-      expect(
-        tester.getCenter(find.byType(Switch)).dy,
-        closeTo(enabledCenter, 0.01),
-      );
       expect(find.text('Recognize image text'), findsNothing);
-      expect(find.byType(Switch), findsOneWidget);
-      await tester.tap(find.byType(Switch));
-      await tester.pumpAndSettle();
-      expect(repository.calls, ['enabled:false']);
+      expect(
+        find.descendant(of: drawer, matching: find.byType(Switch)),
+        findsNothing,
+      );
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
       expect(drawer, findsNothing);
@@ -580,14 +576,14 @@ void main() {
       findsOneWidget,
     );
     await tester.tap(
-      find.byKey(const ValueKey('module-settings-copypaste.text-tools')),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(
       find.byKey(const ValueKey('module-enabled-copypaste.text-tools')),
     );
     await tester.pumpAndSettle();
     expect(repository.calls, ['enabled:false']);
+    await tester.tap(
+      find.byKey(const ValueKey('module-settings-copypaste.text-tools')),
+    );
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
 

@@ -36,6 +36,20 @@ class ScreenshotCaptureTest {
         ShadowContentResolver.registerProviderInternal("media", provider)
     }
 
+    @Test fun largeBacklogPagesEqualTimestampsWithoutLosingOrRepeatingCaptures() {
+        val count = ScreenshotCaptureMonitor.CANDIDATE_PAGE_SIZE * 3 + 5
+        provider.rows = (1..count).map { row(it.toLong(), "Screenshot_$it.png", since + 1000) }
+        val reader = Reader()
+        val monitor = ScreenshotCaptureMonitor(app, reader)
+        try {
+            monitor.scan()
+            assertEquals((1..count).map { it.toLong() }, reader.ids)
+            assertEquals(4, provider.queries)
+            monitor.scan()
+            assertEquals(count, reader.ids.size)
+        } finally { monitor.close() }
+    }
+
     @Test fun enabledByDefaultAndPersistsWithoutReinitializingCutoff() {
         assertTrue(ScreenshotCaptureState.enabled(app))
         ScreenshotCaptureState.initialize(app, since + 1000)
@@ -285,7 +299,15 @@ class ScreenshotCaptureTest {
         override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor {
             queries++
             val columns = projection!!.map { it }.toTypedArray()
-            return MatrixCursor(columns).apply { for (row in rows) addRow(columns.map { row[it] ?: 0 }.toTypedArray()) }
+            val selected = rows.filter { row ->
+                val added = (row[MediaStore.Images.Media.DATE_ADDED] as Number).toLong()
+                val id = (row[MediaStore.Images.Media._ID] as Number).toLong()
+                val args = selectionArgs!!
+                added >= args[0].toLong() && (args.size == 1 ||
+                    added > args[1].toLong() || (added == args[2].toLong() && id > args[3].toLong()))
+            }.sortedWith(compareBy({ (it[MediaStore.Images.Media.DATE_ADDED] as Number).toLong() },
+                { (it[MediaStore.Images.Media._ID] as Number).toLong() }))
+            return MatrixCursor(columns).apply { for (row in selected) addRow(columns.map { row[it] ?: 0 }.toTypedArray()) }
         }
         override fun getType(uri: Uri) = "image/png"
         override fun insert(uri: Uri, values: ContentValues?): Uri? = null

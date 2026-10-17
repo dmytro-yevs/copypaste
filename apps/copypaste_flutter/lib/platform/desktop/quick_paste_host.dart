@@ -25,6 +25,9 @@ class MethodChannelQuickPasteWindowHost implements QuickPasteWindowHost {
 
   final MethodChannel _channel;
   VoidCallback? _openSettings;
+  VoidCallback? _openMain;
+
+  void setOpenMainHandler(VoidCallback? handler) => _openMain = handler;
 
   @override
   Future<bool> isSupported() async {
@@ -66,6 +69,10 @@ class MethodChannelQuickPasteWindowHost implements QuickPasteWindowHost {
   }
 
   Future<Object?> _handleMethodCall(MethodCall call) async {
+    if (call.method == 'openMain') {
+      _openMain?.call();
+      return true;
+    }
     if (call.method == 'openSettings') {
       _openSettings?.call();
       return true;
@@ -78,6 +85,7 @@ class MethodChannelQuickPasteWindowHost implements QuickPasteWindowHost {
   @override
   Future<void> dispose() async {
     _openSettings = null;
+    _openMain = null;
     try {
       await _channel.invokeMethod<void>('dispose');
     } on MissingPluginException {
@@ -102,6 +110,7 @@ abstract interface class QuickPasteContextHost {
   Future<void> setInspectorVisible({
     required int presentationId,
     required bool visible,
+    bool remember = true,
   });
 
   Future<bool> paste({required int presentationId});
@@ -163,10 +172,12 @@ class MethodChannelQuickPasteContextHost implements QuickPasteContextHost {
   Future<void> setInspectorVisible({
     required int presentationId,
     required bool visible,
+    bool remember = true,
   }) async {
     if (await _channel.invokeMethod<bool>('setInspectorVisible', {
           'presentationId': presentationId,
           'visible': visible,
+          'remember': remember,
         }) !=
         true) {
       throw PlatformException(code: 'window_unavailable');
