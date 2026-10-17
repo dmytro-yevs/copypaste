@@ -126,6 +126,18 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.copypaste.app/startup")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "getEnabled" -> result.success(StartupPreferences.enabled(this))
+                    "setEnabled" -> {
+                        val enabled = call.argument<Boolean>("enabled")
+                        if (enabled == null) result.error("invalid_arguments", null, null)
+                        else result.success(StartupPreferences.setEnabled(this, enabled))
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         historyFilesChannel = HistoryFilesChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.copypaste.app/lifecycle")
             .setMethodCallHandler { call, result ->

@@ -27,6 +27,7 @@ void main() {
   testWidgets(
     'hidden timeout unloads screens and images, then native focus restores navigation',
     (tester) async {
+      final semantics = tester.ensureSemantics();
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       addTearDown(
         () => tester.binding.handleAppLifecycleStateChanged(
@@ -56,6 +57,9 @@ void main() {
       await host.requestSettings();
       await tester.pumpAndSettle();
       expect(find.text('Settings runtime is unavailable'), findsOneWidget);
+      final rootSemanticsId = tester
+          .getSemantics(find.byKey(const ValueKey('application-semantics')))
+          .id;
       final cache = PaintingBinding.instance.imageCache;
       // Use a deterministic decoded image fixture, independent of asset I/O.
       final recorder = ui.PictureRecorder();
@@ -79,6 +83,12 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
       await tester.pump();
       expect(find.byType(CopyPasteApp), findsNothing);
+      final hiddenSemantics = tester.getSemantics(
+        find.byKey(const ValueKey('application-semantics')),
+      );
+      expect(hiddenSemantics.id, rootSemanticsId);
+      expect(hiddenSemantics.label, 'CopyPaste');
+      expect(hiddenSemantics.childrenCount, 0);
       expect(
         host.disposeCalls,
         0,
@@ -96,6 +106,7 @@ void main() {
       expect(host.disposeCalls, 0);
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
+      semantics.dispose();
     },
   );
 

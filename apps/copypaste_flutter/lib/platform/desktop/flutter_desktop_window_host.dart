@@ -52,7 +52,8 @@ class FlutterDesktopWindowHost
       await windowManager.waitUntilReadyToShow(
         WindowOptions(
           size: Size(initialBounds.width, initialBounds.height),
-          title: 'CopyPaste',
+          // macOS owns the bundle-specific title, including Dev identity.
+          title: Platform.isMacOS ? null : 'CopyPaste',
           skipTaskbar: !showInTaskbar,
         ),
       );

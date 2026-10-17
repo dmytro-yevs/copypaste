@@ -39,9 +39,7 @@ void main() {
       expect(repository.lastPreferences, isNull);
 
       // An independent module operation must not reset unsaved preferences.
-      await tester.tap(
-        find.byKey(const ValueKey('module-enabled-copypaste.text-tools')),
-      );
+      await controller.setEnabled('copypaste.text-tools', false);
       await tester.pumpAndSettle();
       expect(tester.widget<Switch>(find.byType(Switch).last).value, isTrue);
 

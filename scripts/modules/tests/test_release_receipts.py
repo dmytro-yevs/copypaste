@@ -27,7 +27,7 @@ class ReleaseReceiptsTest(unittest.TestCase):
                 "module_id": module_id, "module_version": "0.1.0",
                 "package_sha256": hashlib.sha256(package.read_bytes()).hexdigest(), "package_size_bytes": package.stat().st_size,
                 "cases_passed": 3, "signature_verified": True, "removal_completed_after_restart": True,
-                "restart_required": module_id == "copypaste.ocr",
+                "restart_required": False,
                 **({
                     "glibc_floor": "2.39.0",
                     "effective_uid": 1001,
@@ -54,6 +54,20 @@ class ReleaseReceiptsTest(unittest.TestCase):
                 next(path for path in paths if f"linux-{architecture}.cpmodule.receipt.json" in path.name).unlink()
                 with self.assertRaises(FileNotFoundError):
                     receipts.verify_receipts(root, module, "a" * 40, "123")
+
+    def test_ocr_receipts_require_completed_worker_removal_on_every_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            module, paths = self.fixtures(root, "copypaste.ocr", ["macos", "windows", "android", "linux"])
+            for path in paths:
+                with self.subTest(target=path.name):
+                    receipt = json.loads(path.read_text())
+                    receipt["restart_required"] = True
+                    path.write_text(json.dumps(receipt))
+                    with self.assertRaises(ValueError):
+                        receipts.verify_receipts(root, module, "a" * 40, "123")
+                    receipt["restart_required"] = False
+                    path.write_text(json.dumps(receipt))
 
     def test_linux_receipts_require_the_derived_glibc_floor(self):
         with tempfile.TemporaryDirectory() as directory:

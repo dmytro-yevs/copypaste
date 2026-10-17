@@ -14,5 +14,9 @@ pub use client::{DesktopInferenceLauncher, InferenceConnection, InferenceLaunche
 pub(crate) use protocol::{InferenceRequest, WorkerIdentity};
 pub use worker::run_inference_worker;
 
+pub(crate) fn is_ocr_command(id: &str, command: &str) -> bool {
+    id == "copypaste.ocr" && command == "recognize-image"
+}
+
 #[cfg(test)]
 pub(crate) use client::tests::launcher_fixture;

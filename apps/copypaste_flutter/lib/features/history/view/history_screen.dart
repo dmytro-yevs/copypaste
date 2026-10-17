@@ -1109,6 +1109,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
         textScaler: textScaler,
       )..layout();
       width += painter.width.ceilToDouble() + filterChromeWidth;
+      painter.dispose();
     }
     return width;
   }
@@ -1567,6 +1568,7 @@ class _ClipContent extends StatelessWidget {
       textScaler: MediaQuery.textScalerOf(context),
     )..layout();
     final maxHeight = linePainter.height * 8;
+    linePainter.dispose();
     return LayoutBuilder(
       builder: (context, constraints) {
         final pixelRatio = MediaQuery.devicePixelRatioOf(context);

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
+import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 
 import 'package:copypaste_flutter/features/history/repository/history_file_importer.dart';
 import 'package:flutter/services.dart';
@@ -650,7 +651,11 @@ void main() {
     );
     expect(logo.center.dy, closeTo(search.center.dy, 0.1));
     expect(logo.center.dy, closeTo(inspectorToggle.center.dy, 0.1));
-    expect(search.left - logo.right, 4);
+    expect(
+      search.left -
+          tester.getRect(find.byKey(const ValueKey('quick-paste-home'))).right,
+      AppSpacing.xs,
+    );
     expect(
       tester.getTopLeft(find.text('Pinned clip')).dy,
       greaterThan(tester.getTopLeft(find.text('Recent clip')).dy),
@@ -946,6 +951,12 @@ void main() {
       await tester.pump(const Duration(seconds: 2));
       expect(controller.inspectorOpen, isTrue);
       expect(repository.copied, isEmpty);
+      expect(host.inspectorRemembered, [false]);
+      await controller.close();
+      await controller.opened(2);
+      expect(controller.inspectorOpen, isFalse);
+      await controller.toggleInspector();
+      expect(host.inspectorRemembered, [false, true]);
       expect(tester.takeException(), isNull);
     },
     variant: TargetPlatformVariant({
@@ -1455,6 +1466,7 @@ void main() {
           ),
         );
       final moduleRepository = _OcrModules();
+      moduleRepository.pending = Completer<ModuleResult>();
       final modules = ModulesController(
         repository: moduleRepository,
         marketplace: MemoryModuleMarketplace(),
@@ -1481,7 +1493,21 @@ void main() {
       await controller.opened(1, inspectorVisible: true);
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('history-ocr')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      final loadingBounds = tester.getRect(find.byType(AlertDialog));
+      final loadingCopy = tester.getRect(
+        find.byKey(const ValueKey('history-ocr-copy')),
+      );
+      moduleRepository.pending!.complete(
+        const ModuleResult('Recognized fixture text'),
+      );
       await tester.pumpAndSettle();
+      expect(tester.getRect(find.byType(AlertDialog)), loadingBounds);
+      expect(
+        tester.getRect(find.byKey(const ValueKey('history-ocr-copy'))),
+        loadingCopy,
+      );
       expect(find.text('Recognized fixture text'), findsOneWidget);
       expect(moduleRepository.lastArguments, {
         'image_path': '/tmp/ocr-fixture.png',
@@ -2157,6 +2183,7 @@ class _ContextHost implements QuickPasteContextHost {
   bool initialInspectorVisible = false;
   final inspectorChanges = <bool>[];
   final inspectorPresentationIds = <int>[];
+  final inspectorRemembered = <bool>[];
   Completer<void>? inspectorGate;
   Object? inspectorFailure;
 
@@ -2164,8 +2191,10 @@ class _ContextHost implements QuickPasteContextHost {
   Future<void> setInspectorVisible({
     required int presentationId,
     required bool visible,
+    bool remember = true,
   }) async {
     inspectorChanges.add(visible);
+    inspectorRemembered.add(remember);
     inspectorPresentationIds.add(presentationId);
     final failure = inspectorFailure;
     if (failure != null) throw failure;
@@ -2245,6 +2274,7 @@ class _Downloader implements HistoryFileDownloader {
 }
 
 class _OcrModules extends MemoryModulesRepository {
+  Completer<ModuleResult>? pending;
   _OcrModules() {
     modules = [
       const InstalledModule(
@@ -2274,7 +2304,9 @@ class _OcrModules extends MemoryModulesRepository {
     Map<String, Object> arguments,
   ) async {
     lastArguments = arguments;
-    return const ModuleResult('Recognized fixture text');
+    return pending == null
+        ? const ModuleResult('Recognized fixture text')
+        : await pending!.future;
   }
 }
 
