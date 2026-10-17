@@ -50,6 +50,7 @@ jobs:
           python3 scripts/modules/package.py --module-dir modules/supabase --library modules/supabase/target/${{ matrix.target }}/release/${{ matrix.library }} --platform ${{ matrix.platform }} --architecture ${{ matrix.architecture }} --output "dist/CopyPasteModule-copypaste.supabase-v${version}-${{ matrix.platform }}-${{ matrix.architecture }}.cpmodule"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
+          retention-days: 3
           name: supabase-${{ matrix.platform }}-${{ matrix.architecture }}
           if-no-files-found: error
           path: dist/*.cpmodule
@@ -91,6 +92,7 @@ jobs:
           python3 scripts/modules/package.py --module-dir modules/supabase --library modules/supabase/target/${{ matrix.target }}/release/libcopypaste_module_supabase.so --platform android --architecture ${{ matrix.architecture }} --output "dist/CopyPasteModule-copypaste.supabase-v${version}-android-${{ matrix.architecture }}.cpmodule"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
+          retention-days: 3
           name: supabase-android-${{ matrix.architecture }}
           if-no-files-found: error
           path: dist/*.cpmodule
