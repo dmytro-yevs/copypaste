@@ -87,6 +87,7 @@ jobs:
       linux_artifact_run_id: ${{ steps.version.outputs.linux_artifact_run_id }}
       compositor_runtime_required: ${{ steps.version.outputs.compositor_runtime_required }}
       linux_qualification_only: ${{ steps.version.outputs.linux_qualification_only }}
+      linux_build_matrix: ${{ steps.platform.outputs.matrix }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -263,6 +264,8 @@ jobs:
           WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: python3 scripts/release/preflight-sources.py
+      - id: platform
+        run: echo "matrix=$(python3 scripts/release/platform_manifest.py matrix --tier stable --purpose build)" >> "$GITHUB_OUTPUT"
 
   policy:
     name: Release CI policy
@@ -603,12 +606,7 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - architecture: x86_64
-            runner: ubuntu-24.04
-            appimagetool_url: https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
-            appimagetool_sha256: 95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6
+      matrix: ${{ fromJSON(needs.preflight.outputs.linux_build_matrix) }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
