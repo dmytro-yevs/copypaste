@@ -536,7 +536,7 @@ impl ModuleManager {
         let state_cleared = match self.sync_services.lock() {
             Ok(services) => services
                 .as_ref()
-                .map_or(true, |services| services.clear(id).is_ok()),
+                .is_none_or(|services| services.clear(id).is_ok()),
             Err(_) => false,
         };
         let packages = self.root.join("packages").join(id);
@@ -583,7 +583,7 @@ impl ModuleManager {
             let state_cleared = match self.sync_services.lock() {
                 Ok(services) => services
                     .as_ref()
-                    .map_or(true, |services| services.clear(&id).is_ok()),
+                    .is_none_or(|services| services.clear(&id).is_ok()),
                 Err(_) => false,
             };
             if !state_cleared {
