@@ -119,7 +119,6 @@ Future<void> quickPasteMain() async {
       currentTarget: ModuleMarketplacePlatform().currentTarget,
     ),
   );
-  await modules.initialize();
   runApp(
     QuickPasteApp(
       controller: QuickPasteController(
@@ -135,6 +134,7 @@ Future<void> quickPasteMain() async {
           modules: modules,
           imageInput: TemporaryHistoryImageInput(repository: repository),
         ),
+        initializeInspector: modules.initialize,
       ),
     ),
   );

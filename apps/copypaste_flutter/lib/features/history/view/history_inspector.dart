@@ -146,28 +146,14 @@ class HistoryInspector extends StatelessWidget {
           Gap(inDrawer ? AppSpacing.sm : AppSpacing.lg),
           Flexible(
             fit: inDrawer || compact ? FlexFit.tight : FlexFit.loose,
-            child: clip.secret
-                ? SecretSpoiler(
-                    key: ValueKey(
-                      'inspector-spoiler-${clip.id}-$presentationRevision',
-                    ),
-                    clipId: clip.id,
-                    controller: controller.spoilers,
-                    child: _HistoryDetailContent(
-                      clip: clip,
-                      controller: controller,
-                      body: body,
-                      highlighted: highlighted,
-                      desktop: !inDrawer,
-                    ),
-                  )
-                : _HistoryDetailContent(
-                    clip: clip,
-                    controller: controller,
-                    body: body,
-                    highlighted: highlighted,
-                    desktop: !inDrawer,
-                  ),
+            child: _HistoryDetailContent(
+              clip: clip,
+              controller: controller,
+              body: body,
+              highlighted: highlighted,
+              desktop: !inDrawer,
+              presentationRevision: presentationRevision,
+            ),
           ),
           const Gap(AppSpacing.lg),
           Padding(
@@ -607,6 +593,7 @@ class _HistoryDetailContent extends StatelessWidget {
     required this.body,
     required this.highlighted,
     required this.desktop,
+    required this.presentationRevision,
   });
 
   final HistoryClip clip;
@@ -614,6 +601,17 @@ class _HistoryDetailContent extends StatelessWidget {
   final String body;
   final HighlightedHistoryCode? highlighted;
   final bool desktop;
+  final int presentationRevision;
+
+  Widget _conceal(Widget child, {String keyPrefix = 'inspector-spoiler'}) =>
+      clip.secret
+      ? SecretSpoiler(
+          key: ValueKey('$keyPrefix-${clip.id}-$presentationRevision'),
+          clipId: clip.id,
+          controller: controller.spoilers,
+          child: child,
+        )
+      : child;
 
   @override
   Widget build(BuildContext context) {
@@ -626,17 +624,25 @@ class _HistoryDetailContent extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(
-                child: _DetailImagePreview(clip: clip, controller: controller),
+                child: Align(
+                  alignment: Alignment.topLeft,
+                  child: _conceal(
+                    _DetailImagePreview(clip: clip, controller: controller),
+                  ),
+                ),
               ),
               const Gap(AppSpacing.lg),
               Flexible(
                 child: SingleChildScrollView(
                   primary: false,
                   key: const ValueKey<String>('history-detail-scroll-metadata'),
-                  child: _HistoryMetadataTable(
-                    clip: clip,
-                    controller: controller,
-                    revealConfidential: true,
+                  child: _conceal(
+                    _HistoryMetadataTable(
+                      clip: clip,
+                      controller: controller,
+                      revealConfidential: true,
+                    ),
+                    keyPrefix: 'inspector-metadata-spoiler',
                   ),
                 ),
               ),
@@ -651,12 +657,18 @@ class _HistoryDetailContent extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _body(context),
+            Align(
+              alignment: Alignment.topLeft,
+              child: _conceal(_sizedBody(context)),
+            ),
             const Gap(AppSpacing.lg),
-            _HistoryMetadataTable(
-              clip: clip,
-              controller: controller,
-              revealConfidential: true,
+            _conceal(
+              _HistoryMetadataTable(
+                clip: clip,
+                controller: controller,
+                revealConfidential: true,
+              ),
+              keyPrefix: 'inspector-metadata-spoiler',
             ),
           ],
         ),
@@ -671,13 +683,47 @@ class _HistoryDetailContent extends StatelessWidget {
                 controller: controller,
                 maxHeight: constraints.maxHeight,
               )
-            : SizedBox(width: double.infinity, child: _body(context));
+            : _sizedBody(context);
         return SingleChildScrollView(
           primary: false,
           key: const ValueKey<String>('history-detail-scroll-content'),
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-          child: content,
+          child: Align(alignment: Alignment.topLeft, child: _conceal(content)),
         );
+      },
+    );
+  }
+
+  Widget _sizedBody(BuildContext context) {
+    final content = _body(context);
+    if (!clip.secret ||
+        body.length > 256 ||
+        clip.contentKind == HistoryClipKind.image ||
+        clip.contentKind == HistoryClipKind.color) {
+      return content;
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final style =
+            clip.contentKind == HistoryClipKind.path ||
+                clip.contentKind == HistoryClipKind.file
+            ? Theme.of(context).typography.mono
+            : DefaultTextStyle.of(context).style;
+        final painter = TextPainter(
+          text: TextSpan(
+            style: style,
+            children: [highlighted?.span ?? TextSpan(text: body)],
+          ),
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout(maxWidth: constraints.maxWidth);
+        final width = painter
+            .computeLineMetrics()
+            .fold<double>(0, (longest, line) => math.max(longest, line.width))
+            .ceilToDouble()
+            .clamp(0.0, constraints.maxWidth);
+        painter.dispose();
+        return SizedBox(width: width, child: content);
       },
     );
   }
@@ -863,21 +909,15 @@ class _DetailImagePreview extends StatelessWidget {
         builder: (context, snapshot) {
           final preview = snapshot.data;
           if (preview == null) {
-            return const Align(
-              alignment: Alignment.topLeft,
-              child: SizedBox.square(
-                dimension: AppIconSize.hero,
-                child: Center(
-                  child: Icon(LucideIcons.image, size: AppIconSize.hero),
-                ),
+            return const SizedBox.square(
+              dimension: AppIconSize.hero,
+              child: Center(
+                child: Icon(LucideIcons.image, size: AppIconSize.hero),
               ),
             );
           }
           if (preview.width <= 0 || preview.height <= 0) {
-            return const Align(
-              alignment: Alignment.topLeft,
-              child: Icon(LucideIcons.imageOff, size: AppIconSize.hero),
-            );
+            return const Icon(LucideIcons.imageOff, size: AppIconSize.hero);
           }
           final sourceWidth = preview.width.toDouble();
           final sourceHeight = preview.height.toDouble();
@@ -896,34 +936,29 @@ class _DetailImagePreview extends StatelessWidget {
               availableHeight / sourceHeight,
             ),
           );
-          return Align(
-            alignment: Alignment.topLeft,
-            child: SizedBox(
-              key: const ValueKey<String>('history-detail-image-viewport'),
-              width: sourceWidth * scale,
-              height: sourceHeight * scale,
-              child: Image.memory(
-                preview.bytes,
-                key: ValueKey<String>('history-detail-image-${clip.id}'),
-                fit: BoxFit.contain,
-                alignment: Alignment.topLeft,
-                cacheWidth: math.min(
-                  preview.width,
-                  (sourceWidth * scale * MediaQuery.devicePixelRatioOf(context))
-                      .ceil()
-                      .clamp(1, preview.width),
-                ),
-                cacheHeight: math.min(
-                  preview.height,
-                  (sourceHeight *
-                          scale *
-                          MediaQuery.devicePixelRatioOf(context))
-                      .ceil()
-                      .clamp(1, preview.height),
-                ),
-                errorBuilder: (context, error, stackTrace) => const Center(
-                  child: Icon(LucideIcons.imageOff, size: AppIconSize.hero),
-                ),
+          return SizedBox(
+            key: const ValueKey<String>('history-detail-image-viewport'),
+            width: sourceWidth * scale,
+            height: sourceHeight * scale,
+            child: Image.memory(
+              preview.bytes,
+              key: ValueKey<String>('history-detail-image-${clip.id}'),
+              fit: BoxFit.contain,
+              alignment: Alignment.topLeft,
+              cacheWidth: math.min(
+                preview.width,
+                (sourceWidth * scale * MediaQuery.devicePixelRatioOf(context))
+                    .ceil()
+                    .clamp(1, preview.width),
+              ),
+              cacheHeight: math.min(
+                preview.height,
+                (sourceHeight * scale * MediaQuery.devicePixelRatioOf(context))
+                    .ceil()
+                    .clamp(1, preview.height),
+              ),
+              errorBuilder: (context, error, stackTrace) => const Center(
+                child: Icon(LucideIcons.imageOff, size: AppIconSize.hero),
               ),
             ),
           );

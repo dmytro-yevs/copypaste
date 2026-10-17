@@ -29,6 +29,179 @@ import '../modules/modules_test_support.dart';
 
 void main() {
   testWidgets(
+    'native reveal waits for the visible image and its rendered frame',
+    (tester) async {
+      final repository = _Repository()..imageLoadGate = Completer<void>();
+      repository.clips.insert(
+        0,
+        HistoryClip(
+          id: 'image',
+          contentType: 'image/png',
+          preview: '[image]',
+          createdAt: DateTime.utc(2026),
+          pinned: false,
+        ),
+      );
+      final host = _FrameHost()..openWhenReady = true;
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: host,
+      );
+      await tester.binding.setSurfaceSize(const Size(448, 600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(QuickPasteApp(controller: controller));
+      await tester.pump();
+      await tester.pump();
+      expect(repository.imagePreviewIds, contains('image'));
+      expect(host.presentedIds, isEmpty);
+      repository.imageLoadGate!.complete();
+      await tester.pump();
+      await tester.runAsync(() async {
+        final preview = await controller.history.requestImagePreview(
+          'image',
+          maxEdge: 480,
+        );
+        await precacheImage(
+          MemoryImage(preview!.bytes),
+          tester.element(find.byType(QuickPasteApp)),
+        );
+      });
+      await tester.pumpAndSettle();
+      expect(host.presentedIds, [1]);
+      expect(find.text('[image]'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('a superseded media load cannot reveal an older presentation', (
+    tester,
+  ) async {
+    final repository = _Repository()..imageLoadGate = Completer<void>();
+    repository.clips.insert(
+      0,
+      HistoryClip(
+        id: 'image',
+        contentType: 'image/png',
+        preview: '[image]',
+        createdAt: DateTime.utc(2026),
+        pinned: false,
+      ),
+    );
+    final host = _FrameHost()..openWhenReady = true;
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: host,
+    );
+    await tester.binding.setSurfaceSize(const Size(448, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(QuickPasteApp(controller: controller));
+    await tester.pump();
+    await tester.pump();
+    await controller.opened(2);
+    await tester.pump();
+    repository.imageLoadGate!.complete();
+    await tester.pump();
+    await tester.runAsync(() async {
+      final preview = await controller.history.requestImagePreview(
+        'image',
+        maxEdge: 480,
+      );
+      await precacheImage(
+        MemoryImage(preview!.bytes),
+        tester.element(find.byType(QuickPasteApp)),
+      );
+    });
+    await tester.pumpAndSettle();
+    expect(host.presentedIds, [2]);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('offscreen images do not delay the first visible menu frame', (
+    tester,
+  ) async {
+    final repository = _Repository()..imageLoadGate = Completer<void>();
+    _populateHistory(repository, 40);
+    repository.clips.add(
+      HistoryClip(
+        id: 'image',
+        contentType: 'image/png',
+        preview: '[image]',
+        createdAt: DateTime.utc(2026),
+        pinned: false,
+      ),
+    );
+    final host = _FrameHost()..openWhenReady = true;
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: host,
+    );
+    await tester.binding.setSurfaceSize(const Size(448, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(QuickPasteApp(controller: controller));
+    await tester.pumpAndSettle();
+    expect(host.presentedIds, [1]);
+    expect(repository.imagePreviewIds, isNot(contains('image')));
+    expect(repository.imageLoadGate!.isCompleted, isFalse);
+    repository.imageLoadGate!.complete();
+  });
+  test(
+    'first presentation reuses initial history without filter queries',
+    () async {
+      final repository = _Repository();
+      final host = _ContextHost()..openWhenReady = true;
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: host,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      expect(repository.queryCalls, 1);
+      expect(repository.facetsCalls, 0);
+      expect(controller.items, hasLength(2));
+      await controller.opened(2);
+      expect(repository.queryCalls, 2);
+    },
+  );
+
+  for (final initiallyVisible in [false, true]) {
+    test(
+      'inspector resources load on demand without blocking presentation ($initiallyVisible)',
+      () async {
+        final pending = Completer<void>();
+        var preparations = 0;
+        final host = _ContextHost()
+          ..openWhenReady = true
+          ..initialInspectorVisible = initiallyVisible;
+        final controller = QuickPasteController(
+          repository: _Repository(),
+          preferencesStore: MemoryQuickPastePreferencesStore(),
+          host: host,
+          initializeInspector: () {
+            preparations += 1;
+            return pending.future;
+          },
+        );
+        addTearDown(controller.dispose);
+        await controller.initialize();
+        expect(controller.items, hasLength(2));
+        expect(preparations, initiallyVisible ? 1 : 0);
+        if (!initiallyVisible) await controller.toggleInspector();
+        expect(preparations, 1);
+        expect(controller.inspectorOpen, isTrue);
+        await controller.toggleInspector();
+        await controller.toggleInspector();
+        expect(preparations, 1);
+        expect(pending.isCompleted, isFalse);
+        pending.complete();
+      },
+    );
+  }
+
+  testWidgets(
     'Quick Paste spoiler reveal neither copies nor persists into a reopened menu',
     (tester) async {
       final repository = _Repository();
@@ -55,11 +228,16 @@ void main() {
       await tester.pump();
       expect(find.text('SYNTHETIC MENU SECRET').hitTestable(), findsNothing);
       final generation = controller.presentationGeneration;
+      final quickSpoiler = find.byKey(
+        ValueKey('quick-spoiler-secret-menu-$generation'),
+      );
+      final quickBody = find.descendant(
+        of: quickSpoiler,
+        matching: find.text('SYNTHETIC MENU SECRET'),
+      );
+      expect(tester.getSize(quickSpoiler), tester.getSize(quickBody));
       await tester.tap(
-        find.descendant(
-          of: find.byKey(ValueKey('quick-spoiler-secret-menu-$generation')),
-          matching: find.byType(Button),
-        ),
+        find.descendant(of: quickSpoiler, matching: find.byType(Button)),
       );
       await tester.pump();
       await tester.pump(AppMotion.spoilerReveal);
@@ -672,6 +850,63 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
+
+  for (final kind in HistoryClipKind.values) {
+    testWidgets('tray-sized Quick Paste renders ${kind.name} content', (
+      tester,
+    ) async {
+      final repository = _Repository();
+      final isImage = kind == HistoryClipKind.image;
+      final id = isImage ? 'image' : kind.name;
+      final label = kind == HistoryClipKind.file
+          ? 'invoice.pdf'
+          : 'Preview for ${kind.name}';
+      repository.clips
+        ..clear()
+        ..add(
+          HistoryClip(
+            id: id,
+            contentType: isImage
+                ? 'image/png'
+                : kind == HistoryClipKind.file
+                ? 'file'
+                : 'text/plain',
+            kind: kind,
+            preview: isImage ? '[image]' : label,
+            createdAt: DateTime.utc(2026),
+            pinned: false,
+          ),
+        );
+      final controller = QuickPasteController(
+        repository: repository,
+        preferencesStore: MemoryQuickPastePreferencesStore(),
+        host: _ContextHost()..permissionGranted = true,
+      );
+      await tester.binding.setSurfaceSize(const Size(448, 600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(QuickPasteApp(controller: controller));
+      await tester.pumpAndSettle();
+
+      if (isImage) {
+        final preview = find.descendant(
+          of: find.byKey(const ValueKey('quick-paste-image')),
+          matching: find.byType(Image),
+        );
+        expect(preview, findsOneWidget);
+        expect(tester.widget<Image>(preview).image, isA<MemoryImage>());
+        expect(find.text('[image]'), findsNothing);
+      } else {
+        expect(find.text(label).hitTestable(), findsOneWidget);
+      }
+      expect(
+        find.byKey(const ValueKey('quick-paste-search')).hitTestable(),
+        findsOneWidget,
+      );
+      expect(find.text('Quit').hitTestable(), findsOneWidget);
+      expect(tester.getRect(find.text('Quit')).bottom, lessThanOrEqualTo(600));
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets('keeps pinned clips fixed below scrolling history', (
     tester,
@@ -1984,6 +2219,8 @@ class _Repository implements HistoryRepository {
 
   HistorySourceAppIcon? sourceIcon;
   int sourceIconCalls = 0;
+  int queryCalls = 0;
+  int facetsCalls = 0;
   final clips = <HistoryClip>[
     HistoryClip(
       id: 'pinned',
@@ -2010,6 +2247,7 @@ class _Repository implements HistoryRepository {
   bool failSave = false;
   final imagePreviewEdges = <int?>[];
   final imagePreviewIds = <String>[];
+  Completer<void>? imageLoadGate;
   int deleteAllCalls = 0;
   int getCalls = 0;
   Completer<void>? copyGate;
@@ -2048,7 +2286,10 @@ class _Repository implements HistoryRepository {
   }
 
   @override
-  Future<HistoryFacets> facets() async => const HistoryFacets();
+  Future<HistoryFacets> facets() async {
+    facetsCalls += 1;
+    return const HistoryFacets();
+  }
 
   @override
   Future<HistoryClip> get(String id) async {
@@ -2067,6 +2308,7 @@ class _Repository implements HistoryRepository {
     imagePreviewEdges.add(maxEdge);
     imagePreviewIds.add(id);
     if (id != 'image') return null;
+    await imageLoadGate?.future;
     final preview = image.Image(width: 240, height: 180);
     return HistoryImagePreview(
       Uint8List.fromList(image.encodePng(preview)),
@@ -2080,7 +2322,10 @@ class _Repository implements HistoryRepository {
     required HistoryQuery query,
     required int limit,
     String? cursor,
-  }) async => HistoryClipPage(items: List.of(clips));
+  }) async {
+    queryCalls += 1;
+    return HistoryClipPage(items: List.of(clips));
+  }
 
   @override
   Future<void> reorderPinned(List<String> ids) async {}
@@ -2328,5 +2573,15 @@ class _OcrClipboard implements ClipboardWriter {
   @override
   Future<void> writeText(String text) async {
     this.text = text;
+  }
+}
+
+class _FrameHost extends _ContextHost implements QuickPasteFrameHost {
+  final presentedIds = <int>[];
+
+  @override
+  Future<bool> presentFrame({required int presentationId}) async {
+    presentedIds.add(presentationId);
+    return true;
   }
 }
