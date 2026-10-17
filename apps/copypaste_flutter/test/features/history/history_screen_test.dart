@@ -294,6 +294,35 @@ void main() {
       await controller.select('secret-fixture');
       await tester.pump();
       expect(find.text('SYNTHETIC HISTORY SECRET').hitTestable(), findsNothing);
+      final inspectorSpoiler = find.byKey(
+        const ValueKey('inspector-spoiler-secret-fixture-0'),
+      );
+      final inspectorBody = find
+          .descendant(
+            of: inspectorSpoiler,
+            matching: find.byType(SelectableText),
+          )
+          .first;
+      expect(
+        tester.getSize(inspectorSpoiler).height,
+        tester.getSize(inspectorBody).height,
+      );
+      expect(
+        tester.getSize(inspectorSpoiler).width,
+        tester.getSize(inspectorBody).width,
+      );
+      expect(tester.getSize(inspectorSpoiler).width, lessThan(300));
+      expect(tester.getSize(inspectorSpoiler).height, lessThan(100));
+      final historySpoiler = find.byKey(
+        const ValueKey('history-spoiler-secret-fixture'),
+      );
+      final historyBody = find
+          .descendant(
+            of: historySpoiler,
+            matching: find.text('SYNTHETIC HISTORY SECRET'),
+          )
+          .first;
+      expect(tester.getSize(historySpoiler), tester.getSize(historyBody));
       await tester.tap(
         find.descendant(
           of: find.byKey(const ValueKey('inspector-spoiler-secret-fixture-0')),

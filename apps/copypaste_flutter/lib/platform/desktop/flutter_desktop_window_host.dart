@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/widgets.dart' show IconData, Offset, Rect, Size;
+import 'package:flutter/services.dart'
+    show MissingPluginException, PlatformException;
 import 'package:screen_retriever/screen_retriever.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart' show LucideIcons;
 import 'package:tray_manager/tray_manager.dart';
@@ -9,6 +11,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'desktop_window_controller.dart';
 import 'tray_menu_icons.dart';
+import 'quick_paste_host.dart';
 import '../macos/macos_tray_menu.dart';
 
 const _trayIconAsset = 'assets/brand/copypaste.png';
@@ -36,6 +39,33 @@ class FlutterDesktopWindowHost
   ListenerId? _captureMenuItemListener;
   ListenerId? _settingsMenuItemListener;
   ListenerId? _quitMenuItemListener;
+  bool _openingQuickPaste = false;
+  bool _nativeTrayActivationBound = false;
+
+  Future<void> _unbindNativeTrayActivation() async {
+    if (!_nativeTrayActivationBound) return;
+    try {
+      await unbindMacosTrayQuickPaste();
+    } on MissingPluginException {
+      // Native teardown may have already released its channel.
+    } on PlatformException {
+      // Releasing the remaining tray resources must still complete.
+    } finally {
+      _nativeTrayActivationBound = false;
+    }
+  }
+
+  Future<void> _openQuickPasteFromTray(TrayIcon icon) async {
+    if (_openingQuickPaste) return;
+    _openingQuickPaste = true;
+    try {
+      await openTrayQuickPaste(icon.getBounds());
+    } catch (_) {
+      if (identical(icon, _trayIcon)) icon.openContextMenu();
+    } finally {
+      _openingQuickPaste = false;
+    }
+  }
 
   @override
   Future<void> initializeWindow(
@@ -140,6 +170,7 @@ class FlutterDesktopWindowHost
     required Future<void> Function() onSettingsRequested,
     required Future<void> Function() onQuitRequested,
   }) async {
+    await _unbindNativeTrayActivation();
     _disposeTray();
     final image = ImageAsset.fromAsset(_trayIconAsset);
     final icon = TrayIcon.create();
@@ -207,11 +238,7 @@ class FlutterDesktopWindowHost
         ..setTitle(Platform.isMacOS ? null : 'CopyPaste')
         ..setTooltip('CopyPaste')
         ..setContextMenu(menu)
-        ..setContextMenuTrigger(
-          (Platform.isMacOS || Platform.isLinux)
-              ? ContextMenuTrigger.clicked
-              : ContextMenuTrigger.rightClicked,
-        );
+        ..setContextMenuTrigger(ContextMenuTrigger.rightClicked);
       if (!icon.setVisible(visible)) {
         throw StateError('Unable to show the system tray controls.');
       }
@@ -237,10 +264,8 @@ class FlutterDesktopWindowHost
         }
       });
       trayListener = icon.addListener((event) {
-        if ((Platform.isWindows || Platform.isLinux) &&
-            (event is TrayIconClickedEvent ||
-                event is TrayIconDoubleClickedEvent)) {
-          unawaited(onOpenRequested());
+        if (event is TrayIconClickedEvent && !_nativeTrayActivationBound) {
+          unawaited(_openQuickPasteFromTray(icon));
         }
       });
 
@@ -257,7 +282,15 @@ class FlutterDesktopWindowHost
       _captureMenuItemListener = captureListener;
       _settingsMenuItemListener = settingsListener;
       _quitMenuItemListener = quitListener;
+      if (Platform.isMacOS) {
+        await bindMacosTrayQuickPaste(icon.nativeObject.address);
+        _nativeTrayActivationBound = true;
+      }
     } catch (_) {
+      if (identical(_trayIcon, icon)) {
+        _disposeTray();
+        rethrow;
+      }
       _disposeTrayResources(
         icon: icon,
         image: image,
@@ -334,6 +367,7 @@ class FlutterDesktopWindowHost
     _onCloseRequested = null;
     _onBoundsChanged = null;
     _onVisibilityChanged = null;
+    await _unbindNativeTrayActivation();
     _disposeTray();
     if (_listening) {
       windowManager.removeListener(this);

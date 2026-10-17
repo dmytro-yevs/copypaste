@@ -391,8 +391,10 @@ pub(super) fn set_spoiler_revealed(
             Err(error) => return storage_error(id, "reveal", &error),
         }
     }
-    let (revision, revealed_ids) = state.spoilers.set(item_id, revealed);
-    state.note_remote_change();
+    let (revision, revealed_ids, changed) = state.spoilers.set_with_change(item_id, revealed);
+    if changed {
+        state.note_remote_change();
+    }
     Response::ok(
         id,
         ResponseData::SpoilerState {
@@ -944,6 +946,20 @@ mod tests {
         assert_eq!(page.items[0].id, ranked[0].id);
         assert!(page.next_cursor.is_none());
         assert!(serde_json::to_string(&page).unwrap().len() <= copypaste_ipc::MAX_FRAME_BYTES);
+    }
+
+    #[test]
+    fn spoiler_conceal_of_an_empty_session_does_not_reload_history() {
+        let (state, _dir, writes) =
+            crate::testutil::test_state_watching_clipboard("spoiler-idempotent");
+        let mut events = state.subscribe();
+        let response = set_spoiler_revealed(&state, 1, None, false);
+        assert!(response.ok);
+        assert!(matches!(
+            events.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
+        assert_eq!(writes.count(), 0);
     }
 
     #[test]
