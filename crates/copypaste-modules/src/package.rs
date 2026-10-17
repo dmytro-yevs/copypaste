@@ -79,10 +79,11 @@ impl PackageVerifier {
         for index in 0..archive.len() {
             let file = archive.by_index(index).map_err(|_| invalid_archive())?;
             let kind = file.unix_mode().unwrap_or(0) & 0o170000;
+            let name = file.name().map_err(|_| invalid_archive())?;
             if file.is_dir()
                 || (kind != 0 && kind != 0o100000)
-                || !copypaste_module_sdk::valid_relative_path(file.name())
-                || !names.insert(file.name().to_owned())
+                || !copypaste_module_sdk::valid_relative_path(name.as_ref())
+                || !names.insert(name.into_owned())
             {
                 return Err(invalid_archive());
             }
