@@ -23,7 +23,7 @@ tempfile.workspace = true
 semver = "1"
 libloading = "0.9"
 minisign-verify = "0.3"
-zip = { version = "8", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 wiremock = "=0.6.5"
