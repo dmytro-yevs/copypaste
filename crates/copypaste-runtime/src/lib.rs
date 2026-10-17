@@ -277,6 +277,7 @@ impl Runtime {
                 Response::ok(
                     id,
                     ResponseData::Status(copypaste_ipc::StatusData {
+                        platform_capabilities: Default::default(),
                         sync_status: self.node.sync_status(settings.config.sync_enabled),
                         device_details: Some(p2p_contract::local_device_details(
                             &self.device_name,

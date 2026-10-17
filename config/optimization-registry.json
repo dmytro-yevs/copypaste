@@ -1252,6 +1252,26 @@
       ],
       "supersedes": [],
       "functional_validation": "12 image-preview tests passed, including 140 exact-byte cases, palette transparency, 16-bit/APNG fallback and corruption recovery. Twenty native preview response hashes match baseline. Median latency increased 25.76 -> 35.95 ms; sampled daemon CPU for workload/recovery increased 0.622 -> 0.866 seconds. Candidate 8: 24 native inspector opens verified, 180s sampled family peak 286,918,648 bytes. Functional restore passed but restore peak was outside collection; hidden suspension not established."
+    },
+    {
+      "id": "RUN-031",
+      "title": "Bound Linux clipboard adapter reprobes",
+      "domain": "runtime",
+      "implementation_status": "implemented",
+      "priority": "P1",
+      "owner_module": "Linux clipboard adapter",
+      "platforms": ["Linux"],
+      "source_references": [
+        "crates/copypaste-daemon/src/clipboard/linux.rs",
+        "crates/copypaste-daemon/src/capture.rs"
+      ],
+      "invariant": "A healthy idle data-control adapter adds no reconnect wakeups; a missing required capability or lost bridge triggers at most one probe per five seconds, without reading a clipboard payload.",
+      "next_step": "Measure daemon and worker CPU, wakeups, memory peaks and reconnection latency on GNOME and KDE Wayland sessions before native resource qualification.",
+      "native_resource_qualification": {"Linux": "not_established"},
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Unit adapter selection and reconnect tests passed; native resource qualification pending."
     }
   ]
 }

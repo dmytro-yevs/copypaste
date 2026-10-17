@@ -131,8 +131,6 @@ async fn run() -> anyhow::Result<()> {
         Ok(store) => store,
         Err(e) => return halt_or_fail(&socket_path, e, "open the history database").await,
     };
-    let source = clipboard::new_source(&data_dir).context("initialize the clipboard backend")?;
-
     // Peer sync. The identity is minted in the database the store just opened,
     // so it must come second; the peer file and discovery do not
     // depend on either.
@@ -141,6 +139,8 @@ async fn run() -> anyhow::Result<()> {
         meta.set_device_name(name).context("set the device name")?;
     }
     let settings = Settings::load(&meta);
+    let source = clipboard::new_source_for_settings(&data_dir, &settings.get())
+        .context("initialize the clipboard backend")?;
     let peers = copypaste_core::peer_store::open(&store, &keyring, &peers_path)
         .context("open the paired-device list")?;
     let device_name = meta.device_name();

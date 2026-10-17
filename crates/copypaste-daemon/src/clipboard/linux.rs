@@ -1,9 +1,10 @@
 //! X11 clipboard transport. The worker keeps ownership and serves requests.
 
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, BorrowedFd};
 use std::os::unix::net::UnixStream;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -21,6 +22,7 @@ use x11rb::rust_connection::RustConnection;
 use x11rb::wrapper::ConnectionExt as _;
 
 use super::{Capture, CapturePolicy, ClipboardSource, SourcePolicyEvidence};
+use copypaste_ipc::{CapabilityGuarantee, CapabilityState, CapabilityStatus, PlatformCapability};
 
 mod gnome;
 mod wayland;
@@ -30,6 +32,7 @@ const MAX_TARGETS: usize = 1024;
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(2);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
 const XFIXES_SELECTION_VERSION: (u32, u32) = (2, 0);
+const ADAPTER_REPROBE_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
 struct Atoms {
@@ -248,68 +251,251 @@ impl X11Clipboard {
     }
 }
 
-/// Selects the transport for the active display server. A Wayland session is
-/// never silently redirected through XWayland: missing compositor support is
-/// surfaced by the inactive native adapter instead.
+/// Selects a transport only after checking the live display and authenticated
+/// bridge protocol. A Wayland session never falls through to XWayland.
 pub(super) enum LinuxClipboard {
     X11(X11Clipboard),
     Gnome(gnome::GnomeClipboard),
     Kwin(gnome::GnomeClipboard),
     Wayland(wayland::WaylandClipboard),
+    Adaptive(Box<AdaptiveClipboard>),
 }
 
-impl LinuxClipboard {
-    pub(super) fn new(data_dir: &Path) -> std::io::Result<Self> {
-        if is_wayland_session() {
-            if is_gnome_session() {
-                Ok(Self::Gnome(gnome::GnomeClipboard::new(data_dir)?))
-            } else if is_kde_session() {
-                Ok(Self::Kwin(gnome::GnomeClipboard::new_kwin(data_dir)?))
-            } else {
-                Ok(Self::Wayland(wayland::WaylandClipboard::new(data_dir)?))
-            }
-        } else if std::env::var_os("DISPLAY").is_some() {
-            X11Clipboard::new(data_dir).map(Self::X11)
+pub(in crate::clipboard) struct AdaptiveClipboard {
+    active: LinuxClipboard,
+    data_dir: PathBuf,
+    last_probe: Instant,
+    inactive_since: Option<Instant>,
+}
+
+impl AdaptiveClipboard {
+    fn should_probe(&self, settings: &copypaste_ipc::ConfigData) -> bool {
+        self.should_probe_requirement(!settings.excluded_app_bundle_ids.is_empty())
+    }
+
+    fn should_probe_requirement(&self, source_attribution_required: bool) -> bool {
+        let adapter = match self.active {
+            LinuxClipboard::X11(_) => Adapter::X11,
+            LinuxClipboard::Gnome(_) => Adapter::Gnome,
+            LinuxClipboard::Kwin(_) => Adapter::Kwin,
+            LinuxClipboard::Wayland(_) => Adapter::Wayland,
+            LinuxClipboard::Adaptive(_) => return false,
+        };
+        reprobing_required(
+            adapter,
+            self.active.is_available(),
+            source_attribution_required,
+        )
+    }
+
+    fn probe(&mut self, settings: &copypaste_ipc::ConfigData) {
+        if self.last_probe.elapsed() < ADAPTER_REPROBE_INTERVAL {
+            return;
+        }
+        self.last_probe = Instant::now();
+        if !self.should_probe(settings) {
+            return;
+        }
+        if self.active.is_available() {
+            self.inactive_since = None;
         } else {
-            Ok(Self::Wayland(wayland::WaylandClipboard::new(data_dir)?))
+            self.inactive_since.get_or_insert_with(Instant::now);
+        }
+        let replacement = if matches!(self.active, LinuxClipboard::Wayland(_)) {
+            if gnome::GnomeClipboard::probe_gnome() {
+                gnome::GnomeClipboard::new(&self.data_dir).map(LinuxClipboard::Gnome)
+            } else if gnome::GnomeClipboard::probe_kwin() {
+                gnome::GnomeClipboard::new_kwin(&self.data_dir).map(LinuxClipboard::Kwin)
+            } else {
+                return;
+            }
+        } else if self
+            .inactive_since
+            .is_some_and(|since| since.elapsed() >= ADAPTER_REPROBE_INTERVAL)
+            && wayland::WaylandClipboard::probe_data_control()
+        {
+            wayland::WaylandClipboard::new(&self.data_dir).map(LinuxClipboard::Wayland)
+        } else {
+            return;
+        };
+        if let Ok(replacement) = replacement {
+            // Both bridge Snapshot and data-control connection initialize
+            // their cursor without marking the current selection dirty. Poll
+            // and writes hold the same outer clipboard lock, so the old
+            // adapter cannot deliver a second copy after this swap.
+            self.active = replacement;
+            self.inactive_since = None;
         }
     }
 }
 
+impl LinuxClipboard {
+    pub(super) fn new_with_requirements(
+        data_dir: &Path,
+        source_attribution_required: bool,
+    ) -> std::io::Result<Self> {
+        let wayland = is_wayland_session();
+        // The data-control worker verifies the protocol and seats off the
+        // startup path. If it remains inactive, the adaptive wrapper probes
+        // an authenticated bridge on its bounded reconnect cadence.
+        let data_control = wayland;
+        let needs_bridge = wayland && source_attribution_required;
+        let gnome = needs_bridge && gnome::GnomeClipboard::probe_gnome();
+        let kwin = needs_bridge && !gnome && gnome::GnomeClipboard::probe_kwin();
+        let selected = select_adapter(
+            wayland,
+            std::env::var_os("DISPLAY").is_some(),
+            data_control,
+            gnome,
+            kwin,
+            source_attribution_required,
+        );
+        let active = match selected {
+            Adapter::X11 => X11Clipboard::new(data_dir).map(Self::X11),
+            Adapter::Gnome => gnome::GnomeClipboard::new(data_dir).map(Self::Gnome),
+            Adapter::Kwin => gnome::GnomeClipboard::new_kwin(data_dir).map(Self::Kwin),
+            Adapter::Wayland => wayland::WaylandClipboard::new(data_dir).map(Self::Wayland),
+        }?;
+        Ok(Self::Adaptive(Box::new(AdaptiveClipboard {
+            active,
+            data_dir: data_dir.to_path_buf(),
+            last_probe: Instant::now(),
+            inactive_since: None,
+        })))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Adapter {
+    X11,
+    Gnome,
+    Kwin,
+    Wayland,
+}
+
+fn reprobing_required(adapter: Adapter, available: bool, source_exclusions: bool) -> bool {
+    match adapter {
+        Adapter::Wayland => !available || source_exclusions,
+        Adapter::Gnome | Adapter::Kwin => !available,
+        Adapter::X11 => false,
+    }
+}
+
+fn select_adapter(
+    wayland: bool,
+    x11: bool,
+    data_control: bool,
+    gnome: bool,
+    kwin: bool,
+    source_attribution_required: bool,
+) -> Adapter {
+    if wayland {
+        // A source exclusion requires attribution before Read. Without that
+        // requirement, use the standard protocol when it is exposed. The
+        // data-control adapter fails closed if a bridge is unavailable.
+        if !source_attribution_required && data_control {
+            Adapter::Wayland
+        } else if gnome {
+            Adapter::Gnome
+        } else if kwin {
+            Adapter::Kwin
+        } else {
+            Adapter::Wayland
+        }
+    } else if x11 {
+        Adapter::X11
+    } else {
+        Adapter::Wayland
+    }
+}
+
 fn is_wayland_session() -> bool {
-    std::env::var_os("WAYLAND_DISPLAY").is_some()
+    wayland_client::Connection::connect_to_env().is_ok()
+        || std::env::var_os("WAYLAND_DISPLAY").is_some()
         || std::env::var("XDG_SESSION_TYPE")
             .is_ok_and(|value| value.eq_ignore_ascii_case("wayland"))
 }
 
-fn is_gnome_session() -> bool {
-    [
-        "XDG_CURRENT_DESKTOP",
-        "XDG_SESSION_DESKTOP",
-        "DESKTOP_SESSION",
-    ]
-    .into_iter()
-    .filter_map(std::env::var_os)
-    .any(|value| {
-        value
-            .to_string_lossy()
-            .to_ascii_lowercase()
-            .contains("gnome")
-    })
-}
+#[cfg(test)]
+mod adapter_selection_tests {
+    use super::{clipboard_capabilities, reprobing_required, select_adapter, Adapter};
+    use copypaste_ipc::{CapabilityGuarantee, CapabilityState, PlatformCapability};
 
-fn is_kde_session() -> bool {
-    [
-        "XDG_CURRENT_DESKTOP",
-        "XDG_SESSION_DESKTOP",
-        "DESKTOP_SESSION",
-    ]
-    .into_iter()
-    .filter_map(std::env::var_os)
-    .any(|value| {
-        let value = value.to_string_lossy().to_ascii_lowercase();
-        value.contains("kde") || value.contains("plasma")
-    })
+    #[test]
+    fn probes_select_a_bridge_without_desktop_name() {
+        assert_eq!(
+            select_adapter(true, true, true, true, false, true),
+            Adapter::Gnome
+        );
+        assert_eq!(
+            select_adapter(true, true, true, false, true, true),
+            Adapter::Kwin
+        );
+        assert_eq!(
+            select_adapter(true, true, true, false, false, true),
+            Adapter::Wayland
+        );
+    }
+
+    #[test]
+    fn standard_data_control_wins_when_attribution_is_not_required() {
+        assert_eq!(
+            select_adapter(true, true, true, true, true, false),
+            Adapter::Wayland
+        );
+        assert_eq!(
+            select_adapter(true, true, false, true, false, false),
+            Adapter::Gnome
+        );
+    }
+
+    #[test]
+    fn wayland_never_falls_through_to_xwayland() {
+        assert_eq!(
+            select_adapter(true, true, false, false, false, false),
+            Adapter::Wayland
+        );
+        assert_eq!(
+            select_adapter(false, true, false, false, false, false),
+            Adapter::X11
+        );
+    }
+
+    #[test]
+    fn data_control_reports_no_source_identity_and_fail_closed_privacy() {
+        let capabilities = clipboard_capabilities(true, "linux-wayland-data-control", true);
+        let source = &capabilities[&PlatformCapability::SourceAttribution];
+        let privacy = &capabilities[&PlatformCapability::PrivacyEnforcement];
+        assert_eq!(source.state, CapabilityState::Unsupported);
+        assert_eq!(source.guarantee, CapabilityGuarantee::None);
+        assert_eq!(privacy.state, CapabilityState::Available);
+        assert_eq!(privacy.guarantee, CapabilityGuarantee::Verified);
+        let read_write = &capabilities[&PlatformCapability::ClipboardReadWrite];
+        assert!(read_write.mime_types.iter().any(|mime| mime == "image/png"));
+        assert_eq!(
+            read_write.max_bytes,
+            Some(copypaste_ipc::MAX_CONTENT_BYTES as u64)
+        );
+    }
+
+    #[test]
+    fn lost_backend_reports_no_clipboard_guarantees() {
+        let capabilities = clipboard_capabilities(false, "linux-gnome-wayland-clipboard", false);
+        for value in capabilities.values() {
+            assert_eq!(value.state, CapabilityState::Error);
+            assert_eq!(value.guarantee, CapabilityGuarantee::None);
+        }
+    }
+
+    #[test]
+    fn reconnect_probes_only_when_a_requirement_is_unmet() {
+        assert!(!reprobing_required(Adapter::Wayland, true, false));
+        assert!(reprobing_required(Adapter::Wayland, true, true));
+        assert!(reprobing_required(Adapter::Wayland, false, false));
+        assert!(!reprobing_required(Adapter::Gnome, true, true));
+        assert!(reprobing_required(Adapter::Gnome, false, false));
+        assert!(!reprobing_required(Adapter::X11, false, true));
+    }
 }
 impl Drop for X11Clipboard {
     fn drop(&mut self) {
@@ -376,12 +562,30 @@ impl ClipboardSource for X11Clipboard {
 }
 
 impl ClipboardSource for LinuxClipboard {
+    fn platform_capabilities(&self) -> BTreeMap<PlatformCapability, CapabilityStatus> {
+        if let Self::Adaptive(source) = self {
+            return source.active.platform_capabilities();
+        }
+        clipboard_capabilities(
+            self.is_available(),
+            self.backend_name(),
+            matches!(self, Self::Wayland(_)),
+        )
+    }
+
     fn poll(&mut self) -> Option<Capture> {
         match self {
             Self::X11(source) => source.poll(),
             Self::Gnome(source) => source.poll(),
             Self::Kwin(source) => source.poll(),
             Self::Wayland(source) => source.poll(),
+            Self::Adaptive(source) => {
+                let settings = copypaste_ipc::ConfigData::default();
+                source.probe(&settings);
+                source
+                    .active
+                    .poll_with_policy(CapturePolicy::new(&settings))
+            }
         }
     }
     fn poll_with_policy(&mut self, policy: CapturePolicy<'_>) -> Option<Capture> {
@@ -390,14 +594,26 @@ impl ClipboardSource for LinuxClipboard {
             Self::Gnome(source) => source.poll_with_policy(policy),
             Self::Kwin(source) => source.poll_with_policy(policy),
             Self::Wayland(source) => source.poll_with_policy(policy),
+            Self::Adaptive(source) => {
+                source.probe(policy.settings);
+                source.active.poll_with_policy(policy)
+            }
         }
     }
     fn changed(&mut self) -> bool {
+        self.changed_with_requirements(false)
+    }
+    fn changed_with_requirements(&mut self, source_attribution_required: bool) -> bool {
         match self {
             Self::X11(source) => source.changed(),
             Self::Gnome(source) => source.changed(),
             Self::Kwin(source) => source.changed(),
             Self::Wayland(source) => source.changed(),
+            Self::Adaptive(source) => {
+                source.active.changed()
+                    || source.should_probe_requirement(source_attribution_required)
+                        && source.last_probe.elapsed() >= ADAPTER_REPROBE_INTERVAL
+            }
         }
     }
     fn is_available(&self) -> bool {
@@ -406,6 +622,7 @@ impl ClipboardSource for LinuxClipboard {
             Self::Gnome(source) => source.is_available(),
             Self::Kwin(source) => source.is_available(),
             Self::Wayland(source) => source.is_available(),
+            Self::Adaptive(source) => source.active.is_available(),
         }
     }
     fn set_contents(&mut self, text: &str) -> anyhow::Result<()> {
@@ -414,6 +631,7 @@ impl ClipboardSource for LinuxClipboard {
             Self::Gnome(source) => source.set_contents(text),
             Self::Kwin(source) => source.set_contents(text),
             Self::Wayland(source) => source.set_contents(text),
+            Self::Adaptive(source) => source.active.set_contents(text),
         }
     }
     fn set_binary_contents(
@@ -434,6 +652,11 @@ impl ClipboardSource for LinuxClipboard {
             Self::Wayland(source) => {
                 source.set_binary_contents(item_id, content_type, bytes, metadata)
             }
+            Self::Adaptive(source) => {
+                source
+                    .active
+                    .set_binary_contents(item_id, content_type, bytes, metadata)
+            }
         }
     }
     fn backend_name(&self) -> &'static str {
@@ -442,7 +665,98 @@ impl ClipboardSource for LinuxClipboard {
             Self::Gnome(source) => source.backend_name(),
             Self::Kwin(source) => source.backend_name(),
             Self::Wayland(source) => source.backend_name(),
+            Self::Adaptive(source) => source.active.backend_name(),
         }
+    }
+}
+
+fn clipboard_capabilities(
+    available: bool,
+    backend: &str,
+    anonymous_source: bool,
+) -> BTreeMap<PlatformCapability, CapabilityStatus> {
+    let mut result = BTreeMap::new();
+    let readiness = if available {
+        capability(
+            CapabilityState::Available,
+            Some(backend),
+            CapabilityGuarantee::Verified,
+            None,
+        )
+    } else {
+        capability(
+            CapabilityState::Error,
+            Some(backend),
+            CapabilityGuarantee::None,
+            Some("Clipboard transport unavailable or disconnected."),
+        )
+    };
+    result.insert(PlatformCapability::ClipboardCapture, readiness.clone());
+    let mut read_write = readiness.clone();
+    read_write.mime_types = [
+        "text/plain;charset=utf-8",
+        "text/plain",
+        "text/html",
+        "text/rtf",
+        "image/png",
+        "image/tiff",
+        "text/uri-list",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    read_write.max_bytes = Some(copypaste_ipc::MAX_CONTENT_BYTES as u64);
+    result.insert(PlatformCapability::ClipboardReadWrite, read_write);
+    result.insert(
+        PlatformCapability::SourceAttribution,
+        if !available {
+            readiness.clone()
+        } else if anonymous_source {
+            capability(
+                CapabilityState::Unsupported,
+                Some(backend),
+                CapabilityGuarantee::None,
+                Some("Data-control cannot authenticate the source application."),
+            )
+        } else {
+            capability(
+                CapabilityState::Available,
+                Some(backend),
+                CapabilityGuarantee::BestEffort,
+                Some("Source identity can be unknown for individual selections."),
+            )
+        },
+    );
+    result.insert(
+        PlatformCapability::PrivacyEnforcement,
+        if available {
+            capability(
+                CapabilityState::Available,
+                Some(backend),
+                CapabilityGuarantee::Verified,
+                Some("Unknown sources are rejected before payload reads when exclusions are set."),
+            )
+        } else {
+            readiness
+        },
+    );
+    result
+}
+
+fn capability(
+    state: CapabilityState,
+    backend: Option<&str>,
+    guarantee: CapabilityGuarantee,
+    reason: Option<&str>,
+) -> CapabilityStatus {
+    CapabilityStatus {
+        state,
+        backend: backend.map(str::to_owned),
+        reason: reason.map(str::to_owned),
+        permissions: Vec::new(),
+        guarantee,
+        mime_types: Vec::new(),
+        max_bytes: None,
     }
 }
 
