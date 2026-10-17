@@ -552,6 +552,62 @@ fn archive_inventory_and_path_escape_are_rejected_before_activation() {
     assert!(!fixture.directory.path().join("outside").exists());
 }
 
+fn set_entry_unix_mode(package: &Path, name: &str, mode: u32) {
+    let mut bytes = fs::read(package).unwrap();
+    let mut offset = 0;
+    while let Some(index) = bytes[offset..]
+        .windows(4)
+        .position(|window| window == b"PK\x01\x02")
+    {
+        let header = offset + index;
+        let name_length =
+            u16::from_le_bytes(bytes[header + 28..header + 30].try_into().unwrap()) as usize;
+        if &bytes[header + 46..header + 46 + name_length] == name.as_bytes() {
+            // ZIP's central directory records the originating OS and Unix mode.
+            bytes[header + 5] = 3;
+            bytes[header + 38..header + 42].copy_from_slice(&(mode << 16).to_le_bytes());
+            fs::write(package, bytes).unwrap();
+            return;
+        }
+        offset = header + 4;
+    }
+    panic!("fixture entry is missing");
+}
+
+#[test]
+fn archive_symlink_entries_cannot_activate_or_modify_an_external_target() {
+    let fixture = Fixture::new();
+    let manager = fixture.manager();
+    let outside = fixture.directory.path().join("outside");
+    fs::write(&outside, b"unchanged").unwrap();
+    let package = fixture.package("1.0.0", b"../../outside", |_| {}, None);
+    set_entry_unix_mode(&package, ENTRYPOINT, 0o120777);
+    assert!(manager.install(&package).is_err());
+    assert!(manager.list().unwrap().is_empty());
+    assert_eq!(fs::read(outside).unwrap(), b"unchanged");
+}
+
+#[cfg(unix)]
+#[test]
+fn archive_privileged_permissions_are_not_applied_to_installed_files() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = Fixture::new();
+    let manager = fixture.manager();
+    let package = fixture.package("1.0.0", b"fixture", |_| {}, None);
+    set_entry_unix_mode(&package, ENTRYPOINT, 0o107755);
+    manager.install(&package).unwrap();
+    let installed = fixture
+        .directory
+        .path()
+        .join("modules/packages/copypaste.text-tools/1.0.0")
+        .join(ENTRYPOINT);
+    assert_eq!(
+        fs::metadata(installed).unwrap().permissions().mode() & 0o7000,
+        0
+    );
+}
+
 #[test]
 fn unsupported_api_preferences_and_commands_are_rejected() {
     let fixture = Fixture::new();
