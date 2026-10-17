@@ -25,6 +25,7 @@ class SettingsController extends ChangeNotifier {
     ScreenshotCapture screenshotCapture =
         const MethodChannelScreenshotCapture(),
     this.captureRefreshInterval = const Duration(seconds: 3),
+    this.backgroundCaptureStatusRequired = false,
   }) : _repository = repository,
        _filePicker = filePicker,
        _captureControl = captureControl,
@@ -43,6 +44,10 @@ class SettingsController extends ChangeNotifier {
   ScreenshotCaptureStatus _screenshotStatus = const ScreenshotCaptureStatus();
   final Duration captureRefreshInterval;
 
+  /// Desktop tray controls still need authoritative capture state when hidden.
+  /// Remove this fallback only when runtime capture-state push events exist.
+  final bool backgroundCaptureStatusRequired;
+
   SettingsLoadState _loadState = SettingsLoadState.loading;
   RuntimeSettings? _settings;
   CaptureSettingsState? _capture;
@@ -54,6 +59,9 @@ class SettingsController extends ChangeNotifier {
   bool _blockScreenshots = false;
   bool _disposed = false;
   Timer? _captureTimer;
+  bool _presentationActive = true;
+  bool _captureRefreshInFlight = false;
+  int _presentationEpoch = 0;
   StreamSubscription<String?>? _captureSubscription;
   Future<void> _notificationQueue = Future<void>.value();
 
@@ -102,6 +110,7 @@ class SettingsController extends ChangeNotifier {
             ? _screenshotProtection.blocked()
             : Future<bool>.value(false),
       ]);
+      if (_disposed) return;
       _settings = values[0] as RuntimeSettings;
       _capture = values[1] as CaptureSettingsState;
       _acceptSyncStatus(_capture!.syncStatus);
@@ -110,6 +119,7 @@ class SettingsController extends ChangeNotifier {
       if (_screenshotCapture.supported) {
         _screenshotStatus = await _screenshotCapture.status();
       }
+      if (_disposed) return;
       _loadState = SettingsLoadState.ready;
       _errorMessage = null;
       _startCaptureRefresh();
@@ -336,29 +346,75 @@ class SettingsController extends ChangeNotifier {
     }
   }
 
+  /// Presentation polling is optional; capture and notification streams remain
+  /// active while hidden. A desktop tray may retain capture-state polling.
+  void setPresentationActive(bool active) {
+    if (_disposed || active == _presentationActive) return;
+    _presentationActive = active;
+    _presentationEpoch++;
+    _startCaptureRefresh();
+    if ((active || backgroundCaptureStatusRequired) &&
+        _loadState == SettingsLoadState.ready) {
+      unawaited(_refreshCapture());
+    }
+  }
+
   void _startCaptureRefresh() {
     _captureTimer?.cancel();
-    if (captureRefreshInterval <= Duration.zero) return;
+    _captureTimer = null;
+    if (_disposed ||
+        (!_presentationActive && !backgroundCaptureStatusRequired) ||
+        _loadState != SettingsLoadState.ready ||
+        captureRefreshInterval <= Duration.zero) {
+      return;
+    }
     _captureTimer = Timer.periodic(captureRefreshInterval, (_) {
       unawaited(_refreshCapture());
     });
   }
 
   Future<void> _refreshCapture() async {
-    if (_disposed || _busy) return;
+    if (_disposed ||
+        _busy ||
+        (!_presentationActive && !backgroundCaptureStatusRequired) ||
+        _captureRefreshInFlight) {
+      return;
+    }
+    _captureRefreshInFlight = true;
+    final epoch = _presentationEpoch;
     try {
       final next = await _repository.captureState();
-      if (_screenshotCapture.supported) {
-        _screenshotStatus = await _screenshotCapture.status();
+      if (_disposed || epoch != _presentationEpoch) {
+        return;
       }
-      if (_disposed || next.epoch < (_capture?.epoch ?? 0)) return;
+      var screenshotStatus = _screenshotStatus;
+      if (_presentationActive && _screenshotCapture.supported) {
+        screenshotStatus = await _screenshotCapture.status();
+      }
+      if (_disposed ||
+          _busy ||
+          epoch != _presentationEpoch ||
+          next.epoch < (_capture?.epoch ?? 0)) {
+        return;
+      }
+      _screenshotStatus = screenshotStatus;
       _capture = next;
       _acceptSyncStatus(next.syncStatus);
       _settingsHealthNotice = _settingsHealthMessage(next.settingsHealth);
       _notify();
     } catch (_) {
-      _invalidateSyncStatus();
-      _notify();
+      if (!_disposed && epoch == _presentationEpoch) {
+        _invalidateSyncStatus();
+        _notify();
+      }
+    } finally {
+      _captureRefreshInFlight = false;
+      // A resumed window may have inherited an outstanding hidden request.
+      if (!_disposed &&
+          (_presentationActive || backgroundCaptureStatusRequired) &&
+          epoch != _presentationEpoch) {
+        unawaited(_refreshCapture());
+      }
     }
   }
 

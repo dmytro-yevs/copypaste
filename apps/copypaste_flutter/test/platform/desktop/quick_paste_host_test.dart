@@ -223,6 +223,22 @@ void main() {
       },
     );
 
+    test(
+      'inspector visibility carries explicit persistence separately',
+      () async {
+        await context.setInspectorVisible(
+          presentationId: 41,
+          visible: true,
+          remember: false,
+        );
+        await context.setInspectorVisible(presentationId: 41, visible: false);
+        expect(calls.map((call) => call.arguments).toList(), [
+          {'presentationId': 41, 'visible': true, 'remember': false},
+          {'presentationId': 41, 'visible': false, 'remember': true},
+        ]);
+      },
+    );
+
     for (final value in [
       false,
       null,

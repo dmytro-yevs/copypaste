@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "budget_version": "2026-10-17.1",
+  "ordinary_memory_limit_bytes": 300000000,
+  "comparison": "strictly_less_than",
+  "required_scenarios": [
+    "idle",
+    "active",
+    "repeated",
+    "recovery",
+    "hidden",
+    "sustained",
+    "ocr_ai_peak"
+  ],
+  "minimum_samples": 2,
+  "platforms": {
+    "macos": {
+      "memory_metric": "physical_footprint_bytes",
+      "ordinary_memory_limit_bytes": 300000000,
+      "ocr_ai_peak_limit_bytes": null,
+      "cpu_percent_limit": null,
+      "wakeups_per_second_limit": null,
+      "disk_bytes_per_second_limit": null,
+      "network_bytes_per_second_limit": null,
+      "recovery_seconds_limit": null,
+      "sustained_growth_bytes_limit": null
+    },
+    "android": {
+      "memory_metric": "pss_plus_swap_pss_bytes",
+      "ordinary_memory_limit_bytes": 300000000,
+      "ocr_ai_peak_limit_bytes": null,
+      "cpu_percent_limit": null,
+      "wakeups_per_second_limit": null,
+      "disk_bytes_per_second_limit": null,
+      "network_bytes_per_second_limit": null,
+      "recovery_seconds_limit": null,
+      "sustained_growth_bytes_limit": null
+    },
+    "windows": {
+      "memory_metric": "private_commit_bytes",
+      "ordinary_memory_limit_bytes": 300000000,
+      "ocr_ai_peak_limit_bytes": null,
+      "cpu_percent_limit": null,
+      "wakeups_per_second_limit": null,
+      "disk_bytes_per_second_limit": null,
+      "network_bytes_per_second_limit": null,
+      "recovery_seconds_limit": null,
+      "sustained_growth_bytes_limit": null
+    }
+  },
+  "notes": [
+    "300 MB is decimal and applies to all CopyPaste processes combined. Windows private commit is a conservative retained-memory guard; collect private working set and GPU/shared attribution separately.",
+    "Platform metric adapters must be validated on each supported OS; unlike metrics cannot be compared as the same physical RAM value.",
+    "Null thresholds are unresolved, never passing. Implementation cache limits are allocation controls, not measured release budgets.",
+    "Subsecond peaks require suitable native tracing beyond low-rate samples. Offline receipts do not replace trusted release provenance."
+  ]
+}

@@ -5,6 +5,10 @@ import FlutterMacOS
 class AppDelegate: FlutterAppDelegate {
   private var pendingPairingURLs: [URL] = []
 
+  @objc func showPreferences(_ sender: Any?) {
+    (mainFlutterWindow as? MainFlutterWindow)?.openSettings()
+  }
+
   override func applicationDidFinishLaunching(_ notification: Notification) {
     // FlutterAppDelegate does not implement this optional delegate callback.
     drainPairingURLs()

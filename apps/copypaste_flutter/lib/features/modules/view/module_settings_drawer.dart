@@ -200,32 +200,6 @@ class _ModuleSettingsDrawerState extends State<ModuleSettingsDrawer> {
                             ),
                             const Gap(AppSpacing.md),
                           ],
-                          Card(
-                            child: Basic(
-                              theme: AppTheme.moduleSettingsRowTheme,
-                              leading: const Icon(
-                                LucideIcons.power,
-                                size: AppIconSize.md,
-                              ),
-                              title: const Text('Enabled'),
-                              trailing: Semantics(
-                                label: 'Enabled',
-                                child: Switch(
-                                  key: ValueKey('module-enabled-$moduleId'),
-                                  value: module.enabled,
-                                  onChanged:
-                                      controller.busy ||
-                                          module.error != null ||
-                                          module.restartRequired
-                                      ? null
-                                      : (value) => controller.setEnabled(
-                                          moduleId,
-                                          value,
-                                        ),
-                                ),
-                              ),
-                            ),
-                          ),
                           if (controller.canSetUpSmsAccess &&
                               module.events.contains(
                                 ModuleEventKind.smsReceived,

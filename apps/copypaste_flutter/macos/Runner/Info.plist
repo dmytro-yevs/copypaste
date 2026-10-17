@@ -27,6 +27,9 @@
 	</array>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<!-- The measured Metal Skia path permits an explicit GPU cache budget. -->
+	<key>FLTEnableImpeller</key>
+	<false/>
 	<key>CFBundleShortVersionString</key>
 	<string>$(FLUTTER_BUILD_NAME)</string>
 	<key>CFBundleVersion</key>

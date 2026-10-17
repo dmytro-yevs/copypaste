@@ -13,6 +13,7 @@ add_executable(${BINARY_NAME} WIN32
   "app_update_verifier.cpp"
   "flutter_window.cpp"
   "screenshot_protection.cpp"
+  "startup_channel.cpp"
   "main.cpp"
   "utils.cpp"
   "win32_window.cpp"

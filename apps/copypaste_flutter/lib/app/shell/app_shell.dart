@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 
 import 'package:copypaste_flutter/app/navigation/navigation.dart';
 import 'package:flutter/services.dart';
@@ -163,11 +164,16 @@ class _AppShellState extends State<AppShell> {
                         leading: [
                           ?railToggle,
                           if (mode == _ShellNavigationMode.bottom)
-                            const Image(
-                              key: ValueKey<String>('header-brand-logo'),
-                              image: AssetImage('assets/brand/copypaste.png'),
-                              width: AppIconSize.md,
-                              height: AppIconSize.md,
+                            Button.ghost(
+                              style: AppTheme.brandButtonStyle,
+                              onPressed: _openHistory,
+                              child: const Image(
+                                key: ValueKey<String>('header-brand-logo'),
+                                image: AssetImage('assets/brand/copypaste.png'),
+                                width: AppIconSize.md,
+                                height: AppIconSize.md,
+                                semanticLabel: 'Open History',
+                              ),
                             ),
                         ],
                         title: Text(
@@ -244,29 +250,39 @@ class _AppShellState extends State<AppShell> {
 
             return CallbackShortcuts(
               bindings: <ShortcutActivator, VoidCallback>{
+                SingleActivator(
+                  LogicalKeyboardKey.comma,
+                  meta: defaultTargetPlatform == TargetPlatform.macOS,
+                  control: defaultTargetPlatform != TargetPlatform.macOS,
+                ): () => _selectDestination(
+                  const ValueKey<AppDestination>(AppDestination.settings),
+                ),
                 const SingleActivator(LogicalKeyboardKey.escape): () {
                   widget.controller.handleEscape();
                 },
               },
-              child: DrawerOverlay(
-                child: Column(
-                  children: [
-                    if (widget.unifiedTitleBar)
-                      MacosWindowHeader(
-                        title: Text(
-                          selectedDestination.navigationDestination.label,
+              child: Focus(
+                autofocus: true,
+                child: DrawerOverlay(
+                  child: Column(
+                    children: [
+                      if (widget.unifiedTitleBar)
+                        MacosWindowHeader(
+                          title: Text(
+                            selectedDestination.navigationDestination.label,
+                          ),
+                          leading: railToggle,
+                          actions: headerActions,
                         ),
-                        leading: railToggle,
-                        actions: headerActions,
+                      Expanded(
+                        child: SafeArea(
+                          top: !widget.unifiedTitleBar,
+                          bottom: mode != _ShellNavigationMode.bottom,
+                          child: navigation,
+                        ),
                       ),
-                    Expanded(
-                      child: SafeArea(
-                        top: !widget.unifiedTitleBar,
-                        bottom: mode != _ShellNavigationMode.bottom,
-                        child: navigation,
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             );
@@ -338,26 +354,31 @@ class _AppShellState extends State<AppShell> {
       height: AppIconSize.xl,
       child: Align(
         alignment: expanded ? Alignment.centerLeft : Alignment.center,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            const Image(
-              key: ValueKey<String>('copypaste-brand-logo'),
-              image: AssetImage('assets/brand/copypaste.png'),
-              width: AppIconSize.xl,
-              height: AppIconSize.xl,
-            ),
-            if (expanded) ...[
-              const Gap(AppSpacing.sm),
-              Text(
-                'CopyPaste',
-                style: theme.typography.large
-                    .merge(theme.typography.medium)
-                    .copyWith(color: theme.colorScheme.foreground, height: 1),
+        child: Button.ghost(
+          style: AppTheme.brandButtonStyle,
+          onPressed: _openHistory,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const Image(
+                key: ValueKey<String>('copypaste-brand-logo'),
+                image: AssetImage('assets/brand/copypaste.png'),
+                width: AppIconSize.xl,
+                height: AppIconSize.xl,
+                semanticLabel: 'Open History',
               ),
+              if (expanded) ...[
+                const Gap(AppSpacing.sm),
+                Text(
+                  'CopyPaste',
+                  style: theme.typography.large
+                      .merge(theme.typography.medium)
+                      .copyWith(color: theme.colorScheme.foreground, height: 1),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -376,6 +397,10 @@ class _AppShellState extends State<AppShell> {
       }
     }
   }
+
+  void _openHistory() => _selectDestination(
+    const ValueKey<AppDestination>(AppDestination.history),
+  );
 
   void _toggleDesktopRail() {
     setState(() {

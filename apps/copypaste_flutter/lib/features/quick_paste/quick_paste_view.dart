@@ -137,12 +137,17 @@ class _QuickPasteViewState extends State<QuickPasteView> {
         key: const ValueKey('quick-paste-header'),
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          const Image(
-            key: ValueKey('quick-paste-logo'),
-            image: AssetImage('assets/brand/copypaste.png'),
-            width: AppIconSize.sm,
-            height: AppIconSize.sm,
-            semanticLabel: 'CopyPaste',
+          Button.ghost(
+            key: const ValueKey('quick-paste-home'),
+            style: const ButtonStyle.ghostIcon(),
+            onPressed: controller.openMainWindow,
+            child: const Image(
+              key: ValueKey('quick-paste-logo'),
+              image: AssetImage('assets/brand/copypaste.png'),
+              width: AppIconSize.sm,
+              height: AppIconSize.sm,
+              semanticLabel: 'Open CopyPaste',
+            ),
           ),
           const Gap(AppSpacing.xs),
           Expanded(

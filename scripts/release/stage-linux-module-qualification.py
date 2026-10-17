@@ -96,7 +96,7 @@ def verify_and_stage_package(downloads: Path, staged: Path, name: str, architect
         or receipt.get("signature_verified") is not True
         or receipt.get("cases_passed") != 3
         or receipt.get("removal_completed_after_restart") is not True
-        or receipt.get("restart_required") != (name == "ocr")
+        or receipt.get("restart_required") is not False
     ):
         raise ValueError(f"module receipt does not bind the exact signed package: {package.name}")
     copy_regular(package, staged / package.name, "module package")

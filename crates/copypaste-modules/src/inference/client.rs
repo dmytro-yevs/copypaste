@@ -232,7 +232,7 @@ impl InferenceClient {
         let result = worker.connection.invoke(&request);
         worker.finished = Instant::now();
         self.state.wake.notify_all();
-        if result.is_err() {
+        if result.is_err() || super::is_ocr_command(&request.id, &request.invocation.command) {
             active.take();
             self.state
                 .control
@@ -407,10 +407,20 @@ pub(crate) mod tests {
                         );
                         return;
                     }
-                    let reply: InferenceReply = Ok(ModuleOutput::Embeddings {
-                        model_id: "fixture".into(),
-                        vectors: vec![vec![1.0, 0.0]],
-                    });
+                    let reply: InferenceReply = if request
+                        .invocation
+                        .arguments
+                        .get("text")
+                        .and_then(|value| value.as_str())
+                        == Some("error")
+                    {
+                        Err("Inference failed.".into())
+                    } else {
+                        Ok(ModuleOutput::Embeddings {
+                            model_id: "fixture".into(),
+                            vectors: vec![vec![1.0, 0.0]],
+                        })
+                    };
                     if write_frame(&mut server, &reply).is_err() {
                         return;
                     }
@@ -477,6 +487,44 @@ pub(crate) mod tests {
                 preferences: BTreeMap::new(),
             },
         }
+    }
+
+    #[test]
+    fn ocr_releases_its_process_after_every_request_without_changing_search_reuse() {
+        let (client, launched, stopped, _) = fixture();
+        for count in 1..=3 {
+            let mut ocr = request("image");
+            ocr.id = "copypaste.ocr".into();
+            ocr.invocation.command = "recognize-image".into();
+            assert!(client.invoke(ocr, client.generation()).is_ok());
+            assert_eq!(launched.load(Ordering::SeqCst), count);
+            assert_eq!(stopped.load(Ordering::SeqCst), count);
+            assert!(client.state.active.lock().unwrap().is_none());
+            assert!(client.state.control.lock().unwrap().is_none());
+        }
+        assert!(client
+            .invoke(request("search"), client.generation())
+            .is_ok());
+        assert!(client
+            .invoke(request("search again"), client.generation())
+            .is_ok());
+        assert_eq!(launched.load(Ordering::SeqCst), 4);
+        assert_eq!(stopped.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn failed_ocr_reaps_its_process_and_allows_a_fresh_request() {
+        let (client, launched, stopped, _) = fixture();
+        let mut ocr = request("error");
+        ocr.id = "copypaste.ocr".into();
+        ocr.invocation.command = "recognize-image".into();
+        assert!(client.invoke(ocr, client.generation()).is_err());
+        assert_eq!(launched.load(Ordering::SeqCst), 1);
+        assert_eq!(stopped.load(Ordering::SeqCst), 1);
+        assert!(client.state.active.lock().unwrap().is_none());
+        assert!(client
+            .invoke(request("search"), client.generation())
+            .is_ok());
     }
 
     #[test]

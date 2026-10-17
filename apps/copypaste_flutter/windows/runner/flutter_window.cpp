@@ -141,6 +141,8 @@ bool FlutterWindow::OnCreate() {
   if (!is_protected_pairing_context_ && !is_quick_paste_context_) {
     app_update_channel_ = std::make_unique<AppUpdateChannel>(
         flutter_controller_->engine()->messenger(), GetHandle());
+    startup_channel_ = std::make_unique<StartupChannel>(
+        flutter_controller_->engine()->messenger());
   }
   if (is_quick_paste_context_) {
     quick_paste_channel_ =
@@ -160,7 +162,8 @@ bool FlutterWindow::OnCreate() {
           } else if (call.method_name() == "setInspectorVisible") {
             const auto* visible = BoolArgument(call, "visible");
             result->Success(flutter::EncodableValue(visible != nullptr &&
-                SetQuickPasteInspectorVisible(QuickPastePresentationId(call.arguments()), *visible)));
+                SetQuickPasteInspectorVisible(QuickPastePresentationId(call.arguments()), *visible,
+                    BoolArgument(call, "remember") == nullptr || *BoolArgument(call, "remember"))));
           } else if (call.method_name() == "paste") {
             result->Success(flutter::EncodableValue(
                 PasteIntoPreviousWindow(QuickPastePresentationId(call.arguments()))));
@@ -395,6 +398,7 @@ void FlutterWindow::OnDestroy() {
   pairing_presentation_channel_.reset();
   pairing_links_channel_.reset();
   quick_paste_channel_.reset();
+  startup_channel_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -479,6 +483,7 @@ bool FlutterWindow::PrepareQuickPasteContext() {
   quick_window->SetQuitOnClose(false);
   quick_window->main_window_handle_ = GetHandle();
   quick_window->quick_paste_inspector_visible_ = quick_paste_inspector_visible_;
+  quick_window->quick_paste_inspector_pinned_ = quick_paste_inspector_visible_;
   quick_window->quick_paste_generation_ = ++quick_paste_generation_;
   quick_paste_window_ = std::move(quick_window);
   return true;
@@ -642,6 +647,7 @@ bool FlutterWindow::ShowQuickPasteAtCursor(HWND sampled_foreground) {
     if (quick_paste_session_.id() == 0) ::ShowWindow(GetHandle(), SW_HIDE);
     return false;
   }
+  quick_paste_inspector_visible_ = quick_paste_inspector_pinned_;
   return ShowQuickPastePresentationAtCursor(
       GetHandle(), quick_paste_session_, id, QuickPastePresentationApi{},
       [this] { NotifyQuickPasteOpened(); }, quick_paste_inspector_visible_);
@@ -679,7 +685,7 @@ void FlutterWindow::BeginQuickPasteShutdown() {
           [finish](const auto&, const auto&, const auto*) { finish(); }, finish));
 }
 
-bool FlutterWindow::SetQuickPasteInspectorVisible(int64_t presentation_id, bool visible) {
+bool FlutterWindow::SetQuickPasteInspectorVisible(int64_t presentation_id, bool visible, bool remember) {
   if (!is_quick_paste_context_ || presentation_id <= 0 ||
       quick_paste_session_.id() != presentation_id) return false;
   RECT current{};
@@ -701,6 +707,7 @@ bool FlutterWindow::SetQuickPasteInspectorVisible(int64_t presentation_id, bool 
       SWP_NOACTIVATE | SWP_NOZORDER | SWP_FRAMECHANGED)) return false;
   if (quick_paste_session_.id() != presentation_id) return false;
   quick_paste_inspector_visible_ = visible;
+  if (remember) quick_paste_inspector_pinned_ = visible;
   return true;
 }
 
@@ -730,9 +737,8 @@ void FlutterWindow::ShowMainWindow(bool open_settings) {
   ScheduleQuickPasteRetirement();
   ::ShowWindow(main_window_handle_, SW_SHOW);
   ::SetForegroundWindow(main_window_handle_);
-  if (open_settings && quick_paste_channel_) {
-    // The context asks its owner to route Settings on the main Flutter engine.
-    ::PostMessage(main_window_handle_, WM_APP + 41, 0, 0);
+  if (quick_paste_channel_) {
+    ::PostMessage(main_window_handle_, WM_APP + 41, open_settings ? 1 : 0, 0);
   }
 }
 
@@ -806,7 +812,7 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   } else if (!is_protected_pairing_context_ && message == kRetireQuickPaste) {
     if (quick_paste_window_ && quick_paste_window_->quick_paste_generation_ == wparam &&
         !::IsWindowVisible(quick_paste_window_->GetHandle())) {
-      quick_paste_inspector_visible_ = quick_paste_window_->quick_paste_inspector_visible_;
+      quick_paste_inspector_visible_ = quick_paste_window_->quick_paste_inspector_pinned_;
       auto context = std::move(quick_paste_window_);
       auto* retiring = context.get();
       retiring_quick_paste_windows_.emplace(wparam, std::move(context));
@@ -823,7 +829,7 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   } else if (!is_protected_pairing_context_ && message == WM_APP + 41) {
     if (quick_paste_channel_) {
       quick_paste_channel_->InvokeMethod(
-          "openSettings", std::make_unique<flutter::EncodableValue>());
+          wparam ? "openSettings" : "openMain", std::make_unique<flutter::EncodableValue>());
     }
     return 0;
   }
