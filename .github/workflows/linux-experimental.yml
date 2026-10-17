@@ -7,8 +7,24 @@ permissions:
   contents: read
 
 jobs:
+  platform:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      build_matrix: ${{ steps.manifest.outputs.matrix }}
+      supplemental_matrix: ${{ steps.manifest.outputs.supplemental_matrix }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - id: manifest
+        run: |
+          echo "matrix=$(python3 scripts/release/platform_manifest.py matrix --tier all --purpose build)" >> "$GITHUB_OUTPUT"
+          echo "supplemental_matrix=$(python3 scripts/release/platform_manifest.py matrix --tier all --purpose supplemental-build)" >> "$GITHUB_OUTPUT"
+
   optional-modules:
-    name: Optional modules (${{ matrix.name }})
+    name: Optional modules (${{ matrix.architecture }})
+    needs: platform
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     defaults:
@@ -16,9 +32,7 @@ jobs:
         shell: bash
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { name: Linux aarch64, platform: linux, runner: ubuntu-24.04-arm }
+      matrix: ${{ fromJSON(needs.platform.outputs.supplemental_matrix) }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -33,7 +47,7 @@ jobs:
             modules/ocr
       - name: Module lifecycle and OCR contracts
         env:
-          OPENSSL_SRC_PERL: ${{ matrix.platform == 'windows' && 'C:\Strawberry\perl\bin\perl.exe' || 'perl' }}
+          OPENSSL_SRC_PERL: perl
         run: |
           cargo test -p copypaste-modules --locked
           cargo test --manifest-path modules/ocr/Cargo.toml --locked
@@ -42,7 +56,8 @@ jobs:
           "$RUNNER_TEMP/ocr-dictionary-tests.exe"
 
   flutter-foundation:
-    name: Flutter foundation (${{ matrix.name }})
+    name: Flutter foundation (${{ matrix.architecture }})
+    needs: platform
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     defaults:
@@ -50,9 +65,7 @@ jobs:
         shell: bash
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { name: Linux aarch64, platform: linux, runner: ubuntu-24.04-arm, target: linux }
+      matrix: ${{ fromJSON(needs.platform.outputs.supplemental_matrix) }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -66,29 +79,24 @@ jobs:
       - uses: ./.github/actions/setup-flutter
         with:
           version: ${{ steps.flutter.outputs.version }}
-      - uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4
-        if: matrix.platform == 'android'
-        with:
-          distribution: temurin
-          java-version: "25"
       - uses: ./.github/actions/flutter-build-cache
         with:
-          platform: ${{ matrix.platform }}
+          platform: linux
           profile: debug
       - name: Install Linux Flutter build dependencies
-        if: matrix.platform == 'linux'
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends libgtk-3-dev libsecret-1-dev libssl-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libkeybinder-3.0-dev libxtst-dev libxi-dev ninja-build pkg-config
       - run: ./scripts/ci/verify-flutter-foundation.sh
         env:
-          COPYPASTE_FLUTTER_BUILD_TARGET: ${{ matrix.target }}
+          COPYPASTE_FLUTTER_BUILD_TARGET: linux
           CARGO_BUILD_JOBS: "2"
           CMAKE_BUILD_PARALLEL_LEVEL: "2"
 
   linux-native-fixtures:
     name: Linux native fixtures (${{ matrix.architecture }})
+    needs: platform
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     defaults:
@@ -96,10 +104,7 @@ jobs:
         shell: bash
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { architecture: x86_64, runner: ubuntu-24.04 }
-          - { architecture: aarch64, runner: ubuntu-24.04-arm }
+      matrix: ${{ fromJSON(needs.platform.outputs.build_matrix) }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -192,6 +197,7 @@ jobs:
 
   linux-pr-release-candidate:
     name: Linux release candidate (${{ matrix.architecture }})
+    needs: platform
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     defaults:
@@ -199,16 +205,7 @@ jobs:
         shell: bash
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - architecture: x86_64
-            runner: ubuntu-24.04
-            appimagetool_url: https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
-            appimagetool_sha256: 95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6
-          - architecture: aarch64
-            runner: ubuntu-24.04-arm
-            appimagetool_url: https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-aarch64.AppImage
-            appimagetool_sha256: a595ea34cd6136c7f595e9dcbb16f3e9725d7610efb9e43b38c3c6e86cafc270
+      matrix: ${{ fromJSON(needs.platform.outputs.build_matrix) }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -242,7 +239,7 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN=1 "$tool" --version
           echo "APPIMAGETOOL=$tool" >> "$GITHUB_ENV"
           echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "$GITHUB_ENV"
-      - name: Build the unsigned native Flutter bundle and every package format
+      - name: Build the unsigned native Flutter bundle and declared package formats
         run: |
           set -euo pipefail
           version="$(awk '/^version:[[:space:]]*/ {print $2; exit}' apps/copypaste_flutter/pubspec.yaml)"
@@ -255,8 +252,9 @@ jobs:
             --architecture "${{ matrix.architecture }}" \
             --maximum 2.39 \
             --output "dist/CopyPaste-v$version-linux-${{ matrix.architecture }}.runtime-baseline.json"
-          scripts/release/build-linux-packages.sh "$version" "${{ matrix.architecture }}"
-          for extension in AppImage deb rpm; do
+          scripts/release/build-linux-packages.sh "$version" "${{ matrix.architecture }}" --target-scope
+          IFS=, read -r -a expected_formats <<< "${{ matrix.formats }}"
+          for extension in "${expected_formats[@]}"; do
             test -s "dist/CopyPaste-v$version-linux-${{ matrix.architecture }}.$extension"
           done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -272,14 +270,12 @@ jobs:
 
   linux-package-fixtures:
     name: Linux package fixtures (${{ matrix.architecture }})
+    needs: platform
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { architecture: x86_64, runner: ubuntu-24.04 }
-          - { architecture: aarch64, runner: ubuntu-24.04-arm }
+      matrix: ${{ fromJSON(needs.platform.outputs.build_matrix) }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
