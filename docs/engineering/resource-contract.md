@@ -12,7 +12,7 @@ remains mandatory.
 - `config/optimization-registry.json` owns optimization IDs, implementation
   status, owner modules, invariant, platform coverage and evidence references.
 - `config/runtime-resource-budgets.json` owns runtime thresholds and required
-  scenarios. A null threshold is unresolved and cannot qualify a release.
+  scenarios. A null threshold is unresolved and cannot qualify a resource claim.
 - `config/ci-performance-budgets.json` and `scripts/ci/metrics.py` continue to own
   CI wall-clock measurements. Build time is not a runtime resource measurement.
 - `docs/ui-memory.md`, `docs/semantic-inference.md` and the existing platform and
@@ -30,8 +30,8 @@ shutdown, byte/queue/concurrency bounds, affected platforms, functional contract
 tradeoffs and remaining work. Retire superseded records explicitly.
 
 Keep implementation and validation separate: proposed, partially implemented,
-implemented, functional tests passed, native measured per platform, budget
-qualified per platform, then release qualified. Regressed and superseded entries
+implemented, functional tests passed, native measured per platform, then budget
+qualified per platform. Regressed and superseded entries
 remain visible. Evidence must identify the exact commit, artifact digest, build
 mode, signing identity, OS/device, deterministic fixture, scenario, cache state,
 sample interval, process start identity and budget version. Dirty source can
@@ -82,6 +82,7 @@ pipeline must first verify provenance and authenticity using its existing
 qualification contracts. A string naming a provenance receipt is not signature
 verification. Native collectors and automatic publication wiring remain open
 work in `GOV-001`; this checker alone does not claim that wiring exists.
+Resource qualification and this checker do not gate application publication.
 
 Each receipt is a JSON object containing:
 
@@ -126,7 +127,7 @@ Run the checker with `--commit <SHA> --output <task-artifact-path> <receipts...>
 Its own regression tests run with
 `python3 -m unittest discover -s scripts/profile -p 'test_resource_receipts.py' -v`.
 The checker does not currently enforce scenario duration or repetition counts;
-those must be established with the native baseline protocol before release
+those must be established with the native baseline protocol before resource
 qualification. Two samples only establish structural validity, not a sustained
 resource claim.
 
