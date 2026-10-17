@@ -1252,6 +1252,220 @@
       ],
       "supersedes": [],
       "functional_validation": "12 image-preview tests passed, including 140 exact-byte cases, palette transparency, 16-bit/APNG fallback and corruption recovery. Twenty native preview response hashes match baseline. Median latency increased 25.76 -> 35.95 ms; sampled daemon CPU for workload/recovery increased 0.622 -> 0.866 seconds. Candidate 8: 24 native inspector opens verified, 180s sampled family peak 286,918,648 bytes. Functional restore passed but restore peak was outside collection; hidden suspension not established."
+    },
+    {
+      "id": "RUN-031",
+      "title": "Reuse the transient Quick Paste engine for tray history",
+      "domain": "runtime",
+      "implementation_status": "implemented",
+      "priority": "P2",
+      "owner_module": "Desktop Quick Paste",
+      "platforms": [
+        "macOS",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/platform/desktop/quick_paste_host.dart",
+        "apps/copypaste_flutter/lib/platform/desktop/flutter_desktop_window_host.dart",
+        "apps/copypaste_flutter/macos/Runner/QuickPasteGeometry.swift",
+        "apps/copypaste_flutter/macos/Runner/MainFlutterWindow.swift",
+        "apps/copypaste_flutter/windows/runner/flutter_window.cpp",
+        "docs/adr/0033-quick-paste-popup.md"
+      ],
+      "invariant": "Tray and shortcut share the existing lazy Quick Paste engine, repository, bounded media caches, paging, and paste session. Tray height is capped at 600 logical pixels and available work area; only the list scrolls. No independent history snapshot, watch lease, polling loop, or persistent engine is introduced. The existing acknowledged shutdown releases the repository and native engine after dismissal or paste.",
+      "next_step": "Verify tray placement, every clip kind, and focus-safe paste on installed macOS and Windows. Measure application, daemon, and workers separately and together for tray/shortcut cycles, peak, steady state, recovery, and growth. Non-memory budgets and native qualification remain unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "160 targeted Flutter tests passed, including all 13 clip kinds at 600 logical pixels; Dart analysis passed. Native Swift geometry scenarios and portable Windows geometry scenarios passed, including a short secondary monitor, top/bottom trays, inspector height, and 200-percent dimensions. macOS Dev debug build passed. Installed-platform interaction and native resource qualification remain pending."
+    },
+    {
+      "id": "RUN-032",
+      "title": "Remove redundant Quick Paste startup work and unchanged spoiler notifications",
+      "domain": "runtime",
+      "implementation_status": "implemented",
+      "priority": "P1",
+      "owner_module": "Quick Paste startup and shared spoiler state",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/main.dart",
+        "apps/copypaste_flutter/lib/features/quick_paste/quick_paste_controller.dart",
+        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "crates/copypaste-core/src/spoiler.rs",
+        "crates/copypaste-daemon/src/server/items.rs",
+        "crates/copypaste-runtime/src/lib.rs",
+        "docs/adr/0033-quick-paste-popup.md"
+      ],
+      "invariant": "Quick Paste reuses its initial watched page for its first presentation and omits unused facets. Preference reads overlap safely, and module metadata starts only when the inspector needs it; pending metadata never blocks showing or closing the inspector. An unchanged spoiler update neither advances the revision nor wakes clients, while actual changes retain the existing shared-state notifications. Engine creation remains on demand with the existing acknowledged retirement; no persistent engine or new cache is introduced.",
+      "next_step": "Compare baseline and candidate native click-to-window, first-frame, and preview latency with equivalent debug/AOT builds and cache state. Measure process-family memory, CPU, wakeups, and I/O on macOS, physical Android, and installed Windows. Native interaction measurement was not authorized in this task; non-memory budgets remain unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "startup-before.log",
+          "sha256": "e942e82b435dabdf31c89b6c5e150fc9af225b7ac1e5f35bba3cd0a4c2e703bb",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "startup-flutter-tests.log",
+          "sha256": "d94b688d01054a576845debbdce58be714e74518cdc67434e00b1849d431ca82",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "startup-rust-core-runtime.log",
+          "sha256": "3e30291598a6ab75cf247a067cc6e6185c7b4935c9b1de7dc25027d5d509be8f",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "startup-rust-daemon.log",
+          "sha256": "6f11a0fc57f05f5f4b71860ed2db921d4d06f8c4c094384f22fcd28d1ee15de5",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "startup-macos-build.log",
+          "sha256": "8859f5b9f0701b385172d7dda5505750b19d9e9b58ffb935b3ccf24429b8feca",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "168 targeted Flutter tests, 6 Rust tests, Dart analysis, and macOS Dev debug build passed. A deterministic first-open regression observed two History queries before the change and one after it, with zero unused facet queries. Slow inspector metadata never blocks presentation. Actual spoiler changes still notify both clients. Native click-to-frame latency and resource savings remain unmeasured."
+    },
+    {
+      "id": "RUN-033",
+      "title": "Present Quick Paste only after its visible media frame is ready",
+      "domain": "runtime",
+      "implementation_status": "implemented",
+      "priority": "P1",
+      "owner_module": "Quick Paste presentation readiness",
+      "platforms": [
+        "macOS",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/features/quick_paste/quick_paste_view.dart",
+        "apps/copypaste_flutter/lib/features/quick_paste/quick_paste_controller.dart",
+        "apps/copypaste_flutter/lib/platform/desktop/quick_paste_host.dart",
+        "apps/copypaste_flutter/macos/Runner/MainFlutterWindow.swift",
+        "apps/copypaste_flutter/windows/runner/flutter_window.cpp",
+        "docs/adr/0033-quick-paste-popup.md"
+      ],
+      "invariant": "Position the on-demand popup while hidden, decode only mounted viewport media through existing bounded caches, submit its frame, then reveal by the current presentation ID. A changed foreground or superseded ID cannot activate an obsolete popup. Offscreen clips and image errors do not hold the reveal. macOS registers only file-selection and preferences plugins; Windows registers only file-selection. Existing shutdown retires the engine and owned repository, with no prewarming or persistent engine. Flutter decoded-cache limits remain unchanged.",
+      "next_step": "Measure native click-to-ready and first-visible-frame latency, including decode, with equivalent debug/AOT builds, fixture, and cache state. Compare peak/steady/recovery process-family memory, CPU, wakeups and I/O for cold openings and repeated cycles on macOS and installed Windows. Computer Use remains unauthorized; native latency/resource qualification is not established and non-memory budgets remain unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "first-frame-flutter-tests.log",
+          "sha256": "160d8048c085f9a74f360bf15e5ce0a4a816624e3e93e79b6cd4811bab864c70",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "first-frame-macos-build.log",
+          "sha256": "8859f5b9f0701b385172d7dda5505750b19d9e9b58ffb935b3ccf24429b8feca",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "172 targeted Flutter tests, Dart analysis, and macOS Dev debug build passed. Visible image decoding gates the native reveal; offscreen images do not delay it; superseded IDs cannot reveal. Windows hidden preparation regression added but not run on Windows. Native UI interaction and latency/resource qualification remain pending."
+    },
+    {
+      "id": "RUN-034",
+      "title": "Route macOS tray activation directly through the native Quick Paste opener",
+      "domain": "runtime",
+      "implementation_status": "implemented",
+      "priority": "P1",
+      "owner_module": "macOS tray activation",
+      "platforms": [
+        "macOS"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/macos/Runner/MacosTrayMenuChannel.swift",
+        "apps/copypaste_flutter/macos/Runner/MainFlutterWindow.swift",
+        "apps/copypaste_flutter/lib/platform/macos/macos_tray_menu.dart",
+        "apps/copypaste_flutter/lib/platform/desktop/flutter_desktop_window_host.dart",
+        "docs/adr/0033-quick-paste-popup.md"
+      ],
+      "invariant": "Bind the existing status button primary action directly to the shared native opener after leaving AppKit tracking. Capture the application target and icon frame at the click. Preserve the original target for context-menu gestures and restore only the owned target on detach. Detach cancels queued activation before releasing the tray. The binding retains no button or application payload, adds no poller/event monitor/engine, and preserves acknowledged Quick Paste retirement.",
+      "next_step": "Compare tray and shortcut in the same bundle/build with equivalent workload and cache state. A temporary separate Dev shortcut and source-tagged diagnostic traces confirmed that the observed delay also occurs through the Dev shortcut; the shortcut was restored and diagnostic code removed after comparison. Complete native latency/resource qualification remains unestablished and non-memory budgets unresolved.",
+      "native_resource_qualification": {
+        "macOS": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "developer_diagnostic_timing_log",
+          "name": "native-tray-timing-diagnostic.log",
+          "sha256": "26c1c342827123ff44b4502da8e0ae36bd5940595aaa5cbf2b9e6b531083586c",
+          "source_state": "dirty_debug_instrumentation_removed_before_commit",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_validation_log",
+          "name": "final-flutter-tests.log",
+          "sha256": "1f7695ab5b32b04c191b7f5fc4947a8777162757d98761125a2836406aa55db2",
+          "source_state": "dirty_workspace_before_commit",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_validation_log",
+          "name": "final-rust-core-runtime.log",
+          "sha256": "45a5b41606efd4f910dc61c28725bda27478bd512b5d8fb2862ed1cb380e0d63",
+          "source_state": "dirty_workspace_before_commit",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_validation_log",
+          "name": "final-rust-daemon.log",
+          "sha256": "f9742be9c76f013bfb1f02e83c8792abfa6210aee033e7a90b820af47471aa7e",
+          "source_state": "dirty_workspace_before_commit",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_validation_log",
+          "name": "final-native-tray.log",
+          "sha256": "0274b0710f37b4235e323239c97857efe2775e65f8a6100c96d03de65ec41570",
+          "source_state": "dirty_workspace_before_commit",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_validation_log",
+          "name": "final-macos-build.log",
+          "sha256": "8859f5b9f0701b385172d7dda5505750b19d9e9b58ffb935b3ccf24429b8feca",
+          "source_state": "dirty_workspace_before_commit",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "Final integrated validation passed: full Flutter analysis, formatting, 267 targeted Flutter tests including History/spoiler layouts, 6 Rust spoiler/event tests, windowless native Cocoa tray checks, and macOS Dev debug build. Temporary instrumentation and comparison shortcut were removed/restored before commit. Installed Windows and physical Android evidence and complete native resource qualification remain missing."
     }
   ]
 }

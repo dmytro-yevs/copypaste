@@ -31,6 +31,32 @@ make a history item unusable after it has already been copied successfully.
 The main engine registers the global shortcut without starting the Quick Paste
 engine. A popup engine is created on demand. Its initialized Dart controller
 signals readiness before the native host delivers the current presentation ID.
+That acknowledgement prepares the presentation; it does not reveal an empty
+native window. The host first positions the view while hidden. After the opened
+handler finishes, Flutter waits for the mounted viewport's image previews and
+source icons to decode, submits that frame, and sends `present` with the same
+presentation ID. Offscreen rows are not preloaded. Missing media uses the normal
+row fallback. Stale IDs cannot reveal a newer presentation, and a foreground
+change during startup cancels the pending reveal instead of stealing focus.
+Windows additionally waits for its next rasterized frame before showing and
+activating the popup. The macOS Flutter view explicitly uses a clear background
+instead of Flutter's default initial black surface.
+
+The popup registers only the native plugins it uses: file selection and shared
+preferences on macOS, and file selection on Windows. Other platform preferences
+and path lookup use their existing Dart/FFI implementations. Camera, capture
+notifications, tray, global shortcut, and main-window plugins remain owned by
+the main engine. No hidden engine is prewarmed or retained for this handshake.
+The first presentation reuses the initial watched History page instead of
+clearing and fetching it again. Later presentations still refresh History and
+preferences. Quick Paste does not request filter facets, which only the main
+History surface uses. Independent preference reads and initial permission
+checks may overlap with the initial History load.
+
+Installed-module metadata initializes asynchronously when the inspector is
+first requested. It does not delay `runApp`, ordinary clipboard rows, or the
+native ready acknowledgement. OCR availability updates when that metadata
+arrives. This does not prewarm or retain a hidden popup engine.
 Closing, deactivation, and completed paste retire the hidden engine on the next
 native event-loop turn. A reopened presentation cancels pending retirement.
 
@@ -43,6 +69,45 @@ keeps a delayed Windows reply from destroying a newer popup. Android has no
 separate Quick Paste engine.
 
 ## Window placement
+
+The primary tray-icon click opens this same Quick Paste presentation on macOS
+and Windows. Flutter renders the same rows, media previews, search, pinned
+items, inspector, keyboard commands, and footer actions for both entry points;
+there is no text-only tray history or separate clipboard repository. Selection
+uses the same copy, auto-paste preference, permission handling, and previous
+application target. Right-click retains the native application controls.
+
+On macOS, the native status button routes its primary action directly to the
+same native opener used by the shortcut. It samples the foreground application
+and Cocoa icon rectangle at the click, then leaves AppKit button tracking before
+opening. It does not round-trip through a nativeapi FFI callback, the main Dart
+isolate, and another platform-channel request. Control-click and right-click
+forward to the original nativeapi target. Detaching the binding cancels queued
+activation and restores only the target it owns, before Dart releases the icon.
+No event monitor, polling timer, or extra engine is introduced.
+
+Latency comparisons must use the same bundle, build mode, workload, and cache state;
+co-running production and Dev instances can own different global shortcuts.
+
+Tray presentations align to the icon's right edge and open on the side with
+available work-area space. Their height is at most 600 logical pixels and is
+further constrained by that space. Search and footer stay fixed while History
+scrolls and paginates. Inspector expansion preserves the bounded height and
+tray anchor. The shortcut retains its cursor placement and 800-pixel maximum.
+Both paths create the existing transient engine only on demand and retire it
+through the same close, deactivation, and completed-paste lifecycle. Native tray
+bounds use global top-left coordinates in the channel fallback; macOS converts
+those against the primary screen. Direct native macOS activation already uses
+Cocoa coordinates. Windows selects the tray's monitor and
+scales dimensions for its DPI before placement. Linux tray activation uses its
+existing native Quick Paste backend and compositor placement capabilities.
+
+The required regression matrix covers every clip kind in the bounded layout,
+image pixels rather than placeholder labels, file names, search and pagination,
+fixed footer visibility, inspector expansion, and unchanged copy/paste outcomes.
+Native placement checks cover top/bottom trays, negative monitor origins, short
+work areas, and Windows display scaling. Native resource qualification remains
+separate from these functional checks.
 
 The popup uses a compact menu layout: title and search share the top row,
 source icons and content previews align with shortcuts, pinned clips follow
@@ -65,7 +130,8 @@ pin/unpin, secret/non-secret, delete with confirmation, file download, and image
 is available. Inspector copy keeps the popup open; row and Enter activation keep
 the copy/paste/close behavior. Actions remain outside the scrolling content.
 Pin and delete updates reconcile the focused clip and keyboard shortcuts.
-The popup engine initializes the installed modules and owns its OCR controller.
+The popup engine owns its OCR controller and initializes installed-module
+metadata on the first inspector request.
 Native save sheets on macOS and owned save dialogs on Windows retain the popup
 and paste target until the dialog returns, including cancellation. Android uses
 the same History inspector actions in the main application.
@@ -97,7 +163,7 @@ destination.
 Reference: [Maccy preview controller](https://github.com/p0deje/Maccy/blob/a92c11ae3e7a86a57dc6359bad59e330e4625ede/Maccy/Observables/SlideoutController.swift)
 and [default delay](https://github.com/p0deje/Maccy/blob/a92c11ae3e7a86a57dc6359bad59e330e4625ede/Maccy/Extensions/Defaults.Keys%2BNames.swift).
 
-Each invocation reads the current pointer position, selects the monitor that
+Each shortcut invocation reads the current pointer position, selects the monitor that
 contains that point, and places the popup's top-left corner immediately below
 the pointer. The result is clamped to that monitor's work area, including
 negative coordinates, differing scale factors, menu bars, and taskbars. The
@@ -136,7 +202,9 @@ content uses a bounded controller cache cleared when History suspends.
 Temporary reveals are shared by clip ID across History, Quick Paste and both
 inspectors through the local runtime. `GetSpoilerState` and
 `SetSpoilerRevealed` return a monotonically revisioned snapshot of revealed IDs;
-the existing item invalidation wakes each local client. The snapshot contains
+the existing item invalidation wakes each local client.
+Reapplying an unchanged reveal/conceal state preserves the revision and emits
+no item invalidation. Actual changes still notify all local clients. The snapshot contains
 no content, is neither persisted nor sent to paired devices, and resets on
 runtime restart. An explicit secrecy change conceals that clip. Reopening Quick
 Paste or hiding/backgrounding a surface conceals the shared session; moving
