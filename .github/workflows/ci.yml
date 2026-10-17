@@ -478,6 +478,7 @@ jobs:
           scripts/release/test-linux-rpm.sh "dist/CopyPaste-v$version-linux-${{ matrix.architecture }}.rpm" "$version"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
+          retention-days: 3
           name: linux-pr-release-candidate-${{ matrix.architecture }}
           if-no-files-found: error
           path: |
