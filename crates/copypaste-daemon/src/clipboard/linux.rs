@@ -706,7 +706,6 @@ fn clipboard_capabilities(
     let mut read_write = readiness.clone();
     read_write.mime_types = [
         "text/plain;charset=utf-8",
-        "text/plain",
         "text/html",
         "text/rtf",
         "image/png",
