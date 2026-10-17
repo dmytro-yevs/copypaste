@@ -32,6 +32,17 @@ class PlatformManifestTest(unittest.TestCase):
         self.assertEqual(rows[0]["runner"], "ubuntu-24.04-arm")
         self.assertEqual(rows[0]["formats"], "AppImage,deb")
 
+    def test_gnome_wayland_pilot_reuses_the_x86_build_without_stable_promotion(self):
+        pilot = next(target for target in platform_manifest.TARGETS
+                     if target["id"] == "ubuntu-24.04-gnome-wayland-x86_64")
+        self.assertEqual(pilot["tier"], "experimental")
+        self.assertFalse(pilot["native_qualification"])
+        self.assertEqual(pilot["packaging"], ["AppImage", "deb"])
+        stable_builds = platform_manifest.matrix("stable", "build")["include"]
+        supplemental_builds = platform_manifest.matrix("all", "supplemental-build")["include"]
+        self.assertEqual([row["architecture"] for row in stable_builds], ["x86_64"])
+        self.assertEqual([row["architecture"] for row in supplemental_builds], ["aarch64"])
+
     def test_compatibility_table_tracks_every_declared_target(self):
         table = platform_manifest.table()
         documentation = (ROOT / "docs/platform/linux-support.md").read_text(encoding="utf-8")
