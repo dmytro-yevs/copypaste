@@ -81,6 +81,10 @@ def validate(document, path, root):
             use = step.get("uses", "")
             if not use:
                 continue
+            if use.startswith("actions/upload-artifact@"):
+                days = step.get("with", {}).get("retention-days")
+                if type(days) is not int or not 1 <= days <= 90:
+                    errors.append(f"{key}: artifact retention must be an explicit literal 1..90 days")
             if use.startswith("actions/download-artifact@"):
                 errors.append(f"{key}: use the verified artifact downloader to bind immutable IDs and ZIP digests")
             if use.startswith("./"):
@@ -101,6 +105,16 @@ def check(root):
         except (ValueError, TypeError) as error:
             errors.append(f"{path.name}: {error}")
     contract = json.loads((root / "config/ci-policy.json").read_text())
+    for workflow, document in documents.items():
+        limits = contract.get("artifact_retention_days", {}).get(workflow, {})
+        for key, job in document.get("jobs", {}).items():
+            for step in job.get("steps", []):
+                if not step.get("uses", "").startswith("actions/upload-artifact@"):
+                    continue
+                if key not in limits:
+                    errors.append(f"{workflow}: {key} artifact retention has no reviewed classification")
+                elif step.get("with", {}).get("retention-days") != limits[key]:
+                    errors.append(f"{workflow}: {key} artifact retention differs from its reviewed contract")
     try:
         dependencies({name: {"needs": [Path(job["uses"]).name for job in data["jobs"].values()
                                       if job.get("uses", "").startswith("./.github/workflows/")]}

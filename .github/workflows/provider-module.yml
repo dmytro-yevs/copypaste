@@ -147,6 +147,7 @@ jobs:
           python3 scripts/modules/qualify-desktop.py --platform ${{ matrix.platform }} --fixtures "$fixtures" --package dist/CopyPasteModule-copypaste.${{ needs.preflight.outputs.module }}-v${{ needs.preflight.outputs.version }}-${{ matrix.platform }}-${{ matrix.architecture }}.cpmodule --program target/release/${{ matrix.program }} --app-version "$version" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --receipt dist/CopyPasteModule-copypaste.${{ needs.preflight.outputs.module }}-v${{ needs.preflight.outputs.version }}-${{ matrix.platform }}-${{ matrix.architecture }}.cpmodule.receipt.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
+          retention-days: 7
           name: provider-${{ needs.preflight.outputs.module }}-${{ matrix.platform }}-${{ matrix.architecture }}
           if-no-files-found: error
           path: dist/*
@@ -220,6 +221,7 @@ jobs:
           python3 scripts/modules/build-android-qualification.py --fixtures "$fixtures" --sdk "$ANDROID_HOME" --library target/x86_64-linux-android/release/libcopypaste_module_qualification.so --package dist/CopyPasteModule-copypaste.${{ needs.preflight.outputs.module }}-v${{ needs.preflight.outputs.version }}-android-x86_64.cpmodule --output dist/provider-qualification.apk
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
+          retention-days: 7
           name: provider-${{ needs.preflight.outputs.module }}-android-${{ matrix.architecture }}
           if-no-files-found: error
           path: dist/*
@@ -251,6 +253,7 @@ jobs:
           script: python3 scripts/modules/qualify-android.py --apk dist/provider-qualification.apk --app-version "$(awk '/^\[workspace\.package\]/{inside=1; next} inside && /^version[[:space:]]*=/{gsub(/["[:space:]]/, "", $3); print $3; exit}' Cargo.toml)" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --receipt dist/CopyPasteModule-copypaste.${{ needs.preflight.outputs.module }}-v${{ needs.preflight.outputs.version }}-android-x86_64.cpmodule.receipt.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
+          retention-days: 90
           name: provider-${{ needs.preflight.outputs.module }}-android-native
           if-no-files-found: error
           path: dist/*.receipt.json
