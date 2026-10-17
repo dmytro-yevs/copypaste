@@ -392,6 +392,7 @@ jobs:
         run: bash scripts/ci/macos-test-keychain.sh restore
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
+          retention-days: 7
           name: production-macos
           if-no-files-found: error
           path: |
@@ -506,6 +507,7 @@ jobs:
             --version "${{ needs.preflight.outputs.version }}" --commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --output dist/production-receipt.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
+          retention-days: 7
           name: production-android
           if-no-files-found: error
           path: |
@@ -584,6 +586,7 @@ jobs:
         run: ./scripts/release/windows-sign.ps1 -Operation Cleanup
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
+          retention-days: 7
           name: production-windows
           if-no-files-found: error
           path: |
@@ -672,6 +675,7 @@ jobs:
           python3 scripts/release/write-artifact-receipt.py "${args[@]}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
+          retention-days: 90
           name: production-linux-${{ matrix.architecture }}
           if-no-files-found: error
           path: |
@@ -797,6 +801,7 @@ jobs:
             --output runtime-public/production-receipt.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
+          retention-days: 7
           name: production-compositor-runtime
           if-no-files-found: error
           path: runtime-public
@@ -961,6 +966,7 @@ jobs:
           python3 scripts/release/verify-artifact-receipts.py "${args[@]}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
+          retention-days: 90
           name: production-qualified
           if-no-files-found: error
           path: qualified
