@@ -10,6 +10,12 @@ targets = [
 db-path = "~/.cargo/cargo-deny-advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 version = 2
+# zbus 5 and secret-service 5 still pull the standalone zvariant crates that
+# were merged into zbus 6. secret-service's zbus 6 migration is pending
+# (open-source-cooperative/secret-service-rs#122). Reject direct unmaintained
+# dependencies while retaining vulnerability and unsoundness checks for the
+# entire graph. Revisit this when secret-service 6 is released.
+unmaintained = "workspace"
 ignore = []
 
 [licenses]
