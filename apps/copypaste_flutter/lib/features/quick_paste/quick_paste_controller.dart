@@ -9,6 +9,7 @@ import '../history/controller/history_controller.dart';
 import '../history/controller/history_ocr_controller.dart';
 import '../history/models/history_models.dart';
 import '../history/repository/history_file_downloader.dart';
+import '../history/repository/history_file_transfer.dart';
 import '../history/repository/history_repository.dart';
 import '../settings/repository/quick_paste_preferences_store.dart';
 
@@ -21,9 +22,11 @@ class QuickPasteController extends ChangeNotifier {
     required QuickPastePreferencesStore preferencesStore,
     required QuickPasteContextHost host,
     HistoryFileDownloader? fileDownloader,
+    HistoryFileTransfer? fileTransfer,
     HistoryOcrController? ocr,
     Future<void> Function()? initializeInspector,
-  }) : _disposeRepository = disposeRepository,
+  }) : _fileTransfer = fileTransfer ?? HistoryFileTransfer(repository),
+       _disposeRepository = disposeRepository,
        _initializeInspector = initializeInspector,
        _preferencesStore = preferencesStore,
        _host = host,
@@ -47,6 +50,7 @@ class QuickPasteController extends ChangeNotifier {
   final QuickPastePreferencesStore _preferencesStore;
   final QuickPasteContextHost _host;
   final HistoryController history;
+  final HistoryFileTransfer _fileTransfer;
 
   QuickPastePreferences _preferences;
   HistoryClip? _focusedClip;
@@ -55,6 +59,9 @@ class QuickPasteController extends ChangeNotifier {
   bool _initialized = false;
   bool _initialHistoryReady = false;
   bool _activating = false;
+  String? _transferringClipId;
+  String? _failedTransferClipId;
+  double _transferProgress = 0;
   int _presentationGeneration = 0;
   int? _presentationId;
   int? _renderablePresentationId;
@@ -75,6 +82,9 @@ class QuickPasteController extends ChangeNotifier {
   bool get autoPaste => _preferences.autoPaste;
   bool get accessibilityGranted => _accessibilityGranted;
   bool get activating => _activating;
+  double? transferProgressFor(String id) =>
+      _transferringClipId == id ? _transferProgress : null;
+  bool transferFailedFor(String id) => _failedTransferClipId == id;
   int get presentationGeneration => _presentationGeneration;
   HistoryClip? get focusedClip => _focusedClip;
   bool get inspectorOpen => _inspectorOpen;
@@ -376,6 +386,35 @@ class QuickPasteController extends ChangeNotifier {
     try {
       await history.select(clip.id);
       if (!_isCurrent(presentationId)) return;
+      final selected = history.selectedClip;
+      if (selected?.contentKind == HistoryClipKind.file &&
+          selected?.file != null &&
+          !selected!.file!.sourceAvailable) {
+        _failedTransferClipId = null;
+        _transferringClipId = clip.id;
+        _transferProgress = 0;
+        notifyListeners();
+        try {
+          await _fileTransfer.prepare(
+            selected,
+            onProgress: (progress) {
+              if (!_isCurrent(presentationId)) return;
+              _transferProgress = progress;
+              notifyListeners();
+            },
+          );
+        } catch (_) {
+          if (_isCurrent(presentationId)) {
+            _failedTransferClipId = clip.id;
+            notifyListeners();
+          }
+          return;
+        } finally {
+          _transferringClipId = null;
+          if (_isCurrent(presentationId)) notifyListeners();
+        }
+        if (!_isCurrent(presentationId)) return;
+      }
       final copied = await history.copySelected(plainText: plainText);
       if (!copied || !_isCurrent(presentationId)) return;
       final shouldPaste = forcePaste
