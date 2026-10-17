@@ -168,7 +168,10 @@ pub async fn run(state: Arc<AppState>, mut shutdown: watch::Receiver<bool>) -> a
             _ = tokio::time::sleep(wait) => {
                 // Bound to a local so the clipboard guard is released before
                 // the handoff below rather than held across it.
-                let changed = pending.lock().unwrap_or_else(|e| e.into_inner()).is_some() || state.clipboard().changed();
+                let source_attribution_required =
+                    !state.settings.get().excluded_app_bundle_ids.is_empty();
+                let changed = pending.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+                    || state.clipboard().changed_with_requirements(source_attribution_required);
                 if !changed {
                     continue;
                 }

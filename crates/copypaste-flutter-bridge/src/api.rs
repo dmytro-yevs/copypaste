@@ -1486,6 +1486,7 @@ mod tests {
     #[test]
     fn this_device_maps_the_explicit_local_identity() {
         let device = this_device(copypaste_ipc::StatusData {
+            platform_capabilities: Default::default(),
             sync_status: Default::default(),
             device_name: "Desktop".into(),
             device_id: Some("local-device-id".into()),

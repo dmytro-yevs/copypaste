@@ -37,14 +37,15 @@ pub use limits::{
     MAX_SOURCE_APP_ICON_BYTES, MAX_SYNC_METADATA_BYTES, SOURCE_APP_ICON_EDGE,
 };
 pub use payload::{
-    BackupData, CloudStatusData, CloudSyncData, DeviceClass, DeviceDetails,
-    DeviceEndpointObservation, DeviceLatencyObservation, DeviceObservationProvenance,
-    DeviceObservationTrust, DevicePlatform, DevicePresence, DevicePresenceObservation,
-    DeviceProfileObservation, DiagnosticCounters, DiscoveredData, DiscoveredDevice, ExportData,
-    ExportItem, ExternalNetworkObservation, FileDetails, HistoryDeviceFacet, HistoryFacets,
-    HistoryQuery, HistorySort, HistorySourceAppFacet, ImageDetails, ImagePreview,
-    ImagePreviewBounds, ImportData, Item, ItemPage, PairingInviteData, PairingProgressData,
-    PairingRole, PairingState, PeerInfo, PrivateModeData, StatusData, SyncResult,
+    BackupData, CapabilityGuarantee, CapabilityState, CapabilityStatus, CloudStatusData,
+    CloudSyncData, DeviceClass, DeviceDetails, DeviceEndpointObservation, DeviceLatencyObservation,
+    DeviceObservationProvenance, DeviceObservationTrust, DevicePlatform, DevicePresence,
+    DevicePresenceObservation, DeviceProfileObservation, DiagnosticCounters, DiscoveredData,
+    DiscoveredDevice, ExportData, ExportItem, ExternalNetworkObservation, FileDetails,
+    HistoryDeviceFacet, HistoryFacets, HistoryQuery, HistorySort, HistorySourceAppFacet,
+    ImageDetails, ImagePreview, ImagePreviewBounds, ImportData, Item, ItemPage, PairingInviteData,
+    PairingProgressData, PairingRole, PairingState, PeerInfo, PlatformCapability, PrivateModeData,
+    StatusData, SyncResult,
 };
 pub use response::{ConfigApplied, EventData, EventKind, Response, ResponseData};
 
@@ -446,7 +447,33 @@ mod tests {
         assert!(!status.private_mode);
         assert_eq!(status.private_mode_epoch, 0);
         assert_eq!(status.counters, DiagnosticCounters::default());
+        assert!(status.platform_capabilities.is_empty());
         assert!(status.settings_health.is_none());
+    }
+
+    #[test]
+    fn capability_states_have_stable_snake_case_wire_names() {
+        let status = CapabilityStatus {
+            state: CapabilityState::NeedsPermission,
+            backend: Some("xdg_portal".into()),
+            reason: Some("Permission is required.".into()),
+            permissions: vec!["remote_desktop".into()],
+            guarantee: CapabilityGuarantee::BestEffort,
+            mime_types: Vec::new(),
+            max_bytes: None,
+        };
+        let mut reports = std::collections::BTreeMap::new();
+        reports.insert(PlatformCapability::QuickPaste, status.clone());
+        let wire = serde_json::to_value(&reports).unwrap();
+        assert_eq!(wire["quick_paste"]["state"], "needs_permission");
+        assert_eq!(wire["quick_paste"]["guarantee"], "best_effort");
+        assert_eq!(
+            serde_json::from_value::<
+                std::collections::BTreeMap<PlatformCapability, CapabilityStatus>,
+            >(wire)
+            .unwrap(),
+            reports
+        );
     }
 
     /// The classification both clients share. `Status` is the one that matters
