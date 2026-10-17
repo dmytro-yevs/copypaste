@@ -1445,7 +1445,7 @@ impl Runtime {
                 );
             }
         };
-        let payload = match ClipboardPayload::open(&row, &self.keyring.item_key()) {
+        let mut payload = match ClipboardPayload::open(&row, &self.keyring.item_key()) {
             Ok(value) => value,
             Err(_) => {
                 return Response::err(
@@ -1455,6 +1455,19 @@ impl Runtime {
                 );
             }
         };
+        if let ClipboardPayload::File {
+            metadata: Some(metadata),
+            ..
+        } = &mut payload
+        {
+            if copypaste_core::origin_or(&row.origin_device_id, &self.device_id) != self.device_id
+                || metadata.source_reference.as_deref().is_none_or(|source| {
+                    !source.starts_with("content://") && !std::path::Path::new(source).is_file()
+                })
+            {
+                metadata.source_reference = None;
+            }
+        }
         if plain_text && payload.plain_text().is_none() {
             return Response::err(
                 request_id,
@@ -2758,6 +2771,40 @@ mod tests {
                 .ok
         );
         assert_eq!(std::fs::read(destination).unwrap(), b"file bytes");
+    }
+
+    #[test]
+    fn a_received_file_copy_does_not_write_the_senders_uri() {
+        let clipboard = Arc::new(RecordingClipboard::default());
+        let (runtime, _dir) = fixture_with(clipboard.clone());
+        runtime
+            .capture_binary(
+                b"file bytes",
+                "application/pdf",
+                Some("paper.pdf"),
+                Some("content://sender/paper.pdf"),
+            )
+            .unwrap();
+        let source = runtime.store.list(1, 0).unwrap().pop().unwrap();
+        assert!(runtime
+            .source
+            .apply_version(&copypaste_core::RemoteVersion {
+                item_id: "received-paper",
+                content: "",
+                binary_content: Some(b"file bytes"),
+                payload_metadata: source.payload_metadata.as_deref(),
+                content_type: copypaste_ipc::content_type::FILE,
+                created_at: copypaste_core::now_ms() + 1,
+                deleted: false,
+                content_hash: None,
+                origin_device_id: "sender",
+                app_bundle_id: None,
+                app_name: None,
+            })
+            .unwrap());
+        clipboard.0.lock().unwrap().clear();
+        assert!(runtime.copy(1, "received-paper", false).ok);
+        assert_eq!(*clipboard.0.lock().unwrap(), ["file:"]);
     }
 
     #[test]

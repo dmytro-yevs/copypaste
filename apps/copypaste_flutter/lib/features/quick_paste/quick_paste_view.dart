@@ -18,6 +18,7 @@ import '../history/view/history_inspector.dart';
 import '../history/presentation/history_clip_presentation.dart';
 import '../history/presentation/source_app_label.dart';
 import 'quick_paste_controller.dart';
+import 'middle_ellipsis.dart';
 
 class QuickPasteView extends StatefulWidget {
   const QuickPasteView({super.key, required this.controller});
@@ -550,6 +551,32 @@ class _QuickPasteViewState extends State<QuickPasteView> {
                   child: _ClipContent(clip: clip, controller: controller),
                 ),
                 const Gap(AppSpacing.sm),
+                if (controller.transferProgressFor(clip.id)
+                    case final progress?)
+                  SizedBox(
+                    width: AppLayoutSize.quickPasteTransferStatusWidth,
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: AppIconSize.xs,
+                          height: AppIconSize.xs,
+                          child: CircularProgressIndicator(
+                            value: progress,
+                            animated: !MediaQuery.disableAnimationsOf(context),
+                          ),
+                        ),
+                        const Gap(AppSpacing.xs),
+                        Text('${(progress * 100).floor()}%'),
+                      ],
+                    ),
+                  )
+                else if (controller.transferFailedFor(clip.id))
+                  Text(
+                    'Failed · Retry',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.destructive,
+                    ),
+                  ),
                 if (shortcut != null)
                   MenuShortcut(
                     activator: _desktopShortcut(shortcut),
@@ -603,6 +630,50 @@ class _ClipContent extends StatelessWidget {
                   ),
           ),
         ),
+      );
+    }
+    if (clip.contentKind == HistoryClipKind.file) {
+      final file = clip.file;
+      final reference = file?.sourceReference;
+      final path = reference?.trim().isNotEmpty == true
+          ? reference!
+          : clip.preview.contains(RegExp(r'[/\\]'))
+          ? clip.preview
+          : '';
+      final filename = file?.name?.trim().isNotEmpty == true
+          ? file!.name!.trim()
+          : (path.isEmpty ? clip.preview : path).split(RegExp(r'[/\\]')).last;
+      final theme = Theme.of(context);
+      final pathStyle = theme.typography.xSmall.copyWith(
+        color: theme.colorScheme.mutedForeground,
+      );
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            filename.isEmpty ? 'File' : filename,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          LayoutBuilder(
+            builder: (context, constraints) => Text(
+              path.isEmpty
+                  ? 'Path unavailable'
+                  : middleEllipsis(
+                      path,
+                      maxWidth: constraints.maxWidth,
+                      style: pathStyle,
+                      direction: Directionality.of(context),
+                      textScaler: MediaQuery.textScalerOf(context),
+                    ),
+              key: ValueKey('quick-paste-file-path-${clip.id}'),
+              maxLines: 1,
+              softWrap: false,
+              style: pathStyle,
+            ),
+          ),
+        ],
       );
     }
     if (clip.contentKind != HistoryClipKind.image) {

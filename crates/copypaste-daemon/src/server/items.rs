@@ -1303,7 +1303,7 @@ mod tests {
     fn native_copy_uses_a_file_source_path_while_plain_text_copy_refuses_binary_items() {
         use crate::testutil::WrittenPayload;
 
-        let (state, _dir, writes) =
+        let (state, dir, writes) =
             crate::testutil::test_state_watching_clipboard("native-copy-payloads");
         let image_bytes = b"native image bytes";
         let image = binary_item(
@@ -1312,10 +1312,12 @@ mod tests {
             image_bytes,
             None,
         );
+        let source = dir.path().join("report.bin");
+        std::fs::write(&source, b"native file bytes").unwrap();
         let metadata = copypaste_core::FileMetadata::with_source_reference(
             "report.bin",
             "application/octet-stream",
-            "/Users/person/Documents/report.bin",
+            source.to_str().unwrap(),
         )
         .unwrap();
         let file_bytes = b"native file bytes";
@@ -1333,7 +1335,7 @@ mod tests {
             writes.entries(),
             vec![
                 WrittenPayload::Image(image_bytes.to_vec()),
-                WrittenPayload::Text("/Users/person/Documents/report.bin".into()),
+                WrittenPayload::Text(source.to_string_lossy().into_owned()),
             ]
         );
 
@@ -1356,16 +1358,55 @@ mod tests {
             Some(ResponseData::Page(page)) => page.items,
             other => panic!("{other:?}"),
         };
-        for expected in [
-            "[image]",
-            "/Users/person/Documents/report.bin",
-            "[unsupported]",
-        ] {
+        for expected in ["[image]", source.to_str().unwrap(), "[unsupported]"] {
             assert!(
                 listed.iter().any(|item| item.content == expected),
                 "{expected}"
             );
         }
+    }
+
+    #[test]
+    fn remote_file_copy_uses_authenticated_bytes_instead_of_foreign_path() {
+        use crate::testutil::WrittenPayload;
+
+        let (state, _dir, writes) =
+            crate::testutil::test_state_watching_clipboard("remote-file-copy");
+        let metadata = copypaste_core::FileMetadata::with_source_reference(
+            "report.bin",
+            "application/octet-stream",
+            "/another-device/report.bin",
+        )
+        .unwrap();
+        let local = binary_item(
+            &state,
+            copypaste_ipc::content_type::FILE,
+            b"remote bytes",
+            Some(&metadata),
+        );
+        crate::sync::store_source(&state)
+            .apply_version(&copypaste_core::RemoteVersion {
+                item_id: "remote-file-copy",
+                content: "",
+                binary_content: Some(b"remote bytes"),
+                payload_metadata: local.payload_metadata.as_deref(),
+                content_type: copypaste_ipc::content_type::FILE,
+                created_at: copypaste_core::now_ms() + 1,
+                deleted: false,
+                content_hash: None,
+                origin_device_id: "another-device",
+                app_bundle_id: None,
+                app_name: None,
+            })
+            .unwrap();
+
+        assert!(copy(&state, 1, "remote-file-copy").ok);
+        assert!(writes.entries().iter().all(|entry| matches!(
+            entry,
+            WrittenPayload::File { bytes, metadata }
+                if bytes == b"remote bytes"
+                    && metadata.as_ref().is_some_and(|file| file.source_reference.is_none())
+        )));
     }
 
     #[test]

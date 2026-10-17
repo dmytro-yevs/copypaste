@@ -11,10 +11,25 @@ use crate::server::messages::{
 use crate::AppState;
 
 pub(crate) fn copy(state: &AppState, id: u64, item_id: &str) -> Response {
-    let (item, payload) = match fetch(state, id, item_id) {
+    let (item, mut payload) = match fetch(state, id, item_id) {
         Ok(opened) => opened,
         Err(response) => return *response,
     };
+    // A synchronized source path belongs to another device. Native clipboard
+    // backends must materialize the authenticated bytes instead of copying it.
+    if item
+        .file_details
+        .as_ref()
+        .is_some_and(|file| !file.source_available)
+    {
+        if let ClipboardPayload::File {
+            metadata: Some(metadata),
+            ..
+        } = &mut payload
+        {
+            metadata.source_reference = None;
+        }
+    }
     if let Err(error) = state
         .clipboard()
         .write_payload(&item.id, &payload, &item.content_type)
