@@ -1034,9 +1034,11 @@ impl Node {
                 warn!(error = %e, "could not remove a pairing");
                 NodeError::PeerStore
             })?;
-            let active_sessions = removed
-                .then(|| Self::cancel_active_syncs_locked(&active, pairing_id))
-                .unwrap_or_default();
+            let active_sessions = if removed {
+                Self::cancel_active_syncs_locked(&active, pairing_id)
+            } else {
+                Vec::new()
+            };
             (removed, active_sessions)
         };
         for session in &active_sessions {
