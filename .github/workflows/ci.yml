@@ -21,6 +21,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       native: ${{ steps.changes.outputs.native }}
+      compositor: ${{ steps.changes.outputs.compositor }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -35,7 +36,7 @@ jobs:
   compositor-runtime-metadata:
     needs: changes
     name: Compositor runtime metadata
-    if: needs.changes.outputs.native == 'true' && (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    if: needs.changes.outputs.compositor == 'true' && (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     outputs:
@@ -65,7 +66,7 @@ jobs:
   compositor-runtime-producer:
     name: Compositor runtime producer
     needs: [changes, compositor-runtime-metadata]
-    if: needs.changes.outputs.native == 'true' && (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.compositor-runtime-metadata.result == 'success')
+    if: needs.changes.outputs.compositor == 'true' && (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && needs.compositor-runtime-metadata.result == 'success')
     uses: ./.github/workflows/compositor-runtime.yml
     with:
       version: ${{ needs.compositor-runtime-metadata.outputs.version }}
@@ -359,7 +360,7 @@ jobs:
         run: ./scripts/ci/test-linux-native-fixtures.sh
 
   linux-mutter-bridges:
-    if: needs.changes.outputs.native == 'true'
+    if: needs.changes.outputs.compositor == 'true'
     needs: changes
     name: Mutter ${{ matrix.mutter }} bridge (${{ matrix.architecture }})
     runs-on: ${{ matrix.runner }}
@@ -524,6 +525,7 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
           NATIVE: ${{ needs.changes.outputs.native }}
+          COMPOSITOR: ${{ needs.changes.outputs.compositor }}
           IS_PR: ${{ github.event_name == 'pull_request' }}
           TRUSTED_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
         run: python3 scripts/ci/changes.py --verify
