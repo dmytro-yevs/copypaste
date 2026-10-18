@@ -2,6 +2,8 @@ import Cocoa
 import ApplicationServices
 import Carbon
 import FlutterMacOS
+import file_selector_macos
+import shared_preferences_foundation
 
 private let pairingPresentationHostChannel = "com.copypaste.app/pairing_presentation_host"
 private let pairingPresentationContextChannel = "com.copypaste.app/pairing_presentation_context"
@@ -62,7 +64,10 @@ class MainFlutterWindow: NSWindow {
       binaryMessenger: flutterViewController.engine.binaryMessenger
     )
     trayMenuChannel = MacosTrayMenuChannel(
-      binaryMessenger: flutterViewController.engine.binaryMessenger
+      binaryMessenger: flutterViewController.engine.binaryMessenger,
+      activate: { [weak self] foreground, anchor in
+        _ = self?.openQuickPaste(frontmost: foreground, trayAnchor: anchor)
+      }
     )
     super.awakeFromNib()
     if Bundle.main.bundleIdentifier?.hasSuffix(".dev") == true {
@@ -212,13 +217,22 @@ class MainFlutterWindow: NSWindow {
         result(true)
       case "prepare":
         result(self.prepareQuickPaste())
-      case "open":
+      case "open", "openFromTray":
         let frontmost = NSWorkspace.shared.frontmostApplication
-        guard self.prepareQuickPaste(), let presentation = self.quickPastePresentation else {
-          result(FlutterError(code: "window_unavailable", message: nil, details: nil))
-          return
+        var trayAnchor: NSRect?
+        if call.method == "openFromTray" {
+          guard let arguments = call.arguments as? [String: Any],
+                let x = arguments["x"] as? Double, let y = arguments["y"] as? Double,
+                let width = arguments["width"] as? Double, let height = arguments["height"] as? Double,
+                x.isFinite, y.isFinite, width.isFinite, height.isFinite, width > 0, height > 0,
+                let primary = NSScreen.screens.first else {
+            result(FlutterError(code: "invalid_tray_anchor", message: nil, details: nil))
+            return
+          }
+          // nativeapi exposes top-left global coordinates, flipped against the primary screen.
+          trayAnchor = NSRect(x: x, y: primary.frame.maxY - y - height, width: width, height: height)
         }
-        result(presentation.show(frontmost: frontmost))
+        result(self.openQuickPaste(frontmost: frontmost, trayAnchor: trayAnchor))
       case "accessibilityGranted":
         result(MacosAccessibility.isTrusted(prompt: false))
       case "requestAccessibility":
@@ -230,6 +244,13 @@ class MainFlutterWindow: NSWindow {
         result(FlutterMethodNotImplemented)
       }
     }
+  }
+
+  private func openQuickPaste(
+    frontmost: NSRunningApplication?, trayAnchor: NSRect?
+  ) -> Bool {
+    guard prepareQuickPaste(), let presentation = quickPastePresentation else { return false }
+    return presentation.show(frontmost: frontmost, trayAnchor: trayAnchor)
   }
 
   private func prepareQuickPaste() -> Bool {
@@ -579,6 +600,8 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
   private var inspectorPinned = false
   private var contextReady = false
   private var engineStopped = false
+  private var trayAnchor: NSRect?
+  private var pendingForegroundPID: pid_t?
   private let retirement = QuickPasteRetirement()
 
   init?(
@@ -613,6 +636,7 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
       defer: false
     )
     super.init()
+    controller.backgroundColor = .clear
     window.title = "CopyPaste Quick Paste"
     window.level = .floating
     window.hasShadow = true
@@ -627,24 +651,32 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     window.contentView?.wantsLayer = true
     window.contentView?.layer?.cornerRadius = 12
     window.contentView?.layer?.masksToBounds = true
-    RegisterGeneratedPlugins(registry: controller)
+    FileSelectorPlugin.register(with: controller.registrar(forPlugin: "FileSelectorPlugin"))
+    SharedPreferencesPlugin.register(with: controller.registrar(forPlugin: "SharedPreferencesPlugin"))
     configureContextChannel()
   }
 
   deinit { pasteSession.invalidate() }
 
-  func show(frontmost: NSRunningApplication?) -> Bool {
+  func show(
+    frontmost: NSRunningApplication?, trayAnchor: NSRect? = nil
+  ) -> Bool {
     guard !closed else { return false }
     retirement.cancel()
-    NSLog("QuickPaste open: appActive=%d", NSApplication.shared.isActive ? 1 : 0)
+    let popupActive = window.isVisible && window.isKeyWindow
+    performingAction = true
+    window.orderOut(nil)
+    performingAction = false
+    pendingForegroundPID = frontmost?.processIdentifier
     guard let id = pasteSession.begin(
       frontmost: frontmost,
-      popupActive: window.isVisible && window.isKeyWindow
+      popupActive: popupActive
     ) else {
       if pasteSession.id == 0 { hide() }
       return false
     }
     inspectorVisible = inspectorPinned
+    self.trayAnchor = trayAnchor
     return presentQuickPaste(
       id: id,
       session: pasteSession,
@@ -654,20 +686,31 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
           QuickPasteDisplay(frame: $0.frame, visibleFrame: $0.visibleFrame)
         }
         let size = NSSize(width: self.inspectorVisible ? 816 : 448, height: 800)
-        let frame = quickPasteFrame(cursor: cursor, size: size, displays: displays)
+        let frame = trayAnchor.map {
+          quickPasteTrayFrame(anchor: $0, size: size, displays: displays)
+        } ?? quickPasteFrame(cursor: cursor, size: size, displays: displays)
         self.window.setFrame(frame, display: true)
         return true
       },
+      // The positioned view renders offscreen before Dart acknowledges its media frame.
+      show: { true },
+      hide: { self.hide() },
+      opened: { self.notifyOpened(id) }
+    )
+  }
+
+  private func presentPreparedFrame(_ id: Int64) -> Bool {
+    guard contextReady, !closed else { return false }
+    return presentQuickPaste(
+      id: id, session: pasteSession,
+      position: { NSWorkspace.shared.frontmostApplication?.processIdentifier == self.pendingForegroundPID },
       show: {
-        // A global shortcut must order the panel while another app is active.
         MacosScreenshotProtection.shared.resume(window: self.window)
         self.window.orderFrontRegardless()
         self.window.makeKey()
-        NSLog("QuickPaste shown: visible=%d key=%d", self.window.isVisible ? 1 : 0, self.window.isKeyWindow ? 1 : 0)
         return self.window.isVisible && self.window.isKeyWindow
       },
-      hide: { self.hide() },
-      opened: { self.notifyOpened(id) }
+      hide: { self.hide() }, opened: {}
     )
   }
 
@@ -764,6 +807,9 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
         return
       }
       switch call.method {
+      case "present":
+        guard let id = Self.presentationID(call.arguments) else { result(false); return }
+        result(self.presentPreparedFrame(id))
       case "ready":
         self.contextReady = true
         result(true)
@@ -777,9 +823,19 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
               let arguments = call.arguments as? [String: Any],
               let visible = arguments["visible"] as? Bool,
               let screen = self.window.screen ?? NSScreen.main else { result(false); return }
-        self.window.setFrame(quickPasteInspectorFrame(
-          current: self.window.frame, visible: screen.visibleFrame, expanded: visible
-        ), display: true)
+        let frame: NSRect
+        if let anchor = self.trayAnchor {
+          frame = quickPasteTrayFrame(
+            anchor: anchor,
+            size: NSSize(width: visible ? 816 : 448, height: self.window.frame.height),
+            displays: NSScreen.screens.map { QuickPasteDisplay(frame: $0.frame, visibleFrame: $0.visibleFrame) }
+          )
+        } else {
+          frame = quickPasteInspectorFrame(
+            current: self.window.frame, visible: screen.visibleFrame, expanded: visible
+          )
+        }
+        self.window.setFrame(frame, display: true)
         guard self.pasteSession.matches(id) else { result(false); return }
         self.inspectorVisible = visible
         if arguments["remember"] as? Bool ?? true {

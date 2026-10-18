@@ -67,6 +67,51 @@ void main() {
     });
   }
 
+  test(
+    'tray presentation sends icon bounds through the existing host',
+    () async {
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return true;
+      });
+      await openTrayQuickPaste(
+        const Rect.fromLTWH(-1240, 8, 24, 24),
+        channel: channel,
+      );
+      expect(calls.single.method, 'openFromTray');
+      expect(calls.single.arguments, {
+        'x': -1240.0,
+        'y': 8.0,
+        'width': 24.0,
+        'height': 24.0,
+      });
+    },
+  );
+
+  test('tray presentation requires native acknowledgement', () async {
+    response = false;
+    await expectLater(
+      openTrayQuickPaste(const Rect.fromLTWH(10, 0, 24, 24), channel: channel),
+      throwsA(isA<PlatformException>()),
+    );
+  });
+
+  test('invalid tray geometry never reaches the native host', () async {
+    var invoked = false;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      invoked = true;
+      return true;
+    });
+    for (final anchor in [Rect.zero, Rect.fromLTWH(double.nan, 0, 24, 24)]) {
+      await expectLater(
+        openTrayQuickPaste(anchor, channel: channel),
+        throwsArgumentError,
+      );
+    }
+    expect(invoked, isFalse);
+  });
+
   for (final platform in [
     TargetPlatform.macOS,
     TargetPlatform.windows,
@@ -220,6 +265,17 @@ void main() {
           calls.map((call) => call.arguments),
           everyElement({'presentationId': 41}),
         );
+      },
+    );
+
+    test(
+      'only a rendered presentation can request native reveal by its ID',
+      () async {
+        expect(await context.presentFrame(presentationId: 41), isTrue);
+        expect(calls.single.method, 'present');
+        expect(calls.single.arguments, {'presentationId': 41});
+        response = false;
+        expect(await context.presentFrame(presentationId: 42), isFalse);
       },
     );
 
