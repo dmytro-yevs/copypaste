@@ -76,6 +76,11 @@ void main() {
           );
           await tester.pumpAndSettle();
           final size = tester.getSize(find.byKey(const ValueKey('mask-0')));
+          final maskButton = find.descendant(
+            of: find.byKey(const ValueKey('mask-0')),
+            matching: find.byType(Button),
+          );
+          expect(tester.getSize(maskButton), size);
           expect(
             _semantics(tester),
             isNot(contains('SYNTHETIC SECRET FIXTURE')),
