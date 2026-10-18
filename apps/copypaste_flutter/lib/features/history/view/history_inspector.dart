@@ -146,28 +146,14 @@ class HistoryInspector extends StatelessWidget {
           Gap(inDrawer ? AppSpacing.sm : AppSpacing.lg),
           Flexible(
             fit: inDrawer || compact ? FlexFit.tight : FlexFit.loose,
-            child: clip.secret
-                ? SecretSpoiler(
-                    key: ValueKey(
-                      'inspector-spoiler-${clip.id}-$presentationRevision',
-                    ),
-                    clipId: clip.id,
-                    controller: controller.spoilers,
-                    child: _HistoryDetailContent(
-                      clip: clip,
-                      controller: controller,
-                      body: body,
-                      highlighted: highlighted,
-                      desktop: !inDrawer,
-                    ),
-                  )
-                : _HistoryDetailContent(
-                    clip: clip,
-                    controller: controller,
-                    body: body,
-                    highlighted: highlighted,
-                    desktop: !inDrawer,
-                  ),
+            child: _HistoryDetailContent(
+              clip: clip,
+              controller: controller,
+              body: body,
+              highlighted: highlighted,
+              desktop: !inDrawer,
+              presentationRevision: presentationRevision,
+            ),
           ),
           const Gap(AppSpacing.lg),
           Padding(
@@ -276,32 +262,11 @@ class HistoryInspector extends StatelessWidget {
                       ],
                     ),
                     if (controller.canDownloadSelected)
-                      Tooltip(
-                        tooltip: (_) =>
-                            const TooltipContainer(child: Text('Download')),
-                        child: Semantics(
-                          label: iconOnly ? 'Download' : null,
-                          button: true,
-                          child: Button.secondary(
-                            key: const ValueKey<String>(
-                              'history-detail-download',
-                            ),
-                            style: AppTheme.actionButtonStyle(
-                              iconOnly
-                                  ? const ButtonStyle.secondaryIcon()
-                                  : const ButtonStyle.secondary(),
-                            ),
-                            onPressed: controller.isDownloadPending(clip.id)
-                                ? null
-                                : () => _download(context),
-                            leading: iconOnly
-                                ? null
-                                : const Icon(LucideIcons.download),
-                            child: iconOnly
-                                ? const Icon(LucideIcons.download)
-                                : const Text('Download'),
-                          ),
-                        ),
+                      _DownloadButton(
+                        controller: controller,
+                        clip: clip,
+                        iconOnly: iconOnly,
+                        onDownload: () => _download(context),
                       ),
                     Tooltip(
                       tooltip: (_) => TooltipContainer(
@@ -600,6 +565,133 @@ class HistoryInspector extends StatelessWidget {
   }
 }
 
+class _DownloadButton extends StatefulWidget {
+  const _DownloadButton({
+    required this.controller,
+    required this.clip,
+    required this.iconOnly,
+    required this.onDownload,
+  });
+
+  final HistoryController controller;
+  final HistoryClip clip;
+  final bool iconOnly;
+  final VoidCallback onDownload;
+
+  @override
+  State<_DownloadButton> createState() => _DownloadButtonState();
+}
+
+class _DownloadButtonState extends State<_DownloadButton> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = widget.controller;
+    final id = widget.clip.id;
+    final pending = controller.isDownloadPending(id);
+    final failed = controller.downloadFailedFor(id);
+    final cancelling = controller.isDownloadCancelling(id);
+    final progress = controller.downloadProgressFor(id);
+    final percentage = ((progress ?? 0) * 100).floor();
+    final showCancel = pending && _hovered && !cancelling;
+    final label = cancelling
+        ? 'Cancelling…'
+        : showCancel
+        ? 'Cancel'
+        : pending && progress != null
+        ? '$percentage%'
+        : failed
+        ? 'Retry'
+        : 'Download';
+    final indicator = CircularProgressIndicator(
+      value: progress,
+      animated: !MediaQuery.disableAnimationsOf(context),
+      theme: const CircularProgressIndicatorTheme(size: AppIconSize.sm),
+    );
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: Tooltip(
+        tooltip: (_) => TooltipContainer(
+          child: Text(
+            cancelling
+                ? 'Cancelling download'
+                : pending
+                ? 'Downloading $percentage% · Click to cancel'
+                : failed
+                ? 'Download failed · Click to retry'
+                : 'Download',
+          ),
+        ),
+        child: Semantics(
+          label: widget.iconOnly
+              ? pending
+                    ? 'Cancel download, $percentage% complete'
+                    : failed
+                    ? 'Retry download'
+                    : 'Download'
+              : null,
+          button: true,
+          child: SizedBox(
+            width: widget.iconOnly ? AppTheme.controlHeight(context) : null,
+            height: widget.iconOnly ? AppTheme.controlHeight(context) : null,
+            child: Button.secondary(
+              key: const ValueKey<String>('history-detail-download'),
+              style: AppTheme.actionButtonStyle(
+                widget.iconOnly
+                    ? const ButtonStyle.secondaryIcon()
+                    : const ButtonStyle.secondary(),
+              ),
+              onPressed: cancelling
+                  ? null
+                  : pending
+                  ? () => controller.cancelDownload(id)
+                  : widget.onDownload,
+              leading: widget.iconOnly
+                  ? null
+                  : showCancel
+                  ? const Icon(LucideIcons.x)
+                  : pending
+                  ? indicator
+                  : failed
+                  ? const Icon(LucideIcons.rotateCcw)
+                  : const Icon(LucideIcons.download),
+              child: widget.iconOnly
+                  ? showCancel
+                        ? const Icon(LucideIcons.x)
+                        : pending
+                        ? Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              CircularProgressIndicator(
+                                value: progress,
+                                animated: !MediaQuery.disableAnimationsOf(
+                                  context,
+                                ),
+                                theme: const CircularProgressIndicatorTheme(
+                                  size: AppIconSize.lg,
+                                ),
+                              ),
+                              if (progress != null)
+                                SizedBox(
+                                  width: AppIconSize.lg,
+                                  child: FittedBox(child: Text('$percentage%')),
+                                ),
+                            ],
+                          )
+                        : failed
+                        ? const Icon(LucideIcons.rotateCcw)
+                        : const Icon(LucideIcons.download)
+                  : Text(label),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _HistoryDetailContent extends StatelessWidget {
   const _HistoryDetailContent({
     required this.clip,
@@ -607,6 +699,7 @@ class _HistoryDetailContent extends StatelessWidget {
     required this.body,
     required this.highlighted,
     required this.desktop,
+    required this.presentationRevision,
   });
 
   final HistoryClip clip;
@@ -614,6 +707,17 @@ class _HistoryDetailContent extends StatelessWidget {
   final String body;
   final HighlightedHistoryCode? highlighted;
   final bool desktop;
+  final int presentationRevision;
+
+  Widget _conceal(Widget child, {String keyPrefix = 'inspector-spoiler'}) =>
+      clip.secret
+      ? SecretSpoiler(
+          key: ValueKey('$keyPrefix-${clip.id}-$presentationRevision'),
+          clipId: clip.id,
+          controller: controller.spoilers,
+          child: child,
+        )
+      : child;
 
   @override
   Widget build(BuildContext context) {
@@ -626,17 +730,25 @@ class _HistoryDetailContent extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(
-                child: _DetailImagePreview(clip: clip, controller: controller),
+                child: Align(
+                  alignment: Alignment.topLeft,
+                  child: _conceal(
+                    _DetailImagePreview(clip: clip, controller: controller),
+                  ),
+                ),
               ),
               const Gap(AppSpacing.lg),
               Flexible(
                 child: SingleChildScrollView(
                   primary: false,
                   key: const ValueKey<String>('history-detail-scroll-metadata'),
-                  child: _HistoryMetadataTable(
-                    clip: clip,
-                    controller: controller,
-                    revealConfidential: true,
+                  child: _conceal(
+                    _HistoryMetadataTable(
+                      clip: clip,
+                      controller: controller,
+                      revealConfidential: true,
+                    ),
+                    keyPrefix: 'inspector-metadata-spoiler',
                   ),
                 ),
               ),
@@ -651,12 +763,18 @@ class _HistoryDetailContent extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _body(context),
+            Align(
+              alignment: Alignment.topLeft,
+              child: _conceal(_sizedBody(context)),
+            ),
             const Gap(AppSpacing.lg),
-            _HistoryMetadataTable(
-              clip: clip,
-              controller: controller,
-              revealConfidential: true,
+            _conceal(
+              _HistoryMetadataTable(
+                clip: clip,
+                controller: controller,
+                revealConfidential: true,
+              ),
+              keyPrefix: 'inspector-metadata-spoiler',
             ),
           ],
         ),
@@ -671,15 +789,26 @@ class _HistoryDetailContent extends StatelessWidget {
                 controller: controller,
                 maxHeight: constraints.maxHeight,
               )
-            : SizedBox(width: double.infinity, child: _body(context));
+            : _sizedBody(context);
         return SingleChildScrollView(
           primary: false,
           key: const ValueKey<String>('history-detail-scroll-content'),
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-          child: content,
+          child: Align(alignment: Alignment.topLeft, child: _conceal(content)),
         );
       },
     );
+  }
+
+  Widget _sizedBody(BuildContext context) {
+    final content = _body(context);
+    if (!clip.secret ||
+        body.length > 256 ||
+        clip.contentKind == HistoryClipKind.image ||
+        clip.contentKind == HistoryClipKind.color) {
+      return content;
+    }
+    return IntrinsicWidth(child: content);
   }
 
   Widget _body(BuildContext context) {
@@ -863,21 +992,15 @@ class _DetailImagePreview extends StatelessWidget {
         builder: (context, snapshot) {
           final preview = snapshot.data;
           if (preview == null) {
-            return const Align(
-              alignment: Alignment.topLeft,
-              child: SizedBox.square(
-                dimension: AppIconSize.hero,
-                child: Center(
-                  child: Icon(LucideIcons.image, size: AppIconSize.hero),
-                ),
+            return const SizedBox.square(
+              dimension: AppIconSize.hero,
+              child: Center(
+                child: Icon(LucideIcons.image, size: AppIconSize.hero),
               ),
             );
           }
           if (preview.width <= 0 || preview.height <= 0) {
-            return const Align(
-              alignment: Alignment.topLeft,
-              child: Icon(LucideIcons.imageOff, size: AppIconSize.hero),
-            );
+            return const Icon(LucideIcons.imageOff, size: AppIconSize.hero);
           }
           final sourceWidth = preview.width.toDouble();
           final sourceHeight = preview.height.toDouble();
@@ -896,34 +1019,29 @@ class _DetailImagePreview extends StatelessWidget {
               availableHeight / sourceHeight,
             ),
           );
-          return Align(
-            alignment: Alignment.topLeft,
-            child: SizedBox(
-              key: const ValueKey<String>('history-detail-image-viewport'),
-              width: sourceWidth * scale,
-              height: sourceHeight * scale,
-              child: Image.memory(
-                preview.bytes,
-                key: ValueKey<String>('history-detail-image-${clip.id}'),
-                fit: BoxFit.contain,
-                alignment: Alignment.topLeft,
-                cacheWidth: math.min(
-                  preview.width,
-                  (sourceWidth * scale * MediaQuery.devicePixelRatioOf(context))
-                      .ceil()
-                      .clamp(1, preview.width),
-                ),
-                cacheHeight: math.min(
-                  preview.height,
-                  (sourceHeight *
-                          scale *
-                          MediaQuery.devicePixelRatioOf(context))
-                      .ceil()
-                      .clamp(1, preview.height),
-                ),
-                errorBuilder: (context, error, stackTrace) => const Center(
-                  child: Icon(LucideIcons.imageOff, size: AppIconSize.hero),
-                ),
+          return SizedBox(
+            key: const ValueKey<String>('history-detail-image-viewport'),
+            width: sourceWidth * scale,
+            height: sourceHeight * scale,
+            child: Image.memory(
+              preview.bytes,
+              key: ValueKey<String>('history-detail-image-${clip.id}'),
+              fit: BoxFit.contain,
+              alignment: Alignment.topLeft,
+              cacheWidth: math.min(
+                preview.width,
+                (sourceWidth * scale * MediaQuery.devicePixelRatioOf(context))
+                    .ceil()
+                    .clamp(1, preview.width),
+              ),
+              cacheHeight: math.min(
+                preview.height,
+                (sourceHeight * scale * MediaQuery.devicePixelRatioOf(context))
+                    .ceil()
+                    .clamp(1, preview.height),
+              ),
+              errorBuilder: (context, error, stackTrace) => const Center(
+                child: Icon(LucideIcons.imageOff, size: AppIconSize.hero),
               ),
             ),
           );
