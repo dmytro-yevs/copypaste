@@ -377,13 +377,20 @@ class ReleaseSafetyTest(unittest.TestCase):
         })
         for path in (
             ROOT / ".github/workflows/compositor-runtime.yml",
-            ROOT / ".github/workflows/linux-native-qualification.yml",
             ROOT / ".github/workflows/release.yml",
         ):
             value = path.read_text(encoding="utf-8")
             for name in expected:
                 self.assertIn(name, value)
             self.assertNotIn("copypaste-compositor-runtime-kde-", value)
+        manifest = json.loads((ROOT / "packaging/linux/release-contract.json").read_text(encoding="utf-8"))
+        self.assertTrue(expected <= {
+            row["compositor_artifact"] for row in manifest["targets"]
+            if row["tier"] == "stable" and row["native_qualification"]
+        })
+        qualification = (ROOT / ".github/workflows/linux-native-qualification.yml").read_text(encoding="utf-8")
+        self.assertIn("platform_manifest.py matrix --tier stable --purpose qualification", qualification)
+        self.assertIn("fromJSON(needs.source.outputs.matrix)", qualification)
         verifier = runpy.run_path(str(ROOT / "scripts/release/verify-compositor-runtime-source-run.py"))
         self.assertTrue(expected <= verifier["EXPECTED"])
 

@@ -120,6 +120,28 @@ class PolicyTest(unittest.TestCase):
         self.assertFalse(select(["README.md", "docs/cloud-privacy.md"])["native"])
         self.assertTrue(select(["README.md", "new-file"])["native"])
 
+    def test_compositor_rebuild_tracks_sources_patches_and_toolchain(self):
+        for path in (
+            "packaging/linux/desktop-integrations/gnome-shell-extension/mutter/patches/bridge.patch",
+            "packaging/linux/compositor-runtime/release-contract.json",
+            ".github/workflows/compositor-runtime.yml",
+            ".flutter-version",
+        ):
+            self.assertTrue(select([path])["compositor"], path)
+        self.assertFalse(select(["crates/copypaste-daemon/src/clipboard/linux.rs"])["compositor"])
+        self.assertFalse(select(["apps/copypaste_flutter/lib/platform/permissions/linux_integration.dart"])["compositor"])
+
+    def test_aggregate_accepts_only_declared_compositor_skip(self):
+        needs = {"changes": {"result": "success"},
+                 "compositor-runtime-metadata": {"result": "skipped"},
+                 "compositor-runtime-producer": {"result": "skipped"},
+                 "linux-mutter-bridges": {"result": "skipped"},
+                 "rust-and-supabase": {"result": "success"}}
+        verify_results(needs, True, True, compositor=False)
+        needs["linux-mutter-bridges"]["result"] = "success"
+        with self.assertRaises(ValueError):
+            verify_results(needs, True, True, compositor=False)
+
     def test_aggregate_rejects_failed_or_skipped_required_jobs(self):
         needs = {"changes": {"result": "success"}, "rust": {"result": "success"}}
         verify_results(needs, True, False)
