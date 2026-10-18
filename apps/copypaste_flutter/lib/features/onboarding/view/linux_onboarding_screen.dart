@@ -103,7 +103,11 @@ class _IntegrationSetup extends StatelessWidget {
     }
     final isWayland = status.session == LinuxDesktopSession.wayland;
     final companionReady =
-        status.companion == LinuxCompanionState.active && status.clipboard;
+        status.companion == LinuxCompanionState.active &&
+        status.clipboard &&
+        (status.capabilities.isEmpty ||
+            status.capability(LinuxCapabilityKind.sourceAttribution).state ==
+                LinuxCapabilityState.available);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -140,6 +144,21 @@ class _IntegrationSetup extends StatelessWidget {
                   title: 'GNOME or KDE companion',
                   description: companionReady
                       ? 'The authenticated Clipboard v2 bridge is ready.'
+                      : status
+                                .capability(
+                                  LinuxCapabilityKind.clipboardCapture,
+                                )
+                                .state ==
+                            LinuxCapabilityState.needsCompanion
+                      ? 'Clipboard capture is paused by source app exclusions. Enable the signed companion to resume it.'
+                      : status.clipboard &&
+                            status
+                                    .capability(
+                                      LinuxCapabilityKind.sourceAttribution,
+                                    )
+                                    .state ==
+                                LinuxCapabilityState.unsupported
+                      ? 'Basic clipboard access is ready. Source app exclusions and Quick Paste need the signed companion.'
                       : 'Install and enable the signed companion session package, then return here.',
                   statusIcon: companionReady ? LucideIcons.circleCheck : null,
                   action: companionReady
