@@ -44,7 +44,7 @@ CAPABILITY_NAMES = {
 
 def verify_capability_report(root: Path, evidence_names: set[str], architecture: str,
                              desktop: str, session: str, format_name: str) -> None:
-    name = f"capabilities-{architecture}-{desktop.lower()}-{session}-{format_name}.json"
+    name = f"{format_name.lower()}/capabilities-{architecture}-{desktop.lower()}-{session}-{format_name}.json"
     if name not in evidence_names:
         raise ValueError(f"installed capability report is missing from receipt: {name}")
     report = json.loads(regular_file(root, name).read_text(encoding="utf-8"))
