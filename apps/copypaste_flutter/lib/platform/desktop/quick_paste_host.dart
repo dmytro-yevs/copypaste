@@ -1,5 +1,30 @@
 import 'package:flutter/services.dart';
 
+/// Tray bounds use native global screen coordinates with a top-left origin.
+Future<void> openTrayQuickPaste(
+  Rect anchor, {
+  MethodChannel channel = const MethodChannel(
+    'com.copypaste.app/quick_paste_host',
+  ),
+}) async {
+  if (!anchor.left.isFinite ||
+      !anchor.top.isFinite ||
+      !anchor.width.isFinite ||
+      !anchor.height.isFinite ||
+      anchor.isEmpty) {
+    throw ArgumentError.value(anchor, 'anchor', 'Invalid tray bounds');
+  }
+  final result = await channel.invokeMethod<bool>('openFromTray', {
+    'x': anchor.left,
+    'y': anchor.top,
+    'width': anchor.width,
+    'height': anchor.height,
+  });
+  if (result != true) {
+    throw PlatformException(code: 'window_unavailable');
+  }
+}
+
 abstract interface class QuickPasteWindowHost {
   Future<bool> isSupported();
 
@@ -130,7 +155,12 @@ abstract interface class QuickPasteContextHost {
   Future<void> dispose();
 }
 
-class MethodChannelQuickPasteContextHost implements QuickPasteContextHost {
+abstract interface class QuickPasteFrameHost {
+  Future<bool> presentFrame({required int presentationId});
+}
+
+class MethodChannelQuickPasteContextHost
+    implements QuickPasteContextHost, QuickPasteFrameHost {
   MethodChannelQuickPasteContextHost({MethodChannel? channel})
     : _channel =
           channel ??
@@ -141,6 +171,21 @@ class MethodChannelQuickPasteContextHost implements QuickPasteContextHost {
   final MethodChannel _channel;
   QuickPasteOpenedHandler? _opened;
   Future<void> Function()? _shutdown;
+
+  @override
+  Future<bool> presentFrame({required int presentationId}) async {
+    try {
+      return await _channel.invokeMethod<Object?>('present', {
+            'presentationId': presentationId,
+          }) ==
+          true;
+    } on MissingPluginException {
+      // Older and compositor-owned hosts already reveal their window.
+      return true;
+    } on PlatformException {
+      return false;
+    }
+  }
 
   Future<String> runtimeEndpoint() async {
     final endpoint = await _channel.invokeMethod<Object?>('runtimeEndpoint');

@@ -83,6 +83,7 @@ abstract final class AppLayoutSize {
   static const double onboardingContentMaxWidth = 440;
   static const double marketplaceCardMinWidth = 280;
   static const double quickPasteMenuWidth = 448;
+  static const double quickPasteTransferStatusWidth = 64;
   static const double quickPasteInspectorWidth = 360;
   static const double settingsStackedControlWidth = 420;
   static const double settingsNavigationWidth = 240;

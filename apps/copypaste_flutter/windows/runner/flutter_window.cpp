@@ -1,6 +1,7 @@
 #include "flutter_window.h"
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
 #include <limits>
 #include <string>
@@ -10,6 +11,7 @@
 #include <flutter/method_channel.h>
 #include <flutter/method_result_functions.h>
 #include <flutter/standard_method_codec.h>
+#include <file_selector_windows/file_selector_windows.h>
 
 #include "flutter/generated_plugin_registrant.h"
 #include "copypaste_flutter_protected_pairing.h"
@@ -37,6 +39,30 @@ int64_t QuickPastePresentationId(const flutter::EncodableValue* arguments) {
   if (const auto* id = std::get_if<int64_t>(&found->second)) return *id > 0 ? *id : 0;
   if (const auto* id = std::get_if<int32_t>(&found->second)) return *id > 0 ? *id : 0;
   return 0;
+}
+
+std::optional<RECT> QuickPasteTrayAnchor(const flutter::EncodableValue* arguments) {
+  if (!arguments) return std::nullopt;
+  const auto* map = std::get_if<flutter::EncodableMap>(arguments);
+  if (!map) return std::nullopt;
+  const auto number = [&](const char* key) -> double {
+    const auto found = map->find(flutter::EncodableValue(key));
+    if (found == map->end()) return std::numeric_limits<double>::quiet_NaN();
+    if (const auto* value = std::get_if<double>(&found->second)) return *value;
+    return std::numeric_limits<double>::quiet_NaN();
+  };
+  const double x = number("x"), y = number("y");
+  const double width = number("width"), height = number("height");
+  const double right = x + width, bottom = y + height;
+  if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(right) ||
+      !std::isfinite(bottom) || width <= 0 || height <= 0 ||
+      width > std::numeric_limits<LONG>::max() || height > std::numeric_limits<LONG>::max() ||
+      x < std::numeric_limits<LONG>::min() || y < std::numeric_limits<LONG>::min() ||
+      right > std::numeric_limits<LONG>::max() || bottom > std::numeric_limits<LONG>::max()) {
+    return std::nullopt;
+  }
+  return RECT{static_cast<LONG>(x), static_cast<LONG>(y),
+              static_cast<LONG>(right), static_cast<LONG>(bottom)};
 }
 
 template <typename Function>
@@ -118,7 +144,12 @@ bool FlutterWindow::OnCreate() {
   if (!flutter_controller_->engine() || !flutter_controller_->view()) {
     return false;
   }
-  RegisterPlugins(flutter_controller_->engine());
+  if (is_quick_paste_context_) {
+    FileSelectorWindowsRegisterWithRegistrar(
+        flutter_controller_->engine()->GetRegistrarForPlugin("FileSelectorWindows"));
+  } else {
+    RegisterPlugins(flutter_controller_->engine());
+  }
   if (!is_protected_pairing_context_ && !is_quick_paste_context_) {
     security_channel_ =
         std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
@@ -156,6 +187,24 @@ bool FlutterWindow::OnCreate() {
             quick_paste_ready_ = true;
             result->Success(flutter::EncodableValue(true));
             NotifyQuickPasteOpened();
+          } else if (call.method_name() == "present") {
+            const auto id = QuickPastePresentationId(call.arguments());
+            if (id <= 0 || quick_paste_session_.id() != id) {
+              result->Success(flutter::EncodableValue(false));
+              return;
+            }
+            flutter_controller_->engine()->SetNextFrameCallback([this, id] {
+              if (quick_paste_session_.id() != id) return;
+              if (::GetForegroundWindow() != quick_paste_pending_foreground_ ||
+                  !::SetWindowPos(GetHandle(), HWND_TOPMOST, 0, 0, 0, 0,
+                      SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_FRAMECHANGED) ||
+                  !::SetForegroundWindow(GetHandle())) {
+                quick_paste_session_.Close(id, GetHandle());
+                ScheduleQuickPasteRetirement();
+              }
+            });
+            flutter_controller_->ForceRedraw();
+            result->Success(flutter::EncodableValue(true));
           } else if (call.method_name() == "accessibilityGranted" ||
               call.method_name() == "requestAccessibility") {
             result->Success(flutter::EncodableValue(true));
@@ -201,6 +250,10 @@ bool FlutterWindow::OnCreate() {
                 flutter::EncodableValue(PrepareQuickPasteContext()));
           } else if (call.method_name() == "open") {
             result->Success(flutter::EncodableValue(OpenQuickPasteContext()));
+          } else if (call.method_name() == "openFromTray") {
+            const auto anchor = QuickPasteTrayAnchor(call.arguments());
+            if (!anchor) result->Error("invalid_tray_anchor");
+            else result->Success(flutter::EncodableValue(OpenQuickPasteContext(anchor)));
           } else if (call.method_name() == "accessibilityGranted" ||
                      call.method_name() == "requestAccessibility") {
             result->Success(flutter::EncodableValue(true));
@@ -489,10 +542,10 @@ bool FlutterWindow::PrepareQuickPasteContext() {
   return true;
 }
 
-bool FlutterWindow::OpenQuickPasteContext() {
+bool FlutterWindow::OpenQuickPasteContext(const std::optional<RECT>& tray_anchor) {
   const HWND sampled_foreground = ::GetForegroundWindow();
   if (!PrepareQuickPasteContext()) return false;
-  const bool shown = quick_paste_window_->ShowQuickPasteAtCursor(sampled_foreground);
+  const bool shown = quick_paste_window_->ShowQuickPaste(sampled_foreground, tray_anchor);
   if (!shown) quick_paste_window_->ScheduleQuickPasteRetirement();
   return shown;
 }
@@ -579,10 +632,29 @@ bool QuickPasteTargetSession::Paste(int64_t requested_id, HWND popup) {
   return api_.send_input(4, inputs, sizeof(INPUT)) == 4;
 }
 
-bool PresentQuickPasteAtCursor(
+RECT QuickPasteTrayFrame(const RECT& anchor, const RECT& work,
+                         int width, int height, int gap) {
+  const auto below_top = std::clamp<int64_t>(
+      static_cast<int64_t>(anchor.bottom) + gap, work.top, work.bottom);
+  const auto above_bottom = std::clamp<int64_t>(
+      static_cast<int64_t>(anchor.top) - gap, work.top, work.bottom);
+  const int below = static_cast<int>(work.bottom - below_top);
+  const int above = static_cast<int>(above_bottom - work.top);
+  const bool opens_below = below >= above;
+  width = std::min(width, static_cast<int>(work.right - work.left));
+  height = std::min(height, opens_below ? below : above);
+  const int x = static_cast<int>(std::clamp<int64_t>(
+      static_cast<int64_t>(anchor.right) - width, work.left,
+      static_cast<int64_t>(work.right) - width));
+  const int y = static_cast<int>(opens_below ? below_top : above_bottom - height);
+  return RECT{x, y, x + width, y + height};
+}
+
+bool PresentQuickPaste(
     HWND window, const QuickPastePresentationApi& api,
     const std::function<void()>& opened, const std::function<bool()>& owns,
-    const std::function<void()>& cleanup, bool inspector_visible) {
+    const std::function<void()>& cleanup, bool inspector_visible,
+    const std::optional<RECT>& tray_anchor, bool reveal) {
   const auto fail = [&] {
     if (owns()) {
       if (cleanup) cleanup();
@@ -592,12 +664,15 @@ bool PresentQuickPasteAtCursor(
   };
   if (!owns()) return false;
   POINT cursor{};
-  if (!api.get_cursor_pos(&cursor) || !owns()) return fail();
+  if (tray_anchor) {
+    cursor = POINT{tray_anchor->left + (tray_anchor->right - tray_anchor->left) / 2,
+                   tray_anchor->top + (tray_anchor->bottom - tray_anchor->top) / 2};
+  } else if (!api.get_cursor_pos(&cursor) || !owns()) return fail();
   const HMONITOR monitor = api.monitor_from_point(cursor, MONITOR_DEFAULTTONEAREST);
   if (!monitor || !owns()) return fail();
   MONITORINFO monitor_info{sizeof(MONITORINFO)};
   if (!api.get_monitor_info(monitor, &monitor_info) || !owns()) return fail();
-  // Move first so GetDpiForWindow resolves the display under the pointer rather
+  // Move first so GetDpiForWindow resolves the display at the presentation anchor rather
   // than the display where this pre-warmed hidden window was created.
   if (!api.set_window_pos(window, HWND_TOPMOST, cursor.x, cursor.y, 0, 0,
                       SWP_NOSIZE | SWP_NOACTIVATE) || !owns()) return fail();
@@ -606,7 +681,7 @@ bool PresentQuickPasteAtCursor(
   const RECT work = monitor_info.rcWork;
   const int width = std::min(::MulDiv(inspector_visible ? 816 : 448, dpi, USER_DEFAULT_SCREEN_DPI),
                              static_cast<int>(work.right - work.left));
-  const int height = std::min(::MulDiv(800, dpi, USER_DEFAULT_SCREEN_DPI),
+  const int height = std::min(::MulDiv(tray_anchor ? 600 : 800, dpi, USER_DEFAULT_SCREEN_DPI),
                               static_cast<int>(work.bottom - work.top));
   const int minimum_x = static_cast<int>(work.left);
   const int minimum_y = static_cast<int>(work.top);
@@ -614,17 +689,21 @@ bool PresentQuickPasteAtCursor(
   const int maximum_y = std::max(minimum_y, static_cast<int>(work.bottom) - height);
   const int x = std::clamp(static_cast<int>(cursor.x), minimum_x, maximum_x);
   const int y = std::clamp(static_cast<int>(cursor.y) + 8, minimum_y, maximum_y);
-  if (!api.set_window_pos(window, HWND_TOPMOST, x, y, width, height,
-                      SWP_SHOWWINDOW | SWP_FRAMECHANGED) || !owns()) return fail();
-  if (!api.set_foreground_window(window) || !owns()) return fail();
+  const RECT frame = tray_anchor
+      ? QuickPasteTrayFrame(*tray_anchor, work, width, height, ::MulDiv(8, dpi, USER_DEFAULT_SCREEN_DPI))
+      : RECT{x, y, x + width, y + height};
+  if (!api.set_window_pos(window, HWND_TOPMOST, frame.left, frame.top,
+                      frame.right - frame.left, frame.bottom - frame.top,
+                      SWP_FRAMECHANGED | (reveal ? SWP_SHOWWINDOW : SWP_NOACTIVATE)) || !owns()) return fail();
+  if (reveal && (!api.set_foreground_window(window) || !owns())) return fail();
   opened();
   return true;
 }
 
-bool ShowQuickPastePresentationAtCursor(
+bool ShowQuickPastePresentation(
     HWND window, QuickPasteTargetSession& session, int64_t id,
     const QuickPastePresentationApi& api, const std::function<void()>& opened,
-    bool inspector_visible) {
+    bool inspector_visible, const std::optional<RECT>& tray_anchor, bool reveal) {
   const auto owns = [&] { return id > 0 && session.id() == id; };
   const auto cleanup = [&] {
     if (!owns()) return;
@@ -632,7 +711,7 @@ bool ShowQuickPastePresentationAtCursor(
     api.show_window(window, SW_HIDE);
   };
   if (!owns()) return false;
-  const bool shown = PresentQuickPasteAtCursor(window, api, opened, owns, cleanup, inspector_visible);
+  const bool shown = PresentQuickPaste(window, api, opened, owns, cleanup, inspector_visible, tray_anchor, reveal);
   if (!shown || !owns()) {
     cleanup();
     return false;
@@ -640,7 +719,8 @@ bool ShowQuickPastePresentationAtCursor(
   return true;
 }
 
-bool FlutterWindow::ShowQuickPasteAtCursor(HWND sampled_foreground) {
+bool FlutterWindow::ShowQuickPaste(HWND sampled_foreground,
+                                  const std::optional<RECT>& tray_anchor) {
   if (!is_quick_paste_context_) return false;
   const int64_t id = quick_paste_session_.Begin(sampled_foreground, GetHandle());
   if (id == 0) {
@@ -648,9 +728,11 @@ bool FlutterWindow::ShowQuickPasteAtCursor(HWND sampled_foreground) {
     return false;
   }
   quick_paste_inspector_visible_ = quick_paste_inspector_pinned_;
-  return ShowQuickPastePresentationAtCursor(
+  quick_paste_tray_anchor_ = tray_anchor;
+  quick_paste_pending_foreground_ = sampled_foreground;
+  return ShowQuickPastePresentation(
       GetHandle(), quick_paste_session_, id, QuickPastePresentationApi{},
-      [this] { NotifyQuickPasteOpened(); }, quick_paste_inspector_visible_);
+      [this] { NotifyQuickPasteOpened(); }, quick_paste_inspector_visible_, tray_anchor, false);
 }
 
 void FlutterWindow::NotifyQuickPasteOpened() {
@@ -697,13 +779,17 @@ bool FlutterWindow::SetQuickPasteInspectorVisible(int64_t presentation_id, bool 
   const RECT work = monitor.rcWork;
   const int width = std::min(::MulDiv(visible ? 816 : 448, dpi, USER_DEFAULT_SCREEN_DPI),
                              static_cast<int>(work.right - work.left));
-  const int height = std::min(::MulDiv(800, dpi, USER_DEFAULT_SCREEN_DPI),
+  const int height = std::min(static_cast<int>(current.bottom - current.top),
                               static_cast<int>(work.bottom - work.top));
   const int x = std::clamp(static_cast<int>(current.left), static_cast<int>(work.left),
                            std::max(static_cast<int>(work.left), static_cast<int>(work.right) - width));
   const int y = std::clamp(static_cast<int>(current.top), static_cast<int>(work.top),
                            std::max(static_cast<int>(work.top), static_cast<int>(work.bottom) - height));
-  if (!::SetWindowPos(GetHandle(), nullptr, x, y, width, height,
+  const RECT frame = quick_paste_tray_anchor_
+      ? QuickPasteTrayFrame(*quick_paste_tray_anchor_, work, width, height, ::MulDiv(8, dpi, USER_DEFAULT_SCREEN_DPI))
+      : RECT{x, y, x + width, y + height};
+  if (!::SetWindowPos(GetHandle(), nullptr, frame.left, frame.top,
+      frame.right - frame.left, frame.bottom - frame.top,
       SWP_NOACTIVATE | SWP_NOZORDER | SWP_FRAMECHANGED)) return false;
   if (quick_paste_session_.id() != presentation_id) return false;
   quick_paste_inspector_visible_ = visible;

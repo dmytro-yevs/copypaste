@@ -484,6 +484,78 @@ class RunnerTests: XCTestCase {
     )
   }
 
+  func testNativeTrayPrimaryActivationPreservesContextMenuGestures() {
+    XCTAssertTrue(MacosTrayMenuChannel.isPrimaryActivation(type: .leftMouseUp, modifiers: [], clickCount: 1))
+    XCTAssertTrue(MacosTrayMenuChannel.isPrimaryActivation(type: .leftMouseUp, modifiers: [.shift], clickCount: 1))
+    XCTAssertFalse(MacosTrayMenuChannel.isPrimaryActivation(type: .leftMouseUp, modifiers: [.control], clickCount: 1))
+    XCTAssertFalse(MacosTrayMenuChannel.isPrimaryActivation(type: .rightMouseUp, modifiers: [], clickCount: 1))
+    XCTAssertFalse(MacosTrayMenuChannel.isPrimaryActivation(type: .leftMouseUp, modifiers: [], clickCount: 2))
+  }
+
+  func testNativeTrayBindingRestoresOnlyItsOwnedTarget() {
+    let button = NSButton(frame: .zero)
+    let original = NSObject()
+    let originalAction = NSSelectorFromString("originalAction:")
+    button.target = original
+    button.action = originalAction
+    let binding = TrayQuickPasteBinding(button: button, activate: { _, _ in })
+    XCTAssertTrue(button.target === binding)
+    binding.detach()
+    XCTAssertTrue(button.target === original)
+    XCTAssertEqual(button.action, originalAction)
+    let replacement = NSObject()
+    let next = TrayQuickPasteBinding(button: button, activate: { _, _ in })
+    button.target = replacement
+    next.detach()
+    XCTAssertTrue(button.target === replacement)
+  }
+
+  func testTrayQuickPasteOpensBelowTheIconWithBoundedHeight() {
+    let display = QuickPasteDisplay(
+      frame: NSRect(x: 0, y: 0, width: 1920, height: 1080),
+      visibleFrame: NSRect(x: 0, y: 40, width: 1920, height: 1016)
+    )
+    let anchor = NSRect(x: 1700, y: 1056, width: 24, height: 24)
+    let frame = quickPasteTrayFrame(
+      anchor: anchor, size: NSSize(width: 448, height: 800), displays: [display]
+    )
+    XCTAssertEqual(frame.height, 600)
+    XCTAssertEqual(frame.maxX, anchor.maxX)
+    XCTAssertEqual(frame.maxY, anchor.minY - 8)
+    XCTAssertTrue(display.visibleFrame.contains(frame))
+  }
+
+  func testTrayQuickPasteFitsAShortSecondaryDisplayAndExpandedInspector() {
+    let display = QuickPasteDisplay(
+      frame: NSRect(x: -900, y: 0, width: 900, height: 500),
+      visibleFrame: NSRect(x: -900, y: 0, width: 900, height: 476)
+    )
+    let frame = quickPasteTrayFrame(
+      anchor: NSRect(x: -80, y: 476, width: 24, height: 24),
+      size: NSSize(width: 816, height: 800), displays: [display]
+    )
+    XCTAssertEqual(frame.height, 468)
+    XCTAssertEqual(frame.width, 816)
+    XCTAssertTrue(display.visibleFrame.contains(frame))
+    let resized = quickPasteInspectorFrame(current: frame, visible: display.visibleFrame, expanded: false)
+    XCTAssertEqual(resized.height, frame.height)
+  }
+
+  func testTrayQuickPasteCanOpenAboveABottomTray() {
+    let display = QuickPasteDisplay(
+      frame: NSRect(x: 0, y: 0, width: 1920, height: 1080),
+      visibleFrame: NSRect(x: 0, y: 24, width: 1920, height: 1056)
+    )
+    let anchor = NSRect(x: 10, y: 0, width: 24, height: 24)
+    let frame = quickPasteTrayFrame(
+      anchor: anchor, size: NSSize(width: 448, height: 800), displays: [display]
+    )
+    XCTAssertEqual(frame.minX, 0)
+    XCTAssertEqual(frame.minY, anchor.maxY + 8)
+    XCTAssertEqual(frame.height, 600)
+    XCTAssertTrue(display.visibleFrame.contains(frame))
+  }
+
   func testQuickPasteRetainsItsSizeWhenInstallingAZeroSizedFlutterView() {
     let size = NSSize(width: 520, height: 720)
     let panel = QuickPastePanel(
