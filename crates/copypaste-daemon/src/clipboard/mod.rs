@@ -225,6 +225,17 @@ impl Capture {
 ///
 /// `Send` so the poll loop can own one inside a spawned task.
 pub trait ClipboardSource: Send {
+    /// Probe results that belong to this transport. Other platform services
+    /// report their own capabilities through the status assembler.
+    fn platform_capabilities(
+        &self,
+    ) -> std::collections::BTreeMap<
+        copypaste_ipc::PlatformCapability,
+        copypaste_ipc::CapabilityStatus,
+    > {
+        std::collections::BTreeMap::new()
+    }
+
     /// Return `Some(capture)` when the clipboard changed since the last poll.
     /// Must return `None` when nothing changed — the caller polls on a timer.
     fn poll(&mut self) -> Option<Capture>;
@@ -245,6 +256,12 @@ pub trait ClipboardSource: Send {
     /// genuine copy.
     fn changed(&mut self) -> bool {
         true
+    }
+
+    /// A backend may need a pre-read policy requirement to decide whether a
+    /// capability reprobe is required, without reading clipboard data.
+    fn changed_with_requirements(&mut self, _source_attribution_required: bool) -> bool {
+        self.changed()
     }
 
     /// Whether the system clipboard transport is currently usable.
@@ -352,6 +369,7 @@ pub trait ClipboardSource: Send {
 
 /// The development fake wins before platform selection, so a demo cannot
 /// instantiate a native clipboard backend by accident.
+#[cfg(any(not(target_os = "linux"), feature = "dev-fake-clipboard"))]
 pub fn new_source(data_dir: &std::path::Path) -> std::io::Result<Box<dyn ClipboardSource>> {
     #[cfg(feature = "dev-fake-clipboard")]
     {
@@ -368,10 +386,6 @@ pub fn new_source(data_dir: &std::path::Path) -> std::io::Result<Box<dyn Clipboa
             data_dir,
         )?))
     }
-    #[cfg(all(target_os = "linux", not(feature = "dev-fake-clipboard")))]
-    {
-        Ok(Box::new(linux::LinuxClipboard::new(data_dir)?))
-    }
     #[cfg(all(
         not(feature = "dev-fake-clipboard"),
         not(any(target_os = "macos", target_os = "windows", target_os = "linux"))
@@ -379,6 +393,26 @@ pub fn new_source(data_dir: &std::path::Path) -> std::io::Result<Box<dyn Clipboa
     {
         let _ = data_dir;
         Ok(Box::new(FakeClipboard::new()))
+    }
+}
+
+/// Select a startup transport that can satisfy the configured source policy.
+/// Later policy changes still fail closed in each adapter's pre-read gate.
+pub fn new_source_for_settings(
+    data_dir: &std::path::Path,
+    settings: &copypaste_ipc::ConfigData,
+) -> std::io::Result<Box<dyn ClipboardSource>> {
+    #[cfg(all(target_os = "linux", not(feature = "dev-fake-clipboard")))]
+    {
+        Ok(Box::new(linux::LinuxClipboard::new_with_requirements(
+            data_dir,
+            !settings.excluded_app_bundle_ids.is_empty(),
+        )?))
+    }
+    #[cfg(any(not(target_os = "linux"), feature = "dev-fake-clipboard"))]
+    {
+        let _ = settings;
+        new_source(data_dir)
     }
 }
 

@@ -110,6 +110,16 @@ enum Command {
 }
 
 impl GnomeClipboard {
+    /// Probe only the authenticated protocol contract. Never request Snapshot
+    /// or Read while deciding which adapter will own capture.
+    pub(super) fn probe_gnome() -> bool {
+        probe_bridge(GNOME)
+    }
+
+    pub(super) fn probe_kwin() -> bool {
+        probe_bridge(KWIN)
+    }
+
     pub(super) fn new(data_dir: &Path) -> std::io::Result<Self> {
         Self::with_bridge(data_dir, GNOME)
     }
@@ -255,6 +265,29 @@ impl GnomeClipboard {
         }
         Ok(())
     }
+}
+
+fn probe_bridge(bridge: Bridge) -> bool {
+    // zbus blocking uses its own runtime and must stay off the Tokio thread.
+    thread::spawn(move || {
+        let Ok(connection) =
+            Builder::session().and_then(|builder| builder.method_timeout(RPC_TIMEOUT).build())
+        else {
+            return false;
+        };
+        let Some(owner) = verified_service_owner(&connection, bridge) else {
+            return false;
+        };
+        let Ok(proxy) = Proxy::new(&connection, owner.as_str(), PATH, INTERFACE) else {
+            return false;
+        };
+        proxy
+            .call::<_, _, u32>("Version", &())
+            .is_ok_and(|version| version == BRIDGE_VERSION)
+            && owner_is_current(&connection, bridge, &owner)
+    })
+    .join()
+    .unwrap_or(false)
 }
 
 impl Drop for GnomeClipboard {

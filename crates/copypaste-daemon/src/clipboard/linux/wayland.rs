@@ -142,6 +142,30 @@ pub(in crate::clipboard) struct WaylandClipboard {
 }
 
 impl WaylandClipboard {
+    /// Probe protocol and seat availability without observing a selection or
+    /// requesting clipboard data. Worker connection remains the final check.
+    pub(super) fn probe_data_control() -> bool {
+        let Ok(connection) = Connection::connect_to_env() else {
+            return false;
+        };
+        let Ok((globals, queue)) = registry_queue_init::<Worker>(&connection) else {
+            return false;
+        };
+        let qh = queue.handle();
+        let manager = globals
+            .bind::<ExtDataControlManagerV1, _, _>(&qh, 1..=1, ())
+            .is_ok()
+            || globals
+                .bind::<ZwlrDataControlManagerV1, _, _>(&qh, 1..=2, ())
+                .is_ok();
+        manager
+            && globals.contents().with_list(|contents| {
+                contents
+                    .iter()
+                    .any(|global| global.interface == WlSeat::interface().name)
+            })
+    }
+
     pub(super) fn new(data_dir: &Path) -> std::io::Result<Self> {
         let staging = super::super::file_materialize::StagingArea::new(data_dir)?;
         let (read, write) = UnixStream::pair()?;
