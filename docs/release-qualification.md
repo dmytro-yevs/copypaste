@@ -72,6 +72,12 @@ then run installed Linux qualification against the parent run's exact artifacts.
 The complete module matrices produce the publishable packages; installed Linux
 qualification exercises those same Linux package bytes. Publish their qualified
 packages from this parent run instead of rebuilding a separate module release.
+After the application release is public, dispatch `publish-qualified-modules.yml`
+with its stable application tag and successful production qualification run ID.
+It authenticates the source run and each artifact ZIP, verifies package signatures
+and native receipts, and promotes the exact packages through draft module releases.
+Then run `module-marketplace.yml` once for each new module release tag so the
+signed catalog includes all three published versions.
 Manual evidence run IDs are recovery overrides. Preflight resolves the preceding
 published Linux upgrade packages and checks their public digests before builds.
 See [delivery architecture](engineering/ci-architecture.md) for the dependency
