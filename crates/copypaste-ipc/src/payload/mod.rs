@@ -4,6 +4,7 @@
 //! wrappers live on [`crate::ResponseData`].
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 fn deserialize_optional_u32<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
 where
@@ -408,8 +409,60 @@ pub struct DiagnosticCounters {
     pub uptime_secs: u64,
 }
 
+/// Capability names shared by native adapters, status IPC and diagnostics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlatformCapability {
+    ClipboardCapture,
+    ClipboardReadWrite,
+    SourceAttribution,
+    PrivacyEnforcement,
+    GlobalShortcuts,
+    QuickPaste,
+    SecureStorage,
+    DesktopIntegration,
+    Updates,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityState {
+    Available,
+    NeedsPermission,
+    NeedsCompanion,
+    Unsupported,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityGuarantee {
+    None,
+    BestEffort,
+    Verified,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityStatus {
+    pub state: CapabilityState,
+    pub backend: Option<String>,
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub permissions: Vec<String>,
+    pub guarantee: CapabilityGuarantee,
+    /// Clipboard formats this adapter can read and write. Empty for other capabilities.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mime_types: Vec<String>,
+    /// Maximum accepted payload size in bytes; settings may impose a lower limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_bytes: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusData {
+    /// Current platform probes. Empty means an older daemon did not report them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub platform_capabilities: BTreeMap<PlatformCapability, CapabilityStatus>,
     #[serde(default)]
     pub sync_status: crate::SyncStatus,
     #[serde(default)]

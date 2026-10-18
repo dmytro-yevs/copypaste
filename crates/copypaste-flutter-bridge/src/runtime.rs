@@ -499,6 +499,7 @@ mod tests {
                 let data = match reply {
                     AttachmentReply::Status { protocol_version } => {
                         copypaste_ipc::ResponseData::Status(copypaste_ipc::StatusData {
+                            platform_capabilities: Default::default(),
                             sync_status: Default::default(),
                             device_name: "Attached runtime".into(),
                             device_id: None,
