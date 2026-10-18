@@ -141,8 +141,8 @@ jobs:
           if [[ -n "${QUALIFIED_RUN_ID:-}" ]]; then
             [[ "$QUALIFIED_RUN_ID" =~ ^[1-9][0-9]*$ ]]
             [[ "${REQUESTED_PUBLISH:-false}" == true || "${GITHUB_REF_TYPE:-}" == tag ]]
-            git fetch origin "refs/tags/v$version:refs/tags/v$version"
-            release_commit="$(git rev-list -n 1 "v$version")"
+            git fetch --no-tags origin "refs/tags/v$version"
+            release_commit="$(git rev-list -n 1 FETCH_HEAD)"
             linux_required=false
             compositor_runtime_required=false
             if git cat-file -e "$release_commit:packaging/linux/release-contract.json" 2>/dev/null; then
@@ -182,8 +182,8 @@ jobs:
             [[ "$GITHUB_REF_NAME" == "v$version" ]]
             publish=true
           elif [[ "${REQUESTED_PUBLISH:-false}" == true ]]; then
-            git fetch origin "refs/tags/v$version:refs/tags/v$version"
-            [[ "$(git rev-list -n 1 "v$version")" == "$GITHUB_SHA" ]]
+            git fetch --no-tags origin "refs/tags/v$version"
+            [[ "$(git rev-list -n 1 FETCH_HEAD)" == "$GITHUB_SHA" ]]
             publish=true
           fi
           if [[ -z "${linux_required+x}" ]]; then
