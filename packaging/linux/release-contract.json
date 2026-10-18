@@ -56,6 +56,20 @@
       "test_environment": {"runner": "ubuntu-24.04", "image": "ubuntu-24.04"}
     },
     {
+      "id": "ubuntu-24.04-gnome-wayland-x86_64",
+      "distribution": "ubuntu",
+      "version": "24.04",
+      "desktop": "GNOME",
+      "desktop_version": "46",
+      "session": "wayland",
+      "architecture": "x86_64",
+      "packaging": ["AppImage", "deb"],
+      "required_capabilities": ["clipboardCapture", "clipboardReadWrite", "privacyEnforcement"],
+      "tier": "experimental",
+      "native_qualification": false,
+      "test_environment": {"runner": "ubuntu-24.04", "image": "ubuntu-24.04"}
+    },
+    {
       "id": "ubuntu-24.04-gnome-wayland-aarch64",
       "distribution": "ubuntu",
       "version": "24.04",
