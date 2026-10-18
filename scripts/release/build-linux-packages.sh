@@ -5,10 +5,10 @@ set -euo pipefail
 VERSION="${1:-}"
 ARCHITECTURE="${2:-}"
 SCOPE="${3:-}"
-[[ -z "$SCOPE" || "$SCOPE" == --release-scope ]] || { echo "ERROR: invalid packaging scope" >&2; exit 1; }
+[[ -z "$SCOPE" || "$SCOPE" == --release-scope || "$SCOPE" == --target-scope ]] || { echo "ERROR: invalid packaging scope" >&2; exit 1; }
 [[ "$#" -le 3 ]] || { echo "ERROR: too many packaging arguments" >&2; exit 1; }
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
-  echo "ERROR: usage: $0 <stable-version> <x86_64|aarch64> [--release-scope]" >&2
+  echo "ERROR: usage: $0 <stable-version> <x86_64|aarch64> [--release-scope|--target-scope]" >&2
   exit 1
 }
 case "$ARCHITECTURE" in x86_64|aarch64) ;; *) echo "ERROR: invalid architecture" >&2; exit 1 ;; esac
@@ -24,6 +24,20 @@ contract = json.load(open(sys.argv[1], encoding="utf-8"))
 if sys.argv[2] not in contract["architectures"]:
     raise SystemExit("architecture is outside the Linux release contract")
 print(",".join(contract["formats"] + contract.get("preview_formats", [])))
+PYCONTRACT
+)"
+fi
+if [[ "$SCOPE" == --target-scope ]]; then
+  FORMATS="$(python3 - "$CONTRACT" "$ARCHITECTURE" <<'PYCONTRACT'
+import json
+import sys
+contract = json.load(open(sys.argv[1], encoding="utf-8"))
+formats = {format_name for target in contract["targets"]
+           if target["architecture"] == sys.argv[2]
+           for format_name in target["packaging"]}
+if not {"AppImage", "deb"} <= formats or not formats <= {"AppImage", "deb", "rpm"}:
+    raise SystemExit("target architecture lacks the current AppImage/deb build contract")
+print(",".join(sorted(formats)))
 PYCONTRACT
 )"
 fi

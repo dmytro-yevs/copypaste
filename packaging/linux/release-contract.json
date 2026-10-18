@@ -12,6 +12,16 @@
     "deb"
   ],
   "preview_formats": ["rpm"],
+  "appimagetool": {
+    "x86_64": {
+      "url": "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage",
+      "sha256": "95cbe7cce9717fce90c484e34052ee7c7f1d7635b33c12525b4776826a7d29b6"
+    },
+    "aarch64": {
+      "url": "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-aarch64.AppImage",
+      "sha256": "a595ea34cd6136c7f595e9dcbb16f3e9725d7610efb9e43b38c3c6e86cafc270"
+    }
+  },
   "rpm_preview_environment": {
     "distribution": "fedora",
     "version": "44",
@@ -28,5 +38,50 @@
     "distribution": "ubuntu",
     "version": "24.04",
     "desktop_version": "46"
-  }
+  },
+  "targets": [
+    {
+      "id": "ubuntu-24.04-gnome-46-x11-x86_64",
+      "distribution": "ubuntu",
+      "version": "24.04",
+      "desktop": "GNOME",
+      "desktop_version": "46",
+      "session": "x11",
+      "architecture": "x86_64",
+      "packaging": ["AppImage", "deb"],
+      "required_capabilities": ["clipboardCapture", "clipboardReadWrite", "sourceAttribution", "privacyEnforcement", "globalShortcuts", "quickPaste", "secureStorage"],
+      "tier": "stable",
+      "native_qualification": true,
+      "compositor_artifact": "copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64",
+      "test_environment": {"runner": "ubuntu-24.04", "image": "ubuntu-24.04"}
+    },
+    {
+      "id": "ubuntu-24.04-gnome-wayland-aarch64",
+      "distribution": "ubuntu",
+      "version": "24.04",
+      "desktop": "GNOME",
+      "desktop_version": "46",
+      "session": "wayland",
+      "architecture": "aarch64",
+      "packaging": ["AppImage", "deb"],
+      "required_capabilities": ["clipboardCapture", "clipboardReadWrite", "privacyEnforcement"],
+      "tier": "experimental",
+      "native_qualification": false,
+      "test_environment": {"runner": "ubuntu-24.04-arm", "image": "ubuntu-24.04"}
+    },
+    {
+      "id": "fedora-44-kde-wayland-x86_64",
+      "distribution": "fedora",
+      "version": "44",
+      "desktop": "KDE",
+      "desktop_version": "6",
+      "session": "wayland",
+      "architecture": "x86_64",
+      "packaging": ["rpm"],
+      "required_capabilities": ["clipboardCapture", "clipboardReadWrite", "privacyEnforcement"],
+      "tier": "experimental",
+      "native_qualification": false,
+      "test_environment": {"runner": "ubuntu-24.04", "image": "fedora:44@sha256:43b29f65a41eb9c35e1cd5323e3bdf3b655c2357a9f4f1ff2f9c2798e5045d80"}
+    }
+  ]
 }
