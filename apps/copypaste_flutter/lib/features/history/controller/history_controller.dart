@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/history_models.dart';
 import '../repository/history_file_downloader.dart';
+import '../repository/history_file_transfer.dart';
 import '../repository/history_repository.dart';
 import '../repository/history_file_importer.dart';
 import 'history_ocr_controller.dart';
@@ -26,6 +27,7 @@ class HistoryController extends ChangeNotifier {
   HistoryController(
     this._repository, {
     this.pageSize = 50,
+    this.includeFacets = true,
     Duration? searchDebounce,
     HistoryFileDownloader? fileDownloader,
     this.ocr,
@@ -63,8 +65,12 @@ class HistoryController extends ChangeNotifier {
 
   final HistoryRepository _repository;
   final int pageSize;
+  final bool includeFacets;
   final Duration _searchDebounce;
   final HistoryFileDownloader? _fileDownloader;
+  late final HistoryFileTransfer _fileTransfer = HistoryFileTransfer(
+    _repository,
+  );
   final HistoryFilePicker? _filePicker;
   bool _isImportingFiles = false;
   bool _refreshAfterFileImport = false;
@@ -82,6 +88,9 @@ class HistoryController extends ChangeNotifier {
   final Set<String> _pinMutations = <String>{};
   final Set<String> _deleteMutations = <String>{};
   final Set<String> _downloadMutations = <String>{};
+  final Set<String> _failedDownloads = <String>{};
+  final Set<String> _cancelledDownloads = <String>{};
+  final Map<String, double> _downloadProgress = <String, double>{};
   final Set<String> _collapsedSections = <String>{};
   final Set<String> _bulkSelectedIds = <String>{};
   String? _bulkAnchorId;
@@ -217,6 +226,16 @@ class HistoryController extends ChangeNotifier {
   bool isDeletePending(String id) =>
       _isReorderingPinned || _deleteMutations.contains(id);
   bool isDownloadPending(String id) => _downloadMutations.contains(id);
+  bool downloadFailedFor(String id) => _failedDownloads.contains(id);
+  bool isDownloadCancelling(String id) => _cancelledDownloads.contains(id);
+  void cancelDownload(String id) {
+    if (!_downloadMutations.contains(id) || !_cancelledDownloads.add(id)) {
+      return;
+    }
+    notifyListeners();
+  }
+
+  double? downloadProgressFor(String id) => _downloadProgress[id];
   bool isSectionCollapsed(String key) => _collapsedSections.contains(key);
 
   void toggleSection(String key) {
@@ -649,7 +668,7 @@ class HistoryController extends ChangeNotifier {
   }
 
   Future<void> refreshFacets() async {
-    if (_disposed || _suspended) return;
+    if (_disposed || _suspended || !includeFacets) return;
     final epoch = _mediaEpoch;
     try {
       final facets = await _repository.facets();
@@ -872,19 +891,42 @@ class HistoryController extends ChangeNotifier {
         !_downloadMutations.add(clip.id)) {
       return HistoryFileDownloadResult.failed;
     }
+    _failedDownloads.remove(clip.id);
     notifyListeners();
     try {
       final destination = await downloader.chooseDestination(file);
       if (destination == null) return HistoryFileDownloadResult.cancelled;
-      await _repository.saveFile(clip.id, destination);
+      if (_cancelledDownloads.contains(clip.id)) {
+        return HistoryFileDownloadResult.cancelled;
+      }
+      await _fileTransfer.saveTo(
+        clip,
+        destination,
+        isCancelled: () => _cancelledDownloads.contains(clip.id),
+        onProgress: (progress) {
+          if (_disposed) return;
+          _downloadProgress[clip.id] = progress;
+          notifyListeners();
+        },
+      );
+      if (_cancelledDownloads.contains(clip.id)) {
+        await _fileTransfer.discard(destination);
+        return HistoryFileDownloadResult.cancelled;
+      }
       await downloader.presentSavedFile(destination, file);
       return HistoryFileDownloadResult.saved;
+    } on HistoryFileTransferCancelled {
+      return HistoryFileDownloadResult.cancelled;
     } catch (_) {
       _errorMessage = 'This file could not be downloaded.';
+      _failedDownloads.clear();
+      _failedDownloads.add(clip.id);
       notifyListeners();
       return HistoryFileDownloadResult.failed;
     } finally {
       _downloadMutations.remove(clip.id);
+      _cancelledDownloads.remove(clip.id);
+      _downloadProgress.remove(clip.id);
       if (!_disposed) notifyListeners();
     }
   }
