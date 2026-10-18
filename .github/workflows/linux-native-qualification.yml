@@ -57,6 +57,7 @@ jobs:
       version: ${{ steps.source.outputs.version }}
       previous_version: ${{ steps.source.outputs.previous_version }}
       upgrade_mode: ${{ steps.source.outputs.upgrade_mode }}
+      matrix: ${{ steps.platform.outputs.matrix }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -133,6 +134,8 @@ jobs:
             echo "previous_version=$previous_version"
             echo "upgrade_mode=$upgrade_mode"
           } >> "$GITHUB_OUTPUT"
+      - id: platform
+        run: echo "matrix=$(python3 scripts/release/platform_manifest.py matrix --tier stable --purpose qualification)" >> "$GITHUB_OUTPUT"
 
   scenario:
     name: ${{ matrix.architecture }} ${{ matrix.desktop }} ${{ matrix.session }}
@@ -141,13 +144,7 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - architecture: x86_64
-            runner: ubuntu-24.04
-            desktop: GNOME
-            session: x11
-            compositor_artifact: copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64
+      matrix: ${{ fromJSON(needs.source.outputs.matrix) }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
