@@ -9,6 +9,7 @@ import '../history/controller/history_controller.dart';
 import '../history/controller/history_ocr_controller.dart';
 import '../history/models/history_models.dart';
 import '../history/repository/history_file_downloader.dart';
+import '../history/repository/history_file_transfer.dart';
 import '../history/repository/history_repository.dart';
 import '../settings/repository/quick_paste_preferences_store.dart';
 
@@ -21,13 +22,18 @@ class QuickPasteController extends ChangeNotifier {
     required QuickPastePreferencesStore preferencesStore,
     required QuickPasteContextHost host,
     HistoryFileDownloader? fileDownloader,
+    HistoryFileTransfer? fileTransfer,
     HistoryOcrController? ocr,
-  }) : _disposeRepository = disposeRepository,
+    Future<void> Function()? initializeInspector,
+  }) : _fileTransfer = fileTransfer ?? HistoryFileTransfer(repository),
+       _disposeRepository = disposeRepository,
+       _initializeInspector = initializeInspector,
        _preferencesStore = preferencesStore,
        _host = host,
        history = HistoryController(
          repository,
          pageSize: 50,
+         includeFacets: false,
          searchDebounce: Duration.zero,
          fileDownloader: fileDownloader,
          ocr: ocr,
@@ -39,18 +45,26 @@ class QuickPasteController extends ChangeNotifier {
   }
 
   final Future<void> Function()? _disposeRepository;
+  final Future<void> Function()? _initializeInspector;
+  Future<void>? _inspectorInitialization;
   final QuickPastePreferencesStore _preferencesStore;
   final QuickPasteContextHost _host;
   final HistoryController history;
+  final HistoryFileTransfer _fileTransfer;
 
   QuickPastePreferences _preferences;
   HistoryClip? _focusedClip;
   String? _inspectedClipId;
   bool _accessibilityGranted = false;
   bool _initialized = false;
+  bool _initialHistoryReady = false;
   bool _activating = false;
+  String? _transferringClipId;
+  String? _failedTransferClipId;
+  double _transferProgress = 0;
   int _presentationGeneration = 0;
   int? _presentationId;
+  int? _renderablePresentationId;
   bool _disposed = false;
   bool _inspectorOpen = false;
   Map<String, String> _pinnedShortcuts = {};
@@ -68,10 +82,32 @@ class QuickPasteController extends ChangeNotifier {
   bool get autoPaste => _preferences.autoPaste;
   bool get accessibilityGranted => _accessibilityGranted;
   bool get activating => _activating;
+  double? transferProgressFor(String id) =>
+      _transferringClipId == id ? _transferProgress : null;
+  bool transferFailedFor(String id) => _failedTransferClipId == id;
   int get presentationGeneration => _presentationGeneration;
   HistoryClip? get focusedClip => _focusedClip;
   bool get inspectorOpen => _inspectorOpen;
   bool get paginationFailed => _paginationFailed;
+  int? get renderablePresentationId =>
+      _host is QuickPasteFrameHost &&
+          _presentationId == _renderablePresentationId &&
+          history.state != HistoryLoadState.initial &&
+          history.state != HistoryLoadState.loading
+      ? _presentationId
+      : null;
+
+  Future<bool> presentFrame(int presentationId) async {
+    if (!_isCurrent(presentationId) ||
+        renderablePresentationId != presentationId) {
+      return false;
+    }
+    final host = _host;
+    if (host is! QuickPasteFrameHost) return true;
+    return (host as QuickPasteFrameHost).presentFrame(
+      presentationId: presentationId,
+    );
+  }
 
   List<HistoryClip> get items => [
     ...history.items.where((clip) => !clip.pinned),
@@ -95,16 +131,20 @@ class QuickPasteController extends ChangeNotifier {
   Future<void> initialize() async {
     if (_disposed || _initialized) return;
     _initialized = true;
-    _preferences = await _preferencesStore.read();
+    await Future.wait([
+      () async {
+        _preferences = await _preferencesStore.read();
+      }(),
+      () async {
+        _pinnedShortcuts = await _preferencesStore.readPinnedShortcuts();
+      }(),
+    ]);
     if (_disposed) return;
-    _pinnedShortcuts = await _preferencesStore.readPinnedShortcuts();
-    if (_disposed) return;
-    await history.initialize();
+    await Future.wait([history.initialize(), _refreshAccessibility()]);
     if (_disposed) return;
     await _reconcilePinnedShortcuts();
     if (_disposed) return;
-    await _refreshAccessibility();
-    if (_disposed) return;
+    _initialHistoryReady = true;
     await _host.signalReady();
     if (!_disposed) notifyListeners();
   }
@@ -114,30 +154,61 @@ class QuickPasteController extends ChangeNotifier {
     bool inspectorVisible = false,
   }) async {
     if (_disposed || presentationId <= 0) return;
+    final query = history.query;
+    // Native opens the first presentation after this watched page is ready.
+    // Re-fetching it clears already rendered rows and duplicates startup I/O.
+    final reuseInitialHistory =
+        _initialHistoryReady &&
+        _presentationGeneration == 0 &&
+        (history.state == HistoryLoadState.ready ||
+            history.state == HistoryLoadState.empty) &&
+        !query.hasSearch &&
+        query.kind == null &&
+        !query.pinnedOnly &&
+        query.origin == null &&
+        query.sourceApp == null &&
+        query.sort == HistorySort.newest;
     _cancelInspectorHover();
     _autoOpenSuppressed = false;
     _requestedInspectorVisible = null;
     _presentationId = presentationId;
+    _renderablePresentationId = null;
     _inspectorOpen = inspectorVisible;
+    if (_inspectorOpen) _prepareInspector();
     _focusedClip = null;
     _focusGeneration += 1;
     _pageLoad = null;
     _paginationFailed = false;
     _presentationGeneration += 1;
-    await history.spoilers.setRevealed(null, false);
+    final concealed = history.spoilers.setRevealed(null, false);
+    notifyListeners();
+    await concealed;
     if (!_isCurrent(presentationId)) return;
     final preferences = await _preferencesStore.read();
     if (!_isCurrent(presentationId)) return;
     _preferences = preferences;
-    await history.updateQuery(const HistoryQuery());
-    if (!_isCurrent(presentationId)) return;
-    await _reconcilePinnedShortcuts();
-    if (!_isCurrent(presentationId)) return;
+    if (!reuseInitialHistory) {
+      await history.updateQuery(const HistoryQuery());
+      if (!_isCurrent(presentationId)) return;
+      await _reconcilePinnedShortcuts();
+      if (!_isCurrent(presentationId)) return;
+    }
     await _refreshAccessibility();
     if (_inspectorOpen && _isCurrent(presentationId) && items.isNotEmpty) {
       await history.select(items.first.id);
     }
-    if (_isCurrent(presentationId)) notifyListeners();
+    if (_isCurrent(presentationId)) {
+      _renderablePresentationId = presentationId;
+      notifyListeners();
+    }
+  }
+
+  void _prepareInspector() {
+    final initialize = _initializeInspector;
+    if (_disposed || initialize == null || _inspectorInitialization != null) {
+      return;
+    }
+    _inspectorInitialization = initialize().catchError((Object _) {});
   }
 
   bool _isCurrent(int presentationId) =>
@@ -286,6 +357,7 @@ class QuickPasteController extends ChangeNotifier {
           if (!_isCurrent(id)) return;
           _inspectorOpen = visible;
           if (visible) {
+            _prepareInspector();
             final clip = _focusedClip ?? items.firstOrNull;
             if (clip != null) unawaited(history.select(clip.id));
           }
@@ -314,6 +386,35 @@ class QuickPasteController extends ChangeNotifier {
     try {
       await history.select(clip.id);
       if (!_isCurrent(presentationId)) return;
+      final selected = history.selectedClip;
+      if (selected?.contentKind == HistoryClipKind.file &&
+          selected?.file != null &&
+          !selected!.file!.sourceAvailable) {
+        _failedTransferClipId = null;
+        _transferringClipId = clip.id;
+        _transferProgress = 0;
+        notifyListeners();
+        try {
+          await _fileTransfer.prepare(
+            selected,
+            onProgress: (progress) {
+              if (!_isCurrent(presentationId)) return;
+              _transferProgress = progress;
+              notifyListeners();
+            },
+          );
+        } catch (_) {
+          if (_isCurrent(presentationId)) {
+            _failedTransferClipId = clip.id;
+            notifyListeners();
+          }
+          return;
+        } finally {
+          _transferringClipId = null;
+          if (_isCurrent(presentationId)) notifyListeners();
+        }
+        if (!_isCurrent(presentationId)) return;
+      }
       final copied = await history.copySelected(plainText: plainText);
       if (!copied || !_isCurrent(presentationId)) return;
       final shouldPaste = forcePaste
