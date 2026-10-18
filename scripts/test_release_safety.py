@@ -990,7 +990,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                         trace_digest = hashlib.sha256((root / trace_name).read_bytes()).hexdigest()
                         capability_evidence = []
                         for format_name in ("AppImage", native_format):
-                            capability_name = f"capabilities-{architecture}-{desktop.lower()}-{session}-{format_name}.json"
+                            capability_name = f"{format_name.lower()}/capabilities-{architecture}-{desktop.lower()}-{session}-{format_name}.json"
                             clipboard_backend = "linux-x11-system-clipboard" if session == "x11" else f"linux-{desktop.lower()}-wayland-clipboard"
                             available = {"state": "available", "backend": clipboard_backend,
                                          "reason": None, "permissions": [], "guarantee": "verified"}
@@ -1009,6 +1009,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
                                 **available, "guarantee": "best_effort",
                             }
                             capability_path = root / capability_name
+                            capability_path.parent.mkdir(exist_ok=True)
                             capability_path.write_text(json.dumps({"schema": 1, "capabilities": capability_rows}), encoding="utf-8")
                             capability_evidence.append({"name": capability_name,
                                 "sha256": hashlib.sha256(capability_path.read_bytes()).hexdigest(),
@@ -1035,7 +1036,7 @@ class AndroidReleaseArtifactsTest(unittest.TestCase):
             original_trace = json.loads(trace_path.read_text())
             original_receipt = json.loads(x11.read_text())
             capability_attachments = [item for item in original_receipt["evidence"]
-                                      if item["name"].startswith("capabilities-")]
+                                      if "/capabilities-" in item["name"]]
             def rejects_trace(mutator, message):
                 trace = deepcopy(original_trace)
                 mutator(trace)
