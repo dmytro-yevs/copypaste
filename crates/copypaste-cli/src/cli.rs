@@ -107,6 +107,9 @@ pub(crate) enum Command {
     /// Report whether the daemon is running and what it is doing.
     Status,
 
+    /// Diagnose platform capabilities without exposing clipboard contents.
+    Doctor,
+
     /// Stop the daemon.
     ///
     /// It finishes what it is doing, removes its socket, and exits — the same

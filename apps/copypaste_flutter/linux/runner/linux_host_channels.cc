@@ -863,6 +863,25 @@ bool install_appimage(const gchar* source, const gchar* expected_sha256) {
   return true;
 }
 
+void add_capability(FlValue* capabilities, const char* key, const char* status,
+                    const char* backend, const char* guarantee,
+                    const char* reason = nullptr,
+                    const char* permission = nullptr) {
+  FlValue* value = fl_value_new_map();
+  fl_value_set_string_take(value, "state", fl_value_new_string(status));
+  fl_value_set_string_take(value, "backend", backend == nullptr
+      ? fl_value_new_null() : fl_value_new_string(backend));
+  fl_value_set_string_take(value, "guarantee", fl_value_new_string(guarantee));
+  fl_value_set_string_take(value, "reason", reason == nullptr
+      ? fl_value_new_null() : fl_value_new_string(reason));
+  FlValue* permissions = fl_value_new_list();
+  if (permission != nullptr) {
+    fl_value_append_take(permissions, fl_value_new_string(permission));
+  }
+  fl_value_set_string_take(value, "permissions", permissions);
+  fl_value_set_string_take(capabilities, key, value);
+}
+
 FlValue* integration_status() {
   const bool x11 = gdk_is_x11() && x11_quick_paste != nullptr &&
       x11_quick_paste->available();
@@ -901,6 +920,44 @@ FlValue* integration_status() {
   // a protected pairing context.
   fl_value_set_string_take(response, "screenshotProtection",
                            fl_value_new_bool(false));
+  FlValue* capabilities = fl_value_new_map();
+  const char* clipboard_backend = x11 ? "x11" : clipboard ? "compositorBridge" : nullptr;
+  add_capability(capabilities, "clipboardCapture", clipboard ? "available" : "error",
+                 clipboard_backend, clipboard ? "verified" : "none",
+                 clipboard ? nullptr : "Clipboard transport is unavailable.");
+  add_capability(capabilities, "clipboardReadWrite", clipboard ? "available" : "error",
+                 clipboard_backend, clipboard ? "verified" : "none",
+                 clipboard ? nullptr : "Clipboard transport is unavailable.");
+  add_capability(capabilities, "sourceAttribution", clipboard ? "available" : "unsupported",
+                 clipboard_backend, clipboard ? "best_effort" : "none",
+                 clipboard ? "Source identity may be unknown for individual selections."
+                           : "No authenticated source adapter is active.");
+  add_capability(capabilities, "privacyEnforcement", clipboard ? "available" : "error",
+                 clipboard_backend, clipboard ? "verified" : "none",
+                 clipboard ? "Unknown sources are rejected when exclusions are configured."
+                           : "Clipboard transport is unavailable.");
+  add_capability(capabilities, "globalShortcuts",
+                 x11 || portal_shortcuts || gnome_shortcuts_available
+                     ? "available" : "unsupported",
+                 x11 ? "x11" : portal_shortcuts ? "xdgPortal"
+                     : gnome_shortcuts_available ? "gnomeBridge" : nullptr,
+                 x11 || portal_shortcuts || gnome_shortcuts_available ? "best_effort" : "none");
+  const bool quick_paste = x11 ? x11_quick_paste->input_available()
+      : wayland && companion && clipboard && shortcut_active && remote_active;
+  add_capability(capabilities, "quickPaste",
+                 quick_paste ? "available" : wayland && !companion
+                     ? "needs_companion" : wayland && !remote_active && remote_available
+                     ? "needs_permission" : "unsupported",
+                 quick_paste ? (x11 ? "x11" : "compositorBridge") : nullptr,
+                 quick_paste ? "verified" : "none",
+                 quick_paste ? nullptr : "Focus restoration or input access is unavailable.",
+                 wayland && companion && !remote_active && remote_available
+                     ? "remoteDesktop" : nullptr);
+  for (const char* key : {"secureStorage", "desktopIntegration", "updates"}) {
+    add_capability(capabilities, key, "error", nullptr, "none",
+                   "No native capability probe is registered.");
+  }
+  fl_value_set_string_take(response, "capabilities", capabilities);
   return response;
 }
 
