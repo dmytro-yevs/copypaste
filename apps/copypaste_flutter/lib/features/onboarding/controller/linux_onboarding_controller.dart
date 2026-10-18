@@ -32,9 +32,15 @@ class LinuxOnboardingController extends ChangeNotifier {
   bool get integrationReady {
     final status = _status;
     if (status == null) return false;
+    final captureReady =
+        status.capabilities.isEmpty ||
+        status.capability(LinuxCapabilityKind.clipboardCapture).state ==
+            LinuxCapabilityState.available;
     return switch (status.session) {
-      LinuxDesktopSession.x11 => status.clipboard && status.quickPaste,
-      LinuxDesktopSession.wayland => status.clipboard && status.quickPaste,
+      LinuxDesktopSession.x11 =>
+        status.clipboard && captureReady && status.quickPaste,
+      LinuxDesktopSession.wayland =>
+        status.clipboard && captureReady && status.quickPaste,
       LinuxDesktopSession.unsupported => false,
     };
   }

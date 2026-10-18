@@ -16,6 +16,7 @@
 mod cli;
 mod client;
 mod cloud;
+mod doctor;
 mod error;
 mod render;
 mod report;
@@ -95,7 +96,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             pinned: false,
         },
         Command::Reorder { ids } => Method::ReorderPinned { ids: ids.clone() },
-        Command::Status => Method::Status,
+        Command::Status | Command::Doctor => Method::Status,
         Command::Shutdown { .. } => Method::Shutdown,
         Command::Pair { action } => match action {
             PairAction::Create => Method::PairCreateInvite,
@@ -175,7 +176,21 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         },
     };
 
-    finish_response(&cli.command, cli.json, client::request(method).await?, out)
+    let response = match client::request(method).await {
+        Ok(response) => response,
+        Err(error) => {
+            if cli.json && matches!(&cli.command, Command::Doctor) {
+                out(&doctor::unavailable_json());
+            }
+            return Err(error);
+        }
+    };
+    if matches!(&cli.command, Command::Doctor) {
+        let status = client::expect_status(client::into_data(response)?)?;
+        out(&doctor::render(&status, cli.json));
+        return Ok(());
+    }
+    finish_response(&cli.command, cli.json, response, out)
 }
 
 fn finish_response(
