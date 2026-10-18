@@ -1474,7 +1474,11 @@
       "implementation_status": "present_in_source",
       "priority": "P2",
       "owner_module": "History file transfer",
-      "platforms": ["macOS", "Android", "Windows"],
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
       "source_references": [
         "apps/copypaste_flutter/lib/features/history/repository/history_file_transfer.dart",
         "apps/copypaste_flutter/lib/features/quick_paste/quick_paste_controller.dart",
@@ -1491,6 +1495,30 @@
       "evidence_refs": [],
       "supersedes": [],
       "functional_validation": "Targeted Flutter and Rust tests cover transfer progress, cancellation, reuse, and remote clipboard fallback; installed-platform and native resource evidence remain pending."
+    },
+    {
+      "id": "RUN-036",
+      "title": "Bound Linux clipboard adapter reprobes",
+      "domain": "runtime",
+      "implementation_status": "implemented",
+      "priority": "P1",
+      "owner_module": "Linux clipboard adapter",
+      "platforms": [
+        "Linux"
+      ],
+      "source_references": [
+        "crates/copypaste-daemon/src/clipboard/linux.rs",
+        "crates/copypaste-daemon/src/capture.rs"
+      ],
+      "invariant": "A healthy idle data-control adapter adds no reconnect wakeups; a missing required capability or lost bridge triggers at most one probe per five seconds, without reading a clipboard payload.",
+      "next_step": "Measure daemon and worker CPU, wakeups, memory peaks and reconnection latency on GNOME and KDE Wayland sessions before native resource qualification.",
+      "native_resource_qualification": {
+        "Linux": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [],
+      "supersedes": [],
+      "functional_validation": "Unit adapter selection and reconnect tests passed; native resource qualification pending."
     }
   ]
 }

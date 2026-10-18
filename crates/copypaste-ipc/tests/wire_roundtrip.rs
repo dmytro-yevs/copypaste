@@ -116,6 +116,7 @@ fn every_response_data_variant_has_a_distinct_round_trip() {
     let variants = vec![
         ResponseData::Modules { json: "[]".into() },
         ResponseData::Status(StatusData {
+            platform_capabilities: Default::default(),
             sync_status: Default::default(),
             device_name: "Laptop".into(),
             device_id: Some("device-1".into()),
