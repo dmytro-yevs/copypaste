@@ -1506,17 +1506,20 @@ class _ClipContent extends StatelessWidget {
     if (clip.secret && !revealed) {
       return FutureBuilder<HistoryClip>(
         future: controller.spoilerContent(clip.id),
-        builder: (context, snapshot) => SecretSpoiler(
-          key: ValueKey('history-spoiler-${clip.id}'),
-          clipId: clip.id,
-          controller: controller.spoilers,
-          child: snapshot.hasError
-              ? const StateView.error(title: 'Clip unavailable')
-              : _ClipContent(
-                  clip: snapshot.data ?? clip,
-                  controller: controller,
-                  revealed: true,
-                ),
+        builder: (context, snapshot) => Align(
+          alignment: Alignment.centerLeft,
+          child: SecretSpoiler(
+            key: ValueKey('history-spoiler-${clip.id}'),
+            clipId: clip.id,
+            controller: controller.spoilers,
+            child: snapshot.hasError
+                ? const StateView.error(title: 'Clip unavailable')
+                : _ClipContent(
+                    clip: snapshot.data ?? clip,
+                    controller: controller,
+                    revealed: true,
+                  ),
+          ),
         ),
       );
     }
@@ -1582,10 +1585,12 @@ class _ClipContent extends StatelessWidget {
           builder: (context, snapshot) {
             final preview = snapshot.data;
             if (preview == null) {
-              return const Center(child: Icon(LucideIcons.image));
+              final placeholder = const Icon(LucideIcons.image);
+              return revealed ? placeholder : Center(child: placeholder);
             }
             if (preview.width <= 0 || preview.height <= 0) {
-              return const Center(child: Icon(LucideIcons.imageOff));
+              final placeholder = const Icon(LucideIcons.imageOff);
+              return revealed ? placeholder : Center(child: placeholder);
             }
             final scale = math.min(
               1.0,
@@ -1594,38 +1599,32 @@ class _ClipContent extends StatelessWidget {
                 maxHeight / preview.height,
               ),
             );
-            return Align(
-              alignment: Alignment.centerLeft,
-              child: SizedBox(
-                width: preview.width * scale,
-                height: preview.height * scale,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(AppRadius.sm),
-                  child: Image.memory(
-                    preview.bytes,
-                    key: ValueKey<String>('history-card-image-${clip.id}'),
-                    fit: BoxFit.contain,
-                    alignment: Alignment.centerLeft,
-                    cacheWidth: math.min(
-                      preview.width,
-                      (preview.width * scale * pixelRatio).ceil().clamp(
-                        1,
-                        2048,
-                      ),
-                    ),
-                    cacheHeight: math.min(
-                      preview.height,
-                      (preview.height * scale * pixelRatio).ceil().clamp(
-                        1,
-                        2048,
-                      ),
-                    ),
-                    errorBuilder: (context, error, stackTrace) =>
-                        const Center(child: Icon(LucideIcons.imageOff)),
+            final image = SizedBox(
+              width: preview.width * scale,
+              height: preview.height * scale,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+                child: Image.memory(
+                  preview.bytes,
+                  key: ValueKey<String>('history-card-image-${clip.id}'),
+                  fit: BoxFit.contain,
+                  alignment: Alignment.centerLeft,
+                  cacheWidth: math.min(
+                    preview.width,
+                    (preview.width * scale * pixelRatio).ceil().clamp(1, 2048),
                   ),
+                  cacheHeight: math.min(
+                    preview.height,
+                    (preview.height * scale * pixelRatio).ceil().clamp(1, 2048),
+                  ),
+                  errorBuilder: (context, error, stackTrace) =>
+                      const Center(child: Icon(LucideIcons.imageOff)),
                 ),
               ),
             );
+            return revealed
+                ? image
+                : Align(alignment: Alignment.centerLeft, child: image);
           },
         );
       },
