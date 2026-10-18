@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 import tomllib
 
 
@@ -43,6 +44,17 @@ def release_by_id(repository: str, release_id: int) -> dict:
     ], text=True))
 
 
+def wait_for_created_release(repository: str, tag: str) -> dict:
+    # GitHub can acknowledge draft creation before listing that draft.
+    for attempt in range(10):
+        release = publisher.find_release(repository, tag)
+        if release is not None:
+            return release
+        if attempt < 9:
+            time.sleep(1)
+    raise ValueError("created draft module release is not visible")
+
+
 def publish(repository: str, directory: Path, manifest: Path, commit: str, run_id: str) -> None:
     if repository != "dmytro-yevs/copypaste" or not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("invalid qualified repository or commit")
@@ -66,7 +78,7 @@ def publish(repository: str, directory: Path, manifest: Path, commit: str, run_i
                         f"Exact production-signed packages from qualified run {run_id}, "
                         "with native receipts for macOS, Windows, Linux x86_64, and Android."),
         ], check=True)
-        release = publisher.find_release(repository, tag)
+        release = wait_for_created_release(repository, tag)
     if release is None:
         raise ValueError("draft module release was not created")
     validate_release(release, tag, commit)

@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SPEC = importlib.util.spec_from_file_location(
@@ -13,6 +14,14 @@ SPEC.loader.exec_module(publisher)
 
 
 class QualifiedModulePublisherTest(unittest.TestCase):
+    def test_waits_for_new_draft_to_appear_in_release_inventory(self):
+        release = {"id": 123, "draft": True}
+        with patch.object(publisher.publisher, "find_release", side_effect=[None, release]) as find, \
+                patch.object(publisher.time, "sleep") as sleep:
+            self.assertIs(publisher.wait_for_created_release("dmytro-yevs/copypaste", "tag"), release)
+        self.assertEqual(find.call_count, 2)
+        sleep.assert_called_once_with(1)
+
     def test_accepts_only_first_party_versioned_module_tag(self):
         with tempfile.TemporaryDirectory() as directory:
             manifest = Path(directory) / "module.json"
