@@ -238,7 +238,11 @@ class FlutterDesktopWindowHost
         ..setTitle(Platform.isMacOS ? null : 'CopyPaste')
         ..setTooltip('CopyPaste')
         ..setContextMenu(menu)
-        ..setContextMenuTrigger(ContextMenuTrigger.rightClicked);
+        ..setContextMenuTrigger(
+          Platform.isLinux
+              ? ContextMenuTrigger.clicked
+              : ContextMenuTrigger.rightClicked,
+        );
       if (!icon.setVisible(visible)) {
         throw StateError('Unable to show the system tray controls.');
       }
@@ -264,7 +268,10 @@ class FlutterDesktopWindowHost
         }
       });
       trayListener = icon.addListener((event) {
-        if (event is TrayIconClickedEvent && !_nativeTrayActivationBound) {
+        if (Platform.isLinux && event is TrayIconClickedEvent) {
+          unawaited(onOpenRequested());
+        } else if (event is TrayIconClickedEvent &&
+            !_nativeTrayActivationBound) {
           unawaited(_openQuickPasteFromTray(icon));
         }
       });
