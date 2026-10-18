@@ -14,18 +14,26 @@ impl Spoilers {
 
     /// `None` conceals every clip. No content or state is persisted or synced.
     pub fn set(&self, id: Option<&str>, revealed: bool) -> (u64, Vec<String>) {
+        let (revision, ids, _) = self.set_with_change(id, revealed);
+        (revision, ids)
+    }
+
+    /// Returns whether a presentation change needs to wake other clients.
+    pub fn set_with_change(&self, id: Option<&str>, revealed: bool) -> (u64, Vec<String>, bool) {
         let mut state = self.0.lock().unwrap_or_else(|error| error.into_inner());
-        match id {
-            Some(id) if revealed => {
-                state.1.insert(id.to_owned());
+        let changed = match id {
+            Some(id) if revealed => state.1.insert(id.to_owned()),
+            Some(id) => state.1.remove(id),
+            None => {
+                let changed = !state.1.is_empty();
+                state.1.clear();
+                changed
             }
-            Some(id) => {
-                state.1.remove(id);
-            }
-            None => state.1.clear(),
+        };
+        if changed {
+            state.0 += 1;
         }
-        state.0 += 1;
-        (state.0, state.1.iter().cloned().collect())
+        (state.0, state.1.iter().cloned().collect(), changed)
     }
 }
 
@@ -42,5 +50,21 @@ mod tests {
         assert_eq!(state.set(Some("clip"), false), (3, vec!["other".into()]));
         assert_eq!(state.set(None, false), (4, vec![]));
         assert_eq!(Spoilers::default().snapshot(), (0, vec![]));
+    }
+
+    #[test]
+    fn identical_presentation_state_does_not_advance_or_wake_clients() {
+        let state = Spoilers::default();
+        assert_eq!(state.set_with_change(None, false), (0, vec![], false));
+        assert_eq!(
+            state.set_with_change(Some("clip"), true),
+            (1, vec!["clip".into()], true)
+        );
+        assert_eq!(
+            state.set_with_change(Some("clip"), true),
+            (1, vec!["clip".into()], false)
+        );
+        assert_eq!(state.set_with_change(None, false), (2, vec![], true));
+        assert_eq!(state.set_with_change(None, false), (2, vec![], false));
     }
 }
