@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:flutter/rendering.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 import '../history/presentation/secret_spoiler.dart';
@@ -17,6 +18,7 @@ import '../history/view/history_inspector.dart';
 import '../history/presentation/history_clip_presentation.dart';
 import '../history/presentation/source_app_label.dart';
 import 'quick_paste_controller.dart';
+import 'middle_ellipsis.dart';
 
 class QuickPasteView extends StatefulWidget {
   const QuickPasteView({super.key, required this.controller});
@@ -37,6 +39,83 @@ class _QuickPasteViewState extends State<QuickPasteView> {
   bool _paginationCheckScheduled = false;
   int _generation = 0;
   HistoryQuery _query = const HistoryQuery();
+  int? _preparingFrame;
+  int? _presentedFrame;
+
+  void _preparePresentationFrame() {
+    final id = controller.renderablePresentationId;
+    if (id == null || id == _preparingFrame || id == _presentedFrame) return;
+    _preparingFrame = id;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      var attempted = false;
+      try {
+        if (!mounted || controller.renderablePresentationId != id) return;
+        final media = <Future<void>>[];
+        for (final clip in controller.items) {
+          final row = _rowKeys[clip.id]?.currentContext?.findRenderObject();
+          if (row is! RenderBox || !row.attached || !row.hasSize) continue;
+          final viewportObject = RenderAbstractViewport.maybeOf(row);
+          if (viewportObject is! RenderBox) continue;
+          final viewport = viewportObject as RenderBox;
+          if (!viewport.hasSize) continue;
+          final rowRect = row.localToGlobal(Offset.zero) & row.size;
+          final viewportRect =
+              viewport.localToGlobal(Offset.zero) & viewport.size;
+          if (rowRect.overlaps(viewportRect)) {
+            media.add(_prepareClipMedia(clip));
+          }
+        }
+        await Future.wait(media);
+        if (!mounted || controller.renderablePresentationId != id) return;
+        await WidgetsBinding.instance.endOfFrame;
+        if (!mounted || controller.renderablePresentationId != id) return;
+        attempted = true;
+        if (await controller.presentFrame(id)) _presentedFrame = id;
+      } finally {
+        if (_preparingFrame == id) _preparingFrame = null;
+        if (!attempted && mounted) _preparePresentationFrame();
+      }
+    });
+  }
+
+  Future<void> _prepareClipMedia(HistoryClip clip) async {
+    try {
+      if (clip.secret) clip = await controller.history.spoilerContent(clip.id);
+      final loads = <Future<void>>[];
+      if (clip.contentKind == HistoryClipKind.image) {
+        loads.add(() async {
+          final preview = await controller.history.requestImagePreview(
+            clip.id,
+            maxEdge: 480,
+          );
+          if (mounted && preview != null) {
+            await precacheImage(
+              MemoryImage(preview.bytes),
+              context,
+              onError: (_, _) {},
+            );
+          }
+        }());
+      }
+      if (clip.sourceAppIconId != null) {
+        loads.add(() async {
+          final icon = await controller.history.requestSourceIcon(
+            clip.sourceAppIconId,
+          );
+          if (mounted && icon != null) {
+            await precacheImage(
+              MemoryImage(icon.bytes),
+              context,
+              onError: (_, _) {},
+            );
+          }
+        }());
+      }
+      await Future.wait(loads);
+    } catch (_) {
+      // A missing preview uses the shared row fallback and never prevents opening.
+    }
+  }
 
   QuickPasteController get controller => widget.controller;
 
@@ -89,6 +168,7 @@ class _QuickPasteViewState extends State<QuickPasteView> {
               padding: const EdgeInsets.all(AppSpacing.sm),
               child: LayoutBuilder(
                 builder: (context, constraints) {
+                  _preparePresentationFrame();
                   final menu = _menu(context);
                   final menuWidth =
                       (AppLayoutSize.quickPasteMenuWidth - AppSpacing.sm * 2)
@@ -471,6 +551,32 @@ class _QuickPasteViewState extends State<QuickPasteView> {
                   child: _ClipContent(clip: clip, controller: controller),
                 ),
                 const Gap(AppSpacing.sm),
+                if (controller.transferProgressFor(clip.id)
+                    case final progress?)
+                  SizedBox(
+                    width: AppLayoutSize.quickPasteTransferStatusWidth,
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: AppIconSize.xs,
+                          height: AppIconSize.xs,
+                          child: CircularProgressIndicator(
+                            value: progress,
+                            animated: !MediaQuery.disableAnimationsOf(context),
+                          ),
+                        ),
+                        const Gap(AppSpacing.xs),
+                        Text('${(progress * 100).floor()}%'),
+                      ],
+                    ),
+                  )
+                else if (controller.transferFailedFor(clip.id))
+                  Text(
+                    'Failed · Retry',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.destructive,
+                    ),
+                  ),
                 if (shortcut != null)
                   MenuShortcut(
                     activator: _desktopShortcut(shortcut),
@@ -507,20 +613,67 @@ class _ClipContent extends StatelessWidget {
     if (clip.secret && !revealed) {
       return FutureBuilder<HistoryClip>(
         future: controller.history.spoilerContent(clip.id),
-        builder: (context, snapshot) => SecretSpoiler(
-          clipId: clip.id,
-          controller: controller.history.spoilers,
-          key: ValueKey(
-            'quick-spoiler-${clip.id}-${controller.presentationGeneration}',
+        builder: (context, snapshot) => Align(
+          alignment: Alignment.centerLeft,
+          child: SecretSpoiler(
+            clipId: clip.id,
+            controller: controller.history.spoilers,
+            key: ValueKey(
+              'quick-spoiler-${clip.id}-${controller.presentationGeneration}',
+            ),
+            child: snapshot.hasError
+                ? const StateView.error(title: 'Clip unavailable')
+                : _ClipContent(
+                    clip: snapshot.data ?? clip,
+                    controller: controller,
+                    revealed: true,
+                  ),
           ),
-          child: snapshot.hasError
-              ? const StateView.error(title: 'Clip unavailable')
-              : _ClipContent(
-                  clip: snapshot.data ?? clip,
-                  controller: controller,
-                  revealed: true,
-                ),
         ),
+      );
+    }
+    if (clip.contentKind == HistoryClipKind.file) {
+      final file = clip.file;
+      final reference = file?.sourceReference;
+      final path = reference?.trim().isNotEmpty == true
+          ? reference!
+          : clip.preview.contains(RegExp(r'[/\\]'))
+          ? clip.preview
+          : '';
+      final filename = file?.name?.trim().isNotEmpty == true
+          ? file!.name!.trim()
+          : (path.isEmpty ? clip.preview : path).split(RegExp(r'[/\\]')).last;
+      final theme = Theme.of(context);
+      final pathStyle = theme.typography.xSmall.copyWith(
+        color: theme.colorScheme.mutedForeground,
+      );
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            filename.isEmpty ? 'File' : filename,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          LayoutBuilder(
+            builder: (context, constraints) => Text(
+              path.isEmpty
+                  ? 'Path unavailable'
+                  : middleEllipsis(
+                      path,
+                      maxWidth: constraints.maxWidth,
+                      style: pathStyle,
+                      direction: Directionality.of(context),
+                      textScaler: MediaQuery.textScalerOf(context),
+                    ),
+              key: ValueKey('quick-paste-file-path-${clip.id}'),
+              maxLines: 1,
+              softWrap: false,
+              style: pathStyle,
+            ),
+          ),
+        ],
       );
     }
     if (clip.contentKind != HistoryClipKind.image) {
@@ -534,28 +687,28 @@ class _ClipContent extends StatelessWidget {
       future: controller.history.requestImagePreview(clip.id, maxEdge: 480),
       builder: (context, snapshot) {
         final preview = snapshot.data;
-        return Align(
-          alignment: Alignment.centerLeft,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 240, maxHeight: 120),
-            child: preview == null
-                ? const SizedBox(height: 120, child: Icon(LucideIcons.image))
-                : ClipRRect(
-                    borderRadius: const BorderRadius.all(
-                      Radius.circular(AppRadius.sm),
-                    ),
-                    child: AspectRatio(
-                      aspectRatio: preview.width / preview.height,
-                      child: Image.memory(
-                        preview.bytes,
-                        fit: BoxFit.contain,
-                        errorBuilder: (context, error, stackTrace) =>
-                            const Icon(LucideIcons.imageOff),
-                      ),
+        final image = ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 240, maxHeight: 120),
+          child: preview == null
+              ? const SizedBox(height: 120, child: Icon(LucideIcons.image))
+              : ClipRRect(
+                  borderRadius: const BorderRadius.all(
+                    Radius.circular(AppRadius.sm),
+                  ),
+                  child: AspectRatio(
+                    aspectRatio: preview.width / preview.height,
+                    child: Image.memory(
+                      preview.bytes,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) =>
+                          const Icon(LucideIcons.imageOff),
                     ),
                   ),
-          ),
+                ),
         );
+        return revealed
+            ? image
+            : Align(alignment: Alignment.centerLeft, child: image);
       },
     );
   }
