@@ -302,7 +302,14 @@ class ModulesController extends ChangeNotifier {
     }
   }
 
-  Future<void> remove(String id) => _perform(() => _repository.remove(id));
+  Future<bool> remove(String id) async {
+    final removed = await _perform(() async {
+      await _repository.remove(id);
+      return true;
+    });
+    return removed == true && _error == null;
+  }
+
   Future<ModuleResult?> invoke(
     String id,
     String command,

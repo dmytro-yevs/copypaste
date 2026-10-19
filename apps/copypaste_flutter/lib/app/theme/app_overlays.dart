@@ -1,8 +1,12 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../dialog_action_controller.dart';
 import '../../shared/adaptive_breakpoints.dart';
 
 import 'app_motion.dart';
+import 'app_theme.dart';
 import 'app_tokens.dart';
 
 /// Shared presentation and behavior for application-owned overlays.
@@ -81,6 +85,9 @@ abstract final class AppOverlays {
     );
   }
 
+  /// Uses one adaptive width, with bottom placement on Android and centered
+  /// placement on desktop. The library owns safe areas and route transitions;
+  /// keyboard insets reduce the available dialog height without hiding actions.
   static Future<T?> showDialog<T>(
     BuildContext context, {
     required WidgetBuilder builder,
@@ -92,14 +99,128 @@ abstract final class AppOverlays {
       DialogConfiguration(
         useRootNavigator: useRootNavigator,
         barrierDismissible: barrierDismissible,
+        alignment: defaultTargetPlatform == TargetPlatform.android
+            ? Alignment.bottomCenter
+            : Alignment.center,
       ),
-      builder: (dialogContext) => ConstrainedBox(
-        constraints: const BoxConstraints(
-          maxWidth: AppOverlaySize.dialogMaxWidth,
+      builder: (dialogContext) => AppMotion.keyboardInsets(
+        dialogContext,
+        child: SizedBox(
+          width: AppOverlaySize.dialogMaxWidth,
+          child: builder(dialogContext),
         ),
-        child: builder(dialogContext),
       ),
     ).future;
+  }
+
+  /// Runs an action before closing and keeps failures available for retry.
+  /// A null action result leaves the dialog idle after a nested cancellation.
+  static Future<bool?> showActionDialog(
+    BuildContext context, {
+    required IconData icon,
+    required Widget title,
+    required String actionLabel,
+    required Future<bool?> Function() onConfirm,
+    required String Function() failureMessage,
+    Widget? content,
+    bool destructive = true,
+    Listenable? changes,
+    bool Function()? canConfirm,
+  }) async {
+    final controller = DialogActionController(
+      action: onConfirm,
+      failureMessage: failureMessage,
+    );
+    try {
+      return await showDialog<bool>(
+        context,
+        builder: (context) => AnimatedBuilder(
+          animation: Listenable.merge([controller, ?changes]),
+          builder: (context, _) {
+            final submitting = controller.submitting;
+            void cancel() {
+              if (!controller.submitting) Navigator.of(context).maybePop();
+            }
+
+            Future<void> submit() async {
+              if (controller.submitting || !(canConfirm?.call() ?? true)) {
+                return;
+              }
+              final completed = await controller.submit();
+              if (completed && context.mounted) Navigator.pop(context, true);
+            }
+
+            return PopScope(
+              canPop: !submitting,
+              child: CallbackShortcuts(
+                bindings: {
+                  const SingleActivator(LogicalKeyboardKey.escape): cancel,
+                },
+                child: alertDialog(
+                  icon: icon,
+                  title: title,
+                  content: content == null && controller.errorMessage == null
+                      ? null
+                      : Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (content != null)
+                              ExcludeFocus(
+                                excluding: submitting,
+                                child: AbsorbPointer(
+                                  absorbing: submitting,
+                                  child: content,
+                                ),
+                              ),
+                            if (controller.errorMessage
+                                case final message?) ...[
+                              if (content != null) const Gap(AppSpacing.md),
+                              Alert.destructive(
+                                leading: const Icon(LucideIcons.circleAlert),
+                                title: const Text('Action failed'),
+                                content: Text(message),
+                              ),
+                            ],
+                          ],
+                        ),
+                  actions: [
+                    Button.ghost(
+                      alignment: Alignment.center,
+                      style: AppTheme.dialogButtonStyle(
+                        const ButtonStyle.ghost(),
+                      ),
+                      onPressed: submitting ? null : cancel,
+                      child: const Text('Cancel'),
+                    ),
+                    Button(
+                      alignment: Alignment.center,
+                      style: AppTheme.dialogButtonStyle(
+                        destructive
+                            ? const ButtonStyle.destructive()
+                            : const ButtonStyle.primary(),
+                      ),
+                      onPressed: submitting || !(canConfirm?.call() ?? true)
+                          ? null
+                          : submit,
+                      leading: submitting
+                          ? const SizedBox.square(
+                              dimension: AppIconSize.sm,
+                              child: CircularProgressIndicator(),
+                            )
+                          : null,
+                      child: Text(actionLabel),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      );
+    } finally {
+      controller.dispose();
+    }
   }
 
   static AlertDialog alertDialog({
@@ -109,33 +230,87 @@ abstract final class AppOverlays {
     List<Widget>? actions,
   }) {
     return AlertDialog(
-      title: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: AppIconSize.sm).iconMutedForeground(),
-          const Gap(AppSpacing.lg),
-          Flexible(child: title),
-        ],
+      title: Flexible(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Icon(icon, size: AppIconSize.sm).iconMutedForeground(),
+                  const Gap(AppSpacing.lg),
+                  Flexible(child: title),
+                ],
+              ),
+              if (content != null) ...[
+                const Gap(AppSpacing.sm),
+                Builder(
+                  builder: (context) {
+                    final theme = Theme.of(context);
+                    return DefaultTextStyle.merge(
+                      style: theme.typography.small
+                          .merge(theme.typography.normal)
+                          .copyWith(color: theme.colorScheme.mutedForeground),
+                      child: content,
+                    );
+                  },
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
-      content: content,
       actions: actions == null || actions.isEmpty
           ? null
-          : [
-              Flexible(
-                child: Wrap(
-                  alignment: WrapAlignment.end,
-                  spacing: AppSpacing.sm,
-                  runSpacing: AppSpacing.sm,
-                  children: actions,
-                ),
-              ),
-            ],
+          : [Expanded(child: _dialogActions(actions))],
       padding: const EdgeInsets.all(AppSpacing.xl),
       surfaceOpacity: 1,
       surfaceBlur: 0,
       barrierColor: scrimColor,
     );
   }
+
+  static Widget _dialogActions(List<Widget> actions) => DefaultTextStyle.merge(
+    maxLines: 1,
+    softWrap: false,
+    overflow: TextOverflow.ellipsis,
+    textAlign: TextAlign.center,
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final minimumWidth =
+            AppOverlaySize.dialogActionMinWidth *
+            MediaQuery.textScalerOf(context).scale(1);
+        final stacked =
+            constraints.maxWidth <
+            actions.length * minimumWidth +
+                (actions.length - 1) * AppSpacing.sm;
+        if (stacked) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var index = 0; index < actions.length; index++) ...[
+                if (index > 0) const Gap(AppSpacing.sm),
+                actions[index],
+              ],
+            ],
+          );
+        }
+        return IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var index = 0; index < actions.length; index++) ...[
+                if (index > 0) const Gap(AppSpacing.sm),
+                Expanded(child: actions[index]),
+              ],
+            ],
+          ),
+        );
+      },
+    ),
+  );
 
   static BoxDecoration dialogFieldDecoration(BuildContext context) {
     return BoxDecoration(

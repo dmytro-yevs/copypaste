@@ -21,6 +21,8 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		C0DE12112610190000000002 /* MacosWindowCommandsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE12112610190000000001 /* MacosWindowCommandsTests.swift */; };
+		C0DE11112610190000000002 /* MacosWindowCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE11112610190000000001 /* MacosWindowCommands.swift */; };
 		F1A47B2E96CD4D49B3A77102 /* MacosTrayMenuChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A47B2E96CD4D49B3A77101 /* MacosTrayMenuChannel.swift */; };
 		331C80D8294CF71000263BE5 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331C80D7294CF71000263BE5 /* RunnerTests.swift */; };
 		335BBD1B22A9A15E00E9071D /* GeneratedPluginRegistrant.swift in Sources */ = {isa = PBXBuildFile; fileRef = 335BBD1A22A9A15E00E9071D /* GeneratedPluginRegistrant.swift */; };
@@ -70,6 +72,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		C0DE12112610190000000001 /* MacosWindowCommandsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacosWindowCommandsTests.swift; sourceTree = "<group>"; };
+		C0DE11112610190000000001 /* MacosWindowCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacosWindowCommands.swift; sourceTree = "<group>"; };
 		F1A47B2E96CD4D49B3A77101 /* MacosTrayMenuChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacosTrayMenuChannel.swift; sourceTree = "<group>"; };
 		331C80D5294CF71000263BE5 /* RunnerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunnerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		331C80D7294CF71000263BE5 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
@@ -125,6 +129,7 @@
 			isa = PBXGroup;
 			children = (
 				331C80D7294CF71000263BE5 /* RunnerTests.swift */,
+				C0DE12112610190000000001 /* MacosWindowCommandsTests.swift */,
 				C0DE0D112610060000000001 /* HotkeyManagerMacosPluginTests.swift */,
 			);
 			path = RunnerTests;
@@ -195,6 +200,7 @@
 				C0DE0B112610040000000001 /* QuickPasteGeometry.swift */,
 				C0DE0C112610050000000001 /* MacosAppUpdateChannel.swift */,
 				C0DE10112610080000000001 /* MacosApplicationLifecycle.swift */,
+				C0DE11112610190000000001 /* MacosWindowCommands.swift */,
 				F1A47B2E96CD4D49B3A77101 /* MacosTrayMenuChannel.swift */,
 				A1B2C3D10102030405060708 /* ProtectedPairingBridge.h */,
 				A1B2C3D20102030405060708 /* Runner-Bridging-Header.h */,
@@ -398,6 +404,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				331C80D8294CF71000263BE5 /* RunnerTests.swift in Sources */,
+				C0DE12112610190000000002 /* MacosWindowCommandsTests.swift in Sources */,
 				C0DE0D112610060000000002 /* HotkeyManagerMacosPluginTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -413,6 +420,7 @@
 				C0DE0B112610040000000002 /* QuickPasteGeometry.swift in Sources */,
 				C0DE0C112610050000000002 /* MacosAppUpdateChannel.swift in Sources */,
 				C0DE10112610080000000002 /* MacosApplicationLifecycle.swift in Sources */,
+				C0DE11112610190000000002 /* MacosWindowCommands.swift in Sources */,
 				F1A47B2E96CD4D49B3A77102 /* MacosTrayMenuChannel.swift in Sources */,
 				A1B2C3D40102030405060708 /* ProtectedPairingBridge.mm in Sources */,
 				33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */,

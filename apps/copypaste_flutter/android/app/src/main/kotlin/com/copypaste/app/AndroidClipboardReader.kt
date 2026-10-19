@@ -320,7 +320,8 @@ internal object AndroidClipboardReader {
     }
 
     private fun binary(context: Context, pending: Pending, uri: Uri, declaredType: String, mediaAccess: Boolean = false, sourceDisplayName: String = ""): Boolean {
-        if (uri.scheme != "content" || !mimeType.matches(declaredType) || declaredType.startsWith("text/")) return false
+        if (uri.scheme != "content" || !mimeType.matches(declaredType)) return false
+        if (!declaredType.startsWith("image/") && !mediaAccess) return captureFile(context,pending,uri,declaredType)
         var bytes: ByteArray? = null
         var sourceApp: ScreenshotSourceApp? = null
         val read = pending.read(declaredType) { limit ->
@@ -345,6 +346,38 @@ internal object AndroidClipboardReader {
         val saved = NativeRuntimeCapture.ingestBinary(pending.token, payload, if (declaredType.startsWith("image/")) "image/png" else declaredType, if (declaredType.startsWith("image/")) "" else filename(uri), uri.toString(), sourceApp?.packageName.orEmpty(), sourceApp?.name.orEmpty(), sourceApp?.icon ?: byteArrayOf())
         if (saved && !declaredType.startsWith("image/")) pending.feedbackPreview(CaptureFeedbackPreview(filename(uri)))
         return saved
+    }
+
+    private fun captureFile(context: Context, pending: Pending, uri: Uri, type: String): Boolean {
+        var staged: java.io.File? = null
+        var name = filename(uri)
+        try {
+            val read = pending.read("file") { limit ->
+                if (context.checkUriPermission(uri, Process.myPid(), Process.myUid(), Intent.FLAG_GRANT_READ_URI_PERMISSION) != PackageManager.PERMISSION_GRANTED) return@read
+                context.contentResolver.query(uri,arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),null,null,null)?.use { cursor ->
+                    if (cursor.moveToFirst() && !cursor.isNull(0)) name=cursor.getString(0)
+                }
+                val file=java.io.File.createTempFile("capture-file-", ".bin",context.cacheDir)
+                staged=file
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    pending.input(input)
+                    try {
+                        file.outputStream().use { output ->
+                            val buffer=ByteArray(64*1024); var total=0L
+                            while (pending.reading()) {
+                                val count=input.read(buffer)
+                                if (count<0) break
+                                total+=count
+                                require(total<=limit) { "The file exceeds the file size limit in Settings." }
+                                output.write(buffer,0,count)
+                            }
+                        }
+                    } finally {pending.releaseInput(input)}
+                } ?: throw java.io.IOException("The file could not be read.")
+            }
+            val file=staged ?: return false
+            return read && pending.reading() && NativeRuntimeCapture.ingestFile(pending.token,file.absolutePath,name,type,uri.toString())
+        } finally {staged?.delete()}
     }
 
     private fun filename(uri: Uri): String =

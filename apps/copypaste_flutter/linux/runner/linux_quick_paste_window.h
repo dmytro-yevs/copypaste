@@ -2,6 +2,7 @@
 #define COPYPASTE_LINUX_QUICK_PASTE_WINDOW_H_
 
 #include <gtk/gtk.h>
+#include <functional>
 
 struct LinuxQuickPasteFrame {
   int x;
@@ -16,6 +17,7 @@ LinuxQuickPasteFrame linux_quick_paste_frame(
     const LinuxQuickPasteFrame& work_area, bool inspector_visible);
 bool resize_linux_quick_paste_window(GtkWindow* window, bool inspector_visible,
                                     bool reposition = true);
-void configure_linux_quick_paste_window(GtkWindow* window);
+void configure_linux_quick_paste_window(
+    GtkWindow* window, std::function<void()> on_close = {});
 
 #endif  // COPYPASTE_LINUX_QUICK_PASTE_WINDOW_H_

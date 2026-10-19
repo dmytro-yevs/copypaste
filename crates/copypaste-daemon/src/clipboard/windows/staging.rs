@@ -110,7 +110,17 @@ impl StagingArea {
             .write(true)
             .create_new(true)
             .open(&path)?;
-        file.write_all(bytes)?;
+        if metadata.transfer.is_some() {
+            let mut source = fs::File::open(
+                metadata
+                    .source_reference
+                    .as_deref()
+                    .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?,
+            )?;
+            io::copy(&mut source, &mut file)?;
+        } else {
+            file.write_all(bytes)?;
+        }
         Ok(path)
     }
 

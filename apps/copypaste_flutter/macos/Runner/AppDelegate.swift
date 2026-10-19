@@ -9,6 +9,14 @@ class AppDelegate: FlutterAppDelegate {
     (mainFlutterWindow as? MainFlutterWindow)?.openSettings()
   }
 
+  @objc func closeAllWindows(_ sender: Any?) {
+    MacosWindowCommands.closeAll(windows: NSApplication.shared.windows, sender: sender)
+  }
+
+  @objc func showFind(_ sender: Any?) {
+    (mainFlutterWindow as? MainFlutterWindow)?.findInHistory()
+  }
+
   override func applicationDidFinishLaunching(_ notification: Notification) {
     // FlutterAppDelegate does not implement this optional delegate callback.
     drainPairingURLs()

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
+import 'package:copypaste_flutter/app/theme/app_toast.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
 import 'package:copypaste_flutter/features/history/repository/history_repository.dart';
@@ -14,6 +15,50 @@ import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets(
+    'failed import immediately toasts the actual reason and repeats after retry',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(320, 700));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      const reason =
+          'The file is 6158760 bytes; the file size limit in Settings is 4194304 bytes.';
+      final repository = _Repository()
+        ..failName = 'Hail-v1.10.0.apk'
+        ..importError = const HistoryFileOperationException(reason);
+      final controller = HistoryController(
+        repository,
+        filePicker: _Picker([_Input('Hail-v1.10.0.apk')]),
+      );
+      addTearDown(controller.dispose);
+      addTearDown(repository.events.close);
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: Scaffold(child: HistoryScreen(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      for (var attempt = 0; attempt < 2; attempt++) {
+        await tester.tap(find.byKey(const ValueKey('history-import-files')));
+        await tester.pumpAndSettle();
+        final toast = find.byType(AppToast);
+        expect(toast, findsOneWidget);
+        final widget = tester.widget<AppToast>(toast);
+        expect(widget.tone, AppToastTone.error);
+        expect(widget.message, contains(reason));
+        expect(widget.message, contains('Hail-v1.10.0.apk'));
+        await tester.pump(const Duration(seconds: 6));
+        await tester.pumpAndSettle();
+      }
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+      TargetPlatform.android,
+    }),
+  );
   test(
     'desktop import preserves the leaf filename for either Windows separator',
     () {
@@ -259,6 +304,7 @@ class _Repository implements HistoryRepository {
   final events = StreamController<HistoryRuntimeEvent>.broadcast(sync: true);
   final imported = <String>[];
   String? failName;
+  Object? importError;
   int active = 0, maximumActive = 0, queries = 0;
   @override
   Future<void> importFile(HistoryImportFile file) async {
@@ -266,7 +312,7 @@ class _Repository implements HistoryRepository {
     if (active > maximumActive) maximumActive = active;
     try {
       await file.prepare(4194304);
-      if (file.name == failName) throw StateError('unreadable');
+      if (file.name == failName) throw importError ?? StateError('unreadable');
       imported.add(file.name);
       events.add(HistoryRuntimeEvent.itemsChanged);
     } finally {

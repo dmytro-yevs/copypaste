@@ -114,12 +114,15 @@ class QuickPasteController extends ChangeNotifier {
     ...history.items.where((clip) => clip.pinned),
   ];
 
+  Map<String, LogicalKeyboardKey> get _availablePinKeys =>
+      defaultTargetPlatform == TargetPlatform.macOS ? _pinKeys : _otherPinKeys;
+
   Map<LogicalKeyboardKey, HistoryClip> get shortcuts {
     final recent = history.items.where((clip) => !clip.pinned).take(9).toList();
     return {
       for (final (index, clip) in recent.indexed) _numberKeys[index]: clip,
       for (final clip in history.items.where((clip) => clip.pinned))
-        ?_pinKeys[_pinnedShortcuts[clip.id]]: clip,
+        ?_availablePinKeys[_pinnedShortcuts[clip.id]]: clip,
     };
   }
 
@@ -581,7 +584,7 @@ class QuickPasteController extends ChangeNotifier {
       final next = <String, String>{};
       for (final entry in _pinnedShortcuts.entries) {
         if (entry.key == deletedId) continue;
-        if (_pinKeys.containsKey(entry.value) &&
+        if (_availablePinKeys.containsKey(entry.value) &&
             !next.containsValue(entry.value)) {
           next[entry.key] = entry.value;
         }
@@ -591,7 +594,7 @@ class QuickPasteController extends ChangeNotifier {
       }
       for (final clip in history.items.where((clip) => clip.pinned)) {
         if (next.containsKey(clip.id)) continue;
-        final available = _pinKeys.keys
+        final available = _availablePinKeys.keys
             .where((key) => !next.containsValue(key))
             .toList();
         if (available.isEmpty) break;
@@ -644,26 +647,27 @@ const _numberKeys = [
   LogicalKeyboardKey.digit9,
 ];
 
-// Exclude select-all, quit, paste, close, undo and the pin action itself.
+// Reserve editing (select/copy/cut/paste/undo/redo), find, refresh, close,
+// quit, and the pin action. These commands must never activate a pinned clip.
+// macOS also owns Command-H and Command-M, including in the nonactivating popup.
 const _pinKeys = {
   'b': LogicalKeyboardKey.keyB,
-  'c': LogicalKeyboardKey.keyC,
   'd': LogicalKeyboardKey.keyD,
   'e': LogicalKeyboardKey.keyE,
-  'f': LogicalKeyboardKey.keyF,
   'g': LogicalKeyboardKey.keyG,
-  'h': LogicalKeyboardKey.keyH,
   'i': LogicalKeyboardKey.keyI,
   'j': LogicalKeyboardKey.keyJ,
   'k': LogicalKeyboardKey.keyK,
   'l': LogicalKeyboardKey.keyL,
-  'm': LogicalKeyboardKey.keyM,
   'n': LogicalKeyboardKey.keyN,
   'o': LogicalKeyboardKey.keyO,
-  'r': LogicalKeyboardKey.keyR,
   's': LogicalKeyboardKey.keyS,
   't': LogicalKeyboardKey.keyT,
   'u': LogicalKeyboardKey.keyU,
-  'x': LogicalKeyboardKey.keyX,
-  'y': LogicalKeyboardKey.keyY,
+};
+
+const _otherPinKeys = {
+  ..._pinKeys,
+  'h': LogicalKeyboardKey.keyH,
+  'm': LogicalKeyboardKey.keyM,
 };

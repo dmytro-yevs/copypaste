@@ -373,6 +373,10 @@ impl Store {
             params![id, crate::now_ms()],
         )?;
         tx.commit()?;
+        drop(conn);
+        if changed > 0 {
+            self.request_space_reclaim();
+        }
         Ok(changed > 0)
     }
 
@@ -445,6 +449,10 @@ impl Store {
             [],
         )?;
         tx.commit()?;
+        drop(conn);
+        if changed > 0 {
+            self.request_space_reclaim();
+        }
         Ok(changed as u64)
     }
 

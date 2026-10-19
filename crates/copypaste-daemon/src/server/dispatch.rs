@@ -133,6 +133,7 @@ fn requires_ready(method: &Method) -> bool {
         | Method::ImagePreview { .. }
         | Method::SourceAppIcon { .. }
         | Method::SaveFile { .. }
+        | Method::CancelFileDownload { .. }
         | Method::Add { .. }
         | Method::ImportFile { .. }
         | Method::Delete { .. }
@@ -195,6 +196,51 @@ fn requires_ready(method: &Method) -> bool {
 pub(super) async fn dispatch_request(state: &Arc<AppState>, request: Request) -> Response {
     let id = request.id;
     match request.method {
+        Method::CancelFileDownload { id: item_id } => {
+            state.file_downloads.cancel(&item_id);
+            Response::ok(id, copypaste_ipc::ResponseData::Empty {})
+        }
+        Method::SaveFile {
+            id: item_id,
+            dest_path,
+            download_token,
+        } => {
+            let is_offer = state.store.get(&item_id).ok().flatten().is_some_and(|row| {
+                copypaste_core::file_transfer::row_offer(&row, &state.keyring.item_key())
+                    .ok()
+                    .flatten()
+                    .is_some()
+            });
+            if is_offer {
+                let settings = state.settings.get().clone();
+                match state
+                    .file_downloads
+                    .save_with_token(
+                        &state.store,
+                        &state.keyring,
+                        state.p2p.node(),
+                        state.meta.device_id(),
+                        &settings,
+                        copypaste_core::file_download::FileDownloadRequest {
+                            id: &item_id,
+                            destination: std::path::Path::new(&dest_path),
+                            token: download_token.as_deref(),
+                        },
+                    )
+                    .await
+                {
+                    Ok(()) => Response::ok(id, copypaste_ipc::ResponseData::Empty {}),
+                    Err(error) => Response::err(id, ErrorCode::InvalidRequest, error.to_string()),
+                }
+            } else {
+                let state = Arc::clone(state);
+                tokio::task::spawn_blocking(move || {
+                    items::save_file(&state, id, &item_id, &dest_path)
+                })
+                .await
+                .unwrap_or_else(|_| Response::err(id, ErrorCode::Internal, MSG_INTERNAL))
+            }
+        }
         Method::Modules { operation } => match state.modules.request(operation).await {
             Ok(json) => Response::ok(id, copypaste_ipc::ResponseData::Modules { json }),
             Err(error) => Response::err(id, ErrorCode::InvalidRequest, error.to_string()),
@@ -240,6 +286,10 @@ pub(super) async fn dispatch_request(state: &Arc<AppState>, request: Request) ->
 /// The blocking half of [`dispatch_request`]. Exhaustive over `Method` by design.
 pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Response {
     match method {
+        Method::CancelFileDownload { id: item_id } => {
+            state.file_downloads.cancel(&item_id);
+            Response::ok(id, copypaste_ipc::ResponseData::Empty {})
+        }
         Method::Status => items::status(state, id),
         Method::Modules { .. } => unreachable!("module operations use their shared blocking host"),
         Method::SetDeviceName { name } => items::set_device_name(state, id, &name),
@@ -277,6 +327,7 @@ pub(crate) fn dispatch_store(state: &AppState, id: u64, method: Method) -> Respo
         Method::SaveFile {
             id: item_id,
             dest_path,
+            ..
         } => items::save_file(state, id, &item_id, &dest_path),
         Method::Add { content } => items::add(state, id, &content),
         Method::ImportFile {

@@ -22,6 +22,10 @@ use super::model::{stored_item_columns, StoreError};
 
 // The live counter is derived by the target database's item triggers.
 const RESTORED_TABLES: &[&str] = &[
+    "file_transfer_staging",
+    "downloaded_files",
+    "file_transfer_files",
+    "file_transfer_chunks",
     "history_file_payloads",
     "shared_binary_payloads",
     "clipboard_fts",
@@ -179,6 +183,16 @@ impl super::Store {
                 [],
             )?;
             tx.execute("INSERT INTO shared_binary_payloads SELECT * FROM restore_src.shared_binary_payloads", [])?;
+            tx.execute("INSERT INTO file_transfer_chunks SELECT c.* FROM restore_src.file_transfer_chunks c WHERE EXISTS (SELECT 1 FROM restore_src.file_transfer_files f WHERE f.blob_id=c.blob_id)", [])?;
+            tx.execute(
+                "INSERT INTO file_transfer_files SELECT * FROM restore_src.file_transfer_files",
+                [],
+            )?;
+            tx.execute(
+                "INSERT INTO downloaded_files SELECT * FROM restore_src.downloaded_files",
+                [],
+            )?;
+            tx.execute("UPDATE clipboard_items SET content_bytes=content_bytes+COALESCE((SELECT SUM(LENGTH(c.ciphertext)+LENGTH(c.nonce)) FROM file_transfer_chunks c JOIN file_transfer_files f ON f.blob_id=c.blob_id WHERE f.item_id=clipboard_items.id),0)",[])?;
             tx.execute(
                 "INSERT INTO history_file_payloads SELECT * FROM restore_src.history_file_payloads",
                 [],
@@ -208,9 +222,14 @@ impl super::Store {
             Ok(())
         })();
         let _ = conn.execute("DETACH DATABASE restore_src", []);
-        result
+        let result = result
             .map_err(StoreError::from)
-            .map_err(RestoreError::Failed)
+            .map_err(RestoreError::Failed);
+        drop(conn);
+        if result.is_ok() {
+            self.request_space_reclaim();
+        }
+        result
     }
 
     fn stage_restore_candidate(&self, src: &Path) -> Result<tempfile::NamedTempFile, StoreError> {

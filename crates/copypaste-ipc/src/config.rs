@@ -30,8 +30,9 @@ pub const MIN_TEXT_SIZE_BYTES: u64 = 64 * 1024;
 pub const MAX_IMAGE_SIZE_BYTES: u64 = 4 * 1024 * 1024;
 /// Smallest useful captured image payload: 1 MiB.
 pub const MIN_IMAGE_SIZE_BYTES: u64 = 1024 * 1024;
-/// Default and hard maximum captured file payload: 4 MiB ([`crate::MAX_CONTENT_BYTES`]).
-pub const MAX_FILE_SIZE_BYTES: u64 = 4 * 1024 * 1024;
+/// Maximum selectable file limit. File bodies use bounded on-demand chunks.
+pub const MAX_FILE_SIZE_BYTES: u64 = 20 * 1024 * 1024 * 1024;
+pub const DEFAULT_FILE_SIZE_BYTES: u64 = 64 * 1024 * 1024;
 /// Smallest useful captured file payload: 1 MiB.
 pub const MIN_FILE_SIZE_BYTES: u64 = 1024 * 1024;
 /// Default decoded-image memory budget, in MiB.
@@ -172,7 +173,7 @@ impl Default for ConfigData {
             dedup_window_secs: 60,
             max_text_size_bytes: MAX_TEXT_SIZE_BYTES,
             max_image_size_bytes: MAX_IMAGE_SIZE_BYTES,
-            max_file_size_bytes: MAX_FILE_SIZE_BYTES,
+            max_file_size_bytes: DEFAULT_FILE_SIZE_BYTES,
             max_decoded_image_mb: MAX_DECODED_IMAGE_MB,
             excluded_app_bundle_ids: Vec::new(),
             lan_visibility: true,
@@ -451,16 +452,17 @@ impl ConfigData {
 
     /// Effective live capture cap for one shared content-type classification.
     ///
-    /// Settings, UI, and ingest share [`crate::MAX_CONTENT_BYTES`] as the
-    /// hard ceiling; configured per-type limits cannot exceed it.
+    /// Text and images share the inline message ceiling. Files have a separate
+    /// editable body limit because their bytes move only in bounded chunks.
     #[must_use]
     pub fn capture_limit_bytes(&self, content_type: &str) -> u64 {
         let configured = match crate::content_type::classify(content_type) {
             crate::content_type::ContentClass::Text => self.max_text_size_bytes,
             crate::content_type::ContentClass::Image => self.max_image_size_bytes,
-            crate::content_type::ContentClass::File | crate::content_type::ContentClass::Other => {
-                self.max_file_size_bytes
+            crate::content_type::ContentClass::File => {
+                return self.max_file_size_bytes.min(MAX_FILE_SIZE_BYTES)
             }
+            crate::content_type::ContentClass::Other => self.max_file_size_bytes,
         };
         configured.min(crate::MAX_CONTENT_BYTES as u64)
     }
@@ -572,7 +574,7 @@ mod tests {
         let hard = crate::MAX_CONTENT_BYTES as u64;
         assert_eq!(defaults.max_text_size_bytes, hard);
         assert_eq!(defaults.max_image_size_bytes, hard);
-        assert_eq!(defaults.max_file_size_bytes, hard);
+        assert_eq!(defaults.max_file_size_bytes, DEFAULT_FILE_SIZE_BYTES);
         assert_eq!(defaults.max_decoded_image_mb, 50);
     }
 
@@ -642,7 +644,10 @@ mod tests {
             config.capture_limit_bytes(crate::content_type::IMAGE_PNG),
             hard
         );
-        assert_eq!(config.capture_limit_bytes(crate::content_type::FILE), hard);
+        assert_eq!(
+            config.capture_limit_bytes(crate::content_type::FILE),
+            DEFAULT_FILE_SIZE_BYTES
+        );
     }
 
     #[test]
@@ -650,10 +655,10 @@ mod tests {
         let hard = crate::MAX_CONTENT_BYTES as u64;
         assert_eq!(MAX_TEXT_SIZE_BYTES, hard);
         assert_eq!(MAX_IMAGE_SIZE_BYTES, hard);
-        assert_eq!(MAX_FILE_SIZE_BYTES, hard);
+        assert!(MAX_FILE_SIZE_BYTES > hard);
         assert_eq!(MAX_TEXT_SIZE_RANGE.1, hard);
         assert_eq!(MAX_IMAGE_SIZE_RANGE.1, hard);
-        assert_eq!(MAX_FILE_SIZE_RANGE.1, hard);
+        assert_eq!(MAX_FILE_SIZE_RANGE.1, MAX_FILE_SIZE_BYTES);
     }
 
     #[test]

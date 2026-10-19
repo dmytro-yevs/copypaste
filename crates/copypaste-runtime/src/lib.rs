@@ -30,6 +30,7 @@ use settings::{RuntimeSettings, SettingsError};
 
 /// Storage and direct peer networking shared by daemon and in-process hosts.
 pub struct Runtime {
+    file_downloads: copypaste_core::file_download::FileDownloads,
     peer_sync: Arc<peer_sync::PeerSyncDriver>,
     modules: Arc<copypaste_modules::ModuleHost>,
     pub store: Store,
@@ -85,12 +86,7 @@ pub struct CaptureSourceApp {
     pub icon: Option<copypaste_core::SourceAppIconMetadata>,
 }
 
-#[derive(Clone)]
-struct ItemOrigin {
-    device_id: String,
-    device_name: Option<String>,
-    device_class: copypaste_ipc::DeviceClass,
-}
+use copypaste_core::history_item::ItemOrigin;
 struct UnavailableClipboard;
 impl ClipboardWriter for UnavailableClipboard {
     fn write(&self, _: &ClipboardPayload, _: &str) -> Result<(), ClipboardWriteError> {
@@ -120,6 +116,8 @@ impl Runtime {
         let keyring =
             Arc::new(Keyring::load_or_create(data_dir).map_err(|_| RuntimeError::Keyring)?);
         let store = Store::open(&data_dir.join("history.db"), &keyring.db_key())
+            .map_err(|_| RuntimeError::Storage)?;
+        copypaste_core::file_transfer::upgrade_legacy(&store, &keyring.item_key())
             .map_err(|_| RuntimeError::Storage)?;
         let identity = store
             .device_identity(device_name)
@@ -219,6 +217,7 @@ impl Runtime {
             .map_err(|_| RuntimeError::Storage)?;
         let device_class = copypaste_p2p::DeviceProfile::current().device_class;
         Ok(Self {
+            file_downloads: Default::default(),
             peer_sync: peer_sync::PeerSyncDriver::new(),
             modules,
             store,
@@ -254,7 +253,6 @@ impl Runtime {
                 | Method::Pin { .. }
                 | Method::SetSecret { .. }
                 | Method::ReorderPinned { .. }
-                | Method::Restore { .. }
                 | Method::ImportFile { .. }
         );
         let peer_mutation = matches!(
@@ -361,7 +359,44 @@ impl Runtime {
             Method::SaveFile {
                 id: item_id,
                 dest_path,
-            } => self.save_file(id, &item_id, &dest_path),
+                download_token,
+            } => {
+                let is_offer = self.store.get(&item_id).ok().flatten().is_some_and(|row| {
+                    copypaste_core::file_transfer::row_offer(&row, &self.keyring.item_key())
+                        .ok()
+                        .flatten()
+                        .is_some()
+                });
+                if is_offer {
+                    match self
+                        .file_downloads
+                        .save_with_token(
+                            &self.store,
+                            &self.keyring,
+                            &self.node,
+                            &self.device_id,
+                            &self.settings.config(),
+                            copypaste_core::file_download::FileDownloadRequest {
+                                id: &item_id,
+                                destination: Path::new(&dest_path),
+                                token: download_token.as_deref(),
+                            },
+                        )
+                        .await
+                    {
+                        Ok(()) => Response::ok(id, ResponseData::Empty {}),
+                        Err(error) => {
+                            Response::err(id, ErrorCode::InvalidRequest, error.to_string())
+                        }
+                    }
+                } else {
+                    self.save_file(id, &item_id, &dest_path)
+                }
+            }
+            Method::CancelFileDownload { id: item_id } => {
+                self.file_downloads.cancel(&item_id);
+                Response::ok(id, ResponseData::Empty {})
+            }
             Method::ImportFile {
                 path,
                 filename,
@@ -949,6 +984,43 @@ impl Runtime {
         Ok(())
     }
 
+    pub fn capture_file_operation(
+        &self,
+        token: u64,
+        path: &Path,
+        filename: &str,
+        mime_type: &str,
+        reference: &str,
+    ) -> Result<(), RuntimeError> {
+        let mut permit = self
+            .capture_admission()
+            .acquire(token, CaptureScope::Commit)
+            .ok_or(RuntimeError::CaptureRefused)?;
+        let metadata =
+            copypaste_core::FileMetadata::with_source_reference(filename, mime_type, reference)
+                .ok_or(RuntimeError::Capture)?;
+        let context = copypaste_core::PayloadMetadata {
+            privacy: permit.privacy,
+            ..Default::default()
+        };
+        let row = copypaste_core::file_transfer::import(
+            &self.store,
+            &self.keyring,
+            path,
+            metadata,
+            now_ms(),
+            None,
+            None,
+            Some(&context),
+            &permit.config,
+            false,
+        )
+        .map_err(|_| RuntimeError::Capture)?;
+        self.emit_capture(row);
+        permit.committed();
+        Ok(())
+    }
+
     pub fn set_capture_running(&self, running: bool) {
         self.capture_running.store(running, Ordering::Release);
     }
@@ -981,6 +1053,7 @@ impl Runtime {
 
     /// Permanently closes capture. Call from a worker when scopes may be active.
     pub fn shutdown(&self) {
+        self.file_downloads.cancel_all();
         let _ = self.capture_admission().shutdown();
         let _ = self.shutdown.send(true);
     }
@@ -1028,10 +1101,7 @@ impl Runtime {
         tokio::task::spawn_blocking(move || {
             let applied = settings.apply_with_effects(&patch, |applied| {
                 let removed = if reconcile_retention {
-                    let enforce = copypaste_core::retention::policy_tightened(
-                        &applied.before,
-                        &applied.config,
-                    );
+                    let enforce = applied.should_enforce_retention();
                     copypaste_core::retention::reconcile_policy(
                         &store,
                         || settings.config(),
@@ -1040,10 +1110,10 @@ impl Runtime {
                 } else {
                     0
                 };
-                if applied.before.lan_visibility != applied.config.lan_visibility {
+                if applied.lan_visibility_changed() {
                     node.set_lan_visibility(applied.config.lan_visibility);
                 }
-                if applied.before.sync_enabled != applied.config.sync_enabled {
+                if applied.sync_enabled_changed().is_some() {
                     peer_sync.set_enabled(applied.config.sync_enabled);
                     let _ = events.send(EventData {
                         sync_status: Some(node.sync_status(applied.config.sync_enabled)),
@@ -1063,7 +1133,7 @@ impl Runtime {
                     });
                 }
             })?;
-            if applied.before.sync_enabled != applied.config.sync_enabled {
+            if applied.sync_enabled_changed().is_some() {
                 modules.sync_enabled_changed(applied.config.sync_enabled);
             }
             Ok(applied)
@@ -1137,69 +1207,33 @@ impl Runtime {
         }
     }
 
-    fn backup(&self, request_id: u64, raw_path: &str) -> Response {
-        let path = std::path::Path::new(raw_path.trim());
-        if raw_path.trim().is_empty()
-            || path.exists()
-            || !path.parent().is_some_and(std::path::Path::is_dir)
-        {
-            return Response::err(
+    fn backup(&self, request_id: u64, destination: &str) -> Response {
+        match copypaste_core::history_backup::backup(&self.store, destination) {
+            Ok(size_bytes) => Response::ok(
                 request_id,
-                ErrorCode::InvalidRequest,
-                "Choose a new backup file in an existing folder.",
-            );
+                ResponseData::Backup(copypaste_ipc::BackupData { size_bytes }),
+            ),
+            Err(error) => error.response(request_id),
         }
-        if self.store.backup_to(path).is_err() {
-            let _ = std::fs::remove_file(path);
-            return Response::err(
-                request_id,
-                ErrorCode::Internal,
-                "The encrypted backup could not be created.",
-            );
-        }
-        restrict_backup(path);
-        let size_bytes = std::fs::metadata(path)
-            .map(|metadata| metadata.len())
-            .unwrap_or(0);
-        Response::ok(
-            request_id,
-            ResponseData::Backup(copypaste_ipc::BackupData { size_bytes }),
-        )
     }
 
-    fn restore(&self, request_id: u64, raw_path: &str, confirm: bool) -> Response {
-        if !confirm {
-            return Response::err(
-                request_id,
-                ErrorCode::InvalidRequest,
-                "Restoring history requires confirmation.",
-            );
-        }
-        let path = std::path::Path::new(raw_path.trim());
-        if raw_path.trim().is_empty() || !path.is_file() {
-            return Response::err(
-                request_id,
-                ErrorCode::NotFound,
-                "The backup file was not found.",
-            );
-        }
-        match self.store.restore_from(path, &self.keyring.db_key()) {
-            Ok(()) => {
-                if let Ok(Some(oldest)) = self.store.oldest_version_ms() {
-                    self.node.cursors().note_local(oldest);
+    fn restore(&self, request_id: u64, source: &str, confirm: bool) -> Response {
+        match copypaste_core::history_backup::restore(
+            &self.store,
+            &self.keyring.db_key(),
+            source,
+            confirm,
+        ) {
+            Ok(floor) => {
+                if let Some(oldest) = floor {
+                    self.modules.note_version(oldest);
+                    self.node.note_local_version(oldest);
                 }
+                self.emit(EventKind::Items);
+                self.peer_sync.wake();
                 Response::ok(request_id, ResponseData::Empty {})
             }
-            Err(copypaste_core::RestoreError::InvalidBackup(_)) => Response::err(
-                request_id,
-                ErrorCode::InvalidRequest,
-                "That file is not a valid backup for this device.",
-            ),
-            Err(copypaste_core::RestoreError::Failed(_)) => Response::err(
-                request_id,
-                ErrorCode::Internal,
-                "The history could not be restored; the current history is unchanged.",
-            ),
+            Err(error) => error.response(request_id),
         }
     }
 
@@ -1408,179 +1442,72 @@ impl Runtime {
     }
 
     fn item(&self, request_id: u64, item_id: &str) -> Response {
-        let row = match self.store.get(item_id) {
-            Ok(Some(row)) => row,
-            Ok(None) => {
-                return Response::err(request_id, ErrorCode::NotFound, "The clip was not found.");
-            }
-            Err(_) => {
-                return Response::err(
+        match copypaste_core::history_actions::open(&self.store, &self.keyring.item_key(), item_id)
+        {
+            Ok(opened) => {
+                let origins = self.origins_for(std::slice::from_ref(opened.row()));
+                let origin = origins
+                    .get(&opened.row().id)
+                    .expect("the row has a resolved origin");
+                Response::ok(
                     request_id,
-                    ErrorCode::Internal,
-                    "The history store is unavailable.",
-                );
+                    ResponseData::Item(opened.into_item(origin, &self.device_id)),
+                )
             }
-        };
-        let Some(item) = self.item_value(row, false) else {
-            return Response::err(
-                request_id,
-                ErrorCode::Internal,
-                "The clip could not be decrypted.",
-            );
-        };
-        Response::ok(request_id, ResponseData::Item(item))
+            Err(error) => error.response(request_id),
+        }
     }
 
     fn copy(&self, request_id: u64, item_id: &str, plain_text: bool) -> Response {
-        let row = match self.store.get(item_id) {
-            Ok(Some(row)) => row,
-            Ok(None) => {
-                return Response::err(request_id, ErrorCode::NotFound, "The clip was not found.");
-            }
-            Err(_) => {
-                return Response::err(
-                    request_id,
-                    ErrorCode::Internal,
-                    "The history store is unavailable.",
-                );
-            }
-        };
-        let mut payload = match ClipboardPayload::open(&row, &self.keyring.item_key()) {
-            Ok(value) => value,
-            Err(_) => {
-                return Response::err(
-                    request_id,
-                    ErrorCode::Internal,
-                    "The clip could not be decrypted.",
-                );
-            }
-        };
-        if let ClipboardPayload::File {
-            metadata: Some(metadata),
-            ..
-        } = &mut payload
-        {
-            if copypaste_core::origin_or(&row.origin_device_id, &self.device_id) != self.device_id
-                || metadata.source_reference.as_deref().is_none_or(|source| {
-                    !source.starts_with("content://") && !std::path::Path::new(source).is_file()
-                })
-            {
-                metadata.source_reference = None;
-            }
+        use copypaste_core::history_actions::{self, CopyOptions};
+        let key = self.keyring.item_key();
+        let result = (|| {
+            let opened = history_actions::open(&self.store, &key, item_id)?;
+            let origins = self.origins_for(std::slice::from_ref(opened.row()));
+            let origin = origins
+                .get(&opened.row().id)
+                .expect("the row has a resolved origin");
+            let prepared = history_actions::prepare_copy(
+                &self.store,
+                &key,
+                opened,
+                CopyOptions {
+                    origin,
+                    local_device_id: &self.device_id,
+                    plain_text,
+                    allow_content_uri: true,
+                    max_file_size_bytes: self.settings.config().max_file_size_bytes,
+                },
+            )?;
+            self.clipboard
+                .write(prepared.payload(), &prepared.content_type)
+                .map_err(copypaste_core::history_error::HistoryError::from)?;
+            self.instant_clipboard.note_local(&self.store, now_ms());
+            Ok::<_, copypaste_core::history_error::HistoryError>(prepared.item)
+        })();
+        match result {
+            Ok(item) => Response::ok(request_id, ResponseData::Item(item)),
+            Err(error) => error.response(request_id),
         }
-        if plain_text && payload.plain_text().is_none() {
-            return Response::err(
-                request_id,
-                ErrorCode::UnsupportedContent,
-                "This clip cannot be pasted as plain text.",
-            );
-        }
-        match self.clipboard.write(
-            &payload,
-            if plain_text {
-                copypaste_ipc::content_type::TEXT
-            } else {
-                &row.content_type
-            },
+    }
+
+    fn save_file(&self, request_id: u64, item_id: &str, destination: &str) -> Response {
+        match copypaste_core::history_actions::save_file(
+            &self.store,
+            &self.keyring.item_key(),
+            item_id,
+            destination,
+            self.settings.config().max_file_size_bytes,
         ) {
-            Ok(()) => {
-                self.instant_clipboard.note_local(&self.store, now_ms());
-                self.item(request_id, item_id)
-            }
-            Err(ClipboardWriteError::UnsupportedContent) => Response::err(
-                request_id,
-                ErrorCode::UnsupportedContent,
-                "This clipboard cannot write that content type.",
-            ),
-            Err(ClipboardWriteError::Failed) => Response::err(
-                request_id,
-                ErrorCode::Internal,
-                "The system clipboard could not be written.",
-            ),
-        }
-    }
-
-    fn save_file(&self, request_id: u64, item_id: &str, raw_destination: &str) -> Response {
-        let destination = raw_destination.trim();
-        if destination.is_empty() {
-            return Response::err(
-                request_id,
-                ErrorCode::InvalidRequest,
-                "A destination is required.",
-            );
-        }
-        let path = std::path::Path::new(destination);
-        if path.exists() {
-            return Response::err(
-                request_id,
-                ErrorCode::InvalidRequest,
-                "A file already exists at that destination.",
-            );
-        }
-        if path.parent().is_none_or(|parent| !parent.is_dir()) {
-            return Response::err(
-                request_id,
-                ErrorCode::NotFound,
-                "The destination folder was not found.",
-            );
-        }
-        let row = match self.store.get(item_id) {
-            Ok(Some(row)) => row,
-            Ok(None) => {
-                return Response::err(request_id, ErrorCode::NotFound, "The clip was not found.");
-            }
-            Err(_) => {
-                return Response::err(
-                    request_id,
-                    ErrorCode::Internal,
-                    "The history store is unavailable.",
-                );
-            }
-        };
-        let payload = match ClipboardPayload::open(&row, &self.keyring.item_key()) {
-            Ok(payload)
-                if matches!(
-                    &payload,
-                    ClipboardPayload::Image { .. } | ClipboardPayload::File { .. }
-                ) =>
-            {
-                payload
-            }
-            Ok(_) => {
-                return Response::err(
-                    request_id,
-                    ErrorCode::UnsupportedContent,
-                    "This clip is not an image or file.",
-                );
-            }
-            Err(_) => {
-                return Response::err(
-                    request_id,
-                    ErrorCode::Internal,
-                    "The clip could not be decrypted.",
-                );
-            }
-        };
-        match payload.save_file_to(path) {
             Ok(()) => Response::ok(request_id, ResponseData::Empty {}),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Response::err(
-                request_id,
-                ErrorCode::InvalidRequest,
-                "A file already exists at that destination.",
-            ),
-            Err(_) => Response::err(
-                request_id,
-                ErrorCode::Internal,
-                "The file could not be saved.",
-            ),
+            Err(error) => error.response(request_id),
         }
     }
 
+    #[cfg(test)]
     fn item_value(&self, row: copypaste_core::StoredItem, preview: bool) -> Option<Item> {
         let origins = self.origins_for(std::slice::from_ref(&row));
-        let origin = origins
-            .get(&row.id)
-            .expect("the single row has an origin resolved before decryption");
+        let origin = origins.get(&row.id).expect("the row has a resolved origin");
         self.item_value_with_origin(row, preview, origin)
     }
 
@@ -1659,116 +1586,17 @@ impl Runtime {
         preview: bool,
         origin: &ItemOrigin,
     ) -> Option<Item> {
-        let privacy = row.clipboard_privacy();
-        let origin_device_id = origin.device_id.clone();
-        let origin_device_name = origin.device_name.clone();
-        let origin_device_class = origin.device_class;
-        let payload = match copypaste_core::ClipboardPayload::open(&row, &self.keyring.item_key()) {
-            Ok(payload) => payload,
-            Err(_) => return None,
-        };
-        let (content, truncated) = if preview && privacy.secret {
-            (String::new(), false)
-        } else if preview {
-            payload.display_preview()
-        } else {
-            (payload.display_text(), false)
-        };
-        let semantic = payload
-            .plain_text()
-            .and_then(|text| copypaste_core::classify_semantic(&row.content_type, text));
-        let too_large_to_sync = payload.byte_len() > copypaste_ipc::MAX_CONTENT_BYTES;
-        let imported_image_metadata = row
-            .payload_metadata
-            .as_deref()
-            .and_then(|value| copypaste_core::PayloadMetadata::from_json(value, &row.content_type))
-            .and_then(|value| value.file);
-        let file_details = match &payload {
-            ClipboardPayload::File { bytes, .. } | ClipboardPayload::Image { bytes, .. }
-                if imported_image_metadata.is_some()
-                    || matches!(&payload, ClipboardPayload::File { .. }) =>
-            {
-                let metadata = match &payload {
-                    ClipboardPayload::File { metadata, .. } => metadata,
-                    _ => &imported_image_metadata,
-                };
-                let source_reference = metadata
-                    .as_ref()
-                    .and_then(|metadata| metadata.source_reference.clone());
-                Some(copypaste_ipc::FileDetails {
-                    filename: metadata.as_ref().map(|metadata| metadata.filename.clone()),
-                    mime_type: metadata.as_ref().map(|metadata| metadata.mime_type.clone()),
-                    source_available: origin_device_id == self.device_id
-                        && source_reference.as_deref().is_some_and(|reference| {
-                            !reference.starts_with("content://")
-                                && std::path::Path::new(reference).is_file()
-                        }),
-                    source_reference,
-                    size_bytes: bytes.len() as u64,
-                    file_count: 1,
-                })
-            }
-            ClipboardPayload::File { .. }
-            | ClipboardPayload::Text(_)
-            | ClipboardPayload::Image { .. }
-            | ClipboardPayload::Unsupported { .. } => None,
-        };
-        let image_details = if preview {
-            None
-        } else {
-            match &payload {
-                ClipboardPayload::Image { bytes, .. } => copypaste_core::image_metadata(bytes)
-                    .ok()
-                    .map(|metadata| copypaste_ipc::ImageDetails {
-                        width: metadata.width,
-                        height: metadata.height,
-                        size_bytes: metadata.size_bytes,
-                    }),
-                ClipboardPayload::Text(_)
-                | ClipboardPayload::File { .. }
-                | ClipboardPayload::Unsupported { .. } => None,
-            }
-        };
-        Some(Item {
-            privacy,
-            id: row.id,
-            content,
-            content_type: row.content_type.clone(),
-            content_class: copypaste_ipc::content_type::classify(&row.content_type),
-            semantic_kind: semantic
-                .filter(|_| !privacy.secret || !preview)
-                .map(|classification| classification.kind),
-            color_rgba: semantic
-                .filter(|_| !privacy.secret || !preview)
-                .and_then(|classification| classification.color_rgba),
-            created_at: row.created_at,
-            pinned: row.pinned,
-            file_details: if preview && privacy.secret {
-                None
-            } else {
-                file_details
-            },
-            image_details,
-            origin_device_id,
-            origin_device_name,
-            origin_device_class,
-            source_app_bundle_id: row.app_bundle_id,
-            source_app_name: row.app_name,
-            source_app_icon_id: row.source_icon_id,
-            too_large_to_sync,
-            truncated,
-        })
+        copypaste_core::history_item::open_item(
+            row,
+            origin,
+            &self.device_id,
+            &self.keyring.item_key(),
+            preview,
+        )
+        .ok()
+        .map(|(item, _)| item)
     }
 }
-
-#[cfg(unix)]
-fn restrict_backup(path: &std::path::Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-}
-
-#[cfg(not(unix))]
-fn restrict_backup(_path: &std::path::Path) {}
 
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
@@ -1820,6 +1648,7 @@ mod tests {
         let (shutdown, _) = tokio::sync::watch::channel(false);
         (
             Arc::new(Runtime {
+                file_downloads: Default::default(),
                 peer_sync: peer_sync::PeerSyncDriver::new(),
                 modules: Arc::new(copypaste_modules::ModuleHost::new(dir.path())),
                 store,
@@ -2112,6 +1941,34 @@ mod tests {
                 payload_metadata: None,
             })
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn oversized_authenticated_text_has_the_same_full_body_refusal_as_desktop() {
+        let clipboard = Arc::new(RecordingClipboard::default());
+        let (runtime, _dir) = fixture_with(clipboard.clone());
+        let id = "oversized-legacy";
+        seed_text(
+            &runtime,
+            id,
+            &"x".repeat(copypaste_ipc::MAX_CONTENT_BYTES + 1),
+        );
+        let before = runtime.store.get(id).unwrap().unwrap().content_ciphertext;
+        for method in [
+            Method::Get { id: id.into() },
+            Method::Copy { id: id.into() },
+            Method::CopyPlainText { id: id.into() },
+        ] {
+            let response = runtime.request(1, method).await;
+            assert_eq!(response.error_code, Some(ErrorCode::ContentTooLarge));
+            assert!(!response.ok);
+        }
+        let row = runtime.store.get(id).unwrap().unwrap();
+        assert_eq!(row.content_ciphertext, before);
+        let preview = runtime.item_value(row, true).unwrap();
+        assert!(preview.truncated);
+        assert!(preview.content.len() <= copypaste_ipc::limits::LIST_PREVIEW_BYTES);
+        assert!(clipboard.0.lock().unwrap().is_empty());
     }
 
     #[test]

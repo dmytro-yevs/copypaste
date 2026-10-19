@@ -1,3 +1,4 @@
+import '../../support/temporary_payloads.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -249,10 +250,10 @@ void main() {
       expect(history.savedIds, ['screenshot']);
       expect(await File(selected.path).readAsBytes(), [1, 2, 3, 4]);
       await selected.dispose();
-      expect(await root.list().toList(), isEmpty);
+      expect(await temporaryPayloads(root), isEmpty);
       history.exportFails = true;
       await expectLater(input.prepare(_image), throwsStateError);
-      expect(await root.list().toList(), isEmpty);
+      expect(await temporaryPayloads(root), isEmpty);
     },
   );
 

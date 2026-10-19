@@ -31,6 +31,7 @@ import 'features/history/controller/history_controller.dart';
 import 'features/history/controller/history_ocr_controller.dart';
 import 'features/history/repository/file_selector_history_file_downloader.dart';
 import 'platform/files/history_file_picker.dart';
+import 'platform/files/temporary_artifacts.dart';
 import 'features/history/repository/runtime_history_repository.dart';
 import 'features/history/repository/temporary_history_image_input.dart';
 import 'features/onboarding/controller/android_onboarding_controller.dart';
@@ -38,9 +39,7 @@ import 'features/onboarding/controller/linux_onboarding_controller.dart';
 import 'features/onboarding/controller/macos_onboarding_controller.dart';
 import 'features/onboarding/controller/windows_onboarding_controller.dart';
 import 'features/onboarding/repository/android_onboarding_store.dart';
-import 'features/onboarding/repository/linux_onboarding_store.dart';
-import 'features/onboarding/repository/macos_onboarding_store.dart';
-import 'features/onboarding/repository/windows_onboarding_store.dart';
+import 'features/onboarding/repository/onboarding_store.dart';
 import 'features/onboarding/view/android_onboarding_screen.dart';
 import 'features/onboarding/view/linux_onboarding_screen.dart';
 import 'features/onboarding/view/macos_onboarding_screen.dart';
@@ -224,6 +223,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   String? _runtimeFailureMessage;
   String? _pendingPairingUri;
   final _rootNavigatorKey = GlobalKey<NavigatorState>();
+  final _temporaryArtifacts = TemporaryArtifactCleanup();
   late final ApplicationVisibility _visibility;
   late final UiMemoryController _uiMemory;
 
@@ -234,6 +234,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   void initState() {
     super.initState();
     unawaited(_launchAtLogin.refresh());
+    if (widget.runtimeEnabled) unawaited(_temporaryArtifacts.run());
     _visibility = ApplicationVisibility(
       windowVisible: _desktopWindow?.isVisible,
     );
@@ -343,6 +344,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       !(_rootNavigatorKey.currentState?.canPop() ?? false);
 
   void _settingsVisibilityChanged() {
+    if (widget.runtimeEnabled && _visibility.value) {
+      unawaited(_temporaryArtifacts.run());
+    }
     _settingsController?.setPresentationActive(_visibility.value);
   }
 
@@ -590,7 +594,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       _macosOnboarding = injected;
     } else if (Platform.isMacOS) {
       _macosOnboarding = MacosOnboardingController(
-        store: SharedPreferencesMacosOnboardingStore(),
+        store: SharedPreferencesOnboardingStore(
+          platform: OnboardingPlatform.macos,
+        ),
         setup: MethodChannelMacosSetupGateway(),
       );
       _ownsMacosOnboarding = true;
@@ -644,7 +650,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       _windowsOnboarding = injected;
     } else if (Platform.isWindows) {
       _windowsOnboarding = WindowsOnboardingController(
-        store: SharedPreferencesWindowsOnboardingStore(),
+        store: SharedPreferencesOnboardingStore(
+          platform: OnboardingPlatform.windows,
+        ),
       );
       _ownsWindowsOnboarding = true;
     }
@@ -673,7 +681,9 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       _linuxOnboarding = injected;
     } else {
       _linuxOnboarding = LinuxOnboardingController(
-        store: SharedPreferencesLinuxOnboardingStore(),
+        store: SharedPreferencesOnboardingStore(
+          platform: OnboardingPlatform.linux,
+        ),
         integration: MethodChannelLinuxIntegrationPort(),
       );
       _ownsLinuxOnboarding = true;
@@ -710,6 +720,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   Future<void> _initializeQuickPaste() async {
     if (!Platform.isMacOS && !Platform.isWindows && !Platform.isLinux) return;
     final host = MethodChannelQuickPasteWindowHost();
+    host.setFindInHistoryHandler(_navigation.findInHistory);
     host.setOpenMainHandler(() {
       _navigation.selectDestination(AppDestination.history);
     });

@@ -11,7 +11,7 @@ use std::ffi::c_void;
 use std::sync::{Arc, OnceLock};
 
 use jni::{
-    objects::{GlobalRef, JByteArray, JClass, JObject, JValue},
+    objects::{GlobalRef, JByteArray, JClass, JObject, JString, JValue},
     sys::{jboolean, jint, jlong, JNI_FALSE, JNI_TRUE},
     JNIEnv, JavaVM,
 };
@@ -382,6 +382,63 @@ pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestText(
 
 #[allow(non_snake_case)]
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestFile(
+    mut env: JNIEnv,
+    _class: JClass,
+    token: jlong,
+    path: JString,
+    filename: JString,
+    mime_type: JString,
+    source_reference: JString,
+) -> jboolean {
+    let Some(runtime) = RUNTIME.get() else {
+        return JNI_FALSE;
+    };
+    let Some(read) = runtime.capture_admission().acquire(
+        token as u64,
+        copypaste_runtime::capture_admission::CaptureScope::Read,
+    ) else {
+        return JNI_FALSE;
+    };
+    let values = (|| {
+        Some((
+            env.get_string(&path).ok()?.to_string_lossy().into_owned(),
+            env.get_string(&filename)
+                .ok()?
+                .to_string_lossy()
+                .into_owned(),
+            env.get_string(&mime_type)
+                .ok()?
+                .to_string_lossy()
+                .into_owned(),
+            env.get_string(&source_reference)
+                .ok()?
+                .to_string_lossy()
+                .into_owned(),
+        ))
+    })();
+    drop(read);
+    let Some((path, filename, mime_type, reference)) = values else {
+        return JNI_FALSE;
+    };
+    if runtime
+        .capture_file_operation(
+            token as u64,
+            std::path::Path::new(&path),
+            &filename,
+            &mime_type,
+            &reference,
+        )
+        .is_ok()
+    {
+        JNI_TRUE
+    } else {
+        JNI_FALSE
+    }
+}
+
+#[allow(non_snake_case)]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_com_copypaste_app_NativeRuntimeCapture_ingestBinary(
     mut env: JNIEnv,
     _class: JClass,
@@ -690,6 +747,33 @@ impl AndroidClipboard {
                 received,
             ),
             copypaste_core::ClipboardPayload::File { bytes, metadata } => {
+                if let Some(file) = metadata.as_ref().filter(|file| file.transfer.is_some()) {
+                    let path = file
+                        .source_reference
+                        .as_deref()
+                        .ok_or(copypaste_core::ClipboardWriteError::Failed)?;
+                    let path = env
+                        .new_string(path)
+                        .map_err(|_| copypaste_core::ClipboardWriteError::Failed)?;
+                    let name = env
+                        .new_string(&file.filename)
+                        .map_err(|_| copypaste_core::ClipboardWriteError::Failed)?;
+                    let mime = env
+                        .new_string(&file.mime_type)
+                        .map_err(|_| copypaste_core::ClipboardWriteError::Failed)?;
+                    return env
+                        .call_static_method(
+                            "com/copypaste/app/MainActivity",
+                            "writeClipboardFile",
+                            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z",
+                            &[(&path).into(), (&name).into(), (&mime).into()],
+                        )
+                        .ok()
+                        .and_then(|value| value.z().ok())
+                        .filter(|value| *value)
+                        .map(|_| ())
+                        .ok_or(copypaste_core::ClipboardWriteError::Failed);
+                }
                 if let Some(source_reference) = metadata
                     .as_ref()
                     .and_then(|file| file.source_reference.as_deref())

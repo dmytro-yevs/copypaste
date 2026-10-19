@@ -6,7 +6,8 @@
 pub mod export;
 pub use export::{ExportFrameBudget, ExportFrameBudgetExceeded};
 
-/// Largest plaintext content one item may carry.
+/// Largest inline plaintext content one History message item may carry.
+/// File offers fit here; their bodies use the separate on-demand file limit.
 ///
 /// Shared with Settings and UI payload ceilings in `copypaste_ipc::config`.
 /// Matches `copypaste_p2p::protocol::MAX_CONTENT_BYTES`, so anything storable

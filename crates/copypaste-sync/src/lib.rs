@@ -4,6 +4,8 @@ pub mod account_state;
 pub mod cadence;
 pub mod host;
 pub mod outcome;
+#[cfg(feature = "storage")]
+pub mod peer_driver;
 pub mod scan;
 pub mod source;
 #[cfg(feature = "storage")]

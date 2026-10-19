@@ -115,6 +115,17 @@ abstract final class AppMotion {
     child: child,
   );
 
+  /// Keeps overlay content above the keyboard using the shared motion policy.
+  static Widget keyboardInsets(BuildContext context, {required Widget child}) =>
+      AnimatedPadding(
+        duration: resolve(context, standard),
+        curve: standardCurve,
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: child,
+      );
+
   static bool reducedMotionOf(BuildContext context) =>
       MediaQuery.disableAnimationsOf(context);
 

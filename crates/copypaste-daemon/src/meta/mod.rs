@@ -19,12 +19,7 @@ use copypaste_ipc::DeviceClass;
 /// `None` rather than a guess whenever this device has never been told one —
 /// the ordinary case for an item that arrived through a cloud account from a
 /// third device that was never paired directly.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Origin {
-    pub device_id: String,
-    pub device_name: Option<String>,
-    pub device_class: DeviceClass,
-}
+pub use copypaste_core::history_item::ItemOrigin as Origin;
 
 /// This device's sync identity.
 #[derive(Debug)]
