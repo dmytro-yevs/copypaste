@@ -122,6 +122,9 @@ fn initialise_staged(path: &Path, db_key: &[u8; 32]) -> Result<(), StoreError> {
     )?;
     apply_key(&conn, db_key)?;
     validate_key(&conn)?;
+    // WAL initialization materializes page one, after which enabling pointer
+    // maps would require VACUUM even though no application tables exist yet.
+    conn.pragma_update(None, "auto_vacuum", 2)?;
     apply_connection_pragmas(&conn)?;
     fail_before_schema()?;
     super::schema::create(&mut conn)?;

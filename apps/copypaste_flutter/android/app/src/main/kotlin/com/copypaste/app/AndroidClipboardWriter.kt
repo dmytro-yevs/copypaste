@@ -55,14 +55,34 @@ internal object AndroidClipboardWriter {
 
     fun writeBinary(context: Context, bytes: ByteArray, filename: String, mimeType: String): Boolean {
         // Each published URI must keep its bytes when another clip arrives.
-        return runCatching {
+        var staged: File? = null
+        val written = runCatching {
             val directory = File(context.cacheDir, "clipboard/${UUID.randomUUID()}").also { it.mkdirs() }
             val safeName = filename.replace(Regex("[^A-Za-z0-9._-]"), "_").take(100)
             val file = File(directory, safeName.ifBlank { "copypaste" })
+            staged = file
             file.writeBytes(bytes)
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.clipboard", file)
             ClipData(ClipDescription(label, arrayOf(mimeType)), ClipData.Item(uri))
-        }.getOrNull()?.let { clip -> write(context, clip, SharedPreferencesClipboardOwnerReceiptStore) } == true
+        }.getOrNull()?.let { clip -> write(context, clip, SharedPreferencesClipboardOwnerReceiptStore, staged) } == true
+        if (!written) staged?.parentFile?.deleteRecursively()
+        AndroidClipboardCache.scheduleCleanup(context)
+        return written
+    }
+
+    fun writeFile(context: Context, path: String, filename: String, mimeType: String): Boolean {
+        var staged: File? = null
+        val written = runCatching {
+            val directory=File(context.cacheDir,"clipboard/${UUID.randomUUID()}").also { it.mkdirs() }
+            val safeName=filename.replace(Regex("[^A-Za-z0-9._-]"),"_").take(100).ifBlank {"copypaste"}
+            val file=File(directory,safeName); staged=file
+            File(path).inputStream().use {input -> file.outputStream().use {output -> input.copyTo(output,64*1024)}}
+            val uri=FileProvider.getUriForFile(context,"${context.packageName}.clipboard",file)
+            ClipData(ClipDescription(label,arrayOf(mimeType)),ClipData.Item(uri))
+        }.getOrNull()?.let {clip -> write(context,clip,SharedPreferencesClipboardOwnerReceiptStore,staged)} == true
+        if (!written) staged?.parentFile?.deleteRecursively()
+        AndroidClipboardCache.scheduleCleanup(context)
+        return written
     }
 
     fun isOwned(
@@ -75,7 +95,7 @@ internal object AndroidClipboardWriter {
         return liveReceipt.get() == receipt || storedReceipt(context, receipts) == receipt
     }
 
-    private fun write(context: Context, clip: ClipData, receipts: ClipboardOwnerReceiptStore): Boolean = synchronized(writeLock) {
+    private fun write(context: Context, clip: ClipData, receipts: ClipboardOwnerReceiptStore, file: File? = null): Boolean = synchronized(writeLock) {
         val previousLive = liveReceipt.get()
         val previousStored = storedReceipt(context, receipts)
         val receipt = UUID.randomUUID().toString()
@@ -85,7 +105,8 @@ internal object AndroidClipboardWriter {
         // the user-visible clipboard write itself succeeds.
         storeReceipt(context, receipts, receipt)
         try {
-            clipboard(context).setPrimaryClip(clip)
+            AndroidClipboardCache.publish(context, file) { clipboard(context).setPrimaryClip(clip) }
+            AndroidClipboardCache.scheduleCleanup(context)
             true
         } catch (_: RuntimeException) {
             liveReceipt.set(previousLive)

@@ -32,6 +32,7 @@ abstract final class AppSpacing {
 
 /// Standard Lucide icon sizes for CopyPaste UI.
 abstract final class AppIconSize {
+  static const double statusIndicator = 8;
   static const double xs = 12;
   static const double sm = 16;
   static const double md = 20;
@@ -71,6 +72,8 @@ abstract final class AppTypographySize {
   static const double historyMetadata = 12;
   static const double menu = 13;
   static const double menuMetadata = menu - 2;
+  static const double inspectorMetadata = 10;
+  static const double inspectorCompactMetadata = menuMetadata - 2;
   static const double navigation = 12;
   static const double navigationCompact = 10;
 }
@@ -95,6 +98,7 @@ abstract final class AppLayoutSize {
 abstract final class AppOverlaySize {
   static const double selectMaxHeight = 240;
   static const double dialogMaxWidth = 480;
+  static const double dialogActionMinWidth = 160;
   static const double dialogContentHeightFactor = 0.5;
   static const double drawerHeightFactor = 0.86;
   static const double drawerPanelWidth = 480;

@@ -43,6 +43,10 @@ impl InstantClipboard {
     ) -> bool {
         let _guard = self.0.lock().unwrap_or_else(|error| error.into_inner());
         let config = settings();
+        // File offers never trigger a transfer or write a descriptor as a file.
+        if row.content_type == copypaste_ipc::content_type::FILE {
+            return false;
+        }
         if !config.sync_enabled
             || !config.instant_clipboard
             || row.deleted
@@ -289,7 +293,7 @@ mod tests {
     }
 
     #[test]
-    fn peer_and_cloud_receives_write_original_text_image_and_file_bytes() {
+    fn peer_and_cloud_receives_write_original_text_and_image_but_never_files() {
         let f = fixture();
         let writes = Writes::default();
         let source = receiving_source(
@@ -363,10 +367,11 @@ mod tests {
         let written = writes.lock().unwrap();
         assert_eq!(written[0].1, text.as_bytes());
         assert_eq!(written[1].1, image_bytes);
-        assert_eq!(written[2].1, file_bytes);
-        assert!(
-            written[2].2.is_none(),
-            "a foreign source reference must be materialized locally"
+        assert_eq!(
+            written.len(),
+            2,
+            "Files require an explicit Download and never replace the system clipboard on receipt."
         );
+        assert!(source.store().get(&file_id).unwrap().is_some());
     }
 }

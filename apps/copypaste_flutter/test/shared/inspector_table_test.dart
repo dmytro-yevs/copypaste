@@ -51,10 +51,7 @@ void main() {
           closeTo(tester.getRect(value).center.dy, 0.01),
         );
         final style = DefaultTextStyle.of(tester.element(value)).style;
-        expect(
-          style.fontSize,
-          Theme.of(tester.element(value)).typography.xSmall.fontSize,
-        );
+        expect(style.fontSize, AppTypographySize.inspectorMetadata);
         expect(style.leadingDistribution, TextLeadingDistribution.even);
         final bounds = tester.getRect(table);
         for (final value in ['192.168.50.232:62951', 'Oct 8, 2026 00:54']) {

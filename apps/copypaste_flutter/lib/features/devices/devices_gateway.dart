@@ -10,6 +10,9 @@ enum DeviceClass { desktop, laptop, phone, tablet, unknown }
 /// The reachability state observed by the backend.
 enum DevicePresence { online, offline, unknown }
 
+/// Display-safe reachability after observation trust and freshness checks.
+enum DeviceConnectionState { online, offline, visible, notSeen, unknown }
+
 /// How the backend learned an observation value.
 enum DeviceObservationProvenance { selfReported, observed, measured }
 

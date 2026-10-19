@@ -1,3 +1,4 @@
+import '../../../shared/format_bytes.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -167,14 +168,15 @@ class HistoryInspector extends StatelessWidget {
               builder: (context, constraints) {
                 final iconOnly = _actionsNeedIcons(
                   context,
-                  clip,
                   constraints.maxWidth,
+                );
+                final pinIcon = Icon(
+                  clip.pinned ? LucideIcons.pinOff : LucideIcons.pin,
                 );
                 final secretIconOnly =
                     iconOnly ||
                     _actionsNeedIcons(
                       context,
-                      clip,
                       constraints.maxWidth,
                       includeSpoilerLabel: true,
                     );
@@ -292,11 +294,9 @@ class HistoryInspector extends StatelessWidget {
                           onPressed: controller.isPinPending(clip.id)
                               ? null
                               : () => controller.togglePin(clip),
-                          leading: iconOnly
-                              ? null
-                              : const Icon(LucideIcons.pin),
+                          leading: iconOnly ? null : pinIcon,
                           child: iconOnly
-                              ? const Icon(LucideIcons.pin)
+                              ? pinIcon
                               : Text(clip.pinned ? 'Pinned' : 'Pin'),
                         ),
                       ),
@@ -475,31 +475,20 @@ class HistoryInspector extends StatelessWidget {
 
   bool _actionsNeedIcons(
     BuildContext context,
-    HistoryClip clip,
     double availableWidth, {
     bool includeSpoilerLabel = false,
   }) {
+    // Shared actions use the same label budget for every clip type and state.
+    // Additional actions can wrap without changing the shared button format.
     final actions = <(ButtonStyle, String?)>[
       (
         includeSpoilerLabel
             ? const ButtonStyle.outline()
             : const ButtonStyle.outlineIcon(),
-        includeSpoilerLabel
-            ? (clip.secret ? 'Remove spoiler' : 'Add spoiler')
-            : null,
+        includeSpoilerLabel ? 'Remove spoiler' : null,
       ),
       (const ButtonStyle.primary(), 'Copy'),
-      if (controller.canDownloadSelected)
-        (const ButtonStyle.secondary(), 'Download'),
-      (
-        clip.pinned
-            ? const ButtonStyle.secondary()
-            : const ButtonStyle.outline(),
-        clip.pinned ? 'Pinned' : 'Pin',
-      ),
-      if (clip.contentKind == HistoryClipKind.image &&
-          controller.ocr?.available == true)
-        (const ButtonStyle.secondaryIcon(), null),
+      (const ButtonStyle.secondary(), 'Pinned'),
       (const ButtonStyle.destructive(), 'Delete'),
     ];
     final theme = Theme.of(context);
@@ -534,10 +523,6 @@ class HistoryInspector extends StatelessWidget {
     var requiredWidth = (actions.length - 1) * AppSpacing.sm;
     for (final (style, label) in actions) {
       requiredWidth += widthOf(style, label);
-    }
-    // The attached Copy select occupies space inside the first action group.
-    if (clip.contentKind.isTextual) {
-      requiredWidth += widthOf(const ButtonStyle.primaryIcon(), null);
     }
     return requiredWidth > availableWidth;
   }
@@ -731,7 +716,7 @@ class _HistoryDetailContent extends StatelessWidget {
             children: [
               Expanded(
                 child: Align(
-                  alignment: Alignment.topLeft,
+                  alignment: Alignment.topCenter,
                   child: _conceal(
                     _DetailImagePreview(clip: clip, controller: controller),
                   ),
@@ -794,7 +779,12 @@ class _HistoryDetailContent extends StatelessWidget {
           primary: false,
           key: const ValueKey<String>('history-detail-scroll-content'),
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-          child: Align(alignment: Alignment.topLeft, child: _conceal(content)),
+          child: Align(
+            alignment: clip.contentKind == HistoryClipKind.image
+                ? Alignment.topCenter
+                : Alignment.topLeft,
+            child: _conceal(content),
+          ),
         );
       },
     );
@@ -965,7 +955,7 @@ List<_HistoryMetadataRow> _historyMetadataRows(
         warning: false,
       ),
     if (sizeBytes != null)
-      (label: 'Size', value: _formatBytes(sizeBytes), warning: false),
+      (label: 'Size', value: formatBytes(sizeBytes), warning: false),
     if ((clip.file?.fileCount ?? 0) > 1)
       (label: 'Files', value: '${clip.file!.fileCount}', warning: false),
     if (clip.tooLargeToSync)
@@ -1027,7 +1017,7 @@ class _DetailImagePreview extends StatelessWidget {
               preview.bytes,
               key: ValueKey<String>('history-detail-image-${clip.id}'),
               fit: BoxFit.contain,
-              alignment: Alignment.topLeft,
+              alignment: Alignment.center,
               cacheWidth: math.min(
                 preview.width,
                 (sourceWidth * scale * MediaQuery.devicePixelRatioOf(context))
@@ -1049,10 +1039,4 @@ class _DetailImagePreview extends StatelessWidget {
       ),
     );
   }
-}
-
-String _formatBytes(int bytes) {
-  if (bytes < 1024) return '$bytes B';
-  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-  return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 }

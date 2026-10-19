@@ -1,5 +1,5 @@
 import 'package:copypaste_flutter/features/onboarding/controller/macos_onboarding_controller.dart';
-import 'package:copypaste_flutter/features/onboarding/repository/macos_onboarding_store.dart';
+import 'package:copypaste_flutter/features/onboarding/repository/onboarding_store.dart';
 import 'package:copypaste_flutter/features/onboarding/view/macos_onboarding_screen.dart';
 import 'package:copypaste_flutter/app/shell/macos_window_header.dart';
 import 'package:copypaste_flutter/platform/macos/macos_setup_gateway.dart';
@@ -13,7 +13,7 @@ void main() {
     final setup = _ScreenMacosSetupGateway()
       ..status = MacosLoginItemStatus.notFound;
     final controller = MacosOnboardingController(
-      store: MemoryMacosOnboardingStore(complete: true),
+      store: MemoryOnboardingStore(complete: true),
       setup: setup,
     );
     addTearDown(controller.dispose);
@@ -45,7 +45,7 @@ void main() {
   ) async {
     final setup = _ScreenMacosSetupGateway();
     final controller = MacosOnboardingController(
-      store: MemoryMacosOnboardingStore(),
+      store: MemoryOnboardingStore(),
       setup: setup,
     );
     addTearDown(controller.dispose);
@@ -98,7 +98,7 @@ void main() {
     tester.platformDispatcher.textScaleFactorTestValue = 2;
     final setup = _ScreenMacosSetupGateway(accessibility: true);
     final controller = MacosOnboardingController(
-      store: MemoryMacosOnboardingStore(),
+      store: MemoryOnboardingStore(),
       setup: setup,
     );
     addTearDown(controller.dispose);
@@ -131,7 +131,7 @@ void main() {
       statusAfterUpdate: MacosLoginItemStatus.requiresApproval,
     );
     final controller = MacosOnboardingController(
-      store: MemoryMacosOnboardingStore(),
+      store: MemoryOnboardingStore(),
       setup: setup,
     );
     addTearDown(controller.dispose);
@@ -159,7 +159,7 @@ void main() {
     tester,
   ) async {
     final controller = MacosOnboardingController(
-      store: MemoryMacosOnboardingStore(),
+      store: MemoryOnboardingStore(),
       setup: _ScreenMacosSetupGateway(),
     );
     addTearDown(controller.dispose);

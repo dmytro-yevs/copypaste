@@ -11,7 +11,7 @@ use objc2::{msg_send, msg_send_id, ClassType};
 use objc2_app_kit::{NSPasteboard, NSPasteboardURLReadingFileURLsOnlyKey};
 use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString, NSURL};
 
-use super::super::file_capture::{self, FileReadError};
+use super::super::file_capture::FileReadError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum FileInputError {
@@ -249,18 +249,18 @@ impl FileUrl for Retained<NSURL> {
     }
 }
 
-pub(super) fn read(
+/// Resolve a native file URL while its security scope and generation fence
+/// are valid. The shared capture worker streams the body into encrypted chunks.
+pub(super) fn resolve(
     pasteboard: &NSPasteboard,
     uti: &NSString,
     cap: u64,
     valid: impl Fn() -> bool,
-) -> Result<(Vec<u8>, copypaste_core::FileMetadata), FileInputError> {
-    materialize(
-        &PasteboardInput { pasteboard, uti },
-        cap,
-        valid,
-        file_capture::read,
-    )
+) -> Result<copypaste_core::FileMetadata, FileInputError> {
+    materialize(&PasteboardInput { pasteboard, uti }, cap, valid, |_, _| {
+        Ok(Vec::new())
+    })
+    .map(|(_, metadata)| metadata)
 }
 
 #[cfg(test)]

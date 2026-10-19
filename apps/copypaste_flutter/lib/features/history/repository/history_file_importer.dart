@@ -17,3 +17,9 @@ class HistoryImportFile {
 abstract interface class HistoryFilePicker {
   Future<List<HistoryImportFile>> chooseFiles();
 }
+
+/// A path-free explanation supplied by a typed runtime or platform adapter.
+class HistoryFileOperationException implements Exception {
+  const HistoryFileOperationException(this.message);
+  final String message;
+}

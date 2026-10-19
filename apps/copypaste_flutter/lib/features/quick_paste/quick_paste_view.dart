@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io';
+import 'package:flutter/foundation.dart';
 
 import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
@@ -12,6 +12,7 @@ import '../../app/theme/app_motion.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_tokens.dart';
 import '../../shared/state_view.dart';
+import '../../platform/desktop/desktop_shortcuts.dart';
 import '../history/controller/history_controller.dart';
 import '../history/models/history_models.dart';
 import '../history/view/history_inspector.dart';
@@ -460,6 +461,26 @@ class _QuickPasteViewState extends State<QuickPasteView> {
 
   Map<ShortcutActivator, VoidCallback> _shortcutBindings() {
     final bindings = <ShortcutActivator, VoidCallback>{
+      ...desktopWindowBindings(
+        onClose: controller.close,
+        onQuit: controller.quit,
+      ),
+      desktopShortcut(LogicalKeyboardKey.keyF): _find,
+      desktopShortcut(LogicalKeyboardKey.keyR): () =>
+          unawaited(controller.history.reload()),
+      if (defaultTargetPlatform != TargetPlatform.macOS) ...{
+        const SingleActivator(
+          LogicalKeyboardKey.f4,
+          alt: true,
+          includeRepeats: false,
+        ): () =>
+            unawaited(controller.close()),
+        const SingleActivator(
+          LogicalKeyboardKey.f5,
+          includeRepeats: false,
+        ): () =>
+            unawaited(controller.history.reload()),
+      },
       const SingleActivator(LogicalKeyboardKey.escape): () =>
           unawaited(controller.close()),
       const SingleActivator(LogicalKeyboardKey.arrowDown): () => _moveFocus(1),
@@ -485,16 +506,22 @@ class _QuickPasteViewState extends State<QuickPasteView> {
           unawaited(controller.deleteFocused()),
       const SingleActivator(LogicalKeyboardKey.delete, alt: true): () =>
           unawaited(controller.deleteFocused()),
-      _desktopShortcut(LogicalKeyboardKey.comma): () =>
+      desktopShortcut(LogicalKeyboardKey.comma): () =>
           unawaited(controller.openSettings()),
-      _desktopShortcut(LogicalKeyboardKey.keyQ): () =>
-          unawaited(controller.quit()),
     };
     for (final entry in controller.shortcuts.entries) {
-      bindings[_desktopShortcut(entry.key)] = () =>
+      bindings[desktopShortcut(entry.key)] = () =>
           unawaited(controller.activate(entry.value));
     }
     return bindings;
+  }
+
+  void _find() {
+    _searchFocus.requestFocus();
+    _search.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _search.text.length,
+    );
   }
 
   Widget _item(HistoryClip clip) {
@@ -579,7 +606,7 @@ class _QuickPasteViewState extends State<QuickPasteView> {
                   ),
                 if (shortcut != null)
                   MenuShortcut(
-                    activator: _desktopShortcut(shortcut),
+                    activator: desktopShortcut(shortcut),
                     combiner: const SizedBox.shrink(),
                   ),
               ],
@@ -590,12 +617,6 @@ class _QuickPasteViewState extends State<QuickPasteView> {
     );
   }
 }
-
-SingleActivator _desktopShortcut(LogicalKeyboardKey key) => SingleActivator(
-  key,
-  meta: Platform.isMacOS,
-  control: Platform.isWindows || Platform.isLinux,
-);
 
 class _ClipContent extends StatelessWidget {
   const _ClipContent({
@@ -739,7 +760,7 @@ class _Footer extends StatelessWidget {
             children: [
               const Expanded(child: Text('Preferences…')),
               MenuShortcut(
-                activator: _desktopShortcut(LogicalKeyboardKey.comma),
+                activator: desktopShortcut(LogicalKeyboardKey.comma),
                 combiner: const SizedBox.shrink(),
               ),
             ],
@@ -759,7 +780,7 @@ class _Footer extends StatelessWidget {
             children: [
               const Expanded(child: Text('Quit')),
               MenuShortcut(
-                activator: _desktopShortcut(LogicalKeyboardKey.keyQ),
+                activator: desktopShortcut(LogicalKeyboardKey.keyQ),
                 combiner: const SizedBox.shrink(),
               ),
             ],
@@ -772,31 +793,16 @@ class _Footer extends StatelessWidget {
   static Future<void> confirmClear(
     BuildContext context,
     QuickPasteController controller,
-  ) {
-    return AppOverlays.showDialog<void>(
+  ) async {
+    await AppOverlays.showActionDialog(
       context,
-      builder: (dialogContext) => AppOverlays.alertDialog(
-        icon: LucideIcons.trash2,
-        title: const Text('Clear history?'),
-        content: const Text('Pinned clips will stay in your history.'),
-        actions: [
-          Button.secondary(
-            style: AppTheme.actionButtonStyle(const ButtonStyle.secondary()),
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          Button.destructive(
-            style: AppTheme.actionButtonStyle(const ButtonStyle.destructive()),
-            onPressed: () async {
-              final cleared = await controller.clearUnpinned();
-              if (cleared && dialogContext.mounted) {
-                Navigator.pop(dialogContext);
-              }
-            },
-            child: const Text('Clear'),
-          ),
-        ],
-      ),
+      icon: LucideIcons.trash2,
+      title: const Text('Clear history?'),
+      content: const Text('Pinned clips will stay in your history.'),
+      actionLabel: 'Clear',
+      onConfirm: controller.clearUnpinned,
+      failureMessage: () =>
+          controller.history.errorMessage ?? 'History could not be deleted.',
     );
   }
 
@@ -811,7 +817,7 @@ class _Footer extends StatelessWidget {
         ),
         actions: [
           Button.primary(
-            style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
+            style: AppTheme.dialogButtonStyle(const ButtonStyle.primary()),
             onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Done'),
           ),

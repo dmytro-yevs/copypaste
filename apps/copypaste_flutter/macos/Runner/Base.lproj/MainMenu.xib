@@ -70,6 +70,24 @@
                         </items>
                     </menu>
                 </menuItem>
+                <menuItem title="File" id="CP-file-menu-item">
+                    <modifierMask key="keyEquivalentModifierMask"/>
+                    <menu key="submenu" title="File" id="CP-file-menu">
+                        <items>
+                            <menuItem title="Close Window" keyEquivalent="w" id="CP-close-window">
+                                <connections>
+                                    <action selector="performClose:" target="-1" id="CP-close-window-action"/>
+                                </connections>
+                            </menuItem>
+                            <menuItem title="Close All Windows" alternate="YES" keyEquivalent="w" id="CP-close-all-windows">
+                                <modifierMask key="keyEquivalentModifierMask" option="YES" command="YES"/>
+                                <connections>
+                                    <action selector="closeAllWindows:" target="Voe-Tx-rLC" id="CP-close-all-windows-action"/>
+                                </connections>
+                            </menuItem>
+                        </items>
+                    </menu>
+                </menuItem>
                 <menuItem title="Edit" id="5QF-Oa-p0T">
                     <modifierMask key="keyEquivalentModifierMask"/>
                     <menu key="submenu" title="Edit" id="W48-6f-4Dl">
@@ -124,7 +142,7 @@
                                     <items>
                                         <menuItem title="Find…" tag="1" keyEquivalent="f" id="Xz5-n4-O0W">
                                             <connections>
-                                                <action selector="performFindPanelAction:" target="-1" id="cD7-Qs-BN4"/>
+                                                <action selector="showFind:" target="Voe-Tx-rLC" id="cD7-Qs-BN4"/>
                                             </connections>
                                         </menuItem>
                                         <menuItem title="Find and Replace…" tag="12" keyEquivalent="f" id="YEy-JH-Tfz">

@@ -52,7 +52,7 @@ pub use response::{ConfigApplied, EventData, EventKind, Response, ResponseData};
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any breaking change to the request or response shape.
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// One request. `id` is echoed back so a client can match replies.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -163,6 +163,11 @@ pub enum Method {
     SaveFile {
         id: String,
         dest_path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        download_token: Option<String>,
+    },
+    CancelFileDownload {
+        id: String,
     },
     /// Add an item directly, bypassing clipboard capture. Used by tests, by
     /// `copypaste add`, and by the fake clipboard source.
@@ -493,6 +498,7 @@ mod tests {
             Method::SaveFile {
                 id: "i".into(),
                 dest_path: "d".into(),
+                download_token: None,
             },
             Method::SyncNow { pairing_id: None },
             Method::CloudSyncNow,

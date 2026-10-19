@@ -6,6 +6,56 @@ import 'package:copypaste_flutter/platform/desktop/desktop_visibility_preference
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('fullscreen close preserves the normal saved window bounds', () async {
+    final host = _FakeDesktopWindowHost();
+    final store = _FakeGeometryStore();
+    final controller = DesktopWindowController(
+      host: host,
+      geometryStore: store,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    final normal = host.bounds;
+    await controller.handleCloseRequested();
+    expect(store.lastWrittenBounds, normal);
+    host.fullScreen = true;
+    host.bounds = const DesktopWindowBounds(
+      left: 0,
+      top: 0,
+      width: 1920,
+      height: 1080,
+    );
+    await controller.handleCloseRequested();
+    expect(store.lastWrittenBounds, normal);
+    expect(host.hideCalls, 2);
+  });
+  test(
+    'full-screen commands use current native state and preserve close policy',
+    () async {
+      final host = _FakeDesktopWindowHost();
+      final controller = DesktopWindowController(
+        host: host,
+        geometryStore: _FakeGeometryStore(),
+      );
+      addTearDown(controller.dispose);
+      await controller.toggleFullScreen();
+      expect(host.fullScreen, isTrue);
+      await controller.toggleFullScreen();
+      expect(host.fullScreen, isFalse);
+      host.fullScreen = true;
+      await controller.exitFullScreen();
+      expect(host.fullScreen, isFalse);
+      final changes = host.fullScreenChanges;
+      await controller.exitFullScreen();
+      expect(host.fullScreenChanges, changes);
+      host.failFullScreen = true;
+      await controller.toggleFullScreen();
+      expect(
+        controller.setupIssue.value,
+        DesktopWindowSetupIssue.windowUnavailable,
+      );
+    },
+  );
   group('DesktopWindowController', () {
     test(
       'native window adapter forwards visibility rather than focus loss',
@@ -570,6 +620,20 @@ void main() {
 }
 
 class _FakeDesktopWindowHost implements DesktopWindowHost {
+  bool fullScreen = false;
+  int fullScreenChanges = 0;
+  bool failFullScreen = false;
+
+  @override
+  Future<bool> isFullScreen() async => fullScreen;
+
+  @override
+  Future<void> setFullScreen(bool enabled) async {
+    if (failFullScreen) throw StateError('Full screen unavailable');
+    fullScreen = enabled;
+    fullScreenChanges += 1;
+  }
+
   bool taskbarVisible = true;
   int failedTaskbarChanges = 0;
   bool trayVisible = true;

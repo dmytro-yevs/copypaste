@@ -8,6 +8,24 @@ import 'package:copypaste_flutter/features/modules/repository/modules_repository
 import 'modules_test_support.dart';
 
 void main() {
+  test('module removal reports failure before a successful retry', () async {
+    final repository = MemoryModulesRepository()..modules = [testModule];
+    final controller = ModulesController(
+      repository: repository,
+      marketplace: MemoryModuleMarketplace(),
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    repository.failure = const ModulesException('Removal failed.');
+    expect(await controller.remove(testModule.id), isFalse);
+    expect(controller.errorMessage, 'Removal failed.');
+    expect(controller.modules, hasLength(1));
+    repository.failure = null;
+    expect(await controller.remove(testModule.id), isTrue);
+    expect(controller.modules, isEmpty);
+    expect(controller.errorMessage, isNull);
+  });
+
   test(
     'offers newer versions and rejects equal versions or downgrades',
     () async {

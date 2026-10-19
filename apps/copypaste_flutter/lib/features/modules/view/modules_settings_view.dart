@@ -1,3 +1,4 @@
+import '../../../shared/format_bytes.dart';
 import 'dart:async';
 
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -179,7 +180,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
         : marketplace?.supportedPlatforms ?? const <ModulePlatform>[];
     final size = installed == null
         ? marketplace!.downloadSize
-        : formatModuleSize(installed.sizeBytes);
+        : formatBytes(installed.sizeBytes);
     return Card(
       key: ValueKey('module-$id'),
       child: Column(
@@ -406,7 +407,7 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
         content: SingleChildScrollView(child: SelectableText(result!.text)),
         actions: [
           Button.primary(
-            style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
+            style: AppTheme.dialogButtonStyle(const ButtonStyle.primary()),
             onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Done'),
           ),
@@ -416,29 +417,18 @@ class _ModulesSettingsViewState extends State<ModulesSettingsView> {
   }
 
   Future<void> _remove(BuildContext context, InstalledModule module) async {
-    final confirmed = await AppOverlays.showDialog<bool>(
+    await AppOverlays.showActionDialog(
       context,
-      builder: (dialogContext) => AppOverlays.alertDialog(
-        icon: LucideIcons.trash2,
-        title: Text('Remove ${module.title}?'),
-        content: const Text(
-          'The module and its local settings will be removed.',
-        ),
-        actions: [
-          Button.ghost(
-            style: AppTheme.actionButtonStyle(const ButtonStyle.ghost()),
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          Button.destructive(
-            style: AppTheme.actionButtonStyle(const ButtonStyle.destructive()),
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
+      icon: LucideIcons.trash2,
+      title: Text('Remove ${module.title}?'),
+      content: const Text('The module and its local settings will be removed.'),
+      actionLabel: 'Remove',
+      changes: controller,
+      canConfirm: () => !controller.busy,
+      onConfirm: () => controller.remove(module.id),
+      failureMessage: () =>
+          controller.errorMessage ?? 'The module could not be removed.',
     );
-    if (confirmed == true) await controller.remove(module.id);
   }
 }
 
@@ -479,12 +469,12 @@ class _ModuleFieldsDialog extends StatelessWidget {
       content: SingleChildScrollView(child: ModuleFormFields(draft: draft)),
       actions: [
         Button.ghost(
-          style: AppTheme.actionButtonStyle(const ButtonStyle.ghost()),
+          style: AppTheme.dialogButtonStyle(const ButtonStyle.ghost()),
           onPressed: () => Navigator.pop(context, false),
           child: const Text('Cancel'),
         ),
         Button.primary(
-          style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
+          style: AppTheme.dialogButtonStyle(const ButtonStyle.primary()),
           onPressed: draft.valid && !draft.busy
               ? () => Navigator.pop(context, true)
               : null,

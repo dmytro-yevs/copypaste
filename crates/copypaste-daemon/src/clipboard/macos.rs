@@ -318,7 +318,7 @@ impl ClipboardSource for MacOsClipboard {
                         return None;
                     }
                     if content_type == copypaste_ipc::content_type::FILE {
-                        let (bytes, metadata) = match file::read(
+                        let metadata = match file::resolve(
                             &pb,
                             &uti,
                             policy.limit_bytes(content_type),
@@ -342,8 +342,11 @@ impl ClipboardSource for MacOsClipboard {
                         let capture = Capture {
                             privacy,
                             content: String::new(),
-                            binary_content: Some(bytes),
-                            file_path: None,
+                            binary_content: None,
+                            file_path: metadata
+                                .source_reference
+                                .as_ref()
+                                .map(std::path::PathBuf::from),
                             file_metadata: Some(metadata),
                             content_type: content_type.to_string(),
                             app_bundle_id,
@@ -953,9 +956,8 @@ mod tests {
                 let pb = NSPasteboard::generalPasteboard();
                 let _ = pb.clearContents();
                 assert!(pb.writeObjects(&objects));
-                let (captured, metadata) =
-                    file::read(&pb, &NSString::from_str(UTI_FILE_URL), 1024, || true).unwrap();
-                assert_eq!(captured, bytes);
+                let metadata =
+                    file::resolve(&pb, &NSString::from_str(UTI_FILE_URL), 1024, || true).unwrap();
                 assert_eq!(
                     metadata.filename,
                     expected_path.file_name().unwrap().to_str().unwrap()
@@ -992,7 +994,7 @@ mod tests {
             assert!(pb.writeObjects(&objects));
             assert_eq!(pb.pasteboardItems().unwrap().len(), 2);
             assert_eq!(
-                file::read(&pb, &NSString::from_str(UTI_FILE_URL), 1024, || true),
+                file::resolve(&pb, &NSString::from_str(UTI_FILE_URL), 1024, || true),
                 Err(file::FileInputError::UnsupportedItemCount)
             );
         });

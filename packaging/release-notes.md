@@ -1,15 +1,13 @@
-Improve Quick Paste and modernize Linux platform detection in CopyPaste 1.0.30.
+Improve file transfers, desktop controls, and clipboard lifecycle in CopyPaste 1.0.31.
 
-- Open Quick Paste directly from the macOS tray with the shared native presentation path.
-- Prepare synchronized files from another device when selected in Quick Paste, show progress measured from written bytes, and reuse a recent local copy.
-- Show file names above their original paths, keeping both ends visible when a path is too long.
-- Show progress on the Download button and offer Cancel on hover while keeping icon-only buttons square; failed transfers can be retried.
-- Copy remote files as native file payloads instead of copying a path from the sending device.
-- Probe Linux clipboard backends at runtime and select them for each operation's required guarantees. Report missing source attribution and privacy enforcement explicitly.
-- Expose typed capability statuses and redacted diagnostics through the CLI and Flutter integration.
-- Generate Linux build, qualification, and support views from one platform manifest. Add GNOME Wayland x86_64 as an experimental target.
-- Reduce unnecessary compositor builds and collect comparable CI timing evidence while preserving exact signed artifact verification, upgrade tests, and native acceptance.
-- Refresh OCR, Semantic Search, and Supabase packages to 0.1.21 for CopyPaste 1.0.30.
+- Synchronize file metadata and download original file bytes on demand, with progress, cancellation, retry, and encrypted backup support.
+- Keep History and device inspector actions visible while long metadata scrolls, including compact layouts and larger text.
+- Share desktop keyboard, window-menu, Quick Paste, dialog, and onboarding behavior through the platform adapters and common controls.
+- Reclaim owned temporary clipboard, import, installer, and module staging files while preserving current payloads and pending updates.
+- Keep dialog keyboard motion in the shared motion policy and isolate Android clipboard provider state in tests.
+- Probe Linux clipboard backends at runtime and expose typed capability statuses and redacted diagnostics.
+- Share Linux build and qualification targets through one platform manifest; GNOME Wayland remains experimental.
+- Refresh OCR, Semantic Search, and Supabase packages to 0.1.22 for CopyPaste 1.0.31.
 
 Optional modules remain available from Settings. OCR engines and models are not bundled with the application. Cloud Sync is not part of this release.
 

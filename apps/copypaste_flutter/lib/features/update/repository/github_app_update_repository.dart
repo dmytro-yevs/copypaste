@@ -1,14 +1,15 @@
+import '../../../shared/network/github_artifact_downloader.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:crypto/crypto.dart';
 import 'package:pub_semver/pub_semver.dart';
 
 import '../../../platform/update/app_update_architecture.dart';
 import '../models/app_update_models.dart';
 import 'app_update_repository.dart';
 import 'minisign_verifier.dart';
+import 'obsolete_update_cleanup.dart';
 
 typedef UpdateTemporaryDirectoryProvider = Future<Directory> Function();
 
@@ -39,6 +40,10 @@ class GitHubAppUpdateRepository
   final UpdateTemporaryDirectoryProvider _temporaryDirectory;
   final AndroidAppUpdateArchitecture? Function() _androidArchitecture;
   final HttpClient _client;
+  late final _downloader = GitHubArtifactDownloader(
+    _client,
+    userAgent: 'CopyPaste updater',
+  );
   final Uri _releasesUri;
   final MinisignVerifier _signatureVerifier = MinisignVerifier(
     publicKeyBase64: copyPasteUpdaterPublicKey,
@@ -65,6 +70,18 @@ class GitHubAppUpdateRepository
     required AppUpdateTarget target,
     LinuxAppUpdateInstallation? linuxInstallation,
   }) async {
+    // Run before network access so installed packages are removed offline too.
+    try {
+      final temporary = await _temporaryDirectory();
+      await removeInstalledUpdatePackages(
+        Directory(
+          '${temporary.path}${Platform.pathSeparator}copypaste-updates',
+        ),
+        currentVersion,
+      );
+    } catch (_) {
+      // A missing temporary-directory provider must not break update checks.
+    }
     final request = await _client.getUrl(_releasesUri).timeout(_requestTimeout);
     request.headers
       ..set(HttpHeaders.acceptHeader, 'application/vnd.github+json')
@@ -115,7 +132,7 @@ class GitHubAppUpdateRepository
       '${directory.path}${Platform.pathSeparator}${asset.name}',
     );
     if (await destination.exists() &&
-        await _matchesDigest(
+        await _downloader.matchesDigest(
           destination,
           expectedSha256: asset.sha256,
           expectedSize: asset.sizeBytes,
@@ -127,45 +144,14 @@ class GitHubAppUpdateRepository
 
     final partial = File('${destination.path}.part');
     if (await partial.exists()) await partial.delete();
-    final response = await _openDownload(asset.downloadUri);
-    final contentLength = response.contentLength;
-    if (contentLength > _maximumArtifactBytes ||
-        (contentLength > 0 && contentLength != asset.sizeBytes)) {
-      await response.drain<void>();
-      throw const AppUpdateException('The update package size is invalid.');
-    }
-
-    final output = partial.openWrite();
-    final digestSink = _DigestSink();
-    final digestInput = sha256.startChunkedConversion(digestSink);
-    var received = 0;
-    try {
-      await for (final chunk in response.timeout(_requestTimeout)) {
-        received += chunk.length;
-        if (received > _maximumArtifactBytes || received > asset.sizeBytes) {
-          throw const AppUpdateException('The update package is too large.');
-        }
-        output.add(chunk);
-        digestInput.add(chunk);
-        onProgress(received / asset.sizeBytes);
-      }
-      await output.flush();
-      await output.close();
-      digestInput.close();
-    } catch (_) {
-      await output.close().catchError((Object _) {});
-      digestInput.close();
-      if (await partial.exists()) await partial.delete();
-      rethrow;
-    }
-
-    final digest = digestSink.value?.toString();
-    if (received != asset.sizeBytes || digest != asset.sha256) {
-      if (await partial.exists()) await partial.delete();
-      throw const AppUpdateException(
-        'The downloaded update failed its integrity check.',
-      );
-    }
+    await _downloadArtifact(
+      asset.downloadUri,
+      partial,
+      maximumBytes: _maximumArtifactBytes,
+      expectedSize: asset.sizeBytes,
+      expectedSha256: asset.sha256,
+      onProgress: onProgress,
+    );
     if (await destination.exists()) await destination.delete();
     await partial.rename(destination.path);
     if (!await _verifyUpdaterSignature(destination, asset, directory)) {
@@ -178,47 +164,38 @@ class GitHubAppUpdateRepository
     return DownloadedAppUpdate(path: destination.path, asset: asset);
   }
 
-  Future<HttpClientResponse> _openDownload(Uri initialUri) async {
-    var uri = initialUri;
-    for (var redirects = 0; redirects <= 5; redirects++) {
-      _validateDownloadUri(uri, firstRequest: redirects == 0);
-      final request = await _client.getUrl(uri).timeout(_requestTimeout);
-      request
-        ..followRedirects = false
-        ..headers.set(HttpHeaders.userAgentHeader, 'CopyPaste updater');
-      final response = await request.close().timeout(_requestTimeout);
-      if (response.isRedirect) {
-        final location = response.headers.value(HttpHeaders.locationHeader);
-        await response.drain<void>();
-        if (location == null) {
-          throw const AppUpdateException(
-            'The update download was redirected incorrectly.',
-          );
-        }
-        uri = uri.resolve(location);
-        continue;
-      }
-      if (response.statusCode != HttpStatus.ok) {
-        await response.drain<void>();
-        throw const AppUpdateException(
-          'CopyPaste could not download the update.',
-        );
-      }
-      return response;
-    }
-    throw const AppUpdateException(
-      'The update download used too many redirects.',
-    );
-  }
-
-  Future<bool> _matchesDigest(
-    File file, {
-    required String expectedSha256,
+  Future<void> _downloadArtifact(
+    Uri uri,
+    File destination, {
+    required int maximumBytes,
     required int expectedSize,
+    required String expectedSha256,
+    void Function(double)? onProgress,
   }) async {
-    if (await file.length() != expectedSize) return false;
-    final digest = await sha256.bind(file.openRead()).first;
-    return digest.toString() == expectedSha256;
+    try {
+      await _downloader.download(
+        uri,
+        destination,
+        maximumBytes: maximumBytes,
+        expectedSize: expectedSize,
+        expectedSha256: expectedSha256,
+        onProgress: onProgress,
+      );
+    } on ArtifactDownloadException catch (error) {
+      throw AppUpdateException(switch (error.failure) {
+        ArtifactDownloadFailure.untrustedUrl =>
+          'The update package URL is not trusted.',
+        ArtifactDownloadFailure.untrustedRedirect =>
+          'The update download left GitHub.',
+        ArtifactDownloadFailure.redirects =>
+          'The update download used too many redirects.',
+        ArtifactDownloadFailure.tooLarge => 'The update package is too large.',
+        ArtifactDownloadFailure.integrity =>
+          'The downloaded update failed its integrity check.',
+        ArtifactDownloadFailure.unavailable =>
+          'CopyPaste could not download the update.',
+      });
+    }
   }
 
   Future<bool> _verifyUpdaterSignature(
@@ -249,50 +226,31 @@ class GitHubAppUpdateRepository
       '${directory.path}${Platform.pathSeparator}${asset.name}.sig',
     );
     if (await destination.exists() &&
-        await _matchesDigest(
+        await _downloader.matchesDigest(
           destination,
           expectedSha256: asset.signatureSha256,
           expectedSize: asset.signatureSizeBytes,
         )) {
       return destination;
     }
-    final response = await _openDownload(asset.signatureUri);
-    final bytes = <int>[];
-    await for (final chunk in response.timeout(_requestTimeout)) {
-      if (bytes.length + chunk.length > _maximumSignatureBytes) {
-        throw const AppUpdateException('The updater signature is too large.');
-      }
-      bytes.addAll(chunk);
-    }
-    if (bytes.length != asset.signatureSizeBytes ||
-        sha256.convert(bytes).toString() != asset.signatureSha256) {
-      throw const AppUpdateException(
-        'The updater signature failed its integrity check.',
-      );
-    }
-    await destination.writeAsBytes(bytes, flush: true);
+    final partial = File('${destination.path}.part');
+    await _downloadArtifact(
+      asset.signatureUri,
+      partial,
+      maximumBytes: _maximumSignatureBytes,
+      expectedSize: asset.signatureSizeBytes,
+      expectedSha256: asset.signatureSha256,
+    );
+    if (await destination.exists()) await destination.delete();
+    await partial.rename(destination.path);
     return destination;
   }
 
   void _validateReleaseAssetUri(Uri uri) {
-    if (uri.scheme != 'https' ||
-        uri.host != 'github.com' ||
-        !uri.path.startsWith('/dmytro-yevs/copypaste/releases/download/')) {
+    try {
+      GitHubArtifactDownloader.validateAssetUri(uri);
+    } on ArtifactDownloadException {
       throw const AppUpdateException('The update package URL is not trusted.');
-    }
-  }
-
-  void _validateDownloadUri(Uri uri, {required bool firstRequest}) {
-    if (firstRequest) {
-      _validateReleaseAssetUri(uri);
-      return;
-    }
-    final trustedRedirect =
-        uri.host == 'github.com' ||
-        uri.host == 'objects.githubusercontent.com' ||
-        uri.host == 'release-assets.githubusercontent.com';
-    if (uri.scheme != 'https' || !trustedRedirect) {
-      throw const AppUpdateException('The update download left GitHub.');
     }
   }
 
@@ -504,14 +462,4 @@ Future<String> _readBoundedUtf8(
   } on FormatException {
     throw const AppUpdateException('GitHub returned invalid update metadata.');
   }
-}
-
-class _DigestSink implements Sink<Digest> {
-  Digest? value;
-
-  @override
-  void add(Digest data) => value = data;
-
-  @override
-  void close() {}
 }

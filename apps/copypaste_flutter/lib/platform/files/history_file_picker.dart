@@ -17,27 +17,34 @@ class SystemHistoryFilePicker implements HistoryFilePicker {
     if (!Platform.isAndroid) {
       return (await openFiles()).map(fromDesktopFile).toList(growable: false);
     }
-    final selected =
-        await androidChannel.invokeListMethod<Object?>('chooseFiles') ??
-        const [];
-    return selected
-        .map((value) {
-          final file = Map<String, Object?>.from(value! as Map);
-          final token = file['token']! as String;
-          return HistoryImportFile(
-            name: file['name']! as String,
-            mimeType: file['mimeType']! as String,
-            sourceReference: file['uri']! as String,
-            prepare: (maxBytes) async =>
-                (await androidChannel.invokeMethod<String>('materialize', {
-                  'token': token,
-                  'maxBytes': maxBytes,
-                }))!,
-            dispose: () =>
-                androidChannel.invokeMethod<void>('release', {'token': token}),
-          );
-        })
-        .toList(growable: false);
+    try {
+      final selected =
+          await androidChannel.invokeListMethod<Object?>('chooseFiles') ??
+          const [];
+      return selected
+          .map((value) {
+            final file = Map<String, Object?>.from(value! as Map);
+            final token = file['token']! as String;
+            return HistoryImportFile(
+              name: file['name']! as String,
+              mimeType: file['mimeType']! as String,
+              sourceReference: file['uri']! as String,
+              prepare: (maxBytes) async =>
+                  (await androidChannel.invokeMethod<String>('materialize', {
+                    'token': token,
+                    'maxBytes': maxBytes,
+                  }))!,
+              dispose: () => androidChannel.invokeMethod<void>('release', {
+                'token': token,
+              }),
+            );
+          })
+          .toList(growable: false);
+    } on PlatformException catch (error) {
+      throw HistoryFileOperationException(
+        error.message ?? 'Files could not be selected.',
+      );
+    }
   }
 
   static HistoryImportFile fromDesktopFile(
@@ -56,7 +63,7 @@ class SystemHistoryFilePicker implements HistoryFilePicker {
       prepare: (_) async {
         if (await FileSystemEntity.type(file.path) !=
             FileSystemEntityType.file) {
-          throw const FileSystemException(
+          throw const HistoryFileOperationException(
             'Only regular files can be imported.',
           );
         }
