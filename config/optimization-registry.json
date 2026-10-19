@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "date": "2026-10-17",
+  "date": "2026-10-19",
   "scope": "Runtime, CI and development-resource optimization register. Source references describe implementation; evidence describes qualification.",
   "entries": [
     {
@@ -84,18 +84,26 @@
       "owner_module": "Desktop Quick Paste",
       "platforms": [
         "macOS",
-        "Windows"
+        "Windows",
+        "Linux"
       ],
       "source_references": [
         "docs/adr/0033-quick-paste-popup.md",
         "apps/copypaste_flutter/macos/Runner/MainFlutterWindow.swift",
-        "apps/copypaste_flutter/windows/runner/flutter_window.cpp"
+        "apps/copypaste_flutter/macos/Runner/MacosWindowCommands.swift",
+        "apps/copypaste_flutter/macos/RunnerTests/MacosWindowCommandsTests.swift",
+        "apps/copypaste_flutter/windows/runner/flutter_window.cpp",
+        "apps/copypaste_flutter/linux/runner/linux_quick_paste_window.cc",
+        "apps/copypaste_flutter/linux/runner/linux_host_channels.cc",
+        "scripts/fixtures/linux-quick-paste-close.cc",
+        "docs/ui/desktop-keyboard-shortcuts.md"
       ],
-      "invariant": "Create on demand, dispose Dart owners and native engine on retirement; preserve focus and paste behavior.",
+      "invariant": "Create on demand, dispose Dart owners and native engine on retirement; preserve focus and paste behavior. Standard keyboard and native window close use the existing cancellation/hide/retirement paths. macOS Command-W and Option-Command-W invalidate the popup paste session before acknowledged retirement. Windows preserves the native system-menu close command. Linux GTK close/iconify coalesces duplicate requests, cancels/restores the transaction, and exits on idle; its callback is owned and released by the GTK window. Quit from the Linux popup requests primary-process termination through PID/transaction authorization. No event monitor, polling timer, retained presentation, or engine prewarming is introduced.",
       "next_step": "Measure startup latency, peak and recovered memory for 100 open/close cycles; compare reuse only with evidence.",
       "native_resource_qualification": {
         "macOS": "not_established",
-        "Windows": "not_established"
+        "Windows": "not_established",
+        "Linux": "not_established"
       },
       "measured_saving": null,
       "evidence_refs": [
@@ -103,6 +111,34 @@
           "kind": "functional_test_log",
           "name": "flutter-resource-tests.log",
           "sha256": "036f614b32eb18f2113f1e3f1a7a9acfabb71a12ad219b4f54580be07f1248c9",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "desktop-flutter-tests.log",
+          "sha256": "87732ae75a50e16a27dbc0e29cb02aac7cf979c4c1450e49390cb1d08fc343a5",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "desktop-macos-tests.log",
+          "sha256": "a78724695db82f2b0319c332295e04bf53bb9c8eeda7b4c1b726b6d407865df7",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "desktop-linux-gtk.log",
+          "sha256": "1ed37d3fd33e249b7fcf50b8b38391dedd10b71d818f08f7650d959250c9b488",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "desktop-linux-quit.log",
+          "sha256": "2a688a284fc5e23cb954eb2a0734f31570edc737015fedf1926410a3a1524f96",
           "source_state": "dirty_workspace",
           "release_qualification": false
         }
@@ -383,9 +419,12 @@
         "Windows"
       ],
       "source_references": [
-        "crates/copypaste-daemon/src/p2p/poll.rs"
+        "crates/copypaste-sync/src/peer_driver.rs",
+        "crates/copypaste-sync/src/cadence.rs",
+        "crates/copypaste-daemon/src/p2p/poll.rs",
+        "crates/copypaste-runtime/src/peer_sync.rs"
       ],
-      "invariant": "Long no-peer wait, adaptive cadence and capture-triggered wake; preserve convergence.",
+      "invariant": "One daemon/Android scheduler: 60-second no-peer wait, shared 5\u201310-second adaptive cadence, capture wake queued behind manual rounds, live disable cancellation, and joined session teardown. Preserve convergence.",
       "next_step": "Measure idle with no peers, reachable peers, offline peers and reconnect; preserve sync latency.",
       "native_resource_qualification": {
         "macOS": "not_established",
@@ -393,9 +432,25 @@
         "Windows": "not_established"
       },
       "measured_saving": null,
-      "evidence_refs": [],
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "rust-tests-final.log",
+          "sha256": "84cbd2a727692471b7c9bd86c89af1dbbd0fd19a6409333d206384b40d95184a",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
       "supersedes": [],
-      "functional_validation": "not_recorded"
+      "functional_validation": "passed_targeted_tests_native_resource_qualification_pending",
+      "allocation_lifetime": "One outgoing round; per-peer tasks exist only while its sessions run. Cancelled sessions are aborted and joined before releasing the round permit.",
+      "cancellation": "Sync disable cancels the live SyncCycle; shutdown and new capture wakes abort and join unfinished sessions. Capture wake is preserved for the next round.",
+      "bounds": {
+        "outgoing_rounds": 1,
+        "peer_tasks": "One per dialable paired peer, retaining existing fanout; active network sessions use the shared Node admission limit.",
+        "idle_timing": "Existing AdaptiveCadence constants and NO_PEERS_INTERVAL; allocation policy, not a measured runtime budget."
+      },
+      "tradeoffs": "Android now shares the desktop no-peer wait and adaptive idle policy. Native latency, wakeup, CPU and memory effects remain unmeasured."
     },
     {
       "id": "RUN-014",
@@ -1497,28 +1552,208 @@
       "functional_validation": "Targeted Flutter and Rust tests cover transfer progress, cancellation, reuse, and remote clipboard fallback; installed-platform and native resource evidence remain pending."
     },
     {
-      "id": "RUN-036",
-      "title": "Bound Linux clipboard adapter reprobes",
+      "id": "DISK-001",
+      "title": "Owned temporary payload cleanup and encrypted database reclamation",
       "domain": "runtime",
-      "implementation_status": "implemented",
+      "implementation_status": "present_in_source",
       "priority": "P1",
-      "owner_module": "Linux clipboard adapter",
+      "owner_module": "Storage and temporary-file adapters",
       "platforms": [
-        "Linux"
+        "macOS",
+        "Android",
+        "Windows"
       ],
       "source_references": [
-        "crates/copypaste-daemon/src/clipboard/linux.rs",
-        "crates/copypaste-daemon/src/capture.rs"
+        "crates/copypaste-core/src/storage/space.rs",
+        "crates/copypaste-core/src/storage/creation.rs",
+        "crates/copypaste-core/src/storage/store.rs",
+        "apps/copypaste_flutter/lib/platform/files/temporary_artifacts.dart",
+        "apps/copypaste_flutter/lib/features/history/repository/history_file_transfer.dart",
+        "apps/copypaste_flutter/lib/features/update/repository/obsolete_update_cleanup.dart",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidClipboardCache.kt",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/HistoryFilesChannel.kt",
+        "docs/engineering/disk-storage.md",
+        "crates/copypaste-modules/src/staging_cleanup.rs",
+        "crates/copypaste-modules/src/manager.rs"
       ],
-      "invariant": "A healthy idle data-control adapter adds no reconnect wakeups; a missing required capability or lost bridge triggers at most one probe per five seconds, without reading a clipboard payload.",
-      "next_step": "Measure daemon and worker CPU, wakeups, memory peaks and reconnection latency on GNOME and KDE Wayland sessions before native resource qualification.",
+      "invariant": "Preserve original History bytes, pins, retention settings and live clear boundaries. Current Android URI ownership survives restart and interrupted publication; stale inactive publications have one-day grace. Flutter staging is namespaced, leased across processes and protected across engines. No periodic cleanup timer or permanent cleanup executor. Recognized installed-version packages are removed offline; newer pending installers remain. Completed transfer paths identify actual bytes; only complete outputs are published. New databases reclaim incrementally after committed deletes; legacy full rebuild requires exclusive lifetime Store ownership before runtime publication. Module managers retain shared lifetime leases; exclusive startup maintenance removes only expired default temporary input/extraction/download directories, preserving installed models and completed pending module updates.",
+      "next_step": "Measure equivalent native baseline/candidate cache and data growth, CPU, I/O, startup/action latency, process-family memory and low-space behavior on macOS, physical Android and installed Windows. A legacy file opened before a large deletion requires a later exclusive reopen; conversion admission requires 8 MiB and 25% free pages. Busy readers can defer WAL truncation. Unmarked generic legacy desktop staging is preserved because ownership is unknown. Recent/current/leased payloads and pending newer installers have no aggregate byte ceiling. Allocation policies are not resource budgets; unresolved non-memory thresholds remain unresolved.",
       "native_resource_qualification": {
-        "Linux": "not_established"
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
       },
       "measured_saving": null,
-      "evidence_refs": [],
+      "evidence_refs": [
+        {
+          "kind": "functional_validation_log",
+          "name": "core-tests.log",
+          "sha256": "58ecd1dc14298957b17b2c3d702ed4595432b9dd116c1124b5909cf78fad9559",
+          "source_state": "dirty_workspace_snapshots",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_validation_log",
+          "name": "modules-tests.log",
+          "sha256": "8ca2dfab0f69ae9dd9cd71dd4e4cb9329615397ad668801b5e3c8ddcef880919",
+          "source_state": "dirty_workspace_snapshots",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_validation_log",
+          "name": "flutter-tests.log",
+          "sha256": "41b00003af4ec3a767ccf1f6cd24a260c717c8318304c44b955432b557a85b89",
+          "source_state": "dirty_workspace_snapshots",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_validation_log",
+          "name": "flutter-analysis.log",
+          "sha256": "f446cdcbef620357d8e0d1a48e88721258500b369a697a26ab26ae5a0795bd6f",
+          "source_state": "dirty_workspace_snapshots",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_validation_log",
+          "name": "dart-format.log",
+          "sha256": "0cc9c066013eec993ad556ea1d08770bc3a9fe37923f21341d2c7543ded4d5c5",
+          "source_state": "dirty_workspace_snapshots",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_validation_log",
+          "name": "rust-owned-format.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "source_state": "dirty_workspace_snapshots",
+          "release_qualification": false
+        },
+        {
+          "kind": "blocked_android_build_log",
+          "name": "android-tests-final.log",
+          "sha256": "c2de7bc454118992e6816eba833724d23f14d109737b4b660ce5a50eb4601782",
+          "source_state": "dirty_workspace_snapshots",
+          "release_qualification": false
+        },
+        {
+          "kind": "partial_physical_android_aggregate_diagnostic",
+          "name": "android-disk-audit/storage-receipts.json",
+          "sha256": "dda20ef0582bc574af5624e4c0d1780610e1bf1d3a7c5000807ab282a74e3f04",
+          "source_state": "installed_1.0.29_not_bound_to_current_source",
+          "release_qualification": false
+        }
+      ],
       "supersedes": [],
-      "functional_validation": "Unit adapter selection and reconnect tests passed; native resource qualification pending."
+      "functional_validation": "454 core Rust tests, 45 module tests and 224 targeted Flutter tests passed in dirty workspace snapshots; Flutter analysis and owned-source formatting passed. Two existing asset-dependent native module tests remain ignored by their pre-existing definitions. Android host tests could not run: the Android native build is blocked by parallel JNI/generated-binding changes (including missing JString import). User explicitly instructed this task to leave parallel code unchanged and record the blocker. No installed candidate or native resource qualification is established."
+    },
+    {
+      "id": "RUN-036",
+      "title": "Explicit bounded file transfer",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "Shared file offers, encrypted chunk store and authenticated peer sessions",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "crates/copypaste-core/src/file_transfer.rs",
+        "crates/copypaste-core/src/file_download.rs",
+        "crates/copypaste-core/src/storage/file_transfers.rs",
+        "crates/copypaste-p2p/src/node/files.rs",
+        "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
+        "crates/copypaste-core/src/history_actions.rs",
+        "crates/copypaste-core/src/history_item.rs",
+        "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/ClipboardFocusCaptureGuard.kt"
+      ],
+      "invariant": "Ordinary P2P/cloud history sync transfers only an authenticated file offer. File bodies move only for an explicit Download. Import, encryption, save and native copy use bounded blocks; no file-sized allocation for new files. One explicit outgoing/incoming file session per node. Cancellation, revocation and shutdown close sessions; partial destinations and scoped plaintext are removed. Encrypted chunks share a digest and are released with the final retained row. File byte quota includes retained bodies. A downloaded destination is user-owned and has no second hidden full-byte cache.",
+      "allocation_lifetime": "64 KiB plaintext blocks while actively importing, serving, downloading or copying. Existing small inline rows are converted before sync starts; legacy decryption remains bounded by the former 4 MiB cap.",
+      "cancellation": "Explicit Cancel, pairing removal/revocation and runtime shutdown cancel active downloads. Reads have the existing peer deadline.",
+      "bounds": {
+        "plaintext_chunk_bytes": 65536,
+        "file_sessions_per_node": 1,
+        "file_downloads_per_host": 1,
+        "file_limit": "Live editable max_file_size_bytes; default 64 MiB, supported setting range 1 MiB through 20 GiB. This is an allocation policy, not a native resource budget."
+      },
+      "tradeoffs": "Import hashes then encrypts the source and holds one SQLite write transaction for the snapshot. Peer requests acknowledge each chunk. Source device must be online for an uncached download. Native clipboard staging retains its existing timed cleanup owner.",
+      "next_step": "Collect equivalent baseline/candidate native peak, steady, recovery, growth, CPU, latency and I/O evidence on macOS, physical Android and installed Windows. Resolve unset runtime budgets before resource qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "accepted-file-tests.log",
+          "sha256": "a8fb558841f7653fe7bc3994e0fb5e44f2fd5daf5d9fada9f12d1c99e9592dea",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "accepted-toast-tests.log",
+          "sha256": "1576e917c7f89cd213ab2ca432ec240883e09efebb32624f879ed849637d516b",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        },
+        {
+          "kind": "functional_test_log",
+          "name": "final-kotlin-check.log",
+          "sha256": "27d839f20e9e43da0a1a1d64fe16a1da26a7f83266cc1948fb3d39ba2ee8e7cc",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "passed_targeted_file_tests_native_resource_qualification_pending"
+    },
+    {
+      "id": "RUN-037",
+      "title": "Shared bounded GitHub release-asset transport",
+      "domain": "runtime",
+      "implementation_status": "present_in_source",
+      "priority": "P1",
+      "owner_module": "GitHubArtifactDownloader",
+      "platforms": [
+        "macOS",
+        "Android",
+        "Windows"
+      ],
+      "source_references": [
+        "apps/copypaste_flutter/lib/shared/network/github_artifact_downloader.dart",
+        "apps/copypaste_flutter/lib/features/update/repository/github_app_update_repository.dart",
+        "apps/copypaste_flutter/lib/features/modules/repository/github_module_marketplace_repository.dart"
+      ],
+      "invariant": "One trusted HTTPS authority and redirect policy for app and module artifacts. Stream through IOSink backpressure, hash received bytes in the same pass, enforce declared and streamed size bounds, remove failed partial files, and preserve signature validation before use. Repository-specific metadata, staging and cache publication remain with their owner.",
+      "allocation_lifetime": "Only the current HTTP stream and sink buffers during an active download; no whole-package byte list or retained payload.",
+      "bounds": {
+        "redirects": 5,
+        "request_timeout_seconds": 30,
+        "artifact_limits": "Existing app, module, metadata and signature size limits; unchanged."
+      },
+      "cancellation": "Network timeout, stream or integrity failure closes the output and removes its partial destination. Repository disposal force-closes its HttpClient.",
+      "tradeoffs": "Disk and hash work share one streamed pass; physical buffer sizes remain owned by dart:io. Native memory, CPU, latency and I/O effects are unmeasured.",
+      "next_step": "Measure equivalent baseline/candidate downloads and failure cleanup on macOS, physical Android and installed Windows; resolve pending resource budgets before qualification.",
+      "native_resource_qualification": {
+        "macOS": "not_established",
+        "Android": "not_established",
+        "Windows": "not_established"
+      },
+      "measured_saving": null,
+      "evidence_refs": [
+        {
+          "kind": "functional_test_log",
+          "name": "flutter-tests-final.log",
+          "sha256": "19b8861f7202586aaf1b93e6daa166caa72757b2c8558b79ad174db0b73b9001",
+          "source_state": "dirty_workspace",
+          "release_qualification": false
+        }
+      ],
+      "supersedes": [],
+      "functional_validation": "passed_targeted_tests_native_resource_qualification_pending"
     }
   ]
 }

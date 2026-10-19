@@ -3,6 +3,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+#[cfg(test)]
 use tokio::sync::watch;
 use tokio::task::{JoinError, JoinHandle};
 #[cfg(test)]
@@ -26,6 +27,7 @@ pub const TEARDOWN_BUDGET: Duration = Duration::from_secs(5);
 /// Resolves when shutdown has been asked for, and never when there is nothing
 /// watching it — a `None` receiver is a caller with no teardown to observe,
 /// such as a unit test driving one round.
+#[cfg(test)]
 pub async fn requested(shutdown: Option<watch::Receiver<bool>>) {
     let Some(mut shutdown) = shutdown else {
         std::future::pending::<()>().await;

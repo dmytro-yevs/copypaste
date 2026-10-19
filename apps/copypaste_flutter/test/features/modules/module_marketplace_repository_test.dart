@@ -1,3 +1,4 @@
+import '../../support/temporary_payloads.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
@@ -398,7 +399,7 @@ void main() {
       addTearDown(repository.dispose);
       final module = (await repository.list()).single;
       expect(await cache.exists(), isTrue);
-      expect(await cache.list().toList(), isEmpty);
+      expect(await temporaryPayloads(cache), isEmpty);
       await cache.delete(recursive: true);
       client.routes[module.artifact!.downloadUri.pathSegments.last] = _Response(
         utf8.encode('package'),
@@ -412,7 +413,7 @@ void main() {
       expect(progress.last, 1);
       await package.dispose();
       expect(await cache.exists(), isTrue);
-      expect(await cache.list().toList(), isEmpty);
+      expect(await temporaryPayloads(cache), isEmpty);
 
       client.routes[module.artifact!.downloadUri.pathSegments.last] = _Response(
         utf8.encode('changed'),
@@ -421,12 +422,12 @@ void main() {
         repository.download(module, onProgress: (_) {}),
         throwsA(isA<ModulesException>()),
       );
-      expect(await cache.list().toList(), isEmpty);
+      expect(await temporaryPayloads(cache), isEmpty);
       client.routes[moduleCatalogName] = _Response(
         utf8.encode(jsonEncode({'schema_version': 1, 'modules': []})),
       );
       await expectLater(repository.list(), throwsA(isA<ModulesException>()));
-      expect(await cache.list().toList(), isEmpty);
+      expect(await temporaryPayloads(cache), isEmpty);
     },
   );
 
@@ -456,10 +457,10 @@ void main() {
         contentLength: -1,
       );
       await expectLater(repository.list(), throwsA(isA<ModulesException>()));
-      expect(await directory.list().toList(), isEmpty);
+      expect(await temporaryPayloads(directory), isEmpty);
       client.routes[moduleCatalogName] = _Response([], statusCode: 404);
       expect(await repository.list(), isEmpty);
-      expect(await directory.list().toList(), isEmpty);
+      expect(await temporaryPayloads(directory), isEmpty);
     },
   );
 

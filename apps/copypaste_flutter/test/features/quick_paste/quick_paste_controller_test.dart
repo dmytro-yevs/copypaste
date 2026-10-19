@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 
@@ -31,6 +32,120 @@ import 'package:copypaste_flutter/platform/clipboard/clipboard_writer.dart';
 import '../modules/modules_test_support.dart';
 
 void main() {
+  for (final platform in [
+    TargetPlatform.macOS,
+    TargetPlatform.windows,
+    TargetPlatform.linux,
+  ]) {
+    testWidgets(
+      'standard find, text editing, and close in Quick Paste on $platform',
+      (tester) async {
+        var clipboard = '';
+        final messenger =
+            TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+        messenger.setMockMethodCallHandler(SystemChannels.platform, (
+          call,
+        ) async {
+          if (call.method == 'Clipboard.setData') {
+            clipboard = (call.arguments as Map)['text'] as String;
+          }
+          if (call.method == 'Clipboard.getData') return {'text': clipboard};
+          return null;
+        });
+        addTearDown(
+          () =>
+              messenger.setMockMethodCallHandler(SystemChannels.platform, null),
+        );
+        final repository = _Repository();
+        final host = _ContextHost();
+        final controller = QuickPasteController(
+          repository: repository,
+          preferencesStore: MemoryQuickPastePreferencesStore(),
+          host: host,
+        );
+        await tester.binding.setSurfaceSize(const Size(448, 800));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        await tester.pumpWidget(QuickPasteApp(controller: controller));
+        await tester.pumpAndSettle();
+        await controller.opened(1);
+        await tester.pumpAndSettle();
+        final search = find.byType(EditableText).first;
+        await tester.enterText(search, 'find text');
+        await tester.pumpAndSettle();
+        await tester.pump(const Duration(milliseconds: 600));
+        final modifier = platform == TargetPlatform.macOS
+            ? LogicalKeyboardKey.metaLeft
+            : LogicalKeyboardKey.controlLeft;
+        await tester.sendKeyDownEvent(modifier);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+        await tester.sendKeyUpEvent(modifier);
+        await tester.pumpAndSettle();
+        final editable = tester.widget<EditableText>(search);
+        expect(editable.focusNode.hasFocus, isTrue);
+        expect(
+          editable.controller.selection,
+          const TextSelection(baseOffset: 0, extentOffset: 9),
+        );
+        await tester.sendKeyDownEvent(modifier);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyX);
+        await tester.sendKeyUpEvent(modifier);
+        await tester.pumpAndSettle();
+        expect(editable.controller.text, isEmpty);
+        expect(repository.copied, isEmpty);
+        expect(host.closeCalls, 0);
+        await tester.pump(const Duration(milliseconds: 600));
+        await tester.sendKeyDownEvent(modifier);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+        await tester.sendKeyUpEvent(modifier);
+        await tester.pumpAndSettle();
+        expect(editable.controller.text, 'find text');
+        await tester.sendKeyDownEvent(modifier);
+        if (platform != TargetPlatform.windows) {
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        }
+        await tester.sendKeyEvent(
+          platform == TargetPlatform.windows
+              ? LogicalKeyboardKey.keyY
+              : LogicalKeyboardKey.keyZ,
+        );
+        if (platform != TargetPlatform.windows) {
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        }
+        await tester.sendKeyUpEvent(modifier);
+        await tester.pumpAndSettle();
+        expect(editable.controller.text, isEmpty);
+        await tester.sendKeyDownEvent(modifier);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        if (platform == TargetPlatform.macOS) {
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+        }
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+        if (platform == TargetPlatform.macOS) {
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+        }
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyUpEvent(modifier);
+        await tester.pumpAndSettle();
+        expect(editable.controller.text, 'find text');
+        expect(repository.copied, isEmpty);
+        await tester.sendKeyDownEvent(modifier);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
+        await tester.sendKeyUpEvent(modifier);
+        await tester.pumpAndSettle();
+        expect(host.closeIds, [1]);
+        await controller.opened(2);
+        await tester.pumpAndSettle();
+        await tester.sendKeyDownEvent(modifier);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyQ);
+        await tester.sendKeyUpEvent(modifier);
+        await tester.pumpAndSettle();
+        expect(host.quitCalls, 1);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+      variant: TargetPlatformVariant({platform}),
+    );
+  }
   test(
     'file transfer reports written bytes, reuses a copy, and retries failure',
     () async {
@@ -59,8 +174,15 @@ void main() {
       repository.failSave = false;
       repository.saveGate = Completer<void>();
       final progress = <double>[];
-      final preparation = transfer.prepare(clip, onProgress: progress.add);
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+      final halfWritten = Completer<void>();
+      final preparation = transfer.prepare(
+        clip,
+        onProgress: (value) {
+          progress.add(value);
+          if (value == 0.5 && !halfWritten.isCompleted) halfWritten.complete();
+        },
+      );
+      await halfWritten.future;
       expect(progress, contains(0.5));
       repository.saveGate!.complete();
       final path = await preparation;
@@ -73,13 +195,18 @@ void main() {
       repository.saveGate = Completer<void>();
       var cancelled = false;
       final destination = File('${directory.path}/cancelled.bin');
+      final cancellableWriteStarted = Completer<void>();
       final cancelledSave = transfer.saveTo(
         clip,
         destination.path,
-        onProgress: (_) {},
+        onProgress: (value) {
+          if (value == 0.5 && !cancellableWriteStarted.isCompleted) {
+            cancellableWriteStarted.complete();
+          }
+        },
         isCancelled: () => cancelled,
       );
-      await Future<void>.delayed(const Duration(milliseconds: 80));
+      await cancellableWriteStarted.future;
       cancelled = true;
       repository.saveGate!.complete();
       await expectLater(
@@ -1729,6 +1856,63 @@ void main() {
     expect(repository.copied, ['recent']);
   });
 
+  for (final platform in [
+    TargetPlatform.macOS,
+    TargetPlatform.windows,
+    TargetPlatform.linux,
+  ]) {
+    test(
+      'saved editing and search clip accelerators migrate on $platform',
+      () async {
+        debugDefaultTargetPlatformOverride = platform;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        final repository = _Repository();
+        final saved = {
+          'pinned': 'c',
+          'find': 'f',
+          'refresh': 'r',
+          'cut': 'x',
+          'redo': 'y',
+          'valid': 'b',
+        };
+        for (final id in saved.keys.where((id) => id != 'pinned')) {
+          repository.clips.add(
+            HistoryClip(
+              id: id,
+              contentType: 'text/plain',
+              preview: id,
+              createdAt: DateTime.utc(2026),
+              pinned: true,
+            ),
+          );
+        }
+        final store = MemoryQuickPastePreferencesStore();
+        await store.writePinnedShortcuts(saved);
+        final controller = QuickPasteController(
+          repository: repository,
+          preferencesStore: store,
+          host: _ContextHost(),
+        );
+        await controller.initialize();
+        final migrated = await store.readPinnedShortcuts();
+        expect(migrated['valid'], 'b');
+        expect(migrated.values.toSet().length, saved.length);
+        for (final reserved in ['c', 'f', 'r', 'x', 'y']) {
+          expect(migrated.values, isNot(contains(reserved)));
+        }
+        controller.dispose();
+        final restarted = QuickPasteController(
+          repository: repository,
+          preferencesStore: store,
+          host: _ContextHost(),
+        );
+        addTearDown(restarted.dispose);
+        await restarted.initialize();
+        expect(await store.readPinnedShortcuts(), migrated);
+      },
+    );
+  }
+
   testWidgets('inspector shares History content and follows the focused clip', (
     tester,
   ) async {
@@ -2091,11 +2275,78 @@ void main() {
         LogicalKeyboardKey.keyW,
         LogicalKeyboardKey.keyZ,
         LogicalKeyboardKey.keyP,
+        LogicalKeyboardKey.keyC,
+        LogicalKeyboardKey.keyF,
+        LogicalKeyboardKey.keyR,
+        LogicalKeyboardKey.keyX,
+        LogicalKeyboardKey.keyY,
       ]) {
         expect(keys, isNot(contains(reserved)));
       }
     },
   );
+
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.windows]) {
+    test(
+      'pinned shortcuts respect native window commands on $platform',
+      () async {
+        debugDefaultTargetPlatformOverride = platform;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        final store = MemoryQuickPastePreferencesStore();
+        await store.writePinnedShortcuts({
+          'pinned': 'h',
+          'second-pin': 'm',
+          'unchanged': 'b',
+        });
+        final repository = _Repository();
+        for (final id in ['second-pin', 'unchanged']) {
+          repository.clips.add(
+            HistoryClip(
+              id: id,
+              contentType: 'text/plain',
+              preview: id,
+              createdAt: DateTime.utc(2026),
+              pinned: true,
+            ),
+          );
+        }
+        final controller = QuickPasteController(
+          repository: repository,
+          preferencesStore: store,
+          host: _ContextHost()..permissionGranted = true,
+        );
+        addTearDown(controller.dispose);
+        await controller.initialize();
+        final saved = await store.readPinnedShortcuts();
+        expect(saved['unchanged'], 'b');
+        if (platform == TargetPlatform.macOS) {
+          expect(saved.values, isNot(contains('h')));
+          expect(saved.values, isNot(contains('m')));
+          expect(
+            controller.shortcuts,
+            isNot(contains(LogicalKeyboardKey.keyH)),
+          );
+          expect(
+            controller.shortcuts,
+            isNot(contains(LogicalKeyboardKey.keyM)),
+          );
+        } else {
+          expect(saved['pinned'], 'h');
+          expect(saved['second-pin'], 'm');
+        }
+        expect(saved.values.toSet().length, 3);
+        controller.dispose();
+        final restarted = QuickPasteController(
+          repository: repository,
+          preferencesStore: store,
+          host: _ContextHost()..permissionGranted = true,
+        );
+        addTearDown(restarted.dispose);
+        await restarted.initialize();
+        expect(await store.readPinnedShortcuts(), saved);
+      },
+    );
+  }
 
   test(
     'Accessibility is requested only for paste and a denial survives reopen',
@@ -2727,6 +2978,7 @@ class _ContextHost implements QuickPasteContextHost {
   int permissionRequests = 0;
   int pasteCalls = 0;
   int closeCalls = 0;
+  int quitCalls = 0;
   QuickPasteOpenedHandler? openedHandler;
   final pasteIds = <int>[];
   final closeIds = <int>[];
@@ -2769,7 +3021,9 @@ class _ContextHost implements QuickPasteContextHost {
   }
 
   @override
-  Future<void> quit() async {}
+  Future<void> quit() async {
+    quitCalls += 1;
+  }
 
   @override
   Future<bool> requestAccessibility() async {

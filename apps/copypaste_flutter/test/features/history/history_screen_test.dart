@@ -23,6 +23,46 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as raster;
 
 void main() {
+  for (final width in [390.0, 1400.0]) {
+    testWidgets('Find opens and selects History search at $width', (
+      tester,
+    ) async {
+      final controller = HistoryController(_ScreenRepository());
+      final navigation = AppNavigationController();
+      addTearDown(controller.dispose);
+      addTearDown(navigation.dispose);
+      await tester.binding.setSurfaceSize(Size(width, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: Scaffold(
+            child: HistoryScreen(
+              controller: controller,
+              findRequests: navigation.historyFindRequests,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      navigation.findInHistory();
+      await tester.pumpAndSettle();
+      final search = find.byType(EditableText).first;
+      final editable = tester.widget<EditableText>(search);
+      expect(editable.focusNode.hasFocus, isTrue);
+      expect(navigation.historyFindRequests.value, isFalse);
+      await tester.enterText(search, 'clipboard');
+      await tester.pumpAndSettle();
+      navigation.findInHistory();
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<EditableText>(search).controller.selection,
+        const TextSelection(baseOffset: 0, extentOffset: 9),
+      );
+      expect(tester.takeException(), isNull);
+    });
+  }
   testWidgets(
     'bulk taps select confidential clips without revealing their spoiler',
     (tester) async {
@@ -1058,11 +1098,11 @@ void main() {
             )
             .style
             ?.fontSize,
-        theme.typography.xSmall.fontSize,
+        AppTypographySize.inspectorMetadata,
       );
       expect(
         tester.widget<SourceAppLabel>(sourceApp).style?.fontSize,
-        theme.typography.xSmall.fontSize,
+        AppTypographySize.inspectorMetadata,
       );
 
       final actionsTop = tester.getTopLeft(actions).dy;
@@ -1403,7 +1443,9 @@ void main() {
   testWidgets('keeps the mobile image fixed while its metadata table scrolls', (
     tester,
   ) async {
-    await tester.binding.setSurfaceSize(const Size(480, 800));
+    // Exercise overflow on a compact viewport instead of relying on a larger
+    // metadata font to make short values scroll.
+    await tester.binding.setSurfaceSize(const Size(480, 640));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final repository = _ScreenRepository()
       ..availableImagePreview = HistoryImagePreview(

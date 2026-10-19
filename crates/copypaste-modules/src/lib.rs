@@ -11,6 +11,7 @@ mod native;
 mod package;
 mod resources;
 mod semantic_search;
+mod staging_cleanup;
 mod sync;
 pub use copypaste_module_sdk::{
     ModuleCommand, ModuleField, ModuleFieldValue, ModuleOutput, ModuleTarget,

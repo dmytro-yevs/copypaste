@@ -16,6 +16,7 @@ class AppNavigationController extends ChangeNotifier {
   final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
   final ValueNotifier<double> visualPosition;
   final ValueNotifier<bool> pageGestureActive = ValueNotifier(false);
+  final ValueNotifier<bool> historyFindRequests = ValueNotifier(false);
   bool pageTransitionActive = false;
   final Map<AppDestination, ScrollController> _scrollControllers = {};
 
@@ -55,6 +56,7 @@ class AppNavigationController extends ChangeNotifier {
   void dispose() {
     visualPosition.dispose();
     pageGestureActive.dispose();
+    historyFindRequests.dispose();
     for (final controller in _scrollControllers.values) {
       controller.dispose();
     }
@@ -65,6 +67,12 @@ class AppNavigationController extends ChangeNotifier {
   bool _bottomOverlayOpen = false;
 
   AppDestination get selectedDestination => _selectedDestination;
+
+  void findInHistory() {
+    selectDestination(AppDestination.history);
+    historyFindRequests.value = true;
+  }
+
   bool get bottomOverlayOpen => _bottomOverlayOpen;
 
   void setBottomOverlayOpen(bool open) {

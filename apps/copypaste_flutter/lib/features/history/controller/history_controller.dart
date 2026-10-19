@@ -116,6 +116,19 @@ class HistoryController extends ChangeNotifier {
   Future<void>? _selectedDetailLoad;
   int? _selectedDetailLoadEpoch;
   String? _errorMessage;
+  String? _operationError;
+  int _operationErrorRevision = 0;
+  String? get operationError => _operationError;
+  int get operationErrorRevision => _operationErrorRevision;
+
+  void _reportOperationError(String message) {
+    _errorMessage = message;
+    _operationError = message;
+    _operationErrorRevision++;
+  }
+
+  String _fileFailure(Object error, String fallback) =>
+      error is HistoryFileOperationException ? error.message : fallback;
   int _skippedUndecryptable = 0;
   bool _isLoadingMore = false;
   bool _isDeletingAll = false;
@@ -231,6 +244,15 @@ class HistoryController extends ChangeNotifier {
   void cancelDownload(String id) {
     if (!_downloadMutations.contains(id) || !_cancelledDownloads.add(id)) {
       return;
+    }
+    final repository = _repository;
+    if (repository is HistoryFileDownloadCancellation) {
+      final cancellation = repository as HistoryFileDownloadCancellation;
+      unawaited(
+        Future<void>.sync(
+          () => cancellation.cancelFileDownload(id),
+        ).catchError((Object _) {}),
+      );
     }
     notifyListeners();
   }
@@ -871,10 +893,15 @@ class HistoryController extends ChangeNotifier {
         await _repository.copy(clip.id);
       }
       return true;
-    } catch (_) {
-      _errorMessage = plainText
-          ? 'Plain text could not be copied.'
-          : 'This clip could not be copied.';
+    } catch (error) {
+      _reportOperationError(
+        _fileFailure(
+          error,
+          plainText
+              ? 'Plain text could not be copied.'
+              : 'This clip could not be copied.',
+        ),
+      );
       notifyListeners();
       return false;
     }
@@ -917,8 +944,13 @@ class HistoryController extends ChangeNotifier {
       return HistoryFileDownloadResult.saved;
     } on HistoryFileTransferCancelled {
       return HistoryFileDownloadResult.cancelled;
-    } catch (_) {
-      _errorMessage = 'This file could not be downloaded.';
+    } catch (error) {
+      if (_cancelledDownloads.contains(clip.id)) {
+        return HistoryFileDownloadResult.cancelled;
+      }
+      _reportOperationError(
+        _fileFailure(error, 'This file could not be downloaded.'),
+      );
       _failedDownloads.clear();
       _failedDownloads.add(clip.id);
       notifyListeners();
@@ -939,8 +971,8 @@ class HistoryController extends ChangeNotifier {
     String? failure;
     try {
       failure = await _importFiles(await picker.chooseFiles());
-    } catch (_) {
-      failure = 'Files could not be selected. Try again.';
+    } catch (error) {
+      failure = _fileFailure(error, 'Files could not be selected. Try again.');
     } finally {
       await _finishFileImport(failure);
     }
@@ -967,6 +999,7 @@ class HistoryController extends ChangeNotifier {
     if (files.isEmpty) return null;
     var failed = 0;
     String? failedName;
+    String? firstReason;
     _errorMessage = null;
     for (final file in files) {
       try {
@@ -974,16 +1007,20 @@ class HistoryController extends ChangeNotifier {
           await _repository.importFile(file);
           _refreshAfterFileImport = true;
         }
-      } catch (_) {
+      } catch (error) {
         failed++;
         failedName ??= file.name;
+        firstReason ??= _fileFailure(
+          error,
+          'The selected file could not be read. Check access and available storage.',
+        );
       } finally {
         await _releaseImportFile(file);
       }
     }
     return failed == 0
         ? null
-        : '$failed of ${files.length} files could not be imported. First: $failedName. Check access and the History size limit.';
+        : '$failed of ${files.length} files could not be imported. First: $failedName. $firstReason';
   }
 
   Future<void> _releaseImportFile(HistoryImportFile file) async {
@@ -1006,7 +1043,7 @@ class HistoryController extends ChangeNotifier {
       }
     }
     if (_disposed) return;
-    if (failure != null) _errorMessage = failure;
+    if (failure != null) _reportOperationError(failure);
     notifyListeners();
   }
 

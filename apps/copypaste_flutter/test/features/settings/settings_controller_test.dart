@@ -24,6 +24,93 @@ import 'package:copypaste_flutter/features/modules/view/modules_settings_view.da
 
 void main() {
   testWidgets(
+    'restore confirmation survives cancellation and failure until restoration succeeds',
+    (tester) async {
+      final repository = _DialogRestoreRepository();
+      final picker = FakeSettingsFilePicker()..restorePath = null;
+      final controller = SettingsController(
+        screenshotProtection: FakeScreenshotProtection(),
+        repository: repository,
+        filePicker: picker,
+        notifications: FakeCaptureNotificationPort(),
+        captureRefreshInterval: Duration.zero,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await tester.pumpWidget(
+        ShadcnApp(
+          theme: AppTheme.light,
+          builder: AppTheme.builder,
+          home: SettingsScreen(controller: controller),
+        ),
+      );
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey<String>('settings-section-data')),
+          matching: find.text('Data'),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(AppMotion.emphasized);
+      await tester.ensureVisible(find.text('Restore'));
+      await tester.tap(find.text('Restore'));
+      await tester.pump();
+      await tester.pump(AppMotion.emphasized);
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('Restore'),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(AppMotion.emphasized);
+      expect(find.text('Replace local history?'), findsOneWidget);
+      expect(find.text('Action failed'), findsNothing);
+      expect(repository.restoreCalls, 0);
+
+      picker.restorePath = '/selected.copypaste-backup';
+      repository.failRestore = true;
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('Restore'),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(AppMotion.emphasized);
+      expect(find.text('Replace local history?'), findsOneWidget);
+      expect(find.text('Action failed'), findsOneWidget);
+
+      repository.failRestore = false;
+      repository.pending = Completer<void>();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('Restore'),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Action failed'), findsNothing);
+      expect(find.text('Replace local history?'), findsOneWidget);
+      expect(
+        tester.widget<Button>(find.widgetWithText(Button, 'Cancel')).onPressed,
+        isNull,
+      );
+      repository.pending!.complete();
+      await tester.pump();
+      await tester.pump(AppMotion.emphasized);
+      expect(repository.restoreCalls, 1);
+      expect(find.text('Replace local history?'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+  );
+
+  testWidgets(
     'mobile settings categories clear the floating navigation at every text scale',
     (tester) async {
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -136,7 +223,13 @@ void main() {
           if (slug == 'data') {
             await tester.tap(find.widgetWithText(Button, 'Restore'));
             await tester.pumpAndSettle();
-            expect(find.text('Choose backup'), findsOneWidget);
+            expect(
+              find.descendant(
+                of: find.byType(AlertDialog),
+                matching: find.text('Restore'),
+              ),
+              findsOneWidget,
+            );
             await tester.tap(find.widgetWithText(Button, 'Cancel'));
             await tester.pumpAndSettle();
           }
@@ -174,6 +267,9 @@ void main() {
     expect(controller.capture?.paused, isTrue);
     expect(await controller.setRetentionDays(30), isTrue);
     expect(controller.settings?.retentionDays, 30);
+    expect(await controller.setMaxFileSizeBytes(256 * 1024 * 1024), isTrue);
+    expect(controller.settings?.maxFileSizeBytes, 256 * 1024 * 1024);
+    expect(repository.currentSettings.maxFileSizeBytes, 256 * 1024 * 1024);
     expect(await controller.addExcludedApp('com.example.private'), isTrue);
     expect(controller.settings?.excludedAppIds, ['com.example.private']);
 
@@ -940,7 +1036,12 @@ void main() {
       expect(repository.restoreCalls, 0);
       await tester.tap(restore);
       await tester.pump();
-      await tester.tap(find.text('Choose backup'));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('Restore'),
+        ),
+      );
       await tester.pump(AppMotion.emphasized);
       await tester.pump();
       expect(repository.restoreCalls, 1);
@@ -1179,6 +1280,18 @@ void main() {
     await tester.pump(const Duration(seconds: 5));
     await tester.pump(const Duration(seconds: 1));
   });
+}
+
+class _DialogRestoreRepository extends FakeSettingsRepository {
+  bool failRestore = false;
+  Completer<void>? pending;
+
+  @override
+  Future<void> restoreHistory(String path) async {
+    if (failRestore) throw StateError('Backup unavailable');
+    await pending?.future;
+    await super.restoreHistory(path);
+  }
 }
 
 class _RejectedExclusionRepository extends FakeSettingsRepository {

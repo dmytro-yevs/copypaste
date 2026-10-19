@@ -20,6 +20,7 @@ use crate::settings::Settings;
 
 /// Everything the daemon shares between the capture loop and the IPC server.
 pub struct AppState {
+    pub file_downloads: copypaste_core::file_download::FileDownloads,
     pub modules: Arc<copypaste_modules::ModuleHost>,
     pub store: Store,
     pub spoilers: copypaste_core::spoiler::Spoilers,
@@ -90,6 +91,7 @@ impl AppState {
             }),
         );
         Self {
+            file_downloads: Default::default(),
             modules,
             store,
             instant_clipboard: Default::default(),
@@ -145,6 +147,7 @@ impl AppState {
     /// Every task finishes the unit of work it is in before observing this, so
     /// a capture already past the clipboard read still reaches the database.
     pub fn request_shutdown(&self) {
+        self.file_downloads.cancel_all();
         self.draining.store(true, Ordering::Release);
         // Fails only if every receiver has been dropped, which means the tasks
         // this would have stopped are already gone.

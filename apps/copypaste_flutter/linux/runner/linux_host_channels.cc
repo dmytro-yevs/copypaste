@@ -1115,29 +1115,27 @@ void quick_paste_context_call(FlMethodChannel* channel, FlMethodCall* call, gpoi
     fl_value_set_string_take(opened, "inspectorVisible", fl_value_new_bool(false));
     fl_method_channel_invoke_method(channel, "opened", opened, nullptr, nullptr, nullptr);
     fl_value_unref(opened);
-  } else if (is_method(call, "close") || is_method(call, "quit")) {
-    if (is_method(call, "quit") || presentation_matches(call)) {
-      const gchar* transaction = static_cast<const gchar*>(g_object_get_data(
-          G_OBJECT(state->application), "copypaste-transaction"));
-      const gchar* x11_window = static_cast<const gchar*>(g_object_get_data(
-          G_OBJECT(state->application), "copypaste-x11-window"));
-      if (x11_window != nullptr && x11_quick_paste != nullptr) {
-        x11_quick_paste->restore_focus(x11_window);
-      } else if (transaction != nullptr && *transaction != '\0') {
-        g_autoptr(GError) error = nullptr;
-        g_autoptr(GDBusConnection) bus = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, &error);
-        if (bus != nullptr) {
-          g_autoptr(GVariant) ignored = g_dbus_connection_call_sync(
-              bus, kBridgeName, kBridgePath, kBridgeInterface, "CancelQuickPaste",
-              g_variant_new("(s)", transaction), G_VARIANT_TYPE("(b)"),
-              G_DBUS_CALL_FLAGS_NONE, 2000, nullptr, &error);
-        }
-      }
-      success(call);
-      quit_context_when_idle();
-    } else {
-      success(call);
+  } else if (is_method(call, "close")) {
+    const bool matches = presentation_matches(call);
+    success(call);
+    if (matches) close_linux_quick_paste_context();
+  } else if (is_method(call, "quit")) {
+    const gchar* transaction = static_cast<const gchar*>(g_object_get_data(
+        G_OBJECT(state->application), "copypaste-transaction"));
+    g_autoptr(GError) error = nullptr;
+    g_autoptr(GDBusConnection) bus = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, &error);
+    g_autoptr(GVariant) result = bus == nullptr ? nullptr : g_dbus_connection_call_sync(
+        bus, kBridgeName, kBridgePath, kBridgeInterface, "Quit",
+        g_variant_new("(s)", transaction == nullptr ? "" : transaction),
+        G_VARIANT_TYPE("(b)"), G_DBUS_CALL_FLAGS_NONE, 2000, nullptr, &error);
+    gboolean quitting = FALSE;
+    if (result != nullptr) g_variant_get(result, "(b)", &quitting);
+    if (!quitting) {
+      failure(call, "quit_failed", "CopyPaste could not quit. Please try again.");
+      return;
     }
+    success(call);
+    quit_context_when_idle();
   } else if (is_method(call, "openMain") || is_method(call, "openSettings")) {
     const gchar* transaction = static_cast<const gchar*>(g_object_get_data(
         G_OBJECT(state->application), "copypaste-transaction"));
@@ -1534,7 +1532,8 @@ void bridge_call(GDBusConnection*, const gchar* sender, const gchar*, const gcha
     return;
   }
   if (g_strcmp0(method, "OpenMain") == 0 ||
-      g_strcmp0(method, "OpenSettings") == 0) {
+      g_strcmp0(method, "OpenSettings") == 0 ||
+      g_strcmp0(method, "Quit") == 0) {
     if (!authorised_child(sender)) {
       g_dbus_method_invocation_return_dbus_error(
           invocation, "app.copypaste.WaylandIntegration.Error.Unauthorized",
@@ -1547,6 +1546,12 @@ void bridge_call(GDBusConnection*, const gchar* sender, const gchar*, const gcha
         (bridge_transaction.empty() ? *transaction != '\0'
                                     : bridge_transaction != transaction)) {
       g_dbus_method_invocation_return_value(invocation, g_variant_new("(b)", FALSE));
+      return;
+    }
+    if (g_strcmp0(method, "Quit") == 0) {
+      g_dbus_method_invocation_return_value(invocation, g_variant_new("(b)", TRUE));
+      cancel_bridge(true, false);
+      quit_context_when_idle();
       return;
     }
     const bool settings = g_strcmp0(method, "OpenSettings") == 0;
@@ -1620,7 +1625,7 @@ void bridge_call(GDBusConnection*, const gchar* sender, const gchar*, const gcha
   } else if (cancelling) {
     // A child cancellation is copy-only: notify the companion so it restores
     // the previously focused window rather than treating it as a paste.
-    cancel_bridge(child);
+    cancel_bridge(child, !child);
     g_dbus_method_invocation_return_value(invocation, g_variant_new("(b)", TRUE));
   } else if (selection) {
     bridge_selection = G_DBUS_METHOD_INVOCATION(g_object_ref(invocation));
@@ -1646,6 +1651,7 @@ void bridge_bus_acquired(GDBusConnection* connection, const gchar*, gpointer) {
       "<method name='QuickPasteInputReady'><arg type='s' direction='in'/><arg type='b' direction='out'/></method>"
       "<method name='OpenMain'><arg type='s' direction='in'/><arg type='b' direction='out'/></method>"
       "<method name='OpenSettings'><arg type='s' direction='in'/><arg type='b' direction='out'/></method>"
+      "<method name='Quit'><arg type='s' direction='in'/><arg type='b' direction='out'/></method>"
       "<method name='StartQualification'><arg type='s' direction='in'/><arg type='s' direction='in'/><arg type='s' direction='out'/></method>"
       "<method name='AwaitQualification'><arg type='s' direction='out'/><arg type='s' direction='out'/><arg type='u' direction='out'/></method>"
       "<method name='QualificationEnabled'><arg type='b' direction='out'/></method>"
@@ -1691,6 +1697,35 @@ FlMethodChannel* create_channel(FlBinaryMessenger* messenger, const char* name,
 }
 
 }  // namespace
+
+void close_linux_quick_paste_context() {
+  if (state == nullptr || state->application == nullptr ||
+      g_object_get_data(G_OBJECT(state->application), "copypaste-quick-paste") == nullptr) return;
+  for (GList* item = gtk_application_get_windows(state->application);
+       item != nullptr; item = item->next) {
+    auto* window = GTK_WINDOW(item->data);
+    if (g_strcmp0(gtk_window_get_role(window), "copypaste-quick-paste") == 0) {
+      gtk_widget_hide(GTK_WIDGET(window));
+    }
+  }
+  const gchar* transaction = static_cast<const gchar*>(g_object_get_data(
+      G_OBJECT(state->application), "copypaste-transaction"));
+  const gchar* x11_window = static_cast<const gchar*>(g_object_get_data(
+      G_OBJECT(state->application), "copypaste-x11-window"));
+  if (x11_window != nullptr && x11_quick_paste != nullptr) {
+    x11_quick_paste->restore_focus(x11_window);
+  } else if (transaction != nullptr && *transaction != '\0') {
+    g_autoptr(GError) error = nullptr;
+    g_autoptr(GDBusConnection) bus = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, &error);
+    if (bus != nullptr) {
+      g_autoptr(GVariant) ignored = g_dbus_connection_call_sync(
+          bus, kBridgeName, kBridgePath, kBridgeInterface, "CancelQuickPaste",
+          g_variant_new("(s)", transaction), G_VARIANT_TYPE("(b)"),
+          G_DBUS_CALL_FLAGS_NONE, 2000, nullptr, &error);
+    }
+  }
+  quit_context_when_idle();
+}
 
 void register_linux_host_channels(FlBinaryMessenger* messenger,
                                   GtkApplication* application) {

@@ -48,14 +48,22 @@ impl ClipboardPayload {
                 content_type: row.content_type.clone(),
                 bytes: binary()?,
             }),
-            ContentClass::File => Ok(Self::File {
-                bytes: binary()?,
-                metadata: row
+            ContentClass::File => {
+                let bytes = binary()?;
+                let metadata = row
                     .payload_metadata
                     .as_deref()
                     .and_then(|metadata| PayloadMetadata::from_json(metadata, &row.content_type))
-                    .and_then(|metadata| metadata.file),
-            }),
+                    .and_then(|metadata| metadata.file);
+                if let Some(transfer) = metadata.as_ref().and_then(|m| m.transfer.as_ref()) {
+                    let descriptor: copypaste_payload::FileTransfer =
+                        serde_json::from_slice(&bytes).map_err(|_| CryptoError::AuthFailed)?;
+                    if &descriptor != transfer || !descriptor.is_valid() {
+                        return Err(CryptoError::AuthFailed);
+                    }
+                }
+                Ok(Self::File { bytes, metadata })
+            }
             ContentClass::Other => Ok(Self::Unsupported { bytes: binary()? }),
         }
     }
@@ -125,6 +133,12 @@ impl ClipboardPayload {
     /// The destination must not exist so a stale dialog result can
     /// never overwrite an unrelated file.
     pub fn save_file_to(&self, destination: &std::path::Path) -> std::io::Result<()> {
+        if crate::file_transfer::offer(self).is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "Download this file before saving its contents.",
+            ));
+        }
         let (Self::Image { bytes, .. } | Self::File { bytes, .. }) = self else {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -149,6 +163,9 @@ impl ClipboardPayload {
 
     #[must_use]
     pub fn byte_len(&self) -> usize {
+        if let Some(offer) = crate::file_transfer::offer(self) {
+            return usize::try_from(offer.size_bytes).unwrap_or(usize::MAX);
+        }
         match self {
             Self::Text(text) => text.len(),
             Self::Image { bytes, .. } | Self::File { bytes, .. } | Self::Unsupported { bytes } => {

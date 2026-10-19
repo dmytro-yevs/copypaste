@@ -24,6 +24,7 @@ mod activity;
 mod channel;
 mod dial;
 mod error;
+mod files;
 mod listen;
 mod pairing;
 mod pairing_ceremony;
@@ -362,6 +363,10 @@ impl<S: SyncSource> ActiveSyncSource<'_, S> {
 }
 
 impl<S: SyncSource> SyncSource for ActiveSyncSource<'_, S> {
+    fn file_chunk(&self, id: &str, sha256: &str, index: u64) -> Result<Vec<u8>, SyncError> {
+        let _operation = self.operation()?;
+        self.source.file_chunk(id, sha256, index)
+    }
     fn device_id(&self) -> String {
         self.source.device_id()
     }
@@ -439,6 +444,7 @@ pub struct Node {
     listen_addr: RwLock<Option<SocketAddr>>,
     bound_addr: RwLock<Option<SocketAddr>>,
     sessions: Arc<Semaphore>,
+    file_transfers: Semaphore,
     /// Established or dialling history sessions, indexed by the non-secret
     /// pairing id. A removal cancels every direction that already holds its
     /// authenticated transport; new handshakes are still controlled by
@@ -495,6 +501,7 @@ impl Node {
             listen_addr: RwLock::new(None),
             bound_addr: RwLock::new(None),
             sessions: Arc::new(Semaphore::new(MAX_CONCURRENT_PEER_SESSIONS)),
+            file_transfers: Semaphore::new(1),
             active_syncs: Mutex::new(HashMap::new()),
             next_active_sync: AtomicU64::new(1),
             browse_until_ms: AtomicI64::new(0),

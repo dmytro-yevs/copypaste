@@ -138,7 +138,9 @@ fn class_clause(classes: &[&str]) -> Option<&'static str> {
         ["text"] => Some("(ci.content_type = 'text' OR ci.content_type LIKE 'text/%')"),
         ["image"] => Some("ci.content_type LIKE 'image/%'"),
         ["file"] => Some("ci.content_type = 'file'"),
-        ["other"] => Some("NOT (ci.content_type = 'text' OR ci.content_type LIKE 'text/%' OR ci.content_type LIKE 'image/%' OR ci.content_type = 'file')"),
+        ["other"] => Some(
+            "NOT (ci.content_type = 'text' OR ci.content_type LIKE 'text/%' OR ci.content_type LIKE 'image/%' OR ci.content_type = 'file')",
+        ),
         _ => Some("("),
     }
 }
@@ -227,7 +229,10 @@ impl Store {
     /// Labels are mandatory: unknown device/app metadata is deliberately not
     /// returned as a selectable raw identifier. `local_device_id` maps the
     /// storage representation for local captures (an empty origin id) to the
-    /// stable id clients receive on [`copypaste_ipc::Item`].
+    /// stable id clients receive on [`copypaste_ipc::Item`]. Grouping uses that
+    /// resolved identity because a newer version can return through sync with
+    /// an explicit local id. Current local metadata takes precedence over the
+    /// device registry for both representations.
     pub fn history_facets(
         &self,
         local_device_id: &str,
@@ -237,14 +242,15 @@ impl Store {
         let conn = self.conn()?;
         let mut origins = Vec::new();
         let mut origin_stmt = conn.prepare(
-            "SELECT ci.origin_device_id, dn.name, dc.value \
+            "SELECT CASE WHEN ci.origin_device_id = '' THEN ?1 ELSE ci.origin_device_id END \
+                 AS resolved_device_id, dn.name, dc.value \
              FROM clipboard_items ci \
              LEFT JOIN sync_device_name dn ON dn.device_id = ci.origin_device_id \
              LEFT JOIN sync_device_state dc ON dc.key = 'device_class:' || ci.origin_device_id \
              WHERE ci.deleted = 0 \
-             GROUP BY ci.origin_device_id, dn.name, dc.value",
+             GROUP BY resolved_device_id",
         )?;
-        let origin_rows = origin_stmt.query_map([], |row| {
+        let origin_rows = origin_stmt.query_map([local_device_id], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Option<String>>(1)?,
@@ -252,11 +258,11 @@ impl Store {
             ))
         })?;
         for row in origin_rows {
-            let (stored_id, known_label, known_class) = row?;
-            let (id, label) = if stored_id.is_empty() {
-                (local_device_id, Some(local_device_name))
+            let (id, known_label, known_class) = row?;
+            let label = if id == local_device_id {
+                Some(local_device_name)
             } else {
-                (stored_id.as_str(), known_label.as_deref())
+                known_label.as_deref()
             };
             if !id.is_empty() {
                 if let Some(label) = label.filter(|label| !label.trim().is_empty()) {
@@ -334,8 +340,9 @@ impl Store {
     /// Device-aware counterpart of [`Self::query_history_bounded`].
     ///
     /// Local captures are stored with an empty origin id, while IPC correctly
-    /// presents the real local device id. The transport owner supplies that id
-    /// here so selecting the local facet filters the same identity users see.
+    /// presents the real local device id. Synced versions can also store the
+    /// explicit local id. The transport owner supplies that id here so selecting
+    /// the local facet includes both representations of the same identity.
     pub fn query_history_bounded_for_device(
         &self,
         query: &HistoryQuery,
@@ -431,10 +438,13 @@ impl Store {
             filters.push_str(" AND ci.pinned = 1");
         }
         if let Some(origin) = &query.origin_device_id {
+            values.push(Value::Text(origin.clone()));
             if Some(origin.as_str()) == local_device_id {
-                filters.push_str(" AND ci.origin_device_id = ''");
+                filters.push_str(&format!(
+                    " AND ci.origin_device_id IN ('', ?{})",
+                    values.len()
+                ));
             } else {
-                values.push(Value::Text(origin.clone()));
                 filters.push_str(&format!(" AND ci.origin_device_id = ?{}", values.len()));
             }
         }
@@ -1204,6 +1214,64 @@ mod tests {
             .items
             .iter()
             .all(|item| item.origin_device_id.is_empty()));
+    }
+
+    #[test]
+    fn device_facets_preserve_distinct_ids_with_the_same_name() {
+        for include_empty_origin in [false, true] {
+            let store = store();
+            if include_empty_origin {
+                store.insert(item("local capture", T0)).unwrap();
+            }
+            let returned = store
+                .insert(item("returned local version", T0 + 1))
+                .unwrap();
+            let remote = store.insert(item("another phone", T0 + 2)).unwrap();
+            let conn = store.conn().unwrap();
+            for (item_id, device_id) in [
+                (&returned.id, "local-device"),
+                (&remote.id, "another-phone"),
+            ] {
+                conn.execute(
+                    "UPDATE clipboard_items SET origin_device_id = ?2 WHERE id = ?1",
+                    rusqlite::params![item_id, device_id],
+                )
+                .unwrap();
+            }
+            drop(conn);
+            store
+                .record_device_name("local-device", "Old name")
+                .unwrap();
+            store
+                .record_device_class("local-device", copypaste_ipc::DeviceClass::Desktop)
+                .unwrap();
+            store
+                .record_device_name("another-phone", "CPH2305")
+                .unwrap();
+            store
+                .record_device_class("another-phone", copypaste_ipc::DeviceClass::Phone)
+                .unwrap();
+
+            let facets = store
+                .history_facets("local-device", "CPH2305", copypaste_ipc::DeviceClass::Phone)
+                .unwrap();
+            assert_eq!(
+                facets.origin_devices,
+                vec![
+                    HistoryDeviceFacet {
+                        id: "another-phone".into(),
+                        label: "CPH2305".into(),
+                        device_class: copypaste_ipc::DeviceClass::Phone,
+                    },
+                    HistoryDeviceFacet {
+                        id: "local-device".into(),
+                        label: "CPH2305".into(),
+                        device_class: copypaste_ipc::DeviceClass::Phone,
+                    },
+                ],
+                "empty local origin present: {include_empty_origin}"
+            );
+        }
     }
 
     #[test]

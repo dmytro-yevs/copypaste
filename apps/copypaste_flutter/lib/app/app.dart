@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import '../features/modules/controller/modules_controller.dart';
@@ -17,6 +18,7 @@ import '../features/settings/view/sync_header_action.dart';
 import '../features/settings/view/settings_screen.dart';
 import '../features/update/controller/app_update_controller.dart';
 import '../platform/desktop/desktop_window_controller.dart';
+import '../platform/desktop/desktop_shortcuts.dart';
 import '../shared/state_view.dart';
 import 'navigation/navigation.dart';
 import 'shell/shell.dart';
@@ -63,7 +65,20 @@ class CopyPasteApp extends StatelessWidget {
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: AppTheme.mode,
-      builder: AppTheme.builder,
+      builder: (context, child) => AppTheme.builder(
+        context,
+        CallbackShortcuts(
+          bindings: desktopWindowBindings(
+            onClose: desktopWindow?.handleCloseRequested,
+            onQuit: desktopWindow?.quit,
+            onToggleFullScreen: desktopWindow?.toggleFullScreen,
+          ),
+          child: Shortcuts(
+            shortcuts: desktopTextEditingShortcuts,
+            child: child ?? const SizedBox.shrink(),
+          ),
+        ),
+      ),
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       supportedLocales: ShadcnLocalizations.supportedLocales,
       home: Builder(
@@ -78,6 +93,18 @@ class CopyPasteApp extends StatelessWidget {
             final shell = AppShell(
               controller: navigation,
               unifiedTitleBar: unifiedTitleBar,
+              onCloseWindow: desktopWindow?.handleCloseRequested,
+              onQuit: desktopWindow?.quit,
+              onToggleFullScreen: desktopWindow?.toggleFullScreen,
+              onExitFullScreen: desktopWindow?.exitFullScreen,
+              onRefresh: historyController == null
+                  ? null
+                  : () {
+                      if (navigation.selectedDestination ==
+                          AppDestination.history) {
+                        unawaited(historyController!.reload());
+                      }
+                    },
               headerActions: {
                 if (settingsController != null)
                   AppDestination.history: [
@@ -126,6 +153,7 @@ class CopyPasteApp extends StatelessWidget {
                       )
                     : HistoryScreen(
                         controller: historyController!,
+                        findRequests: navigation.historyFindRequests,
                         onDrawerVisibilityChanged:
                             navigation.setBottomOverlayOpen,
                       ),

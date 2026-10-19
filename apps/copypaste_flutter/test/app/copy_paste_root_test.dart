@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -5,25 +6,79 @@ import 'package:flutter/foundation.dart' show SynchronousFuture;
 
 import 'package:copypaste_flutter/main.dart';
 import 'package:copypaste_flutter/app/app.dart';
+import 'package:copypaste_flutter/app/theme/app_overlays.dart';
+import 'package:copypaste_flutter/shared/state_view.dart';
 import 'package:copypaste_flutter/features/onboarding/controller/windows_onboarding_controller.dart';
 import 'package:copypaste_flutter/features/onboarding/controller/linux_onboarding_controller.dart';
-import 'package:copypaste_flutter/features/onboarding/repository/windows_onboarding_store.dart';
-import 'package:copypaste_flutter/features/onboarding/repository/linux_onboarding_store.dart';
+import 'package:copypaste_flutter/features/onboarding/repository/onboarding_store.dart';
 import 'package:copypaste_flutter/app/shell/macos_window_header.dart';
 import 'package:copypaste_flutter/features/onboarding/controller/android_onboarding_controller.dart';
 import 'package:copypaste_flutter/features/onboarding/controller/macos_onboarding_controller.dart';
 import 'package:copypaste_flutter/features/onboarding/repository/android_onboarding_store.dart';
-import 'package:copypaste_flutter/features/onboarding/repository/macos_onboarding_store.dart';
 import 'package:copypaste_flutter/platform/android/android_capture_setup_gateway.dart';
 import 'package:copypaste_flutter/platform/desktop/desktop_window_controller.dart';
 import 'package:copypaste_flutter/platform/desktop/flutter_desktop_window_host.dart';
 import 'package:copypaste_flutter/platform/macos/macos_setup_gateway.dart';
 import 'package:copypaste_flutter/platform/permissions/linux_integration.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
+import 'package:copypaste_flutter/app/navigation/navigation.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 import 'package:window_manager/window_manager.dart';
 
 void main() {
+  for (final platform in [
+    TargetPlatform.macOS,
+    TargetPlatform.windows,
+    TargetPlatform.linux,
+  ]) {
+    testWidgets(
+      'window quit command reaches the host while a dialog owns focus',
+      (tester) async {
+        final host = _FakeDesktopWindowHost();
+        final window = DesktopWindowController(
+          host: host,
+          geometryStore: const _NoopGeometryStore(),
+        );
+        final navigation = AppNavigationController();
+        try {
+          await tester.pumpWidget(
+            CopyPasteApp(navigation: navigation, desktopWindow: window),
+          );
+          await tester.pumpAndSettle();
+          final context = tester.element(find.byType(StateView).first);
+          unawaited(
+            AppOverlays.showDialog<void>(
+              context,
+              builder: (_) =>
+                  const AlertDialog(title: Text('Keyboard fixture')),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final modifier = platform == TargetPlatform.macOS
+              ? LogicalKeyboardKey.metaLeft
+              : LogicalKeyboardKey.controlLeft;
+          await tester.sendKeyDownEvent(modifier);
+          await tester.sendKeyEvent(LogicalKeyboardKey.keyQ);
+          await tester.sendKeyUpEvent(modifier);
+          await tester.pumpAndSettle();
+          expect(host.quitCalls, 1);
+          expect(find.text('Keyboard fixture'), findsOneWidget);
+          await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+          await tester.pumpAndSettle();
+          expect(find.text('Keyboard fixture'), findsNothing);
+        } finally {
+          await tester.pumpWidget(const SizedBox.shrink());
+          final disposal = window.dispose();
+          // Drain controller futures while still inside the widget test clock.
+          await tester.pump();
+          await disposal;
+          navigation.dispose();
+        }
+      },
+      variant: TargetPlatformVariant({platform}),
+    );
+  }
   testWidgets(
     'hidden timeout unloads screens and images, then native focus restores navigation',
     (tester) async {
@@ -113,9 +168,7 @@ void main() {
   testWidgets('Windows onboarding finishes on the main History screen', (
     tester,
   ) async {
-    final windows = WindowsOnboardingController(
-      store: MemoryWindowsOnboardingStore(),
-    );
+    final windows = WindowsOnboardingController(store: MemoryOnboardingStore());
     final macos = _completedOnboarding();
     addTearDown(windows.dispose);
     addTearDown(macos.dispose);
@@ -162,7 +215,7 @@ void main() {
     tester,
   ) async {
     final onboarding = MacosOnboardingController(
-      store: MemoryMacosOnboardingStore(),
+      store: MemoryOnboardingStore(),
       setup: _GrantedMacosSetupGateway(),
     );
     addTearDown(onboarding.dispose);
@@ -275,7 +328,7 @@ void main() {
   ) async {
     final host = _FakeDesktopWindowHost();
     final onboarding = MacosOnboardingController(
-      store: MemoryMacosOnboardingStore(),
+      store: MemoryOnboardingStore(),
       setup: _GrantedMacosSetupGateway(),
     );
     addTearDown(onboarding.dispose);
@@ -336,7 +389,7 @@ void main() {
 
 MacosOnboardingController _completedOnboarding() {
   return MacosOnboardingController(
-    store: MemoryMacosOnboardingStore(complete: true),
+    store: MemoryOnboardingStore(complete: true),
     setup: _GrantedMacosSetupGateway(),
   );
 }
@@ -418,6 +471,13 @@ class _NoopGeometryStore implements DesktopWindowGeometryStore {
 }
 
 class _FakeDesktopWindowHost implements DesktopWindowHost {
+  int quitCalls = 0;
+  @override
+  Future<bool> isFullScreen() async => false;
+
+  @override
+  Future<void> setFullScreen(bool enabled) async {}
+
   bool taskbarVisible = true;
   bool trayVisible = true;
 
@@ -484,7 +544,9 @@ class _FakeDesktopWindowHost implements DesktopWindowHost {
   }
 
   @override
-  Future<void> quit() async {}
+  Future<void> quit() async {
+    quitCalls += 1;
+  }
 
   @override
   void setBoundsChangedHandler(Future<void> Function() onBoundsChanged) {}
@@ -531,7 +593,7 @@ class _QuitHookRecordingController extends DesktopWindowController {
 
 WindowsOnboardingController _completedWindowsOnboarding() {
   final controller = WindowsOnboardingController(
-    store: MemoryWindowsOnboardingStore(complete: true),
+    store: MemoryOnboardingStore(complete: true),
   );
   addTearDown(controller.dispose);
   return controller;
@@ -539,7 +601,7 @@ WindowsOnboardingController _completedWindowsOnboarding() {
 
 LinuxOnboardingController _completedLinuxOnboarding() {
   final controller = LinuxOnboardingController(
-    store: MemoryLinuxOnboardingStore(complete: true),
+    store: MemoryOnboardingStore(complete: true),
     integration: _ReadyLinuxIntegration(),
   );
   addTearDown(controller.dispose);

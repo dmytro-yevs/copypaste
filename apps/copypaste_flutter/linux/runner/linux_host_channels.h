@@ -8,4 +8,6 @@ void register_linux_host_channels(FlBinaryMessenger* messenger,
 
 void deliver_linux_pairing_uri(const gchar* uri);
 
+void close_linux_quick_paste_context();
+
 #endif  // FLUTTER_LINUX_HOST_CHANNELS_H_

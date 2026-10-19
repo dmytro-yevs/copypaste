@@ -27,10 +27,10 @@ use copypaste_p2p::peers::PeerStore;
 use copypaste_p2p::sync::SyncOutcome;
 use copypaste_p2p::Node;
 use tokio::net::TcpListener;
-use tokio::sync::{watch, Notify};
+use tokio::sync::watch;
 use tracing::warn;
 
-use copypaste_core::sync::{RoundGate, RoundGuard};
+use copypaste_core::sync::RoundGuard;
 
 use crate::cadence::Idle;
 use crate::sync::peer_source;
@@ -39,23 +39,7 @@ use crate::AppState;
 /// The node, plus what only a long-lived daemon has: a cadence and a wake.
 pub struct P2p {
     node: Arc<Node>,
-    /// Woken by a local capture and by `copypaste sync`, so neither waits out
-    /// the idle interval. Mirrors `Cloud::wake`.
-    wake: Notify,
-    /// The idle cadence [`poll::run`] waits on, capped at the shared
-    /// **non-push** ceiling.
-    ///
-    /// `Idle::default()`'s five minutes is only defensible for cloud sync
-    /// because `cloud::realtime` carries the latency in front of it. Peer sync
-    /// has no push channel at all, so the poll is the sole path by which one
-    /// idle laptop learns the other copied something.
-    idle: Idle,
-    /// One outbound pass over the peers at a time. Two passes dial the same
-    /// peers at once, and the second one is refused by the far side's session
-    /// limit rather than doing anything useful.
-    rounds: RoundGate,
-    /// Cancels outbound sessions for the current enabled cycle.
-    sync_cycle: SyncCycle,
+    driver: Arc<copypaste_sync::peer_driver::PeerSyncDriver>,
 }
 
 impl std::fmt::Debug for P2p {
@@ -73,13 +57,7 @@ impl P2p {
     ) -> Self {
         Self {
             node: Arc::new(Node::new(peers, discovery, port, lan_visible)),
-            wake: Notify::new(),
-            idle: Idle::new(
-                crate::cadence::MIN_POLL_INTERVAL,
-                crate::cadence::MAX_POLL_INTERVAL_WITHOUT_PUSH,
-            ),
-            rounds: RoundGate::new(),
-            sync_cycle: SyncCycle::new(),
+            driver: copypaste_sync::peer_driver::PeerSyncDriver::new(),
         }
     }
 
@@ -119,45 +97,42 @@ impl P2p {
     }
 
     pub fn idle(&self) -> &Idle {
-        &self.idle
+        &self.driver.cadence
     }
 
     /// The permit for one outbound pass, or `None` when one is running.
+    #[cfg(test)]
     pub(crate) fn try_begin_round(&self) -> Option<RoundGuard> {
-        self.rounds.try_enter()
+        self.driver.rounds.try_enter()
     }
 
     /// The permit for one outbound pass, waiting for any running pass first.
     pub(crate) async fn begin_round(&self) -> RoundGuard {
-        self.rounds.enter().await
+        self.driver.rounds.enter().await
     }
 
     #[cfg(test)]
     pub(crate) fn round_in_flight(&self) -> bool {
-        self.rounds.is_running()
+        self.driver.rounds.is_running()
     }
 
     /// Ask the peer sync loop to run now.
     pub fn wake(&self) {
-        self.idle.reset();
-        self.wake.notify_one();
+        self.driver.wake();
     }
 
     /// Resolves when someone calls [`P2p::wake`]. `Notify` stores one permit,
     /// so a wake during a round is not lost.
     pub async fn wake_signal(&self) {
-        self.wake.notified().await;
+        self.driver.wake_signal().await;
     }
 
     pub(crate) fn sync_enabled_changed(&self, enabled: bool) {
-        self.sync_cycle.set_enabled(enabled);
-        if enabled {
-            self.wake();
-        }
+        self.driver.set_enabled(enabled);
     }
 
     pub(crate) fn sync_cycle(&self) -> SyncCycle {
-        self.sync_cycle.clone()
+        self.driver.cycle.clone()
     }
 }
 

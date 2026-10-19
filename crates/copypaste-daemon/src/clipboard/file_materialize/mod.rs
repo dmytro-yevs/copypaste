@@ -111,7 +111,7 @@ impl StagingArea {
         let _access = self.access.lock().unwrap_or_else(|held| held.into_inner());
         retired = self.ensure_cleanup()?;
         debug_assert!(!is_running(&retired), "a running worker was retired");
-        self.stage(bytes, filename)
+        self.stage(bytes, filename, metadata)
     }
 
     /// A *running* cleanup worker must exist before any plaintext is created,
@@ -180,8 +180,11 @@ impl StagingArea {
         Ok(retired)
     }
 
-    fn stage(&self, bytes: &[u8], filename: &str) -> io::Result<PathBuf> {
-        let content_id = copypaste_core::binary_item_id(bytes);
+    fn stage(&self, bytes: &[u8], filename: &str, metadata: &FileMetadata) -> io::Result<PathBuf> {
+        let content_id = metadata.transfer.as_ref().map_or_else(
+            || copypaste_core::binary_item_id(bytes),
+            |offer| offer.sha256.clone(),
+        );
         let content_fd = open_or_create_content_dir(&self.root_fd, &content_id)?;
 
         match open_regular_at(&content_fd, filename) {
@@ -202,7 +205,17 @@ impl StagingArea {
         )?;
         let mut temporary = File::from(temporary_fd);
         let write_result = (|| {
-            temporary.write_all(bytes)?;
+            if metadata.transfer.is_some() {
+                let mut input = File::open(
+                    metadata
+                        .source_reference
+                        .as_deref()
+                        .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?,
+                )?;
+                std::io::copy(&mut input, &mut temporary)?;
+            } else {
+                temporary.write_all(bytes)?;
+            }
             if let Some(injected) = injected_failure() {
                 return Err(injected);
             }
@@ -503,6 +516,7 @@ mod tests {
 
     fn metadata(filename: impl Into<String>) -> FileMetadata {
         FileMetadata {
+            transfer: None,
             filename: filename.into(),
             mime_type: "application/octet-stream".to_string(),
             source_reference: None,
@@ -974,11 +988,19 @@ mod tests {
 
         // The replacement is a real owner, not just an occupant of the slot.
         let expired = SystemTime::now() - Duration::from_secs(601);
-        set_modified(&first, expired);
-        set_modified(&second, expired);
-        wait_until_gone(&second, Duration::from_secs(10));
+        {
+            let _access = staging
+                .access
+                .lock()
+                .unwrap_or_else(|held| held.into_inner());
+            set_modified(&first, expired);
+            set_modified(&second, expired);
+        }
+        // Directory traversal order is unspecified. One unlinked file does
+        // not mean that the worker has finished removing the other one.
         assert!(
-            !first.exists() && !second.exists(),
+            wait_until(Duration::from_secs(10), || !first.exists()
+                && !second.exists()),
             "the replacement never enforced the deadline"
         );
     }

@@ -304,22 +304,12 @@ pub trait ClipboardSource: Send {
                 content_type,
                 bytes,
             } => self.set_binary_contents(item_id, content_type, bytes, None),
-            ClipboardPayload::File { bytes, metadata } => {
-                if let Some(source_reference) = metadata
-                    .as_ref()
-                    .and_then(|metadata| metadata.source_reference.as_deref())
-                {
-                    self.set_contents(source_reference)
-                        .map_err(|_| ClipboardWriteError::Failed)
-                } else {
-                    self.set_binary_contents(
-                        item_id,
-                        copypaste_ipc::content_type::FILE,
-                        bytes,
-                        metadata.as_ref(),
-                    )
-                }
-            }
+            ClipboardPayload::File { bytes, metadata } => self.set_binary_contents(
+                item_id,
+                copypaste_ipc::content_type::FILE,
+                bytes,
+                metadata.as_ref(),
+            ),
             ClipboardPayload::Unsupported { .. } => Err(ClipboardWriteError::UnsupportedContent),
         }
     }
@@ -446,13 +436,12 @@ mod tests {
 
     /// And nothing it passes can outgrow a reply frame.
     #[test]
-    fn the_read_gate_stays_inside_the_wire_contract() {
+    fn text_and_image_read_gates_stay_inside_the_wire_contract() {
         let settings = ConfigData::default();
         let policy = CapturePolicy::new(&settings);
         for content_type in [
             copypaste_ipc::content_type::TEXT,
             copypaste_ipc::content_type::IMAGE_PNG,
-            copypaste_ipc::content_type::FILE,
         ] {
             assert_eq!(policy.limit_bytes(content_type), MAX_CAPTURE_BYTES as u64);
         }
@@ -592,8 +581,8 @@ mod tests {
                 copypaste_ipc::content_type::FILE,
             )
             .unwrap();
-        assert_eq!(writes.text.as_deref(), Some("/old/deleted/file"));
-        assert!(writes.binary.is_none());
+        assert!(writes.text.is_none());
+        assert_eq!(writes.binary, Some(vec![7]));
         writes
             .write_payload(
                 "id",
