@@ -14,3 +14,9 @@ Stable publication requires the exact-artifact native qualification described in
 [native qualification](native-qualification.md). Experimental targets remain
 unqualified for stable desktop parity. Fedora RPM installation evidence does not
 establish complete KDE or Wayland desktop qualification.
+
+Screenshot blocking is unavailable on Linux and must be shown as an explicit
+platform limitation. A session's clipboard access alone does not establish
+source-application attribution, privacy-marker enforcement, or Quick Paste input.
+Use the runtime capability report and the maintained native qualification matrix
+for those guarantees.
