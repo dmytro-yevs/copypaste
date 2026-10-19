@@ -30,7 +30,9 @@ pub(super) const MSG_EMPTY_CONTENT: &str = "content must not be empty";
 pub(super) const MSG_STORAGE: &str = "the history database could not be accessed";
 pub(super) const MSG_DECRYPT: &str = "the stored item could not be decrypted";
 pub(super) const MSG_ENCRYPT: &str = "the item could not be encrypted";
+#[cfg(test)]
 pub(super) const MSG_CLIPBOARD: &str = "the system clipboard could not be written";
+#[cfg(test)]
 pub(super) const MSG_UNSUPPORTED_CONTENT: &str =
     "this item has no supported representation for that clipboard action";
 pub(super) const MSG_CONTENT_TOO_LARGE: &str =
@@ -50,16 +52,25 @@ pub(super) const MSG_BAD_HISTORY_QUERY: &str = "that history filter or ordering 
 pub(super) const MSG_IMPORT_EMPTY: &str = "there is nothing to import";
 pub(super) const MSG_IMPORT_TOO_MANY: &str =
     "too many items in one import; split the file into smaller batches";
+#[cfg(test)]
 pub(super) const MSG_BAD_PATH: &str = "a destination is required";
+#[cfg(test)]
 pub(super) const MSG_BACKUP_EXISTS: &str =
     "a file is already there; choose a name that does not exist yet";
+#[cfg(test)]
 pub(super) const MSG_BACKUP_NO_DIR: &str = "the folder to write the backup into does not exist";
+#[cfg(test)]
 pub(super) const MSG_BACKUP_FAILED: &str = "the backup could not be written";
+#[cfg(test)]
 pub(super) const MSG_SAVE_FILE_FAILED: &str = "the file could not be saved";
+#[cfg(test)]
 pub(super) const MSG_NEEDS_CONFIRM: &str = "restoring replaces this device's history; confirm it";
+#[cfg(test)]
 pub(super) const MSG_RESTORE_NOT_FOUND: &str = "there is no backup file there";
+#[cfg(test)]
 pub(super) const MSG_RESTORE_NOT_A_BACKUP: &str =
     "that file is not a CopyPaste backup for this device, or it is damaged; nothing was changed";
+#[cfg(test)]
 pub(super) const MSG_RESTORE_FAILED: &str =
     "the restore could not be completed; this device's history is unchanged";
 

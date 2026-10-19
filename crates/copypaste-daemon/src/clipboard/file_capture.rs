@@ -1,8 +1,12 @@
 //! Descriptor-bounded local file capture. Errors never carry source data.
 
+#[cfg(test)]
 use std::fs::{File, Metadata};
+#[cfg(test)]
 use std::io::{self, Read};
+#[cfg(test)]
 use std::path::Path;
+#[cfg(test)]
 use std::time::SystemTime;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -10,13 +14,18 @@ pub(crate) enum FileReadError {
     OpenPermissionDenied,
     OpenNotFound,
     OpenFailed,
+    #[cfg(test)]
     StatFailed,
     NonRegular,
     TooLarge,
+    #[cfg(test)]
     UnsupportedEmptyFile,
+    #[cfg(test)]
     AllocationFailed,
+    #[cfg(test)]
     ReadPermissionDenied,
     ReadFailed,
+    #[cfg(test)]
     SourceChanged,
 }
 
@@ -26,13 +35,18 @@ impl FileReadError {
             Self::OpenPermissionDenied => "file capture input rejected: open permission denied",
             Self::OpenNotFound => "file capture input rejected: source not found",
             Self::OpenFailed => "file capture input rejected: open failed",
+            #[cfg(test)]
             Self::StatFailed => "file capture input rejected: descriptor metadata unavailable",
             Self::NonRegular => "file capture input rejected: source is not a regular file",
             Self::TooLarge => "file capture input rejected: size limit exceeded",
+            #[cfg(test)]
             Self::UnsupportedEmptyFile => "file capture input rejected: empty file unsupported",
+            #[cfg(test)]
             Self::AllocationFailed => "file capture input rejected: allocation failed",
+            #[cfg(test)]
             Self::ReadPermissionDenied => "file capture input rejected: read permission denied",
             Self::ReadFailed => "file capture input rejected: read failed",
+            #[cfg(test)]
             Self::SourceChanged => "file capture input rejected: source changed during read",
         }
     }
@@ -48,7 +62,12 @@ pub(crate) fn reset_test_open_count() {
 pub(crate) fn test_open_count() -> usize {
     TEST_OPEN_COUNT.with(std::cell::Cell::get)
 }
+#[cfg(test)]
+pub(crate) fn note_test_open() {
+    TEST_OPEN_COUNT.with(|count| count.set(count.get() + 1));
+}
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Snapshot {
     regular: bool,
@@ -59,6 +78,7 @@ struct Snapshot {
     #[cfg(not(unix))]
     created: Option<SystemTime>,
 }
+#[cfg(test)]
 impl From<Metadata> for Snapshot {
     fn from(metadata: Metadata) -> Self {
         Self {
@@ -83,6 +103,7 @@ impl From<Metadata> for Snapshot {
     }
 }
 
+#[cfg(test)]
 fn open_error(error: io::Error) -> FileReadError {
     match error.kind() {
         io::ErrorKind::PermissionDenied => FileReadError::OpenPermissionDenied,
@@ -91,6 +112,7 @@ fn open_error(error: io::Error) -> FileReadError {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn read(path: &Path, cap: u64) -> Result<Vec<u8>, FileReadError> {
     #[cfg(test)]
     TEST_OPEN_COUNT.with(|count| count.set(count.get() + 1));
@@ -118,6 +140,7 @@ pub(crate) fn read(path: &Path, cap: u64) -> Result<Vec<u8>, FileReadError> {
     })
 }
 
+#[cfg(test)]
 fn read_bounded<R: Read>(
     reader: &mut R,
     before: Snapshot,

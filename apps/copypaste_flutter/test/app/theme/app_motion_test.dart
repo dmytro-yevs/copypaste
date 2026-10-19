@@ -73,6 +73,54 @@ void main() {
     expect(resolvedEffects, same(AppMotion.fadeIn));
   });
 
+  for (final reducedMotion in [false, true]) {
+    testWidgets('keyboard insets honor reduced motion: $reducedMotion', (
+      tester,
+    ) async {
+      const contentKey = ValueKey('keyboard-aware-content');
+      Widget overlay(double inset) => MediaQuery(
+        data: MediaQueryData(
+          disableAnimations: reducedMotion,
+          viewInsets: EdgeInsets.only(bottom: inset),
+        ),
+        child: Directionality(
+          textDirection: TextDirection.ltr,
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: Builder(
+              builder: (context) => AppMotion.keyboardInsets(
+                context,
+                child: const SizedBox(key: contentKey, width: 40, height: 40),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(overlay(0));
+      final initialBottom = tester.getBottomLeft(find.byKey(contentKey)).dy;
+      await tester.pumpWidget(overlay(240));
+      if (reducedMotion) {
+        expect(
+          tester.getBottomLeft(find.byKey(contentKey)).dy,
+          initialBottom - 240,
+        );
+      } else {
+        expect(tester.getBottomLeft(find.byKey(contentKey)).dy, initialBottom);
+        await tester.pump(AppMotion.standard ~/ 2);
+        expect(
+          tester.getBottomLeft(find.byKey(contentKey)).dy,
+          inExclusiveRange(initialBottom - 240, initialBottom),
+        );
+      }
+      await tester.pumpAndSettle();
+      expect(
+        tester.getBottomLeft(find.byKey(contentKey)).dy,
+        initialBottom - 240,
+      );
+    });
+  }
+
   test('production motion uses AppMotion instead of local implementations', () {
     final localTiming = RegExp(
       r'\b(?:duration|transitionDuration|reverseTransitionDuration|showDuration|dismissDuration)\s*:\s*(?:const\s+)?Duration\(',

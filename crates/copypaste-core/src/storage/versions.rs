@@ -344,6 +344,10 @@ impl Store {
             return Ok(false);
         }
         tx.commit()?;
+        drop(conn);
+        if incoming.deleted {
+            self.request_space_reclaim();
+        }
         Ok(true)
     }
 
@@ -376,6 +380,10 @@ impl Store {
             stored.push(written);
         }
         tx.commit()?;
+        drop(conn);
+        if incoming.iter().any(|item| item.deleted) {
+            self.request_space_reclaim();
+        }
         Ok(stored)
     }
 }

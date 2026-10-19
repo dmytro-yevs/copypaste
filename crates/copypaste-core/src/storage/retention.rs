@@ -172,6 +172,8 @@ impl Store {
 
         let removed = hard_delete_in_tx(&tx, &victims)?;
         tx.commit()?;
+        drop(conn);
+        self.request_space_reclaim();
         Ok(removed)
     }
 
@@ -202,6 +204,8 @@ impl Store {
 
         let removed = hard_delete_in_tx(&tx, &victims)?;
         tx.commit()?;
+        drop(conn);
+        self.request_space_reclaim();
         Ok(removed)
     }
 
@@ -228,6 +232,7 @@ impl Store {
             let batch = victims.len() as i64;
             removed += hard_delete_in_tx(&tx, &victims)?;
             tx.commit()?;
+            self.request_space_reclaim();
             if batch < EVICTION_BATCH {
                 return Ok(removed);
             }

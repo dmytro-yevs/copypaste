@@ -560,6 +560,7 @@ pub struct RuntimeSettingsHealth {
 
 #[derive(Debug, Clone)]
 pub struct RuntimeSettingsData {
+    pub max_file_size_bytes: u64,
     pub skip_secret: bool,
     pub skip_transient: bool,
     pub retention_days: u32,
@@ -575,6 +576,7 @@ pub struct RuntimeSettingsData {
 
 #[derive(Debug, Clone, Default)]
 pub struct RuntimeSettingsPatch {
+    pub max_file_size_bytes: Option<u64>,
     pub skip_secret: Option<bool>,
     pub skip_transient: Option<bool>,
     pub retention_days: Option<u32>,
@@ -722,6 +724,7 @@ pub async fn update_runtime_settings(
         patch: copypaste_ipc::ConfigPatch {
             retention_days: patch.retention_days,
             storage_quota_bytes: patch.storage_quota_bytes,
+            max_file_size_bytes: patch.max_file_size_bytes,
             skip_secret: patch.skip_secret,
             skip_transient: patch.skip_transient,
             excluded_app_bundle_ids: patch.excluded_app_ids,
@@ -994,12 +997,29 @@ pub async fn copy_clip_as_plain_text(id: String) -> Result<Clip, RuntimeError> {
     item_response(Method::CopyPlainText { id }).await
 }
 
-pub async fn save_clip_file(id: String, dest_path: String) -> Result<(), RuntimeError> {
-    empty_response(Method::SaveFile { id, dest_path }).await
+pub async fn save_clip_file(
+    id: String,
+    dest_path: String,
+    download_token: Option<String>,
+) -> Result<(), RuntimeError> {
+    empty_response(Method::SaveFile {
+        id,
+        dest_path,
+        download_token,
+    })
+    .await
 }
 
-pub fn history_file_import_max_bytes() -> u64 {
-    copypaste_ipc::MAX_CONTENT_BYTES as u64
+pub async fn cancel_clip_file_download(id: String) -> Result<(), RuntimeError> {
+    empty_response(Method::CancelFileDownload { id }).await
+}
+
+pub async fn history_file_import_max_bytes() -> Result<u64, RuntimeError> {
+    let response = client::request(Method::GetConfig).await?;
+    match response.data {
+        Some(ResponseData::Config(config)) => Ok(config.config.max_file_size_bytes),
+        _ => Err(RuntimeError::internal()),
+    }
 }
 
 pub async fn import_clip_file(
@@ -1233,6 +1253,7 @@ async fn cloud_status_response(method: Method) -> Result<CloudAccountStatus, Run
 
 fn runtime_settings(config: copypaste_ipc::ConfigData) -> RuntimeSettingsData {
     RuntimeSettingsData {
+        max_file_size_bytes: config.max_file_size_bytes,
         skip_secret: config.skip_secret,
         skip_transient: config.skip_transient,
         retention_days: config.retention_days,

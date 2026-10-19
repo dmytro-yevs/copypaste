@@ -1,3 +1,4 @@
+import '../../../platform/files/temporary_artifacts.dart';
 import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
@@ -20,7 +21,8 @@ class TemporaryHistoryImageInput implements HistoryImageInput {
   @override
   Future<SelectedModuleInput> prepare(HistoryClip clip) async {
     final root = await _temporaryDirectory();
-    final directory = await root.createTemp('copypaste-ocr-');
+    final lease = await TemporaryDirectoryLease.create(root, 'copypaste-ocr-');
+    final directory = lease.directory;
     final extension = switch (clip.contentType) {
       'image/jpeg' => 'jpg',
       'image/webp' => 'webp',
@@ -35,10 +37,10 @@ class TemporaryHistoryImageInput implements HistoryImageInput {
       return SelectedModuleInput(
         path: path,
         name: name,
-        dispose: () => directory.delete(recursive: true),
+        dispose: lease.dispose,
       );
     } catch (_) {
-      await directory.delete(recursive: true);
+      await lease.dispose();
       rethrow;
     }
   }

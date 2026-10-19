@@ -28,6 +28,27 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
+  test('native Find routes to the shared History search action', () async {
+    var finds = 0;
+    host.setFindInHistoryHandler(() => finds += 1);
+    final completion = Completer<void>();
+    var acknowledged = false;
+    await messenger.handlePlatformMessage(
+      channel.name,
+      const StandardMethodCodec().encodeMethodCall(
+        const MethodCall('findInHistory'),
+      ),
+      (reply) {
+        acknowledged =
+            const StandardMethodCodec().decodeEnvelope(reply!) == true;
+        completion.complete();
+      },
+    );
+    await completion.future;
+    expect(acknowledged, isTrue);
+    expect(finds, 1);
+  });
+
   for (final method in ['prepare', 'open']) {
     test('$method accepts native true', () async {
       await (method == 'prepare' ? host.prepare() : host.open());

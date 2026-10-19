@@ -1,3 +1,4 @@
+import '../../../shared/format_bytes.dart';
 import 'package:pub_semver/pub_semver.dart';
 
 import 'module_models.dart';
@@ -80,7 +81,7 @@ class MarketplaceModule {
       artifact != null && availability == ModuleAvailability.available;
 
   String? get downloadSize =>
-      artifact == null ? null : formatModuleSize(artifact!.sizeBytes);
+      artifact == null ? null : formatBytes(artifact!.sizeBytes);
   String? get appRequirement {
     final constraint = appVersions;
     if (constraint == null || constraint.isAny) return null;
@@ -105,10 +106,4 @@ class MarketplaceModule {
       version.preRelease.length == 1 && version.preRelease.single == 0
       ? '${version.major}.${version.minor}.${version.patch}'
       : version.toString();
-}
-
-String formatModuleSize(int bytes) {
-  if (bytes < 1024) return '$bytes B';
-  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-  return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 }

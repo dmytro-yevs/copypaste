@@ -83,6 +83,9 @@ class RuntimeSettingsRepository implements SettingsRepository {
   Future<RuntimeSettings> updateSettings(RuntimeSettingsChange change) async {
     final updated = await runtime.updateRuntimeSettings(
       patch: runtime.RuntimeSettingsPatch(
+        maxFileSizeBytes: change.maxFileSizeBytes == null
+            ? null
+            : BigInt.from(change.maxFileSizeBytes!),
         skipSecret: change.skipSecret,
         skipTransient: change.skipTransient,
         retentionDays: change.retentionDays,
@@ -173,6 +176,7 @@ class RuntimeSettingsRepository implements SettingsRepository {
 
   RuntimeSettings _settings(runtime.RuntimeSettingsData settings) =>
       RuntimeSettings(
+        maxFileSizeBytes: settings.maxFileSizeBytes.toInt(),
         retentionDays: settings.retentionDays,
         storageQuotaBytes: settings.storageQuotaBytes.toInt(),
         skipSecret: settings.skipSecret,

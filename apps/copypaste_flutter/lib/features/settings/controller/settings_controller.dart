@@ -198,6 +198,9 @@ class SettingsController extends ChangeNotifier {
   Future<bool> setStorageQuotaBytes(int value) =>
       _update(RuntimeSettingsChange(storageQuotaBytes: value));
 
+  Future<bool> setMaxFileSizeBytes(int value) =>
+      _update(RuntimeSettingsChange(maxFileSizeBytes: value));
+
   Future<bool> addExcludedApp(String rawValue) async {
     final value = rawValue.trim();
     final settings = _settings;
@@ -304,12 +307,18 @@ class SettingsController extends ChangeNotifier {
     });
   }
 
-  Future<bool> restoreBackup() async {
-    final path = await _filePicker.chooseRestorePath();
-    if (path == null) return false;
-    return _run(() async {
+  /// Returns null when the native picker is cancelled without restoring.
+  Future<bool?> restoreBackup() async {
+    var cancelled = false;
+    final restored = await _run(() async {
+      final path = await _filePicker.chooseRestorePath();
+      if (path == null) {
+        cancelled = true;
+        return;
+      }
       await _repository.restoreHistory(path);
     });
+    return cancelled ? null : restored;
   }
 
   void clearMessages() {

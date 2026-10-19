@@ -1,10 +1,28 @@
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
+import '../../app/theme/app_tokens.dart';
 import 'devices_gateway.dart';
 
 /// The shared visual mapping for typed device metadata.
 abstract final class DevicePresentation {
   static const IconData collectionIcon = LucideIcons.monitorSmartphone;
+
+  static String connectionLabel(DeviceConnectionState state) => switch (state) {
+    DeviceConnectionState.online => 'Online',
+    DeviceConnectionState.offline => 'Offline',
+    DeviceConnectionState.visible => 'Visible',
+    DeviceConnectionState.notSeen => 'Not seen',
+    DeviceConnectionState.unknown => 'Unknown',
+  };
+
+  static AppStatusTone connectionTone(DeviceConnectionState state) =>
+      switch (state) {
+        DeviceConnectionState.online => AppStatusTone.success,
+        DeviceConnectionState.offline => AppStatusTone.error,
+        DeviceConnectionState.visible => AppStatusTone.info,
+        DeviceConnectionState.notSeen ||
+        DeviceConnectionState.unknown => AppStatusTone.muted,
+      };
 
   static IconData pairingEntryIcon(PairingEntryMode? mode) => switch (mode) {
     PairingEntryMode.invite => LucideIcons.qrCode,

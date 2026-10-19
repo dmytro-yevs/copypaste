@@ -79,10 +79,13 @@ impl NoiseChannel {
 }
 
 impl SyncChannel for NoiseChannel {
-    async fn send(&mut self, msg: SyncMessage) -> Result<(), SyncError> {
+    async fn send(&mut self, mut msg: SyncMessage) -> Result<(), SyncError> {
         // Handed down verbatim, so what reaches the wire is exactly the bytes
         // `encode` validated.
         let bytes = Zeroizing::new(msg.encode()?);
+        if let SyncMessage::FileChunk { bytes, .. } = &mut msg {
+            zeroize::Zeroize::zeroize(bytes);
+        }
 
         self.session
             .send_bytes(bytes)

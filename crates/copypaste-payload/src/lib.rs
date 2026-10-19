@@ -16,6 +16,27 @@ pub struct FileMetadata {
     /// It is optional so file clips written by older versions remain readable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_reference: Option<String>,
+    /// An authenticated offer; ordinary history sync carries no file bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transfer: Option<FileTransfer>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileTransfer {
+    pub size_bytes: u64,
+    pub sha256: String,
+}
+
+impl FileTransfer {
+    pub fn is_valid(&self) -> bool {
+        self.size_bytes <= i64::MAX as u64
+            && self.sha256.len() == 64
+            && self
+                .sha256
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    }
 }
 
 impl FileMetadata {
@@ -54,6 +75,7 @@ impl FileMetadata {
             filename,
             mime_type,
             source_reference,
+            transfer: None,
         })
     }
 
@@ -74,6 +96,7 @@ impl FileMetadata {
             self.source_reference.clone(),
         )
         .is_some()
+            && self.transfer.as_ref().is_none_or(FileTransfer::is_valid)
     }
 }
 

@@ -235,8 +235,18 @@ Future<Clip> copyClip({required String id}) =>
 Future<Clip> copyClipAsPlainText({required String id}) =>
     RustLib.instance.api.crateApiCopyClipAsPlainText(id: id);
 
-Future<void> saveClipFile({required String id, required String destPath}) =>
-    RustLib.instance.api.crateApiSaveClipFile(id: id, destPath: destPath);
+Future<void> saveClipFile({
+  required String id,
+  required String destPath,
+  String? downloadToken,
+}) => RustLib.instance.api.crateApiSaveClipFile(
+  id: id,
+  destPath: destPath,
+  downloadToken: downloadToken,
+);
+
+Future<void> cancelClipFileDownload({required String id}) =>
+    RustLib.instance.api.crateApiCancelClipFileDownload(id: id);
 
 Future<BigInt> historyFileImportMaxBytes() =>
     RustLib.instance.api.crateApiHistoryFileImportMaxBytes();
@@ -1251,6 +1261,7 @@ class RuntimePeerSyncStatus {
 }
 
 class RuntimeSettingsData {
+  final BigInt maxFileSizeBytes;
   final bool skipSecret;
   final bool skipTransient;
   final int retentionDays;
@@ -1264,6 +1275,7 @@ class RuntimeSettingsData {
   final bool soundOnCopy;
 
   const RuntimeSettingsData({
+    required this.maxFileSizeBytes,
     required this.skipSecret,
     required this.skipTransient,
     required this.retentionDays,
@@ -1279,6 +1291,7 @@ class RuntimeSettingsData {
 
   @override
   int get hashCode =>
+      maxFileSizeBytes.hashCode ^
       skipSecret.hashCode ^
       skipTransient.hashCode ^
       retentionDays.hashCode ^
@@ -1296,6 +1309,7 @@ class RuntimeSettingsData {
       identical(this, other) ||
       other is RuntimeSettingsData &&
           runtimeType == other.runtimeType &&
+          maxFileSizeBytes == other.maxFileSizeBytes &&
           skipSecret == other.skipSecret &&
           skipTransient == other.skipTransient &&
           retentionDays == other.retentionDays &&
@@ -1333,6 +1347,7 @@ class RuntimeSettingsHealth {
 }
 
 class RuntimeSettingsPatch {
+  final BigInt? maxFileSizeBytes;
   final bool? skipSecret;
   final bool? skipTransient;
   final int? retentionDays;
@@ -1346,6 +1361,7 @@ class RuntimeSettingsPatch {
   final bool? soundOnCopy;
 
   const RuntimeSettingsPatch({
+    this.maxFileSizeBytes,
     this.skipSecret,
     this.skipTransient,
     this.retentionDays,
@@ -1364,6 +1380,7 @@ class RuntimeSettingsPatch {
 
   @override
   int get hashCode =>
+      maxFileSizeBytes.hashCode ^
       skipSecret.hashCode ^
       skipTransient.hashCode ^
       retentionDays.hashCode ^
@@ -1381,6 +1398,7 @@ class RuntimeSettingsPatch {
       identical(this, other) ||
       other is RuntimeSettingsPatch &&
           runtimeType == other.runtimeType &&
+          maxFileSizeBytes == other.maxFileSizeBytes &&
           skipSecret == other.skipSecret &&
           skipTransient == other.skipTransient &&
           retentionDays == other.retentionDays &&

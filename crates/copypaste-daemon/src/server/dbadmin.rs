@@ -1,118 +1,36 @@
-//! IPC adaptation for the core encrypted backup and atomic restore API.
-//!
-//! Restore leaves `sync_device_state` untouched, so this device keeps its
-//! identity, cloud session and settings. Every failure maps to a fixed sentence
-//! because a client-visible path discloses the local username.
-
-use std::path::{Path, PathBuf};
-
-use copypaste_core::RestoreError;
-use copypaste_ipc::{BackupData, ErrorCode, Response, ResponseData};
-use tracing::{info, warn};
-
+//! IPC envelope and runtime effects for the shared backup policy.
+use crate::AppState;
 #[cfg(test)]
 use copypaste_core::storage::open_validated;
+#[cfg(test)]
+use copypaste_ipc::ErrorCode;
+use copypaste_ipc::{BackupData, Response, ResponseData};
+#[cfg(test)]
+use std::path::Path;
 
-use super::messages::{
-    MSG_BACKUP_EXISTS, MSG_BACKUP_FAILED, MSG_BACKUP_NO_DIR, MSG_BAD_PATH, MSG_NEEDS_CONFIRM,
-    MSG_RESTORE_FAILED, MSG_RESTORE_NOT_A_BACKUP, MSG_RESTORE_NOT_FOUND,
-};
-use crate::AppState;
-
-pub(super) fn backup(state: &AppState, id: u64, dest_path: &str) -> Response {
-    let Some(dest) = clean_path(dest_path) else {
-        return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_PATH);
-    };
-    // Refusing to overwrite is not politeness: the obvious mistake is passing
-    // the live database's own path, and `VACUUM INTO` onto it would be a wipe.
-    if dest.exists() {
-        return Response::err(id, ErrorCode::InvalidRequest, MSG_BACKUP_EXISTS);
+pub(super) fn backup(state: &AppState, id: u64, destination: &str) -> Response {
+    match copypaste_core::history_backup::backup(&state.store, destination) {
+        Ok(size_bytes) => Response::ok(id, ResponseData::Backup(BackupData { size_bytes })),
+        Err(error) => error.response(id),
     }
-    if !dest.parent().is_some_and(Path::is_dir) {
-        return Response::err(id, ErrorCode::InvalidRequest, MSG_BACKUP_NO_DIR);
-    }
-
-    if let Err(e) = state.store.backup_to(&dest) {
-        // A partial file from a failed VACUUM would look like a backup.
-        let _ = std::fs::remove_file(&dest);
-        return failed(id, "write the backup", e, MSG_BACKUP_FAILED);
-    }
-
-    // The backup is ciphertext, but it is a whole history: owner-only, like the
-    // database and the socket.
-    if let Err(e) = set_owner_only(&dest) {
-        warn!(error = %e, "could not restrict the backup to the owner");
-    }
-
-    let size_bytes = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
-    info!(size_bytes, "wrote a database backup");
-    Response::ok(id, ResponseData::Backup(BackupData { size_bytes }))
 }
-
-pub(super) fn restore(state: &AppState, id: u64, src_path: &str, confirm: bool) -> Response {
-    if !confirm {
-        return Response::err(id, ErrorCode::InvalidRequest, MSG_NEEDS_CONFIRM);
-    }
-    let Some(src) = clean_path(src_path) else {
-        return Response::err(id, ErrorCode::InvalidRequest, MSG_BAD_PATH);
-    };
-    if !src.is_file() {
-        return Response::err(id, ErrorCode::NotFound, MSG_RESTORE_NOT_FOUND);
-    }
-    match state.store.restore_from(&src, &state.keyring.db_key()) {
-        Ok(()) => {
-            // Every restored row is "written below the cloud cursor" as far as
-            // the upload floor is concerned — their stamps are older than it —
-            // so without this the restored history would never leave the device
-            // again.
-            if let Ok(Some(oldest)) = state.store.oldest_version_ms() {
+pub(super) fn restore(state: &AppState, id: u64, source: &str, confirm: bool) -> Response {
+    match copypaste_core::history_backup::restore(
+        &state.store,
+        &state.keyring.db_key(),
+        source,
+        confirm,
+    ) {
+        Ok(floor) => {
+            if let Some(oldest) = floor {
                 state.modules.note_version(oldest);
                 state.p2p.node().note_local_version(oldest);
             }
             state.note_local_change();
-            info!("restored the history database from a backup");
             Response::ok(id, ResponseData::Empty {})
         }
-        Err(RestoreError::InvalidBackup(error)) => {
-            warn!(error = ?error, "the backup failed validation");
-            Response::err(id, ErrorCode::InvalidRequest, MSG_RESTORE_NOT_A_BACKUP)
-        }
-        Err(RestoreError::Failed(error)) => {
-            warn!(error = ?error, "restore failed; the database is unchanged");
-            Response::err(id, ErrorCode::Internal, MSG_RESTORE_FAILED)
-        }
+        Err(error) => error.response(id),
     }
-}
-
-/// Reject a path that is empty or only whitespace before it reaches the
-/// filesystem, where the failure would be an errno rather than a sentence.
-fn clean_path(raw: &str) -> Option<PathBuf> {
-    let trimmed = raw.trim();
-    (!trimmed.is_empty()).then(|| PathBuf::from(trimmed))
-}
-
-#[cfg(unix)]
-fn set_owner_only(path: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-}
-
-/// **Unverified off unix.** The backup inherits the destination directory's
-/// ACL, which is not the same guarantee; restricting it needs a DACL rather
-/// than a mode, and that is a decision, not a cfg.
-#[cfg(not(unix))]
-fn set_owner_only(_path: &Path) -> std::io::Result<()> {
-    Ok(())
-}
-
-fn failed(
-    id: u64,
-    operation: &'static str,
-    error: impl std::fmt::Display,
-    message: &'static str,
-) -> Response {
-    warn!(operation, error = %error, "database administration failed");
-    Response::err(id, ErrorCode::Internal, message)
 }
 
 #[cfg(test)]

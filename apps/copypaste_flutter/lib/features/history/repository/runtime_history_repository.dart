@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
+import 'package:flutter/services.dart';
 
 import 'package:copypaste_flutter/generated/api.dart' as runtime;
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
@@ -15,7 +17,10 @@ import 'history_file_importer.dart';
 /// Runtime startup and its isolated debug profile are owned by app integration.
 /// This adapter never starts a daemon and never supplies a fallback data source.
 class RuntimeHistoryRepository
-    implements HistoryRepository, HistorySpoilerRepository {
+    implements
+        HistoryRepository,
+        HistorySpoilerRepository,
+        HistoryFileDownloadCancellation {
   RuntimeHistoryRepository({RuntimeWatchLease? watchLease})
     : _watchLease =
           watchLease ??
@@ -26,7 +31,7 @@ class RuntimeHistoryRepository
 
   final RuntimeWatchLease _watchLease;
   bool _disposed = false;
-  Future<BigInt>? _fileImportMaxBytes;
+  final _downloadTokens = <String, String>{};
 
   @override
   Stream<HistoryRuntimeEvent> watch() {
@@ -140,7 +145,7 @@ class RuntimeHistoryRepository
   @override
   Future<void> copy(String id) async {
     _ensureActive();
-    await runtime.copyClip(id: id);
+    await _fileOperation(() => runtime.copyClip(id: id));
   }
 
   @override
@@ -152,22 +157,55 @@ class RuntimeHistoryRepository
   @override
   Future<void> saveFile(String id, String destinationPath) async {
     _ensureActive();
-    await runtime.saveClipFile(id: id, destPath: destinationPath);
+    final random = Random.secure();
+    final token = base64UrlEncode(
+      List<int>.generate(16, (_) => random.nextInt(256)),
+    );
+    _downloadTokens[id] = token;
+    try {
+      await _fileOperation(
+        () => runtime.saveClipFile(
+          id: id,
+          destPath: destinationPath,
+          downloadToken: token,
+        ),
+      );
+    } finally {
+      if (_downloadTokens[id] == token) _downloadTokens.remove(id);
+    }
+  }
+
+  @override
+  Future<void> cancelFileDownload(String id) async {
+    final token = _downloadTokens[id];
+    if (token != null) await runtime.cancelClipFileDownload(id: token);
+  }
+
+  Future<T> _fileOperation<T>(Future<T> Function() operation) async {
+    try {
+      return await operation();
+    } on runtime.RuntimeError catch (error) {
+      throw HistoryFileOperationException(error.message);
+    } on PlatformException catch (error) {
+      throw HistoryFileOperationException(
+        error.message ?? 'The selected file could not be accessed.',
+      );
+    }
   }
 
   @override
   Future<void> importFile(HistoryImportFile file) async {
     _ensureActive();
-    final maxBytes =
-        (await (_fileImportMaxBytes ??= runtime.historyFileImportMaxBytes()))
-            .toInt();
-    final path = await file.prepare(maxBytes);
-    await runtime.importClipFile(
-      path: path,
-      filename: file.name,
-      mimeType: file.mimeType,
-      sourceReference: file.sourceReference,
-    );
+    await _fileOperation(() async {
+      final maxBytes = (await runtime.historyFileImportMaxBytes()).toInt();
+      final path = await file.prepare(maxBytes);
+      await runtime.importClipFile(
+        path: path,
+        filename: file.name,
+        mimeType: file.mimeType,
+        sourceReference: file.sourceReference,
+      );
+    });
   }
 
   @override
