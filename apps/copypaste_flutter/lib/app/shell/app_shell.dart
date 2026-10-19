@@ -11,6 +11,7 @@ import '../theme/app_tokens.dart';
 import 'macos_window_header.dart';
 import 'app_mobile_navigation.dart';
 import '../navigation/app_destination_viewport.dart';
+import '../../platform/desktop/desktop_shortcuts.dart';
 
 /// Hosts persistent primary destinations inside the adaptive shadcn navigation.
 class AppShell extends StatefulWidget {
@@ -20,6 +21,11 @@ class AppShell extends StatefulWidget {
     required this.destinations,
     this.headerActions = const {},
     this.unifiedTitleBar = false,
+    this.onCloseWindow,
+    this.onQuit,
+    this.onToggleFullScreen,
+    this.onExitFullScreen,
+    this.onRefresh,
   }) : assert(
          destinations.length == AppDestination.values.length,
          'Provide a root widget for every app destination.',
@@ -32,6 +38,11 @@ class AppShell extends StatefulWidget {
   final Map<AppDestination, Widget> destinations;
   final Map<AppDestination, List<Widget>> headerActions;
   final bool unifiedTitleBar;
+  final Future<void> Function()? onCloseWindow;
+  final Future<void> Function()? onQuit;
+  final Future<void> Function()? onToggleFullScreen;
+  final Future<void> Function()? onExitFullScreen;
+  final VoidCallback? onRefresh;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -250,6 +261,39 @@ class _AppShellState extends State<AppShell> {
 
             return CallbackShortcuts(
               bindings: <ShortcutActivator, VoidCallback>{
+                ...desktopWindowBindings(
+                  onClose: widget.onCloseWindow,
+                  onQuit: widget.onQuit,
+                  onToggleFullScreen: widget.onToggleFullScreen,
+                ),
+                if (usesDesktopShortcuts) ...{
+                  if (defaultTargetPlatform == TargetPlatform.macOS)
+                    desktopShortcut(LogicalKeyboardKey.bracketLeft): () =>
+                        unawaited(widget.controller.handleEscape()),
+                  desktopShortcut(LogicalKeyboardKey.keyF):
+                      widget.controller.findInHistory,
+                  if (widget.onRefresh != null) ...{
+                    desktopShortcut(LogicalKeyboardKey.keyR): widget.onRefresh!,
+                    if (defaultTargetPlatform != TargetPlatform.macOS)
+                      const SingleActivator(
+                        LogicalKeyboardKey.f5,
+                        includeRepeats: false,
+                      ): widget.onRefresh!,
+                  },
+                  if (defaultTargetPlatform != TargetPlatform.macOS) ...{
+                    const SingleActivator(
+                      LogicalKeyboardKey.browserBack,
+                      includeRepeats: false,
+                    ): () =>
+                        unawaited(widget.controller.handleEscape()),
+                    const SingleActivator(
+                      LogicalKeyboardKey.arrowLeft,
+                      alt: true,
+                      includeRepeats: false,
+                    ): () =>
+                        unawaited(widget.controller.handleEscape()),
+                  },
+                },
                 SingleActivator(
                   LogicalKeyboardKey.comma,
                   meta: defaultTargetPlatform == TargetPlatform.macOS,
@@ -257,8 +301,10 @@ class _AppShellState extends State<AppShell> {
                 ): () => _selectDestination(
                   const ValueKey<AppDestination>(AppDestination.settings),
                 ),
-                const SingleActivator(LogicalKeyboardKey.escape): () {
-                  widget.controller.handleEscape();
+                const SingleActivator(LogicalKeyboardKey.escape): () async {
+                  if (!await widget.controller.handleEscape()) {
+                    await widget.onExitFullScreen?.call();
+                  }
                 },
               },
               child: Focus(

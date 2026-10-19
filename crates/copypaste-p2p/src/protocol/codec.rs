@@ -199,6 +199,32 @@ impl SyncMessage {
                 }
             }
             Self::Done => {}
+            Self::FileRequest {
+                protocol_version,
+                item_id,
+                sha256,
+                index,
+            } => {
+                check_protocol_version(*protocol_version)?;
+                check_id("item_id", item_id)?;
+                if sha256.len() != 64
+                    || !sha256
+                        .bytes()
+                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                    || *index > i64::MAX as u64 / super::FILE_CHUNK_BYTES as u64
+                {
+                    return Err(ProtocolError::Decode("invalid file request".into()));
+                }
+            }
+            Self::FileChunk { bytes, .. } => {
+                if bytes.len() > super::FILE_CHUNK_BYTES {
+                    return Err(ProtocolError::ContentTooLarge {
+                        bytes: bytes.len(),
+                        max: super::FILE_CHUNK_BYTES,
+                    });
+                }
+            }
+            Self::FileUnavailable => {}
         }
         Ok(())
     }

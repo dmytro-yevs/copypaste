@@ -60,6 +60,10 @@ abstract interface class DesktopWindowHost implements DesktopVisibilityHost {
 
   Future<void> quit();
 
+  Future<bool> isFullScreen();
+
+  Future<void> setFullScreen(bool enabled);
+
   void setBoundsChangedHandler(Future<void> Function() onBoundsChanged);
 
   void setVisibilityChangedHandler(ValueChanged<bool>? onVisibilityChanged);
@@ -68,6 +72,28 @@ abstract interface class DesktopWindowHost implements DesktopVisibilityHost {
 }
 
 class DesktopWindowController {
+  bool _changingFullScreen = false;
+
+  Future<void> toggleFullScreen() => _changeFullScreen();
+
+  Future<void> exitFullScreen() => _changeFullScreen(enabled: false);
+
+  Future<void> _changeFullScreen({bool? enabled}) async {
+    if (_disposed || _isQuitting || _changingFullScreen) return;
+    _changingFullScreen = true;
+    try {
+      final current = await _host.isFullScreen();
+      final next = enabled ?? !current;
+      if (!_disposed && !_isQuitting && next != current) {
+        await _host.setFullScreen(next);
+      }
+    } catch (_) {
+      _setIssue(DesktopWindowSetupIssue.windowUnavailable);
+    } finally {
+      _changingFullScreen = false;
+    }
+  }
+
   DesktopWindowController({
     required DesktopWindowHost host,
     required DesktopWindowGeometryStore geometryStore,
@@ -363,6 +389,8 @@ class DesktopWindowController {
         return;
       }
       try {
+        // Fullscreen is a presentation state, not the user's normal geometry.
+        if (await _host.isFullScreen()) return;
         final bounds = await _host.getBounds();
         if (_persistenceReady && !_disposed) {
           await _geometryStore.write(bounds);

@@ -145,8 +145,16 @@ class DevicesController extends ChangeNotifier {
   bool get canConfirmPairing => _verificationCode != null;
 
   /// Display-safe peer connection state. Expired observations fail closed.
-  String peerStateLabel(DevicePeer peer) =>
-      _presenceLabel(peer.details?.presence, fallbackOnline: peer.online);
+  DeviceConnectionState peerConnectionState(DevicePeer peer) =>
+      _connectionState(peer.details?.presence, fallbackOnline: peer.online);
+
+  String peerStateLabel(DevicePeer peer) => switch (peerConnectionState(peer)) {
+    DeviceConnectionState.online => 'Available',
+    DeviceConnectionState.offline => 'Offline',
+    DeviceConnectionState.visible => 'Visible now',
+    DeviceConnectionState.notSeen => 'Not seen',
+    DeviceConnectionState.unknown => 'Status unknown',
+  };
 
   /// Display-safe RTT. A missing or expired observation is never rendered.
   String peerLatencyLabel(DevicePeer peer) => _latencyLabel(peer.details);
@@ -204,23 +212,27 @@ class DevicesController extends ChangeNotifier {
     _notify();
   }
 
-  String _presenceLabel(
+  DeviceConnectionState _connectionState(
     DevicePresenceObservation? presence, {
     required bool fallbackOnline,
   }) {
-    if (presence == null) return fallbackOnline ? 'Visible now' : 'Not seen';
-    if (!_isFresh(presence.freshUntil)) return 'Status unknown';
+    if (presence == null) {
+      return fallbackOnline
+          ? DeviceConnectionState.visible
+          : DeviceConnectionState.notSeen;
+    }
+    if (!_isFresh(presence.freshUntil)) return DeviceConnectionState.unknown;
     return switch (presence.state) {
       DevicePresence.online
           when presence.provenance == DeviceObservationProvenance.measured &&
               presence.trust == DeviceObservationTrust.authenticated =>
-        'Available',
-      DevicePresence.online => 'Visible now',
+        DeviceConnectionState.online,
+      DevicePresence.online => DeviceConnectionState.visible,
       DevicePresence.offline
           when presence.provenance == DeviceObservationProvenance.measured &&
               presence.trust == DeviceObservationTrust.authenticated =>
-        'Offline',
-      _ => 'Status unknown',
+        DeviceConnectionState.offline,
+      _ => DeviceConnectionState.unknown,
     };
   }
 
@@ -295,7 +307,7 @@ class DevicesController extends ChangeNotifier {
 
   Future<bool> revoke(String peerId) =>
       _removePeer(peerId, () => _gateway.revoke(peerId));
-  Future<void> setThisDeviceName(String name) =>
+  Future<bool> setThisDeviceName(String name) =>
       _runAndRefresh(() => _gateway.setThisDeviceName(name));
 
   /// Opens ordinary device details only while pairing is not active.

@@ -278,7 +278,25 @@ pub(super) fn payload_is_refused(incoming: &RemoteVersion<'_>) -> bool {
     match incoming.payload_metadata {
         None => incoming.content_type == copypaste_ipc::content_type::FILE,
         Some(metadata) => {
-            crate::PayloadMetadata::from_json(metadata, incoming.content_type).is_none()
+            let Some(metadata) = crate::PayloadMetadata::from_json(metadata, incoming.content_type)
+            else {
+                return true;
+            };
+            if let Some(offer) = metadata
+                .file
+                .as_ref()
+                .and_then(|file| file.transfer.as_ref())
+            {
+                return incoming.content_type != copypaste_ipc::content_type::FILE
+                    || incoming
+                        .binary_content
+                        .and_then(|bytes| {
+                            serde_json::from_slice::<copypaste_payload::FileTransfer>(bytes).ok()
+                        })
+                        .as_ref()
+                        != Some(offer);
+            }
+            false
         }
     }
 }

@@ -10,6 +10,7 @@ import 'package:copypaste_flutter/app/theme/app_overlays.dart';
 import 'package:copypaste_flutter/app/theme/app_motion.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/app/theme/app_tokens.dart';
+import 'package:copypaste_flutter/app/theme/app_toast.dart';
 import 'package:copypaste_flutter/features/devices/device_label.dart';
 import 'package:copypaste_flutter/features/history/controller/history_controller.dart';
 
@@ -38,10 +39,12 @@ class HistoryScreen extends StatefulWidget {
     super.key,
     required this.controller,
     this.onDrawerVisibilityChanged,
+    this.findRequests,
   });
 
   final HistoryController controller;
   final ValueChanged<bool>? onDrawerVisibilityChanged;
+  final ValueNotifier<bool>? findRequests;
 
   @override
   State<HistoryScreen> createState() => _HistoryScreenState();
@@ -60,10 +63,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
   ScrollController? _fallbackScrollController;
   bool _detailDrawerOpen = false;
   bool _fileDragHover = false;
+  late int _operationErrorRevision;
 
   @override
   void initState() {
     super.initState();
+    _operationErrorRevision = widget.controller.operationErrorRevision;
     _searchController = TextEditingController(
       text: widget.controller.query.search,
     );
@@ -101,6 +106,23 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   void _selectionChanged() {
+    final revision = widget.controller.operationErrorRevision;
+    if (revision != _operationErrorRevision) {
+      _operationErrorRevision = revision;
+      final message = widget.controller.operationError;
+      if (message != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            AppToast.show(
+              context,
+              title: 'Action failed',
+              message: message,
+              tone: AppToastTone.error,
+            );
+          }
+        });
+      }
+    }
     final selecting = widget.controller.isBulkSelecting;
     if (selecting && !_wasSelecting) _selectionFocus.requestFocus();
     _wasSelecting = selecting;
@@ -203,6 +225,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       controller: widget.controller,
       scrollController: _scrollController!,
       searchController: _searchController,
+      findRequests: widget.findRequests,
       showKindLabel: wide,
       onSelected: (clip) => _select(context, clip, wide: wide),
       onDragSelection: _selectionGesture.begin,
@@ -253,7 +276,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
     widget.onDrawerVisibilityChanged?.call(true);
     try {
       await WidgetsBinding.instance.endOfFrame;
-      if (!context.mounted) return;
+      if (!context.mounted || widget.controller.selectedId == null) return;
+      var drawerCloseScheduled = false;
       await showOverlay<void>(
         context,
         AppOverlays.drawerConfiguration(context),
@@ -262,8 +286,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
           constraints: AppOverlays.drawerContentConstraints(context),
           child: AnimatedBuilder(
             animation: widget.controller,
-            builder: (context, child) =>
-                HistoryInspector(controller: widget.controller, inDrawer: true),
+            builder: (context, child) {
+              if (widget.controller.selectedId == null &&
+                  !drawerCloseScheduled) {
+                drawerCloseScheduled = true;
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (context.mounted) unawaited(closeDrawer(context));
+                });
+              }
+              return HistoryInspector(
+                controller: widget.controller,
+                inDrawer: true,
+              );
+            },
           ),
         ),
       ).future;
@@ -280,6 +315,7 @@ class _HistoryList extends StatefulWidget {
     required this.controller,
     required this.scrollController,
     required this.searchController,
+    this.findRequests,
     required this.showKindLabel,
     required this.onSelected,
     required this.onDragSelection,
@@ -288,6 +324,7 @@ class _HistoryList extends StatefulWidget {
   final HistoryController controller;
   final ScrollController scrollController;
   final TextEditingController searchController;
+  final ValueNotifier<bool>? findRequests;
   final bool showKindLabel;
   final ValueChanged<HistoryClip> onSelected;
   final void Function(String, Offset, ScrollableState) onDragSelection;
@@ -355,6 +392,7 @@ class _HistoryListState extends State<_HistoryList> {
           _HistoryToolbar(
             controller: controller,
             searchController: searchController,
+            findRequests: widget.findRequests,
           ),
           if (controller.skippedUndecryptable > 0) ...[
             const Gap(AppSpacing.md),
@@ -376,6 +414,7 @@ class _HistoryListState extends State<_HistoryList> {
           _HistoryToolbar(
             controller: controller,
             searchController: searchController,
+            findRequests: widget.findRequests,
           ),
           const Expanded(
             child: StateView.loading(message: 'Loading clipboard history.'),
@@ -417,6 +456,7 @@ class _HistoryListState extends State<_HistoryList> {
         _HistoryToolbar(
           controller: controller,
           searchController: searchController,
+          findRequests: widget.findRequests,
         ),
         if (controller.skippedUndecryptable > 0) ...[
           const Gap(AppSpacing.md),
@@ -738,16 +778,63 @@ class _HistoryToolbar extends StatefulWidget {
   const _HistoryToolbar({
     required this.controller,
     required this.searchController,
+    this.findRequests,
   });
 
   final HistoryController controller;
   final TextEditingController searchController;
+  final ValueNotifier<bool>? findRequests;
 
   @override
   State<_HistoryToolbar> createState() => _HistoryToolbarState();
 }
 
 class _HistoryToolbarState extends State<_HistoryToolbar> {
+  final _searchFocus = FocusNode(debugLabel: 'History search');
+
+  @override
+  void initState() {
+    super.initState();
+    widget.findRequests?.addListener(_find);
+    if (widget.findRequests?.value ?? false) _find();
+  }
+
+  @override
+  void didUpdateWidget(covariant _HistoryToolbar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.findRequests != widget.findRequests) {
+      oldWidget.findRequests?.removeListener(_find);
+      widget.findRequests?.addListener(_find);
+      if (widget.findRequests?.value ?? false) _find();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.findRequests?.removeListener(_find);
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
+  void _find() {
+    if (!(widget.findRequests?.value ?? false)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !(widget.findRequests?.value ?? false)) return;
+      widget.controller.endBulkSelection();
+      setState(() => _searchExpanded = true);
+      widget.findRequests!.value = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _searchFocus.requestFocus();
+        widget.searchController.selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: widget.searchController.text.length,
+        );
+      });
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
   double _controlExtent(BuildContext context) =>
       AppTheme.controlHeight(context, minimum: AppControlSize.large);
   static const double _minimumExpandedSearchWidth =
@@ -866,6 +953,7 @@ class _HistoryToolbarState extends State<_HistoryToolbar> {
         minimum: AppControlSize.large,
       ),
       controller: widget.searchController,
+      focusNode: _searchFocus,
       autofocus: compact,
       placeholder: const Text('Search history'),
       onChanged: widget.controller.updateSearch,

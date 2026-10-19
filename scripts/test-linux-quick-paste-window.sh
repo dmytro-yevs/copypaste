@@ -10,3 +10,10 @@ read -r -a flags <<< "$(pkg-config --cflags --libs gtk+-3.0)"
   "$root/scripts/fixtures/linux-quick-paste-window.cc" \
   "${flags[@]}" -o "$work/geometry"
 "$work/geometry"
+
+"${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror \
+  -I "$root/apps/copypaste_flutter/linux/runner" \
+  "$root/apps/copypaste_flutter/linux/runner/linux_quick_paste_window.cc" \
+  "$root/scripts/fixtures/linux-quick-paste-close.cc" \
+  "${flags[@]}" -o "$work/close"
+xvfb-run -a "$work/close"

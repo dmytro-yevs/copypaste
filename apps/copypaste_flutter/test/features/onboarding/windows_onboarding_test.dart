@@ -1,6 +1,6 @@
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/features/onboarding/controller/windows_onboarding_controller.dart';
-import 'package:copypaste_flutter/features/onboarding/repository/windows_onboarding_store.dart';
+import 'package:copypaste_flutter/features/onboarding/repository/onboarding_store.dart';
 import 'package:copypaste_flutter/features/onboarding/view/windows_onboarding_screen.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
@@ -17,7 +17,7 @@ void main() {
     expect(controller.errorMessage, isNotNull);
   });
   test('Windows completion persists and cannot finish from Welcome', () async {
-    final store = MemoryWindowsOnboardingStore();
+    final store = MemoryOnboardingStore();
     final first = WindowsOnboardingController(store: store);
     addTearDown(first.dispose);
     await first.initialize();
@@ -38,7 +38,7 @@ void main() {
           await tester.binding.setSurfaceSize(Size(width, 640));
           addTearDown(() => tester.binding.setSurfaceSize(null));
           final controller = WindowsOnboardingController(
-            store: MemoryWindowsOnboardingStore(),
+            store: MemoryOnboardingStore(),
           );
           addTearDown(controller.dispose);
           await controller.initialize();
@@ -72,7 +72,7 @@ void main() {
   }
 }
 
-class _FailingStore implements WindowsOnboardingStore {
+class _FailingStore implements OnboardingStore {
   @override
   Future<bool> isComplete() async => false;
 

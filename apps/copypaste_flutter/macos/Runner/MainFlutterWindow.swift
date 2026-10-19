@@ -282,6 +282,12 @@ class MainFlutterWindow: NSWindow {
     quickPasteHostMethodChannel?.invokeMethod("openSettings", arguments: nil)
   }
 
+  func findInHistory() {
+    makeKeyAndOrderFront(nil)
+    NSApplication.shared.activate(ignoringOtherApps: true)
+    quickPasteHostMethodChannel?.invokeMethod("findInHistory", arguments: nil)
+  }
+
   func receivePairingURL(_ url: URL) {
     guard url.scheme == "copypaste", url.host == "pair",
           ["/v1", "/v2"].contains(url.path) else {
@@ -387,27 +393,6 @@ enum MacosAccessibility {
     return { post(keyDown); post(keyUp) }
   }
 
-}
-
-final class QuickPastePanel: NSPanel {
-  static let presentationStyleMask: NSWindow.StyleMask = [
-    .borderless,
-    .resizable,
-    .fullSizeContentView,
-    .nonactivatingPanel,
-  ]
-
-  override var canBecomeKey: Bool { true }
-  override var canBecomeMain: Bool { false }
-
-  override var contentViewController: NSViewController? {
-    get { super.contentViewController }
-    set {
-      // AppKit sizes the window from its controller; Flutter starts at zero.
-      newValue?.view.setFrameSize(contentLayoutRect.size)
-      super.contentViewController = newValue
-    }
-  }
 }
 
 protocol QuickPasteApplicationTarget: AnyObject {
@@ -646,6 +631,10 @@ private final class QuickPastePresentationWindow: NSObject, NSWindowDelegate {
     window.hidesOnDeactivate = false
     window.collectionBehavior = [.transient, .moveToActiveSpace, .fullScreenAuxiliary]
     window.delegate = self
+    window.onCloseRequested = { [weak self] in
+      self?.pasteSession.invalidate()
+      self?.hide()
+    }
     window.contentViewController = controller
     MacosScreenshotProtection.shared.register(window: window, view: controller.view)
     window.contentView?.wantsLayer = true

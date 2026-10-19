@@ -45,6 +45,9 @@ class InspectorTable extends StatelessWidget {
                   child: _cell(
                     Text(
                       row.label,
+                      softWrap: false,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: style
                           .merge(theme.typography.medium)
                           .copyWith(color: theme.colorScheme.mutedForeground),

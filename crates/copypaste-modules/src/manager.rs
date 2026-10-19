@@ -77,6 +77,8 @@ pub struct ModuleManager {
     model_health: Mutex<BTreeMap<String, ResourceHealth>>,
     inference: crate::inference::InferenceClient,
     worker_identity: crate::inference::WorkerIdentity,
+    // Drop last, after inference and loaded native consumers have shut down.
+    _staging_owner: fs::File,
 }
 
 impl ModuleManager {
@@ -108,9 +110,11 @@ impl ModuleManager {
         {
             return Err(ModuleError::State);
         }
+        let verifier = PackageVerifier::new(public_key, app_version, target)?;
+        let staging_owner = crate::staging_cleanup::open(&root)?;
         let manager = Self {
             root,
-            verifier: PackageVerifier::new(public_key, app_version, target)?,
+            verifier,
             state: Mutex::new(State {
                 registry,
                 loaded: BTreeMap::new(),
@@ -125,6 +129,7 @@ impl ModuleManager {
                 target,
                 public_key: public_key.into(),
             },
+            _staging_owner: staging_owner,
         };
         manager.activate_staged_updates();
         Ok(manager)

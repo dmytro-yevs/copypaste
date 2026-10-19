@@ -450,6 +450,8 @@ class _DevicesScreenState extends State<DevicesScreen> {
       key: const ValueKey<String>('this-device-card'),
       name: device.name,
       details: device.details,
+      statusLabel: 'This device',
+      statusTone: AppStatusTone.muted,
       selected:
           controller.deviceDetailsTarget ==
           const DeviceDetailsTarget.thisDevice(),
@@ -464,11 +466,17 @@ class _DevicesScreenState extends State<DevicesScreen> {
     DevicesController controller,
     DevicePeer peer,
   ) {
+    final state = controller.peerConnectionState(peer);
     return _deviceCard(
       context,
       key: ValueKey<String>('peer-device-card-${peer.id}'),
       name: peer.name,
       details: peer.details,
+      statusLabel: DevicePresentation.connectionLabel(state),
+      statusTone: DevicePresentation.connectionTone(state),
+      ping: state == DeviceConnectionState.online
+          ? controller.peerLatencyLabel(peer)
+          : null,
       selected:
           controller.deviceDetailsTarget == DeviceDetailsTarget.peer(peer.id),
       onPressed: controller.pairingInspectorOpen
@@ -507,6 +515,9 @@ class _DevicesScreenState extends State<DevicesScreen> {
     required Key key,
     required String name,
     required DeviceDetails? details,
+    required String statusLabel,
+    required AppStatusTone statusTone,
+    String? ping,
     required bool selected,
     required VoidCallback? onPressed,
   }) {
@@ -536,17 +547,36 @@ class _DevicesScreenState extends State<DevicesScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ).semiBold(),
+                  Row(
+                    children: [
+                      Semantics(
+                        label: statusLabel,
+                        child: AvatarBadge(
+                          size: AppIconSize.statusIndicator,
+                          borderRadius: AppRadius.full,
+                          color: AppTheme.statusColor(context, statusTone),
+                        ),
+                      ),
+                      const Gap(AppSpacing.xs),
+                      Expanded(
+                        child: Text(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ).semiBold(),
+                      ),
+                    ],
+                  ),
                   const Gap(AppSpacing.xs),
                   Text(
                     DevicePresentation.summary(details),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ).muted(),
+                  if (ping != null) ...[
+                    const Gap(AppSpacing.sm),
+                    Text('Ping: $ping').small().muted(),
+                  ],
                 ],
               ),
             ),
@@ -588,35 +618,29 @@ class _DevicesScreenState extends State<DevicesScreen> {
     String currentName,
   ) async {
     final nameController = TextEditingController(text: currentName);
-    final nextName = await AppOverlays.showDialog<String>(
-      context,
-      useRootNavigator: false,
-      builder: (dialogContext) => AppOverlays.alertDialog(
+    try {
+      await AppOverlays.showActionDialog(
+        context,
         icon: LucideIcons.pencil,
         title: const Text('Rename this device'),
+        actionLabel: 'Save',
+        destructive: false,
+        changes: nameController,
+        canConfirm: () =>
+            nameController.text.trim().isNotEmpty && !controller.actionInFlight,
         content: TextField(
           controller: nameController,
           placeholder: const Text('Device name'),
           autofocus: true,
-          decoration: AppOverlays.dialogFieldDecoration(dialogContext),
+          decoration: AppOverlays.dialogFieldDecoration(context),
         ),
-        actions: [
-          Button.ghost(
-            style: AppTheme.actionButtonStyle(const ButtonStyle.ghost()),
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          Button.primary(
-            style: AppTheme.actionButtonStyle(const ButtonStyle.primary()),
-            onPressed: () => Navigator.pop(dialogContext, nameController.text),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-    nameController.dispose();
-    if (nextName != null && nextName.trim().isNotEmpty) {
-      await controller.setThisDeviceName(nextName.trim());
+        onConfirm: () =>
+            controller.setThisDeviceName(nameController.text.trim()),
+        failureMessage: () =>
+            controller.errorMessage ?? 'The device name could not be saved.',
+      );
+    } finally {
+      nameController.dispose();
     }
   }
 
@@ -626,77 +650,23 @@ class _DevicesScreenState extends State<DevicesScreen> {
     DevicePeer peer, {
     required bool revoke,
   }) async {
-    await AppOverlays.showDialog<void>(
+    await AppOverlays.showActionDialog(
       context,
-      useRootNavigator: false,
-      builder: (dialogContext) {
-        var submitting = false;
-        String? failure;
-        return StatefulBuilder(
-          builder: (context, setDialogState) => AppOverlays.alertDialog(
-            icon: revoke ? LucideIcons.ban : LucideIcons.unlink,
-            title: Text(
-              revoke ? 'Revoke ${peer.name}?' : 'Unpair ${peer.name}?',
-            ),
-            content: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  revoke
-                      ? 'This permanently prevents this pairing from being used again.'
-                      : 'This removes the local pairing key from this device.',
-                ),
-                if (failure != null) ...[
-                  const Gap(AppSpacing.md),
-                  Alert.destructive(
-                    leading: const Icon(LucideIcons.circleAlert),
-                    title: const Text('Action failed'),
-                    content: Text(failure!),
-                  ),
-                ],
-              ],
-            ),
-            actions: [
-              Button.ghost(
-                style: AppTheme.actionButtonStyle(const ButtonStyle.ghost()),
-                onPressed: submitting
-                    ? null
-                    : () => Navigator.pop(dialogContext),
-                child: const Text('Cancel'),
-              ),
-              Button.destructive(
-                style: AppTheme.actionButtonStyle(
-                  const ButtonStyle.destructive(),
-                ),
-                onPressed: submitting
-                    ? null
-                    : () async {
-                        setDialogState(() {
-                          submitting = true;
-                          failure = null;
-                        });
-                        final succeeded = revoke
-                            ? await controller.revoke(peer.id)
-                            : await controller.unpair(peer.id);
-                        if (!dialogContext.mounted) return;
-                        if (succeeded) {
-                          Navigator.pop(dialogContext);
-                          return;
-                        }
-                        setDialogState(() {
-                          submitting = false;
-                          failure =
-                              controller.errorMessage ??
-                              'The device action could not be completed.';
-                        });
-                      },
-                child: Text(revoke ? 'Revoke pairing' : 'Unpair'),
-              ),
-            ],
-          ),
-        );
-      },
+      icon: revoke ? LucideIcons.ban : LucideIcons.unlink,
+      title: Text(revoke ? 'Revoke ${peer.name}?' : 'Unpair ${peer.name}?'),
+      content: Text(
+        revoke
+            ? 'This permanently prevents this pairing from being used again.'
+            : 'This removes the local pairing key from this device.',
+      ),
+      actionLabel: revoke ? 'Revoke' : 'Unpair',
+      changes: controller,
+      canConfirm: () => !controller.actionInFlight,
+      onConfirm: () =>
+          revoke ? controller.revoke(peer.id) : controller.unpair(peer.id),
+      failureMessage: () =>
+          controller.errorMessage ??
+          'The device action could not be completed.',
     );
   }
 }

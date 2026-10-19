@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:copypaste_flutter/features/devices/devices.dart';
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
+import 'package:copypaste_flutter/app/theme/app_tokens.dart';
 import 'package:copypaste_flutter/app/navigation/navigation.dart';
 import 'package:copypaste_flutter/app/shell/app_shell.dart';
 import 'package:flutter/services.dart';
@@ -11,6 +12,228 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_flutter/shadcn_flutter.dart';
 
 void main() {
+  for (final dark in [false, true]) {
+    for (final width in [320.0, 1100.0]) {
+      testWidgets(
+        'device cards show trusted status and online ping at $width, dark=$dark',
+        (tester) async {
+          final now = DateTime.utc(2026, 10, 3, 12);
+          final fresh = now.add(const Duration(seconds: 5));
+          final cases = [
+            (
+              'online',
+              DevicePresence.online,
+              true,
+              fresh,
+              'Online',
+              AppStatusTone.success,
+              'Ping: 24 ms',
+            ),
+            (
+              'offline',
+              DevicePresence.offline,
+              true,
+              fresh,
+              'Offline',
+              AppStatusTone.error,
+              null,
+            ),
+            (
+              'visible',
+              DevicePresence.online,
+              false,
+              fresh,
+              'Visible',
+              AppStatusTone.info,
+              null,
+            ),
+            (
+              'unknown',
+              DevicePresence.unknown,
+              true,
+              fresh,
+              'Unknown',
+              AppStatusTone.muted,
+              null,
+            ),
+            (
+              'expired',
+              DevicePresence.online,
+              true,
+              now,
+              'Unknown',
+              AppStatusTone.muted,
+              null,
+            ),
+          ];
+          final peers = [
+            for (final (id, presence, authenticated, deadline, _, _, _)
+                in cases)
+              _statusPeer(
+                id,
+                now,
+                deadline,
+                presence: presence,
+                authenticated: authenticated,
+              ),
+            _statusPeer('missing-ping', now, fresh, latency: null),
+            _statusPeer('expired-ping', now, fresh, latencyDeadline: now),
+            _statusPeer('sub-ms', now, fresh, latency: Duration.zero),
+            DevicePeer(
+              id: 'legacy-visible',
+              name: 'Legacy visible',
+              lastSeen: now,
+              online: true,
+            ),
+            DevicePeer(
+              id: 'legacy-unseen',
+              name: 'Legacy unseen',
+              lastSeen: now,
+              online: false,
+            ),
+          ];
+          tester.platformDispatcher.textScaleFactorTestValue = 1.6;
+          addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+          final controller = DevicesController(
+            gateway: _ScreenGateway(peers: peers, discovered: const []),
+            captureProtection: _CaptureProtection(),
+            now: () => now,
+          );
+          try {
+            await _pumpDevices(
+              tester,
+              controller,
+              size: Size(width, 900),
+              dark: dark,
+            );
+            await tester.pumpAndSettle();
+            for (final (id, _, _, _, label, tone, ping) in cases) {
+              final card = find.byKey(ValueKey('peer-device-card-$id'));
+              expect(
+                find.descendant(of: card, matching: find.text(label)),
+                findsNothing,
+              );
+              final dot = find.descendant(
+                of: card,
+                matching: find.byType(AvatarBadge),
+              );
+              final indicator = tester.widget<AvatarBadge>(dot);
+              expect(
+                indicator.color,
+                AppTheme.statusColor(tester.element(card), tone),
+              );
+              final name = find.descendant(of: card, matching: find.text(id));
+              expect(
+                tester.getRect(dot).right,
+                lessThan(tester.getRect(name).left),
+              );
+              expect(tester.getCenter(dot).dy, tester.getCenter(name).dy);
+              expect(
+                find.descendant(
+                  of: card,
+                  matching: find.textContaining('Ping:'),
+                ),
+                ping == null ? findsNothing : findsOneWidget,
+              );
+              if (ping != null) {
+                expect(
+                  find.descendant(of: card, matching: find.text(ping)),
+                  findsOneWidget,
+                );
+              }
+            }
+            for (final id in ['missing-ping', 'expired-ping']) {
+              expect(
+                find.descendant(
+                  of: find.byKey(ValueKey('peer-device-card-$id')),
+                  matching: find.text('Ping: — ms'),
+                ),
+                findsOneWidget,
+              );
+            }
+            expect(find.text('Ping: <1 ms'), findsOneWidget);
+            for (final (id, label) in [
+              ('legacy-visible', 'Visible'),
+              ('legacy-unseen', 'Not seen'),
+            ]) {
+              final card = find.byKey(ValueKey('peer-device-card-$id'));
+              expect(
+                find.descendant(of: card, matching: find.text(label)),
+                findsNothing,
+              );
+              expect(
+                find.descendant(
+                  of: card,
+                  matching: find.textContaining('Ping:'),
+                ),
+                findsNothing,
+              );
+            }
+            final local = find.byKey(const ValueKey('this-device-card'));
+            expect(
+              find.descendant(of: local, matching: find.text('This device')),
+              findsNothing,
+            );
+            expect(
+              find.descendant(
+                of: local,
+                matching: find.textContaining('Ping:'),
+              ),
+              findsNothing,
+            );
+            expect(tester.takeException(), isNull);
+          } finally {
+            controller.dispose();
+          }
+        },
+        variant: TargetPlatformVariant({
+          TargetPlatform.android,
+          TargetPlatform.macOS,
+          TargetPlatform.windows,
+        }),
+      );
+    }
+  }
+
+  testWidgets('device card expires online status and ping without polling', (
+    tester,
+  ) async {
+    var now = DateTime.utc(2026, 10, 3, 12);
+    final gateway = _ScreenGateway(
+      peers: [_statusPeer('peer', now, now.add(const Duration(seconds: 5)))],
+      discovered: const [],
+    );
+    final controller = DevicesController(
+      gateway: gateway,
+      captureProtection: _CaptureProtection(),
+      now: () => now,
+    );
+    try {
+      await _pumpDevices(tester, controller);
+      final card = find.byKey(const ValueKey('peer-device-card-peer'));
+      final dot = find.descendant(of: card, matching: find.byType(AvatarBadge));
+      expect(
+        tester.widget<AvatarBadge>(dot).color,
+        AppTheme.statusColor(tester.element(card), AppStatusTone.success),
+      );
+      expect(find.text('Online'), findsNothing);
+      expect(find.text('Ping: 24 ms'), findsOneWidget);
+      final loads = gateway.loadCalls;
+      now = now.add(const Duration(seconds: 5));
+      await tester.pump(const Duration(seconds: 5));
+      expect(find.text('Online'), findsNothing);
+      expect(find.text('Unknown'), findsNothing);
+      expect(
+        tester.widget<AvatarBadge>(dot).color,
+        AppTheme.statusColor(tester.element(card), AppStatusTone.muted),
+      );
+      expect(find.textContaining('Ping:'), findsNothing);
+      expect(gateway.loadCalls, loads);
+    } finally {
+      controller.dispose();
+    }
+  });
+
   testWidgets('nearby discovery exposes a distinct accessible heading', (
     tester,
   ) async {
@@ -141,7 +364,14 @@ void main() {
           tester.platformDispatcher.textScaleFactorTestValue = scale;
           addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
           final controller = DevicesController(
-            gateway: _ScreenGateway(),
+            gateway: _ScreenGateway(
+              localEndpoint: '192.0.2.20:47654',
+              // Deliberately multiline metadata must overflow even when the
+              // compact inspector font makes the ordinary local profile fit.
+              localModel:
+                  'Mac Studio (2025)\nApple M4 Max\n'
+                  '16-core CPU / 40-core GPU\n128 GB unified memory',
+            ),
             captureProtection: _CaptureProtection(),
           );
           addTearDown(controller.dispose);
@@ -500,15 +730,15 @@ void main() {
       await _pumpDevices(tester, controller, size: const Size(320, 640));
       expect(tester.takeException(), isNull);
       final nearby = find.byKey(const ValueKey('nearby-devices'));
+      final scan = find.byKey(const ValueKey('rescan-devices'));
+      final pending = Completer<void>();
+      gateway.rescanPending = pending;
+      await tester.scrollUntilVisible(scan, AppControlSize.touch * 3);
+      await tester.pumpAndSettle();
       expect(
         find.descendant(of: nearby, matching: find.byType(Divider)),
         findsOneWidget,
       );
-      final scan = find.byKey(const ValueKey('rescan-devices'));
-      final pending = Completer<void>();
-      gateway.rescanPending = pending;
-      await tester.ensureVisible(scan);
-      await tester.pumpAndSettle();
       await tester.tap(scan);
       await tester.pump();
       expect(find.text('Scanning…'), findsOneWidget);
@@ -1095,7 +1325,13 @@ void main() {
       find.byKey(const ValueKey<String>('devices-details-drawer')),
       findsOneWidget,
     );
-    expect(find.text('This device'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey<String>('devices-details-drawer')),
+        matching: find.text('This device'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('Local'), findsNothing);
     final metadata = find.byKey(
       const ValueKey<String>('device-details-metadata'),
@@ -1420,12 +1656,13 @@ Future<void> _pumpDevices(
   DevicesController controller, {
   Size size = const Size(1400, 900),
   bool Function()? isActive,
+  bool dark = false,
 }) async {
   await tester.binding.setSurfaceSize(size);
   addTearDown(() => tester.binding.setSurfaceSize(null));
   await tester.pumpWidget(
     ShadcnApp(
-      theme: AppTheme.light,
+      theme: dark ? AppTheme.dark : AppTheme.light,
       builder: AppTheme.builder,
       home: Scaffold(
         headers: [
@@ -1443,52 +1680,59 @@ Future<void> _pumpDevices(
 }
 
 class _ScreenGateway implements DevicesGateway {
-  _ScreenGateway({List<DevicePeer>? peers, List<DiscoveredDevice>? discovered})
-    : peers =
-          peers ??
-          [
-            DevicePeer(
-              id: 'peer',
-              name: 'Phone',
-              lastSeen: DateTime.utc(2026, 10, 3),
-              online: true,
-              details: _details(
-                name: 'Phone',
-                platform: DevicePlatform.android,
-                deviceClass: DeviceClass.phone,
-                osName: 'Android',
-                osVersion: '16',
-                presence: DevicePresence.online,
-                latency: const Duration(milliseconds: 24),
-                endpoint: '192.0.2.20:47654',
-              ),
-            ),
-          ],
-      discovered =
-          discovered ??
-          [
-            DiscoveredDevice(
-              id: 'paired',
-              name: 'Tablet',
-              address: '192.0.2.20:47654',
-              paired: true,
-              lastSeen: DateTime.utc(2026, 10, 3),
-              details: _details(
-                name: 'Tablet',
-                platform: DevicePlatform.android,
-                deviceClass: DeviceClass.tablet,
-                osName: 'Android',
-                osVersion: '16',
-                presence: DevicePresence.online,
-              ),
-            ),
-          ];
+  _ScreenGateway({
+    List<DevicePeer>? peers,
+    List<DiscoveredDevice>? discovered,
+    this.localEndpoint,
+    this.localModel,
+  }) : peers =
+           peers ??
+           [
+             DevicePeer(
+               id: 'peer',
+               name: 'Phone',
+               lastSeen: DateTime.utc(2026, 10, 3),
+               online: true,
+               details: _details(
+                 name: 'Phone',
+                 platform: DevicePlatform.android,
+                 deviceClass: DeviceClass.phone,
+                 osName: 'Android',
+                 osVersion: '16',
+                 presence: DevicePresence.online,
+                 latency: const Duration(milliseconds: 24),
+                 endpoint: '192.0.2.20:47654',
+               ),
+             ),
+           ],
+       discovered =
+           discovered ??
+           [
+             DiscoveredDevice(
+               id: 'paired',
+               name: 'Tablet',
+               address: '192.0.2.20:47654',
+               paired: true,
+               lastSeen: DateTime.utc(2026, 10, 3),
+               details: _details(
+                 name: 'Tablet',
+                 platform: DevicePlatform.android,
+                 deviceClass: DeviceClass.tablet,
+                 osName: 'Android',
+                 osVersion: '16',
+                 presence: DevicePresence.online,
+               ),
+             ),
+           ];
 
   final _ScreenSession session = _ScreenSession();
   final List<DevicePeer> peers;
   final List<DiscoveredDevice> discovered;
+  final String? localEndpoint;
+  final String? localModel;
   Completer<void>? rescanPending;
   int rescanCalls = 0;
+  int loadCalls = 0;
   Object? syncError;
   Object? joinError;
 
@@ -1511,24 +1755,29 @@ class _ScreenGateway implements DevicesGateway {
   }
 
   @override
-  Future<DevicesSnapshot> load() async => DevicesSnapshot(
-    thisDevice: ThisDevice(
-      id: 'this-device-id',
-      name: 'Desktop',
-      appVersion: '1.0.0',
-      protocolVersion: 1,
-      details: _details(
+  Future<DevicesSnapshot> load() async {
+    loadCalls++;
+    return DevicesSnapshot(
+      thisDevice: ThisDevice(
+        id: 'this-device-id',
         name: 'Desktop',
-        platform: DevicePlatform.macos,
-        deviceClass: DeviceClass.desktop,
-        osName: 'macOS',
-        osVersion: '15.6',
-        presence: DevicePresence.online,
+        appVersion: '1.0.0',
+        protocolVersion: 1,
+        details: _details(
+          name: 'Desktop',
+          platform: DevicePlatform.macos,
+          deviceClass: DeviceClass.desktop,
+          osName: 'macOS',
+          osVersion: '15.6',
+          presence: DevicePresence.online,
+          endpoint: localEndpoint,
+          model: localModel,
+        ),
       ),
-    ),
-    peers: peers,
-    discovered: discovered,
-  );
+      peers: peers,
+      discovered: discovered,
+    );
+  }
 
   @override
   Future<void> rescan() async {
@@ -1550,6 +1799,44 @@ class _ScreenGateway implements DevicesGateway {
   @override
   Future<void> unpair(String peerId) async {}
 }
+
+DevicePeer _statusPeer(
+  String id,
+  DateTime now,
+  DateTime deadline, {
+  DevicePresence presence = DevicePresence.online,
+  bool authenticated = true,
+  Duration? latency = const Duration(milliseconds: 24),
+  DateTime? latencyDeadline,
+}) => DevicePeer(
+  id: id,
+  name: id,
+  lastSeen: now,
+  online: true,
+  details: DeviceDetails(
+    presence: DevicePresenceObservation(
+      state: presence,
+      lastSeen: now,
+      provenance: authenticated
+          ? DeviceObservationProvenance.measured
+          : DeviceObservationProvenance.observed,
+      trust: authenticated
+          ? DeviceObservationTrust.authenticated
+          : DeviceObservationTrust.unverified,
+      observedAt: now,
+      freshUntil: deadline,
+    ),
+    latency: latency == null
+        ? null
+        : DeviceLatency(
+            roundTripLatency: latency,
+            provenance: DeviceObservationProvenance.measured,
+            trust: DeviceObservationTrust.authenticated,
+            observedAt: now,
+            freshUntil: latencyDeadline ?? deadline,
+          ),
+  ),
+);
 
 DiscoveredDevice _discoveredDevice(String name, {bool paired = false}) =>
     DiscoveredDevice(
@@ -1577,10 +1864,12 @@ DeviceDetails _details({
   required DevicePresence presence,
   Duration? latency,
   String? endpoint,
+  String? model,
 }) {
   final observedAt = DateTime.utc(2026, 10, 3, 12);
   return DeviceDetails(
     profile: DeviceProfile(
+      model: model,
       displayName: name,
       appVersion: '1.0.0',
       protocolVersion: 1,

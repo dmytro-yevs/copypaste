@@ -4,6 +4,7 @@ import android.content.ClipboardManager
 import android.content.ClipData
 import android.content.Context
 import org.junit.Assert.*
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -13,6 +14,8 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class AndroidClipboardWriterTest {
+    @Before fun initializeProvider() = initializeClipboardTestProvider()
+
     private object FailingReceiptStore : ClipboardOwnerReceiptStore {
         override fun read(context: Context): String? = null
         override fun write(context: Context, receipt: String?): Boolean = false

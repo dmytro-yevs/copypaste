@@ -16,6 +16,83 @@ void main() {
   for (final platform in [
     TargetPlatform.macOS,
     TargetPlatform.windows,
+    TargetPlatform.linux,
+  ]) {
+    testWidgets(
+      'desktop app commands and system-key passthrough on $platform',
+      (tester) async {
+        final navigation = AppNavigationController(
+          initialDestination: AppDestination.settings,
+        );
+        addTearDown(navigation.dispose);
+        var closes = 0;
+        var quits = 0;
+        var toggles = 0;
+        var exits = 0;
+        var refreshes = 0;
+        await tester.pumpWidget(
+          _shell(
+            controller: navigation,
+            onCloseWindow: () async {
+              closes += 1;
+            },
+            onQuit: () async {
+              quits += 1;
+            },
+            onToggleFullScreen: () async {
+              toggles += 1;
+            },
+            onExitFullScreen: () async {
+              exits += 1;
+            },
+            onRefresh: () {
+              refreshes += 1;
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+        final modifier = platform == TargetPlatform.macOS
+            ? LogicalKeyboardKey.metaLeft
+            : LogicalKeyboardKey.controlLeft;
+        await tester.sendKeyDownEvent(modifier);
+        for (final key in [
+          LogicalKeyboardKey.keyF,
+          LogicalKeyboardKey.keyR,
+          LogicalKeyboardKey.keyW,
+          LogicalKeyboardKey.keyQ,
+        ]) {
+          await tester.sendKeyEvent(key);
+        }
+        await tester.sendKeyUpEvent(modifier);
+        await tester.pumpAndSettle();
+        expect(navigation.selectedDestination, AppDestination.history);
+        expect(navigation.historyFindRequests.value, isTrue);
+        expect([closes, quits, refreshes], [1, 1, 1]);
+        await tester.sendKeyEvent(LogicalKeyboardKey.f11);
+        await tester.pumpAndSettle();
+        expect(toggles, platform == TargetPlatform.macOS ? 0 : 1);
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        expect(exits, 1);
+        // Window switching, tiling, and force-quit remain owned by the OS.
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+        await tester.pumpAndSettle();
+        expect(
+          [closes, quits, toggles, refreshes],
+          [1, 1, platform == TargetPlatform.macOS ? 0 : 1, 1],
+        );
+      },
+      variant: TargetPlatformVariant({platform}),
+    );
+  }
+  for (final platform in [
+    TargetPlatform.macOS,
+    TargetPlatform.windows,
     TargetPlatform.android,
   ]) {
     for (final width in [390.0, 1400.0]) {
@@ -1211,6 +1288,11 @@ Widget _shell({
   Map<AppDestination, Widget>? destinations,
   Map<AppDestination, List<Widget>> headerActions = const {},
   bool unifiedTitleBar = false,
+  Future<void> Function()? onCloseWindow,
+  Future<void> Function()? onQuit,
+  Future<void> Function()? onToggleFullScreen,
+  Future<void> Function()? onExitFullScreen,
+  VoidCallback? onRefresh,
 }) {
   return ShadcnApp(
     theme: AppTheme.light,
@@ -1221,6 +1303,11 @@ Widget _shell({
       controller: controller ?? AppNavigationController(),
       headerActions: headerActions,
       unifiedTitleBar: unifiedTitleBar,
+      onCloseWindow: onCloseWindow,
+      onQuit: onQuit,
+      onToggleFullScreen: onToggleFullScreen,
+      onExitFullScreen: onExitFullScreen,
+      onRefresh: onRefresh,
       destinations:
           destinations ??
           const {

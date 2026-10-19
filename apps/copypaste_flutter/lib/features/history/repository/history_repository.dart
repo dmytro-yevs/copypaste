@@ -32,3 +32,7 @@ abstract interface class HistoryRepository {
   Future<void> deleteAll();
   Future<void> reorderPinned(List<String> ids);
 }
+
+abstract interface class HistoryFileDownloadCancellation {
+  Future<void> cancelFileDownload(String id);
+}

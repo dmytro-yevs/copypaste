@@ -1,5 +1,5 @@
 import 'package:copypaste_flutter/features/onboarding/controller/linux_onboarding_controller.dart';
-import 'package:copypaste_flutter/features/onboarding/repository/linux_onboarding_store.dart';
+import 'package:copypaste_flutter/features/onboarding/repository/onboarding_store.dart';
 import 'package:copypaste_flutter/features/onboarding/view/linux_onboarding_screen.dart';
 import 'package:copypaste_flutter/platform/permissions/linux_integration.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -23,7 +23,7 @@ void main() {
         ),
       );
       final controller = LinuxOnboardingController(
-        store: MemoryLinuxOnboardingStore(),
+        store: MemoryOnboardingStore(),
         integration: integration,
       );
       addTearDown(controller.dispose);
@@ -68,7 +68,7 @@ void main() {
         ),
       );
       final controller = LinuxOnboardingController(
-        store: MemoryLinuxOnboardingStore(),
+        store: MemoryOnboardingStore(),
         integration: integration,
       );
       addTearDown(controller.dispose);
@@ -113,7 +113,7 @@ void main() {
         ),
       );
       final controller = LinuxOnboardingController(
-        store: MemoryLinuxOnboardingStore(),
+        store: MemoryOnboardingStore(),
         integration: integration,
       );
       addTearDown(controller.dispose);
@@ -149,7 +149,7 @@ void main() {
       ),
     );
     final controller = LinuxOnboardingController(
-      store: MemoryLinuxOnboardingStore(),
+      store: MemoryOnboardingStore(),
       integration: integration,
     );
     addTearDown(controller.dispose);
@@ -176,7 +176,7 @@ void main() {
     tester,
   ) async {
     final controller = LinuxOnboardingController(
-      store: MemoryLinuxOnboardingStore(),
+      store: MemoryOnboardingStore(),
       integration: _Integration(
         const LinuxIntegrationStatus(
           session: LinuxDesktopSession.wayland,
@@ -229,7 +229,7 @@ void main() {
         ),
       );
       final controller = LinuxOnboardingController(
-        store: MemoryLinuxOnboardingStore(),
+        store: MemoryOnboardingStore(),
         integration: integration,
       );
       addTearDown(controller.dispose);

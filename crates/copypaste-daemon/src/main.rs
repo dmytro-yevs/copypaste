@@ -131,6 +131,8 @@ async fn run() -> anyhow::Result<()> {
         Ok(store) => store,
         Err(e) => return halt_or_fail(&socket_path, e, "open the history database").await,
     };
+    copypaste_core::file_transfer::upgrade_legacy(&store, &keyring.item_key())
+        .context("upgrade retained file offers")?;
     let source = clipboard::new_source(&data_dir).context("initialize the clipboard backend")?;
 
     // Peer sync. The identity is minted in the database the store just opened,

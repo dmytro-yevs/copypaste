@@ -172,6 +172,13 @@ async fn serve_peer<S, F, P>(
         }
         return;
     }
+    if matches!(first, SyncMessage::FileRequest { .. }) {
+        let _ = node
+            .serve_file(&pairing_id, source, &mut channel, first)
+            .await;
+        channel.close().await;
+        return;
+    }
     // Register after the first message distinguishes a history session from a
     // probe, but before any summary or payload reaches the source. If removal
     // won the race after Noise authenticated, do not let this old transport

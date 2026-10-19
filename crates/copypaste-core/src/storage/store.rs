@@ -2,6 +2,7 @@
 //! connection, and nothing about what is then done with it.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use r2d2::{Pool, PooledConnection};
@@ -24,6 +25,10 @@ pub struct Store {
     pool: Pool<SqliteConnectionManager>,
     pub(super) path: Option<Arc<PathBuf>>,
     retention: Arc<Mutex<()>>,
+    pub(super) reclaiming: Arc<AtomicBool>,
+    pub(super) reclaim_requested: Arc<AtomicBool>,
+    pub(super) incremental_reclaim: bool,
+    _space_lock: Option<Arc<std::fs::File>>,
     #[cfg(test)]
     before_retention: Arc<Mutex<Option<BeforeRetentionHook>>>,
 }
@@ -44,6 +49,7 @@ impl Store {
     /// existing file yields [`StoreError::InvalidKey`]; there is no fallback
     /// read and no unkeyed plaintext probe.
     pub fn open(path: &Path, db_key: &[u8; 32]) -> Result<Self, StoreError> {
+        let (space_lock, exclusive) = super::space::lock_store(path)?;
         let db_key = Zeroizing::new(*db_key);
         let flags =
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
@@ -56,6 +62,17 @@ impl Store {
         // A restart onto a populated history would otherwise plan every query
         // from default guesses until the pool first retires a connection.
         let _ = run_pragma(&conn, "PRAGMA optimize");
+        // Full legacy-file conversion is confined to opening a store, before
+        // this runtime can issue rowid-based clear/undo boundaries.
+        if exclusive {
+            if let Err(error) = super::space::prepare(&conn) {
+                tracing::warn!(%error, "deferred history space maintenance");
+            }
+            space_lock.unlock()?;
+            space_lock.lock_shared()?;
+        }
+        let incremental_reclaim =
+            conn.pragma_query_value(None, "auto_vacuum", |r| r.get::<_, u32>(0))? == 2;
         drop(conn);
 
         let manager = SqliteConnectionManager::file(path).with_flags(flags);
@@ -63,7 +80,11 @@ impl Store {
         Ok(Self {
             pool,
             path: Some(Arc::new(path.to_owned())),
+            incremental_reclaim,
+            _space_lock: Some(Arc::new(space_lock)),
             retention: Arc::new(Mutex::new(())),
+            reclaiming: Arc::new(AtomicBool::new(false)),
+            reclaim_requested: Arc::new(AtomicBool::new(false)),
             #[cfg(test)]
             before_retention: Arc::new(Mutex::new(None)),
         })
@@ -92,7 +113,11 @@ impl Store {
         Ok(Self {
             pool,
             path: None,
+            incremental_reclaim: false,
+            _space_lock: None,
             retention: Arc::new(Mutex::new(())),
+            reclaiming: Arc::new(AtomicBool::new(false)),
+            reclaim_requested: Arc::new(AtomicBool::new(false)),
             #[cfg(test)]
             before_retention: Arc::new(Mutex::new(None)),
         })

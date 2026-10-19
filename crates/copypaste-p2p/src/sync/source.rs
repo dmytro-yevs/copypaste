@@ -65,6 +65,11 @@ impl SyncCursor {
 /// concurrent local writes, and re-checking is what makes replay a no-op rather
 /// than a resurrection. Return `false` when the local copy wins.
 pub trait SyncSource {
+    /// Resolves an authenticated offer to one local chunk. Never a path lookup
+    /// supplied by the peer, and never called by ordinary history sync.
+    fn file_chunk(&self, _id: &str, _sha256: &str, _index: u64) -> Result<Vec<u8>, SyncError> {
+        Err(SyncError::Source("The file is unavailable.".into()))
+    }
     fn device_id(&self) -> String;
     fn device_name(&self) -> String;
 
