@@ -988,11 +988,19 @@ mod tests {
 
         // The replacement is a real owner, not just an occupant of the slot.
         let expired = SystemTime::now() - Duration::from_secs(601);
-        set_modified(&first, expired);
-        set_modified(&second, expired);
-        wait_until_gone(&second, Duration::from_secs(10));
+        {
+            let _access = staging
+                .access
+                .lock()
+                .unwrap_or_else(|held| held.into_inner());
+            set_modified(&first, expired);
+            set_modified(&second, expired);
+        }
+        // Directory traversal order is unspecified. One unlinked file does
+        // not mean that the worker has finished removing the other one.
         assert!(
-            !first.exists() && !second.exists(),
+            wait_until(Duration::from_secs(10), || !first.exists()
+                && !second.exists()),
             "the replacement never enforced the deadline"
         );
     }
