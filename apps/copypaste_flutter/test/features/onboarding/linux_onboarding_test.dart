@@ -158,7 +158,7 @@ void main() {
         ),
       );
       final controller = LinuxOnboardingController(
-        store: MemoryLinuxOnboardingStore(),
+        store: MemoryOnboardingStore(),
         integration: integration,
       );
       addTearDown(controller.dispose);
@@ -249,7 +249,7 @@ void main() {
     tester,
   ) async {
     final controller = LinuxOnboardingController(
-      store: MemoryLinuxOnboardingStore(),
+      store: MemoryOnboardingStore(),
       integration: _Integration(
         const LinuxIntegrationStatus(
           session: LinuxDesktopSession.wayland,
