@@ -2,7 +2,7 @@
 # Install PostgreSQL server binaries for supabase/dev/verify-schema.sh.
 #
 # That script needs initdb/pg_ctl/psql and starts its own throwaway cluster
-# (docs/supabase-deployment.md). It must not start a system service.
+# without starting a system service.
 #
 # Usage (CI or local Ubuntu):
 #   scripts/ci/install-postgresql-server.sh

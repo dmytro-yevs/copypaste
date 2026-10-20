@@ -33,7 +33,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id || github.event.workflow_run.id }}
-        run: python3 scripts/ci/metrics.py --run-id "$SOURCE_RUN_ID" --cache-logs --compare docs/engineering/ci-baseline.json --output ci-metrics.json
+        run: python3 scripts/ci/metrics.py --run-id "$SOURCE_RUN_ID" --cache-logs --compare config/ci-baseline.json --output ci-metrics.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ci-performance-report

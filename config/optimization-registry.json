@@ -17,8 +17,7 @@
       ],
       "source_references": [
         "apps/copypaste_flutter/lib/main.dart",
-        "apps/copypaste_flutter/lib/app/ui_memory_controller.dart",
-        "docs/ui-memory.md"
+        "apps/copypaste_flutter/lib/app/ui_memory_controller.dart"
       ],
       "invariant": "Suspend after 60 continuous hidden seconds; preserve active work and restore query/selection identity.",
       "next_step": "Measure engine/native footprint before hiding, after the deadline, and after repeated reopen; widget/cache disposal is not qualification.",
@@ -88,15 +87,13 @@
         "Linux"
       ],
       "source_references": [
-        "docs/adr/0033-quick-paste-popup.md",
         "apps/copypaste_flutter/macos/Runner/MainFlutterWindow.swift",
         "apps/copypaste_flutter/macos/Runner/MacosWindowCommands.swift",
         "apps/copypaste_flutter/macos/RunnerTests/MacosWindowCommandsTests.swift",
         "apps/copypaste_flutter/windows/runner/flutter_window.cpp",
         "apps/copypaste_flutter/linux/runner/linux_quick_paste_window.cc",
         "apps/copypaste_flutter/linux/runner/linux_host_channels.cc",
-        "scripts/fixtures/linux-quick-paste-close.cc",
-        "docs/ui/desktop-keyboard-shortcuts.md"
+        "scripts/fixtures/linux-quick-paste-close.cc"
       ],
       "invariant": "Create on demand, dispose Dart owners and native engine on retirement; preserve focus and paste behavior. Standard keyboard and native window close use the existing cancellation/hide/retirement paths. macOS Command-W and Option-Command-W invalidate the popup paste session before acknowledged retirement. Windows preserves the native system-menu close command. Linux GTK close/iconify coalesces duplicate requests, cancels/restores the transaction, and exits on idle; its callback is owned and released by the GTK window. Quit from the Linux popup requests primary-process termination through PID/transaction authorization. No event monitor, polling timer, retained presentation, or engine prewarming is introduced.",
       "next_step": "Measure startup latency, peak and recovered memory for 100 open/close cycles; compare reuse only with evidence.",
@@ -160,7 +157,6 @@
       ],
       "source_references": [
         "crates/copypaste-modules/src/inference/client.rs",
-        "docs/semantic-inference.md",
         "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/InferenceWorkerService.kt"
       ],
       "invariant": "Model loading is lazy; idle worker exits after 60 seconds; disable/change/shutdown cancel and reap.",
@@ -189,7 +185,6 @@
       ],
       "source_references": [
         "crates/copypaste-modules/src/inference/client.rs",
-        "docs/release-qualification.md",
         "modules/ocr/src/lib.rs",
         "modules/ocr/vendor/paddle-ocr-rs/src/crnn_net.rs"
       ],
@@ -225,7 +220,6 @@
       ],
       "source_references": [
         "crates/copypaste-modules/src/semantic_search.rs",
-        "docs/semantic-inference.md",
         "crates/copypaste-core/src/storage/semantic_index.rs",
         "crates/copypaste-core/src/storage/resource_revisions.rs"
       ],
@@ -379,9 +373,7 @@
         "Android",
         "Windows"
       ],
-      "source_references": [
-        "docs/adr/0032-bounded-source-app-icon-metadata.md"
-      ],
+      "source_references": [],
       "invariant": "32 KiB PNG, 128 px decoded edge, bounded metadata envelopes.",
       "next_step": "Retain identity parity and bound resident icon caches by bytes and visible working set.",
       "native_resource_qualification": {
@@ -407,8 +399,7 @@
         "Windows"
       ],
       "source_references": [
-        "crates/copypaste-core/src/storage/connection.rs",
-        "docs/adr/0023-retention-batch-scope-guard.md"
+        "crates/copypaste-core/src/storage/connection.rs"
       ],
       "invariant": "One minimum idle connection, up to four pooled connections, an 8 MiB configured page-cache target per connection, and batched retention; cache targets are not hard total-memory bounds.",
       "next_step": "Measure sustained full-app storage and sync workloads, connection retirement, encrypted temporary state and platform-native memory. Preserve four-way checkout and existing timeouts.",
@@ -913,7 +904,6 @@
         "Windows"
       ],
       "source_references": [
-        "docs/ui-memory.md",
         "apps/copypaste_flutter/lib/main.dart"
       ],
       "invariant": "Releasing Dart references is distinct from reclaiming allocator, engine, GPU or native memory.",
@@ -951,8 +941,6 @@
         "Windows"
       ],
       "source_references": [
-        "docs/ui-memory.md",
-        "docs/release-qualification.md",
         "scripts/profile/darwin-rusage.py",
         "config/runtime-resource-budgets.json",
         "scripts/profile/check-resource-receipts.py",
@@ -992,9 +980,6 @@
         "Windows"
       ],
       "source_references": [
-        "docs/engineering/ci-standards.md",
-        "docs/ui-memory.md",
-        "docs/engineering/resource-contract.md",
         "config/optimization-registry.json"
       ],
       "invariant": "Every optimization has a stable ID, owner, contract, tests, tradeoffs and exact evidence; implementation is not measured qualification.",
@@ -1021,10 +1006,7 @@
         "Android",
         "Windows"
       ],
-      "source_references": [
-        "docs/engineering/ci-architecture.md",
-        "docs/engineering/ci-standards.md"
-      ],
+      "source_references": [],
       "invariant": "Preserve release artifact/signing identity; cache trust separation and platform matrix.",
       "next_step": "Keep existing gates; attach equivalent-input cold/warm/unknown-cohort evidence before any acceleration claim.",
       "native_resource_qualification": {
@@ -1051,8 +1033,7 @@
       ],
       "source_references": [
         "scripts/ci/metrics.py",
-        "config/ci-performance-budgets.json",
-        "docs/engineering/ci-standards.md"
+        "config/ci-performance-budgets.json"
       ],
       "invariant": "Wall-clock, critical path and cache evidence stay separate from runtime RAM.",
       "next_step": "Continue recording CI changes with scripts/ci/metrics.py; it currently has no native runtime memory ingestion.",
@@ -1078,9 +1059,7 @@
         "Android",
         "Windows"
       ],
-      "source_references": [
-        "docs/adr/0026-bound-the-primary-checkout-target-directory.md"
-      ],
+      "source_references": [],
       "invariant": "Clean owned build caches at safe boundaries, skip active builds; do not delete unrelated artifacts.",
       "next_step": "Track reclaimed disk versus subsequent cold build CPU/time; the documented policy is not a continuous disk ceiling.",
       "native_resource_qualification": {
@@ -1105,10 +1084,7 @@
         "Android",
         "Windows"
       ],
-      "source_references": [
-        "docs/adr/0025-bound-per-worktree-build-artifacts.md",
-        "docs/adr/0026-bound-the-primary-checkout-target-directory.md"
-      ],
+      "source_references": [],
       "invariant": "Historical, replaced and active optimization policies must have explicit status and successor links.",
       "next_step": "Verify hook implementation against both ADRs before assigning active/superseded status; avoid counting old policy as a current optimization.",
       "native_resource_qualification": {
@@ -1489,8 +1465,7 @@
         "apps/copypaste_flutter/lib/platform/desktop/flutter_desktop_window_host.dart",
         "apps/copypaste_flutter/macos/Runner/QuickPasteGeometry.swift",
         "apps/copypaste_flutter/macos/Runner/MainFlutterWindow.swift",
-        "apps/copypaste_flutter/windows/runner/flutter_window.cpp",
-        "docs/adr/0033-quick-paste-popup.md"
+        "apps/copypaste_flutter/windows/runner/flutter_window.cpp"
       ],
       "invariant": "Tray and shortcut share the existing lazy Quick Paste engine, repository, bounded media caches, paging, and paste session. Tray height is capped at 600 logical pixels and available work area; only the list scrolls. No independent history snapshot, watch lease, polling loop, or persistent engine is introduced. The existing acknowledged shutdown releases the repository and native engine after dismissal or paste.",
       "next_step": "Verify tray placement, every clip kind, and focus-safe paste on installed macOS and Windows. Measure application, daemon, and workers separately and together for tray/shortcut cycles, peak, steady state, recovery, and growth. Non-memory budgets and native qualification remain unresolved.",
@@ -1521,8 +1496,7 @@
         "apps/copypaste_flutter/lib/features/history/controller/history_controller.dart",
         "crates/copypaste-core/src/spoiler.rs",
         "crates/copypaste-daemon/src/server/items.rs",
-        "crates/copypaste-runtime/src/lib.rs",
-        "docs/adr/0033-quick-paste-popup.md"
+        "crates/copypaste-runtime/src/lib.rs"
       ],
       "invariant": "Quick Paste reuses its initial watched page for its first presentation and omits unused facets. Preference reads overlap safely, and module metadata starts only when the inspector needs it; pending metadata never blocks showing or closing the inspector. An unchanged spoiler update neither advances the revision nor wakes clients, while actual changes retain the existing shared-state notifications. Engine creation remains on demand with the existing acknowledged retirement; no persistent engine or new cache is introduced.",
       "next_step": "Compare baseline and candidate native click-to-window, first-frame, and preview latency with equivalent debug/AOT builds and cache state. Measure process-family memory, CPU, wakeups, and I/O on macOS, physical Android, and installed Windows. Native interaction measurement was not authorized in this task; non-memory budgets remain unresolved.",
@@ -1588,8 +1562,7 @@
         "apps/copypaste_flutter/lib/features/quick_paste/quick_paste_controller.dart",
         "apps/copypaste_flutter/lib/platform/desktop/quick_paste_host.dart",
         "apps/copypaste_flutter/macos/Runner/MainFlutterWindow.swift",
-        "apps/copypaste_flutter/windows/runner/flutter_window.cpp",
-        "docs/adr/0033-quick-paste-popup.md"
+        "apps/copypaste_flutter/windows/runner/flutter_window.cpp"
       ],
       "invariant": "Position the on-demand popup while hidden, decode only mounted viewport media through existing bounded caches, submit its frame, then reveal by the current presentation ID. A changed foreground or superseded ID cannot activate an obsolete popup. Offscreen clips and image errors do not hold the reveal. macOS registers only file-selection and preferences plugins; Windows registers only file-selection. Existing shutdown retires the engine and owned repository, with no prewarming or persistent engine. Flutter decoded-cache limits remain unchanged.",
       "next_step": "Measure native click-to-ready and first-visible-frame latency, including decode, with equivalent debug/AOT builds, fixture, and cache state. Compare peak/steady/recovery process-family memory, CPU, wakeups and I/O for cold openings and repeated cycles on macOS and installed Windows. Computer Use remains unauthorized; native latency/resource qualification is not established and non-memory budgets remain unresolved.",
@@ -1631,8 +1604,7 @@
         "apps/copypaste_flutter/macos/Runner/MacosTrayMenuChannel.swift",
         "apps/copypaste_flutter/macos/Runner/MainFlutterWindow.swift",
         "apps/copypaste_flutter/lib/platform/macos/macos_tray_menu.dart",
-        "apps/copypaste_flutter/lib/platform/desktop/flutter_desktop_window_host.dart",
-        "docs/adr/0033-quick-paste-popup.md"
+        "apps/copypaste_flutter/lib/platform/desktop/flutter_desktop_window_host.dart"
       ],
       "invariant": "Bind the existing status button primary action directly to the shared native opener after leaving AppKit tracking. Capture the application target and icon frame at the click. Preserve the original target for context-menu gestures and restore only the owned target on detach. Detach cancels queued activation before releasing the tray. The binding retains no button or application payload, adds no poller/event monitor/engine, and preserves acknowledged Quick Paste retirement.",
       "next_step": "Compare tray and shortcut in the same bundle/build with equivalent workload and cache state. A temporary separate Dev shortcut and source-tagged diagnostic traces confirmed that the observed delay also occurs through the Dev shortcut; the shortcut was restored and diagnostic code removed after comparison. Complete native latency/resource qualification remains unestablished and non-memory budgets unresolved.",
@@ -1738,7 +1710,6 @@
         "apps/copypaste_flutter/lib/features/update/repository/obsolete_update_cleanup.dart",
         "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/AndroidClipboardCache.kt",
         "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/HistoryFilesChannel.kt",
-        "docs/engineering/disk-storage.md",
         "crates/copypaste-modules/src/staging_cleanup.rs",
         "crates/copypaste-modules/src/manager.rs"
       ],

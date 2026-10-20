@@ -9,16 +9,11 @@ import subprocess
 
 
 def select(paths):
-    # Documentation that defines executable/release behavior is deliberately full CI.
-    documentation = ("docs/",)
-    contracts = ("docs/release-qualification.md", "docs/linux-platform.md", "docs/engineering/")
     selected = {"native": False}
     for path in paths:
         if not path or path.startswith("/") or ".." in Path(path).parts:
             return {"native": True}
         if path in ("README.md", "LICENSE", "LICENSE-MIT", "LICENSE-APACHE"):
-            continue
-        if path.startswith(documentation) and not path.startswith(contracts):
             continue
         selected["native"] = True
     return selected

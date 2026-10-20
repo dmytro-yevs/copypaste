@@ -3,7 +3,7 @@
 //! # What the deployment must look like
 //!
 //! The SQL below is the contract this module codes against. It is written out
-//! here rather than in a `docs/` file that drifts, because two things in it are
+//! here because two things in it are
 //! load-bearing for code in this module: the unique index (without it the upsert
 //! conflict target does not resolve and every write fails at runtime), and the
 //! `user_id` default (without it the client would have to spell out `user_id`,

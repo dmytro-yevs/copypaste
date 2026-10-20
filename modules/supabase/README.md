@@ -18,8 +18,7 @@ and keeps the account for re-enabling. Removing clears module state and package
 data; local clipboard history remains available. The global Synchronization
 setting also stops the module.
 
-Provision the backend using [the maintained schema](../../supabase/) and
-[deployment instructions](../../docs/supabase-deployment.md). Do not use a
+Provision the backend using [the maintained schema](../../supabase/). Do not use a
 `service_role` key. No endpoint or account is bundled into the application.
 
 Build the independent library:

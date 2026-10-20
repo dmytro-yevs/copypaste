@@ -16,8 +16,6 @@ b6c311e8ada603578543d5b4d99b09cd27d053af:e2e/src/harness/selection-diagnostics.t
 1131d1e2a67678e35bf9baed25d64785567ca0ed:crates/copypaste-core/src/sensitive/engine.rs:slack-bot-token:1200
 9263042a9f334218357f3585dfbb4458ecdc7f09:crates/copypaste-core/src/sensitive/engine.rs:github-app-token:264
 9263042a9f334218357f3585dfbb4458ecdc7f09:crates/copypaste-core/src/sensitive/engine.rs:slack-bot-token:277
-432d8ec25d697508f0b06e2fc6ab67e0a5a3942f:docs/rewrite/port-manifest/07-secret-detection.md:github-app-token:817
-432d8ec25d697508f0b06e2fc6ab67e0a5a3942f:docs/rewrite/port-manifest/07-secret-detection.md:slack-bot-token:824
 92d6904446f9c9f0d6cddb945d8b93e8bdb9b99f:crates/copypaste-core/src/sensitive.rs:github-app-token:992
 92d6904446f9c9f0d6cddb945d8b93e8bdb9b99f:crates/copypaste-core/src/sensitive.rs:slack-bot-token:1005
 
@@ -31,7 +29,6 @@ d4946c5ded0075269f9abcff09f3819ab9539819:crates/copypaste-daemon/src/cloud/sourc
 
 # generic-api-key (36)
 0317f9a9610fbfc0d8243f2a01b4351617e815a0:crates/copypaste-ui/ui/SettingsWindow.slint:generic-api-key:55
-11a2813ec175d1f3cfe7314069623b61c02f0645:docs/rewrite/security-review.md:generic-api-key:93
 3366feb6eb91c4c18f4790189dbe47c92492d206:android/app/src/main/java/com/copypaste/android/Settings.kt:generic-api-key:706
 3366feb6eb91c4c18f4790189dbe47c92492d206:android/app/src/main/java/com/copypaste/android/Settings.kt:generic-api-key:726
 3366feb6eb91c4c18f4790189dbe47c92492d206:crates/copypaste-android/tests/fixtures/golden_vectors.json:generic-api-key:67

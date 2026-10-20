@@ -64,7 +64,7 @@ The host owns the encrypted database and keys. The worker receives only bounded
 command inputs over inherited pipes on desktop or a private socket passed by
 Android Binder. Android runs a non-exported `:inference` service and terminates
 its dedicated process, rather than leaving its allocator in a cached service.
-See [Semantic inference lifecycle](../../docs/semantic-inference.md).
+
 
 ## Build and package
 

@@ -2,8 +2,7 @@
 # What an idle daemon costs: CPU-seconds per hour and wakeups per minute.
 #
 # Those two are the battery proxy. Battery itself cannot be measured here, and
-# the clipboard backend on this host is the fake one — see the transferability
-# note in docs/rewrite/performance.md before quoting any of this for macOS.
+# a fake clipboard backend does not establish native macOS idle behavior.
 #
 # NO_MDNS=1 turns LAN visibility off and restarts before measuring. Do that
 # whenever the number has to be the daemon's *own* cost: the mDNS browse thread
