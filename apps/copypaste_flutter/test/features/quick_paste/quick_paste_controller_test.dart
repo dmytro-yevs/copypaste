@@ -1495,12 +1495,14 @@ void main() {
     expect(find.text('[image]'), findsNothing);
     expect(tester.getSize(preview).height, 120);
     expect(repository.imagePreviewEdges, contains(480));
-      final ratio = tester.view.devicePixelRatio;
-      expect(
-        repository.imagePreviewBounds,
-        contains(((240 * ratio).ceil().clamp(1, 480),
-            (120 * ratio).ceil().clamp(1, 480))),
-      );
+    final ratio = tester.view.devicePixelRatio;
+    expect(
+      repository.imagePreviewBounds,
+      contains((
+        (240 * ratio).ceil().clamp(1, 480),
+        (120 * ratio).ceil().clamp(1, 480),
+      )),
+    );
     final row = find.byKey(const ValueKey('quick-paste-image'));
     final size = tester.getSize(row);
     await controller.history.toggleSecret(repository.clips.first);
@@ -1516,6 +1518,29 @@ void main() {
     expect(repository.copied, isEmpty);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('Enter activates the newest clip on Linux without navigation', (
+    tester,
+  ) async {
+    final repository = _Repository();
+    final host = _ContextHost()..permissionGranted = true;
+    final controller = QuickPasteController(
+      repository: repository,
+      preferencesStore: MemoryQuickPastePreferencesStore(),
+      host: host,
+    );
+    await tester.binding.setSurfaceSize(const Size(448, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(QuickPasteApp(controller: controller));
+    await tester.pumpAndSettle();
+    await controller.opened(1);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(repository.copied, ['recent']);
+    expect(host.pasteIds, [1]);
+    expect(tester.takeException(), isNull);
+  }, variant: TargetPlatformVariant({TargetPlatform.linux}));
 
   testWidgets('arrows select the visible menu order while search keeps focus', (
     tester,
@@ -2575,7 +2600,7 @@ void main() {
     await controller.activateFocused();
 
     expect(repository.copied, ['recent']);
-    expect(host.pasteCalls, 1);
+    expect(host.pasteIds, [1]);
     expect(host.closeCalls, 0);
   });
 
@@ -2621,7 +2646,7 @@ void main() {
       invertAutoPaste: true,
     );
 
-    expect(host.pasteCalls, 1);
+    expect(host.pasteIds, [1]);
     expect(host.closeCalls, 0);
   });
 
