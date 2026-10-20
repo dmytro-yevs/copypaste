@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:copypaste_flutter/app/theme/app_theme.dart';
 import 'package:copypaste_flutter/features/settings/controller/settings_controller.dart';
 import 'package:copypaste_flutter/features/settings/view/settings_screen.dart';
@@ -117,6 +119,36 @@ void main() {
       },
     );
   }
+
+  test('screenshot state stream maps native updates and cancels', () async {
+    const channel = EventChannel('test/screenshot-state-events');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    var cancelled = false;
+    messenger.setMockStreamHandler(
+      channel,
+      MockStreamHandler.inline(
+        onListen: (_, events) => events.success({
+          'enabled': false,
+          'mediaGranted': true,
+          'notificationGranted': false,
+          'running': true,
+        }),
+        onCancel: (_) => cancelled = true,
+      ),
+    );
+    addTearDown(() => messenger.setMockStreamHandler(channel, null));
+    const port = MethodChannelScreenshotCapture(events: channel);
+    final received = Completer<ScreenshotCaptureStatus>();
+    final subscription = port.changes.listen(received.complete);
+    final latest = await received.future;
+    expect(latest.enabled, isFalse);
+    expect(latest.mediaGranted, isTrue);
+    expect(latest.notificationGranted, isFalse);
+    expect(latest.running, isTrue);
+    await subscription.cancel();
+    expect(cancelled, isTrue);
+  });
 
   test('typed channel preserves permission denial and native state', () async {
     const channel = MethodChannel('test/screenshot-capture');

@@ -33,6 +33,10 @@ impl Module for SupabaseModule {
     fn create_with_host(_: ModuleEnvironment, host: HostClient) -> Result<Self, String> {
         let (commands, receiver) = mpsc::unbounded_channel();
         let cancel = CancellationToken::new();
+        let subscription = host.subscribe_revocation({
+            let cancel = cancel.clone();
+            move || cancel.cancel()
+        });
         let worker_cancel = cancel.clone();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -43,7 +47,8 @@ impl Module for SupabaseModule {
             runtime.block_on(async move {
                 let monitor_host = host.clone();
                 let monitor_cancel = worker_cancel.clone();
-                let monitor = tokio::spawn(async move {
+                // Legacy hosts have no revocation callback, so retain their watchdog.
+                let monitor = subscription.is_none().then(|| tokio::spawn(async move {
                     loop {
                         tokio::select! {
                             biased;
@@ -56,10 +61,11 @@ impl Module for SupabaseModule {
                             }
                         }
                     }
-                });
+                }));
+                let _subscription = subscription;
                 run(HostStore(host), receiver, worker_cancel.clone()).await;
                 worker_cancel.cancel();
-                let _ = monitor.await;
+                if let Some(monitor) = monitor { let _ = monitor.await; }
             });
         }).map_err(|_| "The sync worker could not start.")?;
         Ok(Self {
@@ -261,31 +267,45 @@ impl State {
         }
     }
     async fn command(&mut self, invocation: ModuleInvocation) -> Result<ModuleOutput, String> {
+        // A host can disable sync while its startup command is already queued.
+        // Do not configure or restart an account after that stop request.
+        if invocation.command == "provider-tick" && !self.host.enabled() {
+            self.stop_account().await;
+            return Ok(ModuleOutput::Message {
+                message: "Synchronization is disabled.".into(),
+            });
+        }
         self.configure(&invocation.preferences).await?;
+        // Configuration can await state I/O, so recheck after it before
+        // starting Realtime or reading the provider revision.
+        if invocation.command == "provider-tick" && !self.host.enabled() {
+            self.stop_account().await;
+            return Ok(ModuleOutput::Message {
+                message: "Synchronization is disabled.".into(),
+            });
+        }
         match invocation.command.as_str() {
             "provider-tick" => {
-                if self.host.enabled() {
-                    if let Some(account) = self.account.as_mut() {
-                        if account.realtime.is_none() {
-                            account.realtime = Some(tokio::spawn(realtime::run(
-                                Arc::clone(&account.driver),
-                                Arc::clone(&self.wake),
-                                account.cancel.clone(),
-                            )));
-                        }
+                if let Some(account) = self.account.as_mut() {
+                    if account.realtime.is_none() {
+                        account.realtime = Some(tokio::spawn(realtime::run(
+                            Arc::clone(&account.driver),
+                            Arc::clone(&self.wake),
+                            account.cancel.clone(),
+                        )));
                     }
-                    let revision = self
-                        .host
-                        .0
-                        .request(&copypaste_sync::host::SyncHostRequest::Revision)
-                        .map_err(state_error)?;
-                    if self.revision != Some(revision) {
-                        self.revision = Some(revision);
-                        if let Some(account) = &self.account {
-                            account.driver.wake();
-                        }
-                        self.wake.notify_one();
+                }
+                let revision = self
+                    .host
+                    .0
+                    .request(&copypaste_sync::host::SyncHostRequest::Revision)
+                    .map_err(state_error)?;
+                if self.revision != Some(revision) {
+                    self.revision = Some(revision);
+                    if let Some(account) = &self.account {
+                        account.driver.wake();
                     }
+                    self.wake.notify_one();
                 }
                 Ok(ModuleOutput::Message {
                     message: "Sync scheduled.".into(),
@@ -547,6 +567,199 @@ fn to_wire(stats: SyncStats) -> CloudSyncData {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use copypaste_module_sdk::native::{NativeBuffer, NativeHostApi, NativeHostApiV2, NativeReply};
+    use std::{
+        ffi::c_void,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    #[derive(Default)]
+    struct FakeHost {
+        requests: AtomicUsize,
+        unsubscribed: AtomicUsize,
+    }
+    unsafe extern "C" fn request(context: *mut c_void, _: *const u8, _: usize) -> NativeReply {
+        unsafe { &*context.cast::<FakeHost>() }
+            .requests
+            .fetch_add(1, Ordering::SeqCst);
+        let bytes = b"null".to_vec().into_boxed_slice();
+        let len = bytes.len();
+        NativeReply {
+            status: 0,
+            buffer: NativeBuffer {
+                data: Box::into_raw(bytes).cast(),
+                len,
+            },
+        }
+    }
+    unsafe extern "C" fn release(buffer: NativeBuffer) {
+        unsafe {
+            drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                buffer.data,
+                buffer.len,
+            )))
+        }
+    }
+    unsafe extern "C" fn subscribe(
+        _: *mut c_void,
+        _: unsafe extern "C" fn(*mut c_void),
+        _: *mut c_void,
+    ) -> u64 {
+        1
+    }
+    unsafe extern "C" fn already_revoked(
+        _: *mut c_void,
+        callback: unsafe extern "C" fn(*mut c_void),
+        context: *mut c_void,
+    ) -> u64 {
+        unsafe { callback(context) };
+        0
+    }
+    unsafe extern "C" fn unsubscribe(context: *mut c_void, _: u64) {
+        unsafe { &*context.cast::<FakeHost>() }
+            .unsubscribed
+            .fetch_add(1, Ordering::SeqCst);
+    }
+    fn host_api(host: &FakeHost) -> NativeHostApi {
+        NativeHostApi {
+            api_version: copypaste_module_sdk::MODULE_API_VERSION,
+            struct_size: std::mem::size_of::<NativeHostApi>(),
+            context: (host as *const FakeHost).cast_mut().cast(),
+            request,
+            release,
+        }
+    }
+
+    #[test]
+    fn v2_host_is_idle_without_polling_and_legacy_host_keeps_watchdog() {
+        let environment = serde_json::to_vec(&ModuleEnvironment {
+            package_dir: "unused".into(),
+            data_dir: "unused".into(),
+        })
+        .unwrap();
+        let modern = FakeHost::default();
+        let api = NativeHostApiV2 {
+            api_version: 2,
+            struct_size: std::mem::size_of::<NativeHostApiV2>(),
+            base: host_api(&modern),
+            subscribe,
+            unsubscribe,
+        };
+        let module = unsafe {
+            copypaste_module_sdk::native::create_with_host_v2::<SupabaseModule>(
+                environment.as_ptr(),
+                environment.len(),
+                &api,
+            )
+        };
+        assert!(!module.is_null());
+        std::thread::sleep(Duration::from_millis(250));
+        unsafe { (copypaste_module_sdk::native::Export::<SupabaseModule>::API.destroy)(module) };
+        assert_eq!(modern.requests.load(Ordering::SeqCst), 0);
+        assert_eq!(modern.unsubscribed.load(Ordering::SeqCst), 1);
+
+        let legacy = FakeHost::default();
+        let api = host_api(&legacy);
+        let module = unsafe {
+            copypaste_module_sdk::native::create_with_host::<SupabaseModule>(
+                environment.as_ptr(),
+                environment.len(),
+                &api,
+            )
+        };
+        assert!(!module.is_null());
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while legacy.requests.load(Ordering::SeqCst) == 0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        unsafe { (copypaste_module_sdk::native::Export::<SupabaseModule>::API.destroy)(module) };
+        assert!(legacy.requests.load(Ordering::SeqCst) >= 1);
+    }
+
+    #[test]
+    fn disabled_provider_tick_does_not_configure_or_restart_an_account() {
+        let environment = serde_json::to_vec(&ModuleEnvironment {
+            package_dir: "unused".into(),
+            data_dir: "unused".into(),
+        })
+        .unwrap();
+        let host = FakeHost::default();
+        let api = NativeHostApiV2 {
+            api_version: 2,
+            struct_size: std::mem::size_of::<NativeHostApiV2>(),
+            base: host_api(&host),
+            subscribe,
+            unsubscribe,
+        };
+        let module = unsafe {
+            copypaste_module_sdk::native::create_with_host_v2::<SupabaseModule>(
+                environment.as_ptr(),
+                environment.len(),
+                &api,
+            )
+        };
+        assert!(!module.is_null());
+        let invocation = serde_json::to_vec(&ModuleInvocation {
+            command: "provider-tick".into(),
+            arguments: BTreeMap::new(),
+            preferences: BTreeMap::from([(
+                "url".into(),
+                serde_json::Value::String("not-a-valid-endpoint".into()),
+            )]),
+        })
+        .unwrap();
+        let reply = unsafe {
+            (copypaste_module_sdk::native::Export::<SupabaseModule>::API.invoke)(
+                module,
+                invocation.as_ptr(),
+                invocation.len(),
+            )
+        };
+        assert_eq!(reply.status, 0);
+        let output: ModuleOutput = unsafe {
+            serde_json::from_slice(std::slice::from_raw_parts(
+                reply.buffer.data,
+                reply.buffer.len,
+            ))
+            .unwrap()
+        };
+        unsafe {
+            (copypaste_module_sdk::native::Export::<SupabaseModule>::API.release)(reply.buffer)
+        };
+        assert!(
+            matches!(output, ModuleOutput::Message { ref message } if message == "Synchronization is disabled.")
+        );
+        unsafe { (copypaste_module_sdk::native::Export::<SupabaseModule>::API.destroy)(module) };
+        assert_eq!(host.requests.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn v2_host_already_revoked_can_stop_before_first_command() {
+        let environment = serde_json::to_vec(&ModuleEnvironment {
+            package_dir: "unused".into(),
+            data_dir: "unused".into(),
+        })
+        .unwrap();
+        let host = FakeHost::default();
+        let api = NativeHostApiV2 {
+            api_version: 2,
+            struct_size: std::mem::size_of::<NativeHostApiV2>(),
+            base: host_api(&host),
+            subscribe: already_revoked,
+            unsubscribe,
+        };
+        let module = unsafe {
+            copypaste_module_sdk::native::create_with_host_v2::<SupabaseModule>(
+                environment.as_ptr(),
+                environment.len(),
+                &api,
+            )
+        };
+        assert!(!module.is_null());
+        unsafe { (copypaste_module_sdk::native::Export::<SupabaseModule>::API.destroy)(module) };
+        assert_eq!(host.requests.load(Ordering::SeqCst), 0);
+        assert_eq!(host.unsubscribed.load(Ordering::SeqCst), 0);
+    }
     #[test]
     fn production_package_requires_secure_endpoints_and_host_capabilities() {
         #[cfg(not(feature = "test-endpoints"))]

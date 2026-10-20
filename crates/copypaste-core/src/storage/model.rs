@@ -20,14 +20,26 @@ macro_rules! item_columns {
 
 /// The same projection through the `ci` alias used by the FTS JOIN, aliased back
 /// to the bare names so one row mapper serves both.
+macro_rules! item_columns_ci_with {
+    ($ciphertext:literal) => {
+        concat!(
+            "ci.id AS id, ", $ciphertext, ", ci.nonce AS nonce, ",
+            "ci.content_type AS content_type, ci.content_hash AS content_hash, ",
+            "ci.created_at AS created_at, ci.pinned AS pinned, ci.pin_order AS pin_order, ",
+            "ci.pin_updated_at AS pin_updated_at, ci.deleted AS deleted, ",
+            "ci.origin_device_id AS origin_device_id, ci.app_bundle_id AS app_bundle_id, ",
+            "ci.app_name AS app_name, ci.payload_metadata AS payload_metadata, ci.source_icon_id AS source_icon_id"
+        )
+    };
+}
 macro_rules! item_columns_ci {
     () => {
-        "ci.id AS id, CAST(ci.content_ciphertext || COALESCE((SELECT p.ciphertext FROM shared_binary_payloads p JOIN history_file_payloads f ON f.blob_id = p.id WHERE f.item_id = ci.id), X'') AS BLOB) AS content_ciphertext, ci.nonce AS nonce, \
-         ci.content_type AS content_type, ci.content_hash AS content_hash, \
-         ci.created_at AS created_at, ci.pinned AS pinned, ci.pin_order AS pin_order, \
-         ci.pin_updated_at AS pin_updated_at, ci.deleted AS deleted, \
-         ci.origin_device_id AS origin_device_id, ci.app_bundle_id AS app_bundle_id, \
-         ci.app_name AS app_name, ci.payload_metadata AS payload_metadata, ci.source_icon_id AS source_icon_id"
+        $crate::storage::model::item_columns_ci_with!("CAST(ci.content_ciphertext || COALESCE((SELECT p.ciphertext FROM shared_binary_payloads p JOIN history_file_payloads f ON f.blob_id = p.id WHERE f.item_id = ci.id), X'') AS BLOB) AS content_ciphertext")
+    };
+}
+macro_rules! item_columns_preview_ci {
+    () => {
+        $crate::storage::model::item_columns_ci_with!("X'' AS content_ciphertext")
     };
 }
 
@@ -43,7 +55,10 @@ macro_rules! stored_item_columns {
     };
 }
 
-pub(super) use {item_columns, item_columns_ci, stored_item_columns};
+pub(super) use {
+    item_columns, item_columns_ci, item_columns_ci_with, item_columns_preview_ci,
+    stored_item_columns,
+};
 
 /// An item on its way into the store.
 pub struct NewItem {

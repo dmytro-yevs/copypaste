@@ -3,6 +3,8 @@
 
 mod cloud_request;
 mod host;
+#[allow(unsafe_code)]
+mod host_lifetime;
 mod inference;
 mod input;
 mod manager;

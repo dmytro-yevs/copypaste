@@ -54,6 +54,25 @@ pub struct EventData {
     pub captured_item_id: Option<String>,
 }
 
+/// Progress contains only the caller's opaque token and byte counts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileProgress {
+    pub token: String,
+    pub written: u64,
+    pub total: u64,
+}
+
+/// Opt-in runtime stream payload. Legacy watchers never receive these frames.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeEventData {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change: Option<EventData>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<FileProgress>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture: Option<crate::StatusData>,
+}
+
 /// One reply. `ok` distinguishes success from failure without inspecting the
 /// payload.
 #[derive(Debug, Clone)]
@@ -282,6 +301,7 @@ pub enum ResponseData {
     Discovered(DiscoveredData),
     Config(ConfigApplied),
     Event(EventData),
+    RuntimeEvent(RuntimeEventData),
     Page(ItemPage),
     HistoryFacets(HistoryFacets),
     SpoilerState {
@@ -305,6 +325,13 @@ pub enum ResponseData {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_event_accepts_legacy_payload_without_capture() {
+        let event: RuntimeEventData =
+            serde_json::from_str(r#"{"change":null,"progress":null}"#).unwrap();
+        assert!(event.capture.is_none());
+    }
 
     #[test]
     fn success_requires_one_payload_and_no_failure_fields() {

@@ -20,6 +20,8 @@ const CURRENT_TABLES: &[&str] = &[
     "copypaste_schema_migrations",
     "module_search_documents",
     "module_search_vectors",
+    "resource_revisions",
+    "history_preview_cache",
 ];
 
 #[derive(Debug, PartialEq)]

@@ -24,6 +24,7 @@ internal object NativeRuntimeCapture {
     @JvmStatic external fun ingestBinary(
         token: Long,
         bytes: ByteArray,
+        length: Int,
         contentType: String,
         filename: String,
         sourceReference: String,

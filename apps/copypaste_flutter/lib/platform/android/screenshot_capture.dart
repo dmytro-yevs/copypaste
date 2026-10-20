@@ -25,14 +25,29 @@ abstract interface class ScreenshotCapture {
   Future<ScreenshotCaptureStatus> requestPermission();
 }
 
-class MethodChannelScreenshotCapture implements ScreenshotCapture {
+abstract interface class ScreenshotCaptureEvents {
+  Stream<ScreenshotCaptureStatus> get changes;
+}
+
+class MethodChannelScreenshotCapture
+    implements ScreenshotCapture, ScreenshotCaptureEvents {
   const MethodChannelScreenshotCapture({
     MethodChannel channel = const MethodChannel(
       'com.copypaste.app/android_capture',
     ),
-  }) : _channel = channel;
+    EventChannel events = const EventChannel(
+      'com.copypaste.app/android_capture/screenshot_state',
+    ),
+  }) : _channel = channel,
+       _events = events;
 
   final MethodChannel _channel;
+  final EventChannel _events;
+
+  @override
+  Stream<ScreenshotCaptureStatus> get changes => _events
+      .receiveBroadcastStream()
+      .map((raw) => _decode(Map<String, Object?>.from(raw as Map)));
 
   @override
   bool get supported => Platform.isAndroid;
@@ -59,11 +74,14 @@ class MethodChannelScreenshotCapture implements ScreenshotCapture {
     if (raw == null) {
       throw PlatformException(code: 'screenshot_capture_unavailable');
     }
-    return ScreenshotCaptureStatus(
-      enabled: raw['enabled'] as bool? ?? true,
-      mediaGranted: raw['mediaGranted'] as bool? ?? false,
-      notificationGranted: raw['notificationGranted'] as bool? ?? false,
-      running: raw['running'] as bool? ?? false,
-    );
+    return _decode(raw);
   }
+
+  ScreenshotCaptureStatus _decode(Map<String, Object?> raw) =>
+      ScreenshotCaptureStatus(
+        enabled: raw['enabled'] as bool? ?? true,
+        mediaGranted: raw['mediaGranted'] as bool? ?? false,
+        notificationGranted: raw['notificationGranted'] as bool? ?? false,
+        running: raw['running'] as bool? ?? false,
+      );
 }

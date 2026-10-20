@@ -35,6 +35,43 @@ class HighlightedHistoryCode {
   final TextSpan span;
 }
 
+/// Holds only the current presentation result, for the lifetime of its owner.
+class HistoryCodeHighlightMemo {
+  String? _source;
+  ThemeData? _theme;
+  bool? _json;
+  HighlightedHistoryCode? _result;
+
+  HighlightedHistoryCode highlight(
+    String source,
+    ThemeData theme, {
+    bool json = false,
+  }) {
+    if (_source == source &&
+        _theme == theme &&
+        _json == json &&
+        _result != null) {
+      return _result!;
+    }
+    clear();
+    final result = HistoryCodeHighlighter.highlight(source, theme, json: json);
+    if (source.length <= HistoryCodeHighlighter._maxHighlightedCodeUnits) {
+      _source = source;
+      _theme = theme;
+      _json = json;
+      _result = result;
+    }
+    return result;
+  }
+
+  void clear() {
+    _source = null;
+    _theme = null;
+    _json = null;
+    _result = null;
+  }
+}
+
 /// History-owned syntax presentation. It registers only the languages the UI
 /// can name, keeping detection deterministic and the shipped grammar set small.
 abstract final class HistoryCodeHighlighter {
@@ -164,9 +201,8 @@ abstract final class HistoryCodeHighlighter {
         lower.startsWith('from ') && lower.contains(' import ')) {
       return 'python';
     }
-    if (RegExp(
-      r'^\s*(git|npm|pnpm|yarn|cargo|docker|kubectl|brew|sudo)\s+',
-    ).hasMatch(lower)) {
+    if (RegExp(r'^\s*(git|npm|pnpm|yarn|cargo|docker|kubectl|brew|sudo)\s+')
+        .hasMatch(lower)) {
       return 'bash';
     }
     if (lower.startsWith('from ') && lower.contains('\nrun ')) {

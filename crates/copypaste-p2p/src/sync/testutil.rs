@@ -159,6 +159,14 @@ impl SyncSource for TestSource {
         Ok(self.page(since_ms, None, usize::MAX))
     }
 
+    fn local_summaries(&self, ids: &[String]) -> Result<Vec<ItemSummary>, SyncError> {
+        let items = self.items.lock().unwrap();
+        Ok(ids
+            .iter()
+            .filter_map(|id| items.get(id).map(SyncItem::summary))
+            .collect())
+    }
+
     fn summary_page(
         &self,
         since_ms: i64,

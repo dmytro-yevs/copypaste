@@ -6,10 +6,60 @@ import android.net.Uri
 import android.provider.Settings
 import android.os.Handler
 import android.os.Looper
+import java.util.concurrent.atomic.AtomicBoolean
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+
+internal class AndroidCaptureStatePublisher(
+    private val state: () -> Map<String, Any>,
+    private val now: () -> Long = System::currentTimeMillis,
+) {
+    private var sink: EventChannel.EventSink? = null
+    private var lastState: Map<String, Any>? = null
+
+    fun listen(events: EventChannel.EventSink) {
+        sink = events
+        lastState = null
+        publish()
+    }
+
+    fun cancel() {
+        sink = null
+        lastState = null
+    }
+
+    fun publish() {
+        val listener = sink ?: return
+        val current = state().minus("observedAtMs")
+        if (current != lastState) {
+            lastState = current
+            listener.success(current + ("observedAtMs" to now()))
+        }
+    }
+}
+
+internal class AndroidCaptureSignalDispatcher(
+    private val post: (Runnable) -> Boolean,
+    private val remove: (Runnable) -> Unit,
+    private val publish: () -> Unit,
+) {
+    private val pending = AtomicBoolean(false)
+    private val task = Runnable {
+        pending.set(false)
+        publish()
+    }
+
+    fun changed() {
+        if (pending.compareAndSet(false, true) && !post(task)) pending.set(false)
+    }
+
+    fun cancel() {
+        remove(task)
+        pending.set(false)
+    }
+}
 
 internal class AndroidCaptureChannel(
     private val activity: MainActivity,
@@ -18,50 +68,98 @@ internal class AndroidCaptureChannel(
     private val channel = MethodChannel(messenger, channelName)
     private val events = EventChannel(messenger, "$channelName/state")
     private val main = Handler(Looper.getMainLooper())
-    private var sink: EventChannel.EventSink? = null
-    private var lastState: Map<String, Any>? = null
-    private val shizuku = ShizukuCaptureSetup(activity.applicationContext) {
-        main.post(::publishState)
-    }
-    private val sampleState = object : Runnable {
-        override fun run() {
-            if (sink == null) return
-            publishState()
-            main.postDelayed(this, 1_000L)
+    private val screenshotEvents = EventChannel(messenger, "$channelName/screenshot_state")
+    private var screenshotSink: EventChannel.EventSink? = null
+    private var lastScreenshotState: Map<String, Boolean>? = null
+    private val screenshotChanged: () -> Unit = { main.post(::publishScreenshotState) }
+    private val screenshotHandler = object : EventChannel.StreamHandler {
+        override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
+            screenshotSink = events
+            lastScreenshotState = null
+            ScreenshotCaptureSignals.add(screenshotChanged)
+            publishScreenshotState()
         }
+        override fun onCancel(arguments: Any?) {
+            ScreenshotCaptureSignals.remove(screenshotChanged)
+            screenshotSink = null
+            lastScreenshotState = null
+        }
+    }
+    private val statePublisher = AndroidCaptureStatePublisher(::state)
+    private val stateDispatcher = AndroidCaptureSignalDispatcher(
+        main::post,
+        main::removeCallbacks,
+        ::publishState,
+    )
+    private val stateChanged: () -> Unit = stateDispatcher::changed
+    private val stateObserver = AndroidCaptureStateObserver(activity.applicationContext) {
+        AndroidCaptureSignals.changed()
+    }
+    private var stateListening = false
+    private val setupSampler = object : Runnable {
+        override fun run() {
+            if (!needsSetupSampling()) return
+            AndroidCaptureSignals.changed()
+            main.postDelayed(this, setupSampleIntervalMs)
+        }
+    }
+    private val shizuku = ShizukuCaptureSetup(activity.applicationContext) {
+        AndroidCaptureSignals.changed()
     }
 
     init {
         channel.setMethodCallHandler(this)
         events.setStreamHandler(this)
+        screenshotEvents.setStreamHandler(screenshotHandler)
     }
 
     fun dispose() {
         channel.setMethodCallHandler(null)
         events.setStreamHandler(null)
+        screenshotEvents.setStreamHandler(null)
+        screenshotHandler.onCancel(null)
         onCancel(null)
         shizuku.dispose()
     }
 
     override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
-        main.removeCallbacks(sampleState)
-        sink = events
-        lastState = null
-        main.post(sampleState)
+        stateListening = true
+        AndroidCaptureSignals.add(stateChanged)
+        stateObserver.start()
+        statePublisher.listen(events)
+        updateSetupSampler()
     }
 
     override fun onCancel(arguments: Any?) {
-        main.removeCallbacks(sampleState)
-        sink = null
-        lastState = null
+        stateListening = false
+        stateObserver.stop()
+        AndroidCaptureSignals.remove(stateChanged)
+        stateDispatcher.cancel()
+        main.removeCallbacks(setupSampler)
+        statePublisher.cancel()
     }
 
     private fun publishState() {
-        val listener = sink ?: return
-        val current = state().minus("observedAtMs")
-        if (current != lastState) {
-            lastState = current
-            listener.success(current + ("observedAtMs" to System.currentTimeMillis()))
+        statePublisher.publish()
+        updateSetupSampler()
+    }
+
+    private fun needsSetupSampling(): Boolean =
+        stateListening &&
+            activity.hasWindowFocus() &&
+            !AndroidCaptureState.privilegedGrants(activity)
+
+    private fun updateSetupSampler() {
+        main.removeCallbacks(setupSampler)
+        if (needsSetupSampling()) main.postDelayed(setupSampler, setupSampleIntervalMs)
+    }
+
+    private fun publishScreenshotState() {
+        val listener = screenshotSink ?: return
+        val current = ScreenshotCaptureState.asMap(activity)
+        if (current != lastScreenshotState) {
+            lastScreenshotState = current
+            listener.success(current)
         }
     }
 
@@ -175,6 +273,9 @@ internal class AndroidCaptureChannel(
 
     companion object {
         private const val channelName = "com.copypaste.app/android_capture"
+        // READ_LOGS changes made through ADB have no public listener. Poll only
+        // while the visible setup stream is waiting for that prerequisite.
+        private const val setupSampleIntervalMs = 1_000L
     }
 }
 

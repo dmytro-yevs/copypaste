@@ -130,23 +130,38 @@ impl CrnnNet {
         Ok(text_lines)
     }
 
+    /// The dimensions use the same floating-point calculation as recognition.
+    pub fn prepared_dimensions(img_src: &image::RgbImage) -> (u32, u32) {
+        let scale = CRNN_DST_HEIGHT as f32 / img_src.height() as f32;
+        ((img_src.width() as f32 * scale) as u32, CRNN_DST_HEIGHT)
+    }
+
+    /// Prepare the exact RGB input used by recognition for reuse across models.
+    pub fn prepare_image(img_src: &image::RgbImage) -> image::RgbImage {
+        let (width, height) = Self::prepared_dimensions(img_src);
+        image::imageops::resize(
+            img_src,
+            width,
+            height,
+            image::imageops::FilterType::Triangle,
+        )
+    }
+
     fn get_text_line(&mut self, img_src: &image::RgbImage) -> Result<TextLine, OcrError> {
+        self.get_prepared_text_line(&Self::prepare_image(img_src))
+    }
+
+    /// Recognize an image returned by `prepare_image` without resizing it again.
+    pub fn get_prepared_text_line(
+        &mut self,
+        src_resize: &image::RgbImage,
+    ) -> Result<TextLine, OcrError> {
         let Some(session) = &mut self.session else {
             return Err(OcrError::SessionNotInitialized);
         };
 
-        let scale = CRNN_DST_HEIGHT as f32 / img_src.height() as f32;
-        let dst_width = (img_src.width() as f32 * scale) as u32;
-
-        let src_resize = image::imageops::resize(
-            img_src,
-            dst_width,
-            CRNN_DST_HEIGHT,
-            image::imageops::FilterType::Triangle,
-        );
-
         let input_tensors =
-            OcrUtils::substract_mean_normalize(&src_resize, &MEAN_VALUES, &NORM_VALUES);
+            OcrUtils::substract_mean_normalize(src_resize, &MEAN_VALUES, &NORM_VALUES);
 
         let input_tensors = Tensor::from_array(input_tensors)?;
 
@@ -158,9 +173,7 @@ impl CrnnNet {
         let dimensions = shape;
         let height = dimensions[1] as usize;
         let width = dimensions[2] as usize;
-        let src_data: Vec<f32> = src_data.to_vec();
-
-        Self::score_to_text_line(&src_data, height, width, &self.keys)
+        Self::score_to_text_line(src_data, height, width, &self.keys)
     }
 
     fn score_to_text_line(
@@ -201,5 +214,22 @@ impl CrnnNet {
 
         text_line.text_score = text_score_sum / text_socre_count as f32;
         Ok(text_line)
+    }
+}
+
+#[cfg(test)]
+mod prepared_tests {
+    use super::CrnnNet;
+
+    #[test]
+    fn borrowed_scores_match_owned_output_decoding() {
+        let scores = [0.1, 0.8, 0.1, 0.1, 0.7, 0.2, 0.9, 0.0, 0.1, 0.1, 0.2, 0.7];
+        let keys = vec!["#".to_owned(), "A".to_owned(), "Б".to_owned()];
+        let borrowed = CrnnNet::score_to_text_line(&scores, 4, 3, &keys).unwrap();
+        let owned = scores.to_vec();
+        let copied = CrnnNet::score_to_text_line(&owned, 4, 3, &keys).unwrap();
+        assert_eq!(borrowed.text, "AБ");
+        assert_eq!(borrowed.text, copied.text);
+        assert_eq!(borrowed.text_score.to_bits(), copied.text_score.to_bits());
     }
 }

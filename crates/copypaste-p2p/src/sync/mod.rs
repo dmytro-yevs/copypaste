@@ -16,6 +16,7 @@ mod session;
 mod source;
 mod summary;
 mod transfer;
+mod workspace;
 
 #[cfg(test)]
 pub(crate) mod testutil;
@@ -25,3 +26,23 @@ pub use merge::{merge_decision, merge_decision_by_summary, pin_state_wins, Merge
 pub use plan::MAX_FUTURE_SKEW_MS;
 pub use session::{run_initiator, run_responder, run_responder_from_first};
 pub use source::{SyncChannel, SyncCursor, SyncOutcome, SyncSource, SyncStats};
+pub use workspace::{MemorySummaryWorkspace, SummaryWorkspace};
+
+// A cancelled session leaves the blocking task owning the workspace until it
+// completes and drops it; no SQLite operation remains on the async reactor.
+async fn workspace_call<T: Send + 'static>(
+    mut workspace: Box<dyn SummaryWorkspace>,
+    blocking: bool,
+    f: impl FnOnce(&mut dyn SummaryWorkspace) -> T + Send + 'static,
+) -> Result<(Box<dyn SummaryWorkspace>, T), SyncError> {
+    if !blocking {
+        let result = f(&mut *workspace);
+        return Ok((workspace, result));
+    }
+    tokio::task::spawn_blocking(move || {
+        let result = f(&mut *workspace);
+        (workspace, result)
+    })
+    .await
+    .map_err(|_| SyncError::Source("the sync session workspace is unavailable".into()))
+}

@@ -34,7 +34,7 @@ mod contract_tests;
 mod dbadmin;
 pub(crate) mod dispatch;
 mod halted;
-mod items;
+pub(crate) mod items;
 mod listener;
 pub(crate) mod messages;
 #[cfg(windows)]

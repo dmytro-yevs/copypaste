@@ -22,6 +22,7 @@ import 'app/ui_memory_controller.dart';
 import 'app/resource_policy.dart';
 import 'platform/lifecycle/application_visibility.dart';
 import 'app/navigation/navigation.dart';
+import 'app/navigation/settings_presentation_lifecycle.dart';
 import 'app/shell/macos_window_header.dart';
 import 'app/theme/app_motion.dart';
 import 'app/theme/app_theme.dart';
@@ -225,6 +226,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
   final _rootNavigatorKey = GlobalKey<NavigatorState>();
   final _temporaryArtifacts = TemporaryArtifactCleanup();
   late final ApplicationVisibility _visibility;
+  late final SettingsPresentationLifecycle _settingsPresentation;
   late final UiMemoryController _uiMemory;
 
   bool _usesUnifiedMacosTitleBar(bool windowReady) =>
@@ -239,6 +241,11 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       windowVisible: _desktopWindow?.isVisible,
     );
     _visibility.addListener(_settingsVisibilityChanged);
+    _settingsPresentation = SettingsPresentationLifecycle(
+      navigation: _navigation,
+      visible: _visibility,
+      setActive: (active) => _settingsController?.setPresentationActive(active),
+    );
     _uiMemory = UiMemoryController(
       visible: _visibility,
       canSuspend: _canSuspendPresentation,
@@ -299,6 +306,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     _uiMemory.removeListener(_memoryStateChanged);
     _uiMemory.dispose();
     _visibility.removeListener(_settingsVisibilityChanged);
+    _settingsPresentation.dispose();
     _visibility.dispose();
     _launchAtLogin.dispose();
     _pairingLinksChannel.setMethodCallHandler(null);
@@ -347,7 +355,6 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
     if (widget.runtimeEnabled && _visibility.value) {
       unawaited(_temporaryArtifacts.run());
     }
-    _settingsController?.setPresentationActive(_visibility.value);
   }
 
   void _memoryStateChanged() {
@@ -434,6 +441,7 @@ class _CopyPasteRootState extends State<CopyPasteRoot> {
       });
       final settingsController = _settingsController!;
       _settingsVisibilityChanged();
+      _settingsPresentation.refresh();
       settingsController.addListener(_syncCaptureControls);
       _desktopWindow?.setCaptureToggle(() async {
         await settingsController.toggleCapture();

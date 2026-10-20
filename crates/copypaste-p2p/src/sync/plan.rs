@@ -2,9 +2,13 @@
 //! clock-injected, so the delete-before-create case and the clock-skew ceiling
 //! are testable without a session.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+#[cfg(test)]
+use std::collections::HashSet;
 
-use super::{merge_decision_by_summary, pin_state_wins, MergeDecision, SyncStats};
+#[cfg(test)]
+use super::{merge_decision_by_summary, pin_state_wins, MergeDecision};
+use super::{SummaryWorkspace, SyncError, SyncStats};
 use crate::protocol::{ItemSummary, MAX_REQUEST_IDS_PER_MESSAGE};
 
 /// How far into the future a peer's `created_at` may be before we refuse that
@@ -16,9 +20,59 @@ use crate::protocol::{ItemSummary, MAX_REQUEST_IDS_PER_MESSAGE};
 /// delete anything (manifest 05 §3.4, R-CLK-2: refusal, not correction).
 pub const MAX_FUTURE_SKEW_MS: i64 = 24 * 60 * 60 * 1000;
 
+#[cfg(test)]
 pub(super) struct Plan {
     pub(super) wanted: HashMap<String, ItemSummary>,
     pub(super) deferred: HashSet<String>,
+}
+
+/// Plan a session by scanning bounded workspace pages rather than retaining
+/// every remote version and every selected candidate in process memory.
+pub(super) fn plan_workspace(
+    workspace: &mut dyn SummaryWorkspace,
+    now: i64,
+    stats: &mut SyncStats,
+) -> Result<HashMap<String, ItemSummary>, SyncError> {
+    let ceiling = now.saturating_add(MAX_FUTURE_SKEW_MS);
+    let mut cursor = 0;
+    loop {
+        let page = workspace.remote_page(cursor, 256)?;
+        if page.is_empty() {
+            break;
+        }
+        for (next, r) in page {
+            cursor = next;
+            if r.created_at > ceiling {
+                tracing::warn!(
+                    skew_ms = r.created_at.saturating_sub(now),
+                    "peer offered a version stamped beyond the clock-skew ceiling; skipping it"
+                );
+                stats.skipped += 1;
+                workspace.defer(&r.item_id)?;
+                continue;
+            }
+            if !workspace.remote_wins(&r)? {
+                stats.skipped += 1;
+                continue;
+            }
+            if !workspace.consider_wanted(&r)? {
+                stats.skipped += 1;
+            }
+        }
+    }
+    let (selected, dropped) = workspace.finish_plan(MAX_REQUEST_IDS_PER_MESSAGE)?;
+    if dropped > 0 {
+        tracing::warn!(
+            dropped,
+            max = MAX_REQUEST_IDS_PER_MESSAGE,
+            "more wanted items than one session transfers; the rest follow next session"
+        );
+        stats.skipped += dropped;
+    }
+    Ok(selected
+        .into_iter()
+        .map(|s| (s.item_id.clone(), s))
+        .collect())
 }
 
 /// Decides what to ask the peer for, from the two summaries alone.
@@ -32,6 +86,7 @@ pub(super) struct Plan {
 /// * the remote version wins the order — want it.
 /// * the local version wins or ties — skip. A tie is the replay case, and
 ///   skipping it is what makes a repeated session free.
+#[cfg(test)]
 pub(super) fn plan(
     local: &HashMap<String, ItemSummary>,
     remote: &[ItemSummary],
@@ -104,6 +159,40 @@ pub(super) fn plan(
 mod tests {
     use super::*;
     use crate::sync::testutil::summary;
+
+    #[test]
+    fn workspace_matches_existing_plan_and_watermark_with_duplicates_and_deferred() {
+        use crate::sync::{MemorySummaryWorkspace, SummaryWorkspace};
+        let local_items = vec![summary("local", 50, "h", false)];
+        let local: HashMap<_, _> = local_items
+            .iter()
+            .map(|s| (s.item_id.clone(), s.clone()))
+            .collect();
+        let mut remote: Vec<_> = (0..MAX_REQUEST_IDS_PER_MESSAGE + 10)
+            .map(|i| summary(&format!("item-{i}"), i as i64 + 100, "h", false))
+            .collect();
+        remote.extend([
+            summary("local", 20, "h", false),
+            summary("item-4", 5, "h", false),
+            summary("future", i64::MAX, "h", false),
+        ]);
+        let mut old_stats = SyncStats::default();
+        let old = plan(&local, &remote, 10_000, &mut old_stats);
+        let mut workspace = MemorySummaryWorkspace::default();
+        workspace.add_advertised(&local_items).unwrap();
+        workspace.add_comparison(&local_items).unwrap();
+        workspace.add_remote(&remote).unwrap();
+        let mut new_stats = SyncStats::default();
+        let wanted = plan_workspace(&mut workspace, 10_000, &mut new_stats).unwrap();
+        assert_eq!(wanted, old.wanted);
+        assert_eq!(new_stats, old_stats);
+        let attempted = HashSet::from(["item-900".to_string()]);
+        assert_eq!(
+            super::super::summary::workspace_watermark(0, &mut workspace, &wanted, &attempted)
+                .unwrap(),
+            super::super::summary::watermark(0, &remote, &old, &attempted),
+        );
+    }
 
     #[test]
     fn an_unknown_tombstone_is_wanted() {

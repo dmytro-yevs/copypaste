@@ -41,7 +41,7 @@ pub use binary::{
     CHUNK_BYTES,
 };
 pub use clipboard_payload::{ClipboardPayload, ClipboardWriteError};
-pub use crypto::{decrypt, encrypt, CryptoError, ItemKey, Keyring};
+pub use crypto::{decrypt, encrypt, CryptoError, ItemKey, Keyring, PreviewKey};
 pub use image_preview::{
     image_metadata, thumbnail_png, ImageMetadata, ImagePreviewError, ImageThumbnail,
     MAX_THUMBNAIL_EDGE,
@@ -56,9 +56,10 @@ pub use ingest::{
 pub use semantic::{classify_semantic, SemanticClassification};
 pub use storage::{
     compute_content_hash, origin_or, verify_integrity, verify_schema, DeviceIdentity,
-    HistoryCursor, HistoryDeviceFacet, HistoryFacets, HistoryPage, HistoryQuery, HistorySort,
-    HistorySourceAppFacet, IncomingItem, Ingest, ItemCursor, NewItem, Page, RestoreError,
-    SemanticMatches, SemanticWork, Store, StoreError, StoredItem, Version,
+    HistoryCursor, HistoryDeviceFacet, HistoryFacets, HistoryPage, HistoryPreviewPage,
+    HistoryPreviewRow, HistoryQuery, HistorySort, HistorySourceAppFacet, IncomingItem, Ingest,
+    ItemCursor, NewItem, Page, PreviewPage, RestoreError, SemanticMatches, SemanticWork, Store,
+    StoreError, StoredItem, Version,
 };
 pub use sync::{local_winner_stamp, MergeError, OpenVersionError, RemoteVersion, StoreSource};
 pub use transfer::{export, import, ImportError, MAX_IMPORT_ITEMS};

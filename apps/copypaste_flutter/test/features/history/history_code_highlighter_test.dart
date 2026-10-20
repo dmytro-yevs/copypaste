@@ -31,4 +31,47 @@ void main() {
     expect(result.language, 'Rust');
     expect(result.span.toPlainText(), source);
   });
+
+  test('memo reuses matching output and replaces changed inputs', () {
+    final memo = HistoryCodeHighlightMemo();
+    const light = ThemeData();
+    const dark = ThemeData(colorScheme: ColorSchemes.darkSlate);
+    const source = '{"name":"CopyPaste"}';
+    final first = memo.highlight(source, light, json: true);
+    expect(identical(memo.highlight(source, light, json: true), first), isTrue);
+    expect(first.span.toPlainText(), source);
+    expect(first.language, 'JSON');
+
+    final otherSource = memo.highlight('{"name":"Other"}', light, json: true);
+    expect(identical(otherSource, first), isFalse);
+    expect(otherSource.span.toPlainText(), '{"name":"Other"}');
+    final otherKind = memo.highlight(source, light);
+    expect(identical(otherKind, first), isFalse);
+    final jsonAgain = memo.highlight(source, light, json: true);
+    final otherTheme = memo.highlight(source, dark, json: true);
+    expect(identical(otherTheme, jsonAgain), isFalse);
+    expect(otherTheme.span, isNot(equals(jsonAgain.span)));
+    expect(otherTheme.span.toPlainText(), source);
+
+    memo.clear();
+    expect(
+      identical(memo.highlight(source, dark, json: true), otherTheme),
+      isFalse,
+    );
+  });
+
+  test('memo does not retain oversized source or prior result', () {
+    final memo = HistoryCodeHighlightMemo();
+    const theme = ThemeData();
+    const small = 'fn main() {}';
+    final first = memo.highlight(small, theme);
+    final large = List.filled(200001, 'a').join();
+    final oversized = memo.highlight(large, theme, json: true);
+    expect(oversized.span.toPlainText(), large);
+    expect(
+      identical(memo.highlight(large, theme, json: true), oversized),
+      isFalse,
+    );
+    expect(identical(memo.highlight(small, theme), first), isFalse);
+  });
 }

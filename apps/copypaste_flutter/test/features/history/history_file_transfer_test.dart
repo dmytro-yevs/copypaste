@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:copypaste_flutter/features/history/models/history_models.dart';
@@ -15,6 +16,76 @@ HistoryClip clip({String name = 'original.bin'}) => HistoryClip(
 );
 
 void main() {
+  test(
+    'uses writer progress and confirms completion from the save result',
+    () async {
+      final repository = _ProgressRepository();
+      final values = <double>[];
+      final operation = HistoryFileTransfer(
+        repository,
+      ).saveTo(clip(), '/not-read-by-progress', onProgress: values.add);
+      await Future<void>.delayed(Duration.zero);
+      repository.progress!(2, 4);
+      repository.progress!(4, 4);
+      expect(values, [0, 0.5, 0.99]);
+      repository.finish.complete();
+      await operation;
+      expect(values, [0, 0.5, 0.99, 1]);
+      expect(repository.legacySaves, 0);
+    },
+  );
+
+  test('legacy capability falls back to the existing save path', () async {
+    final root = await Directory.systemTemp.createTemp('file-progress-legacy-');
+    addTearDown(() => root.delete(recursive: true));
+    final repository = _LegacyFallbackRepository();
+    final values = <double>[];
+    await HistoryFileTransfer(
+      repository,
+    ).saveTo(clip(), '${root.path}/saved.bin', onProgress: values.add);
+    expect(repository.saves, 1);
+    expect(values, [0, 1]);
+    expect(await File('${root.path}/saved.bin').readAsBytes(), [1, 2, 3, 4]);
+  });
+
+  test(
+    'reports progress while the destination is created and rolled back',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'file-transfer-progress-',
+      );
+      addTearDown(() => root.delete(recursive: true));
+      final repository = _WaitingRepository();
+      final transfer = HistoryFileTransfer(repository);
+      final destination = File('${root.path}/payload');
+      final progress = <double>[];
+      final halfway = Completer<void>();
+      final operation = transfer.saveTo(
+        clip(),
+        destination.path,
+        onProgress: (value) {
+          progress.add(value);
+          if (value == 0.5 && !halfway.isCompleted) halfway.complete();
+        },
+      );
+
+      // Allow a poll while the writer has not created the file yet.
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      expect(progress, [0]);
+      await destination.writeAsBytes([1, 2]);
+      await halfway.future.timeout(const Duration(seconds: 5));
+      await destination.delete();
+      // Allow another poll during a writer rollback before it recreates the file.
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      await destination.writeAsBytes([1, 2, 3, 4]);
+      repository.finish.complete();
+      await operation;
+      expect(progress.first, 0);
+      expect(progress, contains(0.5));
+      expect(progress.last, 1);
+    },
+  );
+
   test(
     'valid long original filenames stay below filesystem component limits',
     () async {
@@ -101,6 +172,16 @@ void main() {
   );
 }
 
+class _WaitingRepository implements HistoryRepository {
+  final finish = Completer<void>();
+
+  @override
+  Future<void> saveFile(String id, String path) => finish.future;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 class _Repository implements HistoryRepository {
   List<int> bytes = [1, 2, 3, 4];
   int saves = 0;
@@ -115,4 +196,40 @@ class _Repository implements HistoryRepository {
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _ProgressRepository
+    implements HistoryRepository, HistoryFileProgressRepository {
+  final finish = Completer<void>();
+  void Function(int, int)? progress;
+  int legacySaves = 0;
+
+  @override
+  Future<bool> saveFileWithProgress(
+    String id,
+    String path,
+    void Function(int, int) onProgress,
+  ) async {
+    progress = onProgress;
+    await finish.future;
+    return true;
+  }
+
+  @override
+  Future<void> saveFile(String id, String path) async {
+    legacySaves++;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _LegacyFallbackRepository extends _Repository
+    implements HistoryFileProgressRepository {
+  @override
+  Future<bool> saveFileWithProgress(
+    String id,
+    String path,
+    void Function(int, int) progress,
+  ) async => false;
 }

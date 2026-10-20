@@ -1,4 +1,5 @@
 import '../../../shared/format_bytes.dart';
+
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -23,7 +24,7 @@ import '../presentation/history_color_swatch.dart';
 import 'history_delete_dialog.dart';
 import 'history_ocr_dialog.dart';
 
-class HistoryInspector extends StatelessWidget {
+class HistoryInspector extends StatefulWidget {
   const HistoryInspector({
     super.key,
     required this.controller,
@@ -40,9 +41,34 @@ class HistoryInspector extends StatelessWidget {
   final int presentationRevision;
 
   @override
+  State<HistoryInspector> createState() => _HistoryInspectorState();
+}
+
+class _HistoryInspectorState extends State<HistoryInspector> {
+  final _highlightMemo = HistoryCodeHighlightMemo();
+  String? _highlightClipId;
+
+  HistoryController get controller => widget.controller;
+  bool get inDrawer => widget.inDrawer;
+  VoidCallback? get onClose => widget.onClose;
+  bool get compact => widget.compact;
+  int get presentationRevision => widget.presentationRevision;
+
+  @override
+  void dispose() {
+    _highlightMemo.clear();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final clip = controller.selectedClip;
+    if (clip?.id != _highlightClipId) {
+      _highlightMemo.clear();
+      _highlightClipId = clip?.id;
+    }
     if (clip == null) {
+      _highlightMemo.clear();
       return const StateView.empty(
         title: 'Select a clip',
         message: 'Its full content and actions appear here.',
@@ -53,14 +79,11 @@ class HistoryInspector extends StatelessWidget {
         ? 'No preview is available.'
         : clip.body ?? clip.preview;
     final highlighted = switch (clip.contentKind) {
-      HistoryClipKind.code => HistoryCodeHighlighter.highlight(body, theme),
-      HistoryClipKind.json => HistoryCodeHighlighter.highlight(
-        body,
-        theme,
-        json: true,
-      ),
+      HistoryClipKind.code => _highlightMemo.highlight(body, theme),
+      HistoryClipKind.json => _highlightMemo.highlight(body, theme, json: true),
       _ => null,
     };
+    if (highlighted == null) _highlightMemo.clear();
     final content = Card(
       theme: compact ? AppTheme.clipboardInspectorCardTheme : null,
       key: ValueKey<String>(
@@ -571,7 +594,12 @@ class _DownloadButtonState extends State<_DownloadButton> {
   bool _hovered = false;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.controller.downloadProgressChanges,
+    builder: (context, _) => _buildButton(context),
+  );
+
+  Widget _buildButton(BuildContext context) {
     final controller = widget.controller;
     final id = widget.clip.id;
     final pending = controller.isDownloadPending(id);

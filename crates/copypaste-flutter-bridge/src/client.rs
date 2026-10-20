@@ -124,6 +124,10 @@ pub(crate) async fn watch(
 
     #[cfg(not(target_os = "android"))]
     {
+        let typed = match request(Method::Status).await?.data {
+            Some(copypaste_ipc::ResponseData::Status(status)) => status.runtime_watch,
+            _ => return Err(RuntimeError::internal()),
+        };
         let stream = transport::connect(&crate::runtime::socket_path()?)
             .await
             .map_err(|_| RuntimeError::daemon_unreachable())?;
@@ -132,7 +136,11 @@ pub(crate) async fn watch(
         let request = Request {
             id,
             protocol_version: PROTOCOL_VERSION,
-            method: Method::Watch,
+            method: if typed {
+                Method::WatchRuntime
+            } else {
+                Method::Watch
+            },
         };
         let line = serde_json::to_string(&request).map_err(|_| RuntimeError::internal())?;
         framed
@@ -142,6 +150,9 @@ pub(crate) async fn watch(
         let ack = next_response(&mut framed, id).await?;
         if !matches!(ack.data, Some(copypaste_ipc::ResponseData::Empty {})) {
             return Err(RuntimeError::internal());
+        }
+        if sink.add(runtime_ready(typed)).is_err() {
+            return Ok(());
         }
         let mut cancelled = crate::runtime::watch_stop_rx(watch_id)?;
         loop {
@@ -162,10 +173,14 @@ pub(crate) async fn watch(
                 return Err(RuntimeError::internal());
             }
             let response = response_to_result(response)?;
-            let Some(copypaste_ipc::ResponseData::Event(event)) = response.data else {
-                return Err(RuntimeError::internal());
+            let event = match response.data {
+                Some(copypaste_ipc::ResponseData::Event(event)) if !typed => runtime_event(event),
+                Some(copypaste_ipc::ResponseData::RuntimeEvent(event)) if typed => {
+                    typed_runtime_event(event)
+                }
+                _ => return Err(RuntimeError::internal()),
             };
-            if sink.add(runtime_event(event)).is_err() {
+            if sink.add(event).is_err() {
                 return Ok(());
             }
         }
@@ -182,7 +197,50 @@ fn runtime_event(event: copypaste_ipc::EventData) -> RuntimeEvent {
         item_count: event.item_count,
         captured: event.captured,
         captured_item_id: event.captured_item_id,
+        progress: None,
+        capture: None,
+        runtime_watch: false,
     }
+}
+
+pub(crate) fn runtime_ready(typed: bool) -> RuntimeEvent {
+    RuntimeEvent {
+        sync_status: None,
+        kind: "ready".into(),
+        item_count: 0,
+        captured: false,
+        captured_item_id: None,
+        progress: None,
+        capture: None,
+        runtime_watch: typed,
+    }
+}
+
+pub(crate) fn typed_runtime_event(event: copypaste_ipc::RuntimeEventData) -> RuntimeEvent {
+    let mut mapped = event
+        .change
+        .map(runtime_event)
+        .unwrap_or_else(|| RuntimeEvent {
+            sync_status: None,
+            kind: "progress".into(),
+            item_count: 0,
+            captured: false,
+            captured_item_id: None,
+            progress: None,
+            capture: None,
+            runtime_watch: true,
+        });
+    mapped.capture = event.capture.map(crate::api::runtime_capture_state);
+    if mapped.capture.is_some() && mapped.kind == "progress" {
+        mapped.kind = "capture".into();
+    }
+    mapped.progress = event.progress.map(|p| crate::api::FileProgress {
+        token: p.token,
+        written: p.written,
+        total: p.total,
+    });
+    mapped.runtime_watch = true;
+    mapped
 }
 
 async fn next_response(
@@ -204,6 +262,26 @@ async fn next_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn progress_does_not_look_like_a_history_change() {
+        let mapped = typed_runtime_event(copypaste_ipc::RuntimeEventData {
+            change: None,
+            capture: None,
+            progress: Some(copypaste_ipc::FileProgress {
+                token: "opaque".into(),
+                written: 2,
+                total: 4,
+            }),
+        });
+        assert_eq!(mapped.kind, "progress");
+        let progress = mapped.progress.unwrap();
+        assert_eq!(
+            (progress.token.as_str(), progress.written, progress.total),
+            ("opaque", 2, 4)
+        );
+        assert!(!mapped.captured);
+    }
 
     #[test]
     fn items_and_peers_keep_distinct_runtime_event_kinds() {

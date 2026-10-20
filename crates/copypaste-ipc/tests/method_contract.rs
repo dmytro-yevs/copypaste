@@ -55,6 +55,7 @@ fn wire_name(method: &Method) -> &'static str {
         Method::SetPrivateMode { .. } => "set_private_mode",
         Method::GetPrivateMode => "get_private_mode",
         Method::Watch => "watch",
+        Method::WatchRuntime => "watch_runtime",
         Method::Shutdown => "shutdown",
     }
 }

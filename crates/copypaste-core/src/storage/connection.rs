@@ -92,15 +92,14 @@ pub(super) fn build_pool(
 
     let mut builder = Pool::builder()
         .max_size(POOL_SIZE)
+        // Open remaining connections only as concurrent callers need them.
+        .min_idle(Some(1))
         .connection_timeout(Duration::from_secs(10))
         .connection_customizer(Box::new(OptimizeOnRelease));
     if in_memory {
         // A shared-cache in-memory database exists only while a connection to
         // it is open, so keep one open for the life of the pool.
-        builder = builder
-            .min_idle(Some(1))
-            .idle_timeout(None)
-            .max_lifetime(None);
+        builder = builder.idle_timeout(None).max_lifetime(None);
     }
     Ok(builder.build(manager)?)
 }
@@ -167,6 +166,68 @@ mod tests {
     use super::super::test_support::{item, KEY, T0};
     use super::super::Store;
     use super::*;
+
+    #[test]
+    fn file_pool_starts_with_one_connection_and_grows_to_four() {
+        let dir = TempDir::new().unwrap();
+        let manager = SqliteConnectionManager::file(dir.path().join("pool.db"));
+        let pool = build_pool(manager, Zeroizing::new(KEY), false).unwrap();
+
+        assert_eq!(pool.min_idle(), Some(1));
+        assert_eq!(pool.max_size(), 4);
+        assert_eq!(pool.connection_timeout(), Duration::from_secs(10));
+        assert_eq!(pool.state().connections, 1);
+        assert_eq!(pool.idle_timeout(), Some(Duration::from_secs(600)));
+
+        let first = pool.get().unwrap();
+        first
+            .execute("CREATE TABLE pool_test (value INTEGER)", [])
+            .unwrap();
+        first
+            .execute("INSERT INTO pool_test VALUES (42)", [])
+            .unwrap();
+        let connections: Vec<_> = (0..3).map(|_| pool.get().unwrap()).collect();
+        assert_eq!(pool.state().connections, 4);
+        for conn in &connections {
+            let value: i64 = conn
+                .query_row("SELECT value FROM pool_test", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(value, 42);
+        }
+    }
+
+    #[test]
+    fn memory_pool_keeps_shared_database_alive() {
+        let uri = format!(
+            "file:pool-{}?mode=memory&cache=shared",
+            uuid::Uuid::new_v4()
+        );
+        let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+            | rusqlite::OpenFlags::SQLITE_OPEN_CREATE
+            | rusqlite::OpenFlags::SQLITE_OPEN_URI
+            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let pool = build_pool(
+            SqliteConnectionManager::file(uri).with_flags(flags),
+            Zeroizing::new(KEY),
+            true,
+        )
+        .unwrap();
+        assert_eq!(pool.min_idle(), Some(1));
+        assert_eq!(pool.idle_timeout(), None);
+        assert_eq!(pool.max_lifetime(), None);
+        {
+            let conn = pool.get().unwrap();
+            conn.execute("CREATE TABLE pool_test (value INTEGER)", [])
+                .unwrap();
+            conn.execute("INSERT INTO pool_test VALUES (42)", [])
+                .unwrap();
+        }
+        let conn = pool.get().unwrap();
+        let value: i64 = conn
+            .query_row("SELECT value FROM pool_test", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(value, 42);
+    }
 
     #[test]
     fn database_is_encrypted_on_disk_and_in_wal_mode() {

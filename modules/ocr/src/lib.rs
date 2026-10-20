@@ -2,7 +2,6 @@
 #![deny(unsafe_code)]
 
 use std::{
-    collections::HashMap,
     fs,
     path::{Path, PathBuf},
 };
@@ -19,6 +18,7 @@ const MAX_IMAGE_PIXELS: u64 = 16_000_000;
 const MAX_DECODE_ALLOC_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_TEXT_REGIONS: usize = 512;
 const MAX_CROP_PIXELS: u64 = 24_000_000;
+const MAX_PREPARED_BYTES: u64 = 8 * 1024 * 1024;
 const MODEL_ROOT: &str = "assets/models";
 const DETECTOR: &str = "detector.onnx";
 
@@ -106,6 +106,7 @@ impl OcrEngine {
         let image = decode_image(image_path)?;
         let padding = 50;
         let padded = OcrUtils::make_padding(&image, padding).map_err(ocr_error)?;
+        drop(image);
         let longest_side = padded.width().max(padded.height()).min(2_000);
         let scale = ScaleParam::get_scale_param(&padded, longest_side + (padding * 2));
         let boxes = self
@@ -117,44 +118,80 @@ impl OcrEngine {
             return Ok(String::new());
         }
 
-        let lines = OcrUtils::get_part_images(&padded, &boxes);
+        let prepared = prepare_lines(&padded, &boxes, MAX_PREPARED_BYTES);
+        let padded = if prepared.iter().all(Option::is_some) {
+            None
+        } else {
+            Some(padded)
+        };
 
-        let mut candidates = Vec::with_capacity(ROUTES.len());
+        let mut best: Vec<Option<(Route, LineCandidate)>> =
+            (0..boxes.len()).map(|_| None).collect();
         for route in ROUTES {
-            candidates.push(self.recognize_route(*route, &lines)?);
+            let mut recognizer = CrnnNet::new();
+            recognizer
+                .init_model_dict_file(
+                    path_string(&self.models.join(route.model))?.as_str(),
+                    2,
+                    None,
+                    path_string(&self.models.join(route.dictionary))?.as_str(),
+                )
+                .map_err(ocr_error)?;
+            for (index, cached) in prepared.iter().enumerate() {
+                let fallback;
+                let input = if let Some(cached) = cached {
+                    cached
+                } else {
+                    let crop = OcrUtils::get_rotate_crop_image(
+                        padded
+                            .as_ref()
+                            .expect("uncached lines need the source image"),
+                        &boxes[index].points,
+                    );
+                    fallback = CrnnNet::prepare_image(&crop);
+                    &fallback
+                };
+                let line = recognizer
+                    .get_prepared_text_line(input)
+                    .map_err(ocr_error)?;
+                let candidate = LineCandidate {
+                    score: route.score(&line.text, line.text_score),
+                    text: line.text,
+                };
+                update_best(&mut best[index], *route, candidate);
+            }
         }
-        let text = (0..lines.len())
-            .filter_map(|index| select_line(index, &candidates))
-            .collect::<Vec<_>>()
-            .join("\n");
-        Ok(text)
-    }
-
-    fn recognize_route(
-        &self,
-        route: Route,
-        lines: &[image::RgbImage],
-    ) -> Result<Candidate, String> {
-        let mut recognizer = CrnnNet::new();
-        recognizer
-            .init_model_dict_file(
-                path_string(&self.models.join(route.model))?.as_str(),
-                2,
-                None,
-                path_string(&self.models.join(route.dictionary))?.as_str(),
-            )
-            .map_err(ocr_error)?;
-        let values = recognizer
-            .get_text_lines(lines, &HashMap::new(), 0.0)
-            .map_err(ocr_error)?
+        Ok(best
             .into_iter()
-            .map(|line| LineCandidate {
-                score: route.score(&line.text, line.text_score),
-                text: line.text,
+            .filter_map(|item| {
+                item.map(|(_, line)| line.text.trim().to_owned())
+                    .filter(|text| !text.is_empty())
             })
-            .collect();
-        Ok(Candidate { route, values })
+            .collect::<Vec<_>>()
+            .join("\n"))
     }
+}
+
+// Keep only bounded, resized RGB lines; large lines are prepared on demand.
+fn prepare_lines(
+    padded: &image::RgbImage,
+    boxes: &[TextBox],
+    limit: u64,
+) -> Vec<Option<image::RgbImage>> {
+    let mut prepared = Vec::with_capacity(boxes.len());
+    let mut prepared_bytes = 0_u64;
+    for box_ in boxes {
+        let crop = OcrUtils::get_rotate_crop_image(padded, &box_.points);
+        let (width, height) = CrnnNet::prepared_dimensions(&crop);
+        let bytes = u64::from(width) * u64::from(height) * 3;
+        if bytes <= limit - prepared_bytes {
+            prepared.push(Some(CrnnNet::prepare_image(&crop)));
+            prepared_bytes += bytes;
+        } else {
+            prepared.push(None);
+        }
+    }
+    prepared
 }
 
 #[derive(Clone, Copy)]
@@ -273,6 +310,7 @@ impl Script {
     }
 }
 
+#[cfg(test)]
 struct Candidate {
     route: Route,
     values: Vec<LineCandidate>,
@@ -283,6 +321,29 @@ struct LineCandidate {
     text: String,
 }
 
+fn compare_candidates(
+    left: &(Route, LineCandidate),
+    right: &(Route, LineCandidate),
+) -> std::cmp::Ordering {
+    left.0
+        .distinctive_markers(&left.1.text)
+        .cmp(&right.0.distinctive_markers(&right.1.text))
+        .then_with(|| left.1.score.total_cmp(&right.1.score))
+        .then_with(|| left.0.id.cmp(right.0.id))
+}
+
+fn update_best(best: &mut Option<(Route, LineCandidate)>, route: Route, line: LineCandidate) {
+    let candidate = (route, line);
+    // Iterator::max_by chooses the last equal element.
+    if best
+        .as_ref()
+        .is_none_or(|current| compare_candidates(current, &candidate).is_le())
+    {
+        *best = Some(candidate);
+    }
+}
+
+#[cfg(test)]
 fn select_line(index: usize, candidates: &[Candidate]) -> Option<String> {
     candidates
         .iter()
@@ -513,6 +574,133 @@ mod tests {
             select_line(0, &candidates),
             Some("CopyPaste: Привіт, Україно! OCR".into())
         );
+    }
+
+    #[test]
+    fn online_selection_matches_original_for_mixed_empty_ties_and_nan() {
+        let cases: &[(&str, f32)] = &[
+            ("  Привіт English  ", 0.8),
+            ("English", 0.8),
+            ("  ", f32::NAN),
+            ("日本語", f32::NAN),
+            ("العربية English", 0.7),
+            ("same", 0.5),
+            ("same", 0.5),
+            ("தமிழ்", f32::INFINITY),
+            ("ไทย", f32::NEG_INFINITY),
+            ("한국어", 0.0),
+        ];
+        let candidates: Vec<_> = ROUTES
+            .iter()
+            .zip(cases)
+            .map(|(route, (text, score))| Candidate {
+                route: *route,
+                values: vec![LineCandidate {
+                    text: (*text).into(),
+                    score: *score,
+                }],
+            })
+            .collect();
+        let mut best = None;
+        for candidate in &candidates {
+            let line = &candidate.values[0];
+            update_best(
+                &mut best,
+                candidate.route,
+                LineCandidate {
+                    text: line.text.clone(),
+                    score: line.score,
+                },
+            );
+        }
+        let actual = best
+            .map(|(_, line)| line.text.trim().to_owned())
+            .filter(|text| !text.is_empty());
+        assert_eq!(actual, select_line(0, &candidates));
+
+        let empty: Vec<_> = ROUTES
+            .iter()
+            .map(|route| Candidate {
+                route: *route,
+                values: vec![LineCandidate {
+                    text: "   ".into(),
+                    score: f32::NEG_INFINITY,
+                }],
+            })
+            .collect();
+        let mut best = None;
+        for candidate in &empty {
+            update_best(
+                &mut best,
+                candidate.route,
+                LineCandidate {
+                    text: candidate.values[0].text.clone(),
+                    score: candidate.values[0].score,
+                },
+            );
+        }
+        let actual = best
+            .map(|(_, line)| line.text.trim().to_owned())
+            .filter(|text| !text.is_empty());
+        assert_eq!(actual, select_line(0, &empty));
+        assert_eq!(actual, None);
+
+        // `max_by` selects the last equal element, even for NaN scores.
+        let mut best = None;
+        for text in [" first ", " second "] {
+            update_best(
+                &mut best,
+                ROUTES[1],
+                LineCandidate {
+                    text: text.into(),
+                    score: f32::NAN,
+                },
+            );
+        }
+        assert_eq!(best.unwrap().1.text, " second ");
+    }
+
+    #[test]
+    fn prepared_images_match_original_resize_pixels() {
+        for (width, height) in [(1, 1), (35, 17), (19, 71), (487, 37)] {
+            let source = image::RgbImage::from_fn(width, height, |x, y| {
+                image::Rgb([
+                    (x % 256) as u8,
+                    (y % 256) as u8,
+                    ((x * 7 + y * 3) % 256) as u8,
+                ])
+            });
+            let scale = 48.0_f32 / height as f32;
+            let original = image::imageops::resize(
+                &source,
+                (width as f32 * scale) as u32,
+                48,
+                image::imageops::FilterType::Triangle,
+            );
+            assert_eq!(CrnnNet::prepare_image(&source), original);
+        }
+    }
+
+    #[test]
+    fn preparation_respects_byte_cap_and_fallback_matches_cached_pixels() {
+        use paddle_ocr_rs::ocr_result::Point;
+        let image = image::RgbImage::from_fn(120, 80, |x, y| {
+            image::Rgb([x as u8, y as u8, (x + y) as u8])
+        });
+        let boxes = vec![TextBox {
+            points: vec![
+                Point { x: 5, y: 5 },
+                Point { x: 95, y: 10 },
+                Point { x: 90, y: 45 },
+                Point { x: 10, y: 40 },
+            ],
+            score: 1.0,
+        }];
+        let cached = prepare_lines(&image, &boxes, MAX_PREPARED_BYTES);
+        let uncached = prepare_lines(&image, &boxes, 0);
+        assert!(uncached[0].is_none());
+        let crop = OcrUtils::get_rotate_crop_image(&image, &boxes[0].points);
+        assert_eq!(cached[0].as_ref().unwrap(), &CrnnNet::prepare_image(&crop));
     }
 
     #[test]

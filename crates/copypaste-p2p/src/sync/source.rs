@@ -65,6 +65,10 @@ impl SyncCursor {
 /// concurrent local writes, and re-checking is what makes replay a no-op rather
 /// than a resurrection. Return `false` when the local copy wins.
 pub trait SyncSource {
+    /// Create one isolated summary snapshot for this sync session.
+    fn summary_workspace(&self) -> Result<Box<dyn super::SummaryWorkspace>, SyncError> {
+        Ok(Box::new(super::MemorySummaryWorkspace::default()))
+    }
     /// Resolves an authenticated offer to one local chunk. Never a path lookup
     /// supplied by the peer, and never called by ordinary history sync.
     fn file_chunk(&self, _id: &str, _sha256: &str, _index: u64) -> Result<Vec<u8>, SyncError> {
@@ -79,6 +83,15 @@ pub trait SyncSource {
 
     /// Summaries of everything eligible to sync.
     fn summaries(&self, since_ms: i64) -> Result<Vec<ItemSummary>, SyncError>;
+
+    /// Metadata for local rows named by one received summary page.
+    ///
+    /// This is deliberately separate from [`summaries`](Self::summaries): the
+    /// latter is the immutable set this device advertised to its peer, whereas
+    /// this lookup is the current local comparison set for remote offers. A
+    /// production implementation must read only the requested metadata and
+    /// must not retain a store transaction across network I/O.
+    fn local_summaries(&self, ids: &[String]) -> Result<Vec<ItemSummary>, SyncError>;
 
     /// Full items for the given ids, plaintext. Unknown ids are omitted rather
     /// than erroring.

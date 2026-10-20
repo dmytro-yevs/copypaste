@@ -31,7 +31,7 @@ sha2.workspace = true
 rand.workspace = true
 zeroize.workspace = true
 subtle.workspace = true
-rusqlite.workspace = true
+rusqlite = { workspace = true, features = ["blob"] }
 r2d2.workspace = true
 r2d2_sqlite.workspace = true
 serde.workspace = true

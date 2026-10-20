@@ -410,6 +410,15 @@ pub struct DiagnosticCounters {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusData {
+    /// Whether the opt-in runtime watch carries transfer progress.
+    #[serde(default)]
+    pub runtime_watch: bool,
+    /// Whether all capture state changes are delivered by the runtime watch.
+    #[serde(default)]
+    pub capture_watch: bool,
+    /// Monotonic within one runtime instance; clients resync after reconnect.
+    #[serde(default)]
+    pub capture_revision: u64,
     #[serde(default)]
     pub sync_status: crate::SyncStatus,
     #[serde(default)]

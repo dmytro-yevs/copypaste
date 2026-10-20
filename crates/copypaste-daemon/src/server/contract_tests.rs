@@ -72,7 +72,7 @@ fn expected(method: &Method) -> Expected {
         Method::GetPrivateMode | Method::SetPrivateMode { .. } => {
             Expected::Data(|data| matches!(data, ResponseData::PrivateMode(_)))
         }
-        Method::Watch | Method::Shutdown => {
+        Method::Watch | Method::WatchRuntime | Method::Shutdown => {
             Expected::Data(|data| matches!(data, ResponseData::Empty { .. }))
         }
         Method::Copy { .. }

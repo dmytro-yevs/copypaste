@@ -30,10 +30,12 @@
 mod aead;
 mod keys;
 mod keystore;
+mod preview;
 mod stream;
 
 pub use aead::{decrypt, encrypt, NONCE_LEN, TAG_LEN};
-pub use keys::{ItemKey, Keyring, KEY_LEN};
+pub use keys::{ItemKey, Keyring, PreviewKey, KEY_LEN};
+pub(crate) use preview::{open_preview, seal_preview};
 pub(crate) use stream::{
     decryptor as stream_decryptor, encryptor as stream_encryptor, STREAM_NONCE_LEN,
 };

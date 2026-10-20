@@ -5,7 +5,7 @@
 //! `Option`s existed only because construction was spread across the builders.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
@@ -42,6 +42,7 @@ pub struct AppState {
     /// capture loop. A dropped event is safe — it says only *that* something
     /// changed, and the client re-reads.
     events: broadcast::Sender<EventData>,
+    runtime_events: broadcast::Sender<copypaste_ipc::RuntimeEventData>,
     /// Here rather than in `main` because [`copypaste_ipc::Method::Shutdown`]
     /// has to reach it: an app that did not start this daemon cannot signal the
     /// process. `main` holds no second sender, so SIGTERM and the IPC verb take
@@ -53,6 +54,8 @@ pub struct AppState {
     backend_name: &'static str,
     ready: AtomicBool,
     capture_running: AtomicBool,
+    observed_clipboard_available: AtomicBool,
+    capture_revision: AtomicU64,
     started_at: Instant,
 }
 
@@ -72,6 +75,7 @@ impl AppState {
         db_path: PathBuf,
     ) -> Self {
         let backend_name = clipboard.backend_name();
+        let clipboard_available = clipboard.is_available();
         let events = broadcast::channel(EVENT_BUFFER).0;
         let modules = Arc::new(copypaste_modules::ModuleHost::new(
             db_path.parent().unwrap_or(std::path::Path::new(".")),
@@ -103,6 +107,7 @@ impl AppState {
             settings,
             db_path,
             events,
+            runtime_events: broadcast::channel(EVENT_BUFFER).0,
             shutdown: watch::channel(false).0,
             drain_release: watch::channel(false).0,
             draining: AtomicBool::new(false),
@@ -110,6 +115,8 @@ impl AppState {
             backend_name,
             ready: AtomicBool::new(false),
             capture_running: AtomicBool::new(false),
+            observed_clipboard_available: AtomicBool::new(clipboard_available),
+            capture_revision: AtomicU64::new(0),
             started_at: Instant::now(),
         }
     }
@@ -160,6 +167,14 @@ impl AppState {
 
     pub fn subscribe(&self) -> broadcast::Receiver<EventData> {
         self.events.subscribe()
+    }
+
+    pub fn subscribe_runtime(&self) -> broadcast::Receiver<copypaste_ipc::RuntimeEventData> {
+        self.runtime_events.subscribe()
+    }
+
+    pub fn runtime_event_sender(&self) -> broadcast::Sender<copypaste_ipc::RuntimeEventData> {
+        self.runtime_events.clone()
     }
 
     /// History changed *on this device*. The split from
@@ -270,7 +285,40 @@ impl AppState {
     }
 
     pub fn set_capture_running(&self, running: bool) {
-        self.capture_running.store(running, Ordering::Release);
+        if self.capture_running.swap(running, Ordering::AcqRel) != running {
+            self.note_capture_state_changed();
+        }
+    }
+
+    pub fn capture_revision(&self) -> u64 {
+        self.capture_revision.load(Ordering::Acquire)
+    }
+
+    pub fn observe_clipboard_availability(&self, available: bool) {
+        if self
+            .observed_clipboard_available
+            .swap(available, Ordering::AcqRel)
+            != available
+        {
+            self.note_capture_state_changed();
+        }
+    }
+
+    /// Publish only when subscribed; status includes no clipboard payload.
+    pub fn note_capture_state_changed(&self) {
+        self.capture_revision.fetch_add(1, Ordering::AcqRel);
+        if self.runtime_events.receiver_count() == 0 {
+            return;
+        }
+        if let Some(copypaste_ipc::ResponseData::Status(status)) =
+            crate::server::items::status(self, 0).data
+        {
+            let _ = self.runtime_events.send(copypaste_ipc::RuntimeEventData {
+                change: None,
+                progress: None,
+                capture: Some(status),
+            });
+        }
     }
 
     /// Assembled here rather than in the status handler because two of the five
@@ -296,6 +344,59 @@ impl AppState {
 mod tests {
     use super::*;
     use crate::testutil::test_state;
+
+    #[test]
+    fn capture_events_only_report_actual_transitions() {
+        let (state, _dir) = test_state("capture-state-events");
+        let mut events = state.subscribe_runtime();
+        state.set_capture_running(true);
+        let first = events.try_recv().unwrap().capture.unwrap();
+        assert!(first.capture_running);
+        assert_eq!(first.capture_revision, 1);
+        state.set_capture_running(true);
+        assert!(events.try_recv().is_err());
+        state.set_capture_running(false);
+        let second = events.try_recv().unwrap().capture.unwrap();
+        assert!(!second.capture_running);
+        assert_eq!(second.capture_revision, 2);
+    }
+
+    #[test]
+    fn clipboard_availability_changes_are_published_once() {
+        use crate::clipboard::{Capture, CapturePolicy, ClipboardSource};
+        use std::sync::atomic::AtomicBool;
+        struct Source(Arc<AtomicBool>);
+        impl ClipboardSource for Source {
+            fn poll(&mut self) -> Option<Capture> {
+                None
+            }
+            fn poll_with_policy(&mut self, _: CapturePolicy<'_>) -> Option<Capture> {
+                None
+            }
+            fn set_contents(&mut self, _: &str) -> anyhow::Result<()> {
+                Ok(())
+            }
+            fn backend_name(&self) -> &'static str {
+                "availability-test"
+            }
+            fn is_available(&self) -> bool {
+                self.0.load(Ordering::Acquire)
+            }
+        }
+        let available = Arc::new(AtomicBool::new(true));
+        let (state, _dir) = crate::testutil::test_state_with_clipboard(
+            "capture-availability",
+            Box::new(Source(Arc::clone(&available))),
+        );
+        let mut events = state.subscribe_runtime();
+        available.store(false, Ordering::Release);
+        state.observe_clipboard_availability(false);
+        let status = events.try_recv().unwrap().capture.unwrap();
+        assert!(!status.clipboard_available);
+        assert_eq!(status.capture_revision, 1);
+        state.observe_clipboard_availability(false);
+        assert!(events.try_recv().is_err());
+    }
 
     #[test]
     fn event_buffer_capacity_is_two_fifty_six() {

@@ -829,6 +829,7 @@ dependencies = [
 name = "copypaste-flutter-bridge"
 version = "1.0.31"
 dependencies = [
+ "base64",
  "copypaste-core",
  "copypaste-ipc",
  "copypaste-modules",

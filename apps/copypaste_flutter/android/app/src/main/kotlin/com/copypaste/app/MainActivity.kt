@@ -290,6 +290,7 @@ class MainActivity : FlutterActivity() {
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
             PackageManager.PERMISSION_GRANTED
         ) {
+            AndroidCaptureSignals.changed()
             completion(true)
             return
         }
@@ -344,6 +345,7 @@ class MainActivity : FlutterActivity() {
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        ScreenshotCaptureSignals.changed()
         if (requestCode == screenshotPermissionRequest) {
             val completion = pendingScreenshotPermission ?: return
             pendingScreenshotPermission = null
@@ -356,6 +358,7 @@ class MainActivity : FlutterActivity() {
         if (requestCode != captureNotificationPermissionRequest) return
         val completion = pendingNotificationPermission ?: return
         pendingNotificationPermission = null
+        AndroidCaptureSignals.changed()
         completion(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED)
         ScreenshotCaptureService.restoreIfEnabled(this)
     }
@@ -416,6 +419,10 @@ class MainActivity : FlutterActivity() {
         isForeground = true
         appUpdateChannel?.onResume()
         ScreenshotCaptureState.reconcileMediaPermission(this)
+        ScreenshotCaptureSignals.changed()
+        // External settings, AppOps, ADB grants, battery exemptions, and a
+        // returning Shizuku activity have no reliable broadcast for this app.
+        AndroidCaptureSignals.changed()
         if (ScreenshotCaptureState.enabled(this)) {
             if (!ScreenshotCaptureState.permissionRequested(this)) requestScreenshotPermission {}
             else ScreenshotCaptureService.restoreIfEnabled(this)
@@ -430,6 +437,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
+        AndroidCaptureSignals.changed()
         if (hasFocus && clipboardListenerRegistered) {
             if (!clipboardFocusGuard.hasPendingPicker ||
                 clipboardFocusGuard.shouldCaptureAfterFocus(clipboardGeneration())) {

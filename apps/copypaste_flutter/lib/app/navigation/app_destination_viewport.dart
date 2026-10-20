@@ -144,6 +144,8 @@ class _AppDestinationViewportState extends State<AppDestinationViewport> {
           for (var index = 0; index < widget.children.length; index++)
             _RetainedDestination(
               key: ValueKey(AppDestination.values[index]),
+              controller: widget.controller,
+              destination: AppDestination.values[index],
               child: widget.children[index],
             ),
         ],
@@ -153,7 +155,14 @@ class _AppDestinationViewportState extends State<AppDestinationViewport> {
 }
 
 class _RetainedDestination extends StatefulWidget {
-  const _RetainedDestination({super.key, required this.child});
+  const _RetainedDestination({
+    super.key,
+    required this.controller,
+    required this.destination,
+    required this.child,
+  });
+  final AppNavigationController controller;
+  final AppDestination destination;
   final Widget child;
 
   @override
@@ -168,6 +177,20 @@ class _RetainedDestinationState extends State<_RetainedDestination>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    return widget.child;
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        widget.controller,
+        widget.controller.visualPosition,
+      ]),
+      child: widget.child,
+      builder: (context, child) => TickerMode(
+        enabled:
+            widget.controller.selectedDestination == widget.destination ||
+            (widget.controller.visualPosition.value - widget.destination.index)
+                    .abs() <
+                1,
+        child: child!,
+      ),
+    );
   }
 }

@@ -225,6 +225,11 @@ impl Capture {
 ///
 /// `Send` so the poll loop can own one inside a spawned task.
 pub trait ClipboardSource: Send {
+    /// Optional event-driven wakeup for clipboard changes. The sequence or
+    /// equivalent backend state remains authoritative after each wakeup.
+    fn change_signal(&self) -> Option<std::sync::Arc<ChangeSignal>> {
+        None
+    }
     /// Return `Some(capture)` when the clipboard changed since the last poll.
     /// Must return `None` when nothing changed — the caller polls on a timer.
     fn poll(&mut self) -> Option<Capture>;
@@ -245,6 +250,12 @@ pub trait ClipboardSource: Send {
     /// genuine copy.
     fn changed(&mut self) -> bool {
         true
+    }
+
+    /// Whether an event-driven backend needs a timed retry after a wakeup.
+    /// This includes temporary failure to read its authoritative change marker.
+    fn retry_required(&mut self) -> bool {
+        self.changed()
     }
 
     /// Whether the system clipboard transport is currently usable.
@@ -337,6 +348,23 @@ pub trait ClipboardSource: Send {
     /// (§6.1). Surfaced the same way as the counter above.
     fn lost_intermediates_count(&self) -> u64 {
         0
+    }
+}
+
+/// A backend marks the signal unavailable and wakes the waiter if its event
+/// source fails, so the capture loop can fall back to its normal timer.
+pub struct ChangeSignal {
+    pub(crate) notify: tokio::sync::Notify,
+    pub(crate) available: std::sync::atomic::AtomicBool,
+}
+
+impl ChangeSignal {
+    #[cfg(target_os = "windows")]
+    fn new() -> Self {
+        Self {
+            notify: tokio::sync::Notify::new(),
+            available: std::sync::atomic::AtomicBool::new(true),
+        }
     }
 }
 

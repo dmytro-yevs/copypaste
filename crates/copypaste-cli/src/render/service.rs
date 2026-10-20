@@ -255,6 +255,9 @@ mod tests {
 
     fn status(protocol_version: u32, backend: &str) -> StatusData {
         StatusData {
+            runtime_watch: false,
+            capture_watch: false,
+            capture_revision: 0,
             sync_status: Default::default(),
             device_name: "Test device".into(),
             device_id: None,

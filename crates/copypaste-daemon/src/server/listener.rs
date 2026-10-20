@@ -1,15 +1,10 @@
 //! The socket itself: binding it, guarding it, bounding it, and framing what
 //! arrives on it.
 //!
-//! Framing is `tokio_util::codec::LinesCodec`. The method-aware size cap remains
-//! custom because it must apply before a complete request is parseable. One cap
-//! (`copypaste_ipc::MAX_FRAME_BYTES`) and therefore no reason to look at bytes
-//! at all.
-//!
-//! Only the read half goes through the codec. `SinkExt` lives behind
-//! futures-util's `sink` feature, which this crate's dependency line does not
-//! enable, so a reply is written as `to_string` plus a newline straight to the
-//! socket.
+//! Newline framing reserves a shared wire-buffer budget before allocation.
+//! Control frames use a separate pool so bulk frames cannot starve status.
+//! A connection closes on overload rather than waiting while retaining a
+//! partial frame. Writes retain their reservation until completion or timeout.
 //!
 //! # Three bounds, and what each is for
 //!
@@ -24,24 +19,28 @@
 //!   same-UID client that connects and never drains otherwise pins a permit and
 //!   the database mutex for as long as it likes.
 
+use std::io::{self, Write};
 #[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 #[cfg(unix)]
 use std::path::Path;
 #[cfg(unix)]
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 #[cfg(unix)]
 use anyhow::Context;
 use copypaste_ipc::transport::{Listener, OwnedReadHalf, OwnedWriteHalf, Stream};
 use copypaste_ipc::{ErrorCode, Method, Response, ResponseData, MAX_FRAME_BYTES};
+#[cfg(all(test, unix))]
 use futures_util::StreamExt;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::{watch, Semaphore};
+#[cfg(all(test, unix))]
 use tokio_util::codec::{FramedRead, LinesCodec, LinesCodecError};
 use tracing::{debug, error, info, warn};
 
@@ -248,7 +247,7 @@ async fn handle_connection(
     mut release: watch::Receiver<bool>,
 ) {
     let (reader, mut writer) = stream.into_split();
-    let mut lines = FramedRead::new(reader, LinesCodec::new_with_max_length(MAX_FRAME_BYTES));
+    let mut lines = Reader::new(reader);
 
     loop {
         if release_requested(&mut release) {
@@ -274,7 +273,7 @@ async fn handle_connection(
         let line = match next {
             None => break,
             Some(Ok(line)) => line,
-            Some(Err(LinesCodecError::MaxLineLengthExceeded)) => {
+            Some(Err(FrameError::TooLarge)) => {
                 // Answered, then closed — manifest 04 §6.2: after
                 // `request too large` "the connection is already closed", which
                 // is what `halted::refuse` and the Windows pipe already do.
@@ -296,11 +295,11 @@ async fn handle_connection(
         };
 
         // Blank lines are keep-alives.
-        if line.trim().is_empty() {
+        if line.text.trim().is_empty() {
             continue;
         }
 
-        let request = match parse(&line) {
+        let request = match parse(&line.text) {
             Ok(request) => request,
             Err(rejection) => {
                 if send(&mut writer, &rejection.response).await.is_err() {
@@ -309,6 +308,10 @@ async fn handle_connection(
                 continue;
             }
         };
+
+        // Parsing owns its data. Release the raw frame, but retain its credit
+        // while the decoded request is queued or executing.
+        let wire_lease = line.into_lease();
 
         // `shutdown` is taken here for the same reason `watch` is below: it
         // changes what the connection is — this one ends, and so does the
@@ -345,7 +348,9 @@ async fn handle_connection(
         // `watch` turns the connection into a stream, so it is taken here
         // rather than in the dispatcher: from this point the loop above no
         // longer owns the read half's deadline.
-        if matches!(&request.method, Method::Watch) {
+        if matches!(&request.method, Method::Watch | Method::WatchRuntime) {
+            let typed = matches!(&request.method, Method::WatchRuntime);
+            drop(wire_lease);
             let id = request.id;
             let Ok(_permit) = Arc::clone(&watchers).try_acquire_owned() else {
                 let full = Response::err(id, ErrorCode::Internal, MSG_WATCHERS_FULL);
@@ -357,13 +362,27 @@ async fn handle_connection(
             // the receiver afterwards would drop everything that happened in
             // between, which is a race a client cannot see or retry around.
             let events = state.subscribe();
+            let runtime_events = typed.then(|| state.subscribe_runtime());
             if send(&mut writer, &Response::ok(id, ResponseData::Empty {}))
                 .await
                 .is_err()
             {
                 break;
             }
-            super::watch::pump(events, id, &mut lines, &mut writer, &mut shutdown).await;
+            if let Some(runtime_events) = runtime_events {
+                super::watch::pump_runtime(
+                    Arc::clone(&state),
+                    events,
+                    runtime_events,
+                    id,
+                    &mut lines,
+                    &mut writer,
+                    &mut shutdown,
+                )
+                .await;
+            } else {
+                super::watch::pump(events, id, &mut lines, &mut writer, &mut shutdown).await;
+            }
             break;
         }
 
@@ -378,9 +397,13 @@ async fn handle_connection(
             Some(admission)
         };
 
-        let response = dispatch_request(&state, request).await;
+        let is_interactive = super::dispatch::interactive(&request.method);
+        let response = dispatch_request(&state, request, wire_lease).await;
 
-        if send(&mut writer, &response).await.is_err() {
+        if send_in(&mut writer, &response, is_interactive, wire_budget())
+            .await
+            .is_err()
+        {
             break;
         }
         drop(admission);
@@ -396,20 +419,252 @@ fn release_requested(release: &mut watch::Receiver<bool>) -> bool {
     *release.borrow_and_update()
 }
 
-/// One request, one line, one response line.
-pub(super) async fn send(writer: &mut OwnedWriteHalf, response: &Response) -> Result<(), ()> {
-    let mut encoded = match serde_json::to_string(response) {
-        Ok(encoded) => encoded,
-        Err(e) => {
-            error!(error = %e, "could not serialise a response");
-            return Err(());
+// Allocation limits for wire buffers, not process memory budgets. Small frames
+// have a separate pool so partially sent large frames cannot exhaust status.
+const CONTROL_FRAME: usize = 4096;
+const CONTROL_BYTES: usize = 4 * 1024 * 1024;
+const BULK_BYTES: usize = 128 * 1024 * 1024;
+const INTERACTIVE_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Default)]
+struct WireBudget {
+    control: AtomicUsize,
+    bulk: AtomicUsize,
+    interactive: AtomicUsize,
+}
+
+fn wire_budget() -> &'static WireBudget {
+    static BUDGET: OnceLock<WireBudget> = OnceLock::new();
+    BUDGET.get_or_init(WireBudget::default)
+}
+
+pub(super) struct WireLease {
+    used: &'static AtomicUsize,
+    bytes: usize,
+}
+impl WireLease {
+    fn acquire_in(budget: &'static WireBudget, bytes: usize) -> Option<Self> {
+        let (used, limit) = if bytes <= CONTROL_FRAME * 2 {
+            (&budget.control, CONTROL_BYTES)
+        } else {
+            (&budget.bulk, BULK_BYTES)
+        };
+        Self::reserve(used, limit, bytes)
+    }
+
+    fn response(budget: &'static WireBudget, bytes: usize, interactive: bool) -> Option<Self> {
+        if interactive && bytes > CONTROL_FRAME * 2 {
+            Self::reserve(&budget.interactive, INTERACTIVE_BYTES, bytes)
+        } else {
+            Self::acquire_in(budget, bytes)
         }
-    };
-    encoded.push('\n');
-    // A client that has stopped reading fills the socket buffer and this write
-    // never returns. The task holds a connection permit while it waits
-    // (`CopyPaste-c4q2.24`).
-    match tokio::time::timeout(WRITE_TIMEOUT, writer.write_all(encoded.as_bytes())).await {
+    }
+
+    pub(super) fn reserve(used: &'static AtomicUsize, limit: usize, bytes: usize) -> Option<Self> {
+        used.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+            n.checked_add(bytes).filter(|n| *n <= limit)
+        })
+        .ok()?;
+        Some(Self { used, bytes })
+    }
+}
+impl Drop for WireLease {
+    fn drop(&mut self) {
+        self.used.fetch_sub(self.bytes, Ordering::AcqRel);
+    }
+}
+
+#[derive(Debug)]
+pub(super) enum FrameError {
+    TooLarge,
+    Overloaded,
+    InvalidUtf8,
+    Io(io::Error),
+}
+impl std::fmt::Display for FrameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(error) => write!(f, "{error}"),
+            _ => write!(f, "{self:?}"),
+        }
+    }
+}
+pub(super) struct Frame {
+    pub(super) text: String,
+    _lease: Option<WireLease>,
+}
+impl Frame {
+    fn into_lease(self) -> Option<WireLease> {
+        let Self { text, _lease } = self;
+        drop(text);
+        _lease
+    }
+}
+
+/// Fixed-size lookahead plus a charged frame buffer. A growth never waits
+/// while holding partial data: overload closes the connection instead.
+pub(super) struct Reader {
+    reader: OwnedReadHalf,
+    budget: &'static WireBudget,
+    lookahead: [u8; CONTROL_FRAME],
+    pos: usize,
+    end: usize,
+    frame: Vec<u8>,
+    lease: Option<WireLease>,
+}
+impl Reader {
+    pub(super) fn new(reader: OwnedReadHalf) -> Self {
+        Self {
+            reader,
+            budget: wire_budget(),
+            lookahead: [0; CONTROL_FRAME],
+            pos: 0,
+            end: 0,
+            frame: Vec::new(),
+            lease: None,
+        }
+    }
+    #[cfg(all(test, unix))]
+    fn append(&mut self, bytes: &[u8]) -> Result<(), FrameError> {
+        Self::append_to(&mut self.frame, &mut self.lease, self.budget, bytes)
+    }
+    fn append_to(
+        frame: &mut Vec<u8>,
+        current_lease: &mut Option<WireLease>,
+        budget: &'static WireBudget,
+        bytes: &[u8],
+    ) -> Result<(), FrameError> {
+        let required = frame
+            .len()
+            .checked_add(bytes.len())
+            .ok_or(FrameError::TooLarge)?;
+        if required > MAX_FRAME_BYTES {
+            return Err(FrameError::TooLarge);
+        }
+        if required > frame.capacity() {
+            let target = required
+                .next_power_of_two()
+                .max(CONTROL_FRAME)
+                .min(MAX_FRAME_BYTES);
+            // Reserve for the new buffer while the previous buffer remains live.
+            let lease = WireLease::acquire_in(budget, target * 2).ok_or(FrameError::Overloaded)?;
+            let mut replacement = Vec::new();
+            replacement
+                .try_reserve_exact(target)
+                .map_err(|_| FrameError::Overloaded)?;
+            if replacement.capacity() > target * 2 {
+                return Err(FrameError::Overloaded);
+            }
+            replacement.extend_from_slice(frame);
+            *frame = replacement;
+            *current_lease = Some(lease);
+        }
+        frame.extend_from_slice(bytes);
+        Ok(())
+    }
+    pub(super) async fn next(&mut self) -> Option<Result<Frame, FrameError>> {
+        loop {
+            if self.pos == self.end {
+                match self.reader.read(&mut self.lookahead).await {
+                    Ok(0) if self.frame.is_empty() => return None,
+                    Ok(0) => return Some(self.finish()),
+                    Ok(n) => {
+                        self.pos = 0;
+                        self.end = n;
+                    }
+                    Err(e) => return Some(Err(FrameError::Io(e))),
+                }
+            }
+            let end = self.lookahead[self.pos..self.end]
+                .iter()
+                .position(|b| *b == b'\n')
+                .map(|n| self.pos + n);
+            let stop = end.unwrap_or(self.end);
+            let result = Self::append_to(
+                &mut self.frame,
+                &mut self.lease,
+                self.budget,
+                &self.lookahead[self.pos..stop],
+            );
+            self.pos = stop + usize::from(end.is_some());
+            if let Err(e) = result {
+                return Some(Err(e));
+            }
+            if end.is_some() {
+                return Some(self.finish());
+            }
+        }
+    }
+    fn finish(&mut self) -> Result<Frame, FrameError> {
+        if self.frame.last() == Some(&b'\r') {
+            self.frame.pop();
+        }
+        let bytes = std::mem::take(&mut self.frame);
+        let lease = self.lease.take();
+        let text = String::from_utf8(bytes).map_err(|_| FrameError::InvalidUtf8)?;
+        Ok(Frame {
+            text,
+            _lease: lease,
+        })
+    }
+}
+
+struct ByteCount(usize);
+impl Write for ByteCount {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0 = self
+            .0
+            .checked_add(bytes.len())
+            .ok_or_else(|| io::Error::other("response size overflow"))?;
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+struct AdmittedWriter(Vec<u8>);
+impl Write for AdmittedWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if bytes.len() > self.0.capacity() - self.0.len() {
+            return Err(io::Error::other("response exceeded its admission"));
+        }
+        self.0.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Serialize into an admitted buffer, then retain its lease through the write.
+pub(super) async fn send(writer: &mut OwnedWriteHalf, response: &Response) -> Result<(), ()> {
+    send_in(writer, response, false, wire_budget()).await
+}
+
+async fn send_in(
+    writer: &mut OwnedWriteHalf,
+    response: &Response,
+    interactive: bool,
+    budget: &'static WireBudget,
+) -> Result<(), ()> {
+    let mut count = ByteCount(0);
+    if let Err(e) = serde_json::to_writer(&mut count, response) {
+        error!(error = %e, "could not serialise a response");
+        return Err(());
+    }
+    let capacity = count.0.checked_add(1).ok_or(())?;
+    let _lease =
+        WireLease::response(budget, capacity.checked_mul(2).ok_or(())?, interactive).ok_or(())?;
+    let mut encoded = Vec::new();
+    encoded.try_reserve_exact(capacity).map_err(|_| ())?;
+    if encoded.capacity() > capacity * 2 {
+        return Err(());
+    }
+    let mut admitted = AdmittedWriter(encoded);
+    serde_json::to_writer(&mut admitted, response).map_err(|_| ())?;
+    admitted.write_all(b"\n").map_err(|_| ())?;
+    match tokio::time::timeout(WRITE_TIMEOUT, writer.write_all(&admitted.0)).await {
         Ok(Ok(())) => Ok(()),
         Ok(Err(e)) => {
             debug!(error = %e, "ipc connection write failed");
@@ -422,8 +677,12 @@ pub(super) async fn send(writer: &mut OwnedWriteHalf, response: &Response) -> Re
     }
 }
 
-/// The read half, once a connection has subscribed.
-pub(super) type Reader = FramedRead<OwnedReadHalf, LinesCodec>;
+#[cfg(all(test, unix))]
+pub(super) fn test_socket_path(dir: &tempfile::TempDir, name: impl AsRef<Path>) -> PathBuf {
+    let path = dir.path().join(name);
+    let cwd = std::env::current_dir().expect("current directory");
+    path.strip_prefix(&cwd).unwrap_or(&path).to_path_buf()
+}
 
 // Every test here binds a real endpoint, which only Unix has one of yet.
 #[cfg(test)]
@@ -444,10 +703,140 @@ mod tests {
         }
     }
 
+    #[test]
+    fn reservations_release_on_drop_and_reject_overload() {
+        static USED: AtomicUsize = AtomicUsize::new(0);
+        let first = WireLease::reserve(&USED, 100, 60).unwrap();
+        assert!(WireLease::reserve(&USED, 100, 41).is_none());
+        let second = WireLease::reserve(&USED, 100, 40).unwrap();
+        assert_eq!(USED.load(Ordering::Acquire), 100);
+        drop(first);
+        assert_eq!(USED.load(Ordering::Acquire), 40);
+        drop(second);
+        assert_eq!(USED.load(Ordering::Acquire), 0);
+    }
+
+    #[tokio::test]
+    async fn partial_bulk_overload_does_not_consume_control_reserve() {
+        static TEST_BUDGET: OnceLock<WireBudget> = OnceLock::new();
+        let budget = TEST_BUDGET.get_or_init(WireBudget::default);
+        let bulk = WireLease::acquire_in(budget, BULK_BYTES).unwrap();
+        let mut readers = Vec::new();
+        let mut clients = Vec::new();
+        for _ in 0..MAX_CONCURRENT_CONNECTIONS {
+            let (client, server) = transport::Stream::pair().unwrap();
+            let (read, _) = server.into_split();
+            let mut reader = Reader::new(read);
+            reader.budget = budget;
+            reader.append(&[b'a'; CONTROL_FRAME]).unwrap();
+            assert!(matches!(reader.append(b"a"), Err(FrameError::Overloaded)));
+            readers.push(reader);
+            clients.push(client);
+        }
+        let control = WireLease::acquire_in(budget, 512).unwrap();
+        drop(control);
+        drop(readers);
+        drop(clients);
+        drop(bulk);
+        assert_eq!(budget.control.load(Ordering::Acquire), 0);
+        assert_eq!(budget.bulk.load(Ordering::Acquire), 0);
+    }
+
+    #[tokio::test]
+    async fn bulk_wire_pressure_leaves_interactive_and_control_replies() {
+        static TEST_BUDGET: OnceLock<WireBudget> = OnceLock::new();
+        let budget = TEST_BUDGET.get_or_init(WireBudget::default);
+        let bulk = WireLease::acquire_in(budget, BULK_BYTES).unwrap();
+        let (server, client) = transport::Stream::pair().unwrap();
+        let (_, mut writer) = server.into_split();
+        let (mut reader, _) = client.into_split();
+        let response = Response::ok(
+            7,
+            ResponseData::Modules {
+                json: "x".repeat(8192),
+            },
+        );
+        let task = tokio::spawn(async move { send_in(&mut writer, &response, true, budget).await });
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).await.unwrap();
+        task.await.unwrap().unwrap();
+        let parsed: Response = serde_json::from_slice(&bytes).unwrap();
+        assert!(parsed.ok);
+        let control = WireLease::response(budget, 512, false).unwrap();
+        drop(control);
+        drop(bulk);
+        assert_eq!(budget.bulk.load(Ordering::Acquire), 0);
+        assert_eq!(budget.interactive.load(Ordering::Acquire), 0);
+        assert_eq!(budget.control.load(Ordering::Acquire), 0);
+    }
+
+    #[tokio::test]
+    async fn max_legal_frame_and_pipelined_next_frame_are_preserved() {
+        let (client, server) = transport::Stream::pair().unwrap();
+        let (read, _) = server.into_split();
+        let (_, mut write) = client.into_split();
+        let mut reader = Reader::new(read);
+        let task = tokio::spawn(async move {
+            let prefix = br#"{"id":1,"protocol_version":6,"method":"status","unknown":""#;
+            let suffix = br#""}"#;
+            let mut remaining = MAX_FRAME_BYTES - prefix.len() - suffix.len();
+            let chunk = [b'x'; CONTROL_FRAME];
+            write.write_all(prefix).await.unwrap();
+            while remaining > 0 {
+                let n = remaining.min(chunk.len());
+                write.write_all(&chunk[..n]).await.unwrap();
+                remaining -= n;
+            }
+            write.write_all(suffix).await.unwrap();
+            write.write_all(b"\nnext\n").await.unwrap();
+        });
+        let frame = reader.next().await.unwrap().unwrap();
+        assert_eq!(frame.text.len(), MAX_FRAME_BYTES);
+        assert!(matches!(
+            parse(&frame.text).ok().unwrap().method,
+            Method::Status
+        ));
+        drop(frame);
+        assert_eq!(reader.next().await.unwrap().unwrap().text, "next");
+        task.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stalled_response_writer_times_out() {
+        let (server, client) = transport::Stream::pair().unwrap();
+        let (_, mut writer) = server.into_split();
+        let response = Response::ok(
+            1,
+            ResponseData::Modules {
+                json: "x".repeat(4 * 1024 * 1024),
+            },
+        );
+        assert!(send(&mut writer, &response).await.is_err());
+        drop(client);
+    }
+
+    #[tokio::test]
+    async fn eof_and_invalid_utf8_release_the_frame_lease() {
+        let (client, server) = transport::Stream::pair().unwrap();
+        let (read, _) = server.into_split();
+        let (_, mut write) = client.into_split();
+        let mut reader = Reader::new(read);
+        write.write_all(&[0xff, b'\n']).await.unwrap();
+        assert!(matches!(
+            reader.next().await.unwrap(),
+            Err(FrameError::InvalidUtf8)
+        ));
+        assert!(reader.lease.is_none());
+        write.write_all(b"final").await.unwrap();
+        write.shutdown().await.unwrap();
+        assert_eq!(reader.next().await.unwrap().unwrap().text, "final");
+        assert!(reader.next().await.is_none());
+    }
+
     #[tokio::test]
     async fn a_stale_socket_file_is_replaced() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("daemon.sock");
+        let path = test_socket_path(&dir, "daemon.sock");
         std::fs::write(&path, b"left behind by a crashed daemon").unwrap();
 
         let listener = bind(&path).expect("bind must clear the stale file");
@@ -468,7 +857,7 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         for round in 0..ROUNDS {
-            let path = dir.path().join(format!("daemon-{round}.sock"));
+            let path = test_socket_path(&dir, format!("daemon-{round}.sock"));
             // The state every starter finds after a crash.
             std::fs::write(&path, b"left behind by a crashed daemon").unwrap();
 
@@ -523,7 +912,7 @@ mod tests {
     #[tokio::test]
     async fn the_socket_is_owner_only() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("daemon.sock");
+        let path = test_socket_path(&dir, "daemon.sock");
         let _listener = bind(&path).expect("bind");
 
         let mode = std::fs::metadata(&path).unwrap().permissions().mode();
@@ -549,7 +938,7 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
-        let path = dir.path().join("daemon.sock");
+        let path = test_socket_path(&dir, "daemon.sock");
 
         let stop = Arc::new(AtomicBool::new(false));
         let seen = Arc::new(AtomicUsize::new(NOTHING_SEEN));
@@ -596,7 +985,7 @@ mod tests {
     #[tokio::test]
     async fn requests_round_trip_over_a_socket() {
         let (state, dir) = test_state("server");
-        let path = dir.path().join("daemon.sock");
+        let path = test_socket_path(&dir, "daemon.sock");
         let listener = bind(&path).expect("bind");
 
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -727,7 +1116,7 @@ mod tests {
     #[tokio::test]
     async fn shutdown_keeps_the_endpoint_and_refuses_new_mutations_until_final_release() {
         let (state, dir) = test_state("draining-endpoint");
-        let path = dir.path().join("daemon.sock");
+        let path = test_socket_path(&dir, "daemon.sock");
         let listener = bind(&path).expect("bind");
         let server = tokio::spawn(run(listener, Arc::clone(&state), state.shutdown_rx()));
 
@@ -785,7 +1174,7 @@ mod tests {
     #[tokio::test]
     async fn final_release_closes_idle_and_keepalive_clients_before_listener_join() {
         let (state, dir) = test_state("drain-client-cleanup");
-        let path = dir.path().join("daemon.sock");
+        let path = test_socket_path(&dir, "daemon.sock");
         let listener = bind(&path).expect("bind");
         let server = tokio::spawn(run(listener, Arc::clone(&state), state.shutdown_rx()));
 
@@ -840,7 +1229,7 @@ mod tests {
     #[tokio::test]
     async fn watch_rejects_unsupported_protocol_versions_and_closes() {
         let (state, dir) = test_state("watch-version");
-        let path = dir.path().join("daemon.sock");
+        let path = test_socket_path(&dir, "daemon.sock");
         let listener = bind(&path).expect("bind");
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
@@ -871,7 +1260,7 @@ mod tests {
     async fn watch_rejects_a_not_ready_daemon_and_closes() {
         let (state, dir) = test_state("watch-readiness");
         state.set_ready(false);
-        let path = dir.path().join("daemon.sock");
+        let path = test_socket_path(&dir, "daemon.sock");
         let listener = bind(&path).expect("bind");
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
@@ -893,7 +1282,7 @@ mod tests {
     #[tokio::test]
     async fn malformed_watch_is_rejected_without_changing_the_connection() {
         let (state, dir) = test_state("watch-malformed");
-        let path = dir.path().join("daemon.sock");
+        let path = test_socket_path(&dir, "daemon.sock");
         let listener = bind(&path).expect("bind");
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
@@ -918,7 +1307,7 @@ mod tests {
     #[tokio::test]
     async fn watch_acknowledges_a_successful_subscription() {
         let (state, dir) = test_state("watch-ack");
-        let path = dir.path().join("daemon.sock");
+        let path = test_socket_path(&dir, "daemon.sock");
         let listener = bind(&path).expect("bind");
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
@@ -935,12 +1324,48 @@ mod tests {
         let _ = server.await;
     }
 
+    #[tokio::test]
+    async fn runtime_watch_sends_snapshot_and_capture_transitions() {
+        let (state, dir) = test_state("runtime-capture-watch");
+        // Keep Unix socket names short when the fixture lives beneath the cwd.
+        let cwd = std::env::current_dir().unwrap();
+        let socket_dir = dir.path().strip_prefix(&cwd).unwrap_or(dir.path());
+        let path = socket_dir.join("daemon.sock");
+        let listener = bind(&path).expect("bind");
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
+        let stream = transport::connect(&path).await.expect("connect");
+        let mut watcher = Client::new(stream);
+        let ack = watcher.call(request(1, Method::WatchRuntime)).await;
+        assert!(ack.ok, "{:?}", ack.error);
+        let initial = tokio::time::timeout(Duration::from_secs(5), watcher.next_frame())
+            .await
+            .unwrap();
+        let Some(ResponseData::RuntimeEvent(initial)) = initial.data else {
+            panic!("missing snapshot");
+        };
+        assert!(!initial.capture.unwrap().capture_running);
+        state.set_capture_running(true);
+        let frame = tokio::time::timeout(Duration::from_secs(5), watcher.next_frame())
+            .await
+            .unwrap();
+        let Some(ResponseData::RuntimeEvent(event)) = frame.data else {
+            panic!("missing event");
+        };
+        let capture = event.capture.unwrap();
+        assert!(capture.capture_running);
+        assert_eq!(capture.capture_revision, 1);
+        shutdown_tx.send(true).unwrap();
+        state.release_drain_listener();
+        let _ = server.await;
+    }
+
     /// A subscriber gets an ack, then a frame per change, on the same
     /// connection and in the same envelope.
     #[tokio::test]
     async fn a_watcher_is_pushed_a_frame_when_history_changes() {
         let (state, dir) = test_state("server");
-        let path = dir.path().join("daemon.sock");
+        let path = test_socket_path(&dir, "daemon.sock");
         let listener = bind(&path).expect("bind");
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
@@ -976,6 +1401,194 @@ mod tests {
         let _ = server.await;
     }
 
+    fn progress_socket_path(dir: &tempfile::TempDir) -> std::path::PathBuf {
+        let absolute = dir.path().join("daemon.sock");
+        let cwd = std::env::current_dir().unwrap();
+        absolute
+            .strip_prefix(cwd)
+            .unwrap_or(&absolute)
+            .to_path_buf()
+    }
+
+    #[tokio::test]
+    async fn saving_a_local_file_emits_token_progress() {
+        let (state, dir) = test_state("file-progress");
+        let original = dir.path().join("original.bin");
+        let bytes = vec![9; copypaste_core::file_transfer::CHUNK_BYTES * 2 + 3];
+        std::fs::write(&original, &bytes).unwrap();
+        let row = copypaste_core::file_import::import_file(
+            &state.store,
+            &state.keyring,
+            &original,
+            "original.bin",
+            "application/octet-stream",
+            original.to_str(),
+            &state.settings.get(),
+        )
+        .unwrap();
+        let path = progress_socket_path(&dir);
+        let listener = bind(&path).expect("bind");
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
+        let mut typed = Client::new(transport::connect(&path).await.unwrap());
+        assert!(typed.call(request(1, Method::WatchRuntime)).await.ok);
+        let destination = dir.path().join("saved.bin");
+        let mut client = Client::new(transport::connect(&path).await.unwrap());
+        let save = tokio::spawn(async move {
+            client
+                .call(request(
+                    2,
+                    Method::SaveFile {
+                        id: row.id,
+                        dest_path: destination.to_string_lossy().into_owned(),
+                        download_token: Some("test-token".into()),
+                    },
+                ))
+                .await
+        });
+        let mut last = 0;
+        while last < bytes.len() as u64 {
+            let frame = tokio::time::timeout(Duration::from_secs(5), typed.next_frame())
+                .await
+                .unwrap();
+            if let Some(ResponseData::RuntimeEvent(event)) = frame.data {
+                if let Some(progress) = event.progress {
+                    assert_eq!(progress.token, "test-token");
+                    assert!(progress.written > last);
+                    assert_eq!(progress.total, bytes.len() as u64);
+                    last = progress.written;
+                }
+            }
+        }
+        assert!(save.await.unwrap().ok);
+        assert_eq!(std::fs::read(dir.path().join("saved.bin")).unwrap(), bytes);
+        shutdown_tx.send(true).unwrap();
+        state.release_drain_listener();
+        let _ = server.await;
+    }
+
+    #[tokio::test]
+    async fn progress_only_reaches_opted_in_watchers() {
+        let (state, dir) = test_state("progress-watch");
+        let path = progress_socket_path(&dir);
+        let listener = bind(&path).expect("bind");
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
+        let mut legacy = Client::new(transport::connect(&path).await.unwrap());
+        let mut typed = Client::new(transport::connect(&path).await.unwrap());
+        assert!(legacy.call(request(1, Method::Watch)).await.ok);
+        assert!(typed.call(request(2, Method::WatchRuntime)).await.ok);
+        state
+            .runtime_event_sender()
+            .send(copypaste_ipc::RuntimeEventData {
+                change: None,
+                capture: None,
+                progress: Some(copypaste_ipc::FileProgress {
+                    token: "opaque".into(),
+                    written: 5,
+                    total: 10,
+                }),
+            })
+            .unwrap();
+        let progress = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let frame = typed.next_frame().await;
+                if let Some(ResponseData::RuntimeEvent(event)) = frame.data {
+                    if let Some(progress) = event.progress {
+                        break progress;
+                    }
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            (progress.token.as_str(), progress.written, progress.total),
+            ("opaque", 5, 10)
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), legacy.next_frame())
+                .await
+                .is_err()
+        );
+        state.note_remote_change();
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(5), legacy.next_frame())
+                .await
+                .unwrap()
+                .data,
+            Some(ResponseData::Event(_))
+        ));
+        shutdown_tx.send(true).unwrap();
+        state.release_drain_listener();
+        let _ = server.await;
+    }
+
+    #[tokio::test]
+    async fn runtime_watch_lag_resynchronizes_capture_history_and_peers() {
+        let (state, _dir) = test_state("runtime-watch-lag");
+        let (_legacy_tx, legacy) = tokio::sync::broadcast::channel(1);
+        let (runtime_tx, events) = tokio::sync::broadcast::channel(1);
+        let empty = copypaste_ipc::RuntimeEventData {
+            change: None,
+            progress: None,
+            capture: None,
+        };
+        runtime_tx.send(empty.clone()).unwrap();
+        runtime_tx.send(empty).unwrap();
+        let (server_stream, client_stream) = Stream::pair().expect("socket pair");
+        let (reader, mut writer) = server_stream.into_split();
+        let mut reader = FramedRead::new(reader, LinesCodec::new());
+        let (_shutdown_tx, mut shutdown_rx) = watch::channel(false);
+        let pump = tokio::spawn(async move {
+            crate::server::watch::pump_runtime(
+                state,
+                legacy,
+                events,
+                26,
+                &mut reader,
+                &mut writer,
+                &mut shutdown_rx,
+            )
+            .await;
+        });
+        let mut client = Client::new(client_stream);
+        let mut frames = Vec::new();
+        for _ in 0..4 {
+            frames.push(
+                tokio::time::timeout(Duration::from_secs(5), client.next_frame())
+                    .await
+                    .unwrap(),
+            );
+        }
+        let Some(ResponseData::RuntimeEvent(first)) = &frames[0].data else {
+            panic!("missing initial state")
+        };
+        assert!(first.capture.is_some());
+        let Some(ResponseData::RuntimeEvent(recovery)) = &frames[1].data else {
+            panic!("missing recovery state")
+        };
+        assert!(recovery.capture.is_some());
+        let Some(ResponseData::RuntimeEvent(items)) = &frames[2].data else {
+            panic!("missing history refresh")
+        };
+        assert_eq!(
+            items.change.as_ref().unwrap().event,
+            copypaste_ipc::EventKind::Items
+        );
+        let Some(ResponseData::RuntimeEvent(peers)) = &frames[3].data else {
+            panic!("missing peer refresh")
+        };
+        let peers = peers.change.as_ref().unwrap();
+        assert_eq!(peers.event, copypaste_ipc::EventKind::Peers);
+        assert!(peers.sync_status.is_some());
+        drop(client);
+        tokio::time::timeout(Duration::from_secs(5), pump)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
     #[tokio::test]
     async fn a_watcher_continues_after_lagging() {
         let (events_tx, events) = tokio::sync::broadcast::channel(1);
@@ -1000,7 +1613,7 @@ mod tests {
 
         let (server_stream, client_stream) = Stream::pair().expect("socket pair");
         let (reader, mut writer) = server_stream.into_split();
-        let mut reader = FramedRead::new(reader, LinesCodec::new());
+        let mut reader = Reader::new(reader);
         let (_shutdown_tx, mut shutdown_rx) = watch::channel(false);
         let pump = tokio::spawn(async move {
             crate::server::watch::pump(events, 26, &mut reader, &mut writer, &mut shutdown_rx)
@@ -1033,7 +1646,7 @@ mod tests {
         let (events_tx, events) = tokio::sync::broadcast::channel(1);
         let (server_stream, client_stream) = Stream::pair().expect("socket pair");
         let (reader, mut writer) = server_stream.into_split();
-        let mut reader = FramedRead::new(reader, LinesCodec::new());
+        let mut reader = Reader::new(reader);
         let (_shutdown_tx, mut shutdown_rx) = watch::channel(false);
         drop(client_stream);
 
@@ -1057,7 +1670,7 @@ mod tests {
     #[tokio::test]
     async fn shutdown_is_acknowledged_and_then_acted_on() {
         let (state, dir) = test_state("server");
-        let path = dir.path().join("daemon.sock");
+        let path = test_socket_path(&dir, "daemon.sock");
         let listener = bind(&path).expect("bind");
         let server = tokio::spawn(run(listener, Arc::clone(&state), state.shutdown_rx()));
 
@@ -1090,7 +1703,7 @@ mod tests {
     async fn shutdown_answers_even_when_the_daemon_is_not_ready() {
         let (state, dir) = test_state("server");
         state.set_ready(false);
-        let path = dir.path().join("daemon.sock");
+        let path = test_socket_path(&dir, "daemon.sock");
         let listener = bind(&path).expect("bind");
         let server = tokio::spawn(run(listener, Arc::clone(&state), state.shutdown_rx()));
 
@@ -1122,7 +1735,7 @@ mod tests {
     #[tokio::test]
     async fn shutdown_answers_through_a_protocol_mismatch() {
         let (state, dir) = test_state("server");
-        let path = dir.path().join("daemon.sock");
+        let path = test_socket_path(&dir, "daemon.sock");
         let listener = bind(&path).expect("bind");
         let server = tokio::spawn(run(listener, Arc::clone(&state), state.shutdown_rx()));
         let mut stopping = state.shutdown_rx();
@@ -1155,7 +1768,7 @@ mod tests {
     #[tokio::test]
     async fn an_oversized_line_is_refused_and_the_connection_is_closed() {
         let (state, dir) = test_state("server-oversized");
-        let path = dir.path().join("daemon.sock");
+        let path = test_socket_path(&dir, "daemon.sock");
         let listener = bind(&path).expect("bind");
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
@@ -1196,7 +1809,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn connections_past_the_cap_are_dropped_rather_than_queued() {
         let (state, dir) = test_state("server");
-        let path = dir.path().join("daemon.sock");
+        let path = test_socket_path(&dir, "daemon.sock");
         let listener = bind(&path).expect("bind");
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let server = tokio::spawn(run(listener, Arc::clone(&state), shutdown_rx));
