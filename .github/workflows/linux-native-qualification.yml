@@ -98,6 +98,7 @@ jobs:
             python3 scripts/release/verify-linux-artifact-source-run.py \
               --run "$RUNNER_TEMP/previous-run.json" --jobs "$RUNNER_TEMP/previous-jobs.json" --artifacts "$RUNNER_TEMP/previous-artifacts.json" \
               --repository "$GITHUB_REPOSITORY" --commit "$previous_commit"
+            git fetch --no-tags --depth=1 origin "$previous_commit"
             previous_version="$(git show "$previous_commit:apps/copypaste_flutter/pubspec.yaml" | awk '/^version:[[:space:]]*/ {print $2; exit}')"
             previous_version="${previous_version%%+*}"
             upgrade_mode=prior_release
