@@ -28,19 +28,13 @@ jobs:
             libsecret-tools wl-clipboard wtype x11-utils xdotool wmctrl xdg-desktop-portal \
             xdg-desktop-portal-gnome xvfb rpm cpio xclip python3-gi build-essential pkg-config libgtk-3-dev libxres-dev \
             at-spi2-core python3-pyatspi ffmpeg qrencode v4l-utils
-      - name: Provision owned V4L2 loopback camera for this CI job
-        env:
-          COPYPASTE_QUALIFICATION_HEADLESS: "1"
-        run: |
-          set -euo pipefail
-          python3 scripts/release/provision-linux-v4l2loopback.py provision \
-            --state "$RUNNER_TEMP/copypaste-v4l2loopback.json" --environment "$GITHUB_ENV"
       - uses: ./.github/actions/download-verified-artifact
         with:
           name: copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64
           path: compositor-runtime
           run-id: 39419483475
           github-token: ${{ github.token }}
+          expected-commit: c16dcb5d23e56283c5f17377f1e7335cfc6498ad
       - name: Bind the exact compositor sidecar runtime
         env:
           CI_INPUT_COMPOSITOR_RUNTIME_RUN_ID: 39419483475
@@ -58,86 +52,83 @@ jobs:
           path: current
           run-id: 39419483475
           github-token: ${{ github.token }}
-      - uses: ./.github/actions/download-verified-artifact
-        with:
-          name: production-linux-x86_64
-          path: previous-artifacts/x86_64
-          run-id: 39116440993
-          github-token: ${{ github.token }}
-      - uses: ./.github/actions/download-verified-artifact
-        with:
-          name: production-linux-x86_64
-          path: previous
-          run-id: 39116440993
-          github-token: ${{ github.token }}
-      - uses: ./.github/actions/download-verified-artifact
-        with:
-          name: provider-supabase-linux-x86_64
-          path: module-downloads/supabase
-          run-id: 39419483475
-          github-token: ${{ github.token }}
-      - uses: ./.github/actions/download-verified-artifact
-        with:
-          name: provider-semantic-search-linux-x86_64
-          path: module-downloads/semantic-search
-          run-id: 39419483475
-          github-token: ${{ github.token }}
-      - uses: ./.github/actions/download-verified-artifact
-        with:
-          name: ocr-linux-x86_64
-          path: module-downloads/ocr
-          run-id: 39419483475
-          github-token: ${{ github.token }}
-      - name: Authenticate signed modules and stage offline fixtures
-        env:
-          CI_INPUT_OCR_MODULE_RUN_ID: 39419483475
-          CI_INPUT_SEMANTIC_SEARCH_MODULE_RUN_ID: 39419483475
-          CI_INPUT_SUPABASE_MODULE_RUN_ID: 39419483475
+          expected-commit: c16dcb5d23e56283c5f17377f1e7335cfc6498ad
+      - name: Diagnose immutable package without producing qualification evidence
         run: |
           set -euo pipefail
-          python3 scripts/release/stage-linux-module-qualification.py \
-            --downloads module-downloads --module-artifacts module-artifacts --module-fixtures module-fixtures \
-            --architecture "x86_64" --app-version "1.0.31" \
-            --commit "c16dcb5d23e56283c5f17377f1e7335cfc6498ad" \
-            --supabase-run-id "${CI_INPUT_SUPABASE_MODULE_RUN_ID}" \
-            --semantic-search-run-id "${CI_INPUT_SEMANTIC_SEARCH_MODULE_RUN_ID}" \
-            --ocr-run-id "${CI_INPUT_OCR_MODULE_RUN_ID}"
-      - name: Diagnose exact original packages; no qualification receipt
-        run: |
-          set -euo pipefail
-          mkdir -p evidence companion
           appimage="$PWD/current/CopyPaste-v1.0.31-linux-x86_64.AppImage"
-          chmod u+x "$appimage" previous/CopyPaste-v1.0.30-linux-x86_64.AppImage
+          chmod u+x "$appimage"
+          mkdir companion
           (cd companion && APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" --appimage-extract >/dev/null)
-          python3 - <<'PY'
+          cat > "$RUNNER_TEMP/diagnose-quick-paste.py" <<'PY'
+          import contextlib
+          import json
+          import os
+          import runpy
+          import sys
           from pathlib import Path
-          p = Path('scripts/release/linux-native-fixture-driver.py')
-          s = p.read_text()
-          needle = '            raise RuntimeError("Quick Paste did not restore focus and insert the selected item")'
-          replacement = '''            print("DIAGNOSTIC target", target_window, "result", repr(result_file.read_text() if result_file.is_file() else None), flush=True)
-                      for command in (["xdotool", "getwindowfocus"], ["xprop", "-root", "_NET_ACTIVE_WINDOW"], ["xclip", "-selection", "clipboard", "-o"]):
-                          probe = run(command, env=environment)
-                          print("DIAGNOSTIC observation", command, repr(probe.stdout.decode("utf-8", "replace")), flush=True)
-                      try:
-                          arguments = Path(f"/proc/{quick_paste_pid}/cmdline").read_bytes().split(b"\\0")
-                          print("DIAGNOSTIC popup", quick_paste_pid, [arg.decode() for arg in arguments if arg.startswith(b"--copypaste-x11-")], flush=True)
-                      except OSError:
-                          print("DIAGNOSTIC popup exited", quick_paste_pid, flush=True)
-          '''+needle
-          assert s.count(needle) == 1
-          p.write_text(s.replace(needle, replacement))
+          
+          driver_path = Path('scripts/release/linux-native-fixture-driver.py')
+          driver_source = driver_path.read_text().replace('marker = "copypaste-x11-quick-paste-fixture"', 'marker = f"copypaste-x11-quick-paste-fixture-{time.monotonic_ns()}"')
+          namespace = {'__file__': str(driver_path), '__name__': 'diagnostic'}
+          exec(compile(driver_source, str(driver_path), 'exec'), namespace)
+          g = namespace['require_x11_quick_paste'].__globals__
+          original_run = g['run']
+          original_target = g['x11_input_target']
+          
+          def run(argv, **kwargs):
+              print('DIAGNOSTIC COMMAND', [str(v) for v in argv], flush=True)
+              result = original_run(argv, **kwargs)
+              print('DIAGNOSTIC COMMAND DONE', result.returncode, flush=True)
+              return result
+          
+          g['run'] = run
+          
+          @contextlib.contextmanager
+          def target(workspace, environment):
+              with original_target(workspace, environment) as value:
+                  try:
+                      yield value
+                  except BaseException:
+                      window, result = value
+                      print('DIAGNOSTIC target', window, 'result', repr(result.read_text() if result.is_file() else None), flush=True)
+                      for argv in (['xdotool', 'getwindowfocus'], ['xprop', '-root', '_NET_ACTIVE_WINDOW'], ['xclip', '-selection', 'clipboard', '-o']):
+                          probe = original_run(argv, env=environment)
+                          print('DIAGNOSTIC observation', argv, repr(probe.stdout.decode('utf-8', 'replace')), flush=True)
+                      for process in Path('/proc').iterdir():
+                          if not process.name.isdigit():
+                              continue
+                          try:
+                              args = (process / 'cmdline').read_bytes().split(b'\0')
+                          except OSError:
+                              continue
+                          if b'--copypaste-quick-paste' in args:
+                              print('DIAGNOSTIC popup', process.name, [v.decode() for v in args if v.startswith(b'--copypaste-x11-')], flush=True)
+                      raise
+          
+          g['x11_input_target'] = target
+          workspace = Path(os.environ['RUNNER_TEMP']) / 'quick-paste-diagnostic'
+          workspace.mkdir(mode=0o700)
+          runtime = workspace / 'runtime'
+          runtime.mkdir(mode=0o700)
+          environment = {**os.environ, 'COPYPASTE_QUALIFICATION': '1', 'COPYPASTE_QUALIFICATION_CAPABILITY': os.urandom(32).hex(), 'XDG_DATA_HOME': str(workspace / 'data-home'), 'TMPDIR': str(runtime)}
+          prefix = Path('companion/squashfs-root/usr/lib/copypaste').resolve()
+          entrypoint = namespace['runtime_gui_entrypoint'](prefix, 'AppImage')
+          app, socket = namespace['start_gui_runtime'](entrypoint, environment, runtime, set())
+          try:
+              cli_environment = {**environment, 'COPYPASTE_SOCKET': str(socket)}
+              cli = prefix / 'copypaste-cli'
+              namespace['wait_for_startup_status'](cli, cli_environment, require_native_clipboard=True)
+              original_run([str(cli), '--json', 'config', 'set', '--notify-on-copy', 'true', '--notification-preview', 'false'], env=cli_environment)
+              for iteration in range(40):
+                  print('DIAGNOSTIC ITERATION', iteration, flush=True)
+                  namespace['require_x11_quick_paste'](cli, cli_environment, workspace)
+          finally:
+              app.terminate()
+              app.wait(timeout=10)
           PY
           scripts/release/run-linux-native-desktop-session.sh \
             --desktop GNOME --session x11 \
             --companion-source "$PWD/companion/squashfs-root/usr/share/copypaste/desktop-integrations" \
             --compositor-runtime compositor-runtime --compositor-runtime-binding compositor-runtime/binding.json \
-            -- scripts/release/run-linux-native-scenarios.sh \
-            --artifacts "$PWD/current" --version 1.0.31 --architecture x86_64 --desktop GNOME --session x11 \
-            --evidence-dir "$PWD/evidence" --module-artifacts "$PWD/module-artifacts" --module-fixtures "$PWD/module-fixtures" \
-            --previous-artifacts "$PWD/previous" --previous-version 1.0.30
-      - name: Remove owned V4L2 loopback camera
-        if: always()
-        run: |
-          set -euo pipefail
-          python3 scripts/release/provision-linux-v4l2loopback.py cleanup \
-            --state "$RUNNER_TEMP/copypaste-v4l2loopback.json" --missing-ok
+            -- python3 "$RUNNER_TEMP/diagnose-quick-paste.py"
