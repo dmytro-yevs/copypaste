@@ -6,6 +6,7 @@ Improve file transfers, desktop controls, and clipboard lifecycle in CopyPaste 1
 - Reclaim owned temporary clipboard, import, installer, and module staging files while preserving current payloads and pending updates.
 - Keep dialog keyboard motion in the shared motion policy and isolate Android clipboard provider state in tests.
 - Refresh OCR, Semantic Search, and Supabase packages to 0.1.22 for CopyPaste 1.0.31.
+- Restore Android storage and module lifecycle leases with supported native file locks.
 
 Optional modules remain available from Settings. OCR engines and models are not bundled with the application. Cloud Sync is not part of this release.
 
