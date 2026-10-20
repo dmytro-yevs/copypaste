@@ -1,0 +1,143 @@
+name: Linux release diagnostics
+on:
+  push:
+    branches: [codex/release-1-0-31]
+    paths: [.github/workflows/linux-release-diagnostics.yml]
+permissions:
+  actions: read
+  contents: read
+concurrency:
+  group: linux-release-diagnostics
+  cancel-in-progress: false
+  queue: max
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Install disposable desktop scenario dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            dbus-user-session gjs gnome-shell gnome-session gnome-keyring gnome-shell-extension-appindicator \
+            libsecret-tools wl-clipboard wtype x11-utils xdotool wmctrl xdg-desktop-portal \
+            xdg-desktop-portal-gnome xvfb rpm cpio xclip python3-gi build-essential pkg-config libgtk-3-dev libxres-dev \
+            at-spi2-core python3-pyatspi ffmpeg qrencode v4l-utils
+      - name: Provision owned V4L2 loopback camera for this CI job
+        env:
+          COPYPASTE_QUALIFICATION_HEADLESS: "1"
+        run: |
+          set -euo pipefail
+          python3 scripts/release/provision-linux-v4l2loopback.py provision \
+            --state "$RUNNER_TEMP/copypaste-v4l2loopback.json" --environment "$GITHUB_ENV"
+      - uses: ./.github/actions/download-verified-artifact
+        with:
+          name: copypaste-compositor-runtime-gnome-46-ubuntu24.04-x86_64
+          path: compositor-runtime
+          run-id: 39419483475
+          github-token: ${{ github.token }}
+      - name: Bind the exact compositor sidecar runtime
+        env:
+          CI_INPUT_COMPOSITOR_RUNTIME_RUN_ID: 39419483475
+        run: |
+          set -euo pipefail
+          python3 scripts/release/compositor-runtime-archive.py extract \
+            --archive compositor-runtime/runtime.tar --output compositor-runtime/runtime
+          python3 scripts/release/verify-linux-compositor-runtime.py artifact \
+            --root compositor-runtime --desktop "GNOME" --architecture "x86_64" \
+            --commit "c16dcb5d23e56283c5f17377f1e7335cfc6498ad" --producer-run-id "${CI_INPUT_COMPOSITOR_RUNTIME_RUN_ID}" \
+            --output compositor-runtime/binding.json
+      - uses: ./.github/actions/download-verified-artifact
+        with:
+          name: production-linux-x86_64
+          path: current
+          run-id: 39419483475
+          github-token: ${{ github.token }}
+      - uses: ./.github/actions/download-verified-artifact
+        with:
+          name: production-linux-x86_64
+          path: previous-artifacts/x86_64
+          run-id: 39116440993
+          github-token: ${{ github.token }}
+      - uses: ./.github/actions/download-verified-artifact
+        with:
+          name: production-linux-x86_64
+          path: previous
+          run-id: 39116440993
+          github-token: ${{ github.token }}
+      - uses: ./.github/actions/download-verified-artifact
+        with:
+          name: provider-supabase-linux-x86_64
+          path: module-downloads/supabase
+          run-id: 39419483475
+          github-token: ${{ github.token }}
+      - uses: ./.github/actions/download-verified-artifact
+        with:
+          name: provider-semantic-search-linux-x86_64
+          path: module-downloads/semantic-search
+          run-id: 39419483475
+          github-token: ${{ github.token }}
+      - uses: ./.github/actions/download-verified-artifact
+        with:
+          name: ocr-linux-x86_64
+          path: module-downloads/ocr
+          run-id: 39419483475
+          github-token: ${{ github.token }}
+      - name: Authenticate signed modules and stage offline fixtures
+        env:
+          CI_INPUT_OCR_MODULE_RUN_ID: 39419483475
+          CI_INPUT_SEMANTIC_SEARCH_MODULE_RUN_ID: 39419483475
+          CI_INPUT_SUPABASE_MODULE_RUN_ID: 39419483475
+        run: |
+          set -euo pipefail
+          python3 scripts/release/stage-linux-module-qualification.py \
+            --downloads module-downloads --module-artifacts module-artifacts --module-fixtures module-fixtures \
+            --architecture "x86_64" --app-version "1.0.31" \
+            --commit "c16dcb5d23e56283c5f17377f1e7335cfc6498ad" \
+            --supabase-run-id "${CI_INPUT_SUPABASE_MODULE_RUN_ID}" \
+            --semantic-search-run-id "${CI_INPUT_SEMANTIC_SEARCH_MODULE_RUN_ID}" \
+            --ocr-run-id "${CI_INPUT_OCR_MODULE_RUN_ID}"
+      - name: Diagnose exact original packages; no qualification receipt
+        run: |
+          set -euo pipefail
+          mkdir -p evidence companion
+          appimage="$PWD/current/CopyPaste-v1.0.31-linux-x86_64.AppImage"
+          chmod u+x "$appimage" previous/CopyPaste-v1.0.30-linux-x86_64.AppImage
+          (cd companion && APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" --appimage-extract >/dev/null)
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/release/linux-native-fixture-driver.py')
+          s = p.read_text()
+          needle = '            raise RuntimeError("Quick Paste did not restore focus and insert the selected item")'
+          replacement = '''            print("DIAGNOSTIC target", target_window, "result", repr(result_file.read_text() if result_file.is_file() else None), flush=True)
+                      for command in (["xdotool", "getwindowfocus"], ["xprop", "-root", "_NET_ACTIVE_WINDOW"], ["xclip", "-selection", "clipboard", "-o"]):
+                          probe = run(command, env=environment)
+                          print("DIAGNOSTIC observation", command, repr(probe.stdout.decode("utf-8", "replace")), flush=True)
+                      try:
+                          arguments = Path(f"/proc/{quick_paste_pid}/cmdline").read_bytes().split(b"\\0")
+                          print("DIAGNOSTIC popup", quick_paste_pid, [arg.decode() for arg in arguments if arg.startswith(b"--copypaste-x11-")], flush=True)
+                      except OSError:
+                          print("DIAGNOSTIC popup exited", quick_paste_pid, flush=True)
+          '''+needle
+          assert s.count(needle) == 1
+          p.write_text(s.replace(needle, replacement))
+          PY
+          scripts/release/run-linux-native-desktop-session.sh \
+            --desktop GNOME --session x11 \
+            --companion-source "$PWD/companion/squashfs-root/usr/share/copypaste/desktop-integrations" \
+            --compositor-runtime compositor-runtime --compositor-runtime-binding compositor-runtime/binding.json \
+            -- scripts/release/run-linux-native-scenarios.sh \
+            --artifacts "$PWD/current" --version 1.0.31 --architecture x86_64 --desktop GNOME --session x11 \
+            --evidence-dir "$PWD/evidence" --module-artifacts "$PWD/module-artifacts" --module-fixtures "$PWD/module-fixtures" \
+            --previous-artifacts "$PWD/previous" --previous-version 1.0.30
+      - name: Remove owned V4L2 loopback camera
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 scripts/release/provision-linux-v4l2loopback.py cleanup \
+            --state "$RUNNER_TEMP/copypaste-v4l2loopback.json" --missing-ok
