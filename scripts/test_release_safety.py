@@ -160,13 +160,26 @@ class ReleaseSafetyTest(unittest.TestCase):
         verify = runpy.run_path(str(ROOT / "scripts/release/verify-capture-jni.py"))["verify"]
         callback = ".method public abstract run(J)V"
         text = ".method public static final native ingestText(JLjava/lang/String;)Z"
-        binary = ".method public static final native ingestBinary(J[BLjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[B)Z"
+        binary = ".method public static final native ingestBinary(J[BILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[B)Z"
         verify(callback, text + "\n" + binary)
         with self.assertRaisesRegex(ValueError, "ingestBinary"):
             verify(callback, text)
         legacy = ".method public static final native ingestBinary(J[BLjava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z"
         with self.assertRaisesRegex(ValueError, "ingestBinary"):
             verify(callback, text + "\n" + legacy)
+        without_length = binary.replace("(J[BI", "(J[B")
+        with self.assertRaisesRegex(ValueError, "ingestBinary"):
+            verify(callback, text + "\n" + without_length)
+
+    def test_optimized_capture_descriptor_matches_the_production_kotlin_api(self):
+        verify = runpy.run_path(str(ROOT / "scripts/release/verify-capture-jni.py"))["verify"]
+        source = (ROOT / "apps/copypaste_flutter/android/app/src/main/kotlin/com/copypaste/app/NativeRuntimeCapture.kt").read_text()
+        declaration = re.search(r"external fun ingestBinary\((.*?)\): Boolean", source, re.DOTALL)[1]
+        descriptors = {"Long": "J", "ByteArray": "[B", "Int": "I", "String": "Ljava/lang/String;"}
+        parameters = re.findall(r"\w+:\s*(\w+)", declaration)
+        self.assertEqual(parameters[:3], ["Long", "ByteArray", "Int"])
+        binary = ".method public static final native ingestBinary(" + "".join(descriptors[kind] for kind in parameters) + ")Z"
+        verify(".method public abstract run(J)V", ".method public static final native ingestText(JLjava/lang/String;)Z\n" + binary)
 
     def qualification(self):
         return (
